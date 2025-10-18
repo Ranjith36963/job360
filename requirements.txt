@@ -1,0 +1,19 @@
+# Core AI packages - Python 3.13 compatible
+langchain==0.1.20
+langchain-openai==0.0.8
+openai==1.54.0
+langchain-core==0.1.52
+langchain-community==0.0.38
+langchain-text-splitters==0.0.2
+
+# NumPy - Compatible with LangChain (must be < 2.0)
+numpy>=1.26.0,<2.0
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
+pydantic>=2.0.0,<3.0.0
+
+# Development
+pytest==8.3.0
+black==24.10.0
