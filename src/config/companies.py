@@ -1,30 +1,27 @@
+# Greenhouse boards: https://boards-api.greenhouse.io/v1/boards/{slug}/jobs
+# Verified slugs for UK AI/ML relevant companies
 GREENHOUSE_COMPANIES = [
-    "deepmind", "revolut", "monzo", "wise", "deliveroo", "darktrace",
-    "stabilityai", "anthropic", "openai", "cohere", "mistralai",
-    "bloomberg", "palantir", "snyk", "improbable", "graphcore",
-    "ocado", "eigen", "faculty", "benevolentai", "healx",
-    "exscientia", "wayve", "oxbotica", "oxa", "five-ai",
-    "cervest", "speechmatics", "polyai", "synthesia",
-    "quantumblack", "mckinsey", "bbc", "sky", "bt",
-    "armmbed", "samsung-cambridge",
+    "deepmind", "monzo", "darktrace", "snyk",
+    "bloomberg", "palantirtechnologies", "graphcore",
+    "ocadotechnology", "benevolentai", "healx",
+    "exscientia", "wayve", "speechmatics", "synthesia",
     "king", "spotify", "stripe", "cloudflare",
     "databricks", "dataiku", "harnessio", "hashicorp",
+    "cohere", "openai", "improbable",
 ]
 
+# Lever boards: https://api.lever.co/v0/postings/{slug}?mode=json
 LEVER_COMPANIES = [
-    "tractable", "polyai", "facultyai", "synthesia",
-    "wayve", "benevolentai", "speechmatics",
-    "improbable", "checkout", "multiverse",
-    "hopinworld", "thought-machine", "paddle",
-    "cazoo", "zoe", "beauty-pie", "bulb",
+    "checkout", "multiverse", "paddle",
+    "thought-machine",
 ]
 
+# Workable boards: https://apply.workable.com/api/v2/accounts/{slug}/jobs
 WORKABLE_COMPANIES = [
-    "deepmind", "revolut", "monzo", "wise",
-    "darktrace", "ocado", "faculty",
+    "darktrace", "faculty",
 ]
 
+# Ashby boards: https://api.ashbyhq.com/posting-api/job-board/{slug}
 ASHBY_COMPANIES = [
-    "anthropic", "cohere", "mistralai",
-    "stabilityai", "databricks", "dataiku",
+    "anthropic",
 ]

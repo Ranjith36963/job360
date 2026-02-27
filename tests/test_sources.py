@@ -276,25 +276,26 @@ def test_ashby_parses_response():
     _run(_test())
 
 
-def test_findajob_parses_rss():
+def test_findajob_parses_html():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
-            <rss version="2.0"><channel>
-            <item>
-                <title>AI Engineer - Government Digital Service</title>
-                <link>https://findajob.dwp.gov.uk/details/123</link>
-                <description>AI Engineer role in government</description>
-            </item>
-            </channel></rss>"""
+            html = """<html><body>
+            <div class="search-results">
+                <a href="/job/123-ai-engineer">AI Engineer - Government Digital Service</a>
+                <li class="company">GDS</li>
+                <a href="/job/456-ml-engineer">ML Engineer - HMRC</a>
+                <li class="company">HMRC</li>
+            </div>
+            </body></html>"""
             with aioresponses() as m:
-                m.get(re.compile(r"https://findajob\.dwp\.gov\.uk/search\.rss.*"),
-                      body=rss_xml, content_type="application/rss+xml", repeat=True)
+                m.get(re.compile(r"https://findajob\.dwp\.gov\.uk/search.*"),
+                      body=html, content_type="text/html", repeat=True)
                 source = FindAJobSource(session)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "findajob"
+                assert "findajob.dwp.gov.uk" in jobs[0].apply_url
         finally:
             await session.close()
     _run(_test())

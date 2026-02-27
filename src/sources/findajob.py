@@ -1,23 +1,29 @@
+import re
 import logging
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-
-import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES
 
 logger = logging.getLogger("job360.sources.findajob")
 
-# Use RSS search with key queries
 FINDAJOB_QUERIES = [
     "AI engineer",
-    "machine learning",
+    "machine learning engineer",
     "data scientist",
     "NLP engineer",
     "deep learning",
 ]
+
+# Regex to extract job cards from the Find a Job search results HTML
+_JOB_LINK_RE = re.compile(
+    r'<a[^>]+href="(/job/[^"]+)"[^>]*>\s*([^<]+)</a>',
+    re.IGNORECASE,
+)
+_COMPANY_RE = re.compile(
+    r'<li[^>]*class="[^"]*company[^"]*"[^>]*>\s*([^<]+)',
+    re.IGNORECASE,
+)
 
 
 class FindAJobSource(BaseJobSource):
@@ -25,38 +31,36 @@ class FindAJobSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        seen_urls = set()
         for query in FINDAJOB_QUERIES:
             params = {
                 "q": query,
                 "w": "united kingdom",
                 "d": "20",
             }
-            text = await self._get_text(
-                "https://findajob.dwp.gov.uk/search.rss",
+            html = await self._get_text(
+                "https://findajob.dwp.gov.uk/search",
                 params=params,
             )
-            if not text:
+            if not html:
                 continue
-            try:
-                root = ET.fromstring(text)
-                channel = root.find("channel")
-                if channel is None:
+            matches = _JOB_LINK_RE.findall(html)
+            if not matches:
+                logger.debug(f"FindAJob: no job links found for query '{query}'")
+                continue
+            for path, title in matches:
+                url = f"https://findajob.dwp.gov.uk{path}"
+                if url in seen_urls:
                     continue
-                for item in channel.findall("item"):
-                    title = item.findtext("title", "")
-                    link = item.findtext("link", "")
-                    desc = item.findtext("description", "")
-                    jobs.append(Job(
-                        title=title,
-                        company="",
-                        location="UK",
-                        description=desc,
-                        apply_url=link,
-                        source=self.name,
-                        date_found=datetime.now(timezone.utc).isoformat(),
-                    ))
-            except ET.ParseError:
-                logger.warning(f"FindAJob: failed to parse RSS for query '{query}'")
-                continue
+                seen_urls.add(url)
+                jobs.append(Job(
+                    title=title.strip(),
+                    company="",
+                    location="UK",
+                    description="",
+                    apply_url=url,
+                    source=self.name,
+                    date_found=datetime.now(timezone.utc).isoformat(),
+                ))
         logger.info(f"FindAJob: found {len(jobs)} jobs")
         return jobs

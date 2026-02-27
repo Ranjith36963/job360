@@ -30,6 +30,9 @@ class BaseJobSource(ABC):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 ) as resp:
+                    if resp.status in (404, 403, 401):
+                        logger.debug(f"[{self.name}] HTTP {resp.status} from {url}")
+                        return None
                     if resp.status >= 400:
                         logger.warning(f"[{self.name}] HTTP {resp.status} from {url}")
                         if attempt < MAX_RETRIES - 1:
@@ -53,6 +56,9 @@ class BaseJobSource(ABC):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 ) as resp:
+                    if resp.status in (404, 403, 401):
+                        logger.debug(f"[{self.name}] HTTP {resp.status} from {url}")
+                        return None
                     if resp.status >= 400:
                         logger.warning(f"[{self.name}] HTTP {resp.status} from {url}")
                         if attempt < MAX_RETRIES - 1:
