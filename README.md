@@ -1,6 +1,6 @@
 # Job360
 
-Automated UK job search system that aggregates AI/ML jobs from 12 sources every 12 hours and emails new matching jobs with apply links.
+Automated UK job search system that aggregates AI/ML jobs from 12 sources, scores them against your CV profile, and delivers results via email, Slack, Discord, and a web dashboard.
 
 ## Architecture
 
@@ -22,43 +22,62 @@ flowchart TD
     end
 
     Sources -->|async fetch| Orchestrator[main.py Orchestrator]
-    Orchestrator --> Scorer[Skill Matcher\nScore 0-100]
+    Orchestrator --> Scorer[Skill Matcher\nScore 0-90]
     Scorer --> Dedup[Deduplicator]
     Dedup --> DB[(SQLite\nSeen Jobs)]
     DB --> CSV[CSV Export]
     DB --> Report[Markdown Report]
     DB --> Email[Email Notification]
-    Cron[Cron 6AM/6PM UK] -->|triggers| Orchestrator
+    DB --> Slack[Slack Webhook]
+    DB --> Discord[Discord Webhook]
+    DB --> Dashboard[Streamlit Dashboard]
+    Cron[Cron 6AM/6PM UK] -.->|not yet configured| Orchestrator
 ```
 
-## Features
+## What's Done
 
-- **12 job sources**: 3 keyed APIs (Reed, Adzuna, JSearch) + 4 free APIs (Arbeitnow, RemoteOK, Jobicy, Himalayas) + 4 ATS boards (Greenhouse, Lever, Workable, Ashby monitoring 80+ companies) + UK GOV FindAJob
-- **Smart scoring**: Jobs scored 0-100 against your CV profile (title match 40pts, skill match 40pts, location 10pts, recency 10pts)
-- **Visa flagging**: Automatically flags jobs mentioning visa/sponsorship
-- **Deduplication**: Same job from different sources merged by normalised company+title
-- **Persistent tracking**: SQLite database prevents duplicate notifications
-- **Email digest**: HTML email with top jobs, scores, and clickable apply links
-- **CSV exports**: Full job data exported per run
-- **Markdown reports**: Ranked job tables saved locally
-- **Cron scheduling**: Runs at 6AM and 6PM UK time automatically
+- **12 job sources** — all implemented and tested:
+  - 3 keyed APIs: Reed, Adzuna, JSearch (skip gracefully if no API key)
+  - 4 free APIs: Arbeitnow, RemoteOK, Jobicy, Himalayas
+  - 4 ATS boards: Greenhouse (20 companies), Lever (5 companies), Workable (4 companies), Ashby (6 companies) — 35 companies total
+  - 1 government: UK GOV FindAJob RSS
+- **Smart scoring** — jobs scored 0-90 against your CV profile (title 40pts + skills 40pts + location 10pts)
+- **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
+- **Deduplication** — same job from different sources merged by normalised company+title
+- **Persistent tracking** — SQLite database prevents duplicate notifications across runs
+- **Email digest** — HTML email with top jobs, scores, and clickable apply links
+- **Slack notifications** — rich Block Kit message with top 10 jobs via webhook
+- **Discord notifications** — embed message with top 10 jobs via webhook
+- **Streamlit dashboard** — interactive web UI with filters, charts, score distribution, source breakdown, run history, and CSV export
+- **CSV exports** — full job data exported per run
+- **Markdown reports** — ranked job tables saved locally
+- **74 tests passing** — full test suite covering all sources, scoring, dedup, storage, and notifications
+
+## What's Not Done Yet
+
+- **Recency scoring** — `RECENCY_WEIGHT = 10` is defined but not wired into `score_job()`. Max effective score is 90, not 100
+- **Cron scheduling** — `cron_setup.sh` exists but hasn't been configured/tested on a live server
+- **Live job search** — the system hasn't been run against real APIs yet (tested with mocks only)
 
 ## Quick Start
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/Ranjith36963/job360.git
-cd job360
+git clone https://github.com/Ranjith36963/enterprise-mcp-hub.git
+cd enterprise-mcp-hub
 bash setup.sh
 
 # 2. Configure API keys
 nano .env
 
-# 3. Run
+# 3. Run job search
 source venv/bin/activate
 python src/main.py
 
-# 4. Schedule (optional)
+# 4. Launch dashboard
+streamlit run src/dashboard.py
+
+# 5. Schedule (optional — not yet tested)
 bash cron_setup.sh
 ```
 
@@ -70,39 +89,45 @@ bash cron_setup.sh
 | Adzuna | [developer.adzuna.com](https://developer.adzuna.com/) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` |
 | JSearch | [rapidapi.com/jsearch](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) | `JSEARCH_API_KEY` |
 | Gmail | [Google App Passwords](https://myaccount.google.com/apppasswords) | `SMTP_EMAIL`, `SMTP_PASSWORD`, `NOTIFY_EMAIL` |
+| Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
+| Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
 
 **Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Greenhouse, Lever, Workable, Ashby, FindAJob
 
-The system works without any API keys - it will skip keyed sources and fetch from the 9 free sources.
+The system works without any API keys — it will skip keyed sources and fetch from the 9 free sources.
 
 ## Scoring Algorithm
 
-| Component | Points | How |
-|-----------|--------|-----|
-| Title match | 0-40 | Exact match to target titles (AI Engineer, ML Engineer, etc.) |
-| Skill match | 0-40 | Primary skills (Python, PyTorch, LangChain) = 3pts, Secondary (Docker, AWS) = 2pts, Tertiary = 1pt |
-| Location | 0-10 | UK/London/specified locations = 10, Remote = 8 |
-| Recency | 0-10 | Based on posting date |
+| Component | Points | How | Status |
+|-----------|--------|-----|--------|
+| Title match | 0-40 | Exact match to target titles (AI Engineer, ML Engineer, etc.) | Done |
+| Skill match | 0-40 | Primary skills (Python, PyTorch, LangChain) = 3pts, Secondary (Docker, AWS) = 2pts, Tertiary = 1pt | Done |
+| Location | 0-10 | UK/London/specified locations = 10, Remote = 8 | Done |
+| Recency | 0-10 | Based on posting date | **Not implemented** |
+
+> **Note**: Current max effective score is **90** since recency scoring is not yet wired in.
 
 ## Configuration
 
 Edit `src/config/keywords.py` to customise:
-- `JOB_TITLES` - Job titles to search for
-- `PRIMARY_SKILLS` / `SECONDARY_SKILLS` / `TERTIARY_SKILLS` - Skills to match with weights
-- `LOCATIONS` - Target locations
+- `JOB_TITLES` — target job titles to search for
+- `PRIMARY_SKILLS` / `SECONDARY_SKILLS` / `TERTIARY_SKILLS` — skills to match with weighted points
+- `LOCATIONS` — target locations
 
 Edit `src/config/companies.py` to customise:
-- `GREENHOUSE_COMPANIES` - Companies to monitor on Greenhouse (~40 companies)
-- `LEVER_COMPANIES` - Companies to monitor on Lever (~20 companies)
-- `WORKABLE_COMPANIES` / `ASHBY_COMPANIES` - Additional ATS boards
+- `GREENHOUSE_COMPANIES` — 20 companies monitored on Greenhouse
+- `LEVER_COMPANIES` — 5 companies monitored on Lever
+- `WORKABLE_COMPANIES` — 4 companies monitored on Workable
+- `ASHBY_COMPANIES` — 6 companies monitored on Ashby
 
 ## Project Structure
 
 ```
-job360/
+enterprise-mcp-hub/
 ├── src/
 │   ├── main.py              # Central orchestrator
 │   ├── models.py             # Job dataclass
+│   ├── dashboard.py          # Streamlit web dashboard
 │   ├── config/
 │   │   ├── settings.py       # Env vars, constants
 │   │   ├── keywords.py       # Job titles, skills, locations
@@ -122,10 +147,12 @@ job360/
 │   │   ├── ashby.py          # Ashby ATS boards
 │   │   └── findajob.py       # UK GOV FindAJob RSS
 │   ├── filters/
-│   │   ├── skill_matcher.py  # Scoring engine (0-100)
+│   │   ├── skill_matcher.py  # Scoring engine (0-90 currently)
 │   │   └── deduplicator.py   # Cross-source dedup
 │   ├── notifications/
 │   │   ├── email_notify.py   # SMTP/Gmail email sender
+│   │   ├── slack_notify.py   # Slack webhook notifications
+│   │   ├── discord_notify.py # Discord webhook notifications
 │   │   └── report_generator.py  # Markdown + HTML reports
 │   ├── storage/
 │   │   ├── database.py       # Async SQLite
@@ -133,7 +160,7 @@ job360/
 │   └── utils/
 │       ├── logger.py         # Logging config
 │       └── rate_limiter.py   # Async rate limiter
-├── tests/                    # Full test suite
+├── tests/                    # 74 tests (all passing)
 ├── data/                     # Exports, reports, logs (gitignored)
 ├── requirements.txt
 ├── .env.example
@@ -144,7 +171,7 @@ job360/
 ## Testing
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest tests/ -v    # 74 tests, all passing
 ```
 
 ## Output
@@ -152,6 +179,9 @@ python -m pytest tests/ -v
 Each run produces:
 - **CSV file**: `data/exports/jobs_YYYYMMDD_HHMMSS.csv`
 - **Markdown report**: `data/reports/report_YYYYMMDD_HHMMSS.md`
-- **Email**: HTML digest with top jobs and apply links
+- **Email**: HTML digest with top jobs and apply links (if configured)
+- **Slack message**: Rich Block Kit notification with top 10 jobs (if webhook configured)
+- **Discord message**: Embed notification with top 10 jobs (if webhook configured)
+- **Dashboard**: Interactive Streamlit UI at `http://localhost:8501`
 - **Console**: Summary of new jobs found
 - **Logs**: `data/logs/job360.log`
