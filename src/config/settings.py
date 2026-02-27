@@ -24,6 +24,10 @@ SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
+# Slack / Discord webhooks
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+
 # Search
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100

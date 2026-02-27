@@ -17,6 +17,8 @@ from src.filters.skill_matcher import score_job, check_visa_flag
 from src.filters.deduplicator import deduplicate
 from src.notifications.report_generator import generate_markdown_report
 from src.notifications.email_notify import send_email
+from src.notifications.slack_notify import send_slack
+from src.notifications.discord_notify import send_discord
 
 from src.sources.reed import ReedSource
 from src.sources.adzuna import AdzunaSource
@@ -139,11 +141,16 @@ async def run_search(db_path: str | None = None) -> dict:
             md_path.write_text(md_report)
             logger.info(f"Report saved: {md_path}")
 
-            # Email
-            try:
-                await send_email(new_jobs, stats, csv_path)
-            except Exception as e:
-                logger.error(f"Email failed: {e}")
+            # Notifications (email + Slack + Discord)
+            for name, coro in [
+                ("Email", send_email(new_jobs, stats, csv_path)),
+                ("Slack", send_slack(new_jobs, stats)),
+                ("Discord", send_discord(new_jobs, stats)),
+            ]:
+                try:
+                    await coro
+                except Exception as e:
+                    logger.error(f"{name} notification failed: {e}")
 
             # Print top jobs to console
             print(f"\n{'='*60}")
