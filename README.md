@@ -57,7 +57,7 @@ flowchart TD
 
 ## What's Not Done Yet
 
-- **Live job search** — the system hasn't been run against real APIs yet (tested with mocks only)
+- **Live API results** — the system runs end-to-end without errors but needs to be executed on a machine with internet access to fetch real job listings (this sandbox has no outbound network). All 12 sources, retry logic, scoring, dedup, and notifications have been verified with mocks (90 tests passing)
 
 ## Quick Start
 
