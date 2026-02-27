@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.companies import LEVER_COMPANIES
+from src.config.companies import LEVER_COMPANIES, COMPANY_NAME_OVERRIDES
 from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.lever")
@@ -26,7 +26,7 @@ class LeverSource(BaseJobSource):
             data = await self._get_json(url, params=params)
             if not data or not isinstance(data, list):
                 continue
-            company_name = slug.replace("-", " ").title()
+            company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in data:
                 title = item.get("text", "")
                 desc = item.get("descriptionPlain", item.get("description", ""))

@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.companies import WORKABLE_COMPANIES
+from src.config.companies import WORKABLE_COMPANIES, COMPANY_NAME_OVERRIDES
 from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.workable")
@@ -25,7 +25,7 @@ class WorkableSource(BaseJobSource):
             data = await self._post_json(url)
             if not data or "results" not in data:
                 continue
-            company_name = slug.replace("-", " ").title()
+            company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in data["results"]:
                 title = item.get("title", "")
                 desc = item.get("shortDescription", "")
