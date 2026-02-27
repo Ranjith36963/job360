@@ -22,7 +22,7 @@ flowchart TD
     end
 
     Sources -->|async fetch| Orchestrator[main.py Orchestrator]
-    Orchestrator --> Scorer[Skill Matcher\nScore 0-90]
+    Orchestrator --> Scorer[Skill Matcher\nScore 0-100]
     Scorer --> Dedup[Deduplicator]
     Dedup --> DB[(SQLite\nSeen Jobs)]
     DB --> CSV[CSV Export]
@@ -31,7 +31,7 @@ flowchart TD
     DB --> Slack[Slack Webhook]
     DB --> Discord[Discord Webhook]
     DB --> Dashboard[Streamlit Dashboard]
-    Cron[Cron 6AM/6PM UK] -.->|not yet configured| Orchestrator
+    Cron[Cron 6AM/6PM UK] -->|triggers| Orchestrator
 ```
 
 ## What's Done
@@ -41,7 +41,7 @@ flowchart TD
   - 4 free APIs: Arbeitnow, RemoteOK, Jobicy, Himalayas
   - 4 ATS boards: Greenhouse (20 companies), Lever (5 companies), Workable (4 companies), Ashby (6 companies) — 35 companies total
   - 1 government: UK GOV FindAJob RSS
-- **Smart scoring** — jobs scored 0-90 against your CV profile (title 40pts + skills 40pts + location 10pts)
+- **Smart scoring** — jobs scored 0-100 against your CV profile (title 40pts + skills 40pts + location 10pts + recency 10pts)
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Deduplication** — same job from different sources merged by normalised company+title
 - **Persistent tracking** — SQLite database prevents duplicate notifications across runs
@@ -51,12 +51,12 @@ flowchart TD
 - **Streamlit dashboard** — interactive web UI with filters, charts, score distribution, source breakdown, run history, and CSV export
 - **CSV exports** — full job data exported per run
 - **Markdown reports** — ranked job tables saved locally
-- **74 tests passing** — full test suite covering all sources, scoring, dedup, storage, and notifications
+- **Recency scoring** — recent jobs (0-1 days) get full 10pts, older jobs score less, 7+ days get 0pts
+- **Cron scheduling** — validated `cron_setup.sh` with tests (6AM/6PM UK time, Europe/London timezone)
+- **90 tests passing** — full test suite covering all sources, scoring (including recency tiers), dedup, storage, notifications, cron validation, and integration
 
 ## What's Not Done Yet
 
-- **Recency scoring** — `RECENCY_WEIGHT = 10` is defined but not wired into `score_job()`. Max effective score is 90, not 100
-- **Cron scheduling** — `cron_setup.sh` exists but hasn't been configured/tested on a live server
 - **Live job search** — the system hasn't been run against real APIs yet (tested with mocks only)
 
 ## Quick Start
@@ -77,7 +77,7 @@ python src/main.py
 # 4. Launch dashboard
 streamlit run src/dashboard.py
 
-# 5. Schedule (optional — not yet tested)
+# 5. Schedule (optional)
 bash cron_setup.sh
 ```
 
@@ -103,9 +103,7 @@ The system works without any API keys — it will skip keyed sources and fetch f
 | Title match | 0-40 | Exact match to target titles (AI Engineer, ML Engineer, etc.) | Done |
 | Skill match | 0-40 | Primary skills (Python, PyTorch, LangChain) = 3pts, Secondary (Docker, AWS) = 2pts, Tertiary = 1pt | Done |
 | Location | 0-10 | UK/London/specified locations = 10, Remote = 8 | Done |
-| Recency | 0-10 | Based on posting date | **Not implemented** |
-
-> **Note**: Current max effective score is **90** since recency scoring is not yet wired in.
+| Recency | 0-10 | ≤1 day = 10, ≤3 days = 8, ≤5 days = 6, ≤7 days = 4, >7 days = 0 | Done |
 
 ## Configuration
 
@@ -147,7 +145,7 @@ enterprise-mcp-hub/
 │   │   ├── ashby.py          # Ashby ATS boards
 │   │   └── findajob.py       # UK GOV FindAJob RSS
 │   ├── filters/
-│   │   ├── skill_matcher.py  # Scoring engine (0-90 currently)
+│   │   ├── skill_matcher.py  # Scoring engine (0-100)
 │   │   └── deduplicator.py   # Cross-source dedup
 │   ├── notifications/
 │   │   ├── email_notify.py   # SMTP/Gmail email sender
@@ -160,7 +158,7 @@ enterprise-mcp-hub/
 │   └── utils/
 │       ├── logger.py         # Logging config
 │       └── rate_limiter.py   # Async rate limiter
-├── tests/                    # 74 tests (all passing)
+├── tests/                    # 90 tests (all passing)
 ├── data/                     # Exports, reports, logs (gitignored)
 ├── requirements.txt
 ├── .env.example
@@ -171,7 +169,7 @@ enterprise-mcp-hub/
 ## Testing
 
 ```bash
-python -m pytest tests/ -v    # 74 tests, all passing
+python -m pytest tests/ -v    # 90 tests, all passing
 ```
 
 ## Output
