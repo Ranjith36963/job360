@@ -1,10 +1,20 @@
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SETUP_SCRIPT = PROJECT_ROOT / "setup.sh"
 
+needs_bash = pytest.mark.skipif(
+    shutil.which("bash") is None or sys.platform == "win32",
+    reason="bash not available (Windows)",
+)
 
+
+@needs_bash
 def test_setup_script_syntax_valid():
     """bash -n validates the script has no syntax errors."""
     result = subprocess.run(

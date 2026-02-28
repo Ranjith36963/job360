@@ -1,16 +1,26 @@
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CRON_SCRIPT = PROJECT_ROOT / "cron_setup.sh"
+
+needs_bash = pytest.mark.skipif(
+    shutil.which("bash") is None or sys.platform == "win32",
+    reason="bash not available (Windows)",
+)
 
 
 def _read_script() -> str:
     return CRON_SCRIPT.read_text()
 
 
+@needs_bash
 def test_cron_script_syntax_valid():
     """bash -n validates the script has no syntax errors."""
     result = subprocess.run(
@@ -20,6 +30,7 @@ def test_cron_script_syntax_valid():
     assert result.returncode == 0, f"Syntax error: {result.stderr}"
 
 
+@needs_bash
 def test_cron_script_fails_without_venv():
     """Running in a temp dir with no venv should fail with an error message."""
     with tempfile.TemporaryDirectory() as tmpdir:
