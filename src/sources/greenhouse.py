@@ -38,6 +38,7 @@ class GreenhouseSource(BaseJobSource):
                     continue
                 loc = item.get("location", {})
                 location = loc.get("name", "") if isinstance(loc, dict) else str(loc)
+                date_found = item.get("updated_at") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -45,7 +46,7 @@ class GreenhouseSource(BaseJobSource):
                     description=plain[:5000],
                     apply_url=item.get("absolute_url", ""),
                     source=self.name,
-                    date_found=datetime.now(timezone.utc).isoformat(),
+                    date_found=date_found,
                 ))
         logger.info(f"Greenhouse: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
         return jobs

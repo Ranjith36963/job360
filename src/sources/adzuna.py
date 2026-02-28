@@ -47,6 +47,7 @@ class AdzunaSource(BaseJobSource):
             for item in data["results"]:
                 company = item.get("company", {})
                 location = item.get("location", {})
+                date_found = item.get("created") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=item.get("title", ""),
                     company=company.get("display_name", "") if isinstance(company, dict) else str(company),
@@ -56,7 +57,7 @@ class AdzunaSource(BaseJobSource):
                     description=item.get("description", ""),
                     apply_url=item.get("redirect_url", ""),
                     source=self.name,
-                    date_found=datetime.now(timezone.utc).isoformat(),
+                    date_found=date_found,
                 ))
         logger.info(f"Adzuna: found {len(jobs)} jobs")
         return jobs
