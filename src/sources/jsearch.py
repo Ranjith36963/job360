@@ -56,6 +56,7 @@ class JSearchSource(BaseJobSource):
                     item.get("job_country", ""),
                 ]
                 location = ", ".join(p for p in location_parts if p)
+                date_found = item.get("job_posted_at_datetime_utc") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=item.get("job_title", ""),
                     company=item.get("employer_name", ""),
@@ -65,7 +66,7 @@ class JSearchSource(BaseJobSource):
                     description=item.get("job_description", ""),
                     apply_url=item.get("job_apply_link", ""),
                     source=self.name,
-                    date_found=datetime.now(timezone.utc).isoformat(),
+                    date_found=date_found,
                 ))
         logger.info(f"JSearch: found {len(jobs)} jobs")
         return jobs

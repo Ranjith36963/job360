@@ -7,7 +7,7 @@ import aiohttp
 
 from src.config.settings import (
     REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
-    DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT,
+    DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
 )
 from src.utils.logger import setup_logging
 from src.models import Job
@@ -145,6 +145,10 @@ async def run_search(
         # Deduplicate
         unique_jobs = deduplicate(all_jobs)
         logger.info(f"After dedup: {len(unique_jobs)} unique jobs")
+
+        # Filter by minimum score
+        unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+        logger.info(f"After score filter (>={MIN_MATCH_SCORE}): {len(unique_jobs)} jobs")
 
         if dry_run:
             # Dry run: show results without DB writes or notifications

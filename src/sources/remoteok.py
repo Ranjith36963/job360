@@ -28,6 +28,7 @@ class RemoteOKSource(BaseJobSource):
             text = f"{item.get('position', '')} {item.get('description', '')} {tags}".lower()
             if not any(kw in text for kw in RELEVANCE_KEYWORDS):
                 continue
+            date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("position", ""),
                 company=item.get("company", ""),
@@ -37,7 +38,7 @@ class RemoteOKSource(BaseJobSource):
                 description=item.get("description", ""),
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=datetime.now(timezone.utc).isoformat(),
+                date_found=date_found,
             ))
         logger.info(f"RemoteOK: found {len(jobs)} relevant jobs")
         return jobs

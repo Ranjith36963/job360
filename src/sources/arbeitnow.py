@@ -22,6 +22,7 @@ class ArbeitnowSource(BaseJobSource):
             text = f"{item.get('title', '')} {item.get('description', '')} {' '.join(item.get('tags', []))}".lower()
             if not any(kw in text for kw in RELEVANCE_KEYWORDS):
                 continue
+            date_found = item.get("created_at") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("company_name", ""),
@@ -29,7 +30,7 @@ class ArbeitnowSource(BaseJobSource):
                 description=item.get("description", ""),
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=datetime.now(timezone.utc).isoformat(),
+                date_found=date_found,
             ))
         logger.info(f"Arbeitnow: found {len(jobs)} relevant jobs")
         return jobs

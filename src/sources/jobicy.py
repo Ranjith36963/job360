@@ -16,6 +16,7 @@ class JobicySource(BaseJobSource):
         jobs = []
         params = {
             "count": "50",
+            "geo": "united-kingdom",
             "tag": "ai,machine-learning,python,data-science",
         }
         data = await self._get_json(
@@ -24,6 +25,7 @@ class JobicySource(BaseJobSource):
         if not data or "jobs" not in data:
             return []
         for item in data["jobs"]:
+            date_found = item.get("pubDate") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("jobTitle", ""),
                 company=item.get("companyName", ""),
@@ -33,7 +35,7 @@ class JobicySource(BaseJobSource):
                 description=item.get("jobExcerpt", ""),
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=datetime.now(timezone.utc).isoformat(),
+                date_found=date_found,
             ))
         logger.info(f"Jobicy: found {len(jobs)} jobs")
         return jobs
