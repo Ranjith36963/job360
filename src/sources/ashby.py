@@ -32,6 +32,7 @@ class AshbySource(BaseJobSource):
                 text = f"{title} {desc}".lower()
                 if not any(kw in text for kw in RELEVANCE_KEYWORDS):
                     continue
+                date_found = item.get("publishedAt") or item.get("updatedAt") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -39,7 +40,7 @@ class AshbySource(BaseJobSource):
                     description=desc[:5000],
                     apply_url=item.get("applicationUrl", item.get("jobUrl", "")),
                     source=self.name,
-                    date_found=datetime.now(timezone.utc).isoformat(),
+                    date_found=date_found,
                 ))
         logger.info(f"Ashby: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
         return jobs

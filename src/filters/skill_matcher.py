@@ -1,4 +1,6 @@
 import re
+from datetime import datetime, timezone
+
 from src.models import Job
 from src.config.keywords import (
     JOB_TITLES,
@@ -67,12 +69,35 @@ def _location_score(location: str) -> int:
     return 0
 
 
+def _recency_score(date_found: str) -> int:
+    """Score based on job posting age. Recent jobs score higher."""
+    if not date_found:
+        return 0
+    try:
+        posted = datetime.fromisoformat(date_found)
+        if posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        days_old = (datetime.now(timezone.utc) - posted).days
+    except (ValueError, TypeError):
+        return 0
+    if days_old <= 1:
+        return RECENCY_WEIGHT
+    if days_old <= 3:
+        return 8
+    if days_old <= 5:
+        return 6
+    if days_old <= 7:
+        return 4
+    return 0
+
+
 def score_job(job: Job) -> int:
     text = f"{job.title} {job.description}"
     title_pts = _title_score(job.title)
     skill_pts = _skill_score(text)
     location_pts = _location_score(job.location)
-    total = title_pts + skill_pts + location_pts
+    recency_pts = _recency_score(job.date_found)
+    total = title_pts + skill_pts + location_pts + recency_pts
     return min(max(total, 0), 100)
 
 

@@ -28,6 +28,7 @@ class HimalayasSource(BaseJobSource):
                 continue
             loc_restrictions = item.get("locationRestrictions", [])
             location = ", ".join(loc_restrictions) if isinstance(loc_restrictions, list) else str(loc_restrictions)
+            date_found = item.get("pubDate") or item.get("createdAt") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("companyName", ""),
@@ -37,7 +38,7 @@ class HimalayasSource(BaseJobSource):
                 description=item.get("excerpt", ""),
                 apply_url=item.get("applicationUrl", item.get("url", "")),
                 source=self.name,
-                date_found=datetime.now(timezone.utc).isoformat(),
+                date_found=date_found,
             ))
         logger.info(f"Himalayas: found {len(jobs)} relevant jobs")
         return jobs

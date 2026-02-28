@@ -6,12 +6,15 @@ from logging.handlers import RotatingFileHandler
 from src.config.settings import LOGS_DIR
 
 
-def setup_logging() -> logging.Logger:
+def setup_logging(log_level: str | None = None) -> logging.Logger:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("job360")
     if logger.handlers:
+        if log_level:
+            logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
         return logger
-    logger.setLevel(logging.INFO)
+    level = getattr(logging, log_level.upper(), logging.INFO) if log_level else logging.INFO
+    logger.setLevel(level)
     fmt = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
