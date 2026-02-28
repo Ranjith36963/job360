@@ -7,6 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Ensure project root is on sys.path so "src" package resolves
+# when Streamlit runs this file directly.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
