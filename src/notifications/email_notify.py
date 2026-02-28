@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.models import Job
 from src.config.settings import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD, NOTIFY_EMAIL
+from src.notifications.base import NotificationChannel
 from src.notifications.report_generator import generate_html_report
 
 logger = logging.getLogger("job360.email")
@@ -60,3 +61,15 @@ async def send_email(jobs: list[Job], stats: dict, csv_path: str | None = None):
     msg = _build_email(jobs, stats, csv_path)
     await asyncio.to_thread(_send_sync, msg)
     logger.info(f"Email sent to {NOTIFY_EMAIL} with {len(jobs)} jobs")
+
+
+class EmailChannel(NotificationChannel):
+    """Email notification channel using SMTP/Gmail."""
+
+    name = "Email"
+
+    def is_configured(self) -> bool:
+        return is_email_configured()
+
+    async def send(self, jobs: list[Job], stats: dict, **kwargs) -> None:
+        await send_email(jobs, stats, csv_path=kwargs.get("csv_path"))

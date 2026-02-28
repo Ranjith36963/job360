@@ -53,11 +53,13 @@ flowchart TD
 - **Markdown reports** — ranked job tables saved locally
 - **Recency scoring** — recent jobs (0-1 days) get full 10pts, older jobs score less, 7+ days get 0pts
 - **Cron scheduling** — validated `cron_setup.sh` with tests (6AM/6PM UK time, Europe/London timezone)
-- **90 tests passing** — full test suite covering all sources, scoring (including recency tiers), dedup, storage, notifications, cron validation, and integration
+- **CLI interface** — Click-based CLI with `--source` (single source), `--dry-run`, `--log-level`, `--db-path`, `sources` listing, and `status` command
+- **Notification abstraction** — `NotificationChannel` ABC with auto-discovery; adding a new channel (e.g. Telegram) requires one file
+- **108 tests passing** — full test suite covering all sources, scoring, dedup, storage, notifications, CLI, channel abstraction, cron, setup, and integration
 
 ## What's Not Done Yet
 
-- **Live API results** — the system runs end-to-end without errors but needs to be executed on a machine with internet access to fetch real job listings (this sandbox has no outbound network). All 12 sources, retry logic, scoring, dedup, and notifications have been verified with mocks (90 tests passing)
+- **Live API results** — the system runs end-to-end without errors but needs to be executed on a machine with internet access to fetch real job listings (this sandbox has no outbound network). All 12 sources, retry logic, scoring, dedup, and notifications have been verified with mocks (108 tests passing)
 
 ## Quick Start
 
@@ -72,12 +74,16 @@ nano .env
 
 # 3. Run job search
 source venv/bin/activate
-python src/main.py
+python -m src.cli run
 
-# 4. Launch dashboard
-streamlit run src/dashboard.py
+# 4. Single source / dry run
+python -m src.cli run --source arbeitnow
+python -m src.cli run --dry-run --log-level DEBUG
 
-# 5. Schedule (optional)
+# 5. Launch dashboard
+python -m src.cli dashboard
+
+# 6. Schedule (optional)
 bash cron_setup.sh
 ```
 
@@ -124,6 +130,7 @@ Edit `src/config/companies.py` to customise:
 enterprise-mcp-hub/
 ├── src/
 │   ├── main.py              # Central orchestrator
+│   ├── cli.py               # Click CLI (run, dashboard, status, sources)
 │   ├── models.py             # Job dataclass
 │   ├── dashboard.py          # Streamlit web dashboard
 │   ├── config/
@@ -148,6 +155,7 @@ enterprise-mcp-hub/
 │   │   ├── skill_matcher.py  # Scoring engine (0-100)
 │   │   └── deduplicator.py   # Cross-source dedup
 │   ├── notifications/
+│   │   ├── base.py           # NotificationChannel ABC + auto-discovery
 │   │   ├── email_notify.py   # SMTP/Gmail email sender
 │   │   ├── slack_notify.py   # Slack webhook notifications
 │   │   ├── discord_notify.py # Discord webhook notifications
@@ -158,9 +166,10 @@ enterprise-mcp-hub/
 │   └── utils/
 │       ├── logger.py         # Logging config
 │       └── rate_limiter.py   # Async rate limiter
-├── tests/                    # 90 tests (all passing)
+├── tests/                    # 108 tests (all passing)
 ├── data/                     # Exports, reports, logs (gitignored)
-├── requirements.txt
+├── requirements.txt          # Production dependencies
+├── requirements-dev.txt      # Dev/test dependencies
 ├── .env.example
 ├── setup.sh
 └── cron_setup.sh
@@ -169,7 +178,7 @@ enterprise-mcp-hub/
 ## Testing
 
 ```bash
-python -m pytest tests/ -v    # 90 tests, all passing
+python -m pytest tests/ -v    # 108 tests, all passing
 ```
 
 ## Output

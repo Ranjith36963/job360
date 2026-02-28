@@ -1,26 +1,16 @@
-import asyncio
 import logging
 
 import aiohttp
 
 from src.models import Job
 from src.config.settings import SLACK_WEBHOOK_URL
+from src.notifications.base import NotificationChannel, format_salary
 
 logger = logging.getLogger("job360.slack")
 
 
 def is_slack_configured() -> bool:
     return bool(SLACK_WEBHOOK_URL)
-
-
-def _format_salary(job: Job) -> str:
-    if job.salary_min and job.salary_max:
-        return f"£{int(job.salary_min):,}-£{int(job.salary_max):,}"
-    if job.salary_min:
-        return f"£{int(job.salary_min):,}+"
-    if job.salary_max:
-        return f"Up to £{int(job.salary_max):,}"
-    return "N/A"
 
 
 def _build_payload(jobs: list[Job], stats: dict) -> dict:
@@ -52,7 +42,7 @@ def _build_payload(jobs: list[Job], stats: dict) -> dict:
         score = job.match_score
         emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
         visa = " 🛂" if job.visa_flag else ""
-        salary = _format_salary(job)
+        salary = format_salary(job)
 
         blocks.append({
             "type": "section",
@@ -100,3 +90,15 @@ async def send_slack(jobs: list[Job], stats: dict):
             else:
                 body = await resp.text()
                 logger.error(f"Slack webhook failed ({resp.status}): {body}")
+
+
+class SlackChannel(NotificationChannel):
+    """Slack notification channel via webhook."""
+
+    name = "Slack"
+
+    def is_configured(self) -> bool:
+        return is_slack_configured()
+
+    async def send(self, jobs: list[Job], stats: dict, **kwargs) -> None:
+        await send_slack(jobs, stats)

@@ -1,26 +1,16 @@
-import asyncio
 import logging
 
 import aiohttp
 
 from src.models import Job
 from src.config.settings import DISCORD_WEBHOOK_URL
+from src.notifications.base import NotificationChannel, format_salary
 
 logger = logging.getLogger("job360.discord")
 
 
 def is_discord_configured() -> bool:
     return bool(DISCORD_WEBHOOK_URL)
-
-
-def _format_salary(job: Job) -> str:
-    if job.salary_min and job.salary_max:
-        return f"£{int(job.salary_min):,}-£{int(job.salary_max):,}"
-    if job.salary_min:
-        return f"£{int(job.salary_min):,}+"
-    if job.salary_max:
-        return f"Up to £{int(job.salary_max):,}"
-    return "N/A"
 
 
 def _build_embeds(jobs: list[Job], stats: dict) -> dict:
@@ -38,7 +28,7 @@ def _build_embeds(jobs: list[Job], stats: dict) -> dict:
         score = job.match_score
         emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
         visa = " 🛂" if job.visa_flag else ""
-        salary = _format_salary(job)
+        salary = format_salary(job)
         lines.append(
             f"{emoji} **[{score}]** [{job.title}]({job.apply_url})\n"
             f"*{job.company}* | {job.location} | {salary}{visa}"
@@ -80,3 +70,15 @@ async def send_discord(jobs: list[Job], stats: dict):
             else:
                 body = await resp.text()
                 logger.error(f"Discord webhook failed ({resp.status}): {body}")
+
+
+class DiscordChannel(NotificationChannel):
+    """Discord notification channel via webhook."""
+
+    name = "Discord"
+
+    def is_configured(self) -> bool:
+        return is_discord_configured()
+
+    async def send(self, jobs: list[Job], stats: dict, **kwargs) -> None:
+        await send_discord(jobs, stats)

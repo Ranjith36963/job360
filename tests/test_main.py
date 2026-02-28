@@ -2,7 +2,7 @@ import re
 import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from aioresponses import aioresponses
 
 from src.main import run_search
@@ -38,16 +38,12 @@ MOCK_JOB_PAYLOAD = {"data": [{
 }]}
 
 
-def _patch_notifications():
-    """Patch all three notification channels."""
-    return (
-        patch("src.main.send_email", new_callable=AsyncMock),
-        patch("src.main.send_slack", new_callable=AsyncMock),
-        patch("src.main.send_discord", new_callable=AsyncMock),
-    )
+def _patch_no_notifications():
+    """Patch get_configured_channels to return empty list (no notifications sent)."""
+    return patch("src.main.get_configured_channels", return_value=[])
 
 
-# ---- Existing tests (fixed to patch all 3 channels) ----
+# ---- Existing tests ----
 
 
 def test_run_search_completes_without_keys():
@@ -55,8 +51,7 @@ def test_run_search_completes_without_keys():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email, p_slack, p_discord:
+            with _patch_no_notifications():
                 stats = await run_search(db_path=":memory:")
                 assert stats["sources_queried"] > 0
                 assert isinstance(stats["total_found"], int)
@@ -68,11 +63,13 @@ def test_run_search_with_mock_jobs():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email, p_slack, p_discord:
-                stats = await run_search(db_path=":memory:")
-                assert stats["total_found"] >= 1
-                assert stats["new_jobs"] >= 1
+            with _patch_no_notifications():
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
+                         patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
+                        stats = await run_search(db_path=":memory:")
+                        assert stats["total_found"] >= 1
+                        assert stats["new_jobs"] >= 1
     _run(_test())
 
 
@@ -84,39 +81,37 @@ def test_jobs_are_scored_with_recency():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email, p_slack, p_discord:
-                # Patch database to capture scored jobs
-                from src.storage.database import JobDatabase
-                db = JobDatabase(":memory:")
-                await db.init_db()
-
-                stats = await run_search(db_path=":memory:")
-                # The mock AI Engineer job in London with skills + today's date
-                # should have a meaningful score (title 40 + skills + location 10 + recency 10)
-                assert stats["new_jobs"] >= 1
-                assert stats["total_found"] >= 1
-
-                await db.close()
+            with _patch_no_notifications():
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
+                         patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
+                        stats = await run_search(db_path=":memory:")
+                        assert stats["new_jobs"] >= 1
+                        assert stats["total_found"] >= 1
     _run(_test())
 
 
 def test_all_notification_channels_called():
-    """When new jobs are found, all three notification channels should be invoked."""
+    """When new jobs are found, all configured notification channels should be invoked."""
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email as mock_email, p_slack as mock_slack, p_discord as mock_discord:
+            # Create 3 mock channels
+            mock_channels = []
+            for name in ["Email", "Slack", "Discord"]:
+                ch = MagicMock()
+                ch.name = name
+                ch.send = AsyncMock()
+                mock_channels.append(ch)
+
+            with patch("src.main.get_configured_channels", return_value=mock_channels):
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    # Patch export/report dirs to temp
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
                         stats = await run_search(db_path=":memory:")
                         if stats["new_jobs"] > 0:
-                            mock_email.assert_awaited_once()
-                            mock_slack.assert_awaited_once()
-                            mock_discord.assert_awaited_once()
+                            for ch in mock_channels:
+                                ch.send.assert_awaited_once()
     _run(_test())
 
 
@@ -125,15 +120,12 @@ def test_run_search_scores_within_range():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email, p_slack, p_discord:
+            with _patch_no_notifications():
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
                         stats = await run_search(db_path=":memory:")
                         assert stats["total_found"] >= 1
-                        # Scores are validated in test_scorer.py; here we just
-                        # verify the pipeline completes with scored output
                         assert stats["new_jobs"] >= 1
     _run(_test())
 
@@ -143,12 +135,10 @@ def test_stats_include_per_source():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
-            p_email, p_slack, p_discord = _patch_notifications()
-            with p_email, p_slack, p_discord:
+            with _patch_no_notifications():
                 stats = await run_search(db_path=":memory:")
                 assert "per_source" in stats
                 assert isinstance(stats["per_source"], dict)
-                # Should have entries for all 12 sources
                 assert len(stats["per_source"]) == 12
     _run(_test())
 
@@ -156,14 +146,13 @@ def test_stats_include_per_source():
 def test_second_run_finds_no_new_jobs():
     """Running twice with same jobs should find 0 new jobs on second run (DB dedup)."""
     async def _test():
-        import tempfile, os
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        import tempfile as tf, os
+        with tf.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
             with aioresponses() as m:
                 _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-                p_email, p_slack, p_discord = _patch_notifications()
-                with p_email, p_slack, p_discord:
+                with _patch_no_notifications():
                     with tempfile.TemporaryDirectory() as tmpdir:
                         with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                              patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -173,8 +162,7 @@ def test_second_run_finds_no_new_jobs():
             # Second run — same job should be recognized as seen
             with aioresponses() as m:
                 _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-                p_email, p_slack, p_discord = _patch_notifications()
-                with p_email, p_slack, p_discord:
+                with _patch_no_notifications():
                     stats2 = await run_search(db_path=db_path)
                     assert stats2["new_jobs"] == 0
         finally:
