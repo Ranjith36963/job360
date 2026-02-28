@@ -124,8 +124,8 @@ flowchart TD
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/Ranjith36963/enterprise-mcp-hub.git
-cd enterprise-mcp-hub
+git clone https://github.com/Ranjith36963/job360.git
+cd job360
 bash setup.sh
 
 # 2. Configure API keys
@@ -225,8 +225,8 @@ for channel in get_configured_channels():
 ## Configuration
 
 ### Keywords (`src/config/keywords.py`)
-- **17 job titles**: AI Engineer, ML Engineer, Machine Learning Engineer, Data Scientist, NLP Engineer, Computer Vision Engineer, Deep Learning Engineer, GenAI Engineer, LLM Engineer, AI/ML Engineer, Applied Scientist, Research Engineer, MLOps Engineer, AI Researcher, Prompt Engineer, AI Developer, Conversational AI Engineer
-- **15 primary skills** (3pts each): Python, PyTorch, TensorFlow, LangChain, RAG, LLM, GenAI, Hugging Face, Transformers, OpenAI, NLP, Deep Learning, Neural Networks, Computer Vision, Prompt Engineering
+- **17 job titles**: AI Engineer, ML Engineer, Machine Learning Engineer, GenAI Engineer, Generative AI Engineer, LLM Engineer, NLP Engineer, Data Scientist, MLOps Engineer, AI/ML Engineer, Deep Learning Engineer, Computer Vision Engineer, RAG Engineer, AI Solutions Engineer, AI Research Engineer, Applied ML Engineer, Python AI Developer
+- **15 primary skills** (3pts each): Python, PyTorch, TensorFlow, LangChain, RAG, LLM, Generative AI, Hugging Face, Transformers, OpenAI, NLP, Deep Learning, Neural Networks, Computer Vision, Prompt Engineering
 - **17 secondary skills** (2pts each): Scikit-learn, Keras, AWS, SageMaker, Bedrock, Docker, Kubernetes, FastAPI, ChromaDB, FAISS, OpenSearch, Redis, pgvector, Gemini, Agentic AI, LLM fine-tuning, Fine-tuning
 - **11 tertiary skills** (1pt each): CI/CD, MLflow, Git, Linux, n8n, Data Pipelines, ETL, Feature Engineering, S3, CloudWatch, Machine Learning
 - **12 UK locations** + Remote/Hybrid
@@ -240,7 +240,7 @@ for channel in get_configured_channels():
 ## Project Structure
 
 ```
-enterprise-mcp-hub/
+job360/
 ├── src/
 │   ├── main.py                  # Central orchestrator (run_search, SOURCE_REGISTRY)
 │   ├── cli.py                   # Click CLI (run, dashboard, status, sources)
