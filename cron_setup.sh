@@ -23,15 +23,15 @@ mkdir -p "$PROJECT_DIR/data/logs"
 
 # Build cron command that loads .env properly
 CRON_CMD="cd $PROJECT_DIR && $PYTHON -m src.main >> $LOG 2>&1"
-CRON_6AM="0 6 * * * TZ='Europe/London' $CRON_CMD"
-CRON_6PM="0 18 * * * TZ='Europe/London' $CRON_CMD"
+CRON_4AM="0 4 * * * TZ='Europe/London' $CRON_CMD"
+CRON_4PM="0 16 * * * TZ='Europe/London' $CRON_CMD"
 
 # Remove existing job360 entries and add new ones
-(crontab -l 2>/dev/null | grep -v "job360\|Job360\|src\.main" || true; echo "$CRON_6AM"; echo "$CRON_6PM") | crontab -
+(crontab -l 2>/dev/null | grep -v "job360\|Job360\|src\.main" || true; echo "$CRON_4AM"; echo "$CRON_4PM") | crontab -
 
 echo "Cron jobs installed:"
-echo "  - 6:00 AM UK time (daily)"
-echo "  - 6:00 PM UK time (daily)"
+echo "  - 4:00 AM UK time (daily)"
+echo "  - 4:00 PM UK time (daily)"
 echo ""
 
 # Show notification channels status

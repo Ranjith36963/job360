@@ -7,7 +7,7 @@ Automated UK AI/ML job search system. Aggregates jobs from 12 sources, scores th
 ```mermaid
 flowchart TD
     CLI["CLI (Click)\njob360 run / dashboard / status / sources"]
-    Cron["Cron 6AM/6PM\nEurope/London"]
+    Cron["Cron 4AM/4PM\nEurope/London"]
 
     subgraph Sources["12 Job Sources"]
         direction LR
@@ -92,7 +92,7 @@ flowchart TD
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
 - **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout
-- **Cron scheduling** — `cron_setup.sh` sets up 6AM/6PM UK time (Europe/London)
+- **Cron scheduling** — `cron_setup.sh` sets up 4AM/4PM UK time (Europe/London)
 - **Logging** — rotating file handler (5MB max, 3 backups) + console output
 - **Dry-run mode** — fetch and score without writing to DB or sending notifications
 - **Split requirements** — prod deps in `requirements.txt`, dev/test in `requirements-dev.txt`
@@ -298,7 +298,7 @@ enterprise-mcp-hub/
 ├── requirements-dev.txt         # Dev/test dependencies (pytest, aioresponses)
 ├── .env.example                 # Template for API keys and webhooks
 ├── setup.sh                     # Setup script (Python 3.9+ check, venv, deps)
-└── cron_setup.sh                # Cron scheduling (6AM/6PM Europe/London)
+└── cron_setup.sh                # Cron scheduling (4AM/4PM Europe/London)
 ```
 
 ## Testing

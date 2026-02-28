@@ -54,11 +54,11 @@ def test_cron_contains_uk_timezone():
     assert "Europe/London" in content
 
 
-def test_cron_schedule_6am_6pm():
-    """Cron script must schedule runs at 6AM and 6PM."""
+def test_cron_schedule_4am_4pm():
+    """Cron script must schedule runs at 4AM and 4PM."""
     content = _read_script()
-    assert "0 6 * * *" in content, "Missing 6AM schedule"
-    assert "0 18 * * *" in content, "Missing 6PM schedule"
+    assert "0 4 * * *" in content, "Missing 4AM schedule"
+    assert "0 16 * * *" in content, "Missing 4PM schedule"
 
 
 def test_cron_uses_module_invocation():
