@@ -22,7 +22,7 @@ class WorkableSource(BaseJobSource):
         jobs = []
         for slug in self._companies:
             url = f"https://apply.workable.com/api/v2/accounts/{slug}/jobs"
-            data = await self._post_json(url)
+            data = await self._post_json(url, body={"query": "", "location": [], "department": [], "worktype": []})
             if not data or "results" not in data:
                 continue
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())

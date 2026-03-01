@@ -1,10 +1,10 @@
-"""Job360 Web Dashboard — Streamlit UI for browsing, filtering, and managing job results."""
+"""Job360 Web Dashboard — Streamlit UI with time-bucketed card layout."""
 
 import sqlite3
 import json
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # Ensure project root is on sys.path so "src" package resolves
@@ -18,6 +18,18 @@ import pandas as pd
 import plotly.express as px
 
 from src.config.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE
+from src.utils.time_buckets import (
+    BUCKETS,
+    bucket_jobs,
+    bucket_summary_counts,
+    format_relative_time,
+    get_job_age_hours,
+    assign_bucket,
+    score_color_hex,
+    extract_matched_skills,
+)
+from src.notifications.report_generator import generate_markdown_report
+from src.models import Job
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -31,6 +43,46 @@ st.set_page_config(
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# ---------------------------------------------------------------------------
+# Custom CSS
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+    .job-card {
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 12px;
+        background: #fafafa;
+    }
+    .score-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 16px;
+        color: white;
+        font-weight: bold;
+        font-size: 14px;
+    }
+    .visa-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .visa-yes { background: #4CAF50; color: white; }
+    .visa-no { background: #e0e0e0; color: #666; }
+    .source-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: #e3f2fd;
+        color: #1565c0;
+        font-size: 12px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------------------------
 # Database helpers (synchronous – Streamlit-friendly)
@@ -42,35 +94,38 @@ def _get_conn() -> sqlite3.Connection:
 
 
 @st.cache_data(ttl=60)
-def load_jobs() -> pd.DataFrame:
+def load_jobs_7day() -> list[dict]:
+    """Load jobs from last 7 days with score >= MIN_MATCH_SCORE."""
     conn = _get_conn()
     try:
-        df = pd.read_sql_query("SELECT * FROM jobs ORDER BY match_score DESC", conn)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        cursor = conn.execute(
+            "SELECT * FROM jobs WHERE first_seen >= ? AND match_score >= ? ORDER BY date_found DESC",
+            (cutoff, MIN_MATCH_SCORE),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
     except Exception:
-        return pd.DataFrame()
+        return []
     finally:
         conn.close()
 
-    if df.empty:
-        return df
-
-    df["visa_flag"] = df["visa_flag"].astype(bool)
-    df["first_seen"] = pd.to_datetime(df["first_seen"], errors="coerce")
-    df["date_found"] = pd.to_datetime(df["date_found"], errors="coerce")
-
-    # Formatted salary column
-    def _fmt_salary(row):
-        smin, smax = row.get("salary_min"), row.get("salary_max")
-        if pd.notna(smin) and pd.notna(smax):
-            return f"\u00a3{int(smin):,} – \u00a3{int(smax):,}"
-        if pd.notna(smin):
-            return f"\u00a3{int(smin):,}"
-        if pd.notna(smax):
-            return f"\u00a3{int(smax):,}"
-        return ""
-
-    df["salary"] = df.apply(_fmt_salary, axis=1)
-    return df
+    # Compute bucket index and salary display for each job
+    for job in rows:
+        age = get_job_age_hours(job.get("date_found", ""), job.get("first_seen", ""))
+        job["bucket_idx"] = assign_bucket(age)
+        job["age_hours"] = age
+        # Salary formatting
+        smin, smax = job.get("salary_min"), job.get("salary_max")
+        if smin and smax:
+            job["salary_display"] = f"\u00a3{int(smin):,} \u2013 \u00a3{int(smax):,}"
+        elif smin:
+            job["salary_display"] = f"\u00a3{int(smin):,}+"
+        elif smax:
+            job["salary_display"] = f"Up to \u00a3{int(smax):,}"
+        else:
+            job["salary_display"] = "Not disclosed"
+        job["has_salary"] = bool(smin or smax)
+    return rows
 
 
 @st.cache_data(ttl=60)
@@ -90,9 +145,54 @@ def load_run_logs() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Job card renderer
+# ---------------------------------------------------------------------------
+def render_job_card(job: dict):
+    """Render a single job as a styled card."""
+    score = job.get("match_score", 0)
+    color = score_color_hex(score)
+    visa = job.get("visa_flag", False)
+    url = job.get("apply_url", "#")
+    title = job.get("title", "Unknown")
+
+    st.markdown(f"### [{title}]({url})")
+
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        st.markdown(f"**{job.get('company', 'Unknown')}**")
+        st.caption(f"\U0001F4CD {job.get('location', 'N/A')} &nbsp; | &nbsp; \U0001F4B0 {job.get('salary_display', 'N/A')}")
+    with col2:
+        posted = format_relative_time(job.get("date_found", ""))
+        st.caption(f"\U0001F4C5 {posted}")
+        st.markdown(f'<span class="source-badge">{job.get("source", "")}</span>', unsafe_allow_html=True)
+    with col3:
+        st.markdown(
+            f'<span class="score-badge" style="background:{color}">{score}</span>',
+            unsafe_allow_html=True,
+        )
+        visa_class = "visa-yes" if visa else "visa-no"
+        visa_text = "Visa \u2713" if visa else "No visa info"
+        st.markdown(f'<span class="visa-badge {visa_class}">{visa_text}</span>', unsafe_allow_html=True)
+
+    # Apply button
+    st.link_button("Apply Now \u2192", url)
+
+    # Skills expander
+    skills = extract_matched_skills(job.get("description", ""))
+    has_skills = any(skills.values())
+    if has_skills:
+        with st.expander("Skills Matched"):
+            for tier, tier_skills in skills.items():
+                if tier_skills:
+                    st.markdown(f"**{tier.title()}:** " + " ".join(f"`{s}`" for s in tier_skills))
+
+    st.divider()
+
+
+# ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-df_jobs = load_jobs()
+all_jobs = load_jobs_7day()
 df_runs = load_run_logs()
 
 # ---------------------------------------------------------------------------
@@ -103,68 +203,76 @@ with st.sidebar:
 
     search_text = st.text_input("Search", placeholder="e.g. AI Engineer London")
 
-    score_range = st.slider("Match Score", 0, 100, (0, 100))
+    time_range = st.selectbox("Time Range", [
+        "All 7 days", "Last 24h", "Last 48h", "Last 72h", "Last 3 days",
+    ])
 
-    if not df_jobs.empty:
-        available_sources = sorted(df_jobs["source"].unique())
-        selected_sources = st.multiselect("Sources", available_sources, default=available_sources)
+    min_score = st.slider("Min Score", 30, 100, MIN_MATCH_SCORE)
 
-        available_locations = sorted(df_jobs["location"].dropna().unique())
-        selected_locations = st.multiselect("Locations", available_locations)
-
-        visa_filter = st.radio("Visa Sponsorship", ["All", "Visa Only", "No Visa Flag"])
+    # Populate options from data
+    if all_jobs:
+        all_locations = sorted(set(j.get("location", "") for j in all_jobs if j.get("location")))
+        all_sources = sorted(set(j.get("source", "") for j in all_jobs if j.get("source")))
     else:
-        selected_sources = []
-        selected_locations = []
-        visa_filter = "All"
+        all_locations = []
+        all_sources = []
+
+    selected_locations = st.multiselect("Location", all_locations)
+    selected_sources = st.multiselect("Source", all_sources)
+
+    visa_filter = st.radio("Visa Sponsorship", ["All", "Only sponsorship mentioned"])
+    salary_filter = st.radio("Salary", ["All", "Has salary"])
 
     st.divider()
     st.subheader("\u2699\uFE0F Actions")
-    trigger_search = st.button("\U0001F680 Run New Search", use_container_width=True)
-    export_csv = st.button("\U0001F4E5 Export CSV", use_container_width=True)
+    trigger_search = st.button("\U0001F680 Refresh Now", use_container_width=True)
+    export_csv_btn = st.button("\U0001F4E5 Export CSV", use_container_width=True)
+    export_md_btn = st.button("\U0001F4DD Export Markdown", use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Apply filters
 # ---------------------------------------------------------------------------
-df_filtered = df_jobs.copy()
+filtered_jobs = list(all_jobs)
 
-if not df_filtered.empty:
-    # Text search across title, company, location, description
-    if search_text:
-        q = search_text.lower()
-        mask = (
-            df_filtered["title"].str.lower().str.contains(q, na=False)
-            | df_filtered["company"].str.lower().str.contains(q, na=False)
-            | df_filtered["location"].str.lower().str.contains(q, na=False)
-            | df_filtered["description"].str.lower().str.contains(q, na=False)
-        )
-        df_filtered = df_filtered[mask]
-
-    # Score range
-    df_filtered = df_filtered[
-        (df_filtered["match_score"] >= score_range[0])
-        & (df_filtered["match_score"] <= score_range[1])
+if search_text:
+    q = search_text.lower()
+    filtered_jobs = [
+        j for j in filtered_jobs
+        if q in j.get("title", "").lower()
+        or q in j.get("company", "").lower()
+        or q in j.get("location", "").lower()
     ]
 
-    # Source filter
-    if selected_sources:
-        df_filtered = df_filtered[df_filtered["source"].isin(selected_sources)]
+# Time range filter
+time_max_hours = {"All 7 days": 168, "Last 24h": 24, "Last 48h": 48, "Last 72h": 72, "Last 3 days": 72}
+max_hours = time_max_hours.get(time_range, 168)
+if max_hours < 168:
+    filtered_jobs = [j for j in filtered_jobs if j.get("age_hours", 999) <= max_hours]
 
-    # Location filter
-    if selected_locations:
-        df_filtered = df_filtered[df_filtered["location"].isin(selected_locations)]
+# Score filter
+filtered_jobs = [j for j in filtered_jobs if j.get("match_score", 0) >= min_score]
 
-    # Visa filter
-    if visa_filter == "Visa Only":
-        df_filtered = df_filtered[df_filtered["visa_flag"]]
-    elif visa_filter == "No Visa Flag":
-        df_filtered = df_filtered[~df_filtered["visa_flag"]]
+# Location filter
+if selected_locations:
+    filtered_jobs = [j for j in filtered_jobs if j.get("location") in selected_locations]
+
+# Source filter
+if selected_sources:
+    filtered_jobs = [j for j in filtered_jobs if j.get("source") in selected_sources]
+
+# Visa filter
+if visa_filter == "Only sponsorship mentioned":
+    filtered_jobs = [j for j in filtered_jobs if j.get("visa_flag")]
+
+# Salary filter
+if salary_filter == "Has salary":
+    filtered_jobs = [j for j in filtered_jobs if j.get("has_salary")]
 
 # ---------------------------------------------------------------------------
 # Trigger new search
 # ---------------------------------------------------------------------------
 if trigger_search:
-    with st.spinner("Running Job360 search... this may take 2-3 minutes."):
+    with st.spinner("Fetching from all sources... this takes 2-3 minutes"):
         result = subprocess.run(
             [sys.executable, "-m", "src.main"],
             capture_output=True,
@@ -183,118 +291,63 @@ if trigger_search:
 # Header
 # ---------------------------------------------------------------------------
 st.title("\U0001F4BC Job360 Dashboard")
-st.caption("AI/ML Job Search Aggregator — UK & Remote")
+st.caption("AI/ML Job Search Aggregator \u2014 UK & Remote \u2014 Time-Prioritized View")
 
 # ---------------------------------------------------------------------------
 # Empty state
 # ---------------------------------------------------------------------------
-if df_jobs.empty:
-    st.info(
-        "No jobs in the database yet. Click **Run New Search** in the sidebar to get started!"
-    )
+if not all_jobs:
+    st.info("No jobs in the database yet. Click **Refresh Now** in the sidebar to get started!")
     st.stop()
 
 # ---------------------------------------------------------------------------
-# KPI metrics
+# Summary metrics
 # ---------------------------------------------------------------------------
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Total Jobs", len(df_filtered))
-c2.metric("Avg Score", f"{df_filtered['match_score'].mean():.0f}" if len(df_filtered) else "—")
-c3.metric("Top Score", int(df_filtered["match_score"].max()) if len(df_filtered) else "—")
-c4.metric("Visa Sponsors", int(df_filtered["visa_flag"].sum()) if len(df_filtered) else 0)
-c5.metric("Sources", df_filtered["source"].nunique() if len(df_filtered) else 0)
+bucketed = bucket_jobs(filtered_jobs, min_score=0)  # already filtered above
+counts = bucket_summary_counts(bucketed)
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1.metric("Total 7d Jobs", len(filtered_jobs))
+c2.metric("New 24h", counts["last_24h"])
+c3.metric("Avg Score", f"{sum(j.get('match_score', 0) for j in filtered_jobs) / max(len(filtered_jobs), 1):.0f}")
+
+# Top 3 sources
+source_counts = {}
+for j in filtered_jobs:
+    s = j.get("source", "")
+    source_counts[s] = source_counts.get(s, 0) + 1
+top_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+c4.metric("Top Sources", ", ".join(s for s, _ in top_sources) if top_sources else "N/A")
+
+c5.metric("Visa Count", sum(1 for j in filtered_jobs if j.get("visa_flag")))
+c6.metric("Sources Active", len(set(j.get("source", "") for j in filtered_jobs)))
 
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Charts
+# Time-bucketed job cards
 # ---------------------------------------------------------------------------
-chart_left, chart_right = st.columns(2)
+BUCKET_EMOJIS = ["\U0001f534", "\U0001f7e0", "\U0001f7e1", "\U0001f535"]
 
-with chart_left:
-    if len(df_filtered):
-        fig_hist = px.histogram(
-            df_filtered,
-            x="match_score",
-            nbins=20,
-            color_discrete_sequence=["#1a73e8"],
-            title="Score Distribution",
-            labels={"match_score": "Match Score", "count": "Jobs"},
-        )
-        fig_hist.add_vline(
-            x=MIN_MATCH_SCORE,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Min ({MIN_MATCH_SCORE})",
-        )
-        fig_hist.update_layout(bargap=0.1, height=350)
-        st.plotly_chart(fig_hist, use_container_width=True)
+for idx in range(4):
+    label, emoji_unicode, _, _, _ = BUCKETS[idx]
+    bucket_list = bucketed.get(idx, [])
+    count = len(bucket_list)
+
+    st.subheader(f"{emoji_unicode} {label} ({count} jobs)")
+
+    if not bucket_list:
+        st.caption("No new jobs in this period")
     else:
-        st.info("No data to chart.")
-
-with chart_right:
-    if len(df_filtered):
-        source_counts = df_filtered["source"].value_counts().reset_index()
-        source_counts.columns = ["source", "count"]
-        fig_pie = px.pie(
-            source_counts,
-            values="count",
-            names="source",
-            title="Jobs by Source",
-            hole=0.35,
-        )
-        fig_pie.update_layout(height=350)
-        st.plotly_chart(fig_pie, use_container_width=True)
-    else:
-        st.info("No data to chart.")
-
-st.divider()
+        for job in bucket_list:
+            render_job_card(job)
 
 # ---------------------------------------------------------------------------
-# Job listings table
+# Export buttons
 # ---------------------------------------------------------------------------
-st.subheader(f"Job Listings ({len(df_filtered)})")
-
-if len(df_filtered):
-    display_cols = [
-        "match_score", "title", "company", "location",
-        "salary", "source", "visa_flag", "date_found", "apply_url",
-    ]
-    df_display = df_filtered[display_cols].copy()
-    df_display = df_display.rename(columns={
-        "match_score": "Score",
-        "title": "Title",
-        "company": "Company",
-        "location": "Location",
-        "salary": "Salary",
-        "source": "Source",
-        "visa_flag": "Visa",
-        "date_found": "Date",
-        "apply_url": "Apply",
-    })
-
-    st.dataframe(
-        df_display,
-        use_container_width=True,
-        height=500,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=100, format="%d"
-            ),
-            "Visa": st.column_config.CheckboxColumn("Visa"),
-            "Apply": st.column_config.LinkColumn("Apply", display_text="Apply"),
-            "Date": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD"),
-        },
-        hide_index=True,
-    )
-else:
-    st.info("No jobs match the current filters.")
-
-# ---------------------------------------------------------------------------
-# CSV export
-# ---------------------------------------------------------------------------
-if export_csv and len(df_filtered):
-    csv_data = df_filtered.to_csv(index=False).encode("utf-8")
+if export_csv_btn and filtered_jobs:
+    df_export = pd.DataFrame(filtered_jobs)
+    csv_data = df_export.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download CSV",
         data=csv_data,
@@ -302,71 +355,83 @@ if export_csv and len(df_filtered):
         mime="text/csv",
     )
 
+if export_md_btn and filtered_jobs:
+    # Convert dicts to Job objects for report generator
+    job_objs = []
+    for j in filtered_jobs:
+        job_objs.append(Job(
+            title=j.get("title", ""),
+            company=j.get("company", ""),
+            apply_url=j.get("apply_url", ""),
+            source=j.get("source", ""),
+            date_found=j.get("date_found", ""),
+            location=j.get("location", ""),
+            salary_min=j.get("salary_min"),
+            salary_max=j.get("salary_max"),
+            description=j.get("description", ""),
+            match_score=j.get("match_score", 0),
+            visa_flag=bool(j.get("visa_flag")),
+        ))
+    stats = {"total_found": len(filtered_jobs), "new_jobs": len(filtered_jobs), "per_source": source_counts}
+    md_report = generate_markdown_report(job_objs, stats)
+    st.download_button(
+        label="Download Markdown",
+        data=md_report.encode("utf-8"),
+        file_name=f"job360_report_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+        mime="text/markdown",
+    )
+
 # ---------------------------------------------------------------------------
-# Run history
+# Charts + Run History
 # ---------------------------------------------------------------------------
+with st.expander("Charts", expanded=False):
+    chart_left, chart_right = st.columns(2)
+    with chart_left:
+        if filtered_jobs:
+            df_chart = pd.DataFrame(filtered_jobs)
+            fig_hist = px.histogram(
+                df_chart, x="match_score", nbins=20,
+                color_discrete_sequence=["#1a73e8"],
+                title="Score Distribution",
+                labels={"match_score": "Match Score", "count": "Jobs"},
+            )
+            fig_hist.add_vline(x=MIN_MATCH_SCORE, line_dash="dash", line_color="red",
+                               annotation_text=f"Min ({MIN_MATCH_SCORE})")
+            fig_hist.update_layout(bargap=0.1, height=350)
+            st.plotly_chart(fig_hist, use_container_width=True)
+    with chart_right:
+        if filtered_jobs:
+            sc = pd.DataFrame(list(source_counts.items()), columns=["source", "count"])
+            fig_pie = px.pie(sc, values="count", names="source", title="Jobs by Source", hole=0.35)
+            fig_pie.update_layout(height=350)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
 with st.expander("Run History", expanded=False):
     if not df_runs.empty:
         col_a, col_b = st.columns(2)
-
         with col_a:
             st.dataframe(
                 df_runs[["timestamp", "total_found", "new_jobs"]].rename(columns={
-                    "timestamp": "Time",
-                    "total_found": "Total Found",
-                    "new_jobs": "New Jobs",
+                    "timestamp": "Time", "total_found": "Total Found", "new_jobs": "New Jobs",
                 }),
-                use_container_width=True,
-                hide_index=True,
+                use_container_width=True, hide_index=True,
             )
-
         with col_b:
             if len(df_runs) > 1:
                 fig_line = px.line(
-                    df_runs.sort_values("timestamp"),
-                    x="timestamp",
-                    y="new_jobs",
-                    title="New Jobs per Run",
-                    markers=True,
+                    df_runs.sort_values("timestamp"), x="timestamp", y="new_jobs",
+                    title="New Jobs per Run", markers=True,
                 )
                 fig_line.update_layout(height=300)
                 st.plotly_chart(fig_line, use_container_width=True)
-
-        # Per-source breakdown of latest run
         if len(df_runs):
             latest = df_runs.iloc[0]
             ps = latest["per_source"]
             if ps:
-                st.subheader("Latest Run — Per Source")
-                ps_df = pd.DataFrame(
-                    list(ps.items()), columns=["Source", "Jobs Found"]
-                ).sort_values("Jobs Found", ascending=False)
-                fig_bar = px.bar(
-                    ps_df, x="Source", y="Jobs Found",
-                    color_discrete_sequence=["#34a853"],
-                )
+                st.subheader("Latest Run \u2014 Per Source")
+                ps_df = pd.DataFrame(list(ps.items()), columns=["Source", "Jobs Found"]).sort_values("Jobs Found", ascending=False)
+                fig_bar = px.bar(ps_df, x="Source", y="Jobs Found", color_discrete_sequence=["#34a853"])
                 fig_bar.update_layout(height=300)
                 st.plotly_chart(fig_bar, use_container_width=True)
     else:
         st.info("No runs recorded yet.")
-
-# ---------------------------------------------------------------------------
-# Previous exports
-# ---------------------------------------------------------------------------
-with st.expander("Previous Exports", expanded=False):
-    exports_path = Path(EXPORTS_DIR)
-    if exports_path.exists():
-        csv_files = sorted(exports_path.glob("*.csv"), reverse=True)
-        if csv_files:
-            for f in csv_files[:10]:
-                col_f, col_d = st.columns([3, 1])
-                col_f.text(f.name)
-                with open(f, "rb") as fh:
-                    col_d.download_button(
-                        "Download", fh.read(), file_name=f.name, mime="text/csv",
-                        key=f"dl_{f.name}",
-                    )
-        else:
-            st.info("No exports yet.")
-    else:
-        st.info("Exports directory not found.")

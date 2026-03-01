@@ -1,6 +1,10 @@
 from datetime import datetime, timezone, timedelta
 from src.models import Job
-from src.filters.skill_matcher import score_job, check_visa_flag, _recency_score
+from src.filters.skill_matcher import (
+    score_job, check_visa_flag, _recency_score, _text_contains,
+    _negative_penalty, detect_experience_level, salary_in_range,
+    _location_score, _foreign_location_penalty,
+)
 
 
 def _make_job(**overrides):
@@ -150,3 +154,211 @@ def test_recency_score_tiers():
     assert _recency_score((now - timedelta(days=6)).isoformat()) == 4
     assert _recency_score((now - timedelta(days=7)).isoformat()) == 4
     assert _recency_score((now - timedelta(days=8)).isoformat()) == 0
+
+
+# ---- Word-boundary matching tests ----
+
+
+def test_word_boundary_python_no_monty():
+    """'Python' should NOT match 'Monty Python' — word boundary prevents it."""
+    assert _text_contains("Monty Python fan club", "Python") is True  # Python IS a word here
+    assert _text_contains("expert in Python programming", "Python") is True
+
+
+def test_word_boundary_nlp_no_helpline():
+    """'NLP' should not match inside 'helpline'."""
+    assert _text_contains("NLP engineer role", "NLP") is True
+    assert _text_contains("call our helpline", "NLP") is False
+
+
+def test_word_boundary_ai_standalone():
+    """'AI' should match as a standalone word but not inside 'FAIR'."""
+    assert _text_contains("AI research lab", "AI") is True
+    assert _text_contains("FAIR research lab", "AI") is False
+
+
+def test_word_boundary_ml_standalone():
+    """'ML' should match standalone but not inside 'HTML'."""
+    assert _text_contains("ML engineer needed", "ML") is True
+    assert _text_contains("HTML developer needed", "ML") is False
+
+
+# ---- Negative keyword tests ----
+
+
+def test_negative_penalty_sales_engineer():
+    assert _negative_penalty("Sales Engineer") == 30
+
+
+def test_negative_penalty_marketing_manager():
+    assert _negative_penalty("Marketing Manager") == 30
+
+
+def test_negative_penalty_no_match():
+    assert _negative_penalty("AI Engineer") == 0
+
+
+def test_negative_penalty_civil_engineer():
+    assert _negative_penalty("Civil Engineer") == 30
+
+
+def test_sales_engineer_scores_below_threshold():
+    """A 'Sales Engineer' should score below MIN_MATCH_SCORE (30)."""
+    job = _make_job(
+        title="Sales Engineer",
+        location="London, UK",
+        description="Looking for a sales engineer to sell our software products.",
+    )
+    score = score_job(job)
+    assert score < 30, f"Expected < 30, got {score}"
+
+
+def test_marketing_manager_scores_below_threshold():
+    job = _make_job(
+        title="Marketing Manager",
+        location="New York, US",
+        description="Looking for marketing manager with SEO and social media skills.",
+    )
+    score = score_job(job)
+    assert score < 30, f"Expected < 30, got {score}"
+
+
+# ---- Experience level detection tests ----
+
+
+def test_detect_senior():
+    assert detect_experience_level("Senior ML Engineer") == "senior"
+
+
+def test_detect_junior():
+    assert detect_experience_level("Junior Data Scientist") == "junior"
+
+
+def test_detect_lead():
+    assert detect_experience_level("Lead AI Engineer") == "lead"
+
+
+def test_detect_principal():
+    assert detect_experience_level("Principal Research Scientist") == "principal"
+
+
+def test_detect_no_level():
+    assert detect_experience_level("AI Engineer") == ""
+
+
+# ---- Location scoring tests ----
+
+
+def test_greater_london_gets_points():
+    """'Greater London' should get full location points."""
+    assert _location_score("Greater London") == 10
+
+
+def test_city_of_london_gets_points():
+    assert _location_score("City of London") == 10
+
+
+def test_scotland_gets_points():
+    """Scotland should get location points via alias to UK."""
+    assert _location_score("Scotland") == 10
+
+
+def test_remote_gets_points():
+    assert _location_score("Remote") == 8
+
+
+def test_wfh_gets_points():
+    assert _location_score("Work from home") == 8
+
+
+# ---- Salary range tests ----
+
+
+def test_salary_in_range_matching():
+    job = _make_job(salary_min=50000, salary_max=80000)
+    assert salary_in_range(job) is True
+
+
+def test_salary_in_range_too_low():
+    job = _make_job(salary_min=10000, salary_max=20000)
+    assert salary_in_range(job) is False
+
+
+def test_salary_in_range_no_salary():
+    job = _make_job()
+    assert salary_in_range(job) is False
+
+
+# ---- Foreign location penalty tests ----
+
+
+def test_foreign_penalty_us_location():
+    assert _foreign_location_penalty("New York, US") == 15
+
+
+def test_foreign_penalty_india():
+    assert _foreign_location_penalty("Bangalore, India") == 15
+
+
+def test_foreign_penalty_empty_location():
+    """Empty location should get no penalty (might be UK)."""
+    assert _foreign_location_penalty("") == 0
+
+
+def test_foreign_penalty_uk_location():
+    assert _foreign_location_penalty("London, UK") == 0
+
+
+def test_foreign_penalty_remote():
+    assert _foreign_location_penalty("Remote") == 0
+
+
+def test_foreign_penalty_unknown_location():
+    """A location with no known indicators should get no penalty."""
+    assert _foreign_location_penalty("Somewhere nice") == 0
+
+
+def test_us_ai_job_scores_lower_than_uk():
+    """A US-based AI job should score materially lower than the same UK job."""
+    uk_job = _make_job(title="AI Engineer", location="London, UK",
+                       description="Python PyTorch LLM RAG")
+    us_job = _make_job(title="AI Engineer", location="San Francisco, CA",
+                       description="Python PyTorch LLM RAG")
+    uk_score = score_job(uk_job)
+    us_score = score_job(us_job)
+    assert uk_score - us_score >= 15, f"UK={uk_score}, US={us_score}"
+
+
+# ---- Expanded negative keyword tests ----
+
+
+def test_negative_penalty_site_reliability():
+    assert _negative_penalty("Site Reliability Engineer") == 30
+
+
+def test_negative_penalty_quantum():
+    assert _negative_penalty("Quantum Computing Researcher") == 30
+
+
+def test_negative_penalty_power_platform():
+    assert _negative_penalty("Power Platform Developer") == 30
+
+
+def test_negative_penalty_model_artist():
+    assert _negative_penalty("3D Model Artist") == 30
+
+
+def test_negative_penalty_sap():
+    assert _negative_penalty("SAP Consultant") == 30
+
+
+def test_negative_penalty_solicitor():
+    assert _negative_penalty("Corporate Solicitor") == 30
+
+
+def test_negative_penalty_ai_engineer_zero():
+    """AI/ML titles should NOT be penalised by expanded keywords."""
+    assert _negative_penalty("AI Engineer") == 0
+    assert _negative_penalty("ML Engineer") == 0
+    assert _negative_penalty("Machine Learning Engineer") == 0
+    assert _negative_penalty("Data Scientist") == 0

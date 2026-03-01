@@ -12,7 +12,6 @@ logger = logging.getLogger("job360.sources.jsearch")
 JSEARCH_QUERIES = [
     "AI Engineer UK",
     "ML Engineer London",
-    "GenAI Engineer UK",
 ]
 
 

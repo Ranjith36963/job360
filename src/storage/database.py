@@ -40,6 +40,9 @@ class JobDatabase:
                 new_jobs INTEGER DEFAULT 0,
                 per_source TEXT DEFAULT '{}'
             );
+            CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
+            CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
+            CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
         """)
         await self._conn.commit()
 
@@ -115,6 +118,25 @@ class JobDatabase:
         cursor = await self._conn.execute(
             "SELECT * FROM jobs WHERE first_seen >= ? ORDER BY match_score DESC",
             (cutoff,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def purge_old_jobs(self, days: int = 30) -> int:
+        """Delete jobs where first_seen is older than `days` ago. Returns count deleted."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cursor = await self._conn.execute(
+            "DELETE FROM jobs WHERE first_seen < ?", (cutoff,)
+        )
+        await self._conn.commit()
+        return cursor.rowcount
+
+    async def get_recent_jobs(self, days: int = 7, min_score: int = 0) -> list[dict]:
+        """Return jobs from the last `days` with match_score >= min_score."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cursor = await self._conn.execute(
+            "SELECT * FROM jobs WHERE first_seen >= ? AND match_score >= ? ORDER BY date_found DESC",
+            (cutoff, min_score),
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]

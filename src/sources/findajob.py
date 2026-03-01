@@ -13,11 +13,14 @@ FINDAJOB_QUERIES = [
     "data scientist",
     "NLP engineer",
     "deep learning",
+    "MLOps engineer",
+    "computer vision engineer",
+    "LLM engineer",
 ]
 
 # Regex to extract job cards from the Find a Job search results HTML
 _JOB_LINK_RE = re.compile(
-    r'<a[^>]+href="(/job/[^"]+)"[^>]*>\s*([^<]+)</a>',
+    r'<a[^>]+href="(/details/\d+)"[^>]*>\s*([^<]+)</a>',
     re.IGNORECASE,
 )
 _COMPANY_RE = re.compile(

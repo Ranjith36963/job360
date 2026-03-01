@@ -72,3 +72,56 @@ def test_dedup_single_job():
     jobs = [_make_job()]
     result = deduplicate(jobs)
     assert len(result) == 1
+
+
+# ---- Smarter deduplication tests ----
+
+
+def test_dedup_strips_seniority_prefix():
+    """'Senior ML Engineer' and 'ML Engineer' at same company should dedup."""
+    jobs = [
+        _make_job(title="Senior ML Engineer", company="DeepMind", source="reed"),
+        _make_job(title="ML Engineer", company="DeepMind", source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1
+
+
+def test_dedup_strips_trailing_job_code():
+    """'AI Engineer - 12345' and 'AI Engineer' at same company should dedup."""
+    jobs = [
+        _make_job(title="AI Engineer - REQ-12345", company="DeepMind", source="reed"),
+        _make_job(title="AI Engineer", company="DeepMind", source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1
+
+
+def test_dedup_strips_parenthetical():
+    """'AI Engineer (London)' and 'AI Engineer' at same company should dedup."""
+    jobs = [
+        _make_job(title="AI Engineer (London)", company="DeepMind", source="reed"),
+        _make_job(title="AI Engineer", company="DeepMind", source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1
+
+
+def test_dedup_different_roles_same_company():
+    """Different actual roles at same company should NOT dedup."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind"),
+        _make_job(title="Data Scientist", company="DeepMind"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 2
+
+
+def test_dedup_company_suffix_normalization():
+    """Companies with suffix variants should dedup."""
+    jobs = [
+        _make_job(title="AI Engineer", company="Acme Solutions", source="reed"),
+        _make_job(title="AI Engineer", company="acme", source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1

@@ -22,13 +22,17 @@ def cli():
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
               default="INFO", help="Set logging verbosity.")
 @click.option("--db-path", default=None, help="Override database file path.")
-def run(source, dry_run, log_level, db_path):
+@click.option("--no-email", is_flag=True, help="Skip all notifications (email, Slack, Discord).")
+@click.option("--dashboard", is_flag=True, help="Launch Streamlit dashboard after the run.")
+def run(source, dry_run, log_level, db_path, no_email, dashboard):
     """Run the job search pipeline."""
     stats = asyncio.run(run_search(
         db_path=db_path,
         source_filter=source,
         dry_run=dry_run,
         log_level=log_level,
+        no_notify=no_email,
+        launch_dashboard=dashboard,
     ))
     click.echo(f"Done: {stats['total_found']} found, {stats['new_jobs']} new, {stats['sources_queried']} sources.")
 
@@ -65,6 +69,19 @@ def status():
         click.echo(f"  Total in DB: {total_jobs}")
     finally:
         conn.close()
+
+
+@cli.command()
+@click.option("--hours", default=168, type=int, help="Show jobs from last N hours (default 168 = 7 days).")
+@click.option("--min-score", default=30, type=int, help="Minimum match score to display.")
+@click.option("--source", default=None, help="Filter by source name.")
+@click.option("--visa-only", is_flag=True, help="Show only visa-flagged jobs.")
+@click.option("--db-path", default=None, help="Override database file path.")
+def view(hours, min_score, source, visa_only, db_path):
+    """View jobs in a time-bucketed Rich terminal table."""
+    from src.cli_view import display_jobs
+    display_jobs(hours=hours, min_score=min_score, source=source,
+                 visa_only=visa_only, db_path=db_path)
 
 
 @cli.command("sources")

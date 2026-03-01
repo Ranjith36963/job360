@@ -16,6 +16,8 @@ REED_API_KEY = os.getenv("REED_API_KEY", "")
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
 JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
+JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 
 # Email
 SMTP_HOST = "smtp.gmail.com"
@@ -33,6 +35,10 @@ MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
 
+# Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
+TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
+TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
+
 # Rate limits (requests per second)
 RATE_LIMITS = {
     "reed": {"concurrent": 1, "delay": 2.0},
@@ -47,6 +53,18 @@ RATE_LIMITS = {
     "workable": {"concurrent": 2, "delay": 1.5},
     "ashby": {"concurrent": 2, "delay": 1.5},
     "findajob": {"concurrent": 1, "delay": 3.0},
+    "remotive": {"concurrent": 2, "delay": 1.0},
+    "jooble": {"concurrent": 1, "delay": 2.0},
+    "linkedin": {"concurrent": 1, "delay": 3.0},
+    "smartrecruiters": {"concurrent": 2, "delay": 1.5},
+    "pinpoint": {"concurrent": 2, "delay": 1.5},
+    "recruitee": {"concurrent": 2, "delay": 1.5},
+    "indeed": {"concurrent": 1, "delay": 3.0},
+    "glassdoor": {"concurrent": 1, "delay": 3.0},
+    "workday": {"concurrent": 2, "delay": 1.5},
+    "google_jobs": {"concurrent": 1, "delay": 2.0},
+    "devitjobs": {"concurrent": 2, "delay": 1.0},
+    "landingjobs": {"concurrent": 2, "delay": 1.0},
 }
 
 # Retry

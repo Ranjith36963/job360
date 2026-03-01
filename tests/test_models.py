@@ -76,3 +76,76 @@ def test_job_with_salary():
     )
     assert job.salary_min == 60000
     assert job.salary_max == 80000
+
+
+# ---- Company cleaning tests ----
+
+
+def test_company_empty_becomes_unknown():
+    job = Job(title="AI Engineer", company="", apply_url="x", source="a", date_found="x")
+    assert job.company == "Unknown"
+
+
+def test_company_nan_becomes_unknown():
+    job = Job(title="AI Engineer", company="nan", apply_url="x", source="a", date_found="x")
+    assert job.company == "Unknown"
+
+
+def test_company_none_str_becomes_unknown():
+    job = Job(title="AI Engineer", company="None", apply_url="x", source="a", date_found="x")
+    assert job.company == "Unknown"
+
+
+def test_company_whitespace_becomes_unknown():
+    job = Job(title="AI Engineer", company="   ", apply_url="x", source="a", date_found="x")
+    assert job.company == "Unknown"
+
+
+def test_company_valid_unchanged():
+    job = Job(title="AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
+    assert job.company == "DeepMind"
+
+
+# ---- HTML decoding tests ----
+
+
+def test_html_decode_title():
+    job = Job(title="AI &amp; ML Engineer", company="Test", apply_url="x", source="a", date_found="x")
+    assert job.title == "AI & ML Engineer"
+
+
+def test_html_decode_company():
+    job = Job(title="Engineer", company="Smith &amp; Sons", apply_url="x", source="a", date_found="x")
+    assert job.company == "Smith & Sons"
+
+
+# ---- Salary outlier tests ----
+
+
+def test_salary_low_nullified():
+    job = Job(title="AI Engineer", company="Test", salary_min=50, salary_max=80000,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min is None
+    assert job.salary_max == 80000
+
+
+def test_salary_high_nullified():
+    job = Job(title="AI Engineer", company="Test", salary_min=50000, salary_max=999999,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min == 50000
+    assert job.salary_max is None
+
+
+def test_salary_normal_unchanged():
+    job = Job(title="AI Engineer", company="Test", salary_min=60000, salary_max=90000,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min == 60000
+    assert job.salary_max == 90000
+
+
+def test_salary_boundary_kept():
+    """10000 and 500000 are at the boundary and should be kept."""
+    job = Job(title="AI Engineer", company="Test", salary_min=10000, salary_max=500000,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min == 10000
+    assert job.salary_max == 500000

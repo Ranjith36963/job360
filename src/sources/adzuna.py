@@ -27,15 +27,14 @@ class AdzunaSource(BaseJobSource):
             logger.info("Adzuna: no API keys, skipping")
             return []
         jobs = []
-        queries = JOB_TITLES[:8]
+        queries = JOB_TITLES
         for query in queries:
             params = {
                 "app_id": self._app_id,
                 "app_key": self._app_key,
                 "what": query,
-                "where": "United Kingdom",
                 "results_per_page": 50,
-                "max_days_old": 7,
+                "max_days_old": 14,
                 "content-type": "application/json",
             }
             data = await self._get_json(

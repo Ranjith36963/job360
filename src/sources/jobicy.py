@@ -16,8 +16,9 @@ class JobicySource(BaseJobSource):
         jobs = []
         params = {
             "count": "50",
-            "geo": "united-kingdom",
-            "tag": "ai,machine-learning,python,data-science",
+            "geo": "uk",
+            "industry": "data-science",
+            "tag": "ai",
         }
         data = await self._get_json(
             "https://jobicy.com/api/v2/remote-jobs", params=params
