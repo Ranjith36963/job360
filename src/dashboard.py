@@ -119,6 +119,22 @@ with st.sidebar:
         visa_filter = "All"
 
     st.divider()
+    st.subheader("CV Profile")
+    from src.cv_parser import load_profile
+    _cv_profile = load_profile()
+    if _cv_profile:
+        st.success(f"Loaded from: {_cv_profile.get('source_file', 'unknown')}")
+        st.caption(f"Extracted: {_cv_profile.get('extracted_at', 'unknown')}")
+        with st.expander("Skills Profile"):
+            st.write(f"**Job Titles:** {', '.join(_cv_profile.get('job_titles', []))}")
+            st.write(f"**Primary Skills:** {', '.join(_cv_profile.get('primary_skills', []))}")
+            st.write(f"**Secondary Skills:** {', '.join(_cv_profile.get('secondary_skills', []))}")
+            st.write(f"**Tertiary Skills:** {', '.join(_cv_profile.get('tertiary_skills', []))}")
+            st.write(f"**Locations:** {', '.join(_cv_profile.get('locations', []))}")
+    else:
+        st.info("No CV uploaded. Using default profile.")
+
+    st.divider()
     st.subheader("\u2699\uFE0F Actions")
     trigger_search = st.button("\U0001F680 Run New Search", use_container_width=True)
     export_csv = st.button("\U0001F4E5 Export CSV", use_container_width=True)

@@ -40,6 +40,20 @@ def test_sources_command():
         assert name in result.output
 
 
+def test_upload_cv_in_commands():
+    """upload-cv command should appear in CLI help."""
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "upload-cv" in result.output
+
+
+def test_upload_cv_help():
+    """upload-cv --help should show CV_PATH argument."""
+    result = runner.invoke(cli, ["upload-cv", "--help"])
+    assert result.exit_code == 0
+    assert "CV_PATH" in result.output
+
+
 def test_source_registry_has_12_sources():
     """SOURCE_REGISTRY should have all 12 sources."""
     assert len(SOURCE_REGISTRY) == 12

@@ -10,6 +10,7 @@ from src.config.keywords import (
     TERTIARY_SKILLS,
     VISA_KEYWORDS,
 )
+from src.cv_parser import load_profile
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -23,6 +24,34 @@ SECONDARY_POINTS = 2
 TERTIARY_POINTS = 1
 SKILL_CAP = SKILL_WEIGHT
 
+_cached_profile: dict | None = None
+
+
+def _load_active_profile() -> dict:
+    """Return the active keyword profile (CV-based or default)."""
+    global _cached_profile
+    if _cached_profile is not None:
+        return _cached_profile
+
+    profile = load_profile()
+    if profile:
+        _cached_profile = profile
+    else:
+        _cached_profile = {
+            "job_titles": JOB_TITLES,
+            "primary_skills": PRIMARY_SKILLS,
+            "secondary_skills": SECONDARY_SKILLS,
+            "tertiary_skills": TERTIARY_SKILLS,
+            "locations": LOCATIONS,
+        }
+    return _cached_profile
+
+
+def reload_profile() -> None:
+    """Clear cached profile so next scoring call reloads from disk."""
+    global _cached_profile
+    _cached_profile = None
+
 
 def _text_contains(text: str, term: str) -> bool:
     return term.lower() in text
@@ -30,7 +59,7 @@ def _text_contains(text: str, term: str) -> bool:
 
 def _title_score(job_title: str) -> int:
     title_lower = job_title.lower()
-    for target in JOB_TITLES:
+    for target in _load_active_profile()["job_titles"]:
         if target.lower() == title_lower:
             return TITLE_WEIGHT
         if target.lower() in title_lower or title_lower in target.lower():
@@ -47,13 +76,14 @@ def _title_score(job_title: str) -> int:
 def _skill_score(text: str) -> int:
     text_lower = text.lower()
     points = 0
-    for skill in PRIMARY_SKILLS:
+    profile = _load_active_profile()
+    for skill in profile["primary_skills"]:
         if _text_contains(text_lower, skill.lower()):
             points += PRIMARY_POINTS
-    for skill in SECONDARY_SKILLS:
+    for skill in profile["secondary_skills"]:
         if _text_contains(text_lower, skill.lower()):
             points += SECONDARY_POINTS
-    for skill in TERTIARY_SKILLS:
+    for skill in profile["tertiary_skills"]:
         if _text_contains(text_lower, skill.lower()):
             points += TERTIARY_POINTS
     return min(points, SKILL_CAP)
@@ -61,7 +91,7 @@ def _skill_score(text: str) -> int:
 
 def _location_score(location: str) -> int:
     loc_lower = location.lower()
-    for target in LOCATIONS:
+    for target in _load_active_profile()["locations"]:
         if target.lower() in loc_lower:
             return LOCATION_WEIGHT
     if "remote" in loc_lower:
