@@ -13,9 +13,9 @@ from src.config.keywords import (
 from src.cv_parser import load_profile
 
 # Weights for scoring components (total = 100)
-TITLE_WEIGHT = 40
-SKILL_WEIGHT = 40
-LOCATION_WEIGHT = 10
+TITLE_WEIGHT = 20
+SKILL_WEIGHT = 45
+LOCATION_WEIGHT = 25
 RECENCY_WEIGHT = 10
 
 # Points per skill match
