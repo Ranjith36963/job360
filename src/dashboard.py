@@ -1,9 +1,11 @@
 """Job360 Web Dashboard — Streamlit UI for browsing, filtering, and managing job results."""
 
+import os
 import sqlite3
 import json
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -120,17 +122,70 @@ with st.sidebar:
 
     st.divider()
     st.subheader("CV Profile")
-    from src.cv_parser import load_profile
+
+    from src.cv_parser import (
+        extract_text,
+        extract_profile,
+        save_profile,
+        load_profile,
+    )
+    from src.filters.skill_matcher import reload_profile
+    from src.config.settings import CV_PROFILE_PATH
+
+    uploaded_cv = st.file_uploader(
+        "Upload CV (PDF/DOCX)",
+        type=["pdf", "docx"],
+        key="cv_upload",
+        help="Upload your CV to personalise job matching. "
+        "Skills are extracted automatically and used to score jobs.",
+    )
+
+    if uploaded_cv is not None:
+        suffix = Path(uploaded_cv.name).suffix
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+        try:
+            os.write(tmp_fd, uploaded_cv.getvalue())
+            os.close(tmp_fd)
+            text = extract_text(tmp_path)
+            profile = extract_profile(text)
+            profile["source_file"] = uploaded_cv.name
+            save_profile(profile)
+            reload_profile()
+            total_skills = (
+                len(profile["primary_skills"])
+                + len(profile["secondary_skills"])
+                + len(profile["tertiary_skills"])
+            )
+            st.success(
+                f"Extracted {total_skills} skills from **{uploaded_cv.name}**"
+            )
+            st.cache_data.clear()
+            st.rerun()
+        except (ValueError, FileNotFoundError) as exc:
+            st.error(f"Failed to process CV: {exc}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     _cv_profile = load_profile()
     if _cv_profile:
-        st.success(f"Loaded from: {_cv_profile.get('source_file', 'unknown')}")
-        st.caption(f"Extracted: {_cv_profile.get('extracted_at', 'unknown')}")
+        st.success(f"Active: {_cv_profile.get('source_file', 'unknown')}")
+        st.caption(f"Extracted: {_cv_profile.get('extracted_at', 'N/A')}")
         with st.expander("Skills Profile"):
-            st.write(f"**Job Titles:** {', '.join(_cv_profile.get('job_titles', []))}")
-            st.write(f"**Primary Skills:** {', '.join(_cv_profile.get('primary_skills', []))}")
-            st.write(f"**Secondary Skills:** {', '.join(_cv_profile.get('secondary_skills', []))}")
-            st.write(f"**Tertiary Skills:** {', '.join(_cv_profile.get('tertiary_skills', []))}")
-            st.write(f"**Locations:** {', '.join(_cv_profile.get('locations', []))}")
+            for label, key in [
+                ("Job Titles", "job_titles"),
+                ("Primary Skills", "primary_skills"),
+                ("Secondary Skills", "secondary_skills"),
+                ("Tertiary Skills", "tertiary_skills"),
+                ("Locations", "locations"),
+            ]:
+                items = _cv_profile.get(key, [])
+                st.write(f"**{label} ({len(items)}):** {', '.join(items) if items else 'None'}")
+        if st.button("Reset to Default Profile", use_container_width=True):
+            CV_PROFILE_PATH.unlink(missing_ok=True)
+            reload_profile()
+            st.cache_data.clear()
+            st.rerun()
     else:
         st.info("No CV uploaded. Using default profile.")
 
