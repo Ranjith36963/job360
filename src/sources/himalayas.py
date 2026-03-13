@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
+from src.filters.skill_matcher import get_relevance_keywords
 
 logger = logging.getLogger("job360.sources.himalayas")
 
@@ -24,7 +24,7 @@ class HimalayasSource(BaseJobSource):
         for item in data["jobs"]:
             categories = " ".join(item.get("categories", [])) if isinstance(item.get("categories"), list) else ""
             text = f"{item.get('title', '')} {item.get('excerpt', '')} {categories}".lower()
-            if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+            if not any(kw in text for kw in get_relevance_keywords()):
                 continue
             loc_restrictions = item.get("locationRestrictions", [])
             location = ", ".join(loc_restrictions) if isinstance(loc_restrictions, list) else str(loc_restrictions)

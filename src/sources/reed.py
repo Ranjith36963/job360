@@ -6,7 +6,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES, LOCATIONS
+from src.filters.skill_matcher import get_search_queries, get_search_locations
 
 logger = logging.getLogger("job360.sources.reed")
 
@@ -29,9 +29,9 @@ class ReedSource(BaseJobSource):
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
-        # Search top job titles in key locations
-        queries = JOB_TITLES[:5]
-        locations = ["London", "UK", "Remote"]
+        # Search job titles and locations from the active profile
+        queries = get_search_queries(limit=5)
+        locations = get_search_locations()[:3] or ["Remote"]
         for query in queries:
             for loc in locations:
                 params = {

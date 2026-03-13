@@ -56,4 +56,4 @@ RETRY_BACKOFF = [1, 2, 4]
 
 # HTTP
 REQUEST_TIMEOUT = 30
-USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
+USER_AGENT = "Job360/1.0 (Job Search Aggregator)"

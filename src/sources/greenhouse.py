@@ -7,7 +7,7 @@ import aiohttp
 from src.models import Job
 from src.sources.base import BaseJobSource
 from src.config.companies import GREENHOUSE_COMPANIES, COMPANY_NAME_OVERRIDES
-from src.config.keywords import RELEVANCE_KEYWORDS
+from src.filters.skill_matcher import get_relevance_keywords
 
 logger = logging.getLogger("job360.sources.greenhouse")
 
@@ -34,7 +34,7 @@ class GreenhouseSource(BaseJobSource):
                 content = item.get("content", "")
                 plain = _HTML_TAG_RE.sub(" ", content)
                 text = f"{title} {plain}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in get_relevance_keywords()):
                     continue
                 loc = item.get("location", {})
                 location = loc.get("name", "") if isinstance(loc, dict) else str(loc)

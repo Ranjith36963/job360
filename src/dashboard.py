@@ -103,7 +103,7 @@ df_runs = load_run_logs()
 with st.sidebar:
     st.title("\U0001F50D Filters")
 
-    search_text = st.text_input("Search", placeholder="e.g. AI Engineer London")
+    search_text = st.text_input("Search", placeholder="e.g. Software Engineer London")
 
     score_range = st.slider("Match Score", 0, 100, (0, 100))
 
@@ -254,7 +254,7 @@ if trigger_search:
 # Header
 # ---------------------------------------------------------------------------
 st.title("\U0001F4BC Job360 Dashboard")
-st.caption("AI/ML Job Search Aggregator — UK & Remote")
+st.caption("Personalised Job Search Aggregator — Powered by Your CV")
 
 # ---------------------------------------------------------------------------
 # Empty state

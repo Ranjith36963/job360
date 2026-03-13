@@ -190,3 +190,57 @@ def score_job(job: Job, profile: dict | None = None) -> int:
 def check_visa_flag(job: Job) -> bool:
     text = f"{job.title} {job.description}".lower()
     return any(kw.lower() in text for kw in VISA_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
+# Profile-driven query helpers — used by job sources
+# ---------------------------------------------------------------------------
+
+def get_search_queries(limit: int = 5) -> list[str]:
+    """Return job title search queries derived from the active profile."""
+    profile = _load_active_profile()
+    return list(profile.get("job_titles", []))[:limit]
+
+
+def get_search_locations() -> list[str]:
+    """Return locations derived from the active profile."""
+    profile = _load_active_profile()
+    return list(profile.get("locations", []))
+
+
+def get_relevance_keywords() -> list[str]:
+    """Build relevance keywords from the active profile's skills and titles.
+
+    These replace the old hardcoded RELEVANCE_KEYWORDS so that sources
+    filter for jobs relevant to THIS user's profile, not just AI/ML.
+    """
+    profile = _load_active_profile()
+    keywords: set[str] = set()
+    # Add all skill names (lowercased)
+    for key in ("primary_skills", "secondary_skills", "tertiary_skills"):
+        for skill in profile.get(key, []):
+            keywords.add(skill.lower())
+    # Add words from job titles
+    for title in profile.get("job_titles", []):
+        for word in title.lower().split():
+            if len(word) > 2:
+                keywords.add(word)
+    return sorted(keywords)
+
+
+def get_search_tags() -> str:
+    """Build comma-separated tags for tag-based APIs (e.g. Jobicy).
+
+    Derived from the profile's primary skills and job titles.
+    """
+    profile = _load_active_profile()
+    tags: list[str] = []
+    for skill in profile.get("primary_skills", [])[:5]:
+        tags.append(skill.lower().replace(" ", "-"))
+    for title in profile.get("job_titles", [])[:3]:
+        # Extract key words, skip generic words
+        for word in title.lower().split():
+            if word not in ("engineer", "developer", "senior", "junior", "lead"):
+                if len(word) > 2 and word not in tags:
+                    tags.append(word)
+    return ",".join(tags[:10])

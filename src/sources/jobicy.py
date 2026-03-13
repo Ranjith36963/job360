@@ -5,6 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
+from src.filters.skill_matcher import get_search_tags, get_search_locations
 
 logger = logging.getLogger("job360.sources.jobicy")
 
@@ -14,11 +15,24 @@ class JobicySource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        tags = get_search_tags()
+        # Derive geo from profile locations
+        locations = get_search_locations()
+        geo = ""
+        for loc in locations:
+            loc_lower = loc.lower().replace(" ", "-")
+            if loc_lower in ("uk", "united-kingdom", "remote"):
+                geo = "united-kingdom"
+                break
+            elif len(loc_lower) > 3:
+                geo = loc_lower
+                break
         params = {
             "count": "50",
-            "geo": "united-kingdom",
-            "tag": "ai,machine-learning,python,data-science",
+            "tag": tags,
         }
+        if geo:
+            params["geo"] = geo
         data = await self._get_json(
             "https://jobicy.com/api/v2/remote-jobs", params=params
         )

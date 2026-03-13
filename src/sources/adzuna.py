@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES
+from src.filters.skill_matcher import get_search_queries, get_search_locations
 
 logger = logging.getLogger("job360.sources.adzuna")
 
@@ -27,13 +27,22 @@ class AdzunaSource(BaseJobSource):
             logger.info("Adzuna: no API keys, skipping")
             return []
         jobs = []
-        queries = JOB_TITLES[:8]
+        queries = get_search_queries(limit=8)
+        # Derive location from profile (Adzuna uses country-level "where")
+        locations = get_search_locations()
+        where = "United Kingdom"
+        for loc in locations:
+            if loc.lower() in ("uk", "united kingdom"):
+                where = "United Kingdom"
+                break
+            elif len(loc) > 3:
+                where = loc
         for query in queries:
             params = {
                 "app_id": self._app_id,
                 "app_key": self._app_key,
                 "what": query,
-                "where": "United Kingdom",
+                "where": where,
                 "results_per_page": 50,
                 "max_days_old": 7,
                 "content-type": "application/json",

@@ -4,16 +4,9 @@ from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource
+from src.filters.skill_matcher import get_search_queries
 
 logger = logging.getLogger("job360.sources.findajob")
-
-FINDAJOB_QUERIES = [
-    "AI engineer",
-    "machine learning engineer",
-    "data scientist",
-    "NLP engineer",
-    "deep learning",
-]
 
 # Regex to extract job cards from the Find a Job search results HTML
 _JOB_LINK_RE = re.compile(
@@ -32,7 +25,8 @@ class FindAJobSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        for query in FINDAJOB_QUERIES:
+        queries = get_search_queries(limit=5)
+        for query in queries:
             params = {
                 "q": query,
                 "w": "united kingdom",

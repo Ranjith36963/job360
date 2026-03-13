@@ -5,15 +5,9 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
+from src.filters.skill_matcher import get_search_queries, get_search_locations
 
 logger = logging.getLogger("job360.sources.jsearch")
-
-# Limited queries to stay within 100 req/month free tier
-JSEARCH_QUERIES = [
-    "AI Engineer UK",
-    "ML Engineer London",
-    "GenAI Engineer UK",
-]
 
 
 class JSearchSource(BaseJobSource):
@@ -36,7 +30,11 @@ class JSearchSource(BaseJobSource):
             "X-RapidAPI-Key": self._api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
-        for query in JSEARCH_QUERIES:
+        # Build queries from profile: "<title> <location>" (limited to 3 for free tier)
+        titles = get_search_queries(limit=3)
+        locations = get_search_locations()[:2] or ["Remote"]
+        jsearch_queries = [f"{t} {locations[0]}" for t in titles] if locations else titles
+        for query in jsearch_queries[:3]:
             params = {
                 "query": query,
                 "page": "1",

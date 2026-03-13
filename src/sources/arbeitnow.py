@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
+from src.filters.skill_matcher import get_relevance_keywords
 
 logger = logging.getLogger("job360.sources.arbeitnow")
 
@@ -20,7 +20,7 @@ class ArbeitnowSource(BaseJobSource):
             return []
         for item in data["data"]:
             text = f"{item.get('title', '')} {item.get('description', '')} {' '.join(item.get('tags', []))}".lower()
-            if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+            if not any(kw in text for kw in get_relevance_keywords()):
                 continue
             date_found = item.get("created_at") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(

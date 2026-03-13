@@ -6,7 +6,7 @@ import aiohttp
 from src.models import Job
 from src.sources.base import BaseJobSource
 from src.config.companies import WORKABLE_COMPANIES, COMPANY_NAME_OVERRIDES
-from src.config.keywords import RELEVANCE_KEYWORDS
+from src.filters.skill_matcher import get_relevance_keywords
 
 logger = logging.getLogger("job360.sources.workable")
 
@@ -30,7 +30,7 @@ class WorkableSource(BaseJobSource):
                 title = item.get("title", "")
                 desc = item.get("shortDescription", "")
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in get_relevance_keywords()):
                     continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):

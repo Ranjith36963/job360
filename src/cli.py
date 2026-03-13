@@ -12,7 +12,7 @@ from src.main import run_search, SOURCE_REGISTRY
 @click.group()
 @click.version_option(version="1.0.0", prog_name="job360")
 def cli():
-    """Job360 — Automated UK AI/ML job search aggregator."""
+    """Job360 — Automated job search aggregator powered by your CV."""
 
 
 @cli.command()
