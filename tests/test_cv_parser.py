@@ -5,7 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from src.cv_parser import extract_text, extract_profile, save_profile, load_profile, _match_terms
+from src.cv_parser import (
+    extract_text,
+    extract_profile,
+    save_profile,
+    load_profile,
+    _match_terms,
+    _find_skills_in_text,
+    _find_job_titles,
+    _find_locations,
+    _categorise_skills,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +115,7 @@ def test_extract_text_missing_file():
 
 
 # ---------------------------------------------------------------------------
-# Term matching tests
+# Legacy term matching tests (backward compat)
 # ---------------------------------------------------------------------------
 
 def test_match_terms_finds_skills():
@@ -130,10 +140,89 @@ def test_match_terms_substring_matching():
 
 
 # ---------------------------------------------------------------------------
-# Profile extraction tests
+# Smart extraction tests
 # ---------------------------------------------------------------------------
 
-def test_extract_profile_full_cv():
+def test_find_skills_discovers_python():
+    counts = _find_skills_in_text("Python developer using Python and Django")
+    assert "Python" in counts
+    assert counts["Python"] >= 2
+
+
+def test_find_skills_discovers_java():
+    """A Java developer's CV should find Java, not just AI/ML skills."""
+    counts = _find_skills_in_text(
+        "Java Spring Boot developer with MySQL and Docker experience. "
+        "Worked on microservices using Java and Kubernetes."
+    )
+    assert "Java" in counts
+    assert "Spring Boot" in counts
+    assert "MySQL" in counts
+    assert "Docker" in counts
+
+
+def test_find_skills_discovers_frontend():
+    counts = _find_skills_in_text(
+        "React TypeScript developer. Built apps with Next.js, Tailwind CSS, Redux."
+    )
+    assert "React" in counts
+    assert "TypeScript" in counts
+    assert "Next.js" in counts
+
+
+def test_find_job_titles_multi_domain():
+    text = "Worked as a Software Engineer at Google, then Data Scientist at Meta."
+    titles = _find_job_titles(text)
+    assert "Software Engineer" in titles
+    assert "Data Scientist" in titles
+
+
+def test_find_locations_multiple():
+    text = "Based in London, open to Remote and Hybrid roles."
+    locs = _find_locations(text)
+    assert "London" in locs
+    assert "Remote" in locs
+
+
+def test_find_locations_international():
+    text = "Worked in Berlin, Germany. Relocated to San Francisco, USA."
+    locs = _find_locations(text)
+    assert "Berlin" in locs
+    assert "Germany" in locs
+    assert "San Francisco" in locs
+
+
+# ---------------------------------------------------------------------------
+# Auto-categorisation tests
+# ---------------------------------------------------------------------------
+
+def test_categorise_skills_by_frequency():
+    """Skills mentioned more often should rank higher."""
+    from collections import Counter
+    counts = Counter({"Python": 5, "Docker": 2, "Nginx": 1})
+    text = "Python Python Python Python Python Docker Docker Nginx"
+    primary, secondary, tertiary = _categorise_skills(counts, text)
+    assert "Python" in primary
+    assert "Nginx" in tertiary
+
+
+def test_categorise_skills_section_boost():
+    """Skills in a 'Skills' section get boosted."""
+    from collections import Counter
+    text = "Experience with various tools.\n\nSkills:\nReact, Node.js, PostgreSQL\n\nWork history..."
+    counts = _find_skills_in_text(text)
+    primary, secondary, tertiary = _categorise_skills(counts, text)
+    # React appears in skills section (once) → should be at least secondary
+    all_skills = primary + secondary
+    assert "React" in all_skills or "Node.js" in all_skills
+
+
+# ---------------------------------------------------------------------------
+# Profile extraction tests (integration)
+# ---------------------------------------------------------------------------
+
+def test_extract_profile_ai_engineer():
+    """AI/ML CV should produce AI-relevant profile."""
     text = (
         "AI Engineer with Python, PyTorch, TensorFlow experience. "
         "Expert in LangChain, RAG, LLM, NLP, Deep Learning. "
@@ -141,11 +230,61 @@ def test_extract_profile_full_cv():
         "Based in London, UK."
     )
     profile = extract_profile(text)
-    assert "Python" in profile["primary_skills"]
-    assert "PyTorch" in profile["primary_skills"]
-    assert "AWS" in profile["secondary_skills"]
+    all_skills = (
+        profile["primary_skills"]
+        + profile["secondary_skills"]
+        + profile["tertiary_skills"]
+    )
+    assert "Python" in all_skills
+    assert "PyTorch" in all_skills
+    assert "AWS" in all_skills
     assert "London" in profile["locations"]
     assert "AI Engineer" in profile["job_titles"]
+
+
+def test_extract_profile_java_developer():
+    """A Java developer's CV should produce Java-relevant profile — NOT empty."""
+    text = (
+        "Software Engineer\n\n"
+        "Skills:\n"
+        "Java, Spring Boot, MySQL, PostgreSQL, Docker, Kubernetes, "
+        "React, TypeScript, Git, Jenkins, AWS\n\n"
+        "Experience:\n"
+        "Built microservices in Java using Spring Boot. Deployed with Docker "
+        "and Kubernetes on AWS. Frontend in React and TypeScript.\n\n"
+        "Location: Manchester, UK"
+    )
+    profile = extract_profile(text)
+    all_skills = (
+        profile["primary_skills"]
+        + profile["secondary_skills"]
+        + profile["tertiary_skills"]
+    )
+    assert "Java" in all_skills
+    assert "Spring Boot" in all_skills
+    assert "Docker" in all_skills
+    assert "Software Engineer" in profile["job_titles"]
+    assert "Manchester" in profile["locations"]
+    # Python should NOT appear — it's not in this CV
+    assert "Python" not in all_skills
+
+
+def test_extract_profile_accountant():
+    """Non-tech CV should still extract meaningful info."""
+    text = (
+        "Accountant with 10 years experience.\n"
+        "Proficient in Excel, QuickBooks, Xero, Sage.\n"
+        "Based in Birmingham, UK."
+    )
+    profile = extract_profile(text)
+    all_skills = (
+        profile["primary_skills"]
+        + profile["secondary_skills"]
+        + profile["tertiary_skills"]
+    )
+    assert "Excel" in all_skills
+    assert "Birmingham" in profile["locations"]
+    assert "Accountant" in profile["job_titles"]
 
 
 def test_extract_profile_empty_text():
@@ -163,6 +302,39 @@ def test_extract_profile_has_metadata():
     # Should be a valid ISO timestamp
     from datetime import datetime
     datetime.fromisoformat(profile["extracted_at"])
+
+
+def test_different_cvs_produce_different_profiles():
+    """The core multi-user requirement: different CVs → different results."""
+    ai_cv = (
+        "AI Engineer with Python, PyTorch, TensorFlow, LangChain, RAG. "
+        "Based in London."
+    )
+    java_cv = (
+        "Software Engineer with Java, Spring Boot, MySQL, React. "
+        "Based in Manchester."
+    )
+
+    ai_profile = extract_profile(ai_cv)
+    java_profile = extract_profile(java_cv)
+
+    ai_skills = set(
+        ai_profile["primary_skills"]
+        + ai_profile["secondary_skills"]
+        + ai_profile["tertiary_skills"]
+    )
+    java_skills = set(
+        java_profile["primary_skills"]
+        + java_profile["secondary_skills"]
+        + java_profile["tertiary_skills"]
+    )
+
+    # They should have different skill sets
+    assert ai_skills != java_skills
+    assert "PyTorch" in ai_skills
+    assert "PyTorch" not in java_skills
+    assert "Spring Boot" in java_skills
+    assert "Spring Boot" not in ai_skills
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +436,45 @@ def test_scorer_falls_back_without_profile(tmp_path, monkeypatch):
     # Should score high with the full default list
     assert score >= 70
     sm.reload_profile()
+
+
+def test_scorer_explicit_profile_parameter():
+    """score_job should accept an explicit profile, bypassing the global cache."""
+    from datetime import datetime, timezone
+    from src.models import Job
+    from src.filters.skill_matcher import score_job
+
+    java_profile = {
+        "job_titles": ["Software Engineer"],
+        "primary_skills": ["Java", "Spring Boot"],
+        "secondary_skills": ["MySQL", "Docker"],
+        "tertiary_skills": ["Git"],
+        "locations": ["Manchester"],
+    }
+
+    java_job = Job(
+        title="Software Engineer",
+        company="Test",
+        apply_url="https://example.com",
+        source="test",
+        date_found=datetime.now(timezone.utc).isoformat(),
+        location="Manchester",
+        description="Java Spring Boot developer with MySQL and Docker",
+    )
+
+    ai_job = Job(
+        title="AI Engineer",
+        company="Test",
+        apply_url="https://example.com",
+        source="test",
+        date_found=datetime.now(timezone.utc).isoformat(),
+        location="London",
+        description="Python PyTorch TensorFlow LangChain RAG",
+    )
+
+    # Java job should score HIGH with Java profile
+    java_score = score_job(java_job, profile=java_profile)
+    # AI job should score LOW with Java profile
+    ai_score = score_job(ai_job, profile=java_profile)
+
+    assert java_score > ai_score

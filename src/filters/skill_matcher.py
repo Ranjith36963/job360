@@ -1,3 +1,13 @@
+"""Skill matcher — scores jobs against the active user profile.
+
+When a CV profile exists, scoring is personalised to THAT user's skills,
+titles, and locations.  Without a CV, falls back to the default AI/ML
+keywords in config/keywords.py.
+
+The scoring engine is domain-agnostic: it derives all matching terms
+from the active profile rather than using hardcoded domain words.
+"""
+
 import re
 from datetime import datetime, timezone
 
@@ -57,41 +67,74 @@ def _text_contains(text: str, term: str) -> bool:
     return term.lower() in text
 
 
-def _title_score(job_title: str) -> int:
+def _build_title_keywords(profile: dict) -> set[str]:
+    """Derive domain-relevant words from the profile's job titles and skills.
+
+    Instead of a hardcoded set like {'ai', 'ml', ...}, we extract meaningful
+    words from whatever titles and top skills the profile contains.
+    """
+    words: set[str] = set()
+    # Words from job titles
+    for title in profile.get("job_titles", []):
+        for w in re.findall(r'\w+', title.lower()):
+            if len(w) > 1:  # skip single chars
+                words.add(w)
+    # Top-skill single words (for partial title matching)
+    for skill in profile.get("primary_skills", [])[:10]:
+        for w in re.findall(r'\w+', skill.lower()):
+            if len(w) > 2:  # skip very short
+                words.add(w)
+    # Remove noise words
+    words -= {"and", "the", "for", "with", "from", "our", "you", "are", "has"}
+    return words
+
+
+def _title_score(job_title: str, profile: dict | None = None) -> int:
+    if profile is None:
+        profile = _load_active_profile()
+
     title_lower = job_title.lower()
-    for target in _load_active_profile()["job_titles"]:
+
+    # Exact or substring match against profile titles
+    for target in profile.get("job_titles", []):
         if target.lower() == title_lower:
             return TITLE_WEIGHT
         if target.lower() in title_lower or title_lower in target.lower():
             return TITLE_WEIGHT // 2
-    # Check for partial keyword overlap
+
+    # Partial keyword overlap — derived from the profile, not hardcoded
     title_words = set(re.findall(r'\w+', title_lower))
-    ai_ml_words = {"ai", "ml", "machine", "learning", "deep", "nlp", "data", "scientist", "engineer", "genai", "llm", "rag", "computer", "vision", "mlops"}
-    overlap = title_words & ai_ml_words
+    domain_words = _build_title_keywords(profile)
+    overlap = title_words & domain_words
     if overlap:
         return min(len(overlap) * 5, TITLE_WEIGHT // 2)
     return 0
 
 
-def _skill_score(text: str) -> int:
+def _skill_score(text: str, profile: dict | None = None) -> int:
+    if profile is None:
+        profile = _load_active_profile()
+
     text_lower = text.lower()
     points = 0
-    profile = _load_active_profile()
-    for skill in profile["primary_skills"]:
+    for skill in profile.get("primary_skills", []):
         if _text_contains(text_lower, skill.lower()):
             points += PRIMARY_POINTS
-    for skill in profile["secondary_skills"]:
+    for skill in profile.get("secondary_skills", []):
         if _text_contains(text_lower, skill.lower()):
             points += SECONDARY_POINTS
-    for skill in profile["tertiary_skills"]:
+    for skill in profile.get("tertiary_skills", []):
         if _text_contains(text_lower, skill.lower()):
             points += TERTIARY_POINTS
     return min(points, SKILL_CAP)
 
 
-def _location_score(location: str) -> int:
+def _location_score(location: str, profile: dict | None = None) -> int:
+    if profile is None:
+        profile = _load_active_profile()
+
     loc_lower = location.lower()
-    for target in _load_active_profile()["locations"]:
+    for target in profile.get("locations", []):
         if target.lower() in loc_lower:
             return LOCATION_WEIGHT
     if "remote" in loc_lower:
@@ -121,11 +164,24 @@ def _recency_score(date_found: str) -> int:
     return 0
 
 
-def score_job(job: Job) -> int:
+def score_job(job: Job, profile: dict | None = None) -> int:
+    """Score a job against a profile.
+
+    Parameters
+    ----------
+    job : Job
+        The job to score.
+    profile : dict, optional
+        An explicit profile to score against.  When ``None`` (the default),
+        the globally cached profile (CV-based or default) is used.
+    """
+    if profile is None:
+        profile = _load_active_profile()
+
     text = f"{job.title} {job.description}"
-    title_pts = _title_score(job.title)
-    skill_pts = _skill_score(text)
-    location_pts = _location_score(job.location)
+    title_pts = _title_score(job.title, profile)
+    skill_pts = _skill_score(text, profile)
+    location_pts = _location_score(job.location, profile)
     recency_pts = _recency_score(job.date_found)
     total = title_pts + skill_pts + location_pts + recency_pts
     return min(max(total, 0), 100)

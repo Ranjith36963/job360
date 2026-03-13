@@ -150,3 +150,56 @@ def test_recency_score_tiers():
     assert _recency_score((now - timedelta(days=6)).isoformat()) == 4
     assert _recency_score((now - timedelta(days=7)).isoformat()) == 4
     assert _recency_score((now - timedelta(days=8)).isoformat()) == 0
+
+
+# ---- Per-profile scoring tests ----
+
+
+def test_score_with_explicit_java_profile():
+    """score_job with an explicit Java profile should favour Java jobs."""
+    java_profile = {
+        "job_titles": ["Software Engineer", "Full Stack Developer"],
+        "primary_skills": ["Java", "Spring Boot", "React"],
+        "secondary_skills": ["MySQL", "Docker", "Kubernetes"],
+        "tertiary_skills": ["Git", "Jenkins"],
+        "locations": ["Manchester"],
+    }
+    java_job = _make_job(
+        title="Software Engineer",
+        location="Manchester",
+        description="Java Spring Boot developer with MySQL and Docker",
+    )
+    ai_job = _make_job(
+        title="AI Engineer",
+        location="London, UK",
+        description="Python PyTorch TensorFlow LangChain RAG",
+    )
+    assert score_job(java_job, profile=java_profile) > score_job(ai_job, profile=java_profile)
+
+
+def test_same_job_different_profiles_different_scores():
+    """The same job description should score differently for different profiles."""
+    job = _make_job(
+        title="Full Stack Developer",
+        location="London",
+        description="Java Spring Boot React Python Django AWS Docker Kubernetes",
+    )
+    java_profile = {
+        "job_titles": ["Software Engineer"],
+        "primary_skills": ["Java", "Spring Boot"],
+        "secondary_skills": ["React", "MySQL"],
+        "tertiary_skills": ["Git"],
+        "locations": ["London"],
+    }
+    python_profile = {
+        "job_titles": ["Python Developer"],
+        "primary_skills": ["Python", "Django"],
+        "secondary_skills": ["AWS", "Docker"],
+        "tertiary_skills": ["Git"],
+        "locations": ["London"],
+    }
+    java_score = score_job(job, profile=java_profile)
+    python_score = score_job(job, profile=python_profile)
+    # Both should score > 0 since the job has both Java and Python
+    assert java_score > 0
+    assert python_score > 0

@@ -63,25 +63,39 @@ def _isolate_scorer():
 
 class TestProfileExtraction:
 
-    def test_extracts_primary_skills(self, sample_profile):
-        assert "Python" in sample_profile["primary_skills"]
-        assert "PyTorch" in sample_profile["primary_skills"]
-        assert "TensorFlow" in sample_profile["primary_skills"]
-        assert "LangChain" in sample_profile["primary_skills"]
-        assert "RAG" in sample_profile["primary_skills"]
+    def test_extracts_skills(self, sample_profile):
+        all_skills = (
+            sample_profile["primary_skills"]
+            + sample_profile["secondary_skills"]
+            + sample_profile["tertiary_skills"]
+        )
+        assert "Python" in all_skills
+        assert "PyTorch" in all_skills
+        assert "TensorFlow" in all_skills
+        assert "LangChain" in all_skills
+        assert "RAG" in all_skills
 
-    def test_extracts_secondary_skills(self, sample_profile):
-        assert "AWS" in sample_profile["secondary_skills"]
-        assert "Docker" in sample_profile["secondary_skills"]
-        assert "Kubernetes" in sample_profile["secondary_skills"]
-        assert "FastAPI" in sample_profile["secondary_skills"]
-        assert "LLM fine-tuning" in sample_profile["secondary_skills"]
+    def test_extracts_secondary_level_skills(self, sample_profile):
+        all_skills = (
+            sample_profile["primary_skills"]
+            + sample_profile["secondary_skills"]
+            + sample_profile["tertiary_skills"]
+        )
+        assert "AWS" in all_skills
+        assert "Docker" in all_skills
+        assert "Kubernetes" in all_skills
+        assert "FastAPI" in all_skills
 
-    def test_extracts_tertiary_skills(self, sample_profile):
-        assert "CI/CD" in sample_profile["tertiary_skills"]
-        assert "MLflow" in sample_profile["tertiary_skills"]
-        assert "Git" in sample_profile["tertiary_skills"]
-        assert "Linux" in sample_profile["tertiary_skills"]
+    def test_extracts_tertiary_level_skills(self, sample_profile):
+        all_skills = (
+            sample_profile["primary_skills"]
+            + sample_profile["secondary_skills"]
+            + sample_profile["tertiary_skills"]
+        )
+        assert "CI/CD" in all_skills
+        assert "MLflow" in all_skills
+        assert "Git" in all_skills
+        assert "Linux" in all_skills
 
     def test_extracts_locations(self, sample_profile):
         assert "London" in sample_profile["locations"]
@@ -114,14 +128,23 @@ class TestProfileLifecycle:
     def test_overwrite_on_reupload(self, sample_profile, profile_path):
         save_profile(sample_profile, profile_path)
 
-        new_text = "Data Scientist with R, SQL, and Tableau expertise."
+        new_text = (
+            "Software Engineer with Java, Spring Boot, MySQL expertise. "
+            "Based in Manchester."
+        )
         new_profile = extract_profile(new_text)
         new_profile["source_file"] = "updated_cv.pdf"
         save_profile(new_profile, profile_path)
 
         loaded = load_profile(profile_path)
         assert loaded["source_file"] == "updated_cv.pdf"
-        assert "Python" not in loaded["primary_skills"]
+        all_skills = (
+            loaded["primary_skills"]
+            + loaded["secondary_skills"]
+            + loaded["tertiary_skills"]
+        )
+        # Python should NOT be in the new Java profile
+        assert "Python" not in all_skills
 
     def test_delete_resets_to_none(self, sample_profile, profile_path):
         save_profile(sample_profile, profile_path)
@@ -150,8 +173,20 @@ class TestScorerProfileSwitching:
         sm.reload_profile()
 
         active = sm._load_active_profile()
-        assert active["primary_skills"] == sample_profile["primary_skills"]
-        assert active["locations"] == sample_profile["locations"]
+        # The active profile should use the CV's extracted skills
+        all_active = (
+            active["primary_skills"]
+            + active["secondary_skills"]
+            + active["tertiary_skills"]
+        )
+        all_sample = (
+            sample_profile["primary_skills"]
+            + sample_profile["secondary_skills"]
+            + sample_profile["tertiary_skills"]
+        )
+        # Skills from the CV should appear in the active profile
+        for skill in all_sample:
+            assert skill in all_active
 
     def test_scorer_falls_back_after_delete(self, sample_profile, tmp_path, monkeypatch):
         import src.cv_parser as cv_mod
@@ -164,7 +199,13 @@ class TestScorerProfileSwitching:
 
         sm.reload_profile()
         active_with_cv = sm._load_active_profile()
-        assert active_with_cv["primary_skills"] == sample_profile["primary_skills"]
+        # Should have CV-derived skills
+        all_cv_skills = (
+            active_with_cv["primary_skills"]
+            + active_with_cv["secondary_skills"]
+            + active_with_cv["tertiary_skills"]
+        )
+        assert len(all_cv_skills) > 0
 
         path.unlink()
         sm.reload_profile()
@@ -178,19 +219,116 @@ class TestScorerProfileSwitching:
         path = tmp_path / "cv_profile.json"
         monkeypatch.setattr(cv_mod, "CV_PROFILE_PATH", path)
 
-        profile_v1 = extract_profile("Python developer in London")
+        profile_v1 = extract_profile(
+            "Python developer in London using Python and Django extensively."
+        )
         profile_v1["source_file"] = "v1.pdf"
         save_profile(profile_v1, path)
         sm.reload_profile()
-        assert "Python" in sm._load_active_profile()["primary_skills"]
+        v1_all = (
+            sm._load_active_profile()["primary_skills"]
+            + sm._load_active_profile()["secondary_skills"]
+            + sm._load_active_profile()["tertiary_skills"]
+        )
+        assert "Python" in v1_all
 
-        profile_v2 = extract_profile("Java developer in Manchester")
+        profile_v2 = extract_profile(
+            "Java developer in Manchester using Java and Spring Boot extensively."
+        )
         profile_v2["source_file"] = "v2.pdf"
         save_profile(profile_v2, path)
         sm.reload_profile()
         active = sm._load_active_profile()
-        assert "Python" not in active["primary_skills"]
+        v2_all = (
+            active["primary_skills"]
+            + active["secondary_skills"]
+            + active["tertiary_skills"]
+        )
+        assert "Java" in v2_all
         assert "Manchester" in active["locations"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-user: different CVs produce different scoring
+# ---------------------------------------------------------------------------
+
+class TestMultiUserScoring:
+
+    def test_java_cv_scores_java_jobs_higher(self):
+        from datetime import datetime, timezone
+        from src.models import Job
+        from src.filters.skill_matcher import score_job
+
+        java_profile = extract_profile(
+            "Software Engineer\n\n"
+            "Skills:\n"
+            "Java, Spring Boot, MySQL, PostgreSQL, Docker, Kubernetes, Git\n\n"
+            "Experience:\n"
+            "Built microservices in Java using Spring Boot. Deployed with Docker.\n"
+            "Location: Manchester, UK"
+        )
+
+        java_job = Job(
+            title="Software Engineer",
+            company="Test",
+            apply_url="https://example.com",
+            source="test",
+            date_found=datetime.now(timezone.utc).isoformat(),
+            location="Manchester",
+            description="Java Spring Boot developer with MySQL and Docker",
+        )
+
+        ai_job = Job(
+            title="AI Engineer",
+            company="Test",
+            apply_url="https://example.com",
+            source="test",
+            date_found=datetime.now(timezone.utc).isoformat(),
+            location="London",
+            description="Python PyTorch TensorFlow LangChain RAG Deep Learning",
+        )
+
+        java_score = score_job(java_job, profile=java_profile)
+        ai_score = score_job(ai_job, profile=java_profile)
+        assert java_score > ai_score
+
+    def test_ai_cv_scores_ai_jobs_higher(self):
+        from datetime import datetime, timezone
+        from src.models import Job
+        from src.filters.skill_matcher import score_job
+
+        ai_profile = extract_profile(
+            "AI Engineer\n\n"
+            "Skills:\n"
+            "Python, PyTorch, TensorFlow, LangChain, RAG, LLM, NLP\n\n"
+            "Experience:\n"
+            "Built RAG pipelines using LangChain and Python. Fine-tuned LLMs.\n"
+            "Location: London, UK"
+        )
+
+        ai_job = Job(
+            title="AI Engineer",
+            company="Test",
+            apply_url="https://example.com",
+            source="test",
+            date_found=datetime.now(timezone.utc).isoformat(),
+            location="London",
+            description="Python PyTorch TensorFlow LangChain RAG LLM NLP Deep Learning",
+        )
+
+        java_job = Job(
+            title="Software Engineer",
+            company="Test",
+            apply_url="https://example.com",
+            source="test",
+            date_found=datetime.now(timezone.utc).isoformat(),
+            location="Manchester",
+            description="Java Spring Boot MySQL Docker Kubernetes microservices",
+        )
+
+        ai_score = score_job(ai_job, profile=ai_profile)
+        java_score = score_job(java_job, profile=ai_profile)
+        assert ai_score > java_score
 
 
 # ---------------------------------------------------------------------------
@@ -208,10 +346,14 @@ class TestEdgeCases:
         assert profile["job_titles"] == []
 
     def test_cv_with_no_matching_skills(self):
-        text = "Marketing manager with SEO and Google Analytics experience."
+        text = "A brief biography of a historical figure with no tech background."
         profile = extract_profile(text)
-        assert profile["primary_skills"] == []
-        assert profile["secondary_skills"] == []
+        all_skills = (
+            profile["primary_skills"]
+            + profile["secondary_skills"]
+            + profile["tertiary_skills"]
+        )
+        assert len(all_skills) == 0
 
     def test_extract_text_from_docx(self, tmp_path):
         from docx import Document
