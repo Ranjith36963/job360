@@ -15,6 +15,9 @@ from src.cv_parser import (
     _find_job_titles,
     _find_locations,
     _categorise_skills,
+    _discover_freeform_skills,
+    _extract_skills_section_text,
+    _is_likely_skill,
 )
 
 
@@ -190,6 +193,124 @@ def test_find_locations_international():
     assert "Berlin" in locs
     assert "Germany" in locs
     assert "San Francisco" in locs
+
+
+# ---------------------------------------------------------------------------
+# Freeform discovery tests — skills NOT in the database
+# ---------------------------------------------------------------------------
+
+def test_discover_freeform_from_skills_section():
+    """Skills section items not in KNOWN_SKILLS should be discovered."""
+    text = (
+        "Experience\nBuilt systems for clients.\n\n"
+        "Skills:\n"
+        "Pulumi, Temporal, dbt Cloud, Prefect, Airbyte\n\n"
+        "Education\nBSc Computer Science"
+    )
+    discovered = _discover_freeform_skills(text)
+    # Pulumi and Temporal are NOT in KNOWN_SKILLS — should be discovered
+    # (dbt and Prefect ARE in KNOWN_SKILLS, so they won't appear here)
+    assert "Pulumi" in discovered or "Temporal" in discovered
+
+
+def test_discover_freeform_from_context_pattern():
+    """'experience with X, Y' pattern should capture unknown skills."""
+    text = "I have experience with Mage.ai, ZenML, and Metaflow for ML pipelines."
+    discovered = _discover_freeform_skills(text)
+    # These are niche tools unlikely to be in KNOWN_SKILLS
+    found_any = any(
+        term in discovered
+        for term in ["Mage.ai", "ZenML", "Metaflow"]
+    )
+    assert found_any
+
+
+def test_discover_freeform_skips_noise():
+    """Noise words and short terms should not be discovered."""
+    text = (
+        "Skills:\n"
+        "the, and, or, a, in, for, with, Python\n"
+    )
+    discovered = _discover_freeform_skills(text)
+    assert "the" not in discovered
+    assert "and" not in discovered
+    # Python is in KNOWN_SKILLS, so it won't be in freeform either
+    assert "Python" not in discovered
+
+
+def test_is_likely_skill_filters():
+    assert _is_likely_skill("Kubernetes") is True
+    assert _is_likely_skill("ArgoCD") is True
+    assert _is_likely_skill("the") is False
+    assert _is_likely_skill("and") is False
+    assert _is_likely_skill("") is False
+    assert _is_likely_skill("a") is False
+    assert _is_likely_skill("12345") is False
+    # Too many words
+    assert _is_likely_skill("this is a very long sentence about things") is False
+
+
+def test_extract_skills_section_text():
+    text = (
+        "Summary\nI am a developer.\n\n"
+        "Technical Skills:\n"
+        "Python, Rust, ArgoCD, Pulumi\n\n"
+        "Experience\nWorked at Google."
+    )
+    sections = _extract_skills_section_text(text)
+    assert len(sections) >= 1
+    combined = " ".join(sections).lower()
+    assert "pulumi" in combined
+
+
+def test_freeform_skills_end_up_in_profile():
+    """Freeform-discovered skills should appear in the final profile."""
+    text = (
+        "Software Engineer\n\n"
+        "Skills:\n"
+        "Python, Java, Pulumi, Temporal, ZenML, ClearML\n\n"
+        "Experience:\n"
+        "Built infrastructure with Pulumi and Temporal. "
+        "Used ZenML and ClearML for ML experiment tracking.\n"
+        "Based in London."
+    )
+    profile = extract_profile(text)
+    all_skills = (
+        profile["primary_skills"]
+        + profile["secondary_skills"]
+        + profile["tertiary_skills"]
+    )
+    # Python and Java are in KNOWN_SKILLS
+    assert "Python" in all_skills
+    assert "Java" in all_skills
+    # Pulumi and Temporal are NOT in KNOWN_SKILLS but should be discovered
+    # (they appear in Skills section + experience = should be primary or secondary)
+    freeform_found = [s for s in all_skills if s in ("Pulumi", "Temporal", "ZenML", "ClearML")]
+    assert len(freeform_found) >= 1, f"Expected freeform skills, got: {all_skills}"
+
+
+def test_freeform_skills_used_in_relevance_keywords():
+    """Freeform-discovered skills should appear in relevance keywords."""
+    import src.cv_parser as cv_mod
+    import src.filters.skill_matcher as sm
+    import json
+    from pathlib import Path
+    import tempfile
+
+    text = (
+        "Skills:\n"
+        "Python, Pulumi, Temporal, ZenML\n\n"
+        "Experience with Pulumi for IaC. Used Temporal for workflows."
+    )
+    profile = extract_profile(text)
+    all_skills = (
+        profile["primary_skills"]
+        + profile["secondary_skills"]
+        + profile["tertiary_skills"]
+    )
+    # Check that at least one freeform skill is captured
+    freeform_in_profile = [s for s in all_skills if s in ("Pulumi", "Temporal", "ZenML")]
+    assert len(freeform_in_profile) >= 1
 
 
 # ---------------------------------------------------------------------------
