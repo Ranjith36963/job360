@@ -17,16 +17,13 @@ from src.sources.ashby import AshbySource
 from src.sources.findajob import FindAJobSource
 from src.sources.weworkremotely import WeWorkRemotelySource
 from src.sources.themuse import TheMuseSource
-from src.sources.usajobs import USAJobsSource
 from src.sources.careerjet import CareerjetSource
 from src.sources.jooble import JoobleSource
 from src.sources.devitjobs import DevITJobsSource
-from src.sources.jobsearch_gov_au import JobSearchGovAUSource
 from src.sources.relocate_me import RelocateMeSource
 from src.sources.landingjobs import LandingJobsSource
 from src.sources.nofluffjobs import NoFluffJobsSource
 from src.sources.remotive import RemotiveSource
-from src.sources.arbeitsagentur import ArbeitsagenturSource
 from src.sources.smartrecruiters import SmartRecruitersSource
 from src.sources.recruitee import RecruiteeSource
 from src.sources.findwork import FindworkSource
@@ -360,46 +357,6 @@ def test_themuse_parses_response():
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "themuse"
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_usajobs_skips_without_key():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            source = USAJobsSource(session, api_key="", email="")
-            jobs = await source.fetch_jobs()
-            assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_usajobs_parses_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(re.compile(r"https://data\.usajobs\.gov/api/Search.*"), payload={
-                    "SearchResult": {"SearchResultItems": [{
-                        "MatchedObjectDescriptor": {
-                            "PositionTitle": "IT Specialist",
-                            "OrganizationName": "Department of Defense",
-                            "QualificationSummary": "Python and AWS required",
-                            "PositionURI": "https://usajobs.gov/job/123",
-                            "PositionLocation": [{"CityName": "Washington", "CountrySubDivisionCode": "DC"}],
-                            "PositionRemuneration": [{"MinimumRange": "80000", "MaximumRange": "120000"}],
-                            "PublicationStartDate": "2024-01-01",
-                        }
-                    }]}
-                }, repeat=True)
-                source = USAJobsSource(session, api_key="test", email="test@test.com")
-                jobs = await source.fetch_jobs()
-                assert len(jobs) >= 1
-                assert jobs[0].source == "usajobs"
-                assert jobs[0].salary_min == 80000.0
         finally:
             await session.close()
     _run(_test())

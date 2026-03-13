@@ -187,12 +187,12 @@ def test_find_locations_multiple():
     assert "Remote" in locs
 
 
-def test_find_locations_international():
-    text = "Worked in Berlin, Germany. Relocated to San Francisco, USA."
+def test_find_locations_uk():
+    text = "Worked in Manchester, England. Relocated to Edinburgh, Scotland."
     locs = _find_locations(text)
-    assert "Berlin" in locs
-    assert "Germany" in locs
-    assert "San Francisco" in locs
+    assert "Manchester" in locs
+    assert "England" in locs
+    assert "Edinburgh" in locs
 
 
 # ---------------------------------------------------------------------------

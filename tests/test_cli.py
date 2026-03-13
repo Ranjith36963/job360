@@ -55,16 +55,16 @@ def test_upload_cv_help():
 
 
 def test_source_registry_has_all_sources():
-    """SOURCE_REGISTRY should have all 27 sources."""
-    assert len(SOURCE_REGISTRY) == 27
+    """SOURCE_REGISTRY should have all 24 UK-focused sources."""
+    assert len(SOURCE_REGISTRY) == 24
     expected = {
         "reed", "adzuna", "jsearch", "arbeitnow", "remoteok",
         "jobicy", "himalayas", "greenhouse", "lever", "workable",
         "ashby", "findajob",
-        "weworkremotely", "themuse", "usajobs", "careerjet",
-        "jooble", "devitjobs", "jobsearch_gov_au", "relocate_me",
+        "weworkremotely", "themuse", "careerjet",
+        "jooble", "devitjobs", "relocate_me",
         "landingjobs", "nofluffjobs",
-        "remotive", "arbeitsagentur", "smartrecruiters", "recruitee",
+        "remotive", "smartrecruiters", "recruitee",
         "findwork",
     }
     assert set(SOURCE_REGISTRY.keys()) == expected

@@ -7,7 +7,7 @@ import aiohttp
 
 from src.config.settings import (
     REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
-    USAJOBS_API_KEY, USAJOBS_EMAIL, JOOBLE_API_KEY, FINDWORK_API_KEY,
+    JOOBLE_API_KEY, FINDWORK_API_KEY,
     DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
 )
 from src.utils.logger import setup_logging
@@ -36,16 +36,13 @@ from src.sources.ashby import AshbySource
 from src.sources.findajob import FindAJobSource
 from src.sources.weworkremotely import WeWorkRemotelySource
 from src.sources.themuse import TheMuseSource
-from src.sources.usajobs import USAJobsSource
 from src.sources.careerjet import CareerjetSource
 from src.sources.jooble import JoobleSource
 from src.sources.devitjobs import DevITJobsSource
-from src.sources.jobsearch_gov_au import JobSearchGovAUSource
 from src.sources.relocate_me import RelocateMeSource
 from src.sources.landingjobs import LandingJobsSource
 from src.sources.nofluffjobs import NoFluffJobsSource
 from src.sources.remotive import RemotiveSource
-from src.sources.arbeitsagentur import ArbeitsagenturSource
 from src.sources.smartrecruiters import SmartRecruitersSource
 from src.sources.recruitee import RecruiteeSource
 from src.sources.findwork import FindworkSource
@@ -68,16 +65,13 @@ SOURCE_REGISTRY = {
     "findajob": FindAJobSource,
     "weworkremotely": WeWorkRemotelySource,
     "themuse": TheMuseSource,
-    "usajobs": USAJobsSource,
     "careerjet": CareerjetSource,
     "jooble": JoobleSource,
     "devitjobs": DevITJobsSource,
-    "jobsearch_gov_au": JobSearchGovAUSource,
     "relocate_me": RelocateMeSource,
     "landingjobs": LandingJobsSource,
     "nofluffjobs": NoFluffJobsSource,
     "remotive": RemotiveSource,
-    "arbeitsagentur": ArbeitsagenturSource,
     "smartrecruiters": SmartRecruitersSource,
     "recruitee": RecruiteeSource,
     "findwork": FindworkSource,
@@ -91,7 +85,6 @@ def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = N
         ReedSource(session, api_key=REED_API_KEY),
         AdzunaSource(session, app_id=ADZUNA_APP_ID, app_key=ADZUNA_APP_KEY),
         JSearchSource(session, api_key=JSEARCH_API_KEY),
-        USAJobsSource(session, api_key=USAJOBS_API_KEY, email=USAJOBS_EMAIL),
         JoobleSource(session, api_key=JOOBLE_API_KEY),
         FindworkSource(session, api_key=FINDWORK_API_KEY),
         # Group B: Free APIs (no key needed)
@@ -114,10 +107,8 @@ def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = N
         AshbySource(session),
         SmartRecruitersSource(session),
         RecruiteeSource(session),
-        # Group D: Government
+        # Group D: Government (UK)
         FindAJobSource(session),
-        JobSearchGovAUSource(session),
-        ArbeitsagenturSource(session),
     ]
     if source_filter:
         return [s for s in all_sources if s.name == source_filter]
