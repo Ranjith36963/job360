@@ -27,6 +27,18 @@ ASHBY_COMPANIES = [
     "Synthesia", "multiverse",
 ]
 
+# SmartRecruiters boards: https://api.smartrecruiters.com/v1/companies/{slug}/postings
+SMARTRECRUITERS_COMPANIES = [
+    "Visa", "BOSCH", "SiemensAG", "Adidas",
+    "Zalando", "SAP", "Accenture1", "DHL",
+]
+
+# Recruitee boards: https://{slug}.recruitee.com/api/offers
+RECRUITEE_COMPANIES = [
+    "fresha", "superside", "frontapp",
+    "hotjar", "pitch", "bird",
+]
+
 # Slug → display name overrides (when slug doesn't match company name)
 COMPANY_NAME_OVERRIDES = {
     "darktracelimited": "Darktrace",

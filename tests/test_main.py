@@ -139,7 +139,7 @@ def test_stats_include_per_source():
                 stats = await run_search(db_path=":memory:")
                 assert "per_source" in stats
                 assert isinstance(stats["per_source"], dict)
-                assert len(stats["per_source"]) == 22
+                assert len(stats["per_source"]) == 27
     _run(_test())
 
 

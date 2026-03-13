@@ -21,6 +21,7 @@ JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
 USAJOBS_API_KEY = os.getenv("USAJOBS_API_KEY", "")
 USAJOBS_EMAIL = os.getenv("USAJOBS_EMAIL", "")
 JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
+FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
 
 # Email
 SMTP_HOST = "smtp.gmail.com"
@@ -62,6 +63,11 @@ RATE_LIMITS = {
     "relocate_me": {"concurrent": 2, "delay": 1.0},
     "landingjobs": {"concurrent": 2, "delay": 1.0},
     "nofluffjobs": {"concurrent": 2, "delay": 1.0},
+    "remotive": {"concurrent": 1, "delay": 5.0},
+    "arbeitsagentur": {"concurrent": 1, "delay": 2.0},
+    "smartrecruiters": {"concurrent": 2, "delay": 1.5},
+    "recruitee": {"concurrent": 2, "delay": 1.5},
+    "findwork": {"concurrent": 1, "delay": 2.0},
 }
 
 # Retry

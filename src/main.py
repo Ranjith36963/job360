@@ -7,7 +7,7 @@ import aiohttp
 
 from src.config.settings import (
     REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
-    USAJOBS_API_KEY, USAJOBS_EMAIL, JOOBLE_API_KEY,
+    USAJOBS_API_KEY, USAJOBS_EMAIL, JOOBLE_API_KEY, FINDWORK_API_KEY,
     DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
 )
 from src.utils.logger import setup_logging
@@ -44,6 +44,11 @@ from src.sources.jobsearch_gov_au import JobSearchGovAUSource
 from src.sources.relocate_me import RelocateMeSource
 from src.sources.landingjobs import LandingJobsSource
 from src.sources.nofluffjobs import NoFluffJobsSource
+from src.sources.remotive import RemotiveSource
+from src.sources.arbeitsagentur import ArbeitsagenturSource
+from src.sources.smartrecruiters import SmartRecruitersSource
+from src.sources.recruitee import RecruiteeSource
+from src.sources.findwork import FindworkSource
 
 logger = logging.getLogger("job360.main")
 
@@ -71,6 +76,11 @@ SOURCE_REGISTRY = {
     "relocate_me": RelocateMeSource,
     "landingjobs": LandingJobsSource,
     "nofluffjobs": NoFluffJobsSource,
+    "remotive": RemotiveSource,
+    "arbeitsagentur": ArbeitsagenturSource,
+    "smartrecruiters": SmartRecruitersSource,
+    "recruitee": RecruiteeSource,
+    "findwork": FindworkSource,
 }
 
 
@@ -83,6 +93,7 @@ def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = N
         JSearchSource(session, api_key=JSEARCH_API_KEY),
         USAJobsSource(session, api_key=USAJOBS_API_KEY, email=USAJOBS_EMAIL),
         JoobleSource(session, api_key=JOOBLE_API_KEY),
+        FindworkSource(session, api_key=FINDWORK_API_KEY),
         # Group B: Free APIs (no key needed)
         ArbeitnowSource(session),
         RemoteOKSource(session),
@@ -95,14 +106,18 @@ def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = N
         RelocateMeSource(session),
         LandingJobsSource(session),
         NoFluffJobsSource(session),
+        RemotiveSource(session),
         # Group C: ATS boards
         GreenhouseSource(session),
         LeverSource(session),
         WorkableSource(session),
         AshbySource(session),
+        SmartRecruitersSource(session),
+        RecruiteeSource(session),
         # Group D: Government
         FindAJobSource(session),
         JobSearchGovAUSource(session),
+        ArbeitsagenturSource(session),
     ]
     if source_filter:
         return [s for s in all_sources if s.name == source_filter]

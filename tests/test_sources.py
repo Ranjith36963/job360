@@ -25,6 +25,11 @@ from src.sources.jobsearch_gov_au import JobSearchGovAUSource
 from src.sources.relocate_me import RelocateMeSource
 from src.sources.landingjobs import LandingJobsSource
 from src.sources.nofluffjobs import NoFluffJobsSource
+from src.sources.remotive import RemotiveSource
+from src.sources.arbeitsagentur import ArbeitsagenturSource
+from src.sources.smartrecruiters import SmartRecruitersSource
+from src.sources.recruitee import RecruiteeSource
+from src.sources.findwork import FindworkSource
 
 
 def _run(coro):
@@ -544,6 +549,106 @@ def test_nofluffjobs_parses_response():
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "nofluffjobs"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_remotive_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://remotive\.com/api/remote-jobs.*"), payload={"jobs": [{
+                    "title": "Python Developer",
+                    "company_name": "RemoteCo",
+                    "description": "Python and Django remote role",
+                    "url": "https://remotive.com/job/123",
+                    "candidate_required_location": "Worldwide",
+                    "publication_date": "2024-01-01",
+                }]}, repeat=True)
+                source = RemotiveSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "remotive"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_smartrecruiters_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.smartrecruiters\.com/v1/companies/.*"), payload={"content": [{
+                    "name": "Software Engineer",
+                    "department": {"label": "Engineering Python"},
+                    "location": {"city": "Berlin", "country": "Germany"},
+                    "ref": "https://jobs.smartrecruiters.com/TestCo/123",
+                    "releasedDate": "2024-01-01",
+                }]}, repeat=True)
+                source = SmartRecruitersSource(session, companies=["TestCo"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "smartrecruiters"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_recruitee_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.recruitee\.com/api/offers.*"), payload={"offers": [{
+                    "title": "Backend Developer",
+                    "description": "<p>Python FastAPI role</p>",
+                    "location": "Amsterdam",
+                    "careers_url": "https://testco.recruitee.com/o/backend-dev",
+                    "published_at": "2024-01-01",
+                }]}, repeat=True)
+                source = RecruiteeSource(session, companies=["testco"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "recruitee"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_findwork_skips_without_key():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = FindworkSource(session, api_key="")
+            jobs = await source.fetch_jobs()
+            assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_findwork_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://findwork\.dev/api/jobs/.*"), payload={"results": [{
+                    "role": "ML Engineer",
+                    "company_name": "AIStartup",
+                    "url": "https://findwork.dev/job/123",
+                    "location": "London",
+                    "remote": True,
+                    "text": "Python ML role",
+                    "keywords": ["python", "ml"],
+                    "date_posted": "2024-01-01",
+                }]}, repeat=True)
+                source = FindworkSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "findwork"
         finally:
             await session.close()
     _run(_test())
