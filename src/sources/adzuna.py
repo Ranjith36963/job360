@@ -44,7 +44,7 @@ class AdzunaSource(BaseJobSource):
                 "what": query,
                 "where": where,
                 "results_per_page": 50,
-                "max_days_old": 7,
+                "max_days_old": 14,
                 "content-type": "application/json",
             }
             data = await self._get_json(

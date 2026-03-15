@@ -59,14 +59,16 @@ class SmartRecruitersSource(BaseJobSource):
                     continue
 
                 ref = item.get("ref", "") or item.get("id", "")
-                url = item.get("ref", "") or f"https://jobs.smartrecruiters.com/{slug}/{ref}"
+                apply_url = item.get("ref", "")
+                if not apply_url or not apply_url.startswith("http"):
+                    apply_url = f"https://jobs.smartrecruiters.com/{slug}/{ref}"
                 date_found = item.get("releasedDate", "") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=title,
                     company=company_name,
                     location=location or "Global",
                     description=dept_name,
-                    apply_url=url,
+                    apply_url=apply_url,
                     source=self.name,
                     date_found=date_found,
                 ))

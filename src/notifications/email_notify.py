@@ -12,6 +12,7 @@ from src.models import Job
 from src.config.settings import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD, NOTIFY_EMAIL
 from src.notifications.base import NotificationChannel
 from src.notifications.report_generator import generate_html_report
+from src.utils.time_buckets import bucket_jobs, bucket_summary_counts
 
 logger = logging.getLogger("job360.email")
 
@@ -22,8 +23,18 @@ def is_email_configured() -> bool:
 
 def _build_email(jobs: list[Job], stats: dict, csv_path: str | None = None) -> MIMEMultipart:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Compute bucket counts for subject line
+    job_dicts = [
+        {"date_found": j.date_found, "match_score": j.match_score}
+        for j in jobs
+    ]
+    bucketed = bucket_jobs(job_dicts, min_score=0)
+    counts = bucket_summary_counts(bucketed)
+    in_24h = counts["last_24h"]
+    subject = f"Job360: {len(jobs)} new jobs ({in_24h} in 24h) - {now}"
+
     msg = MIMEMultipart("mixed")
-    msg["Subject"] = f"Job360: {len(jobs)} new AI/ML jobs found - {now}"
+    msg["Subject"] = subject
     msg["From"] = SMTP_EMAIL
     msg["To"] = NOTIFY_EMAIL
 

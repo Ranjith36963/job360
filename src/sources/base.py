@@ -33,6 +33,20 @@ class BaseJobSource(ABC):
                     if resp.status in (404, 403, 401):
                         logger.debug(f"[{self.name}] HTTP {resp.status} from {url}")
                         return None
+                    if resp.status == 429:
+                        retry_after = resp.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            wait = min(int(retry_after), 60)
+                        else:
+                            wait = RETRY_BACKOFF[attempt] * 3
+                        logger.warning(
+                            f"[{self.name}] Rate limited (429), waiting {wait}s "
+                            f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                        )
+                        if attempt < MAX_RETRIES - 1:
+                            await asyncio.sleep(wait)
+                            continue
+                        return None
                     if resp.status >= 400:
                         logger.warning(f"[{self.name}] HTTP {resp.status} from {url}")
                         if attempt < MAX_RETRIES - 1:
@@ -59,6 +73,20 @@ class BaseJobSource(ABC):
                     if resp.status in (404, 403, 401):
                         logger.debug(f"[{self.name}] HTTP {resp.status} from {url}")
                         return None
+                    if resp.status == 429:
+                        retry_after = resp.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            wait = min(int(retry_after), 60)
+                        else:
+                            wait = RETRY_BACKOFF[attempt] * 3
+                        logger.warning(
+                            f"[{self.name}] Rate limited (429), waiting {wait}s "
+                            f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                        )
+                        if attempt < MAX_RETRIES - 1:
+                            await asyncio.sleep(wait)
+                            continue
+                        return None
                     if resp.status >= 400:
                         logger.warning(f"[{self.name}] HTTP {resp.status} from {url}")
                         if attempt < MAX_RETRIES - 1:
@@ -82,6 +110,20 @@ class BaseJobSource(ABC):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 ) as resp:
+                    if resp.status == 429:
+                        retry_after = resp.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            wait = min(int(retry_after), 60)
+                        else:
+                            wait = RETRY_BACKOFF[attempt] * 3
+                        logger.warning(
+                            f"[{self.name}] Rate limited (429), waiting {wait}s "
+                            f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                        )
+                        if attempt < MAX_RETRIES - 1:
+                            await asyncio.sleep(wait)
+                            continue
+                        return None
                     if resp.status >= 400:
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(RETRY_BACKOFF[attempt])

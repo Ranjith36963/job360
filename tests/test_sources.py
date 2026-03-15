@@ -294,9 +294,9 @@ def test_findajob_parses_html():
         try:
             html = """<html><body>
             <div class="search-results">
-                <a href="/job/123-ai-engineer">AI Engineer - Government Digital Service</a>
+                <a href="/details/123">AI Engineer - Government Digital Service</a>
                 <li class="company">GDS</li>
-                <a href="/job/456-ml-engineer">ML Engineer - HMRC</a>
+                <a href="/details/456">ML Engineer - HMRC</a>
                 <li class="company">HMRC</li>
             </div>
             </body></html>"""

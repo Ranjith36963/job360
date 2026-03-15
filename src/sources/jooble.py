@@ -5,6 +5,7 @@ Covers 70+ countries, millions of job listings.
 URL: https://jooble.org/api/about
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -55,7 +56,17 @@ class JoobleSource(BaseJobSource):
                     if not url or url in seen_urls:
                         continue
                     seen_urls.add(url)
-                    sal = item.get("salary", "")
+                    date_found = item.get("updated") or datetime.now(timezone.utc).isoformat()
+                    salary_text = item.get("salary", "")
+                    salary_min = None
+                    salary_max = None
+                    if salary_text and "-" in str(salary_text):
+                        parts = str(salary_text).replace(",", "").replace("£", "").replace("$", "").split("-")
+                        try:
+                            salary_min = float("".join(c for c in parts[0] if c.isdigit() or c == "."))
+                            salary_max = float("".join(c for c in parts[1] if c.isdigit() or c == "."))
+                        except (ValueError, IndexError):
+                            pass
                     jobs.append(Job(
                         title=item.get("title", ""),
                         company=item.get("company", ""),
@@ -63,7 +74,10 @@ class JoobleSource(BaseJobSource):
                         description=item.get("snippet", ""),
                         apply_url=url,
                         source=self.name,
-                        date_found=item.get("updated", "") or datetime.now(timezone.utc).isoformat(),
+                        date_found=date_found,
+                        salary_min=salary_min,
+                        salary_max=salary_max,
                     ))
+                await asyncio.sleep(1)
         logger.info(f"Jooble: found {len(jobs)} jobs")
         return jobs

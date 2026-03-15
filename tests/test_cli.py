@@ -68,3 +68,29 @@ def test_source_registry_has_all_sources():
         "findwork",
     }
     assert set(SOURCE_REGISTRY.keys()) == expected
+
+
+def test_run_help_shows_new_flags():
+    """run --help should show --no-email and --dashboard flags."""
+    result = runner.invoke(cli, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--no-email" in result.output
+    assert "--dashboard" in result.output
+
+
+def test_view_help():
+    """view --help should show all expected options."""
+    result = runner.invoke(cli, ["view", "--help"])
+    assert result.exit_code == 0
+    assert "--hours" in result.output
+    assert "--min-score" in result.output
+    assert "--source" in result.output
+    assert "--visa-only" in result.output
+    assert "--db-path" in result.output
+
+
+def test_cli_help_shows_view():
+    """CLI --help should list the view command."""
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "view" in result.output

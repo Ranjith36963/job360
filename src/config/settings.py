@@ -20,6 +20,7 @@ ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
 JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
 JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
 FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 
 # Email
 SMTP_HOST = "smtp.gmail.com"
@@ -36,6 +37,10 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
+
+# Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
+TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
+TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
 
 # Rate limits (requests per second)
 RATE_LIMITS = {
@@ -63,6 +68,9 @@ RATE_LIMITS = {
     "smartrecruiters": {"concurrent": 2, "delay": 1.5},
     "recruitee": {"concurrent": 2, "delay": 1.5},
     "findwork": {"concurrent": 1, "delay": 2.0},
+    "pinpoint": {"concurrent": 2, "delay": 1.5},
+    "workday": {"concurrent": 2, "delay": 1.5},
+    "google_jobs": {"concurrent": 1, "delay": 2.0},
 }
 
 # Retry

@@ -6,6 +6,7 @@ URL: https://remotive.com/api/remote-jobs
 Note: Max ~4 requests/day recommended. Jobs delayed 24h.
 """
 
+import re
 import logging
 from datetime import datetime, timezone
 
@@ -46,10 +47,8 @@ class RemotiveSource(BaseJobSource):
                     continue
 
                 # Strip HTML
-                import re
                 clean_desc = re.sub(r"<[^>]+>", " ", desc)[:500]
                 location = item.get("candidate_required_location", "Remote")
-                sal = item.get("salary", "")
                 date_found = item.get("publication_date", "") or datetime.now(timezone.utc).isoformat()
 
                 jobs.append(Job(
