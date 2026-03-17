@@ -3,8 +3,9 @@ from src.models import Job
 from src.filters.skill_matcher import (
     score_job, check_visa_flag, _recency_score, _text_contains,
     _negative_penalty, detect_experience_level, salary_in_range,
-    _location_score, _foreign_location_penalty,
+    _location_score, _foreign_location_penalty, JobScorer,
 )
+from src.profile.models import SearchConfig
 
 
 def _make_job(**overrides):
@@ -160,14 +161,17 @@ def test_recency_score_tiers():
 
 
 def test_score_with_explicit_java_profile():
-    """score_job with an explicit Java profile should favour Java jobs."""
-    java_profile = {
-        "job_titles": ["Software Engineer", "Full Stack Developer"],
-        "primary_skills": ["Java", "Spring Boot", "React"],
-        "secondary_skills": ["MySQL", "Docker", "Kubernetes"],
-        "tertiary_skills": ["Git", "Jenkins"],
-        "locations": ["Manchester"],
-    }
+    """JobScorer with a Java profile should favour Java jobs over AI jobs."""
+    config = SearchConfig(
+        job_titles=["Software Engineer", "Full Stack Developer"],
+        primary_skills=["Java", "Spring Boot", "React"],
+        secondary_skills=["MySQL", "Docker", "Kubernetes"],
+        tertiary_skills=["Git", "Jenkins"],
+        locations=["Manchester"],
+        core_domain_words={"software", "full", "stack"},
+        supporting_role_words={"engineer", "developer"},
+    )
+    scorer = JobScorer(config)
     java_job = _make_job(
         title="Software Engineer",
         location="Manchester",
@@ -178,7 +182,7 @@ def test_score_with_explicit_java_profile():
         location="London, UK",
         description="Python PyTorch TensorFlow LangChain RAG",
     )
-    assert score_job(java_job, profile=java_profile) > score_job(ai_job, profile=java_profile)
+    assert scorer.score(java_job) > scorer.score(ai_job)
 
 
 def test_same_job_different_profiles_different_scores():
@@ -188,22 +192,26 @@ def test_same_job_different_profiles_different_scores():
         location="London",
         description="Java Spring Boot React Python Django AWS Docker Kubernetes",
     )
-    java_profile = {
-        "job_titles": ["Software Engineer"],
-        "primary_skills": ["Java", "Spring Boot"],
-        "secondary_skills": ["React", "MySQL"],
-        "tertiary_skills": ["Git"],
-        "locations": ["London"],
-    }
-    python_profile = {
-        "job_titles": ["Python Developer"],
-        "primary_skills": ["Python", "Django"],
-        "secondary_skills": ["AWS", "Docker"],
-        "tertiary_skills": ["Git"],
-        "locations": ["London"],
-    }
-    java_score = score_job(job, profile=java_profile)
-    python_score = score_job(job, profile=python_profile)
+    java_config = SearchConfig(
+        job_titles=["Software Engineer"],
+        primary_skills=["Java", "Spring Boot"],
+        secondary_skills=["React", "MySQL"],
+        tertiary_skills=["Git"],
+        locations=["London"],
+        core_domain_words={"software"},
+        supporting_role_words={"engineer"},
+    )
+    python_config = SearchConfig(
+        job_titles=["Python Developer"],
+        primary_skills=["Python", "Django"],
+        secondary_skills=["AWS", "Docker"],
+        tertiary_skills=["Git"],
+        locations=["London"],
+        core_domain_words={"python"},
+        supporting_role_words={"developer"},
+    )
+    java_score = JobScorer(java_config).score(job)
+    python_score = JobScorer(python_config).score(job)
     # Both should score > 0 since the job has both Java and Python
     assert java_score > 0
     assert python_score > 0
