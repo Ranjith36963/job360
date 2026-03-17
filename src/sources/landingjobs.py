@@ -5,7 +5,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.landingjobs")
 
@@ -46,7 +45,7 @@ class LandingJobsSource(BaseJobSource):
                 title = item.get("title", "")
                 tags = " ".join(item.get("tags", []))
                 text = f"{title} {tags}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
 
                 # Build location string

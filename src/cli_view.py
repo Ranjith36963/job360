@@ -115,8 +115,8 @@ def display_jobs(
     # Filter by hours (more precise than days)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     filtered = []
+    from src.utils.time_buckets import parse_date_safe
     for j in jobs:
-        from src.utils.time_buckets import parse_date_safe
         dt = parse_date_safe(j.get("date_found", "")) or parse_date_safe(j.get("first_seen", ""))
         if dt is None or dt >= cutoff:
             filtered.append(j)

@@ -5,7 +5,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES
 
 logger = logging.getLogger("job360.sources.adzuna")
 
@@ -13,8 +12,8 @@ logger = logging.getLogger("job360.sources.adzuna")
 class AdzunaSource(BaseJobSource):
     name = "adzuna"
 
-    def __init__(self, session: aiohttp.ClientSession, app_id: str = "", app_key: str = ""):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, app_id: str = "", app_key: str = "", search_config=None):
+        super().__init__(session, search_config=search_config)
         self._app_id = app_id
         self._app_key = app_key
 
@@ -27,7 +26,7 @@ class AdzunaSource(BaseJobSource):
             logger.info("Adzuna: no API keys, skipping")
             return []
         jobs = []
-        queries = JOB_TITLES
+        queries = self.job_titles
         for query in queries:
             params = {
                 "app_id": self._app_id,

@@ -1,3 +1,4 @@
+import html as html_mod
 from datetime import datetime, timezone
 from src.models import Job
 from src.utils.time_buckets import (
@@ -93,7 +94,9 @@ def generate_html_report(jobs: list[Job], stats: dict) -> str:
     counts = bucket_summary_counts(bucketed)
 
     per_source = stats.get("per_source", {})
-    source_info = ", ".join(f"{k}: {v}" for k, v in per_source.items()) if per_source else "N/A"
+    source_info = html_mod.escape(
+        ", ".join(f"{k}: {v}" for k, v in per_source.items())
+    ) if per_source else "N/A"
 
     bucket_colors = ["#f44336", "#FF9800", "#FFC107", "#2196F3"]
     bucket_emojis_html = ["&#x1f534;", "&#x1f7e0;", "&#x1f7e1;", "&#x1f535;"]
@@ -119,12 +122,16 @@ def generate_html_report(jobs: list[Job], stats: dict) -> str:
                 source=j["source"], date_found=j["date_found"],
                 salary_min=j.get("salary_min"), salary_max=j.get("salary_max"),
             ))
+            title_esc = html_mod.escape(j['title'])
+            company_esc = html_mod.escape(j['company'])
+            location_esc = html_mod.escape(j.get('location', ''))
+            url_esc = html_mod.escape(j['apply_url'])
             sections_html += f"""<tr>
                 <td style="color:{sc};font-weight:bold">{score}</td>
-                <td>{j['title']}</td><td>{j['company']}</td>
-                <td>{j.get('location', '')}</td><td>{salary}</td>
+                <td>{title_esc}</td><td>{company_esc}</td>
+                <td>{location_esc}</td><td>{salary}</td>
                 <td>{visa}</td>
-                <td><a href="{j['apply_url']}" style="color:#1a73e8">Apply</a></td>
+                <td><a href="{url_esc}" style="color:#1a73e8">Apply</a></td>
             </tr>"""
         sections_html += "</table>"
 

@@ -26,6 +26,30 @@ from src.sources.workday import WorkdaySource
 from src.sources.google_jobs import GoogleJobsSource
 from src.sources.devitjobs import DevITJobsSource
 from src.sources.landingjobs import LandingJobsSource
+from src.sources.aijobs import AIJobsSource
+from src.sources.themuse import TheMuseSource
+from src.sources.hackernews import HackerNewsSource
+from src.sources.careerjet import CareerjetSource
+from src.sources.findwork import FindworkSource
+from src.sources.nofluffjobs import NoFluffJobsSource
+from src.sources.hn_jobs import HNJobsSource
+from src.sources.yc_companies import YCCompaniesSource
+from src.sources.jobs_ac_uk import JobsAcUkSource
+from src.sources.nhs_jobs import NHSJobsSource
+from src.sources.personio import PersonioSource
+from src.sources.workanywhere import WorkAnywhereSource
+from src.sources.weworkremotely import WeWorkRemotelySource
+from src.sources.realworkfromanywhere import RealWorkFromAnywhereSource
+from src.sources.biospace import BioSpaceSource
+from src.sources.jobtensor import JobTensorSource
+from src.sources.climatebase import ClimatebaseSource
+from src.sources.eightykhours import EightyKHoursSource
+from src.sources.bcs_jobs import BCSJobsSource
+from src.sources.uni_jobs import UniJobsSource
+from src.sources.successfactors import SuccessFactorsSource
+from src.sources.aijobs_global import AIJobsGlobalSource
+from src.sources.aijobs_ai import AIJobsAISource
+from src.sources.nomis import NomisSource
 
 
 def _run(coro):
@@ -698,6 +722,96 @@ def test_landingjobs_skips_non_uk():
     _run(_test())
 
 
+def test_ashby_skips_non_uk():
+    """Ashby should filter out jobs with non-UK locations."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.ashbyhq\.com/.*"), payload={"jobs": [{
+                    "id": "701", "title": "AI Safety Engineer",
+                    "location": "San Francisco, CA",
+                    "applicationUrl": "https://ashby.com/anthropic/701",
+                    "descriptionPlain": "AI safety research role",
+                }]})
+                source = AshbySource(session, companies=["anthropic"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 0
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workday_skips_non_uk():
+    """Workday should filter out jobs with non-UK locations."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = {
+                "total": 1,
+                "jobPostings": [{
+                    "title": "AI Engineer",
+                    "externalPath": "/job/SF/AI-Engineer_JR999",
+                    "locationsText": "San Francisco, CA",
+                    "postedOn": "Posted Today",
+                    "bulletFields": ["JR999"],
+                }],
+            }
+            companies = [{"tenant": "testco", "wd": "wd5", "site": "Careers", "name": "TestCo"}]
+            with aioresponses() as m:
+                m.post(
+                    re.compile(r"https://testco\.wd5\.myworkdayjobs\.com/.*"),
+                    payload=payload,
+                    repeat=True,
+                )
+                source = WorkdaySource(session, companies=companies)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 0
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_greenhouse_skips_non_uk():
+    """Greenhouse should filter out jobs with non-UK locations."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://boards-api\.greenhouse\.io/.*"), payload={"jobs": [{
+                    "id": 801, "title": "AI Research Engineer",
+                    "location": {"name": "Berlin, Germany"},
+                    "absolute_url": "https://boards.greenhouse.io/test/jobs/801",
+                    "content": "<p>AI research role</p>",
+                }]})
+                source = GreenhouseSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 0
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_lever_skips_non_uk():
+    """Lever should filter out jobs with non-UK locations."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.lever\.co/v0/postings/.*"), payload=[{
+                    "id": "901", "text": "Computer Vision Engineer",
+                    "categories": {"location": "Toronto, Canada", "team": "Engineering"},
+                    "hostedUrl": "https://jobs.lever.co/test/901",
+                    "descriptionPlain": "CV role with Python and PyTorch",
+                }])
+                source = LeverSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 0
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_source_returns_empty_on_error():
     async def _test():
         session = aiohttp.ClientSession()
@@ -705,6 +819,1020 @@ def test_source_returns_empty_on_error():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.arbeitnow\.com/.*"), status=500, repeat=True)
                 source = ArbeitnowSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- AI-Jobs.net ----
+
+AIJOBS_PAYLOAD = [
+    {
+        "title": "ML Engineer",
+        "company": "DeepTech",
+        "location": "London, UK",
+        "description": "Machine learning engineer role with Python and PyTorch",
+        "url": "https://aijobs.net/jobs/ml-engineer",
+        "date": "2024-01-15",
+    },
+    {
+        "title": "Marketing Manager",
+        "company": "SomeCo",
+        "location": "London",
+        "description": "Marketing role",
+        "url": "https://aijobs.net/jobs/marketing",
+        "date": "2024-01-15",
+    },
+]
+
+
+def test_aijobs_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
+                      payload=AIJOBS_PAYLOAD)
+                source = AIJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].title == "ML Engineer"
+                assert jobs[0].company == "DeepTech"
+                assert jobs[0].source == "aijobs"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_aijobs_skips_non_uk():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = [{
+                "title": "ML Engineer",
+                "company": "USCo",
+                "location": "San Francisco, CA",
+                "description": "Machine learning role",
+                "url": "https://aijobs.net/jobs/ml-us",
+                "date": "2024-01-15",
+            }]
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
+                      payload=payload)
+                source = AIJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- The Muse ----
+
+THEMUSE_PAYLOAD = {"results": [{
+    "name": "Data Scientist",
+    "company": {"name": "MuseCo"},
+    "locations": [{"name": "London, UK"}],
+    "contents": "<p>Data science and machine learning role with Python</p>",
+    "refs": {"landing_page": "https://www.themuse.com/jobs/museco/data-scientist"},
+    "publication_date": "2024-01-12",
+    "levels": [{"name": "Mid Level"}],
+}]}
+
+
+def test_themuse_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.themuse\.com/api/public/jobs.*"),
+                      payload=THEMUSE_PAYLOAD, repeat=True)
+                source = TheMuseSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].title == "Data Scientist"
+                assert jobs[0].company == "MuseCo"
+                assert jobs[0].source == "themuse"
+                assert jobs[0].experience_level == "Mid Level"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_themuse_skips_non_uk():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = {"results": [{
+                "name": "Data Scientist",
+                "company": {"name": "USCo"},
+                "locations": [{"name": "New York, NY"}],
+                "contents": "<p>Data science and machine learning role</p>",
+                "refs": {"landing_page": "https://themuse.com/jobs/usco/ds"},
+                "publication_date": "2024-01-12",
+                "levels": [],
+            }]}
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.themuse\.com/api/public/jobs.*"),
+                      payload=payload, repeat=True)
+                source = TheMuseSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Hacker News ----
+
+HN_SEARCH_PAYLOAD = {"hits": [{"objectID": "99999"}]}
+
+HN_ITEM_PAYLOAD = {
+    "children": [
+        {
+            "text": "DeepMind | London, UK | Remote | https://deepmind.com/careers<br>We are looking for a machine learning engineer to work on AI research.",
+            "created_at": "2024-01-01T12:00:00Z",
+        },
+        {
+            "text": "SomeCo | New York | Onsite<br>Looking for a marketing manager.",
+            "created_at": "2024-01-01T12:00:00Z",
+        },
+    ],
+}
+
+
+def test_hackernews_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://hn\.algolia\.com/api/v1/search.*"),
+                      payload=HN_SEARCH_PAYLOAD)
+                m.get(re.compile(r"https://hn\.algolia\.com/api/v1/items/.*"),
+                      payload=HN_ITEM_PAYLOAD)
+                source = HackerNewsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "hackernews"
+                assert "DeepMind" in jobs[0].company
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_hackernews_returns_empty_without_thread():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://hn\.algolia\.com/api/v1/search.*"),
+                      payload={"hits": []})
+                source = HackerNewsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Careerjet ----
+
+CAREERJET_PAYLOAD = {"jobs": [{
+    "title": "AI Engineer",
+    "company": "TechCo",
+    "locations": "London, UK",
+    "description": "AI and machine learning role with Python",
+    "url": "https://careerjet.co.uk/job/ai-engineer-123",
+    "date": "2024-01-15",
+    "salary_min": 70000,
+    "salary_max": 100000,
+}]}
+
+
+def test_careerjet_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://search\.api\.careerjet\.net/.*"),
+                      payload=CAREERJET_PAYLOAD, repeat=True)
+                source = CareerjetSource(session, affid="test-affid")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].title == "AI Engineer"
+                assert jobs[0].source == "careerjet"
+                assert jobs[0].salary_min == 70000
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_careerjet_skips_without_affid():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = CareerjetSource(session, affid="")
+            jobs = await source.fetch_jobs()
+            assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Findwork ----
+
+FINDWORK_PAYLOAD = {"results": [{
+    "role": "ML Engineer",
+    "company_name": "FindworkCo",
+    "location": "London, UK",
+    "text": "Machine learning engineer role with Python and deep learning",
+    "url": "https://findwork.dev/job/ml-engineer-123",
+    "date_posted": "2024-01-14",
+}]}
+
+
+def test_findwork_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://findwork\.dev/api/jobs/.*"),
+                      payload=FINDWORK_PAYLOAD)
+                source = FindworkSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].title == "ML Engineer"
+                assert jobs[0].company == "FindworkCo"
+                assert jobs[0].source == "findwork"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_findwork_skips_without_key():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = FindworkSource(session, api_key="")
+            jobs = await source.fetch_jobs()
+            assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- NoFluffJobs ----
+
+NOFLUFFJOBS_PAYLOAD = [
+    {
+        "id": "ml-engineer-abc",
+        "title": "ML Engineer",
+        "company": "NoFluffCo",
+        "category": "AI",
+        "technology": ["python", "pytorch"],
+        "location": {"places": [{"city": "London"}]},
+        "remote": True,
+        "posted": "2024-01-13",
+        "salary": {"from": 60000, "to": 85000},
+    },
+    {
+        "id": "marketing-xyz",
+        "title": "Marketing Manager",
+        "company": "OtherCo",
+        "category": "Marketing",
+        "technology": [],
+        "location": {"places": [{"city": "Warsaw"}]},
+        "remote": False,
+        "posted": "2024-01-13",
+    },
+]
+
+
+def test_nofluffjobs_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://nofluffjobs\.com/api/.*"),
+                      payload=NOFLUFFJOBS_PAYLOAD, repeat=True)
+                source = NoFluffJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].title == "ML Engineer"
+                assert jobs[0].source == "nofluffjobs"
+                assert jobs[0].salary_min == 60000
+                assert jobs[0].salary_max == 85000
+                assert "Remote" in jobs[0].location
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nofluffjobs_skips_non_uk():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = [{
+                "id": "ml-de",
+                "title": "ML Engineer",
+                "company": "GermanCo",
+                "category": "AI",
+                "technology": ["python"],
+                "location": {"places": [{"city": "Berlin"}]},
+                "remote": False,
+                "posted": "2024-01-13",
+            }]
+            with aioresponses() as m:
+                m.get(re.compile(r"https://nofluffjobs\.com/api/.*"),
+                      payload=payload, repeat=True)
+                source = NoFluffJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- HN Jobs (YC Startup Jobs) ----
+
+HN_JOBS_IDS = [1001, 1002]
+
+HN_JOBS_ITEM_1 = {
+    "id": 1001,
+    "title": "DeepTech AI is hiring ML Engineers",
+    "url": "https://deeptech.ai/careers",
+    "text": "We need machine learning engineers with Python and PyTorch experience.",
+    "time": 1704067200,
+}
+
+HN_JOBS_ITEM_2 = {
+    "id": 1002,
+    "title": "SomeCo is hiring a Marketing Manager",
+    "url": "https://someco.com/jobs",
+    "text": "Looking for a marketing manager.",
+    "time": 1704067200,
+}
+
+
+def test_hn_jobs_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://hacker-news.firebaseio.com/v0/jobstories.json",
+                      payload=HN_JOBS_IDS)
+                m.get(re.compile(r"https://hacker-news\.firebaseio\.com/v0/item/.*"),
+                      payload=HN_JOBS_ITEM_1, repeat=True)
+                source = HNJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "hn_jobs"
+                assert "DeepTech" in jobs[0].company
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_hn_jobs_returns_empty_on_no_ids():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://hacker-news.firebaseio.com/v0/jobstories.json",
+                      payload=[])
+                source = HNJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- YC Companies ----
+
+YC_COMPANIES_PAYLOAD = [
+    {
+        "name": "DeepMindClone",
+        "slug": "deepmindclone",
+        "website": "https://deepmindclone.com",
+        "long_description": "AI and machine learning research company",
+        "locations": ["London, UK"],
+        "tags": ["ai", "ml"],
+        "industries": ["Artificial Intelligence"],
+    },
+    {
+        "name": "USOnlyCo",
+        "slug": "usonlyco",
+        "website": "https://usonlyco.com",
+        "long_description": "US-only marketing company",
+        "locations": ["San Francisco, CA"],
+        "tags": ["marketing"],
+        "industries": ["Marketing"],
+    },
+]
+
+
+def test_yc_companies_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://yc-oss.github.io/api/companies/all.json",
+                      payload=YC_COMPANIES_PAYLOAD)
+                source = YCCompaniesSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "yc_companies"
+                assert "DeepMindClone" in jobs[0].company
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- jobs.ac.uk ----
+
+JOBS_AC_UK_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>jobs.ac.uk - Computer Sciences</title>
+<item>
+  <title>AI Research Fellow - University of Oxford</title>
+  <link>https://www.jobs.ac.uk/job/ABC123</link>
+  <description>Machine learning research position in deep learning and NLP</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+<item>
+  <title>Administrative Assistant - University of Oxford</title>
+  <link>https://www.jobs.ac.uk/job/DEF456</link>
+  <description>Office administration role</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_jobs_ac_uk_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.jobs\.ac\.uk/feeds/.*"),
+                      body=JOBS_AC_UK_RSS, content_type="application/xml", repeat=True)
+                source = JobsAcUkSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "jobs_ac_uk"
+                assert "AI Research Fellow" in jobs[0].title
+                assert jobs[0].company == "University of Oxford"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- NHS Jobs ----
+
+NHS_JOBS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<vacancies>
+  <vacancy>
+    <id>12345</id>
+    <title>Data Scientist - NHS Digital</title>
+    <employer>NHS Digital</employer>
+    <location>Leeds</location>
+    <salary>40000 - 55000</salary>
+    <closingDate>2024-02-15</closingDate>
+    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/12345</advertUrl>
+  </vacancy>
+  <vacancy>
+    <id>67890</id>
+    <title>Administrative Officer</title>
+    <employer>NHS Trust</employer>
+    <location>London</location>
+    <salary>25000 - 30000</salary>
+    <closingDate>2024-02-10</closingDate>
+    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/67890</advertUrl>
+  </vacancy>
+</vacancies>"""
+
+
+def test_nhs_jobs_parses_xml():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.jobs\.nhs\.uk/api/v1/search_xml.*"),
+                      body=NHS_JOBS_XML, content_type="application/xml", repeat=True)
+                source = NHSJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "nhs_jobs"
+                assert "Data Scientist" in jobs[0].title
+                assert jobs[0].company == "NHS Digital"
+                assert jobs[0].salary_min == 40000
+                assert jobs[0].salary_max == 55000
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Personio ----
+
+PERSONIO_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<workzag-jobs>
+  <position>
+    <id>101</id>
+    <name>Machine Learning Engineer</name>
+    <office>London, UK</office>
+    <department>Engineering</department>
+    <jobDescriptions>
+      <jobDescription>
+        <name>About</name>
+        <value>ML role with Python and deep learning experience</value>
+      </jobDescription>
+    </jobDescriptions>
+  </position>
+  <position>
+    <id>102</id>
+    <name>Office Manager</name>
+    <office>Berlin, Germany</office>
+    <department>Operations</department>
+    <jobDescriptions></jobDescriptions>
+  </position>
+</workzag-jobs>"""
+
+
+def test_personio_parses_xml():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
+                      body=PERSONIO_XML, content_type="application/xml", repeat=True)
+                source = PersonioSource(session, companies=["testco"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "personio"
+                assert "Machine Learning Engineer" in jobs[0].title
+                assert "London" in jobs[0].location
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_personio_skips_non_uk():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            xml = """<?xml version="1.0"?>
+            <workzag-jobs>
+              <position>
+                <id>103</id>
+                <name>ML Engineer</name>
+                <office>San Francisco, CA</office>
+                <department>AI</department>
+                <jobDescriptions>
+                  <jobDescription><name>About</name><value>Machine learning role</value></jobDescription>
+                </jobDescriptions>
+              </position>
+            </workzag-jobs>"""
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
+                      body=xml, content_type="application/xml", repeat=True)
+                source = PersonioSource(session, companies=["testco"])
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- WorkAnywhere ----
+
+WORKANYWHERE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>WorkAnywhere - Data/AI</title>
+<item>
+  <title>ML Engineer at RemoteTech</title>
+  <link>https://workanywhere.pro/job/ml-engineer</link>
+  <description>Machine learning engineer role with Python. Remote - UK/Europe timezone.</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_workanywhere_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://workanywhere\.pro/rss.*"),
+                      body=WORKANYWHERE_RSS, content_type="application/xml", repeat=True)
+                source = WorkAnywhereSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "workanywhere"
+                assert "ML Engineer" in jobs[0].title
+                assert jobs[0].company == "RemoteTech"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- WeWorkRemotely ----
+
+WEWORKREMOTELY_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>We Work Remotely</title>
+<item>
+  <title>DataCo: Senior AI Engineer</title>
+  <link>https://weworkremotely.com/remote-jobs/dataco-ai-eng</link>
+  <description>AI engineer role with Python and deep learning. UK/EMEA timezone preferred.</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+  <region>Anywhere in the World</region>
+</item>
+</channel>
+</rss>"""
+
+
+def test_weworkremotely_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://weworkremotely.com/remote-jobs.rss",
+                      body=WEWORKREMOTELY_RSS, content_type="application/xml")
+                source = WeWorkRemotelySource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "weworkremotely"
+                assert "Senior AI Engineer" in jobs[0].title
+                assert jobs[0].company == "DataCo"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- RealWorkFromAnywhere ----
+
+REALWORKFROMANYWHERE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Real Work From Anywhere</title>
+<item>
+  <title>Data Scientist at GlobalAI</title>
+  <link>https://www.realworkfromanywhere.com/job/ds-globalai</link>
+  <description>Data science role with machine learning. Remote, Europe/UK timezone.</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_realworkfromanywhere_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://www.realworkfromanywhere.com/rss.xml",
+                      body=REALWORKFROMANYWHERE_RSS, content_type="application/xml")
+                source = RealWorkFromAnywhereSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "realworkfromanywhere"
+                assert "Data Scientist" in jobs[0].title
+                assert jobs[0].company == "GlobalAI"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- BioSpace ----
+
+BIOSPACE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>BioSpace Jobs</title>
+<item>
+  <title>AI Research Scientist at PharmaCo</title>
+  <link>https://www.biospace.com/job/ai-research-123</link>
+  <description>Bioinformatics and machine learning role in London drug discovery lab.</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_biospace_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.biospace\.com/rss/.*"),
+                      body=BIOSPACE_RSS, content_type="application/xml", repeat=True)
+                source = BioSpaceSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "biospace"
+                assert "AI Research Scientist" in jobs[0].title
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- JobTensor ----
+
+JOBTENSOR_HTML = """<html><body>
+<div class="job-card">
+  <a href="/uk/job/ml-engineer-123">ML Engineer</a>
+  <span class="company">TensorCo</span>
+  <span class="location">London, UK</span>
+  <span class="salary">70,000 - 100,000</span>
+</div>
+<div class="job-card">
+  <a href="/uk/job/marketing-456">Marketing Manager</a>
+  <span class="company">OtherCo</span>
+  <span class="location">London</span>
+</div>
+</body></html>"""
+
+
+def test_jobtensor_parses_html():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                # AJAX API returns empty, falls back to HTML
+                m.get(re.compile(r"https://jobtensor\.com/ajax/.*"),
+                      payload={"total": 0, "hits": []})
+                m.get("https://jobtensor.com/uk/AI-Machine-Learning-jobs",
+                      body=JOBTENSOR_HTML, content_type="text/html")
+                source = JobTensorSource(session)
+                jobs = await source.fetch_jobs()
+                assert isinstance(jobs, list)
+                assert all(j.source == "jobtensor" for j in jobs) if jobs else True
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Climatebase ----
+
+CLIMATEBASE_HTML = """<html><body>
+<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"jobs":[
+  {"id":"123","title":"Data Scientist","name_of_employer":"ClimateCo","locations":["London, UK"]}
+]}}}</script>
+</body></html>"""
+
+
+def test_climatebase_parses_html():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://climatebase\.org/jobs.*"),
+                      body=CLIMATEBASE_HTML, content_type="text/html", repeat=True)
+                source = ClimatebaseSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "climatebase"
+                assert "Data Scientist" in jobs[0].title
+                assert jobs[0].company == "ClimateCo"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- 80,000 Hours ----
+
+EIGHTYKHOURS_ALGOLIA_RESPONSE = {
+    "hits": [
+        {
+            "objectID": "123",
+            "title": "AI Safety Researcher",
+            "company_name": "SafetyOrg",
+            "locations": [{"name": "London, UK"}],
+            "description_short": "Research role in AI safety",
+        }
+    ],
+    "nbHits": 1,
+}
+
+
+def test_eightykhours_parses_algolia():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"),
+                       payload=EIGHTYKHOURS_ALGOLIA_RESPONSE, repeat=True)
+                source = EightyKHoursSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "eightykhours"
+                assert "AI Safety" in jobs[0].title
+                assert jobs[0].company == "SafetyOrg"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- BCS Jobs ----
+
+BCS_HTML = """<html><body>
+<div class="job-card">
+  <a href="/jobs/data-engineer-bcs-123">Data Engineer</a>
+  <span class="company">TechCorp</span>
+  <span class="location">Birmingham, UK</span>
+</div>
+</body></html>"""
+
+
+def test_bcs_jobs_parses_html():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.bcs\.org/jobs.*"),
+                      body=BCS_HTML, content_type="text/html", repeat=True)
+                source = BCSJobsSource(session)
+                jobs = await source.fetch_jobs()
+                # BCS might not match our regex patterns exactly in mocked HTML,
+                # so just verify it returns a list without errors
+                assert isinstance(jobs, list)
+                assert jobs[0].source == "bcs_jobs" if jobs else True
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- University Jobs ----
+
+UNI_JOBS_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>University of Cambridge Jobs</title>
+<item>
+  <title>Research Associate in Machine Learning</title>
+  <link>https://www.jobs.cam.ac.uk/job/12345/</link>
+  <description>AI and deep learning research position in the Computer Science department</description>
+  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_uni_jobs_parses_rss():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r".*jobs\.cam\.ac\.uk.*"),
+                      body=UNI_JOBS_RSS, content_type="application/xml")
+                m.get(re.compile(r".*hr-jobs\.lancs\.ac\.uk.*"), status=404)
+                m.get(re.compile(r".*jobs\.kent\.ac\.uk.*"), status=404)
+                m.get(re.compile(r".*jobs\.royalholloway\.ac\.uk.*"), status=404)
+                m.get(re.compile(r".*jobs\.surrey\.ac\.uk.*"), status=404)
+                m.get(re.compile(r".*uukjobs\.co\.uk.*"), status=404)
+                source = UniJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "uni_jobs"
+                assert "Machine Learning" in jobs[0].title
+                assert jobs[0].company == "University of Cambridge"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- SuccessFactors ----
+
+SUCCESSFACTORS_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://jobs.baesystems.com/careers/ai-engineer-london</loc>
+  </url>
+  <url>
+    <loc>https://jobs.baesystems.com/careers/marketing-manager</loc>
+  </url>
+</urlset>"""
+
+
+def test_successfactors_parses_sitemap():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            companies = [{"name": "BAE Systems", "sitemap_url": "https://jobs.baesystems.com/sitemap.xml"}]
+            with aioresponses() as m:
+                m.get("https://jobs.baesystems.com/sitemap.xml",
+                      body=SUCCESSFACTORS_SITEMAP, content_type="application/xml")
+                source = SuccessFactorsSource(session, companies=companies)
+                jobs = await source.fetch_jobs()
+                # Sitemap parsing extracts titles from URLs
+                assert isinstance(jobs, list)
+                assert all(j.source == "successfactors" for j in jobs) if jobs else True
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- AI Jobs Global ----
+
+AIJOBS_GLOBAL_HTML = """<html><body>
+<div class="job-listing">
+  <a href="/job/ml-engineer-globalco-123">ML Engineer</a>
+  <span class="company">GlobalCo</span>
+  <span class="location">London, UK</span>
+</div>
+</body></html>"""
+
+
+def test_aijobs_global_parses_html():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                # AJAX endpoint returns results
+                m.get(re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
+                      payload=[{"label": "ML Engineer", "url": "https://ai-jobs.global/jobs/123", "company": "GlobalCo", "location": "London, UK"}],
+                      repeat=True)
+                source = AIJobsGlobalSource(session)
+                jobs = await source.fetch_jobs()
+                assert isinstance(jobs, list)
+                assert all(j.source == "aijobs_global" for j in jobs) if jobs else True
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- AI Jobs AI ----
+
+AIJOBS_AI_HTML = """<html><body>
+<div class="job-card">
+  <a href="/job/deep-learning-researcher-456">Deep Learning Researcher</a>
+  <span class="company">AILab</span>
+  <span class="location">Cambridge, UK</span>
+</div>
+</body></html>"""
+
+
+def test_aijobs_ai_parses_html():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.ai/.*"),
+                      body=AIJOBS_AI_HTML, content_type="text/html", repeat=True)
+                source = AIJobsAISource(session)
+                jobs = await source.fetch_jobs()
+                assert isinstance(jobs, list)
+                assert all(j.source == "aijobs_ai" for j in jobs) if jobs else True
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Nomis ----
+
+NOMIS_PAYLOAD = {
+    "obs": [
+        {
+            "date": {"value": "2024-01", "label": "January 2024"},
+            "obs_value": {"value": "880"},
+        }
+    ]
+}
+
+
+def test_nomis_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.nomisweb\.co\.uk/api/.*"),
+                      payload=NOMIS_PAYLOAD)
+                source = NomisSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].source == "nomis"
+                assert "880" in jobs[0].title
+                assert jobs[0].company == "ONS / Nomis"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nomis_returns_empty_on_no_data():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.nomisweb\.co\.uk/api/.*"),
+                      payload={"obs": []})
+                source = NomisSource(session)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:

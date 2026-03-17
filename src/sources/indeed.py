@@ -6,7 +6,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES, RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.indeed")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.indeed")
 class JobSpySource(BaseJobSource):
     name = "indeed"
 
-    def __init__(self, session: aiohttp.ClientSession, sites: list[str] | None = None):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, sites: list[str] | None = None, search_config=None):
+        super().__init__(session, search_config=search_config)
         self._sites = sites or ["indeed", "glassdoor"]
 
     async def fetch_jobs(self) -> list[Job]:
@@ -26,7 +25,7 @@ class JobSpySource(BaseJobSource):
             return []
 
         jobs = []
-        queries = JOB_TITLES[:8]
+        queries = self.job_titles[:8]
         for query in queries:
             try:
                 df = await asyncio.to_thread(
@@ -47,7 +46,7 @@ class JobSpySource(BaseJobSource):
                 title = str(row.get("title", ""))
                 desc = str(row.get("description", ""))
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
                 site = str(row.get("site", "indeed")).lower()
                 source_name = site if site in ("indeed", "glassdoor") else "indeed"

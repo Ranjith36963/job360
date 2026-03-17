@@ -6,7 +6,6 @@ import aiohttp
 from src.models import Job
 from src.sources.base import BaseJobSource
 from src.config.companies import WORKABLE_COMPANIES, COMPANY_NAME_OVERRIDES
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.workable")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.workable")
 class WorkableSource(BaseJobSource):
     name = "workable"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+        super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else WORKABLE_COMPANIES
 
     async def fetch_jobs(self) -> list[Job]:
@@ -30,7 +29,7 @@ class WorkableSource(BaseJobSource):
                 title = item.get("title", "")
                 desc = item.get("shortDescription", "")
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):

@@ -362,3 +362,29 @@ def test_negative_penalty_ai_engineer_zero():
     assert _negative_penalty("ML Engineer") == 0
     assert _negative_penalty("Machine Learning Engineer") == 0
     assert _negative_penalty("Data Scientist") == 0
+
+
+# ---- Partial title scoring tests ----
+
+
+def test_partial_title_needs_core_keyword():
+    """Titles without core AI/ML words should score 0 in partial matching."""
+    from src.filters.skill_matcher import _title_score
+    # "Technical Program Manager" has no core AI words and doesn't match JOB_TITLES → 0
+    assert _title_score("Technical Program Manager") == 0
+
+
+def test_partial_title_with_core_keyword():
+    """Titles with core AI words should get partial points."""
+    from src.filters.skill_matcher import _title_score
+    # "AI Workspace Coordinator" → core: {"ai"}, support: {} → 5
+    score = _title_score("AI Workspace Coordinator")
+    assert score == 5
+
+
+def test_partial_title_multiple_core():
+    """Multiple core words should accumulate points."""
+    from src.filters.skill_matcher import _title_score
+    # "GenAI LLM Specialist" → core: {"genai", "llm"}, support: {} → 10
+    score = _title_score("GenAI LLM Specialist")
+    assert score == 10

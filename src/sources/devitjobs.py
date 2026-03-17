@@ -5,7 +5,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.devitjobs")
 
@@ -22,7 +21,7 @@ class DevITJobsSource(BaseJobSource):
         for item in data:
             title = item.get("name", "")
             text = title.lower()
-            if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+            if not any(kw in text for kw in self.relevance_keywords):
                 continue
 
             company = item.get("company", "")

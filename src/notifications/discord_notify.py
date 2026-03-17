@@ -39,7 +39,7 @@ def _build_embeds(jobs: list[Job], stats: dict) -> dict:
         description += f"\n\n*...and {len(sorted_jobs) - 10} more jobs. Check email or dashboard for full list.*"
 
     embed = {
-        "title": f"🔍 Job360: {new} new AI/ML jobs found",
+        "title": f"🔍 Job360: {new} new jobs found",
         "description": description,
         "color": 0x1A73E8,
         "fields": [

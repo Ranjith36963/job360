@@ -26,17 +26,22 @@ class JobicySource(BaseJobSource):
         if not data or "jobs" not in data:
             return []
         for item in data["jobs"]:
+            title = item.get("jobTitle", "")
+            description = item.get("jobExcerpt", "")
+            text = f"{title} {description}".lower()
+            if not any(kw in text for kw in self.relevance_keywords):
+                continue
             date_found = item.get("pubDate") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
-                title=item.get("jobTitle", ""),
+                title=title,
                 company=item.get("companyName", ""),
                 location=item.get("jobGeo", ""),
                 salary_min=item.get("annualSalaryMin"),
                 salary_max=item.get("annualSalaryMax"),
-                description=item.get("jobExcerpt", ""),
+                description=description,
                 apply_url=item.get("url", ""),
                 source=self.name,
                 date_found=date_found,
             ))
-        logger.info(f"Jobicy: found {len(jobs)} jobs")
+        logger.info(f"Jobicy: found {len(jobs)} relevant jobs")
         return jobs

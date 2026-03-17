@@ -6,12 +6,8 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES, RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.google_jobs")
-
-# Use top 8 job titles to stay within 100 req/month free tier (~3 runs/week)
-GOOGLE_JOBS_QUERIES = JOB_TITLES[:8]
 
 _DAYS_RE = re.compile(r"(\d+)\s+days?\s+ago", re.IGNORECASE)
 _HOURS_RE = re.compile(r"(\d+)\s+hours?\s+ago", re.IGNORECASE)
@@ -35,8 +31,8 @@ def _parse_posted_at(text: str) -> str:
 class GoogleJobsSource(BaseJobSource):
     name = "google_jobs"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = ""):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+        super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
     @property
@@ -51,7 +47,7 @@ class GoogleJobsSource(BaseJobSource):
         jobs = []
         seen_keys = set()
 
-        for query in GOOGLE_JOBS_QUERIES:
+        for query in self.job_titles[:8]:
             params = {
                 "engine": "google_jobs",
                 "q": query,
@@ -71,7 +67,7 @@ class GoogleJobsSource(BaseJobSource):
                 description = item.get("description", "")
                 text = f"{title} {description}".lower()
 
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
 
                 # Deduplicate within this source
@@ -95,7 +91,7 @@ class GoogleJobsSource(BaseJobSource):
                 salary_str = extensions.get("salary", "")
                 salary_min = None
                 salary_max = None
-                if salary_str and "–" in salary_str or "-" in salary_str:
+                if salary_str and ("–" in salary_str or "-" in salary_str):
                     parts = salary_str.replace(",", "").replace("£", "").replace("$", "").replace("K", "000")
                     parts = re.split(r"[–\-]", parts)
                     try:

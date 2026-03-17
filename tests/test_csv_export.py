@@ -1,6 +1,5 @@
 import csv
 import tempfile
-import asyncio
 from datetime import datetime, timezone
 
 from src.models import Job
@@ -26,11 +25,10 @@ def _make_job(**overrides):
 
 
 def test_csv_export_creates_file():
-    loop = asyncio.get_event_loop()
     jobs = [_make_job(), _make_job(title="ML Engineer", company="Revolut")]
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
         path = f.name
-    loop.run_until_complete(export_to_csv(jobs, path))
+    export_to_csv(jobs, path)
     with open(path) as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -38,11 +36,10 @@ def test_csv_export_creates_file():
 
 
 def test_csv_export_correct_headers():
-    loop = asyncio.get_event_loop()
     jobs = [_make_job()]
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
         path = f.name
-    loop.run_until_complete(export_to_csv(jobs, path))
+    export_to_csv(jobs, path)
     with open(path) as f:
         reader = csv.reader(f)
         headers = next(reader)
@@ -54,11 +51,10 @@ def test_csv_export_correct_headers():
 
 
 def test_csv_export_salary_format():
-    loop = asyncio.get_event_loop()
     jobs = [_make_job(salary_min=60000, salary_max=80000)]
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
         path = f.name
-    loop.run_until_complete(export_to_csv(jobs, path))
+    export_to_csv(jobs, path)
     with open(path) as f:
         reader = csv.DictReader(f)
         row = next(reader)
@@ -66,11 +62,10 @@ def test_csv_export_salary_format():
 
 
 def test_csv_export_empty_salary():
-    loop = asyncio.get_event_loop()
     jobs = [_make_job(salary_min=None, salary_max=None)]
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
         path = f.name
-    loop.run_until_complete(export_to_csv(jobs, path))
+    export_to_csv(jobs, path)
     with open(path) as f:
         reader = csv.DictReader(f)
         row = next(reader)

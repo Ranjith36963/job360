@@ -149,3 +149,21 @@ def test_salary_boundary_kept():
               apply_url="x", source="a", date_found="x")
     assert job.salary_min == 10000
     assert job.salary_max == 500000
+
+
+# ---- Region suffix stripping tests ----
+
+
+def test_normalized_key_strips_region_suffix():
+    """'Barclays UK' should normalize to 'barclays'."""
+    job = Job(title="AI Engineer", company="Barclays UK", apply_url="x", source="a", date_found="x")
+    company, _ = job.normalized_key()
+    assert company == "barclays"
+
+
+def test_normalized_key_strips_region_suffix_variants():
+    for suffix in ["UK", "US", "USA", "DE", "SG", "EU", "EMEA", "APAC", "Global", "International"]:
+        job = Job(title="Data Scientist", company=f"Acme {suffix}",
+                  apply_url="x", source="a", date_found="x")
+        company, _ = job.normalized_key()
+        assert company == "acme", f"Failed to strip region suffix '{suffix}'"

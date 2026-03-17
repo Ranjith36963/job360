@@ -14,6 +14,8 @@ class JobDatabase:
     async def init_db(self):
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
+        await self._conn.execute("PRAGMA journal_mode=WAL")
+        await self._conn.execute("PRAGMA busy_timeout=5000")
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,6 +30,7 @@ class JobDatabase:
                 date_found TEXT NOT NULL,
                 match_score INTEGER DEFAULT 0,
                 visa_flag INTEGER DEFAULT 0,
+                experience_level TEXT DEFAULT '',
                 normalized_company TEXT NOT NULL,
                 normalized_title TEXT NOT NULL,
                 first_seen TEXT NOT NULL,
@@ -38,6 +41,7 @@ class JobDatabase:
                 timestamp TEXT NOT NULL,
                 total_found INTEGER DEFAULT 0,
                 new_jobs INTEGER DEFAULT 0,
+                sources_queried INTEGER DEFAULT 0,
                 per_source TEXT DEFAULT '{}'
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
@@ -68,14 +72,14 @@ class JobDatabase:
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
              apply_url, source, date_found, match_score, visa_flag,
-             normalized_company, normalized_title, first_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             experience_level, normalized_company, normalized_title, first_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title, job.company, job.location,
                 job.salary_min, job.salary_max, job.description,
                 job.apply_url, job.source, job.date_found,
                 job.match_score, int(job.visa_flag),
-                company, title, now,
+                job.experience_level, company, title, now,
             ),
         )
         await self._conn.commit()
@@ -88,11 +92,12 @@ class JobDatabase:
     async def log_run(self, stats: dict):
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(
-            "INSERT INTO run_log (timestamp, total_found, new_jobs, per_source) VALUES (?, ?, ?, ?)",
+            "INSERT INTO run_log (timestamp, total_found, new_jobs, sources_queried, per_source) VALUES (?, ?, ?, ?, ?)",
             (
                 now,
                 stats.get("total_found", 0),
                 stats.get("new_jobs", 0),
+                stats.get("sources_queried", 0),
                 json.dumps(stats.get("per_source", {})),
             ),
         )

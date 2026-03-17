@@ -10,20 +10,19 @@ import aiohttp
 
 from src.config.settings import (
     REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
-    JOOBLE_API_KEY, SERPAPI_KEY,
+    JOOBLE_API_KEY, SERPAPI_KEY, CAREERJET_AFFID, FINDWORK_API_KEY,
     DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
 )
 from src.utils.logger import setup_logging
 from src.models import Job
 from src.storage.database import JobDatabase
 from src.storage.csv_export import export_to_csv
-from src.filters.skill_matcher import score_job, check_visa_flag, detect_experience_level, salary_in_range
+from src.filters.skill_matcher import score_job, check_visa_flag, detect_experience_level, salary_in_range, JobScorer
 from src.filters.deduplicator import deduplicate
+from src.profile.storage import load_profile
+from src.profile.keyword_generator import generate_search_config
 from src.notifications.report_generator import generate_markdown_report
 from src.notifications.base import get_configured_channels
-from src.notifications.email_notify import send_email
-from src.notifications.slack_notify import send_slack
-from src.notifications.discord_notify import send_discord
 
 from src.sources.reed import ReedSource
 from src.sources.adzuna import AdzunaSource
@@ -48,6 +47,30 @@ from src.sources.workday import WorkdaySource
 from src.sources.google_jobs import GoogleJobsSource
 from src.sources.devitjobs import DevITJobsSource
 from src.sources.landingjobs import LandingJobsSource
+from src.sources.aijobs import AIJobsSource
+from src.sources.themuse import TheMuseSource
+from src.sources.hackernews import HackerNewsSource
+from src.sources.careerjet import CareerjetSource
+from src.sources.findwork import FindworkSource
+from src.sources.nofluffjobs import NoFluffJobsSource
+from src.sources.hn_jobs import HNJobsSource
+from src.sources.yc_companies import YCCompaniesSource
+from src.sources.jobs_ac_uk import JobsAcUkSource
+from src.sources.nhs_jobs import NHSJobsSource
+from src.sources.personio import PersonioSource
+from src.sources.workanywhere import WorkAnywhereSource
+from src.sources.weworkremotely import WeWorkRemotelySource
+from src.sources.realworkfromanywhere import RealWorkFromAnywhereSource
+from src.sources.biospace import BioSpaceSource
+from src.sources.jobtensor import JobTensorSource
+from src.sources.climatebase import ClimatebaseSource
+from src.sources.eightykhours import EightyKHoursSource
+from src.sources.bcs_jobs import BCSJobsSource
+from src.sources.uni_jobs import UniJobsSource
+from src.sources.successfactors import SuccessFactorsSource
+from src.sources.aijobs_global import AIJobsGlobalSource
+from src.sources.aijobs_ai import AIJobsAISource
+from src.sources.nomis import NomisSource
 
 logger = logging.getLogger("job360.main")
 
@@ -77,6 +100,31 @@ SOURCE_REGISTRY = {
     "google_jobs": GoogleJobsSource,
     "devitjobs": DevITJobsSource,
     "landingjobs": LandingJobsSource,
+    "aijobs": AIJobsSource,
+    "themuse": TheMuseSource,
+    "hackernews": HackerNewsSource,
+    "careerjet": CareerjetSource,
+    "findwork": FindworkSource,
+    "nofluffjobs": NoFluffJobsSource,
+    # Phase 4: New free sources
+    "hn_jobs": HNJobsSource,
+    "yc_companies": YCCompaniesSource,
+    "jobs_ac_uk": JobsAcUkSource,
+    "nhs_jobs": NHSJobsSource,
+    "personio": PersonioSource,
+    "workanywhere": WorkAnywhereSource,
+    "weworkremotely": WeWorkRemotelySource,
+    "realworkfromanywhere": RealWorkFromAnywhereSource,
+    "biospace": BioSpaceSource,
+    "jobtensor": JobTensorSource,
+    "climatebase": ClimatebaseSource,
+    "eightykhours": EightyKHoursSource,
+    "bcs_jobs": BCSJobsSource,
+    "uni_jobs": UniJobsSource,
+    "successfactors": SuccessFactorsSource,
+    "aijobs_global": AIJobsGlobalSource,
+    "aijobs_ai": AIJobsAISource,
+    "nomis": NomisSource,
 }
 
 
@@ -95,43 +143,74 @@ def _format_date(date_str: str) -> str:
     return "Posted: N/A"
 
 
-def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = None) -> list:
+def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = None,
+                    search_config=None) -> list:
     """Build source instances, optionally filtered to a single source."""
+    sc = search_config  # short alias
     all_sources = [
         # Group A: Keyed APIs
-        ReedSource(session, api_key=REED_API_KEY),
-        AdzunaSource(session, app_id=ADZUNA_APP_ID, app_key=ADZUNA_APP_KEY),
-        JSearchSource(session, api_key=JSEARCH_API_KEY),
+        ReedSource(session, api_key=REED_API_KEY, search_config=sc),
+        AdzunaSource(session, app_id=ADZUNA_APP_ID, app_key=ADZUNA_APP_KEY, search_config=sc),
+        JSearchSource(session, api_key=JSEARCH_API_KEY, search_config=sc),
         # Group B: Free APIs
-        ArbeitnowSource(session),
-        RemoteOKSource(session),
-        JobicySource(session),
-        HimalayasSource(session),
+        ArbeitnowSource(session, search_config=sc),
+        RemoteOKSource(session, search_config=sc),
+        JobicySource(session, search_config=sc),
+        HimalayasSource(session, search_config=sc),
         # Group C: ATS boards
-        GreenhouseSource(session),
-        LeverSource(session),
-        WorkableSource(session),
-        AshbySource(session),
+        GreenhouseSource(session, search_config=sc),
+        LeverSource(session, search_config=sc),
+        WorkableSource(session, search_config=sc),
+        AshbySource(session, search_config=sc),
         # Group D: Government
-        FindAJobSource(session),
+        FindAJobSource(session, search_config=sc),
         # Group E: New free APIs
-        RemotiveSource(session),
-        JoobleSource(session, api_key=JOOBLE_API_KEY),
-        LinkedInSource(session),
+        RemotiveSource(session, search_config=sc),
+        JoobleSource(session, api_key=JOOBLE_API_KEY, search_config=sc),
+        LinkedInSource(session, search_config=sc),
         # Group F: New ATS boards
-        SmartRecruitersSource(session),
-        PinpointSource(session),
-        RecruiteeSource(session),
+        SmartRecruitersSource(session, search_config=sc),
+        PinpointSource(session, search_config=sc),
+        RecruiteeSource(session, search_config=sc),
         # Group G: Scraper-based
-        JobSpySource(session),
+        JobSpySource(session, search_config=sc),
         # Group H: Workday ATS
-        WorkdaySource(session),
+        WorkdaySource(session, search_config=sc),
         # Group I: Real-time data sources
-        GoogleJobsSource(session, api_key=SERPAPI_KEY),
-        DevITJobsSource(session),
-        LandingJobsSource(session),
+        GoogleJobsSource(session, api_key=SERPAPI_KEY, search_config=sc),
+        DevITJobsSource(session, search_config=sc),
+        LandingJobsSource(session, search_config=sc),
+        # Group J: New free/keyed sources
+        AIJobsSource(session, search_config=sc),
+        TheMuseSource(session, search_config=sc),
+        HackerNewsSource(session, search_config=sc),
+        CareerjetSource(session, affid=CAREERJET_AFFID, search_config=sc),
+        FindworkSource(session, api_key=FINDWORK_API_KEY, search_config=sc),
+        NoFluffJobsSource(session, search_config=sc),
+        # Group K: Phase 4 new free sources
+        HNJobsSource(session, search_config=sc),
+        YCCompaniesSource(session, search_config=sc),
+        JobsAcUkSource(session, search_config=sc),
+        NHSJobsSource(session, search_config=sc),
+        PersonioSource(session, search_config=sc),
+        WorkAnywhereSource(session, search_config=sc),
+        WeWorkRemotelySource(session, search_config=sc),
+        RealWorkFromAnywhereSource(session, search_config=sc),
+        BioSpaceSource(session, search_config=sc),
+        JobTensorSource(session, search_config=sc),
+        ClimatebaseSource(session, search_config=sc),
+        EightyKHoursSource(session, search_config=sc),
+        BCSJobsSource(session, search_config=sc),
+        UniJobsSource(session, search_config=sc),
+        SuccessFactorsSource(session, search_config=sc),
+        AIJobsGlobalSource(session, search_config=sc),
+        AIJobsAISource(session, search_config=sc),
+        NomisSource(session, search_config=sc),
     ]
     if source_filter:
+        # Special case: glassdoor shares JobSpySource with indeed
+        if source_filter == "glassdoor":
+            source_filter = "indeed"
         return [s for s in all_sources if s.name == source_filter]
     return all_sources
 
@@ -151,6 +230,17 @@ async def run_search(
         logger.info(f"  Source filter: {source_filter}")
     if dry_run:
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
+
+    # Load user profile for dynamic keywords
+    profile = load_profile()
+    search_config = None
+    scorer = None
+    if profile and profile.is_complete:
+        search_config = generate_search_config(profile)
+        scorer = JobScorer(search_config)
+        logger.info("  Using dynamic keywords from user profile")
+    else:
+        logger.info("  No user profile found, using default keywords")
     logger.info("=" * 60)
 
     # Init database
@@ -158,131 +248,135 @@ async def run_search(
     db = JobDatabase(path)
     await db.init_db()
 
-    # Auto-purge old jobs (>30 days)
-    purged = await db.purge_old_jobs(days=30)
-    if purged:
-        logger.info(f"Purged {purged} jobs older than 30 days")
+    try:
+        # Auto-purge old jobs (>30 days)
+        purged = await db.purge_old_jobs(days=30)
+        if purged:
+            logger.info(f"Purged {purged} jobs older than 30 days")
 
-    # Create session
-    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        # Build sources
-        sources = _build_sources(session, source_filter)
+        # Create session
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Build sources
+            sources = _build_sources(session, source_filter, search_config=search_config)
 
-        if not sources:
-            logger.error(f"No sources matched filter: {source_filter}")
-            await db.close()
-            return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
+            if not sources:
+                logger.error(f"No sources matched filter: {source_filter}")
+                return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
-        # Fetch from all sources concurrently
-        all_jobs: list[Job] = []
-        per_source: dict[str, int] = {}
-        source_count = 0
+            # Fetch from all sources concurrently
+            all_jobs: list[Job] = []
+            per_source: dict[str, int] = {}
+            source_count = 0
 
-        async def _fetch_source(source):
-            try:
-                return await asyncio.wait_for(source.fetch_jobs(), timeout=120)
-            except asyncio.TimeoutError:
-                logger.warning(f"Source {source.name} timed out")
-                return []
-            except Exception as e:
-                logger.error(f"Source {source.name} failed: {e}")
-                return []
+            async def _fetch_source(source):
+                try:
+                    return await asyncio.wait_for(source.fetch_jobs(), timeout=120)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Source {source.name} timed out")
+                    return []
+                except Exception as e:
+                    logger.error(f"Source {source.name} failed: {e}")
+                    return []
 
-        results = await asyncio.gather(*[_fetch_source(s) for s in sources])
+            results = await asyncio.gather(*[_fetch_source(s) for s in sources])
 
-        for source, jobs in zip(sources, results):
-            source_count += 1
-            per_source[source.name] = len(jobs)
-            all_jobs.extend(jobs)
-            if jobs:
-                logger.info(f"  {source.name}: {len(jobs)} jobs")
-            else:
-                logger.info(f"  {source.name}: 0 jobs")
+            for source, jobs in zip(sources, results):
+                source_count += 1
+                per_source[source.name] = len(jobs)
+                all_jobs.extend(jobs)
+                if jobs:
+                    logger.info(f"  {source.name}: {len(jobs)} jobs")
+                else:
+                    logger.info(f"  {source.name}: 0 jobs")
 
-        logger.info(f"Total raw jobs: {len(all_jobs)}")
+            logger.info(f"Total raw jobs: {len(all_jobs)}")
 
-        # Score all jobs
-        for job in all_jobs:
-            job.match_score = score_job(job)
-            job.visa_flag = check_visa_flag(job)
-            job.experience_level = detect_experience_level(job.title)
+            # Score all jobs
+            for job in all_jobs:
+                if scorer:
+                    job.match_score = scorer.score(job)
+                    job.visa_flag = scorer.check_visa_flag(job)
+                else:
+                    job.match_score = score_job(job)
+                    job.visa_flag = check_visa_flag(job)
+                job.experience_level = detect_experience_level(job.title)
 
-        # Deduplicate
-        unique_jobs = deduplicate(all_jobs)
-        logger.info(f"After dedup: {len(unique_jobs)} unique jobs")
+            # Deduplicate
+            unique_jobs = deduplicate(all_jobs)
+            logger.info(f"After dedup: {len(unique_jobs)} unique jobs")
 
-        # Filter by minimum score
-        unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
-        logger.info(f"After score filter (>={MIN_MATCH_SCORE}): {len(unique_jobs)} jobs")
+            # Filter by minimum score
+            unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+            logger.info(f"After score filter (>={MIN_MATCH_SCORE}): {len(unique_jobs)} jobs")
 
-        if dry_run:
-            # Dry run: show results without DB writes or notifications
-            unique_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
+            if dry_run:
+                # Dry run: show results without DB writes or notifications
+                unique_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
+                stats = {
+                    "total_found": len(all_jobs),
+                    "new_jobs": len(unique_jobs),
+                    "sources_queried": source_count,
+                    "per_source": per_source,
+                }
+                _print_bucketed_summary(unique_jobs, "DRY RUN")
+                logger.info("Job360 dry run complete")
+                return stats
+
+            # Filter new jobs (not seen in DB)
+            new_jobs: list[Job] = []
+            for job in unique_jobs:
+                if not await db.is_job_seen(job.normalized_key()):
+                    await db.insert_job(job)
+                    new_jobs.append(job)
+
+            new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
+            logger.info(f"New jobs: {len(new_jobs)}")
+
+            # Stats
             stats = {
                 "total_found": len(all_jobs),
-                "new_jobs": len(unique_jobs),
+                "new_jobs": len(new_jobs),
                 "sources_queried": source_count,
                 "per_source": per_source,
             }
-            _print_bucketed_summary(unique_jobs, "DRY RUN")
-            await db.close()
-            logger.info("Job360 dry run complete")
-            return stats
 
-        # Filter new jobs (not seen in DB)
-        new_jobs: list[Job] = []
-        for job in unique_jobs:
-            if not await db.is_job_seen(job.normalized_key()):
-                await db.insert_job(job)
-                new_jobs.append(job)
+            # Generate outputs
+            if new_jobs:
+                # CSV
+                EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
+                await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
+                logger.info(f"CSV exported: {csv_path}")
 
-        new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
-        logger.info(f"New jobs: {len(new_jobs)}")
+                # Markdown report
+                REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                md_report = generate_markdown_report(new_jobs, stats)
+                md_path = REPORTS_DIR / f"report_{ts}.md"
+                md_path.write_text(md_report, encoding="utf-8")
+                logger.info(f"Report saved: {md_path}")
 
-        # Stats
-        stats = {
-            "total_found": len(all_jobs),
-            "new_jobs": len(new_jobs),
-            "sources_queried": source_count,
-            "per_source": per_source,
-        }
+                # Notifications via channel abstraction
+                if not no_notify:
+                    for channel in get_configured_channels():
+                        try:
+                            await channel.send(new_jobs, stats, csv_path=csv_path)
+                        except Exception as e:
+                            logger.error(f"{channel.name} notification failed: {e}")
 
-        # Generate outputs
-        if new_jobs:
-            # CSV
-            EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
-            await export_to_csv(new_jobs, csv_path)
-            logger.info(f"CSV exported: {csv_path}")
+                # Print time-bucketed summary to console
+                _print_bucketed_summary(new_jobs, "Results")
+            else:
+                logger.info("No new jobs to report")
+                logger.info("Job360: No new jobs found this run.")
 
-            # Markdown report
-            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            md_report = generate_markdown_report(new_jobs, stats)
-            md_path = REPORTS_DIR / f"report_{ts}.md"
-            md_path.write_text(md_report, encoding="utf-8")
-            logger.info(f"Report saved: {md_path}")
+            # Log run
+            await db.log_run(stats)
 
-            # Notifications via channel abstraction
-            if not no_notify:
-                for channel in get_configured_channels():
-                    try:
-                        await channel.send(new_jobs, stats, csv_path=csv_path)
-                    except Exception as e:
-                        logger.error(f"{channel.name} notification failed: {e}")
-
-            # Print time-bucketed summary to console
-            _print_bucketed_summary(new_jobs, "Results")
-        else:
-            logger.info("No new jobs to report")
-            print("\nJob360: No new jobs found this run.\n")
-
-        # Log run
-        await db.log_run(stats)
-
-    await db.close()
-    logger.info("Job360 run complete")
+        logger.info("Job360 run complete")
+    finally:
+        await db.close()
 
     # Launch dashboard if requested
     if launch_dashboard:
@@ -306,16 +400,16 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
     ]
     bucketed = bucket_jobs(job_dicts, min_score=0)
     counts = bucket_summary_counts(bucketed)
-    print(f"\n{'='*60}")
-    print(f"Job360 {label}: {len(jobs)} jobs found")
-    print(f"  24h: {counts['last_24h']} | 24-48h: {counts['24_48h']} | "
-          f"48-72h: {counts['48_72h']} | 3-7d: {counts['3_7d']}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info(f"Job360 {label}: {len(jobs)} jobs found")
+    logger.info(f"  24h: {counts['last_24h']} | 24-48h: {counts['24_48h']} | "
+                f"48-72h: {counts['48_72h']} | 3-7d: {counts['3_7d']}")
+    logger.info("=" * 60)
     for idx in range(4):
         bucket_list = bucketed.get(idx, [])
         if bucket_list:
             label_name = BUCKETS[idx][0]
-            print(f"\n  {BUCKETS[idx][1]} {label_name} ({len(bucket_list)} jobs):")
+            logger.info(f"  {BUCKETS[idx][1]} {label_name} ({len(bucket_list)} jobs):")
             for i, j in enumerate(bucket_list, 1):
                 visa = " [VISA]" if j.get("visa_flag") else ""
                 salary = ""
@@ -323,8 +417,8 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
                     salary = f" | {int(j['salary_min']):,}-{int(j['salary_max']):,}"
                 posted = f" | {_format_date(j.get('date_found', ''))}"
                 src = f" [{j.get('source', '')}]"
-                print(f"    {i}. [{j['match_score']}] {j['title']} @ {j['company']}{salary}{visa}{posted}{src}")
-    print(f"{'='*60}\n")
+                logger.info(f"    {i}. [{j['match_score']}] {j['title']} @ {j['company']}{salary}{visa}{posted}{src}")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

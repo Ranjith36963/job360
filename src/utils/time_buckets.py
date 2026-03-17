@@ -117,8 +117,16 @@ def format_relative_time(date_str: str) -> str:
     return humanize.naturaltime(delta)
 
 
-def extract_matched_skills(text: str) -> dict[str, list[str]]:
+def extract_matched_skills(text: str, primary: list[str] | None = None,
+                           secondary: list[str] | None = None,
+                           tertiary: list[str] | None = None) -> dict[str, list[str]]:
     """Extract matched skills from text using keyword lists.
+
+    Args:
+        text: Text to search for skill matches.
+        primary: Custom primary skills list. Defaults to hard-coded PRIMARY_SKILLS.
+        secondary: Custom secondary skills list. Defaults to hard-coded SECONDARY_SKILLS.
+        tertiary: Custom tertiary skills list. Defaults to hard-coded TERTIARY_SKILLS.
 
     Returns dict with keys 'primary', 'secondary', 'tertiary'.
     """
@@ -126,13 +134,13 @@ def extract_matched_skills(text: str) -> dict[str, list[str]]:
         return {"primary": [], "secondary": [], "tertiary": []}
     text_lower = text.lower()
     result = {"primary": [], "secondary": [], "tertiary": []}
-    for skill in PRIMARY_SKILLS:
+    for skill in (primary if primary is not None else PRIMARY_SKILLS):
         if skill.lower() in text_lower:
             result["primary"].append(skill)
-    for skill in SECONDARY_SKILLS:
+    for skill in (secondary if secondary is not None else SECONDARY_SKILLS):
         if skill.lower() in text_lower:
             result["secondary"].append(skill)
-    for skill in TERTIARY_SKILLS:
+    for skill in (tertiary if tertiary is not None else TERTIARY_SKILLS):
         if skill.lower() in text_lower:
             result["tertiary"].append(skill)
     return result

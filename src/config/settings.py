@@ -18,6 +18,11 @@ ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
 JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
 JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+CAREERJET_AFFID = os.getenv("CAREERJET_AFFID", "")
+FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+
+# GitHub (optional — for higher rate limits on profile enrichment)
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 # Email
 SMTP_HOST = "smtp.gmail.com"
@@ -65,6 +70,31 @@ RATE_LIMITS = {
     "google_jobs": {"concurrent": 1, "delay": 2.0},
     "devitjobs": {"concurrent": 2, "delay": 1.0},
     "landingjobs": {"concurrent": 2, "delay": 1.0},
+    "aijobs": {"concurrent": 2, "delay": 1.0},
+    "themuse": {"concurrent": 1, "delay": 2.0},
+    "hackernews": {"concurrent": 2, "delay": 1.0},
+    "careerjet": {"concurrent": 1, "delay": 2.0},
+    "findwork": {"concurrent": 1, "delay": 2.0},
+    "nofluffjobs": {"concurrent": 2, "delay": 1.5},
+    # New sources (Phase 4)
+    "hn_jobs": {"concurrent": 3, "delay": 0.5},
+    "yc_companies": {"concurrent": 1, "delay": 1.0},
+    "jobs_ac_uk": {"concurrent": 1, "delay": 2.0},
+    "nhs_jobs": {"concurrent": 1, "delay": 2.0},
+    "personio": {"concurrent": 1, "delay": 3.0},
+    "workanywhere": {"concurrent": 1, "delay": 5.0},
+    "weworkremotely": {"concurrent": 1, "delay": 2.0},
+    "realworkfromanywhere": {"concurrent": 1, "delay": 2.0},
+    "biospace": {"concurrent": 1, "delay": 2.0},
+    "jobtensor": {"concurrent": 1, "delay": 3.0},
+    "climatebase": {"concurrent": 1, "delay": 3.0},
+    "eightykhours": {"concurrent": 1, "delay": 2.0},
+    "bcs_jobs": {"concurrent": 1, "delay": 3.0},
+    "uni_jobs": {"concurrent": 1, "delay": 2.0},
+    "successfactors": {"concurrent": 1, "delay": 2.0},
+    "aijobs_global": {"concurrent": 2, "delay": 1.0},
+    "aijobs_ai": {"concurrent": 1, "delay": 2.0},
+    "nomis": {"concurrent": 1, "delay": 5.0},
 }
 
 # Retry

@@ -18,8 +18,8 @@ def _format_salary(job: Job) -> str:
     return ""
 
 
-async def export_to_csv(jobs: list[Job], filepath: str) -> str:
-    with open(filepath, "w", newline="") as f:
+def export_to_csv(jobs: list[Job], filepath: str) -> str:
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(HEADERS)
         for job in jobs:

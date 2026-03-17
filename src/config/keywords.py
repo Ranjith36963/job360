@@ -143,7 +143,7 @@ NEGATIVE_TITLE_KEYWORDS = [
     "sales specialist", "sales representative", "business development",
     "account executive",
     # IT ops
-    "site reliability", "sre ", "support desk", "help desk",
+    "site reliability", "sre", "support desk", "help desk",
     "service desk", "network engineer", "systems administrator",
     "desktop support", "it support",
     # Unrelated research
@@ -151,7 +151,7 @@ NEGATIVE_TITLE_KEYWORDS = [
     # Creative
     "model artist", "3d artist", "3d modeler", "animator",
     # Enterprise platforms
-    "power platform", "dynamics 365", "sharepoint", "sap ",
+    "power platform", "dynamics 365", "sharepoint", "sap",
     "oracle erp", "salesforce admin",
     # Legacy
     "mainframe", "cobol", "rpg developer",
@@ -164,7 +164,7 @@ NEGATIVE_TITLE_KEYWORDS = [
     # Legal
     "legal counsel", "solicitor", "paralegal", "barrister",
     # Finance
-    "auditor", "tax ", "bookkeeper",
+    "auditor", "tax", "bookkeeper",
     # Education
     "teacher",
 ]

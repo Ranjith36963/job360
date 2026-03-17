@@ -27,13 +27,13 @@ def _normalize_title(title: str) -> str:
 def _completeness(job: Job) -> int:
     score = 0
     if job.salary_min is not None:
-        score += 1
+        score += 10
     if job.salary_max is not None:
-        score += 1
+        score += 10
     if job.description:
-        score += len(job.description)
+        score += min(len(job.description), 20)
     if job.location:
-        score += 1
+        score += 5
     return score
 
 

@@ -14,22 +14,70 @@ def _run(coro):
 
 # Shared mock endpoint setup for all free sources
 def _mock_free_sources(m, arbeitnow_payload=None):
-    """Register mock responses for all free sources."""
+    """Register mock responses for ALL sources so tests don't make real HTTP calls."""
     if arbeitnow_payload is None:
         arbeitnow_payload = {"data": []}
+    # Group A: Keyed APIs (return empty when key is present)
+    m.get(re.compile(r"https://www\.reed\.co\.uk/.*"), payload={"results": []}, repeat=True)
+    m.get(re.compile(r"https://api\.adzuna\.com/.*"), payload={"results": []}, repeat=True)
+    m.get(re.compile(r"https://jsearch\.p\.rapidapi\.com/.*"), payload={"data": []}, repeat=True)
+    m.post(re.compile(r"https://jooble\.org/.*"), payload={"jobs": []}, repeat=True)
+    m.get(re.compile(r"https://serpapi\.com/.*"), payload={"jobs_results": []}, repeat=True)
+    m.get(re.compile(r"https://findwork\.dev/.*"), payload={"results": []}, repeat=True)
+    # Group B: Free APIs
     m.get(re.compile(r"https://www\.arbeitnow\.com/.*"), payload=arbeitnow_payload)
     m.get(re.compile(r"https://remoteok\.com/.*"), payload=[{"legal": "notice"}])
     m.get(re.compile(r"https://jobicy\.com/.*"), payload={"jobs": []})
     m.get(re.compile(r"https://himalayas\.app/.*"), payload={"jobs": []})
+    m.get(re.compile(r"https://remotive\.com/.*"), payload={"jobs": []}, repeat=True)
+    m.get(re.compile(r"https://aijobs\.net/.*"), payload=[], repeat=True)
+    m.get(re.compile(r"https://devitjobs\.uk/api/.*"), payload=[], repeat=True)
+    m.get(re.compile(r"https://landing\.jobs/api/.*"), payload=[], repeat=True)
+    m.get(re.compile(r"https://www\.themuse\.com/.*"), payload={"results": []}, repeat=True)
+    # Group C: ATS boards
     m.get(re.compile(r"https://boards-api\.greenhouse\.io/.*"), payload={"jobs": []}, repeat=True)
     m.get(re.compile(r"https://api\.lever\.co/.*"), payload=[], repeat=True)
     m.post(re.compile(r"https://apply\.workable\.com/.*"), payload={"results": []}, repeat=True)
     m.get(re.compile(r"https://api\.ashbyhq\.com/.*"), payload={"jobs": []}, repeat=True)
+    m.get(re.compile(r"https://api\.smartrecruiters\.com/.*"), payload={"content": []}, repeat=True)
+    m.get(re.compile(r".*\.pinpointhq\.com/.*"), payload=[], repeat=True)
+    m.get(re.compile(r".*\.recruitee\.com/.*"), payload={"offers": []}, repeat=True)
+    m.post(re.compile(r".*\.myworkdayjobs\.com/.*"), payload={"jobPostings": []}, repeat=True)
+    m.get(re.compile(r".*\.jobs\.personio\.de/.*"), body="<xml></xml>", repeat=True)
+    m.get(re.compile(r".*\.baesystems\.com/.*"), body="<urlset></urlset>", repeat=True)
+    m.get(re.compile(r".*\.qinetiq\.com/.*"), body="<urlset></urlset>", repeat=True)
+    m.get(re.compile(r".*\.thalesgroup\.com/.*"), body="<urlset></urlset>", repeat=True)
+    # Group D: HTML scrapers
+    m.get(re.compile(r"https://www\.linkedin\.com/.*"), body="<html></html>", repeat=True)
     m.get(re.compile(r"https://findajob\.dwp\.gov\.uk/.*"),
-          body="<rss><channel></channel></rss>",
-          content_type="application/rss+xml", repeat=True)
-    m.get(re.compile(r"https://devitjobs\.uk/api/.*"), payload=[], repeat=True)
-    m.get(re.compile(r"https://landing\.jobs/api/.*"), payload=[], repeat=True)
+          body="<html><body>No results</body></html>",
+          content_type="text/html", repeat=True)
+    m.get(re.compile(r"https://jobtensor\.com/.*"), payload={"total": 0, "hits": []}, repeat=True)
+    m.get(re.compile(r"https://climatebase\.org/.*"), body="<html></html>", repeat=True)
+    m.get(re.compile(r"https://www\.bcs\.org/.*"), body="<html></html>", repeat=True)
+    m.get(re.compile(r"https://aijobs\.ai/.*"), body="<html></html>", repeat=True)
+    m.get(re.compile(r"https://ai-jobs\.global/.*"), payload=[], repeat=True)
+    # Group E: RSS/XML feeds
+    m.get(re.compile(r"https://www\.jobs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.nhsbsa\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://weworkremotely\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.realworkfromanywhere\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.biospace\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://workanywhere\.pro/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"http://www\.jobs\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://hr-jobs\.lancs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://jobs\.kent\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://jobs\.royalholloway\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://jobs\.surrey\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.uukjobs\.co\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    # Group F: Algolia/other APIs
+    m.get(re.compile(r"https://hacker-news\.firebaseio\.com/.*"), payload={"kids": []}, repeat=True)
+    m.get(re.compile(r"https://hn\.algolia\.com/.*"), payload={"hits": []}, repeat=True)
+    m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"), payload={"hits": []}, repeat=True)
+    m.get(re.compile(r"https://yc-oss\.github\.io/.*"), payload=[], repeat=True)
+    m.get(re.compile(r"https://nofluffjobs\.com/api/.*"), payload=[], repeat=True)
+    m.get(re.compile(r"https://www\.nomis\.co\.uk/.*"), payload={}, repeat=True)
+    m.get(re.compile(r"https://www\.careerjet\.co\.uk/.*"), body="<html></html>", repeat=True)
 
 
 MOCK_JOB_PAYLOAD = {"data": [{
@@ -141,7 +189,7 @@ def test_stats_include_per_source():
                 stats = await run_search(db_path=":memory:")
                 assert "per_source" in stats
                 assert isinstance(stats["per_source"], dict)
-                assert len(stats["per_source"]) == 23
+                assert len(stats["per_source"]) == 47
     _run(_test())
 
 

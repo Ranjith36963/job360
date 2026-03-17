@@ -1,5 +1,6 @@
-"""Job360 Web Dashboard — Streamlit UI with time-bucketed card layout."""
+"""Job360 Web Dashboard — Streamlit UI with compact table-row layout."""
 
+import html
 import sqlite3
 import json
 import subprocess
@@ -18,6 +19,10 @@ import pandas as pd
 import plotly.express as px
 
 from src.config.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE
+from src.profile.storage import load_profile, save_profile, profile_exists
+from src.profile.models import UserProfile, CVData, UserPreferences
+from src.profile.cv_parser import parse_cv_from_bytes
+from src.profile.preferences import merge_cv_and_preferences
 from src.utils.time_buckets import (
     BUCKETS,
     bucket_jobs,
@@ -30,6 +35,21 @@ from src.utils.time_buckets import (
 )
 from src.notifications.report_generator import generate_markdown_report
 from src.models import Job
+
+
+def _run_async(coro):
+    """Run async coroutine safely, handling existing event loops."""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return asyncio.run(coro)
+
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -48,38 +68,138 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-    .job-card {
-        border: 1px solid #e0e0e0;
+    /* --- Compact table-row layout --- */
+    .jrow-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        line-height: 1.3;
+    }
+    .jrow-table thead th {
+        position: sticky;
+        top: 0;
+        background: #f8f9fa;
+        padding: 6px 8px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 11px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .jrow {
+        border-bottom: 1px solid #eee;
+        height: 44px;
+    }
+    .jrow:hover { background: #f0f6ff; }
+    .jrow:nth-child(even) { background: #fafbfc; }
+    .jrow:nth-child(even):hover { background: #f0f6ff; }
+    .jrow td { padding: 5px 8px; vertical-align: middle; white-space: nowrap; }
+    .jrow-score {
+        display: inline-block;
+        min-width: 32px;
+        padding: 2px 6px;
         border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 12px;
-        background: #fafafa;
-    }
-    .score-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 16px;
         color: white;
-        font-weight: bold;
-        font-size: 14px;
+        font-weight: 700;
+        font-size: 12px;
+        text-align: center;
     }
-    .visa-badge {
+    .jrow-title a {
+        color: #1a73e8;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 13px;
+    }
+    .jrow-title a:hover { text-decoration: underline; }
+    .jrow-company { color: #555; font-size: 12px; margin-left: 6px; }
+    .jrow-loc, .jrow-salary, .jrow-time {
+        color: #666;
+        font-size: 12px;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .jrow-pill {
         display: inline-block;
-        padding: 2px 8px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-right: 3px;
+    }
+    .jrow-pill-source { background: #e3f2fd; color: #1565c0; }
+    .jrow-pill-visa { background: #4CAF50; color: white; }
+    /* Skills hover tooltip */
+    .jrow-skills {
+        position: relative;
+        display: inline-block;
+        cursor: default;
+    }
+    .jrow-skills .jrow-pill { background: #f3e5f5; color: #7b1fa2; }
+    .jrow-skills-tip {
+        display: none;
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        white-space: pre-line;
+        z-index: 100;
+        min-width: 160px;
+        max-width: 280px;
+        text-align: left;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .jrow-skills:hover .jrow-skills-tip { display: block; }
+    /* Bucket headers */
+    .bucket-hdr {
+        padding: 8px 0 4px 0;
+        margin-top: 12px;
+        font-size: 15px;
+        font-weight: 700;
+        border-bottom: 3px solid #ddd;
+    }
+    .bucket-hdr .bucket-count {
+        display: inline-block;
+        padding: 1px 8px;
         border-radius: 10px;
         font-size: 12px;
         font-weight: 600;
+        margin-left: 6px;
+        background: #eee;
+        color: #555;
     }
-    .visa-yes { background: #4CAF50; color: white; }
-    .visa-no { background: #e0e0e0; color: #666; }
-    .source-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 10px;
-        background: #e3f2fd;
-        color: #1565c0;
+    .bucket-hdr-0 { border-color: #f44336; }
+    .bucket-hdr-1 { border-color: #ff9800; }
+    .bucket-hdr-2 { border-color: #ffc107; }
+    .bucket-hdr-3 { border-color: #2196f3; }
+    /* Bucket navigation pills */
+    .bucket-nav { display: flex; gap: 8px; margin-bottom: 8px; }
+    .bucket-nav-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        border-radius: 12px;
         font-size: 12px;
+        font-weight: 600;
+        background: #f5f5f5;
+        color: #333;
     }
+    .bucket-nav-pill .bn-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    /* Tighten Streamlit default padding */
+    .block-container { padding-top: 1.5rem !important; }
+    div[data-testid="stMetric"] { padding: 4px 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -145,48 +265,70 @@ def load_run_logs() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Job card renderer
+# Job table renderer
 # ---------------------------------------------------------------------------
-def render_job_card(job: dict):
-    """Render a single job as a styled card."""
-    score = job.get("match_score", 0)
-    color = score_color_hex(score)
-    visa = job.get("visa_flag", False)
-    url = job.get("apply_url", "#")
-    title = job.get("title", "Unknown")
+def render_job_table(jobs: list[dict]) -> str:
+    """Render a list of jobs as a single compact HTML table string."""
+    if not jobs:
+        return '<p style="color:#999;font-size:13px;padding:4px 0;">No jobs in this period</p>'
 
-    st.markdown(f"### [{title}]({url})")
+    rows = []
+    for job in jobs:
+        score = job.get("match_score", 0)
+        color = score_color_hex(score)
+        visa = job.get("visa_flag", False)
+        url = html.escape(job.get("apply_url", "#"))
+        title = html.escape(job.get("title", "Unknown"))
+        company = html.escape(job.get("company", "Unknown"))
+        location = html.escape(job.get("location", "N/A"))
+        salary = html.escape(job.get("salary_display", ""))
+        posted = html.escape(format_relative_time(job.get("date_found", "")))
+        source = html.escape(job.get("source", ""))
 
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        st.markdown(f"**{job.get('company', 'Unknown')}**")
-        st.caption(f"\U0001F4CD {job.get('location', 'N/A')} &nbsp; | &nbsp; \U0001F4B0 {job.get('salary_display', 'N/A')}")
-    with col2:
-        posted = format_relative_time(job.get("date_found", ""))
-        st.caption(f"\U0001F4C5 {posted}")
-        st.markdown(f'<span class="source-badge">{job.get("source", "")}</span>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(
-            f'<span class="score-badge" style="background:{color}">{score}</span>',
-            unsafe_allow_html=True,
-        )
-        visa_class = "visa-yes" if visa else "visa-no"
-        visa_text = "Visa \u2713" if visa else "No visa info"
-        st.markdown(f'<span class="visa-badge {visa_class}">{visa_text}</span>', unsafe_allow_html=True)
+        # Badges column
+        badges = f'<span class="jrow-pill jrow-pill-source">{source}</span>'
+        if visa:
+            badges += ' <span class="jrow-pill jrow-pill-visa">Visa</span>'
 
-    # Apply button
-    st.link_button("Apply Now \u2192", url)
-
-    # Skills expander
-    skills = extract_matched_skills(job.get("description", ""))
-    has_skills = any(skills.values())
-    if has_skills:
-        with st.expander("Skills Matched"):
+        # Skills tooltip
+        skills = extract_matched_skills(job.get("description", ""))
+        skill_count = sum(len(v) for v in skills.values())
+        if skill_count:
+            tip_lines = []
             for tier, tier_skills in skills.items():
                 if tier_skills:
-                    st.markdown(f"**{tier.title()}:** " + " ".join(f"`{s}`" for s in tier_skills))
+                    tip_lines.append(f"{tier.title()}: {', '.join(tier_skills)}")
+            tip_text = html.escape("\n".join(tip_lines))
+            badges += (
+                f' <span class="jrow-skills">'
+                f'<span class="jrow-pill">{skill_count} skills</span>'
+                f'<span class="jrow-skills-tip">{tip_text}</span>'
+                f'</span>'
+            )
 
-    st.divider()
+        rows.append(
+            f'<tr class="jrow">'
+            f'<td><span class="jrow-score" style="background:{color}">{score}</span></td>'
+            f'<td class="jrow-title"><a href="{url}" target="_blank">{title}</a>'
+            f'<span class="jrow-company">@ {company}</span></td>'
+            f'<td class="jrow-loc">{location}</td>'
+            f'<td class="jrow-salary">{salary}</td>'
+            f'<td class="jrow-time">{posted}</td>'
+            f'<td>{badges}</td>'
+            f'</tr>'
+        )
+
+    header = (
+        '<table class="jrow-table"><thead><tr>'
+        '<th style="width:50px">Score</th>'
+        '<th>Title / Company</th>'
+        '<th>Location</th>'
+        '<th>Salary</th>'
+        '<th>Posted</th>'
+        '<th>Tags</th>'
+        '</tr></thead><tbody>'
+    )
+    return header + "\n".join(rows) + "</tbody></table>"
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +338,108 @@ all_jobs = load_jobs_7day()
 df_runs = load_run_logs()
 
 # ---------------------------------------------------------------------------
-# Sidebar
+# Sidebar — Profile Setup
+# ---------------------------------------------------------------------------
+_has_profile = profile_exists()
+
+with st.sidebar:
+    with st.expander("Profile Setup", expanded=not _has_profile):
+        uploaded_cv = st.file_uploader("Upload CV", type=["pdf", "docx"])
+        prof_titles = st.text_area("Target Job Titles (comma-separated)",
+                                   placeholder="e.g. Software Engineer, Product Manager")
+        prof_skills = st.text_area("Skills (comma-separated)",
+                                   placeholder="e.g. Python, SQL, Project Management")
+        prof_about = st.text_area("About Me", placeholder="Brief summary of your background")
+        prof_negatives = st.text_input("Exclude Keywords (comma-separated)",
+                                       placeholder="e.g. intern, junior")
+        prof_locations = st.multiselect("Preferred Locations",
+                                        ["London", "Manchester", "Birmingham", "Edinburgh",
+                                         "Cambridge", "Bristol", "Remote", "Hybrid"])
+        prof_arrangement = st.selectbox("Work Arrangement",
+                                        ["", "remote", "hybrid", "onsite"])
+        prof_salary_col1, prof_salary_col2 = st.columns(2)
+        with prof_salary_col1:
+            prof_salary_min = st.number_input("Salary Min", min_value=0, value=0, step=5000)
+        with prof_salary_col2:
+            prof_salary_max = st.number_input("Salary Max", min_value=0, value=0, step=5000)
+
+        # LinkedIn data export
+        st.markdown("---")
+        st.markdown("**LinkedIn Data Export**")
+        st.caption("Download your data from LinkedIn Settings > Get a copy of your data")
+        uploaded_linkedin = st.file_uploader("Upload LinkedIn ZIP", type=["zip"])
+
+        # GitHub username
+        st.markdown("---")
+        st.markdown("**GitHub Profile**")
+        prof_github = st.text_input("GitHub Username", placeholder="e.g. octocat")
+
+        if st.button("Save Profile"):
+            cv_data = CVData()
+            if uploaded_cv:
+                cv_data = parse_cv_from_bytes(uploaded_cv.read(), uploaded_cv.name)
+
+            # Enrich from LinkedIn
+            if uploaded_linkedin:
+                try:
+                    from src.profile.linkedin_parser import parse_linkedin_zip_from_bytes, enrich_cv_from_linkedin
+                    linkedin_data = parse_linkedin_zip_from_bytes(uploaded_linkedin.read())
+                    cv_data = enrich_cv_from_linkedin(cv_data, linkedin_data)
+                    n_skills = len(linkedin_data.get("skills", []))
+                    n_pos = len(linkedin_data.get("positions", []))
+                    st.info(f"LinkedIn: {n_skills} skills, {n_pos} positions imported")
+                except Exception as e:
+                    st.error(f"Failed to parse LinkedIn ZIP: {e}")
+
+            # Enrich from GitHub
+            if prof_github:
+                try:
+                    import asyncio
+                    from src.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
+                    github_data = _run_async(fetch_github_profile(prof_github))
+                    cv_data = enrich_cv_from_github(cv_data, github_data)
+                    n_repos = len(github_data.get("repositories", []))
+                    n_skills = len(github_data.get("skills_inferred", []))
+                    st.info(f"GitHub: {n_repos} repos, {n_skills} skills inferred")
+                except Exception as e:
+                    st.error(f"Failed to fetch GitHub data: {e}")
+
+            prefs = UserPreferences(
+                target_job_titles=[t.strip() for t in prof_titles.split(",") if t.strip()],
+                additional_skills=[s.strip() for s in prof_skills.split(",") if s.strip()],
+                negative_keywords=[n.strip() for n in prof_negatives.split(",") if n.strip()],
+                preferred_locations=prof_locations,
+                work_arrangement=prof_arrangement,
+                salary_min=prof_salary_min if prof_salary_min > 0 else None,
+                salary_max=prof_salary_max if prof_salary_max > 0 else None,
+                about_me=prof_about,
+                github_username=prof_github or "",
+            )
+
+            if cv_data.skills or cv_data.job_titles:
+                prefs = merge_cv_and_preferences(cv_data.skills, cv_data.job_titles, prefs)
+
+            profile = UserProfile(cv_data=cv_data, preferences=prefs)
+            save_profile(profile)
+            st.success("Profile saved! Next search will use your keywords.")
+            st.rerun()
+
+        if _has_profile:
+            _loaded_prof = load_profile()
+            _sources = ["CV"] if (_loaded_prof and _loaded_prof.cv_data.raw_text) else []
+            if _loaded_prof and _loaded_prof.cv_data.linkedin_skills:
+                _sources.append("LinkedIn")
+            if _loaded_prof and _loaded_prof.cv_data.github_skills_inferred:
+                _sources.append("GitHub")
+            _src_label = ", ".join(_sources) if _sources else "Manual"
+            st.caption(f"Profile active ({_src_label}) — searches use your keywords")
+        else:
+            st.caption("No profile — using default keywords")
+
+    st.divider()
+
+# ---------------------------------------------------------------------------
+# Sidebar — Filters
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("\U0001F50D Filters")
@@ -225,9 +468,9 @@ with st.sidebar:
 
     st.divider()
     st.subheader("\u2699\uFE0F Actions")
-    trigger_search = st.button("\U0001F680 Refresh Now", use_container_width=True)
-    export_csv_btn = st.button("\U0001F4E5 Export CSV", use_container_width=True)
-    export_md_btn = st.button("\U0001F4DD Export Markdown", use_container_width=True)
+    trigger_search = st.button("\U0001F680 Refresh Now", width='stretch')
+    export_csv_btn = st.button("\U0001F4E5 Export CSV", width='stretch')
+    export_md_btn = st.button("\U0001F4DD Export Markdown", width='stretch')
 
 # ---------------------------------------------------------------------------
 # Apply filters
@@ -291,7 +534,8 @@ if trigger_search:
 # Header
 # ---------------------------------------------------------------------------
 st.title("\U0001F4BC Job360 Dashboard")
-st.caption("AI/ML Job Search Aggregator \u2014 UK & Remote \u2014 Time-Prioritized View")
+_mode_label = "Profile-driven" if _has_profile else "Default"
+st.caption(f"{_mode_label} Job Search Aggregator \u2014 UK & Remote \u2014 Time-Prioritized View")
 
 # ---------------------------------------------------------------------------
 # Empty state
@@ -306,41 +550,64 @@ if not all_jobs:
 bucketed = bucket_jobs(filtered_jobs, min_score=0)  # already filtered above
 counts = bucket_summary_counts(bucketed)
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Total 7d Jobs", len(filtered_jobs))
-c2.metric("New 24h", counts["last_24h"])
-c3.metric("Avg Score", f"{sum(j.get('match_score', 0) for j in filtered_jobs) / max(len(filtered_jobs), 1):.0f}")
-
-# Top 3 sources
 source_counts = {}
 for j in filtered_jobs:
     s = j.get("source", "")
     source_counts[s] = source_counts.get(s, 0) + 1
-top_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-c4.metric("Top Sources", ", ".join(s for s, _ in top_sources) if top_sources else "N/A")
 
-c5.metric("Visa Count", sum(1 for j in filtered_jobs if j.get("visa_flag")))
-c6.metric("Sources Active", len(set(j.get("source", "") for j in filtered_jobs)))
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Total Jobs", len(filtered_jobs))
+c2.metric("New 24h", counts["last_24h"])
+c3.metric("Avg Score", f"{sum(j.get('match_score', 0) for j in filtered_jobs) / max(len(filtered_jobs), 1):.0f}")
+c4.metric("Visa Count", sum(1 for j in filtered_jobs if j.get("visa_flag")))
 
-st.divider()
+# Inline mini score distribution
+if filtered_jobs:
+    df_mini = pd.DataFrame(filtered_jobs)
+    fig_mini = px.histogram(
+        df_mini, x="match_score", nbins=20,
+        color_discrete_sequence=["#1a73e8"],
+        labels={"match_score": "Score", "count": ""},
+    )
+    fig_mini.add_vline(x=MIN_MATCH_SCORE, line_dash="dash", line_color="red")
+    fig_mini.update_layout(
+        height=100, margin=dict(l=0, r=0, t=0, b=0),
+        showlegend=False, bargap=0.1,
+        xaxis=dict(showticklabels=True, dtick=10),
+        yaxis=dict(showticklabels=False),
+    )
+    st.plotly_chart(fig_mini, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# Time-bucketed job cards
+# Time-bucketed job tables
 # ---------------------------------------------------------------------------
-BUCKET_EMOJIS = ["\U0001f534", "\U0001f7e0", "\U0001f7e1", "\U0001f535"]
+BUCKET_COLORS = ["#f44336", "#ff9800", "#ffc107", "#2196f3"]
+
+# Bucket navigation pills
+nav_pills = []
+for idx in range(4):
+    label, _, _, _, _ = BUCKETS[idx]
+    count = len(bucketed.get(idx, []))
+    color = BUCKET_COLORS[idx]
+    nav_pills.append(
+        f'<span class="bucket-nav-pill">'
+        f'<span class="bn-dot" style="background:{color}"></span>'
+        f'{label}: {count}'
+        f'</span>'
+    )
+st.markdown('<div class="bucket-nav">' + "".join(nav_pills) + '</div>', unsafe_allow_html=True)
 
 for idx in range(4):
     label, emoji_unicode, _, _, _ = BUCKETS[idx]
     bucket_list = bucketed.get(idx, [])
     count = len(bucket_list)
 
-    st.subheader(f"{emoji_unicode} {label} ({count} jobs)")
-
-    if not bucket_list:
-        st.caption("No new jobs in this period")
-    else:
-        for job in bucket_list:
-            render_job_card(job)
+    st.markdown(
+        f'<div class="bucket-hdr bucket-hdr-{idx}">'
+        f'{emoji_unicode} {label}<span class="bucket-count">{count}</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(render_job_table(bucket_list), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Export buttons
@@ -384,29 +651,25 @@ if export_md_btn and filtered_jobs:
 # ---------------------------------------------------------------------------
 # Charts + Run History
 # ---------------------------------------------------------------------------
-with st.expander("Charts", expanded=False):
+with st.expander("Charts & Run History", expanded=False):
+    # Source pie chart
     chart_left, chart_right = st.columns(2)
     with chart_left:
-        if filtered_jobs:
-            df_chart = pd.DataFrame(filtered_jobs)
-            fig_hist = px.histogram(
-                df_chart, x="match_score", nbins=20,
-                color_discrete_sequence=["#1a73e8"],
-                title="Score Distribution",
-                labels={"match_score": "Match Score", "count": "Jobs"},
-            )
-            fig_hist.add_vline(x=MIN_MATCH_SCORE, line_dash="dash", line_color="red",
-                               annotation_text=f"Min ({MIN_MATCH_SCORE})")
-            fig_hist.update_layout(bargap=0.1, height=350)
-            st.plotly_chart(fig_hist, use_container_width=True)
-    with chart_right:
         if filtered_jobs:
             sc = pd.DataFrame(list(source_counts.items()), columns=["source", "count"])
             fig_pie = px.pie(sc, values="count", names="source", title="Jobs by Source", hole=0.35)
             fig_pie.update_layout(height=350)
             st.plotly_chart(fig_pie, use_container_width=True)
+    with chart_right:
+        if not df_runs.empty and len(df_runs) > 1:
+            fig_line = px.line(
+                df_runs.sort_values("timestamp"), x="timestamp", y="new_jobs",
+                title="New Jobs per Run", markers=True,
+            )
+            fig_line.update_layout(height=350)
+            st.plotly_chart(fig_line, use_container_width=True)
 
-with st.expander("Run History", expanded=False):
+    # Run history table + per-source bar
     if not df_runs.empty:
         col_a, col_b = st.columns(2)
         with col_a:
@@ -414,24 +677,16 @@ with st.expander("Run History", expanded=False):
                 df_runs[["timestamp", "total_found", "new_jobs"]].rename(columns={
                     "timestamp": "Time", "total_found": "Total Found", "new_jobs": "New Jobs",
                 }),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
         with col_b:
-            if len(df_runs) > 1:
-                fig_line = px.line(
-                    df_runs.sort_values("timestamp"), x="timestamp", y="new_jobs",
-                    title="New Jobs per Run", markers=True,
-                )
-                fig_line.update_layout(height=300)
-                st.plotly_chart(fig_line, use_container_width=True)
-        if len(df_runs):
-            latest = df_runs.iloc[0]
-            ps = latest["per_source"]
-            if ps:
-                st.subheader("Latest Run \u2014 Per Source")
-                ps_df = pd.DataFrame(list(ps.items()), columns=["Source", "Jobs Found"]).sort_values("Jobs Found", ascending=False)
-                fig_bar = px.bar(ps_df, x="Source", y="Jobs Found", color_discrete_sequence=["#34a853"])
-                fig_bar.update_layout(height=300)
-                st.plotly_chart(fig_bar, use_container_width=True)
+            if len(df_runs):
+                latest = df_runs.iloc[0]
+                ps = latest["per_source"]
+                if ps:
+                    ps_df = pd.DataFrame(list(ps.items()), columns=["Source", "Jobs Found"]).sort_values("Jobs Found", ascending=False)
+                    fig_bar = px.bar(ps_df, x="Source", y="Jobs Found", title="Latest Run \u2014 Per Source", color_discrete_sequence=["#34a853"])
+                    fig_bar.update_layout(height=300)
+                    st.plotly_chart(fig_bar, use_container_width=True)
     else:
         st.info("No runs recorded yet.")

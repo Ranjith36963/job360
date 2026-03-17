@@ -6,6 +6,7 @@ GREENHOUSE_COMPANIES = [
     "polyai", "synthesia", "transferwise", "snyk",
     "stripe", "cloudflare", "databricks", "dataiku",
     "ocadotechnology", "tractable", "paddle", "harnessinc",
+    "isomorphiclabs", "speechmatics", "onfido", "oxfordnanopore", "bloomberg",
 ]
 
 # Lever boards: https://api.lever.co/v0/postings/{slug}?mode=json
@@ -13,6 +14,7 @@ GREENHOUSE_COMPANIES = [
 LEVER_COMPANIES = [
     "mistral", "healx", "palantir", "spotify", "joinzoe",
     "tractable", "helsing", "secondmind", "mosaic-ml", "faculty",
+    "dyson", "fiveai",
 ]
 
 # Workable boards: https://apply.workable.com/api/v2/accounts/{slug}/jobs
@@ -26,7 +28,8 @@ WORKABLE_COMPANIES = [
 # Verified Feb 2026
 ASHBY_COMPANIES = [
     "anthropic", "cohere", "openai", "improbable",
-    "Synthesia", "multiverse",
+    "synthesia", "multiverse",
+    "elevenlabs", "perplexity", "anyscale",
 ]
 
 # SmartRecruiters boards: https://api.smartrecruiters.com/v1/companies/{slug}/postings
@@ -62,6 +65,12 @@ WORKDAY_COMPANIES = [
     {"tenant": "dell", "wd": "wd1", "site": "External", "name": "Dell"},
     {"tenant": "intel", "wd": "wd1", "site": "External", "name": "Intel"},
     {"tenant": "unilever", "wd": "wd3", "site": "Unilever_Experienced_Professionals", "name": "Unilever"},
+    {"tenant": "hsbc", "wd": "wd3", "site": "HSBC_Careers", "name": "HSBC"},
+    {"tenant": "barclays", "wd": "wd3", "site": "Barclays_Careers", "name": "Barclays"},
+    {"tenant": "lloydsbankinggroup", "wd": "wd3", "site": "LloydsBankingGroupCareers", "name": "Lloyds Banking Group"},
+    {"tenant": "rollsroyce", "wd": "wd3", "site": "Careers", "name": "Rolls-Royce"},
+    {"tenant": "gaborsk", "wd": "wd5", "site": "GSKCareers", "name": "GSK"},
+    {"tenant": "jaguarlandrover", "wd": "wd1", "site": "JLR_Careers", "name": "Jaguar Land Rover"},
 ]
 
 # Slug → display name overrides (when slug doesn't match company name)
@@ -71,7 +80,7 @@ COMPANY_NAME_OVERRIDES = {
     "ocadotechnology": "Ocado Technology",
     "harnessinc": "Harness",
     "joinzoe": "ZOE",
-    "Synthesia": "Synthesia",
+    "synthesia": "Synthesia",
     "huggingface": "Hugging Face",
     # SmartRecruiters
     "samsung-r-and-d-institute-uk": "Samsung R&D UK",
@@ -88,6 +97,27 @@ COMPANY_NAME_OVERRIDES = {
     "kheiron-medical": "Kheiron Medical",
     # Lever
     "mosaic-ml": "MosaicML",
+    "fiveai": "Five AI",
     # Pinpoint
     "tesco-technology": "Tesco Technology",
+    # Greenhouse (new)
+    "isomorphiclabs": "Isomorphic Labs",
+    "oxfordnanopore": "Oxford Nanopore Technologies",
 }
+
+# Personio ATS boards: https://{slug}.jobs.personio.de/xml?language=en
+# UK companies using Personio
+PERSONIO_COMPANIES = [
+    "celonis", "trade-republic", "sennder", "contentful",
+    "personio", "forto", "taxfix", "wonderkind",
+    "airfocus", "heydata",
+]
+
+# SAP SuccessFactors career site sitemaps
+# UK defence/enterprise companies
+SUCCESSFACTORS_COMPANIES = [
+    {"name": "BAE Systems", "sitemap_url": "https://jobs.baesystems.com/sitemap.xml"},
+    {"name": "QinetiQ", "sitemap_url": "https://careers.qinetiq.com/sitemap.xml"},
+    {"name": "Thales UK", "sitemap_url": "https://careers.thalesgroup.com/sitemap.xml"},
+    # MBDA removed: careers.mbda-systems.com DNS resolution fails
+]

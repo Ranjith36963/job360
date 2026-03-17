@@ -8,6 +8,11 @@ _COMPANY_SUFFIXES = re.compile(
     re.IGNORECASE,
 )
 
+_COMPANY_REGION_SUFFIXES = re.compile(
+    r"\s+(uk|us|usa|de|sg|eu|emea|apac|global|international)\s*$",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class Job:
@@ -47,6 +52,7 @@ class Job:
         return cleaned
 
     def normalized_key(self) -> tuple[str, str]:
-        company = _COMPANY_SUFFIXES.sub("", self.company).strip().lower()
+        company = _COMPANY_SUFFIXES.sub("", self.company).strip()
+        company = _COMPANY_REGION_SUFFIXES.sub("", company).strip().lower()
         title = self.title.strip().lower()
         return (company, title)

@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.config.companies import LEVER_COMPANIES, COMPANY_NAME_OVERRIDES
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.lever")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.lever")
 class LeverSource(BaseJobSource):
     name = "lever"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+        super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else LEVER_COMPANIES
 
     async def fetch_jobs(self) -> list[Job]:
@@ -31,10 +30,12 @@ class LeverSource(BaseJobSource):
                 title = item.get("text", "")
                 desc = item.get("descriptionPlain", item.get("description", ""))
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
                 categories = item.get("categories", {})
                 location = categories.get("location", "") if isinstance(categories, dict) else ""
+                if not _is_uk_or_remote(location):
+                    continue
                 # Lever createdAt is milliseconds since epoch
                 created_at = item.get("createdAt")
                 if created_at and isinstance(created_at, (int, float)):

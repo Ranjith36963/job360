@@ -6,7 +6,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES, LOCATIONS
 
 logger = logging.getLogger("job360.sources.reed")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.reed")
 class ReedSource(BaseJobSource):
     name = "reed"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = ""):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+        super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
     @property
@@ -30,7 +29,7 @@ class ReedSource(BaseJobSource):
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
         # Search top job titles in key locations
-        queries = JOB_TITLES[:12]
+        queries = self.job_titles[:12]
         locations = ["London", "UK", "Remote"]
         for query in queries:
             for loc in locations:

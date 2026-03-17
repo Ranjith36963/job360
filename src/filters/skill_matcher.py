@@ -99,19 +99,22 @@ def _title_score(job_title: str) -> int:
             return TITLE_WEIGHT
         if target.lower() in title_lower or title_lower in target.lower():
             return TITLE_WEIGHT // 2
-    # Check for partial keyword overlap
+    # Check for partial keyword overlap — require at least one core AI/ML word
     title_words = set(re.findall(r'\w+', title_lower))
-    ai_ml_words = {
+    core_ai_words = {
         "ai", "ml", "machine", "learning", "deep", "nlp", "data",
-        "scientist", "engineer", "genai", "llm", "rag", "computer",
-        "vision", "mlops", "neural", "transformer", "generative",
-        "research", "applied", "platform", "infrastructure",
-        "conversational", "robotics", "alignment",
+        "genai", "llm", "rag", "mlops", "neural", "transformer",
+        "generative", "vision", "computer",
     }
-    overlap = title_words & ai_ml_words
-    if overlap:
-        return min(len(overlap) * 5, TITLE_WEIGHT // 2)
-    return 0
+    supporting_words = {
+        "scientist", "engineer", "research", "applied", "platform",
+        "infrastructure", "conversational", "robotics", "alignment",
+    }
+    core_overlap = title_words & core_ai_words
+    if not core_overlap:
+        return 0
+    support_overlap = title_words & supporting_words
+    return min(len(core_overlap) * 5 + len(support_overlap) * 3, TITLE_WEIGHT // 2)
 
 
 def _skill_score(text: str) -> int:
@@ -172,9 +175,8 @@ def _recency_score(date_found: str) -> int:
 
 def _negative_penalty(job_title: str) -> int:
     """Return penalty points if the title matches a negative keyword."""
-    title_lower = job_title.lower()
     for kw in NEGATIVE_TITLE_KEYWORDS:
-        if kw in title_lower:
+        if _text_contains(job_title, kw.strip()):
             return 30
     return 0
 
@@ -230,3 +232,66 @@ def score_job(job: Job) -> int:
 def check_visa_flag(job: Job) -> bool:
     text = f"{job.title} {job.description}".lower()
     return any(kw.lower() in text for kw in VISA_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic scorer — uses SearchConfig instead of hard-coded keywords
+# ---------------------------------------------------------------------------
+
+
+class JobScorer:
+    """Score jobs using dynamic keyword sets from a SearchConfig."""
+
+    def __init__(self, config):
+        """Accept a SearchConfig (from src.profile.models)."""
+        self._config = config
+
+    def _title_score(self, job_title: str) -> int:
+        title_lower = job_title.lower()
+        for target in self._config.job_titles:
+            if target.lower() == title_lower:
+                return TITLE_WEIGHT
+            if target.lower() in title_lower or title_lower in target.lower():
+                return TITLE_WEIGHT // 2
+        # Partial keyword overlap using dynamic domain words
+        title_words = set(re.findall(r'\w+', title_lower))
+        core_overlap = title_words & self._config.core_domain_words
+        if not core_overlap:
+            return 0
+        support_overlap = title_words & self._config.supporting_role_words
+        return min(len(core_overlap) * 5 + len(support_overlap) * 3, TITLE_WEIGHT // 2)
+
+    def _skill_score(self, text: str) -> int:
+        points = 0
+        for skill in self._config.primary_skills:
+            if _text_contains(text, skill):
+                points += PRIMARY_POINTS
+        for skill in self._config.secondary_skills:
+            if _text_contains(text, skill):
+                points += SECONDARY_POINTS
+        for skill in self._config.tertiary_skills:
+            if _text_contains(text, skill):
+                points += TERTIARY_POINTS
+        return min(points, SKILL_CAP)
+
+    def _negative_penalty(self, job_title: str) -> int:
+        title_lower = job_title.lower()
+        for kw in self._config.negative_title_keywords:
+            if kw in title_lower:
+                return 30
+        return 0
+
+    def score(self, job: Job) -> int:
+        text = f"{job.title} {job.description}"
+        title_pts = self._title_score(job.title)
+        skill_pts = self._skill_score(text)
+        location_pts = _location_score(job.location)
+        recency_pts = _recency_score(job.date_found)
+        penalty = self._negative_penalty(job.title)
+        foreign_penalty = _foreign_location_penalty(job.location)
+        total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+        return min(max(total, 0), 100)
+
+    def check_visa_flag(self, job: Job) -> bool:
+        text = f"{job.title} {job.description}".lower()
+        return any(kw.lower() in text for kw in self._config.visa_keywords)

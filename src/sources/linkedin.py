@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.linkedin")
 
@@ -36,7 +35,8 @@ class LinkedInSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        for query in _LINKEDIN_QUERIES:
+        queries = self.search_queries[:5] if self.search_queries else _LINKEDIN_QUERIES
+        for query in queries:
             params = {
                 "keywords": query,
                 "location": "United Kingdom",
@@ -59,7 +59,7 @@ class LinkedInSource(BaseJobSource):
                 seen_urls.add(url)
                 title = titles[i].strip()
                 text = title.lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
                     continue
                 company = companies[i].strip() if i < len(companies) else ""
                 location = locations[i].strip() if i < len(locations) else "UK"

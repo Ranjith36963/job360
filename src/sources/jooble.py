@@ -6,7 +6,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import JOB_TITLES
 
 logger = logging.getLogger("job360.sources.jooble")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.jooble")
 class JoobleSource(BaseJobSource):
     name = "jooble"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = ""):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+        super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
     @property
@@ -28,7 +27,7 @@ class JoobleSource(BaseJobSource):
             return []
         jobs = []
         seen_ids = set()
-        queries = JOB_TITLES[:8]
+        queries = self.job_titles[:8]
         for query in queries:
             body = {
                 "keywords": query,

@@ -22,7 +22,7 @@ def _build_payload(jobs: list[Job], stats: dict) -> dict:
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"🔍 Job360: {new} new AI/ML jobs found"},
+            "text": {"type": "plain_text", "text": f"🔍 Job360: {new} new jobs found"},
         },
         {
             "type": "section",

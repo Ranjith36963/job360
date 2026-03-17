@@ -125,3 +125,13 @@ def test_dedup_company_suffix_normalization():
     ]
     result = deduplicate(jobs)
     assert len(result) == 1
+
+
+def test_dedup_company_region_suffix():
+    """'Barclays UK' and 'Barclays' should dedup to 1 job."""
+    jobs = [
+        _make_job(title="AI Engineer", company="Barclays UK", source="ashby"),
+        _make_job(title="AI Engineer", company="Barclays", source="greenhouse"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1

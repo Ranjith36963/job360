@@ -5,7 +5,6 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource
-from src.config.keywords import RELEVANCE_KEYWORDS
 from src.config.settings import USER_AGENT
 
 logger = logging.getLogger("job360.sources.remoteok")
@@ -26,7 +25,7 @@ class RemoteOKSource(BaseJobSource):
                 continue
             tags = " ".join(item.get("tags", [])) if isinstance(item.get("tags"), list) else ""
             text = f"{item.get('position', '')} {item.get('description', '')} {tags}".lower()
-            if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+            if not any(kw in text for kw in self.relevance_keywords):
                 continue
             date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(

@@ -1,25 +1,32 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.jsearch")
 
-# Limited queries to stay within 100 req/month free tier
+# Broader queries to improve UK coverage (stay within 100 req/month free tier)
 JSEARCH_QUERIES = [
     "AI Engineer UK",
-    "ML Engineer London",
+    "Machine Learning Engineer London",
+    "Data Scientist UK",
+    "NLP Engineer London",
+    "MLOps Engineer UK",
+    "Deep Learning Engineer London",
+    "Computer Vision Engineer UK",
+    "LLM Engineer UK",
 ]
 
 
 class JSearchSource(BaseJobSource):
     name = "jsearch"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = ""):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+        super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
     @property
@@ -31,11 +38,15 @@ class JSearchSource(BaseJobSource):
             logger.info("JSearch: no API key, skipping")
             return []
         jobs = []
+        consecutive_failures = 0
         headers = {
             "X-RapidAPI-Key": self._api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
-        for query in JSEARCH_QUERIES:
+        queries = self.search_queries if self.search_queries else JSEARCH_QUERIES
+        for i, query in enumerate(queries):
+            if i > 0:
+                await asyncio.sleep(2.0)
             params = {
                 "query": query,
                 "page": "1",
@@ -48,21 +59,37 @@ class JSearchSource(BaseJobSource):
                 headers=headers,
             )
             if not data or "data" not in data:
+                consecutive_failures += 1
+                if consecutive_failures >= 2:
+                    logger.warning(f"JSearch: {consecutive_failures} consecutive failures, stopping early")
+                    break
                 continue
+            consecutive_failures = 0
             for item in data["data"]:
+                title = item.get("job_title", "")
+                description = item.get("job_description", "")
                 location_parts = [
                     item.get("job_city", ""),
                     item.get("job_country", ""),
                 ]
                 location = ", ".join(p for p in location_parts if p)
+
+                # Filter by relevance keywords
+                text = f"{title} {description}".lower()
+                if not any(kw in text for kw in self.relevance_keywords):
+                    continue
+
+                if not _is_uk_or_remote(location):
+                    continue
+
                 date_found = item.get("job_posted_at_datetime_utc") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
-                    title=item.get("job_title", ""),
+                    title=title,
                     company=item.get("employer_name", ""),
                     location=location,
                     salary_min=item.get("job_min_salary"),
                     salary_max=item.get("job_max_salary"),
-                    description=item.get("job_description", ""),
+                    description=description[:5000],
                     apply_url=item.get("job_apply_link", ""),
                     source=self.name,
                     date_found=date_found,

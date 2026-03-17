@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.config.companies import ASHBY_COMPANIES, COMPANY_NAME_OVERRIDES
-from src.config.keywords import RELEVANCE_KEYWORDS
 
 logger = logging.getLogger("job360.sources.ashby")
 
@@ -14,8 +13,8 @@ logger = logging.getLogger("job360.sources.ashby")
 class AshbySource(BaseJobSource):
     name = "ashby"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None):
-        super().__init__(session)
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+        super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else ASHBY_COMPANIES
 
     async def fetch_jobs(self) -> list[Job]:
@@ -30,13 +29,16 @@ class AshbySource(BaseJobSource):
                 title = item.get("title", "")
                 desc = item.get("descriptionPlain", "")
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in RELEVANCE_KEYWORDS):
+                if not any(kw in text for kw in self.relevance_keywords):
+                    continue
+                location = item.get("location", "")
+                if not _is_uk_or_remote(location):
                     continue
                 date_found = item.get("publishedAt") or item.get("updatedAt") or datetime.now(timezone.utc).isoformat()
                 jobs.append(Job(
                     title=title,
                     company=company_name,
-                    location=item.get("location", ""),
+                    location=location,
                     description=desc[:5000],
                     apply_url=item.get("applicationUrl", item.get("jobUrl", "")),
                     source=self.name,
