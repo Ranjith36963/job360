@@ -25,7 +25,7 @@ class RemotiveSource(BaseJobSource):
             desc = item.get("description", "")
             tags = " ".join(item.get("tags", []))
             text = f"{title} {desc} {tags}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
             date_found = item.get("publication_date") or datetime.now(timezone.utc).isoformat()
             salary = item.get("salary", "")

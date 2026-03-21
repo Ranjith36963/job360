@@ -1,9 +1,26 @@
 import logging
+import re
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 from src.config.settings import LOGS_DIR
+
+# Patterns to redact from log output
+_PII_PATTERNS = [
+    (re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'), '[EMAIL_REDACTED]'),
+    (re.compile(r'(?:api[_-]?key|token|password|secret)["\s:=]+["\']?[\w-]{8,}', re.IGNORECASE), '[KEY_REDACTED]'),
+]
+
+
+class PIISanitizingFormatter(logging.Formatter):
+    """Formatter that redacts PII patterns (emails, API keys) from log messages."""
+
+    def format(self, record):
+        msg = super().format(record)
+        for pattern, replacement in _PII_PATTERNS:
+            msg = pattern.sub(replacement, msg)
+        return msg
 
 
 def setup_logging(log_level: str | None = None) -> logging.Logger:
@@ -15,7 +32,7 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
         return logger
     level = getattr(logging, log_level.upper(), logging.INFO) if log_level else logging.INFO
     logger.setLevel(level)
-    fmt = logging.Formatter(
+    fmt = PIISanitizingFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

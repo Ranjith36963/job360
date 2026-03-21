@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -17,7 +18,8 @@ from src.utils.logger import setup_logging
 from src.models import Job
 from src.storage.database import JobDatabase
 from src.storage.csv_export import export_to_csv
-from src.filters.skill_matcher import score_job, check_visa_flag, detect_experience_level, salary_in_range, JobScorer
+from src.filters.skill_matcher import detect_experience_level, salary_in_range, JobScorer, is_foreign_only
+from src.filters.jd_parser import detect_job_type, parse_jd
 from src.filters.deduplicator import deduplicate
 from src.profile.storage import load_profile
 from src.profile.keyword_generator import generate_search_config
@@ -231,16 +233,21 @@ async def run_search(
     if dry_run:
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
 
-    # Load user profile for dynamic keywords
+    # Load user profile — CV is mandatory, no profile = no search
     profile = load_profile()
-    search_config = None
-    scorer = None
-    if profile and profile.is_complete:
-        search_config = generate_search_config(profile)
-        scorer = JobScorer(search_config)
-        logger.info("  Using dynamic keywords from user profile")
-    else:
-        logger.info("  No user profile found, using default keywords")
+    if not profile:
+        logger.error("  No user profile found. Set up your profile to start searching.")
+        logger.error("  Run: python -m src.cli setup-profile --cv path/to/cv.pdf")
+    elif not profile.is_complete:
+        logger.error("  Profile exists but is incomplete (no CV text, no job titles, no skills).")
+        logger.error("  Run: python -m src.cli setup-profile --cv path/to/cv.pdf")
+        logger.error("  Or re-run setup-profile and enter target job titles + skills at the prompts.")
+    if not profile or not profile.is_complete:
+        return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
+
+    search_config = generate_search_config(profile)
+    scorer = JobScorer(search_config)
+    logger.info("  Using keywords from user profile")
     logger.info("=" * 60)
 
     # Init database
@@ -292,15 +299,97 @@ async def run_search(
 
             logger.info(f"Total raw jobs: {len(all_jobs)}")
 
-            # Score all jobs
+            # Hard-remove foreign-only jobs (no UK/remote mention)
+            before_foreign = len(all_jobs)
+            all_jobs = [j for j in all_jobs if not is_foreign_only(j.location)]
+            removed = before_foreign - len(all_jobs)
+            if removed:
+                logger.info(f"Removed {removed} foreign-only jobs")
+
+            # Score all jobs using profile-based scorer + structured JD parsing
+            cv_data = profile.cv_data if profile else None
+
+            # Compute job embeddings if available
+            try:
+                from src.filters.embeddings import is_available as _emb_ok, encode as _emb_enc
+                from src.filters.hybrid_retriever import serialize_embedding as _emb_ser
+                if _emb_ok():
+                    for job in all_jobs:
+                        vec = _emb_enc(f"{job.title} {job.description[:500]}")
+                        if vec is not None:
+                            job.embedding = _emb_ser(vec)
+            except Exception:
+                pass  # Embeddings are optional
+
             for job in all_jobs:
-                if scorer:
-                    job.match_score = scorer.score(job)
-                    job.visa_flag = scorer.check_visa_flag(job)
-                else:
-                    job.match_score = score_job(job)
-                    job.visa_flag = check_visa_flag(job)
+                job.match_score = scorer.score(job)
+                job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
+                job.job_type = detect_job_type(f"{job.title} {job.description}")
+                # Detailed scoring with ParsedJD + structured CV
+                try:
+                    parsed_jd = parse_jd(job.description) if job.description else None
+                    bd = scorer.score_detailed(job, parsed_jd=parsed_jd, cv_data=cv_data)
+                    job.match_data = json.dumps({
+                        "role": bd.role, "skill": bd.skill,
+                        "seniority": bd.seniority, "experience": bd.experience,
+                        "credentials": bd.credentials, "location": bd.location,
+                        "recency": bd.recency, "semantic": bd.semantic,
+                        "matched": bd.matched_skills,
+                        "missing_required": bd.missing_required,
+                        "missing_preferred": bd.missing_preferred,
+                        "transferable": bd.transferable_skills,
+                    })
+                except Exception:
+                    pass  # Non-critical — match_data stays empty
+
+            # Apply feedback adjustment from user liked/rejected signals
+            try:
+                from src.filters.feedback import (
+                    load_feedback_signals, build_preference_vector,
+                    compute_feedback_adjustment,
+                )
+                from src.filters.hybrid_retriever import deserialize_embedding
+                feedback_signals = await load_feedback_signals(db._conn)
+                pref_vec = build_preference_vector(feedback_signals)
+                if feedback_signals.get("liked_texts") or feedback_signals.get("rejected_texts"):
+                    adjusted = 0
+                    for job in all_jobs:
+                        job_emb = deserialize_embedding(job.embedding) if job.embedding else None
+                        adj = compute_feedback_adjustment(
+                            f"{job.title} {job.description[:500]}",
+                            feedback_signals, pref_vec, job_emb,
+                        )
+                        if adj != 0:
+                            job.match_score = max(0, min(100, job.match_score + adj))
+                            adjusted += 1
+                    if adjusted:
+                        logger.info(f"Feedback loop adjusted {adjusted} job scores")
+            except Exception:
+                pass  # Feedback is optional
+
+            # Cross-encoder reranking (top candidates only — expensive)
+            try:
+                from src.filters.reranker import is_available as _rerank_ok, rerank, build_profile_text
+                if _rerank_ok():
+                    profile_text = build_profile_text(
+                        search_config.job_titles,
+                        search_config.primary_skills,
+                        search_config.secondary_skills,
+                    )
+                    job_dicts = [
+                        {"title": j.title, "description": j.description or "",
+                         "match_score": j.match_score, "_job_ref": j}
+                        for j in all_jobs
+                    ]
+                    job_dicts.sort(key=lambda d: d["match_score"], reverse=True)
+                    reranked = rerank(profile_text, job_dicts, top_n=50)
+                    for rank, d in enumerate(reranked[:50]):
+                        boost = max(0, 5 - rank // 10)
+                        d["_job_ref"].match_score = min(100, d["_job_ref"].match_score + boost)
+                    logger.info("Cross-encoder reranked top-50 candidates")
+            except Exception:
+                pass  # Reranking is optional
 
             # Deduplicate
             unique_jobs = deduplicate(all_jobs)
@@ -403,9 +492,9 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
     logger.info("=" * 60)
     logger.info(f"Job360 {label}: {len(jobs)} jobs found")
     logger.info(f"  24h: {counts['last_24h']} | 24-48h: {counts['24_48h']} | "
-                f"48-72h: {counts['48_72h']} | 3-7d: {counts['3_7d']}")
+                f"2-3d: {counts['2_3d']} | 3-5d: {counts['3_5d']} | 5-7d: {counts['5_7d']}")
     logger.info("=" * 60)
-    for idx in range(4):
+    for idx in range(len(BUCKETS)):
         bucket_list = bucketed.get(idx, [])
         if bucket_list:
             label_name = BUCKETS[idx][0]

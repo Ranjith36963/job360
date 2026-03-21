@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from src.config.keywords import VISA_KEYWORDS, LOCATIONS
 from src.profile.models import SearchConfig, UserProfile
+from src.profile.skill_graph import infer_skills
 
 
 # Words to ignore when building relevance keywords
@@ -21,6 +22,7 @@ _ROLE_WORDS = {
     "manager", "specialist", "lead", "head", "director", "scientist",
     "researcher", "designer", "coordinator", "administrator", "officer",
     "technician", "associate", "assistant", "intern", "trainee",
+    "chief", "vice", "deputy", "president",
 }
 
 
@@ -44,35 +46,38 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
             titles.append(title)
             seen.add(title.lower())
 
-    # --- Skills (auto-tier: first 1/3 primary, next 1/3 secondary, rest tertiary) ---
-    all_skills = list(prefs.additional_skills)
-    seen_skills = {s.lower() for s in all_skills}
+    # --- Skills (source-based tiering) ---
+    # Primary: user preferences (strongest signal of intent)
+    primary = list(prefs.additional_skills)
+    seen_skills = {s.lower() for s in primary}
+
+    # Secondary: CV-extracted skills (proven experience)
+    secondary = []
     for s in cv.skills:
         if s.lower() not in seen_skills:
-            all_skills.append(s)
+            secondary.append(s)
             seen_skills.add(s.lower())
 
-    # LinkedIn endorsed skills
+    # Tertiary: LinkedIn + GitHub (supplementary evidence)
+    tertiary = []
     for s in cv.linkedin_skills:
         if s.lower() not in seen_skills:
-            all_skills.append(s)
+            tertiary.append(s)
             seen_skills.add(s.lower())
-
-    # GitHub-inferred skills (ranked by code bytes)
     for s in cv.github_skills_inferred:
         if s.lower() not in seen_skills:
-            all_skills.append(s)
+            tertiary.append(s)
             seen_skills.add(s.lower())
 
-    n = len(all_skills)
-    if n == 0:
-        primary, secondary, tertiary = [], [], []
-    else:
-        t1 = max(n // 3, 1)
-        t2 = max(2 * n // 3, t1 + 1) if n > 1 else t1
-        primary = all_skills[:t1]
-        secondary = all_skills[t1:t2]
-        tertiary = all_skills[t2:]
+    all_skills = primary + secondary + tertiary
+
+    # --- Controlled skill inference (inferred go to tertiary only) ---
+    inferred = infer_skills(all_skills, threshold=0.7)
+    for s in inferred:
+        if s.lower() not in seen_skills:
+            tertiary.append(s)
+            seen_skills.add(s.lower())
+            all_skills.append(s)
 
     # --- Relevance keywords ---
     rel_set: set[str] = set()
@@ -116,14 +121,8 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
             else:
                 core_words.add(word)
 
-    # --- Search queries (top 8 titles x top 2 locations) ---
-    top_titles = titles[:8]
-    search_locations = prefs.preferred_locations[:2] if prefs.preferred_locations else ["UK"]
-    queries = []
-    for title in top_titles:
-        for loc in search_locations:
-            queries.append(f"{title} {loc}")
-    queries = queries[:16]
+    # --- Search queries: "{title} UK" for all titles (UK-wide search) ---
+    queries = [f"{title} UK" for title in titles]
 
     return SearchConfig(
         job_titles=titles,

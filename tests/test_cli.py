@@ -21,7 +21,7 @@ def test_cli_version():
     """CLI --version should show version."""
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "1.0.0" in result.output
+    assert "2.0.0" in result.output
 
 
 def test_run_help():
@@ -94,20 +94,6 @@ def test_setup_profile_help():
     assert "--cv" in result.output
     assert "--linkedin" in result.output
     assert "--github" in result.output
-
-
-def test_setup_profile_preserves_github_username(tmp_path):
-    """BUG-1 regression: github_username must survive merge in CLI flow."""
-    from src.profile.models import CVData, UserPreferences
-    from src.profile.preferences import merge_cv_and_preferences
-
-    prefs = UserPreferences(
-        target_job_titles=["Engineer"],
-        additional_skills=["Python"],
-        github_username="myuser",
-    )
-    merged = merge_cv_and_preferences(["SQL"], ["Data Analyst"], prefs)
-    assert merged.github_username == "myuser"
 
 
 def test_setup_profile_corrupt_cv(tmp_path):

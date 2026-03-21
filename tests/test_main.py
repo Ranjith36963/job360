@@ -6,10 +6,32 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from aioresponses import aioresponses
 
 from src.main import run_search
+from src.profile.models import CVData, UserPreferences, UserProfile
 
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _mock_profile():
+    """Return a mock profile so run_search proceeds (CV is mandatory)."""
+    return UserProfile(
+        cv_data=CVData(
+            raw_text="Experienced AI Engineer with Python and PyTorch",
+            skills=["Python", "PyTorch", "TensorFlow", "LangChain", "RAG",
+                    "LLM", "NLP", "Deep Learning", "AWS", "Docker"],
+            job_titles=["AI Engineer"],
+        ),
+        preferences=UserPreferences(
+            target_job_titles=["AI Engineer", "ML Engineer"],
+            preferred_locations=["London", "UK"],
+        ),
+    )
+
+
+def _patch_profile():
+    """Patch load_profile to return a valid profile."""
+    return patch("src.main.load_profile", return_value=_mock_profile())
 
 
 # Shared mock endpoint setup for all free sources
@@ -96,12 +118,23 @@ def _patch_no_notifications():
 # ---- Existing tests ----
 
 
+def test_run_search_no_profile_returns_empty():
+    """With no profile, run_search should return early with 0 results."""
+    async def _test():
+        with patch("src.main.load_profile", return_value=None):
+            stats = await run_search(db_path=":memory:")
+            assert stats["total_found"] == 0
+            assert stats["new_jobs"] == 0
+            assert stats["sources_queried"] == 0
+    _run(_test())
+
+
 def test_run_search_completes_without_keys():
     """With no API keys and mocked free sources, run_search should complete without error."""
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
-            with _patch_no_notifications():
+            with _patch_profile(), _patch_no_notifications():
                 stats = await run_search(db_path=":memory:")
                 assert stats["sources_queried"] > 0
                 assert isinstance(stats["total_found"], int)
@@ -113,7 +146,7 @@ def test_run_search_with_mock_jobs():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            with _patch_no_notifications():
+            with _patch_profile(), _patch_no_notifications():
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -131,7 +164,7 @@ def test_jobs_are_scored_with_recency():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            with _patch_no_notifications():
+            with _patch_profile(), _patch_no_notifications():
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -154,7 +187,8 @@ def test_all_notification_channels_called():
                 ch.send = AsyncMock()
                 mock_channels.append(ch)
 
-            with patch("src.main.get_configured_channels", return_value=mock_channels):
+            with _patch_profile(), \
+                 patch("src.main.get_configured_channels", return_value=mock_channels):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -170,7 +204,7 @@ def test_run_search_scores_within_range():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            with _patch_no_notifications():
+            with _patch_profile(), _patch_no_notifications():
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -185,7 +219,7 @@ def test_stats_include_per_source():
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
-            with _patch_no_notifications():
+            with _patch_profile(), _patch_no_notifications():
                 stats = await run_search(db_path=":memory:")
                 assert "per_source" in stats
                 assert isinstance(stats["per_source"], dict)
@@ -202,7 +236,7 @@ def test_second_run_finds_no_new_jobs():
         try:
             with aioresponses() as m:
                 _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-                with _patch_no_notifications():
+                with _patch_profile(), _patch_no_notifications():
                     with tempfile.TemporaryDirectory() as tmpdir:
                         with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                              patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -212,7 +246,7 @@ def test_second_run_finds_no_new_jobs():
             # Second run — same job should be recognized as seen
             with aioresponses() as m:
                 _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-                with _patch_no_notifications():
+                with _patch_profile(), _patch_no_notifications():
                     stats2 = await run_search(db_path=db_path)
                     assert stats2["new_jobs"] == 0
         finally:
@@ -232,7 +266,8 @@ def test_run_search_no_notify_skips_channels():
                 ch.send = AsyncMock()
                 mock_channels.append(ch)
 
-            with patch("src.main.get_configured_channels", return_value=mock_channels):
+            with _patch_profile(), \
+                 patch("src.main.get_configured_channels", return_value=mock_channels):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     with patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"), \
                          patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"):
@@ -275,7 +310,7 @@ def test_run_search_auto_purge():
             # Run search — should purge old job
             with aioresponses() as m:
                 _mock_free_sources(m)
-                with _patch_no_notifications():
+                with _patch_profile(), _patch_no_notifications():
                     await run_search(db_path=db_path)
 
             # Verify the specific old job was purged

@@ -19,9 +19,12 @@ class ClimatebaseSource(BaseJobSource):
     name = "climatebase"
 
     async def fetch_jobs(self) -> list[Job]:
+        if not self.search_queries:
+            logger.info("Climatebase: no search queries configured, skipping")
+            return []
         jobs = []
         seen_ids = set()
-        queries = ["data scientist", "machine learning", "AI", "data engineer"]
+        queries = self.search_queries
 
         for query in queries:
             html = await self._get_text(
@@ -68,7 +71,7 @@ class ClimatebaseSource(BaseJobSource):
             company = item.get("name_of_employer", "") or item.get("company", "") or "Unknown"
 
             text = f"{title} {company}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             locations = item.get("locations", [])
@@ -110,7 +113,7 @@ class ClimatebaseSource(BaseJobSource):
         for match in link_pattern.finditer(html):
             path, title = match.group(1), match.group(2).strip()
             text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             apply_url = f"https://climatebase.org{path}"

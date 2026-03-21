@@ -9,18 +9,18 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.aijobs_global")
 
-_SEARCH_QUERIES = ["AI", "machine learning", "data science", "deep learning"]
-
-
 class AIJobsGlobalSource(BaseJobSource):
     """AI Jobs Worldwide — ai-jobs.global (WordPress + WP Job Manager)."""
     name = "aijobs_global"
 
     async def fetch_jobs(self) -> list[Job]:
+        if not self.search_queries:
+            logger.info("AI Jobs Global: no search queries configured, skipping")
+            return []
         jobs = []
         seen_urls = set()
 
-        for query in _SEARCH_QUERIES:
+        for query in self.search_queries:
             # Try WP Job Manager AJAX endpoint
             params = {
                 "action": "workscout_incremental_jobs_suggest",
@@ -61,7 +61,7 @@ class AIJobsGlobalSource(BaseJobSource):
             return None
 
         text = title.lower()
-        if not any(kw in text for kw in self.relevance_keywords):
+        if not self._relevance_match(text):
             return None
 
         location = item.get("location", "") or ""
@@ -99,7 +99,7 @@ class AIJobsGlobalSource(BaseJobSource):
                 continue
 
             text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             jobs.append(Job(

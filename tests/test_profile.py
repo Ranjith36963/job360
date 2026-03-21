@@ -20,60 +20,7 @@ from src.profile.cv_parser import (
     _find_sections,
 )
 from src.filters.skill_matcher import JobScorer
-from src.config.keywords import (
-    JOB_TITLES,
-    PRIMARY_SKILLS,
-    SECONDARY_SKILLS,
-    TERTIARY_SKILLS,
-    RELEVANCE_KEYWORDS,
-    NEGATIVE_TITLE_KEYWORDS,
-    VISA_KEYWORDS,
-)
-
-
-# -----------------------------------------------------------------------
-# SearchConfig.from_defaults() — must reproduce hard-coded AI/ML keywords
-# -----------------------------------------------------------------------
-
-class TestSearchConfigDefaults:
-    def test_from_defaults_job_titles(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.job_titles == list(JOB_TITLES)
-
-    def test_from_defaults_primary_skills(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.primary_skills == list(PRIMARY_SKILLS)
-
-    def test_from_defaults_secondary_skills(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.secondary_skills == list(SECONDARY_SKILLS)
-
-    def test_from_defaults_tertiary_skills(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.tertiary_skills == list(TERTIARY_SKILLS)
-
-    def test_from_defaults_relevance_keywords(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.relevance_keywords == list(RELEVANCE_KEYWORDS)
-
-    def test_from_defaults_negative_keywords(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.negative_title_keywords == list(NEGATIVE_TITLE_KEYWORDS)
-
-    def test_from_defaults_visa_keywords(self):
-        cfg = SearchConfig.from_defaults()
-        assert cfg.visa_keywords == list(VISA_KEYWORDS)
-
-    def test_from_defaults_has_core_domain_words(self):
-        cfg = SearchConfig.from_defaults()
-        assert "ai" in cfg.core_domain_words
-        assert "ml" in cfg.core_domain_words
-        assert "llm" in cfg.core_domain_words
-
-    def test_from_defaults_has_supporting_role_words(self):
-        cfg = SearchConfig.from_defaults()
-        assert "engineer" in cfg.supporting_role_words
-        assert "scientist" in cfg.supporting_role_words
+from src.config.keywords import VISA_KEYWORDS
 
 
 # -----------------------------------------------------------------------
@@ -217,15 +164,6 @@ class TestPreferences:
         assert "Python" in merged.additional_skills
         assert "React" in merged.additional_skills
 
-    def test_merge_preserves_github_username(self):
-        """BUG-1 regression: github_username must survive merge."""
-        prefs = UserPreferences(
-            additional_skills=["Python"],
-            github_username="testuser",
-        )
-        merged = merge_cv_and_preferences(["SQL"], [], prefs)
-        assert merged.github_username == "testuser"
-
 
 # -----------------------------------------------------------------------
 # Profile storage (uses temp directory)
@@ -306,23 +244,27 @@ class TestKeywordGenerator:
         assert "python" in config.relevance_keywords
         assert "sql" in config.relevance_keywords
 
-    def test_auto_tiers_skills(self):
+    def test_source_based_tiers_skills(self):
+        """CV skills become secondary; preferences become primary."""
         skills = ["Python", "SQL", "Java", "React", "Node", "Docker",
                    "K8s", "AWS", "GCP"]
         profile = self._make_profile(skills=skills)
         config = generate_search_config(profile)
-        assert len(config.primary_skills) > 0
+        # _make_profile puts skills in cv.skills with additional_skills=[],
+        # so primary=[] (from prefs), secondary=cv.skills, tertiary=inferred
         assert len(config.secondary_skills) > 0
         assert len(config.tertiary_skills) > 0
         total = len(config.primary_skills) + len(config.secondary_skills) + len(config.tertiary_skills)
-        assert total == len(skills)
+        assert total >= len(skills)
 
-    def test_single_skill_becomes_primary(self):
+    def test_single_cv_skill_becomes_secondary(self):
+        """A single CV skill lands in secondary tier (not primary)."""
         profile = self._make_profile(skills=["Python"])
         config = generate_search_config(profile)
-        assert config.primary_skills == ["Python"]
-        assert config.secondary_skills == []
-        assert config.tertiary_skills == []
+        assert config.primary_skills == []
+        assert "Python" in config.secondary_skills
+        # tertiary may contain inferred skills (e.g. pip, pytest from Python)
+        assert "Python" not in config.tertiary_skills
 
     def test_empty_skills_no_crash(self):
         profile = self._make_profile()
@@ -356,7 +298,7 @@ class TestKeywordGenerator:
         )
         config = generate_search_config(profile)
         assert len(config.search_queries) > 0
-        assert "Software Engineer London" in config.search_queries
+        assert "Software Engineer UK" in config.search_queries
 
     def test_search_queries_default_uk(self):
         profile = self._make_profile(titles=["Data Scientist"])
@@ -383,10 +325,6 @@ class TestKeywordGenerator:
 
 class TestJobScorer:
     @pytest.fixture
-    def default_scorer(self):
-        return JobScorer(SearchConfig.from_defaults())
-
-    @pytest.fixture
     def custom_scorer(self):
         """A scorer for a sales/marketing domain."""
         return JobScorer(SearchConfig(
@@ -402,17 +340,6 @@ class TestJobScorer:
             supporting_role_words={"manager", "executive", "developer", "lead"},
             search_queries=["Sales Manager UK", "Account Executive London"],
         ))
-
-    def test_default_scorer_matches_score_job(self, default_scorer, sample_ai_job):
-        """Default scorer should produce same result as score_job()."""
-        from src.filters.skill_matcher import score_job
-        dynamic = default_scorer.score(sample_ai_job)
-        static = score_job(sample_ai_job)
-        assert dynamic == static
-
-    def test_default_scorer_visa_matches(self, default_scorer, sample_visa_job):
-        from src.filters.skill_matcher import check_visa_flag
-        assert default_scorer.check_visa_flag(sample_visa_job) == check_visa_flag(sample_visa_job)
 
     def test_custom_scorer_sales_job_scores_high(self, custom_scorer):
         job = Job(
@@ -466,8 +393,9 @@ class TestJobScorer:
         )
         assert custom_scorer.check_visa_flag(job) is True
 
-    def test_scorer_score_range(self, default_scorer):
+    def test_scorer_score_range(self):
         """Score must always be 0-100."""
+        scorer = JobScorer(SearchConfig())
         job = Job(
             title="Random Title",
             company="Unknown",
@@ -477,7 +405,7 @@ class TestJobScorer:
             source="test",
             date_found="2020-01-01",
         )
-        score = default_scorer.score(job)
+        score = scorer.score(job)
         assert 0 <= score <= 100
 
     def test_scorer_empty_config_no_crash(self):

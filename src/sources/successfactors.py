@@ -61,7 +61,7 @@ class SuccessFactorsSource(BaseJobSource):
                 continue
 
             text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             if not _is_uk_or_remote(title):
@@ -87,7 +87,7 @@ class SuccessFactorsSource(BaseJobSource):
                 if not title:
                     continue
                 text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
                 if not _is_uk_or_remote(title):
                     continue

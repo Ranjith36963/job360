@@ -6,7 +6,6 @@ from typing import Optional
 
 import humanize
 
-from src.config.keywords import PRIMARY_SKILLS, SECONDARY_SKILLS, TERTIARY_SKILLS
 
 # ---------------------------------------------------------------------------
 # Bucket definitions: (label, emoji_unicode, emoji_rich, max_hours, css_class)
@@ -14,8 +13,9 @@ from src.config.keywords import PRIMARY_SKILLS, SECONDARY_SKILLS, TERTIARY_SKILL
 BUCKETS = [
     ("Last 24 Hours", "\U0001f534", "[red]\u25cf[/red]", 24, "bucket-24h"),
     ("24 \u2013 48 Hours", "\U0001f7e0", "[dark_orange]\u25cf[/dark_orange]", 48, "bucket-48h"),
-    ("48 \u2013 72 Hours", "\U0001f7e1", "[yellow]\u25cf[/yellow]", 72, "bucket-72h"),
-    ("3 \u2013 7 Days", "\U0001f535", "[blue]\u25cf[/blue]", 168, "bucket-7d"),
+    ("2 \u2013 3 Days", "\U0001f7e1", "[yellow]\u25cf[/yellow]", 72, "bucket-3d"),
+    ("3 \u2013 5 Days", "\U0001f7e2", "[green]\u25cf[/green]", 120, "bucket-5d"),
+    ("5 \u2013 7 Days", "\U0001f535", "[blue]\u25cf[/blue]", 168, "bucket-7d"),
 ]
 
 # Date formats to try (reuses list from src/main.py:_format_date)
@@ -64,7 +64,7 @@ def get_job_age_hours(date_found: str, first_seen: str = "") -> float:
 
 
 def assign_bucket(age_hours: float) -> Optional[int]:
-    """Return bucket index 0-3 based on age_hours, or None if > 7 days."""
+    """Return bucket index 0-4 based on age_hours, or None if > 7 days."""
     for i, (_, _, _, max_h, _) in enumerate(BUCKETS):
         if age_hours <= max_h:
             return i
@@ -72,11 +72,11 @@ def assign_bucket(age_hours: float) -> Optional[int]:
 
 
 def bucket_jobs(jobs: list[dict], min_score: int = 30) -> dict[int, list[dict]]:
-    """Group job dicts into 4 time buckets, sorted by score DESC within each.
+    """Group job dicts into 5 time buckets, sorted by score DESC within each.
 
     Jobs older than 7 days or below min_score are excluded.
     """
-    buckets: dict[int, list[dict]] = {i: [] for i in range(4)}
+    buckets: dict[int, list[dict]] = {i: [] for i in range(len(BUCKETS))}
     for job in jobs:
         score = job.get("match_score", 0)
         if score < min_score:
@@ -99,8 +99,9 @@ def bucket_summary_counts(bucketed: dict[int, list[dict]]) -> dict:
     return {
         "last_24h": len(bucketed.get(0, [])),
         "24_48h": len(bucketed.get(1, [])),
-        "48_72h": len(bucketed.get(2, [])),
-        "3_7d": len(bucketed.get(3, [])),
+        "2_3d": len(bucketed.get(2, [])),
+        "3_5d": len(bucketed.get(3, [])),
+        "5_7d": len(bucketed.get(4, [])),
         "total": total,
     }
 
@@ -124,9 +125,9 @@ def extract_matched_skills(text: str, primary: list[str] | None = None,
 
     Args:
         text: Text to search for skill matches.
-        primary: Custom primary skills list. Defaults to hard-coded PRIMARY_SKILLS.
-        secondary: Custom secondary skills list. Defaults to hard-coded SECONDARY_SKILLS.
-        tertiary: Custom tertiary skills list. Defaults to hard-coded TERTIARY_SKILLS.
+        primary: Primary skills list from user profile.
+        secondary: Secondary skills list from user profile.
+        tertiary: Tertiary skills list from user profile.
 
     Returns dict with keys 'primary', 'secondary', 'tertiary'.
     """
@@ -134,13 +135,13 @@ def extract_matched_skills(text: str, primary: list[str] | None = None,
         return {"primary": [], "secondary": [], "tertiary": []}
     text_lower = text.lower()
     result = {"primary": [], "secondary": [], "tertiary": []}
-    for skill in (primary if primary is not None else PRIMARY_SKILLS):
+    for skill in (primary or []):
         if skill.lower() in text_lower:
             result["primary"].append(skill)
-    for skill in (secondary if secondary is not None else SECONDARY_SKILLS):
+    for skill in (secondary or []):
         if skill.lower() in text_lower:
             result["secondary"].append(skill)
-    for skill in (tertiary if tertiary is not None else TERTIARY_SKILLS):
+    for skill in (tertiary or []):
         if skill.lower() in text_lower:
             result["tertiary"].append(skill)
     return result

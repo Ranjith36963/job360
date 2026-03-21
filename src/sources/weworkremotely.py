@@ -43,7 +43,7 @@ class WeWorkRemotelySource(BaseJobSource):
             region = (item.findtext("region") or "").strip()
 
             text = f"{title} {description}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             # Check region for UK/Europe/EMEA/GMT compatibility

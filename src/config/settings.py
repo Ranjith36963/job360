@@ -24,6 +24,11 @@ FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
+# LLM (optional — for AI-powered CV summarization)
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" or "openai"
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+
 # Email
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -43,6 +48,9 @@ MAX_DAYS_OLD = 7
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
+
+# Dashboard salary band filters (GBP annual)
+SALARY_BANDS = [35000, 45000, 55000, 65000, 75000]
 
 # Rate limits (requests per second)
 RATE_LIMITS = {

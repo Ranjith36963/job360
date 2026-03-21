@@ -451,7 +451,6 @@ class TestStorageWithNewFields:
         )
         prefs = UserPreferences(
             target_job_titles=["ML Engineer"],
-            github_username="testuser",
         )
         profile = UserProfile(cv_data=cv, preferences=prefs)
 
@@ -464,7 +463,6 @@ class TestStorageWithNewFields:
             assert loaded.cv_data.github_languages == {"Python": 50000}
             assert loaded.cv_data.github_topics == ["machine-learning"]
             assert loaded.cv_data.github_skills_inferred == ["TypeScript"]
-            assert loaded.preferences.github_username == "testuser"
 
     def test_load_old_profile_without_new_fields(self, tmp_path):
         """Old profiles without LinkedIn/GitHub fields should load fine."""
@@ -484,7 +482,6 @@ class TestStorageWithNewFields:
             assert loaded.cv_data.skills == ["Java"]
             assert loaded.cv_data.linkedin_skills == []
             assert loaded.cv_data.github_skills_inferred == []
-            assert loaded.preferences.github_username == ""
 
     def test_load_profile_with_unknown_keys(self, tmp_path):
         """Profile with extra keys from future versions shouldn't crash."""
@@ -594,14 +591,17 @@ class TestKeywordGeneratorWithEnrichedData:
         assert "Go" in all_skills
 
     def test_empty_enrichment_fields_no_change(self):
-        """When LinkedIn/GitHub fields are empty, behavior is same as Phase 1."""
+        """When LinkedIn/GitHub fields are empty, CV skills stay in secondary tier (plus inferred)."""
         profile = UserProfile(
             cv_data=CVData(raw_text="test", skills=["Python", "SQL"]),
             preferences=UserPreferences(target_job_titles=["Engineer"]),
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert set(all_skills) == {"Python", "SQL"}
+        # Original CV skills must be present in secondary (source-based tiering)
+        assert "Python" in all_skills
+        assert "SQL" in all_skills
+        assert "Python" in config.secondary_skills
 
 
 # ---------------------------------------------------------------------------

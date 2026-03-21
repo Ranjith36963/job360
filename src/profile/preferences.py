@@ -74,5 +74,4 @@ def merge_cv_and_preferences(
         experience_level=prefs.experience_level,
         negative_keywords=prefs.negative_keywords,
         about_me=prefs.about_me,
-        github_username=prefs.github_username,
     )

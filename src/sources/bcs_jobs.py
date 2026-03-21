@@ -53,7 +53,7 @@ class BCSJobsSource(BaseJobSource):
                 continue
 
             text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             if path.startswith("http"):

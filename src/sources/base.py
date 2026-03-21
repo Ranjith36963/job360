@@ -8,15 +8,17 @@ import aiohttp
 
 from src.models import Job
 from src.config.settings import MAX_RETRIES, RETRY_BACKOFF, REQUEST_TIMEOUT, USER_AGENT, RATE_LIMITS
-from src.filters.skill_matcher import UK_TERMS, REMOTE_TERMS, FOREIGN_INDICATORS
+from src.filters.skill_matcher import is_foreign_only
 from src.utils.rate_limiter import RateLimiter
-from src.config.keywords import RELEVANCE_KEYWORDS as _DEFAULT_RELEVANCE_KEYWORDS
-from src.config.keywords import JOB_TITLES as _DEFAULT_JOB_TITLES
 
 logger = logging.getLogger("job360.sources")
 
 # HTTP status codes that indicate a bad request format — retrying won't help
 _NO_RETRY_STATUSES = (401, 403, 404, 422)
+
+# Circuit breaker: track consecutive failures per source
+_circuit_breaker: dict[str, int] = {}
+_CIRCUIT_BREAKER_THRESHOLD = 3
 
 
 def _sanitize_xml(text: str) -> str:
@@ -30,19 +32,7 @@ def _sanitize_xml(text: str) -> str:
 
 def _is_uk_or_remote(location: str) -> bool:
     """Return True if a job location is likely UK, remote, or unknown."""
-    if not location:
-        return True  # Unknown — might be UK, don't filter
-    loc_lower = location.lower()
-    for term in UK_TERMS:
-        if term in loc_lower:
-            return True
-    for term in REMOTE_TERMS:
-        if term in loc_lower:
-            return True
-    for indicator in FOREIGN_INDICATORS:
-        if indicator in loc_lower:
-            return False
-    return True  # Unknown location, don't filter out
+    return not is_foreign_only(location)
 
 
 class BaseJobSource(ABC):
@@ -58,19 +48,38 @@ class BaseJobSource(ABC):
     def relevance_keywords(self) -> list[str]:
         if self._search_config is not None:
             return self._search_config.relevance_keywords
-        return _DEFAULT_RELEVANCE_KEYWORDS
+        return []
 
     @property
     def job_titles(self) -> list[str]:
         if self._search_config is not None:
             return self._search_config.job_titles
-        return _DEFAULT_JOB_TITLES
+        return []
 
     @property
     def search_queries(self) -> list[str]:
         if self._search_config is not None and self._search_config.search_queries:
             return self._search_config.search_queries
         return []
+
+    def _relevance_match(self, text: str) -> bool:
+        """Check if any relevance keyword appears as a whole word in text.
+
+        Uses word-boundary matching for short keywords to avoid false positives
+        (e.g. keyword 'R' matching 'Recruitment', 'Go' matching 'Good').
+        """
+        if not self.relevance_keywords:
+            return True  # No keywords configured — don't filter
+        text_lower = text.lower()
+        for kw in self.relevance_keywords:
+            kw_lower = kw.lower()
+            if len(kw_lower) <= 2:
+                if re.search(r'\b' + re.escape(kw_lower) + r'\b', text_lower):
+                    return True
+            else:
+                if kw_lower in text_lower:
+                    return True
+        return False
 
     def _headers(self, extra: dict | None = None) -> dict:
         """Build request headers with User-Agent default."""
@@ -82,6 +91,27 @@ class BaseJobSource(ABC):
     @abstractmethod
     async def fetch_jobs(self) -> list[Job]:
         ...
+
+    async def safe_fetch(self) -> list[Job]:
+        """Fetch with circuit breaker — skip source after consecutive failures."""
+        failures = _circuit_breaker.get(self.name, 0)
+        if failures >= _CIRCUIT_BREAKER_THRESHOLD:
+            logger.warning(
+                f"[{self.name}] Circuit breaker OPEN — skipping after "
+                f"{failures} consecutive failures"
+            )
+            return []
+        try:
+            jobs = await self.fetch_jobs()
+            _circuit_breaker[self.name] = 0  # Reset on success
+            return jobs
+        except Exception as e:
+            _circuit_breaker[self.name] = failures + 1
+            logger.error(
+                f"[{self.name}] Fetch failed ({failures + 1}/"
+                f"{_CIRCUIT_BREAKER_THRESHOLD}): {e}"
+            )
+            return []
 
     async def _request(self, method: str, url: str, *,
                        params: dict | None = None,

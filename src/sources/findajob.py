@@ -7,17 +7,6 @@ from src.sources.base import BaseJobSource
 
 logger = logging.getLogger("job360.sources.findajob")
 
-FINDAJOB_QUERIES = [
-    "AI engineer",
-    "machine learning engineer",
-    "data scientist",
-    "NLP engineer",
-    "deep learning",
-    "MLOps engineer",
-    "computer vision engineer",
-    "LLM engineer",
-]
-
 # Updated regex patterns for current FindAJob HTML structure
 # Job links appear as <a href="/details/12345">Job Title</a> inside <h3> tags
 _JOB_LINK_RE = re.compile(
@@ -42,7 +31,10 @@ class FindAJobSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        queries = self.search_queries if self.search_queries else FINDAJOB_QUERIES
+        if not self.search_queries:
+            logger.info("FindAJob: no search queries configured, skipping")
+            return []
+        queries = self.search_queries
         for query in queries:
             params = {
                 "q": query,

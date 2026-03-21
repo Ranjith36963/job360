@@ -40,13 +40,19 @@ def _parse_hn_comment(text: str, relevance_keywords: list[str]) -> dict | None:
     # Use full text as description
     description = clean[:5000]
 
-    # Infer title from relevance keywords in the text
+    # Infer title from relevance keywords in the text (word-boundary match)
     title = ""
     text_lower = clean.lower()
     for kw in relevance_keywords:
-        if kw in text_lower:
-            title = f"{company} - Hiring"
-            break
+        kw_lower = kw.lower()
+        if len(kw_lower) <= 2:
+            if re.search(r'\b' + re.escape(kw_lower) + r'\b', text_lower):
+                title = f"{company} - Hiring"
+                break
+        else:
+            if kw_lower in text_lower:
+                title = f"{company} - Hiring"
+                break
 
     if not title:
         return None
@@ -98,7 +104,7 @@ class HackerNewsSource(BaseJobSource):
                 continue
 
             text_lower = comment_text.lower()
-            if not any(kw in text_lower for kw in self.relevance_keywords):
+            if not self._relevance_match(text_lower):
                 continue
 
             parsed = _parse_hn_comment(comment_text, self.relevance_keywords)

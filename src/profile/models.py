@@ -5,16 +5,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.config.keywords import (
-    JOB_TITLES,
-    LOCATIONS,
-    PRIMARY_SKILLS,
-    SECONDARY_SKILLS,
-    TERTIARY_SKILLS,
-    RELEVANCE_KEYWORDS,
-    NEGATIVE_TITLE_KEYWORDS,
-    VISA_KEYWORDS,
-)
+
+@dataclass
+class WorkExperience:
+    """A single work-experience entry extracted from the CV."""
+    title: str = ""
+    company: str = ""
+    start_date: str = ""       # e.g. "Jan 2020", "2020"
+    end_date: str = ""         # e.g. "Dec 2023", "Present", ""
+    duration_months: int = 0   # computed from dates
+    description: str = ""
+    skills_used: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StructuredEducation:
+    """A single education entry extracted from the CV."""
+    institution: str = ""
+    degree: str = ""           # e.g. "BSc", "MSc", "PhD", "PGCE", "MBA"
+    field_of_study: str = ""   # e.g. "Computer Science", "Nursing"
+    year: Optional[int] = None # graduation year
+    grade: str = ""            # e.g. "First Class", "2:1", "Distinction"
+
+
+@dataclass
+class Project:
+    """A project entry extracted from the CV."""
+    name: str = ""
+    description: str = ""
+    technologies: list[str] = field(default_factory=list)
+    url: str = ""
 
 
 @dataclass
@@ -25,6 +45,12 @@ class CVData:
     education: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
     summary: str = ""
+    # Structured data (Phase 0A)
+    work_experiences: list[WorkExperience] = field(default_factory=list)
+    structured_education: list[StructuredEducation] = field(default_factory=list)
+    projects: list[Project] = field(default_factory=list)
+    total_experience_months: int = 0
+    computed_seniority: str = ""  # "entry", "mid", "senior", "lead", "executive"
     # LinkedIn-sourced data
     linkedin_positions: list[dict] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
@@ -48,7 +74,6 @@ class UserPreferences:
     experience_level: str = ""
     negative_keywords: list[str] = field(default_factory=list)
     about_me: str = ""
-    github_username: str = ""
 
 
 @dataclass
@@ -80,28 +105,3 @@ class SearchConfig:
     supporting_role_words: set[str] = field(default_factory=set)
     search_queries: list[str] = field(default_factory=list)
 
-    @classmethod
-    def from_defaults(cls) -> SearchConfig:
-        """Return SearchConfig with the current hard-coded AI/ML keywords."""
-        core_ai_words = {
-            "ai", "ml", "machine", "learning", "deep", "nlp", "data",
-            "genai", "llm", "rag", "mlops", "neural", "transformer",
-            "generative", "vision", "computer",
-        }
-        supporting_words = {
-            "scientist", "engineer", "research", "applied", "platform",
-            "infrastructure", "conversational", "robotics", "alignment",
-        }
-        return cls(
-            job_titles=list(JOB_TITLES),
-            primary_skills=list(PRIMARY_SKILLS),
-            secondary_skills=list(SECONDARY_SKILLS),
-            tertiary_skills=list(TERTIARY_SKILLS),
-            relevance_keywords=list(RELEVANCE_KEYWORDS),
-            negative_title_keywords=list(NEGATIVE_TITLE_KEYWORDS),
-            locations=list(LOCATIONS),
-            visa_keywords=list(VISA_KEYWORDS),
-            core_domain_words=core_ai_words,
-            supporting_role_words=supporting_words,
-            search_queries=[],
-        )

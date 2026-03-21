@@ -53,11 +53,11 @@ def generate_markdown_report(jobs: list[Job], stats: dict) -> str:
     bucketed = bucket_jobs(job_dicts, min_score=0)
     counts = bucket_summary_counts(bucketed)
     lines.append(f"- **Breakdown**: {counts['last_24h']} in 24h, {counts['24_48h']} in 24-48h, "
-                 f"{counts['48_72h']} in 48-72h, {counts['3_7d']} in 3-7d")
+                 f"{counts['2_3d']} in 2-3d, {counts['3_5d']} in 3-5d, {counts['5_7d']} in 5-7d")
     lines.append("")
 
-    bucket_emojis = ["\U0001f534", "\U0001f7e0", "\U0001f7e1", "\U0001f535"]
-    for idx in range(4):
+    bucket_emojis = ["\U0001f534", "\U0001f7e0", "\U0001f7e1", "\U0001f7e2", "\U0001f535"]
+    for idx in range(len(BUCKETS)):
         label = BUCKETS[idx][0]
         emoji = bucket_emojis[idx]
         bucket_list = bucketed.get(idx, [])
@@ -98,11 +98,11 @@ def generate_html_report(jobs: list[Job], stats: dict) -> str:
         ", ".join(f"{k}: {v}" for k, v in per_source.items())
     ) if per_source else "N/A"
 
-    bucket_colors = ["#f44336", "#FF9800", "#FFC107", "#2196F3"]
-    bucket_emojis_html = ["&#x1f534;", "&#x1f7e0;", "&#x1f7e1;", "&#x1f535;"]
+    bucket_colors = ["#f44336", "#FF9800", "#FFC107", "#4CAF50", "#2196F3"]
+    bucket_emojis_html = ["&#x1f534;", "&#x1f7e0;", "&#x1f7e1;", "&#x1f7e2;", "&#x1f535;"]
 
     sections_html = ""
-    for idx in range(4):
+    for idx in range(len(BUCKETS)):
         label = BUCKETS[idx][0]
         emoji = bucket_emojis_html[idx]
         color = bucket_colors[idx]
@@ -136,8 +136,8 @@ def generate_html_report(jobs: list[Job], stats: dict) -> str:
         sections_html += "</table>"
 
     summary_line = (f"Found {counts['total']} jobs: {counts['last_24h']} in last 24h, "
-                    f"{counts['24_48h']} in 24-48h, {counts['48_72h']} in 48-72h, "
-                    f"{counts['3_7d']} in 3-7d")
+                    f"{counts['24_48h']} in 24-48h, {counts['2_3d']} in 2-3d, "
+                    f"{counts['3_5d']} in 3-5d, {counts['5_7d']} in 5-7d")
 
     return f"""<html>
 <head><style>

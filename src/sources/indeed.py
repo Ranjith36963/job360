@@ -46,7 +46,7 @@ class JobSpySource(BaseJobSource):
                 title = str(row.get("title", ""))
                 desc = str(row.get("description", ""))
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
                 site = str(row.get("site", "indeed")).lower()
                 source_name = site if site in ("indeed", "glassdoor") else "indeed"

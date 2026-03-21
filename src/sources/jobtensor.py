@@ -19,14 +19,17 @@ class JobTensorSource(BaseJobSource):
     name = "jobtensor"
 
     async def fetch_jobs(self) -> list[Job]:
+        if not self.relevance_keywords:
+            logger.info("JobTensor: no keywords configured, skipping")
+            return []
+
+        # Build skills from dynamic keywords
+        skills_str = ",".join(self.relevance_keywords[:10])
+
         # Try the AJAX search API directly
         data = await self._get_json(
             "https://jobtensor.com/ajax/search/",
-            params={
-                "country": "uk",
-                "skills": "AI,Machine Learning,Deep Learning,NLP,Data Science",
-                "page": "1",
-            },
+            params={"country": "uk", "skills": skills_str, "page": "1"},
         )
 
         if data and isinstance(data, dict):
@@ -36,8 +39,12 @@ class JobTensorSource(BaseJobSource):
                 logger.info(f"JobTensor: found {len(jobs)} relevant jobs (API)")
                 return jobs
 
-        # Fallback: try HTML scraping with context extraction
-        html = await self._get_text("https://jobtensor.com/United-Kingdom/Artificial-Intelligence-jobs")
+        # Fallback: HTML scraping with dynamic query
+        query = self.search_queries[0] if self.search_queries else self.relevance_keywords[0]
+        html = await self._get_text(
+            "https://jobtensor.com/search",
+            params={"q": query, "country": "uk"},
+        )
         if not html:
             return []
 
@@ -55,7 +62,7 @@ class JobTensorSource(BaseJobSource):
             location = item.get("location", "") or item.get("city", "") or "UK"
 
             text = f"{title} {company}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             slug = item.get("slug", "") or item.get("url", "")
@@ -103,7 +110,7 @@ class JobTensorSource(BaseJobSource):
         for match in link_pattern.finditer(html):
             path, title = match.group(1), match.group(2).strip()
             text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             apply_url = f"https://jobtensor.com{path}"

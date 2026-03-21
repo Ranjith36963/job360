@@ -29,7 +29,7 @@ class JobicySource(BaseJobSource):
             title = item.get("jobTitle", "")
             description = item.get("jobExcerpt", "")
             text = f"{title} {description}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
             date_found = item.get("pubDate") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(

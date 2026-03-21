@@ -28,35 +28,33 @@ class ReedSource(BaseJobSource):
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
-        # Search top job titles in key locations
+        # Search all job titles UK-wide
         queries = self.job_titles[:12]
-        locations = ["London", "UK", "Remote"]
         for query in queries:
-            for loc in locations:
-                params = {
-                    "keywords": query,
-                    "locationName": loc,
-                    "resultsToTake": 50,
-                }
-                data = await self._get_json(
-                    "https://www.reed.co.uk/api/1.0/search",
-                    params=params,
-                    headers=headers,
-                )
-                if not data or "results" not in data:
-                    continue
-                for item in data["results"]:
-                    date_found = item.get("date") or item.get("datePosted") or datetime.now(timezone.utc).isoformat()
-                    jobs.append(Job(
-                        title=item.get("jobTitle", ""),
-                        company=item.get("employerName", ""),
-                        location=item.get("locationName", ""),
-                        salary_min=item.get("minimumSalary"),
-                        salary_max=item.get("maximumSalary"),
-                        description=item.get("jobDescription", ""),
-                        apply_url=f"https://www.reed.co.uk/jobs/{item.get('jobId', '')}",
-                        source=self.name,
-                        date_found=date_found,
-                    ))
+            params = {
+                "keywords": query,
+                "locationName": "UK",
+                "resultsToTake": 50,
+            }
+            data = await self._get_json(
+                "https://www.reed.co.uk/api/1.0/search",
+                params=params,
+                headers=headers,
+            )
+            if not data or "results" not in data:
+                continue
+            for item in data["results"]:
+                date_found = item.get("date") or item.get("datePosted") or datetime.now(timezone.utc).isoformat()
+                jobs.append(Job(
+                    title=item.get("jobTitle", ""),
+                    company=item.get("employerName", ""),
+                    location=item.get("locationName", ""),
+                    salary_min=item.get("minimumSalary"),
+                    salary_max=item.get("maximumSalary"),
+                    description=item.get("jobDescription", ""),
+                    apply_url=f"https://www.reed.co.uk/jobs/{item.get('jobId', '')}",
+                    source=self.name,
+                    date_found=date_found,
+                ))
         logger.info(f"Reed: found {len(jobs)} jobs")
         return jobs

@@ -13,6 +13,12 @@ _COMPANY_REGION_SUFFIXES = re.compile(
     re.IGNORECASE,
 )
 
+# Trailing job codes like "- 12345" or "/ REQ-123"
+_TRAILING_CODE_RE = re.compile(r'\s*[-/]\s*[A-Z0-9]{2,}[-_]?\d+\s*$', re.IGNORECASE)
+
+# Parentheticals like "(London)" or "(Remote)"
+_PAREN_RE = re.compile(r'\s*\([^)]*\)\s*$')
+
 
 @dataclass
 class Job:
@@ -29,6 +35,9 @@ class Job:
     visa_flag: bool = False
     is_new: bool = True
     experience_level: str = ""
+    job_type: str = ""
+    match_data: str = ""  # JSON: score breakdown + skill match lists
+    embedding: str = ""   # base64-encoded 384-dim vector
 
     def __post_init__(self):
         # Decode HTML entities in title and company
@@ -36,10 +45,10 @@ class Job:
         self.company = html.unescape(self.company)
         # Clean broken company names ("nan", "", "None" → "Unknown")
         self.company = self._clean_company(self.company)
-        # Salary sanity: <10k likely hourly, >500k likely non-GBP
-        if self.salary_min is not None and self.salary_min < 10000:
+        # Salary sanity: reject only negative values (data errors)
+        if self.salary_min is not None and self.salary_min < 0:
             self.salary_min = None
-        if self.salary_max is not None and self.salary_max > 500000:
+        if self.salary_max is not None and self.salary_max < 0:
             self.salary_max = None
 
     @staticmethod
@@ -54,5 +63,8 @@ class Job:
     def normalized_key(self) -> tuple[str, str]:
         company = _COMPANY_SUFFIXES.sub("", self.company).strip()
         company = _COMPANY_REGION_SUFFIXES.sub("", company).strip().lower()
-        title = self.title.strip().lower()
+        title = self.title.strip()
+        title = _TRAILING_CODE_RE.sub('', title)
+        title = _PAREN_RE.sub('', title)
+        title = title.strip().lower()
         return (company, title)

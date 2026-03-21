@@ -47,7 +47,7 @@ class WorkAnywhereSource(BaseJobSource):
             pub_date = (item.findtext("pubDate") or "").strip()
 
             text = f"{title} {description}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             # Check for UK/Europe/GMT timezone compatibility

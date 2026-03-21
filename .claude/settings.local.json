@@ -2,8 +2,27 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(echo:*)",
       "WebSearch",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sqlite__read_query",
+      "mcp__sqlite__list_tables",
+      "mcp__sqlite__describe_table",
+      "mcp__context7__*",
+      "Bash(pip show:*)",
+      "mcp__claude_ai_Context7__resolve-library-id",
+      "Bash(pip install:*)"
     ]
-  }
+  },
+  "outputStyle": "Explanatory",
+  "prefersReducedMotion": false,
+  "disabledMcpjsonServers": [
+    "context7",
+    "sqlite"
+  ]
 }

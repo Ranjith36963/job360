@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 from aioresponses import aioresponses
 
+from src.profile.models import SearchConfig
 from src.sources.reed import ReedSource
 from src.sources.adzuna import AdzunaSource
 from src.sources.jsearch import JSearchSource
@@ -56,6 +57,24 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+# Test SearchConfig — provides keywords for all source tests
+_TEST_CONFIG = SearchConfig(
+    job_titles=["AI Engineer", "ML Engineer", "Data Scientist", "Software Engineer"],
+    primary_skills=["Python", "PyTorch", "TensorFlow"],
+    secondary_skills=["AWS", "Docker"],
+    tertiary_skills=["Git"],
+    relevance_keywords=["ai", "ml", "python", "engineer", "data", "software",
+                        "developer", "remote", "devops", "cloud", "health",
+                        "climate", "science", "tech", "job", "work"],
+    negative_title_keywords=[],
+    locations=["London", "UK", "Remote"],
+    visa_keywords=["visa sponsorship", "sponsorship"],
+    core_domain_words={"ai", "ml", "data", "software"},
+    supporting_role_words={"engineer", "scientist", "developer"},
+    search_queries=["AI Engineer UK", "ML Engineer London"],
+)
+
+
 REED_PAYLOAD = {"results": [{
     "jobId": 123, "jobTitle": "AI Engineer",
     "employerName": "DeepMind", "locationName": "London",
@@ -88,7 +107,7 @@ def test_reed_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"), payload=REED_PAYLOAD, repeat=True)
-                source = ReedSource(session, api_key="test-key")
+                source = ReedSource(session, api_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
@@ -103,7 +122,7 @@ def test_reed_skips_without_key():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            source = ReedSource(session, api_key="")
+            source = ReedSource(session, api_key="", search_config=_TEST_CONFIG)
             jobs = await source.fetch_jobs()
             assert jobs == []
         finally:
@@ -117,7 +136,7 @@ def test_adzuna_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://api\.adzuna\.com/v1/api/jobs/gb/search/1.*"), payload=ADZUNA_PAYLOAD, repeat=True)
-                source = AdzunaSource(session, app_id="test-id", app_key="test-key")
+                source = AdzunaSource(session, app_id="test-id", app_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -133,7 +152,7 @@ def test_jsearch_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://jsearch\.p\.rapidapi\.com/search.*"), payload=JSEARCH_PAYLOAD, repeat=True)
-                source = JSearchSource(session, api_key="test-key")
+                source = JSearchSource(session, api_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "GenAI Engineer"
@@ -155,7 +174,7 @@ def test_arbeitnow_parses_response():
                     "url": "https://arbeitnow.com/jobs/ai-eng-1",
                     "tags": ["ai", "python"],
                 }]})
-                source = ArbeitnowSource(session)
+                source = ArbeitnowSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "arbeitnow"
@@ -178,7 +197,7 @@ def test_remoteok_parses_response():
                      "tags": ["python", "ml"],
                      "salary_min": 50000, "salary_max": 70000},
                 ])
-                source = RemoteOKSource(session)
+                source = RemoteOKSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -200,7 +219,7 @@ def test_jobicy_parses_response():
                     "annualSalaryMin": 50000, "annualSalaryMax": 70000,
                     "jobExcerpt": "Data science role",
                 }]})
-                source = JobicySource(session)
+                source = JobicySource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jobicy"
@@ -223,7 +242,7 @@ def test_himalayas_parses_response():
                     "minSalary": 55000, "maxSalary": 75000,
                     "categories": ["AI", "Machine Learning"],
                 }]})
-                source = HimalayasSource(session)
+                source = HimalayasSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "himalayas"
@@ -243,7 +262,7 @@ def test_greenhouse_parses_response():
                     "absolute_url": "https://boards.greenhouse.io/deepmind/jobs/401",
                     "content": "<p>AI research role</p>",
                 }]})
-                source = GreenhouseSource(session, companies=["deepmind"])
+                source = GreenhouseSource(session, companies=["deepmind"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "greenhouse"
@@ -263,7 +282,7 @@ def test_lever_parses_response():
                     "hostedUrl": "https://jobs.lever.co/tractable/501",
                     "descriptionPlain": "CV role with Python and PyTorch",
                 }])
-                source = LeverSource(session, companies=["tractable"])
+                source = LeverSource(session, companies=["tractable"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "lever"
@@ -282,7 +301,7 @@ def test_workable_parses_response():
                     "location": {"city": "London", "country": "UK"},
                     "shortDescription": "MLOps role with Python and machine learning",
                 }]})
-                source = WorkableSource(session, companies=["deepmind"])
+                source = WorkableSource(session, companies=["deepmind"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "workable"
@@ -302,7 +321,7 @@ def test_ashby_parses_response():
                     "applicationUrl": "https://ashby.com/anthropic/601",
                     "descriptionPlain": "AI safety research role",
                 }]})
-                source = AshbySource(session, companies=["anthropic"])
+                source = AshbySource(session, companies=["anthropic"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "ashby"
@@ -326,7 +345,7 @@ def test_findajob_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://findajob\.dwp\.gov\.uk/search.*"),
                       body=html, content_type="text/html", repeat=True)
-                source = FindAJobSource(session)
+                source = FindAJobSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "findajob"
@@ -350,7 +369,7 @@ def test_remotive_parses_response():
                     "publication_date": "2024-01-15",
                     "salary": "70000-90000",
                 }]})
-                source = RemotiveSource(session)
+                source = RemotiveSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "remotive"
@@ -372,7 +391,7 @@ def test_jooble_parses_response():
                     "link": "https://jooble.org/jobs/1001",
                     "updated": "2024-01-10",
                 }]}, repeat=True)
-                source = JoobleSource(session, api_key="test-key")
+                source = JoobleSource(session, api_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jooble"
@@ -386,7 +405,7 @@ def test_jooble_skips_without_key():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            source = JoobleSource(session, api_key="")
+            source = JoobleSource(session, api_key="", search_config=_TEST_CONFIG)
             jobs = await source.fetch_jobs()
             assert jobs == []
         finally:
@@ -413,7 +432,7 @@ def test_linkedin_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
                       body=html, content_type="text/html", repeat=True)
-                source = LinkedInSource(session)
+                source = LinkedInSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "linkedin"
@@ -434,7 +453,7 @@ def test_smartrecruiters_parses_response():
                     "ref": "https://jobs.smartrecruiters.com/wise/sr-101",
                     "releasedDate": "2024-01-15",
                 }]})
-                source = SmartRecruitersSource(session, companies=["wise"])
+                source = SmartRecruitersSource(session, companies=["wise"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "smartrecruiters"
@@ -455,7 +474,7 @@ def test_pinpoint_parses_response():
                     "location": {"name": "London, UK"},
                     "compensation": {"min": 65000, "max": 85000},
                 }])
-                source = PinpointSource(session, companies=["test"])
+                source = PinpointSource(session, companies=["test"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "pinpoint"
@@ -477,7 +496,7 @@ def test_recruitee_parses_response():
                     "careers_url": "https://test.recruitee.com/o/nlp-engineer",
                     "published_at": "2024-01-12",
                 }]})
-                source = RecruiteeSource(session, companies=["test"])
+                source = RecruiteeSource(session, companies=["test"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "recruitee"
@@ -522,7 +541,7 @@ def test_jobspy_parses_dataframe():
             mock_module = MagicMock()
             mock_module.scrape_jobs = MagicMock(return_value=df)
             with patch.dict(sys.modules, {"jobspy": mock_module}):
-                source = JobSpySource(session)
+                source = JobSpySource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 2
                 indeed_jobs = [j for j in jobs if j.source == "indeed"]
@@ -568,7 +587,7 @@ def test_workday_parses_response():
                     payload=WORKDAY_PAYLOAD,
                     repeat=True,
                 )
-                source = WorkdaySource(session, companies=companies)
+                source = WorkdaySource(session, companies=companies, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 # Only AI Engineer should pass relevance filter; Marketing Manager should not
                 ai_jobs = [j for j in jobs if "AI" in j.title]
@@ -632,7 +651,7 @@ def test_google_jobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://serpapi\.com/search.*"),
                       payload=GOOGLE_JOBS_PAYLOAD, repeat=True)
-                source = GoogleJobsSource(session, api_key="test-key")
+                source = GoogleJobsSource(session, api_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
@@ -648,7 +667,7 @@ def test_google_jobs_skips_without_key():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            source = GoogleJobsSource(session, api_key="")
+            source = GoogleJobsSource(session, api_key="", search_config=_TEST_CONFIG)
             jobs = await source.fetch_jobs()
             assert jobs == []
         finally:
@@ -663,7 +682,7 @@ def test_devitjobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight.*"),
                       payload=DEVITJOBS_PAYLOAD)
-                source = DevITJobsSource(session)
+                source = DevITJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 # Only ML Engineer should pass relevance filter
                 assert len(jobs) >= 1
@@ -685,7 +704,7 @@ def test_landingjobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://landing\.jobs/api/v1/jobs\.json.*"),
                       payload=LANDINGJOBS_PAYLOAD)
-                source = LandingJobsSource(session)
+                source = LandingJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "NLP Engineer"
@@ -714,7 +733,7 @@ def test_landingjobs_skips_non_uk():
             with aioresponses() as m:
                 m.get(re.compile(r"https://landing\.jobs/api/v1/jobs\.json.*"),
                       payload=payload)
-                source = LandingJobsSource(session)
+                source = LandingJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -734,7 +753,7 @@ def test_ashby_skips_non_uk():
                     "applicationUrl": "https://ashby.com/anthropic/701",
                     "descriptionPlain": "AI safety research role",
                 }]})
-                source = AshbySource(session, companies=["anthropic"])
+                source = AshbySource(session, companies=["anthropic"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 0
         finally:
@@ -764,7 +783,7 @@ def test_workday_skips_non_uk():
                     payload=payload,
                     repeat=True,
                 )
-                source = WorkdaySource(session, companies=companies)
+                source = WorkdaySource(session, companies=companies, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 0
         finally:
@@ -784,7 +803,7 @@ def test_greenhouse_skips_non_uk():
                     "absolute_url": "https://boards.greenhouse.io/test/jobs/801",
                     "content": "<p>AI research role</p>",
                 }]})
-                source = GreenhouseSource(session, companies=["test"])
+                source = GreenhouseSource(session, companies=["test"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 0
         finally:
@@ -804,7 +823,7 @@ def test_lever_skips_non_uk():
                     "hostedUrl": "https://jobs.lever.co/test/901",
                     "descriptionPlain": "CV role with Python and PyTorch",
                 }])
-                source = LeverSource(session, companies=["test"])
+                source = LeverSource(session, companies=["test"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 0
         finally:
@@ -818,7 +837,7 @@ def test_source_returns_empty_on_error():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.arbeitnow\.com/.*"), status=500, repeat=True)
-                source = ArbeitnowSource(session)
+                source = ArbeitnowSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -855,7 +874,7 @@ def test_aijobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
                       payload=AIJOBS_PAYLOAD)
-                source = AIJobsSource(session)
+                source = AIJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -881,7 +900,7 @@ def test_aijobs_skips_non_uk():
             with aioresponses() as m:
                 m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
                       payload=payload)
-                source = AIJobsSource(session)
+                source = AIJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -909,7 +928,7 @@ def test_themuse_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.themuse\.com/api/public/jobs.*"),
                       payload=THEMUSE_PAYLOAD, repeat=True)
-                source = TheMuseSource(session)
+                source = TheMuseSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "Data Scientist"
@@ -937,7 +956,7 @@ def test_themuse_skips_non_uk():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.themuse\.com/api/public/jobs.*"),
                       payload=payload, repeat=True)
-                source = TheMuseSource(session)
+                source = TheMuseSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -972,7 +991,7 @@ def test_hackernews_parses_response():
                       payload=HN_SEARCH_PAYLOAD)
                 m.get(re.compile(r"https://hn\.algolia\.com/api/v1/items/.*"),
                       payload=HN_ITEM_PAYLOAD)
-                source = HackerNewsSource(session)
+                source = HackerNewsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "hackernews"
@@ -989,7 +1008,7 @@ def test_hackernews_returns_empty_without_thread():
             with aioresponses() as m:
                 m.get(re.compile(r"https://hn\.algolia\.com/api/v1/search.*"),
                       payload={"hits": []})
-                source = HackerNewsSource(session)
+                source = HackerNewsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -1018,7 +1037,7 @@ def test_careerjet_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://search\.api\.careerjet\.net/.*"),
                       payload=CAREERJET_PAYLOAD, repeat=True)
-                source = CareerjetSource(session, affid="test-affid")
+                source = CareerjetSource(session, affid="test-affid", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
@@ -1033,7 +1052,7 @@ def test_careerjet_skips_without_affid():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            source = CareerjetSource(session, affid="")
+            source = CareerjetSource(session, affid="", search_config=_TEST_CONFIG)
             jobs = await source.fetch_jobs()
             assert jobs == []
         finally:
@@ -1060,7 +1079,7 @@ def test_findwork_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://findwork\.dev/api/jobs/.*"),
                       payload=FINDWORK_PAYLOAD)
-                source = FindworkSource(session, api_key="test-key")
+                source = FindworkSource(session, api_key="test-key", search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -1075,7 +1094,7 @@ def test_findwork_skips_without_key():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            source = FindworkSource(session, api_key="")
+            source = FindworkSource(session, api_key="", search_config=_TEST_CONFIG)
             jobs = await source.fetch_jobs()
             assert jobs == []
         finally:
@@ -1117,7 +1136,7 @@ def test_nofluffjobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://nofluffjobs\.com/api/.*"),
                       payload=NOFLUFFJOBS_PAYLOAD, repeat=True)
-                source = NoFluffJobsSource(session)
+                source = NoFluffJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -1147,7 +1166,7 @@ def test_nofluffjobs_skips_non_uk():
             with aioresponses() as m:
                 m.get(re.compile(r"https://nofluffjobs\.com/api/.*"),
                       payload=payload, repeat=True)
-                source = NoFluffJobsSource(session)
+                source = NoFluffJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -1185,7 +1204,7 @@ def test_hn_jobs_parses_response():
                       payload=HN_JOBS_IDS)
                 m.get(re.compile(r"https://hacker-news\.firebaseio\.com/v0/item/.*"),
                       payload=HN_JOBS_ITEM_1, repeat=True)
-                source = HNJobsSource(session)
+                source = HNJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "hn_jobs"
@@ -1202,7 +1221,7 @@ def test_hn_jobs_returns_empty_on_no_ids():
             with aioresponses() as m:
                 m.get("https://hacker-news.firebaseio.com/v0/jobstories.json",
                       payload=[])
-                source = HNJobsSource(session)
+                source = HNJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -1241,7 +1260,7 @@ def test_yc_companies_parses_response():
             with aioresponses() as m:
                 m.get("https://yc-oss.github.io/api/companies/all.json",
                       payload=YC_COMPANIES_PAYLOAD)
-                source = YCCompaniesSource(session)
+                source = YCCompaniesSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "yc_companies"
@@ -1280,7 +1299,7 @@ def test_jobs_ac_uk_parses_rss():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.jobs\.ac\.uk/feeds/.*"),
                       body=JOBS_AC_UK_RSS, content_type="application/xml", repeat=True)
-                source = JobsAcUkSource(session)
+                source = JobsAcUkSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jobs_ac_uk"
@@ -1323,7 +1342,7 @@ def test_nhs_jobs_parses_xml():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.jobs\.nhs\.uk/api/v1/search_xml.*"),
                       body=NHS_JOBS_XML, content_type="application/xml", repeat=True)
-                source = NHSJobsSource(session)
+                source = NHSJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "nhs_jobs"
@@ -1369,7 +1388,7 @@ def test_personio_parses_xml():
             with aioresponses() as m:
                 m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
                       body=PERSONIO_XML, content_type="application/xml", repeat=True)
-                source = PersonioSource(session, companies=["testco"])
+                source = PersonioSource(session, companies=["testco"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "personio"
@@ -1399,7 +1418,7 @@ def test_personio_skips_non_uk():
             with aioresponses() as m:
                 m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
                       body=xml, content_type="application/xml", repeat=True)
-                source = PersonioSource(session, companies=["testco"])
+                source = PersonioSource(session, companies=["testco"], search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -1430,7 +1449,7 @@ def test_workanywhere_parses_rss():
             with aioresponses() as m:
                 m.get(re.compile(r"https://workanywhere\.pro/rss.*"),
                       body=WORKANYWHERE_RSS, content_type="application/xml", repeat=True)
-                source = WorkAnywhereSource(session)
+                source = WorkAnywhereSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "workanywhere"
@@ -1465,7 +1484,7 @@ def test_weworkremotely_parses_rss():
             with aioresponses() as m:
                 m.get("https://weworkremotely.com/remote-jobs.rss",
                       body=WEWORKREMOTELY_RSS, content_type="application/xml")
-                source = WeWorkRemotelySource(session)
+                source = WeWorkRemotelySource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "weworkremotely"
@@ -1499,7 +1518,7 @@ def test_realworkfromanywhere_parses_rss():
             with aioresponses() as m:
                 m.get("https://www.realworkfromanywhere.com/rss.xml",
                       body=REALWORKFROMANYWHERE_RSS, content_type="application/xml")
-                source = RealWorkFromAnywhereSource(session)
+                source = RealWorkFromAnywhereSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "realworkfromanywhere"
@@ -1533,7 +1552,7 @@ def test_biospace_parses_rss():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.biospace\.com/rss/.*"),
                       body=BIOSPACE_RSS, content_type="application/xml", repeat=True)
-                source = BioSpaceSource(session)
+                source = BioSpaceSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "biospace"
@@ -1568,9 +1587,9 @@ def test_jobtensor_parses_html():
                 # AJAX API returns empty, falls back to HTML
                 m.get(re.compile(r"https://jobtensor\.com/ajax/.*"),
                       payload={"total": 0, "hits": []})
-                m.get("https://jobtensor.com/uk/AI-Machine-Learning-jobs",
+                m.get(re.compile(r"https://jobtensor\.com/search.*"),
                       body=JOBTENSOR_HTML, content_type="text/html")
-                source = JobTensorSource(session)
+                source = JobTensorSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
                 assert all(j.source == "jobtensor" for j in jobs) if jobs else True
@@ -1595,7 +1614,7 @@ def test_climatebase_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://climatebase\.org/jobs.*"),
                       body=CLIMATEBASE_HTML, content_type="text/html", repeat=True)
-                source = ClimatebaseSource(session)
+                source = ClimatebaseSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "climatebase"
@@ -1629,7 +1648,7 @@ def test_eightykhours_parses_algolia():
             with aioresponses() as m:
                 m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"),
                        payload=EIGHTYKHOURS_ALGOLIA_RESPONSE, repeat=True)
-                source = EightyKHoursSource(session)
+                source = EightyKHoursSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "eightykhours"
@@ -1658,7 +1677,7 @@ def test_bcs_jobs_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.bcs\.org/jobs.*"),
                       body=BCS_HTML, content_type="text/html", repeat=True)
-                source = BCSJobsSource(session)
+                source = BCSJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 # BCS might not match our regex patterns exactly in mocked HTML,
                 # so just verify it returns a list without errors
@@ -1697,7 +1716,7 @@ def test_uni_jobs_parses_rss():
                 m.get(re.compile(r".*jobs\.royalholloway\.ac\.uk.*"), status=404)
                 m.get(re.compile(r".*jobs\.surrey\.ac\.uk.*"), status=404)
                 m.get(re.compile(r".*uukjobs\.co\.uk.*"), status=404)
-                source = UniJobsSource(session)
+                source = UniJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "uni_jobs"
@@ -1729,7 +1748,7 @@ def test_successfactors_parses_sitemap():
             with aioresponses() as m:
                 m.get("https://jobs.baesystems.com/sitemap.xml",
                       body=SUCCESSFACTORS_SITEMAP, content_type="application/xml")
-                source = SuccessFactorsSource(session, companies=companies)
+                source = SuccessFactorsSource(session, companies=companies, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 # Sitemap parsing extracts titles from URLs
                 assert isinstance(jobs, list)
@@ -1759,7 +1778,7 @@ def test_aijobs_global_parses_html():
                 m.get(re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
                       payload=[{"label": "ML Engineer", "url": "https://ai-jobs.global/jobs/123", "company": "GlobalCo", "location": "London, UK"}],
                       repeat=True)
-                source = AIJobsGlobalSource(session)
+                source = AIJobsGlobalSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
                 assert all(j.source == "aijobs_global" for j in jobs) if jobs else True
@@ -1786,7 +1805,7 @@ def test_aijobs_ai_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://aijobs\.ai/.*"),
                       body=AIJOBS_AI_HTML, content_type="text/html", repeat=True)
-                source = AIJobsAISource(session)
+                source = AIJobsAISource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
                 assert all(j.source == "aijobs_ai" for j in jobs) if jobs else True
@@ -1814,7 +1833,7 @@ def test_nomis_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.nomisweb\.co\.uk/api/.*"),
                       payload=NOMIS_PAYLOAD)
-                source = NomisSource(session)
+                source = NomisSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "nomis"
@@ -1832,7 +1851,7 @@ def test_nomis_returns_empty_on_no_data():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.nomisweb\.co\.uk/api/.*"),
                       payload={"obs": []})
-                source = NomisSource(session)
+                source = NomisSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:

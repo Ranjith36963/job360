@@ -29,7 +29,7 @@ class RecruiteeSource(BaseJobSource):
                 title = item.get("title", "")
                 desc = item.get("description", "")
                 text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
                 location = item.get("location", "")
                 if not _is_uk_or_remote(location):

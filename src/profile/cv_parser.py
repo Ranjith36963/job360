@@ -28,6 +28,10 @@ _SECTION_PATTERNS = {
         r'^(?:certifications?|certificates?|accreditations?|licenses?)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
     ),
+    "projects": re.compile(
+        r'^(?:projects?|personal\s+projects?|key\s+projects?|portfolio)\s*[:\-]?\s*$',
+        re.IGNORECASE | re.MULTILINE,
+    ),
     "summary": re.compile(
         r'^(?:summary|profile|objective|about\s+me|personal\s+statement|overview)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
@@ -192,6 +196,25 @@ def parse_cv(file_path: str) -> CVData:
     # Extract summary
     if "summary" in sections:
         cv.summary = sections["summary"][:500]
+
+    # Structured parsing (work experience, education, projects, seniority)
+    try:
+        from src.profile.cv_structured_parser import enhance_cv_data
+        cv = enhance_cv_data(cv, sections)
+    except Exception as e:
+        logger.warning(f"Structured CV parsing failed (continuing with flat data): {e}")
+
+    # Optional LLM enrichment
+    try:
+        from src.profile.cv_summarizer import is_configured, extract_from_cv_text, merge_llm_extraction
+        if is_configured():
+            logger.info("LLM configured — supplementing regex CV parsing with AI extraction")
+            extraction = extract_from_cv_text(raw_text)
+            cv = merge_llm_extraction(cv, extraction)
+    except ImportError:
+        pass  # LLM libraries not installed — continue with regex-only parsing
+    except Exception as e:
+        logger.warning(f"LLM CV enrichment failed (continuing with regex results): {e}")
 
     return cv
 

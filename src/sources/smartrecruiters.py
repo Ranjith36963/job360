@@ -31,7 +31,7 @@ class SmartRecruitersSource(BaseJobSource):
             for item in data["content"]:
                 title = item.get("name", "")
                 text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):

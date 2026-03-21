@@ -94,9 +94,14 @@ def test_assign_bucket_2_to_72h():
     assert assign_bucket(72) == 2
 
 
-def test_assign_bucket_3_to_7d():
+def test_assign_bucket_3_to_5d():
     assert assign_bucket(73) == 3
-    assert assign_bucket(168) == 3
+    assert assign_bucket(120) == 3
+
+
+def test_assign_bucket_4_to_7d():
+    assert assign_bucket(121) == 4
+    assert assign_bucket(168) == 4
 
 
 def test_assign_bucket_over_7d_none():
@@ -114,16 +119,18 @@ def _make_job(hours_ago: float, score: int = 60) -> dict:
 
 def test_bucket_jobs_grouping():
     jobs = [
-        _make_job(5, 80),   # bucket 0
-        _make_job(30, 70),  # bucket 1
-        _make_job(60, 65),  # bucket 2
-        _make_job(100, 50), # bucket 3
+        _make_job(5, 80),   # bucket 0 (24h)
+        _make_job(30, 70),  # bucket 1 (24-48h)
+        _make_job(60, 65),  # bucket 2 (2-3d)
+        _make_job(100, 50), # bucket 3 (3-5d)
+        _make_job(150, 45), # bucket 4 (5-7d)
     ]
     bucketed = bucket_jobs(jobs)
     assert len(bucketed[0]) == 1
     assert len(bucketed[1]) == 1
     assert len(bucketed[2]) == 1
     assert len(bucketed[3]) == 1
+    assert len(bucketed[4]) == 1
 
 
 def test_bucket_jobs_score_filter():
@@ -149,13 +156,14 @@ def test_bucket_jobs_old_excluded():
 # bucket_summary_counts
 # ---------------------------------------------------------------------------
 def test_bucket_summary_counts():
-    bucketed = {0: [1, 2, 3], 1: [4], 2: [], 3: [5, 6]}
+    bucketed = {0: [1, 2, 3], 1: [4], 2: [], 3: [5, 6], 4: [7]}
     counts = bucket_summary_counts(bucketed)
     assert counts["last_24h"] == 3
     assert counts["24_48h"] == 1
-    assert counts["48_72h"] == 0
-    assert counts["3_7d"] == 2
-    assert counts["total"] == 6
+    assert counts["2_3d"] == 0
+    assert counts["3_5d"] == 2
+    assert counts["5_7d"] == 1
+    assert counts["total"] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +183,14 @@ def test_format_relative_time_unknown():
 # ---------------------------------------------------------------------------
 # extract_matched_skills
 # ---------------------------------------------------------------------------
+_TEST_PRIMARY = ["Python", "PyTorch", "LangChain"]
+_TEST_SECONDARY = ["Docker", "Kubernetes"]
+_TEST_TERTIARY = ["CI/CD", "Git"]
+
+
 def test_extract_matched_skills_primary():
     text = "Experience with Python and PyTorch required. Knowledge of LangChain preferred."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, primary=_TEST_PRIMARY)
     assert "Python" in skills["primary"]
     assert "PyTorch" in skills["primary"]
     assert "LangChain" in skills["primary"]
@@ -185,20 +198,23 @@ def test_extract_matched_skills_primary():
 
 def test_extract_matched_skills_secondary():
     text = "Must know Docker and Kubernetes."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, secondary=_TEST_SECONDARY)
     assert "Docker" in skills["secondary"]
     assert "Kubernetes" in skills["secondary"]
 
 
 def test_extract_matched_skills_tertiary():
     text = "CI/CD experience and Git proficiency expected."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, tertiary=_TEST_TERTIARY)
     assert "CI/CD" in skills["tertiary"]
     assert "Git" in skills["tertiary"]
 
 
 def test_extract_matched_skills_no_match():
-    skills = extract_matched_skills("Marketing manager position")
+    skills = extract_matched_skills("Marketing manager position",
+                                    primary=_TEST_PRIMARY,
+                                    secondary=_TEST_SECONDARY,
+                                    tertiary=_TEST_TERTIARY)
     assert skills["primary"] == []
     assert skills["secondary"] == []
     assert skills["tertiary"] == []
@@ -242,8 +258,8 @@ def test_score_color_name_orange():
 # ---------------------------------------------------------------------------
 # BUCKETS constant
 # ---------------------------------------------------------------------------
-def test_buckets_has_4_entries():
-    assert len(BUCKETS) == 4
+def test_buckets_has_5_entries():
+    assert len(BUCKETS) == 5
     # Each tuple has 5 elements
     for b in BUCKETS:
         assert len(b) == 5

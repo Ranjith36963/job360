@@ -119,21 +119,39 @@ def test_html_decode_company():
     assert job.company == "Smith & Sons"
 
 
-# ---- Salary outlier tests ----
+# ---- Salary validation tests ----
 
 
-def test_salary_low_nullified():
-    job = Job(title="AI Engineer", company="Test", salary_min=50, salary_max=80000,
+def test_salary_negative_nullified():
+    """Negative salaries are data errors and should be nullified."""
+    job = Job(title="AI Engineer", company="Test", salary_min=-100, salary_max=-500,
               apply_url="x", source="a", date_found="x")
     assert job.salary_min is None
+    assert job.salary_max is None
+
+
+def test_salary_zero_kept():
+    """Zero salary is valid (e.g., volunteer roles)."""
+    job = Job(title="AI Engineer", company="Test", salary_min=0, salary_max=80000,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min == 0
     assert job.salary_max == 80000
 
 
-def test_salary_high_nullified():
-    job = Job(title="AI Engineer", company="Test", salary_min=50000, salary_max=999999,
+def test_salary_low_kept():
+    """Low salaries (part-time, hourly-converted) should be kept."""
+    job = Job(title="AI Engineer", company="Test", salary_min=50, salary_max=80000,
               apply_url="x", source="a", date_found="x")
-    assert job.salary_min == 50000
-    assert job.salary_max is None
+    assert job.salary_min == 50
+    assert job.salary_max == 80000
+
+
+def test_salary_high_kept():
+    """High salaries (CEO, executive) should be kept."""
+    job = Job(title="CEO", company="Test", salary_min=500000, salary_max=1500000,
+              apply_url="x", source="a", date_found="x")
+    assert job.salary_min == 500000
+    assert job.salary_max == 1500000
 
 
 def test_salary_normal_unchanged():
@@ -141,14 +159,6 @@ def test_salary_normal_unchanged():
               apply_url="x", source="a", date_found="x")
     assert job.salary_min == 60000
     assert job.salary_max == 90000
-
-
-def test_salary_boundary_kept():
-    """10000 and 500000 are at the boundary and should be kept."""
-    job = Job(title="AI Engineer", company="Test", salary_min=10000, salary_max=500000,
-              apply_url="x", source="a", date_found="x")
-    assert job.salary_min == 10000
-    assert job.salary_max == 500000
 
 
 # ---- Region suffix stripping tests ----

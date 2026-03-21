@@ -77,14 +77,14 @@ def test_dedup_single_job():
 # ---- Smarter deduplication tests ----
 
 
-def test_dedup_strips_seniority_prefix():
-    """'Senior ML Engineer' and 'ML Engineer' at same company should dedup."""
+def test_dedup_preserves_seniority_prefix():
+    """'Senior ML Engineer' and 'ML Engineer' are distinct roles — must NOT dedup."""
     jobs = [
         _make_job(title="Senior ML Engineer", company="DeepMind", source="reed"),
         _make_job(title="ML Engineer", company="DeepMind", source="adzuna"),
     ]
     result = deduplicate(jobs)
-    assert len(result) == 1
+    assert len(result) == 2
 
 
 def test_dedup_strips_trailing_job_code():
@@ -135,3 +135,74 @@ def test_dedup_company_region_suffix():
     ]
     result = deduplicate(jobs)
     assert len(result) == 1
+
+
+# ---- Pass 2: Description similarity dedup ----
+
+
+_LONG_DESC = (
+    "We are looking for an experienced AI Engineer to join our team. "
+    "You will work on cutting-edge machine learning models using Python, "
+    "PyTorch, and TensorFlow. Experience with LLMs and RAG pipelines "
+    "is highly desirable. Strong communication skills required."
+)
+
+
+def test_dedup_similar_description_different_titles():
+    """Same company + nearly identical descriptions = duplicate even with different titles."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind", description=_LONG_DESC,
+                  match_score=70, source="reed"),
+        _make_job(title="Machine Learning Engineer", company="DeepMind",
+                  description=_LONG_DESC, match_score=65, source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1
+    assert result[0].match_score == 70  # kept the higher score
+
+
+def test_dedup_similar_description_keeps_better():
+    """When descriptions match, keep the one with more data."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind", description=_LONG_DESC,
+                  match_score=60, source="reed"),
+        _make_job(title="ML Engineer", company="DeepMind", description=_LONG_DESC,
+                  match_score=80, salary_min=70000, salary_max=90000, source="adzuna"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 1
+    assert result[0].match_score == 80
+
+
+def test_dedup_different_descriptions_kept():
+    """Same company but genuinely different descriptions = NOT deduplicated."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind",
+                  description="Build computer vision models for autonomous vehicles. "
+                              "Requires expertise in OpenCV, YOLO, and real-time inference."),
+        _make_job(title="Data Scientist", company="DeepMind",
+                  description="Analyze business metrics and create dashboards. "
+                              "Requires SQL, Tableau, and statistical modelling."),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 2
+
+
+def test_dedup_short_descriptions_not_compared():
+    """Short descriptions should not trigger similarity dedup (too unreliable)."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind", description="AI role"),
+        _make_job(title="ML Engineer", company="DeepMind", description="ML role"),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 2
+
+
+def test_dedup_different_companies_not_compared():
+    """Similar descriptions at DIFFERENT companies are NOT duplicates."""
+    jobs = [
+        _make_job(title="AI Engineer", company="DeepMind", description=_LONG_DESC),
+        _make_job(title="AI Engineer", company="Revolut", description=_LONG_DESC),
+    ]
+    result = deduplicate(jobs)
+    assert len(result) == 2

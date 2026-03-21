@@ -9,24 +9,18 @@ from src.sources.base import BaseJobSource
 
 logger = logging.getLogger("job360.sources.nhs_jobs")
 
-SEARCH_QUERIES = [
-    "data scientist",
-    "machine learning",
-    "artificial intelligence",
-    "data analyst",
-    "data engineer",
-]
-
-
 class NHSJobsSource(BaseJobSource):
-    """UK NHS Jobs via XML API — healthcare data/digital roles."""
+    """UK NHS Jobs via XML API."""
     name = "nhs_jobs"
 
     async def fetch_jobs(self) -> list[Job]:
+        if not self.search_queries:
+            logger.info("NHS Jobs: no search queries configured, skipping")
+            return []
         jobs = []
         seen_ids = set()
 
-        queries = self.search_queries if self.search_queries else SEARCH_QUERIES
+        queries = self.search_queries
         for query in queries:
             xml_text = await self._get_text(
                 "https://www.jobs.nhs.uk/api/v1/search_xml",
@@ -62,7 +56,7 @@ class NHSJobsSource(BaseJobSource):
             advert_url = (vacancy.findtext("advertUrl") or "").strip()
 
             text = f"{title} {salary}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
 
             apply_url = advert_url or f"https://www.jobs.nhs.uk/candidate/jobadvert/{vacancy_id}"

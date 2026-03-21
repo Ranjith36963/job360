@@ -1,41 +1,20 @@
 """Keyword configuration for Job360.
 
-DEFAULT_* lists are the fallback when no CV profile exists.
-KNOWN_SKILLS is a comprehensive, multi-domain database used by the CV parser
-to recognise skills from ANY resume — not just AI/ML.
+This module contains:
+- UK_LOCATIONS: UK locations for scoring (domain-agnostic)
+- VISA_KEYWORDS: Visa-related terms (domain-agnostic)
+- KNOWN_SKILLS: Multi-domain skill database for CV parsing
+- KNOWN_TITLE_PATTERNS: Multi-domain job titles for CV parsing
+- KNOWN_LOCATIONS: Comprehensive location database for CV parsing
+
+No hard-coded domain-specific keywords exist here. All job-specific
+keywords (titles, skills, relevance terms, negative keywords) come
+from the user's profile via SearchConfig.
 """
 
 # ---------------------------------------------------------------------------
-# Default profile (used when no CV is uploaded)
+# UK locations for scoring — domain-agnostic, applies to all professions
 # ---------------------------------------------------------------------------
-
-JOB_TITLES = [
-    "AI Engineer",
-    "ML Engineer",
-    "Machine Learning Engineer",
-    "GenAI Engineer",
-    "Generative AI Engineer",
-    "LLM Engineer",
-    "NLP Engineer",
-    "Data Scientist",
-    "MLOps Engineer",
-    "AI/ML Engineer",
-    "Deep Learning Engineer",
-    "Computer Vision Engineer",
-    "RAG Engineer",
-    "AI Solutions Engineer",
-    "AI Research Engineer",
-    "Applied ML Engineer",
-    "Python AI Developer",
-    "AI Researcher",
-    "ML Scientist",
-    "Machine Learning Scientist",
-    "AI Platform Engineer",
-    "AI Infrastructure Engineer",
-    "Conversational AI Engineer",
-    "Applied Scientist",
-    "Research Scientist",
-]
 
 LOCATIONS = [
     "UK",
@@ -66,60 +45,10 @@ LOCATIONS = [
     "Hybrid",
 ]
 
-# Skills with weights: primary=3, secondary=2, tertiary=1
-PRIMARY_SKILLS = [
-    "Python",
-    "PyTorch",
-    "TensorFlow",
-    "LangChain",
-    "RAG",
-    "LLM",
-    "Generative AI",
-    "Hugging Face",
-    "Transformers",
-    "OpenAI",
-    "NLP",
-    "Deep Learning",
-    "Neural Networks",
-    "Computer Vision",
-    "Prompt Engineering",
-]
+# ---------------------------------------------------------------------------
+# Visa-related keywords — domain-agnostic, applies to all professions
+# ---------------------------------------------------------------------------
 
-SECONDARY_SKILLS = [
-    "Scikit-learn",
-    "Keras",
-    "AWS",
-    "SageMaker",
-    "Bedrock",
-    "Docker",
-    "Kubernetes",
-    "FastAPI",
-    "ChromaDB",
-    "FAISS",
-    "OpenSearch",
-    "Redis",
-    "pgvector",
-    "Gemini",
-    "Agentic AI",
-    "LLM fine-tuning",
-    "Fine-tuning",
-]
-
-TERTIARY_SKILLS = [
-    "CI/CD",
-    "MLflow",
-    "Git",
-    "Linux",
-    "n8n",
-    "Data Pipelines",
-    "ETL",
-    "Feature Engineering",
-    "S3",
-    "CloudWatch",
-    "Machine Learning",
-]
-
-# Visa-related keywords to flag
 VISA_KEYWORDS = [
     "visa sponsorship",
     "sponsorship",
@@ -129,55 +58,6 @@ VISA_KEYWORDS = [
     "sponsored",
     "tier 2",
     "skilled worker visa",
-]
-
-# Keywords to filter relevance (job must contain at least one)
-RELEVANCE_KEYWORDS = [
-    "ai", "ml", "machine learning", "deep learning", "nlp",
-    "natural language", "computer vision", "data scien",
-    "generative", "llm", "large language", "neural",
-    "pytorch", "tensorflow", "python", "rag", "langchain",
-    "transformers", "hugging face",
-    "mlops", "genai", "openai", "anthropic", "bedrock", "sagemaker",
-    "prompt engineer", "agentic", "vector database", "embeddings",
-    "fine-tun", "chatgpt", "gpt-4", "claude", "gemini", "diffusion",
-    "reinforcement learning",
-]
-
-NEGATIVE_TITLE_KEYWORDS = [
-    # Original entries
-    "sales engineer", "account manager", "marketing", "recruiter",
-    "accountant", "hr manager", "graphic designer", "copywriter",
-    "customer support", "civil engineer", "mechanical engineer",
-    "nurse", "pharmacist", "teaching assistant", "lecturer",
-    # Sales / business
-    "sales specialist", "sales representative", "business development",
-    "account executive",
-    # IT ops
-    "site reliability", "sre", "support desk", "help desk",
-    "service desk", "network engineer", "systems administrator",
-    "desktop support", "it support",
-    # Unrelated research
-    "quantum", "virology", "bioinformatics", "genomics",
-    # Creative
-    "model artist", "3d artist", "3d modeler", "animator",
-    # Enterprise platforms
-    "power platform", "dynamics 365", "sharepoint", "sap",
-    "oracle erp", "salesforce admin",
-    # Legacy
-    "mainframe", "cobol", "rpg developer",
-    # Hardware
-    "embedded firmware", "hvac",
-    # Non-tech engineering
-    "electrical engineer", "chemical engineer",
-    # Healthcare
-    "doctor", "physician", "dentist",
-    # Legal
-    "legal counsel", "solicitor", "paralegal", "barrister",
-    # Finance
-    "auditor", "tax", "bookkeeper",
-    # Education
-    "teacher",
 ]
 
 # ---------------------------------------------------------------------------

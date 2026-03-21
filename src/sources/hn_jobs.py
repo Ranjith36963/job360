@@ -47,7 +47,7 @@ class HNJobsSource(BaseJobSource):
         text = item.get("text", "")
         check_text = f"{title} {text}".lower()
 
-        if not any(kw in check_text for kw in self.relevance_keywords):
+        if not self._relevance_match(check_text):
             return None
 
         # Extract company from title (format: "Company is hiring ..." or "Company (YC ...)")

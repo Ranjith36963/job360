@@ -130,13 +130,14 @@ def display_jobs(
         f"[bold]Total:[/bold] {counts['total']} jobs | "
         f"[red]24h:[/red] {counts['last_24h']} | "
         f"[dark_orange]24-48h:[/dark_orange] {counts['24_48h']} | "
-        f"[yellow]48-72h:[/yellow] {counts['48_72h']} | "
-        f"[blue]3-7d:[/blue] {counts['3_7d']}"
+        f"[yellow]2-3d:[/yellow] {counts['2_3d']} | "
+        f"[green]3-5d:[/green] {counts['3_5d']} | "
+        f"[blue]5-7d:[/blue] {counts['5_7d']}"
     )
     console.print(Panel(summary, title="Job360 \u2014 Time-Bucketed View", style="bold blue"))
 
     # Print each bucket table
-    for idx in range(4):
+    for idx in range(len(BUCKETS)):
         bucket_list = bucketed.get(idx, [])
         if bucket_list:
             table = _build_bucket_table(bucket_list, idx)

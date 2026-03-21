@@ -50,7 +50,7 @@ class CareerjetSource(BaseJobSource):
                 description = item.get("description", "")
                 text = f"{title} {description}".lower()
 
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
 
                 apply_url = item.get("url", "")

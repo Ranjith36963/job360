@@ -14,17 +14,14 @@ _ALGOLIA_API_KEY = "d1d7f2c8696e7b36837d5ed337c4a319"
 _ALGOLIA_INDEX = "jobs_prod"
 _ALGOLIA_URL = f"https://{_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{_ALGOLIA_INDEX}/query"
 
-_SEARCH_QUERIES = [
-    "AI", "machine learning", "data science", "deep learning",
-    "NLP", "computer vision", "MLOps",
-]
-
-
 class EightyKHoursSource(BaseJobSource):
-    """80,000 Hours — high-impact AI safety jobs via Algolia API."""
+    """80,000 Hours — high-impact jobs via Algolia API."""
     name = "eightykhours"
 
     async def fetch_jobs(self) -> list[Job]:
+        if not self.search_queries:
+            logger.info("80,000 Hours: no search queries configured, skipping")
+            return []
         jobs = []
         seen_ids = set()
         headers = {
@@ -33,7 +30,7 @@ class EightyKHoursSource(BaseJobSource):
             "Content-Type": "application/json",
         }
 
-        for query in _SEARCH_QUERIES:
+        for query in self.search_queries:
             body = {
                 "query": query,
                 "hitsPerPage": 50,
@@ -60,7 +57,7 @@ class EightyKHoursSource(BaseJobSource):
                     location = str(locations) if locations else ""
 
                 text = f"{title} {company}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
 
                 if not _is_uk_or_remote(location):

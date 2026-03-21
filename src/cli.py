@@ -7,12 +7,31 @@ import sys
 import click
 
 from src.main import run_search, SOURCE_REGISTRY
+from src.__version__ import __version__
 
 
 @click.group()
-@click.version_option(version="1.0.0", prog_name="job360")
+@click.version_option(version=__version__, prog_name="job360")
 def cli():
     """Job360 — Automated UK job search aggregator."""
+
+
+def _validate_db_path(ctx, param, value):
+    """Validate --db-path to prevent path traversal and arbitrary system paths."""
+    if value is None:
+        return value
+    from pathlib import Path
+    p = Path(value).resolve()
+    # Must be under the project data/ directory or current working directory
+    cwd = Path.cwd().resolve()
+    data_dir = (Path(__file__).resolve().parent.parent / "data").resolve()
+    if not (str(p).startswith(str(data_dir)) or str(p).startswith(str(cwd))):
+        raise click.BadParameter(
+            f"Database path must be under the project data/ directory or current working directory. Got: {value}"
+        )
+    if not p.suffix == ".db":
+        raise click.BadParameter("Database file must have .db extension.")
+    return str(p)
 
 
 @cli.command()
@@ -21,7 +40,7 @@ def cli():
 @click.option("--dry-run", is_flag=True, help="Fetch and score jobs without saving to DB or sending notifications.")
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
               default="INFO", help="Set logging verbosity.")
-@click.option("--db-path", default=None, help="Override database file path.")
+@click.option("--db-path", default=None, callback=_validate_db_path, help="Override database file path.")
 @click.option("--no-email", is_flag=True, help="Skip all notifications (email, Slack, Discord).")
 @click.option("--dashboard", is_flag=True, help="Launch Streamlit dashboard after the run.")
 def run(source, dry_run, log_level, db_path, no_email, dashboard):
@@ -94,6 +113,73 @@ def list_sources():
     click.echo("Available sources:")
     for name in sorted(SOURCE_REGISTRY.keys()):
         click.echo(f"  - {name}")
+
+
+@cli.command()
+@click.option("--stage", default=None,
+              type=click.Choice(["applied", "outreach_week1", "outreach_week2", "outreach_week3",
+                                 "interview", "offer", "rejected", "withdrawn"], case_sensitive=False),
+              help="Filter by pipeline stage.")
+@click.option("--reminders", is_flag=True, help="Show only applications with due reminders.")
+def pipeline(stage, reminders):
+    """View your application pipeline status."""
+    import sqlite3
+    from src.config.settings import DB_PATH
+    from src.pipeline.reminders import format_reminder_message
+
+    if not DB_PATH.exists():
+        click.echo("No database found. Run 'job360 run' first.")
+        return
+
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        if reminders:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            rows = conn.execute(
+                "SELECT a.*, j.title, j.company FROM applications a "
+                "JOIN jobs j ON a.job_id = j.id "
+                "WHERE a.next_reminder IS NOT NULL AND a.next_reminder <= ? "
+                "ORDER BY a.next_reminder",
+                (now,),
+            ).fetchall()
+            if not rows:
+                click.echo("No due reminders.")
+                return
+            click.echo(f"Due reminders ({len(rows)}):")
+            for row in rows:
+                row_dict = dict(row)
+                click.echo(f"  {row_dict['title']} @ {row_dict['company']} — {format_reminder_message(row_dict)}")
+            return
+
+        query = "SELECT a.*, j.title, j.company FROM applications a JOIN jobs j ON a.job_id = j.id"
+        params = []
+        if stage:
+            query += " WHERE a.status = ?"
+            params.append(stage)
+        query += " ORDER BY a.last_updated DESC"
+
+        rows = conn.execute(query, params).fetchall()
+        if not rows:
+            click.echo("No applications found.")
+            return
+
+        # Group by stage
+        stages = {}
+        for row in rows:
+            row_dict = dict(row)
+            s = row_dict["status"]
+            stages.setdefault(s, []).append(row_dict)
+
+        for s, apps in stages.items():
+            click.echo(f"\n{s.upper()} ({len(apps)})")
+            click.echo("-" * 40)
+            for app in apps:
+                reminder = f" [Reminder: {app['next_reminder'][:10]}]" if app.get("next_reminder") else ""
+                click.echo(f"  {app['title']} @ {app['company']}{reminder}")
+    finally:
+        conn.close()
 
 
 @cli.command("setup-profile")
@@ -182,7 +268,6 @@ def setup_profile(cv_path, linkedin_path, github_username):
         salary_min=salary_min if salary_min > 0 else None,
         salary_max=salary_max if salary_max > 0 else None,
         negative_keywords=[n.strip() for n in negatives_input.split(",") if n.strip()],
-        github_username=github_username or "",
     )
 
     if cv_data.skills or cv_data.job_titles:

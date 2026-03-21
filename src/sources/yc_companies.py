@@ -34,7 +34,7 @@ class YCCompaniesSource(BaseJobSource):
             industries = " ".join(company.get("industries", []) or [])
             check_text = f"{desc} {tags} {industries}".lower()
 
-            if not any(kw in check_text for kw in self.relevance_keywords):
+            if not self._relevance_match(check_text):
                 continue
 
             name = company.get("name", "Unknown")

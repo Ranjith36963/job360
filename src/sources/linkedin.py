@@ -8,14 +8,6 @@ from src.sources.base import BaseJobSource
 
 logger = logging.getLogger("job360.sources.linkedin")
 
-_LINKEDIN_QUERIES = [
-    "AI engineer",
-    "machine learning engineer",
-    "data scientist AI",
-    "NLP engineer",
-    "MLOps engineer",
-]
-
 _BASE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 
 # Regex patterns for LinkedIn guest HTML fragments
@@ -35,7 +27,10 @@ class LinkedInSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        queries = self.search_queries[:5] if self.search_queries else _LINKEDIN_QUERIES
+        if not self.search_queries:
+            logger.info("LinkedIn: no search queries configured, skipping")
+            return []
+        queries = self.search_queries[:5]
         for query in queries:
             params = {
                 "keywords": query,
@@ -59,7 +54,7 @@ class LinkedInSource(BaseJobSource):
                 seen_urls.add(url)
                 title = titles[i].strip()
                 text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
+                if not self._relevance_match(text):
                     continue
                 company = companies[i].strip() if i < len(companies) else ""
                 location = locations[i].strip() if i < len(locations) else "UK"

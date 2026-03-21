@@ -25,7 +25,7 @@ class RemoteOKSource(BaseJobSource):
                 continue
             tags = " ".join(item.get("tags", [])) if isinstance(item.get("tags"), list) else ""
             text = f"{item.get('position', '')} {item.get('description', '')} {tags}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
+            if not self._relevance_match(text):
                 continue
             date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
