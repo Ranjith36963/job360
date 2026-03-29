@@ -14,9 +14,24 @@ class RemotiveSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        # Dynamic category from profile domains (no hardcoded "software-dev")
+        params = {"limit": "100"}
+        if self._search_config and hasattr(self._search_config, 'detected_domains'):
+            domains = self._search_config.detected_domains
+            # Map Job360 domains to Remotive API categories
+            domain_map = {
+                "Technology": "software-dev", "Data & AI": "data",
+                "Marketing": "marketing", "Design": "design",
+                "Finance": "finance-legal", "Healthcare": "medical-health",
+                "Education": "teaching", "Sales": "sales",
+            }
+            for d in domains:
+                if d in domain_map:
+                    params["category"] = domain_map[d]
+                    break
         data = await self._get_json(
             "https://remotive.com/api/remote-jobs",
-            params={"category": "software-dev", "limit": "100"},
+            params=params,
         )
         if not data or "jobs" not in data:
             return []

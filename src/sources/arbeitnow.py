@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.arbeitnow")
 
@@ -20,6 +20,10 @@ class ArbeitnowSource(BaseJobSource):
         for item in data["data"]:
             text = f"{item.get('title', '')} {item.get('description', '')} {' '.join(item.get('tags', []))}".lower()
             if not self._relevance_match(text):
+                continue
+            # Pre-filter foreign jobs at source (global API, no country param)
+            location = item.get("location", "")
+            if not _is_uk_or_remote(location):
                 continue
             date_found = item.get("created_at") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(

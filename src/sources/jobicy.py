@@ -14,12 +14,14 @@ class JobicySource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        # Use dynamic keywords — no hardcoded industry/tag
+        tag = self.relevance_keywords[0] if self.relevance_keywords else ""
         params = {
             "count": "50",
             "geo": "uk",
-            "industry": "data-science",
-            "tag": "ai",
         }
+        if tag:
+            params["tag"] = tag
         data = await self._get_json(
             "https://jobicy.com/api/v2/remote-jobs", params=params
         )

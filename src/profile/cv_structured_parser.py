@@ -193,7 +193,18 @@ def _extract_inline_skills(text: str) -> list[str]:
 
 # UK degree patterns: BSc, BA, BEng, MSc, MA, MBA, PhD, PGCE, etc.
 _DEGREE_RE = re.compile(
-    r'\b(PhD|DPhil|Doctorate|EdD'
+    r'\b('
+    # Full-text degree names (international + UK)
+    r'Master of Science|Master of Arts|Master of Engineering'
+    r'|Master of Business Administration|Master of Research|Master of Philosophy'
+    r'|Master of Laws|Master of Education|Master of Fine Arts'
+    r'|Bachelor of Science|Bachelor of Arts|Bachelor of Engineering'
+    r'|Bachelor of Laws|Bachelor of Commerce|Bachelor of Education'
+    r'|Bachelor of Music|Bachelor of Technology'
+    r'|Doctor of Philosophy|Doctor of Education'
+    r"|Master'?s Degree|Bachelor'?s Degree|Doctoral Degree"
+    # Abbreviated forms (UK standard)
+    r'|PhD|DPhil|Doctorate|EdD'
     r'|MSc|MA|MEng|MRes|MPhil|MBA|LLM|MChem|MMath'
     r'|BSc|BA|BEng|LLB|BMus|BEd|BCom'
     r'|PGCE|PGDE|PGDip|PGCert'
@@ -434,6 +445,13 @@ def enhance_cv_data(cv: CVData, sections: dict[str, str]) -> CVData:
     cv.total_experience_months = sum(
         we.duration_months for we in cv.work_experiences
     )
+
+    # Override flat-parsed job_titles with properly structured ones
+    # (the flat parser often misidentifies company+date lines as titles)
+    if cv.work_experiences:
+        structured_titles = [we.title for we in cv.work_experiences if we.title]
+        if structured_titles:
+            cv.job_titles = structured_titles
 
     # Compute seniority from titles + experience
     all_titles = cv.job_titles[:]

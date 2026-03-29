@@ -21,7 +21,7 @@ LEVER_COMPANIES = [
 # Verified Feb 2026
 WORKABLE_COMPANIES = [
     "benevolentai", "exscientia", "oxa", "cervest",
-    "huggingface", "labelbox", "runway", "adept",
+    "graphcore", "darktrace", "improbable", "wayve",
 ]
 
 # Ashby boards: https://api.ashbyhq.com/posting-api/job-board/{slug}

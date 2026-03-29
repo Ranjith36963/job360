@@ -24,10 +24,15 @@ FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
-# LLM (optional — for AI-powered CV summarization)
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" or "openai"
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+# LLM Provider API Keys (all free tiers — set any combination, more = more capacity)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+SAMBANOVA_API_KEY = os.getenv("SAMBANOVA_API_KEY", "")
+LLM_CACHE_DIR = DATA_DIR / "llm_cache"
+VALIDATION_DIR = REPORTS_DIR  # Validation reports go alongside pipeline reports
 
 # Email
 SMTP_HOST = "smtp.gmail.com"
@@ -43,6 +48,7 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 # Search
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100
+MAX_JOBS_PER_COMPANY = 15
 MAX_DAYS_OLD = 7
 
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
@@ -89,8 +95,8 @@ RATE_LIMITS = {
     "yc_companies": {"concurrent": 1, "delay": 1.0},
     "jobs_ac_uk": {"concurrent": 1, "delay": 2.0},
     "nhs_jobs": {"concurrent": 1, "delay": 2.0},
-    "personio": {"concurrent": 1, "delay": 3.0},
-    "workanywhere": {"concurrent": 1, "delay": 5.0},
+    "personio": {"concurrent": 1, "delay": 5.0},
+    "workanywhere": {"concurrent": 1, "delay": 8.0},
     "weworkremotely": {"concurrent": 1, "delay": 2.0},
     "realworkfromanywhere": {"concurrent": 1, "delay": 2.0},
     "biospace": {"concurrent": 1, "delay": 2.0},
@@ -105,10 +111,10 @@ RATE_LIMITS = {
     "nomis": {"concurrent": 1, "delay": 5.0},
 }
 
-# Retry
-MAX_RETRIES = 3
-RETRY_BACKOFF = [1, 2, 4]
+# Retry — 2 attempts total (saves ~30s per failing endpoint vs 3 retries)
+MAX_RETRIES = 2
+RETRY_BACKOFF = [1, 3]
 
-# HTTP
-REQUEST_TIMEOUT = 30
+# HTTP — 15s catches >95% of responses; slow endpoints return nothing useful
+REQUEST_TIMEOUT = 15
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"

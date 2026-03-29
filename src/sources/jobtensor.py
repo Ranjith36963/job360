@@ -23,23 +23,7 @@ class JobTensorSource(BaseJobSource):
             logger.info("JobTensor: no keywords configured, skipping")
             return []
 
-        # Build skills from dynamic keywords
-        skills_str = ",".join(self.relevance_keywords[:10])
-
-        # Try the AJAX search API directly
-        data = await self._get_json(
-            "https://jobtensor.com/ajax/search/",
-            params={"country": "uk", "skills": skills_str, "page": "1"},
-        )
-
-        if data and isinstance(data, dict):
-            hits = data.get("hits", [])
-            if hits:
-                jobs = self._parse_api_results(hits)
-                logger.info(f"JobTensor: found {len(jobs)} relevant jobs (API)")
-                return jobs
-
-        # Fallback: HTML scraping with dynamic query
+        # HTML search (AJAX API returns 400 — unreliable)
         query = self.search_queries[0] if self.search_queries else self.relevance_keywords[0]
         html = await self._get_text(
             "https://jobtensor.com/search",

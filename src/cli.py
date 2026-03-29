@@ -64,7 +64,14 @@ def run(source, dry_run, log_level, db_path, no_email, dashboard):
 def dashboard():
     """Launch the Streamlit web dashboard."""
     click.echo("Starting Job360 Dashboard...")
-    subprocess.run([sys.executable, "-m", "streamlit", "run", "src/dashboard.py"], check=True)
+    click.echo("  Terminal logs appear below as you interact with the dashboard.")
+    click.echo("  Log file: data/logs/dashboard.log")
+    click.echo("")
+    subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", "src/dashboard.py",
+         "--server.headless", "true"],
+        check=True,
+    )
 
 
 @cli.command()
@@ -277,6 +284,114 @@ def setup_profile(cv_path, linkedin_path, github_username):
     path = save_profile(profile)
     click.echo(f"\nProfile saved to {path}")
     click.echo("Next pipeline run will use your personalised keywords.")
+
+
+@cli.command()
+@click.option("--days", default=7, type=int, help="Validate jobs from last N days.")
+@click.option("--per-source", default=3, type=int, help="Jobs to sample per source.")
+@click.option("--source", "source_filter", default=None, help="Validate a single source only.")
+@click.option("--min-score", default=0, type=int, help="Only validate jobs above this score.")
+@click.option("--db-path", default=None, callback=_validate_db_path, help="Override database path.")
+def validate(days, per_source, source_filter, min_score, db_path):
+    """Validate stored jobs against live web data. Produces confidence benchmark."""
+    import json as _json
+    from pathlib import Path
+    from datetime import datetime, timezone
+
+    import aiohttp
+
+    from src.config.settings import DB_PATH, REPORTS_DIR
+    from src.validation.sampler import sample_jobs
+    from src.validation.checker import validate_job, aggregate_by_source
+    from src.validation.report import generate_validation_report, generate_validation_json
+
+    path = db_path or str(DB_PATH)
+
+    async def _run():
+        click.echo("Job360 Validation")
+        click.echo("=" * 40)
+
+        # Sample jobs
+        click.echo(f"Sampling jobs (last {days} days, per_source={per_source})...")
+        jobs = await sample_jobs(path, per_source=per_source, days=days,
+                                 min_score=min_score, source_filter=source_filter)
+        if not jobs:
+            click.echo("No jobs found to validate. Run a search first.")
+            return
+
+        sources_found = len(set(j["source"] for j in jobs))
+        click.echo(f"  Sampled {len(jobs)} jobs from {sources_found} sources")
+
+        # Validate each job
+        click.echo("Validating against live URLs...")
+        results = []
+        sem = asyncio.Semaphore(3)
+        async with aiohttp.ClientSession() as session:
+            async def _check(job):
+                async with sem:
+                    return await validate_job(session, job)
+
+            results = await asyncio.gather(*[_check(j) for j in jobs])
+
+        results = list(results)
+
+        # Aggregate
+        source_scores = aggregate_by_source(results)
+        validatable = [sc for sc in source_scores if sc.confidence >= 0]
+        total_v = sum(sc.jobs_checked for sc in validatable)
+        overall_pct = (
+            sum(sc.confidence * sc.jobs_checked for sc in validatable) / total_v
+            if total_v else 0
+        )
+        skipped = len(source_scores) - len(validatable)
+
+        # Display summary
+        def _fmt(val: float) -> str:
+            return f"{val:.0%}" if val >= 0 else "N/A"
+
+        click.echo("")
+        skip_note = f" ({skipped} skipped)" if skipped else ""
+        click.echo(f"Overall Benchmark: {overall_pct:.0%} confidence ({len(results)} jobs, {len(validatable)} validatable sources{skip_note})")
+        click.echo("")
+        click.echo(f"{'Source':<25} {'Checked':>7} {'URL':>6} {'Title':>7} {'Date':>6} {'Desc':>6} {'Conf':>8}")
+        click.echo("-" * 72)
+        for sc in sorted(source_scores, key=lambda s: s.confidence, reverse=True):
+            click.echo(
+                f"{sc.source:<25} {sc.jobs_checked:>7} {_fmt(sc.url_score):>6} {_fmt(sc.title_score):>7} "
+                f"{_fmt(sc.date_score):>6} {_fmt(sc.desc_score):>6} {_fmt(sc.confidence):>8}"
+            )
+
+        # Save reports
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+        md_report = generate_validation_report(results, source_scores)
+        md_path = REPORTS_DIR / f"validation_{ts}.md"
+        md_path.write_text(md_report, encoding="utf-8")
+
+        json_data = generate_validation_json(results, source_scores)
+        json_path = REPORTS_DIR / f"validation_{ts}.json"
+        json_path.write_text(_json.dumps(json_data, indent=2), encoding="utf-8")
+
+        click.echo("")
+        click.echo(f"Reports saved:")
+        click.echo(f"  Markdown: {md_path}")
+        click.echo(f"  JSON:     {json_path}")
+
+        # Show issues
+        issues = [
+            f"[{sc.source}] {issue}"
+            for sc in source_scores
+            for issue in sc.issues[:3]
+            if issue
+        ]
+        if issues:
+            click.echo("")
+            click.echo(f"Top issues ({len(issues)} found):")
+            for issue in issues[:10]:
+                click.echo(f"  - {issue}")
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

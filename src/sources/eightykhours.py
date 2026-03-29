@@ -63,16 +63,36 @@ class EightyKHoursSource(BaseJobSource):
                 if not _is_uk_or_remote(location):
                     continue
 
-                # Build apply URL
-                slug = hit.get("id_external_80_000_hours", "") or hit.get("url_external", "") or obj_id
-                if slug.startswith("http"):
+                # Build apply URL — prefer url_external (real job board link)
+                ext_url = hit.get("url_external", "")
+                slug = hit.get("id_external_80_000_hours", "") or obj_id
+                if ext_url and ext_url.startswith("http"):
+                    apply_url = ext_url
+                elif slug.startswith("http"):
                     apply_url = slug
                 else:
-                    apply_url = f"https://jobs.80000hours.org/jobs/{obj_id}"
+                    apply_url = f"https://jobs.80000hours.org/jobs/{slug}"
 
                 description = hit.get("description_short", "") or hit.get("description", "") or title
 
-                date_found = hit.get("date_published", "") or datetime.now(timezone.utc).isoformat()
+                # Algolia uses various date field names — try all known variants
+                raw_date = None
+                for date_key in ("date_published", "date_posted", "datePosted",
+                                 "publishedAt", "created_at", "updated_at",
+                                 "date_created", "posted_at", "date", "timestamp"):
+                    val = hit.get(date_key)
+                    if val:
+                        raw_date = val
+                        break
+                if isinstance(raw_date, (int, float)) and raw_date > 1000000000:
+                    date_found = datetime.fromtimestamp(raw_date, tz=timezone.utc).isoformat()
+                elif isinstance(raw_date, (int, float)) and raw_date > 1000000:
+                    # Milliseconds timestamp
+                    date_found = datetime.fromtimestamp(raw_date / 1000, tz=timezone.utc).isoformat()
+                elif raw_date and str(raw_date).strip():
+                    date_found = str(raw_date)
+                else:
+                    date_found = datetime.now(timezone.utc).isoformat()
 
                 jobs.append(Job(
                     title=title,

@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("job360.reranker")
 
 # Sentinel: None = not yet attempted, False = unavailable
 _model: object = None
@@ -94,6 +94,13 @@ def rerank(
     except Exception as e:
         logger.warning("Cross-encoder scoring failed: %s", e)
         return candidates
+
+    if len(scores) > 0:
+        logger.debug(
+            "Rerank scores: min=%.3f max=%.3f mean=%.3f (n=%d)",
+            float(min(scores)), float(max(scores)),
+            float(sum(scores) / len(scores)), len(scores),
+        )
 
     # Attach scores and sort
     for job, score in zip(to_rerank, scores):

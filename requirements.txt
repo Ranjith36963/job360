@@ -15,6 +15,6 @@ humanize>=4.9.0
 numpy>=1.24.0
 sentence-transformers>=2.2.0
 
-# Optional: LLM-powered CV parsing (uncomment one)
-# anthropic>=0.40.0
-# openai>=1.50.0
+# Optional: LLM-powered CV/JD enrichment (any OpenAI-compatible provider)
+openai>=1.50.0
+# anthropic>=0.40.0  # Only if using Anthropic directly

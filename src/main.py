@@ -4,6 +4,7 @@ import json
 import logging
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -226,6 +227,9 @@ async def run_search(
     launch_dashboard: bool = False,
 ) -> dict:
     setup_logging(log_level)
+    from src.diagnostics import PipelineDiagnostics
+    diag = PipelineDiagnostics()
+
     logger.info("=" * 60)
     logger.info("Job360 - Starting job search run")
     if source_filter:
@@ -234,6 +238,7 @@ async def run_search(
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
 
     # Load user profile — CV is mandatory, no profile = no search
+    diag.start_phase("profile_load")
     profile = load_profile()
     if not profile:
         logger.error("  No user profile found. Set up your profile to start searching.")
@@ -242,6 +247,7 @@ async def run_search(
         logger.error("  Profile exists but is incomplete (no CV text, no job titles, no skills).")
         logger.error("  Run: python -m src.cli setup-profile --cv path/to/cv.pdf")
         logger.error("  Or re-run setup-profile and enter target job titles + skills at the prompts.")
+    diag.end_phase("profile_load")
     if not profile or not profile.is_complete:
         return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
@@ -272,15 +278,16 @@ async def run_search(
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
             # Fetch from all sources concurrently
+            diag.start_phase("source_fetch")
             all_jobs: list[Job] = []
             per_source: dict[str, int] = {}
             source_count = 0
 
             async def _fetch_source(source):
                 try:
-                    return await asyncio.wait_for(source.fetch_jobs(), timeout=120)
+                    return await asyncio.wait_for(source.fetch_jobs(), timeout=60)
                 except asyncio.TimeoutError:
-                    logger.warning(f"Source {source.name} timed out")
+                    logger.warning(f"Source {source.name} timed out after 60s")
                     return []
                 except Exception as e:
                     logger.error(f"Source {source.name} failed: {e}")
@@ -297,39 +304,61 @@ async def run_search(
                 else:
                     logger.info(f"  {source.name}: 0 jobs")
 
+            diag.end_phase("source_fetch")
             logger.info(f"Total raw jobs: {len(all_jobs)}")
+            sys.stdout.flush()
+            diag.record_funnel("raw_fetched", len(all_jobs))
 
             # Hard-remove foreign-only jobs (no UK/remote mention)
+            diag.start_phase("foreign_filter")
             before_foreign = len(all_jobs)
             all_jobs = [j for j in all_jobs if not is_foreign_only(j.location)]
             removed = before_foreign - len(all_jobs)
             if removed:
                 logger.info(f"Removed {removed} foreign-only jobs")
+            diag.end_phase("foreign_filter")
+            diag.record_funnel("after_foreign_filter", len(all_jobs))
 
             # Score all jobs using profile-based scorer + structured JD parsing
             cv_data = profile.cv_data if profile else None
+            # Only primary + secondary for JD parsing (tertiary are inferred/supplementary
+            # and would cause ~7x more regex calls with minimal match gain)
+            _all_user_skills = (
+                search_config.primary_skills
+                + search_config.secondary_skills
+            )
 
-            # Compute job embeddings if available
+            # Compute job embeddings in batch (64 at a time, not one-by-one)
+            diag.start_phase("embeddings")
+            t_emb = time.time()
             try:
-                from src.filters.embeddings import is_available as _emb_ok, encode as _emb_enc
+                from src.filters.embeddings import is_available as _emb_ok, encode_batch as _emb_batch
                 from src.filters.hybrid_retriever import serialize_embedding as _emb_ser
                 if _emb_ok():
-                    for job in all_jobs:
-                        vec = _emb_enc(f"{job.title} {job.description[:500]}")
-                        if vec is not None:
-                            job.embedding = _emb_ser(vec)
+                    texts = [f"{j.title} {j.description[:1500]}" for j in all_jobs]
+                    vecs = _emb_batch(texts)
+                    if vecs is not None:
+                        for i, job in enumerate(all_jobs):
+                            job.embedding = _emb_ser(vecs[i])
             except Exception:
                 pass  # Embeddings are optional
+            diag.end_phase("embeddings")
+            logger.info(f"Embeddings computed ({len(all_jobs)} jobs, {time.time() - t_emb:.1f}s)")
 
+            diag.start_phase("scoring")
+            t_score = time.time()
+            score_evolution: dict[int, dict] = {}
             for job in all_jobs:
-                job.match_score = scorer.score(job)
                 job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
                 job.job_type = detect_job_type(f"{job.title} {job.description}")
-                # Detailed scoring with ParsedJD + structured CV
+                # Full 8D scoring (replaces legacy score() — uses bd.total directly)
                 try:
-                    parsed_jd = parse_jd(job.description) if job.description else None
+                    parsed_jd = parse_jd(
+                        job.description, user_skills=_all_user_skills
+                    ) if job.description else None
                     bd = scorer.score_detailed(job, parsed_jd=parsed_jd, cv_data=cv_data)
+                    job.match_score = bd.total  # 8D score is the primary score
                     job.match_data = json.dumps({
                         "role": bd.role, "skill": bd.skill,
                         "seniority": bd.seniority, "experience": bd.experience,
@@ -340,10 +369,27 @@ async def run_search(
                         "missing_preferred": bd.missing_preferred,
                         "transferable": bd.transferable_skills,
                     })
+                    # Backfill salary from JD when source didn't provide it
+                    if parsed_jd and job.salary_min is None and parsed_jd.salary_min:
+                        job.salary_min = parsed_jd.salary_min
+                    if parsed_jd and job.salary_max is None and parsed_jd.salary_max:
+                        job.salary_max = parsed_jd.salary_max
                 except Exception:
-                    pass  # Non-critical — match_data stays empty
+                    # Fallback to legacy score only if detailed scoring fails
+                    job.match_score = scorer.score(job)
+
+            diag.end_phase("scoring")
+            logger.info(f"Scoring complete ({len(all_jobs)} jobs, {time.time() - t_score:.1f}s)")
+            diag.record_scores(all_jobs)
+            diag.record_funnel("after_scoring", len(all_jobs))
+
+            # Record initial scores for evolution tracking
+            for job in all_jobs:
+                score_evolution[id(job)] = {"score_initial": job.match_score}
 
             # Apply feedback adjustment from user liked/rejected signals
+            diag.start_phase("feedback")
+            _fb_liked = _fb_rejected = _fb_adjusted = _fb_total_adj = 0
             try:
                 from src.filters.feedback import (
                     load_feedback_signals, build_preference_vector,
@@ -352,8 +398,9 @@ async def run_search(
                 from src.filters.hybrid_retriever import deserialize_embedding
                 feedback_signals = await load_feedback_signals(db._conn)
                 pref_vec = build_preference_vector(feedback_signals)
+                _fb_liked = len(feedback_signals.get("liked_texts", []))
+                _fb_rejected = len(feedback_signals.get("rejected_texts", []))
                 if feedback_signals.get("liked_texts") or feedback_signals.get("rejected_texts"):
-                    adjusted = 0
                     for job in all_jobs:
                         job_emb = deserialize_embedding(job.embedding) if job.embedding else None
                         adj = compute_feedback_adjustment(
@@ -362,13 +409,26 @@ async def run_search(
                         )
                         if adj != 0:
                             job.match_score = max(0, min(100, job.match_score + adj))
-                            adjusted += 1
-                    if adjusted:
-                        logger.info(f"Feedback loop adjusted {adjusted} job scores")
+                            _fb_adjusted += 1
+                            _fb_total_adj += adj
+                    if _fb_adjusted:
+                        logger.info(f"Feedback loop adjusted {_fb_adjusted} job scores")
             except Exception:
                 pass  # Feedback is optional
+            diag.end_phase("feedback")
+            diag.record_feedback(_fb_liked, _fb_rejected, _fb_adjusted, _fb_total_adj)
+
+            # Record scores after feedback for evolution tracking
+            for job in all_jobs:
+                evo = score_evolution.get(id(job))
+                if evo:
+                    evo["score_after_feedback"] = job.match_score
 
             # Cross-encoder reranking (top candidates only — expensive)
+            diag.start_phase("reranking")
+            _rr_count = 0
+            _rr_scores: list[float] = []
+            _rr_boosts: list[float] = []
             try:
                 from src.filters.reranker import is_available as _rerank_ok, rerank, build_profile_text
                 if _rerank_ok():
@@ -384,20 +444,139 @@ async def run_search(
                     ]
                     job_dicts.sort(key=lambda d: d["match_score"], reverse=True)
                     reranked = rerank(profile_text, job_dicts, top_n=50)
+                    _rr_count = min(50, len(reranked))
                     for rank, d in enumerate(reranked[:50]):
                         boost = max(0, 5 - rank // 10)
                         d["_job_ref"].match_score = min(100, d["_job_ref"].match_score + boost)
+                        _rr_scores.append(d.get("rerank_score", 0))
+                        _rr_boosts.append(boost)
+                        # Persist rerank_score into match_data
+                        try:
+                            if d["_job_ref"].match_data:
+                                _md = json.loads(d["_job_ref"].match_data)
+                                _md["rerank_score"] = round(d.get("rerank_score", 0), 4)
+                                d["_job_ref"].match_data = json.dumps(_md)
+                        except Exception:
+                            pass
                     logger.info("Cross-encoder reranked top-50 candidates")
             except Exception:
                 pass  # Reranking is optional
+            diag.end_phase("reranking")
+            diag.record_rerank(
+                _rr_count,
+                sum(_rr_scores) / len(_rr_scores) if _rr_scores else 0.0,
+                sum(_rr_boosts) / len(_rr_boosts) if _rr_boosts else 0.0,
+            )
+
+            # Record scores after reranking for evolution tracking
+            for job in all_jobs:
+                evo = score_evolution.get(id(job))
+                if evo:
+                    evo["score_after_rerank"] = job.match_score
+
+            # LLM-enriched JD parsing (top candidates only — optional)
+            diag.start_phase("llm_enrichment")
+            # Snapshot scores before LLM for delta tracking
+            _pre_llm_scores = {id(j): j.match_score for j in all_jobs}
+            try:
+                from src.llm.client import is_configured as _llm_ok
+                if _llm_ok():
+                    from src.llm.jd_enricher import enrich_top_jobs
+                    t_llm = time.time()
+                    enriched = await enrich_top_jobs(
+                        all_jobs, scorer, cv_data, _all_user_skills, top_n=50
+                    )
+                    if enriched:
+                        logger.info(
+                            f"LLM-enriched {enriched} JDs ({time.time() - t_llm:.1f}s)"
+                        )
+            except Exception:
+                pass  # LLM enrichment is optional
+            diag.end_phase("llm_enrichment")
+
+            # Collect LLM stats
+            _llm_score_deltas = []
+            for job in all_jobs:
+                pre = _pre_llm_scores.get(id(job), job.match_score)
+                if pre != job.match_score:
+                    _llm_score_deltas.append(job.match_score - pre)
+            try:
+                from src.llm.cache import cache_stats as _cache_stats
+                from src.llm.client import pool_status as _pool_status
+                _cs = _cache_stats()
+                _ps = _pool_status()
+                diag.record_llm_stats(
+                    cache_hits=_cs.get("hits", 0),
+                    api_calls=_cs.get("misses", 0),
+                    providers_used=_ps.get("configured", []),
+                    score_deltas=_llm_score_deltas,
+                    call_counts=_ps.get("call_counts", {}),
+                    failures=_ps.get("failures", {}),
+                )
+            except Exception:
+                pass
+
+            # Record scores after LLM for evolution tracking
+            for job in all_jobs:
+                evo = score_evolution.get(id(job))
+                if evo:
+                    evo["score_after_llm"] = job.match_score
+
+            # Per-source quality metrics (Phase 5B)
+            _source_quality: dict[str, dict] = {}
+            for job in all_jobs:
+                src = job.source
+                if src not in _source_quality:
+                    _source_quality[src] = {"returned": 0, "above_threshold": 0}
+                _source_quality[src]["returned"] += 1
+                if job.match_score >= MIN_MATCH_SCORE:
+                    _source_quality[src]["above_threshold"] += 1
+            # Merge quality metrics into per_source
+            for src, count in per_source.items():
+                quality = _source_quality.get(src, {})
+                per_source[src] = {
+                    "fetched": count,
+                    "after_foreign_filter": quality.get("returned", 0),
+                    "above_threshold": quality.get("above_threshold", 0),
+                }
 
             # Deduplicate
-            unique_jobs = deduplicate(all_jobs)
-            logger.info(f"After dedup: {len(unique_jobs)} unique jobs")
+            diag.start_phase("dedup")
+            t_dedup = time.time()
+            _dedup_stats: dict = {}
+            unique_jobs = deduplicate(all_jobs, stats_out=_dedup_stats)
+            diag.end_phase("dedup")
+            logger.info(f"After dedup: {len(unique_jobs)} unique jobs ({time.time() - t_dedup:.1f}s)")
+            diag.record_dedup(
+                before=len(all_jobs), after=len(unique_jobs),
+                removed_by_key=_dedup_stats.get("removed_by_key", 0),
+                removed_by_similarity=_dedup_stats.get("removed_by_similarity", 0),
+            )
 
             # Filter by minimum score
+            diag.start_phase("score_filter")
             unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+            diag.end_phase("score_filter")
             logger.info(f"After score filter (>={MIN_MATCH_SCORE}): {len(unique_jobs)} jobs")
+            diag.record_funnel("after_score_filter", len(unique_jobs))
+
+            # Per-company capping — prevent single company flooding results
+            diag.start_phase("company_cap")
+            from src.config.settings import MAX_JOBS_PER_COMPANY
+            unique_jobs.sort(key=lambda j: j.match_score, reverse=True)
+            company_counts: dict[str, int] = {}
+            capped_jobs: list[Job] = []
+            for job in unique_jobs:
+                comp, _ = job.normalized_key()
+                count = company_counts.get(comp, 0)
+                if count < MAX_JOBS_PER_COMPANY:
+                    capped_jobs.append(job)
+                    company_counts[comp] = count + 1
+            if len(capped_jobs) < len(unique_jobs):
+                logger.info(f"Per-company cap ({MAX_JOBS_PER_COMPANY}): {len(unique_jobs)} -> {len(capped_jobs)} jobs")
+            unique_jobs = capped_jobs
+            diag.end_phase("company_cap")
+            diag.record_funnel("after_company_cap", len(unique_jobs))
 
             if dry_run:
                 # Dry run: show results without DB writes or notifications
@@ -412,7 +591,19 @@ async def run_search(
                 logger.info("Job360 dry run complete")
                 return stats
 
+            # Merge score evolution into match_data before DB store
+            for job in unique_jobs:
+                evo = score_evolution.get(id(job))
+                if evo and job.match_data:
+                    try:
+                        _md = json.loads(job.match_data)
+                        _md["score_evolution"] = evo
+                        job.match_data = json.dumps(_md)
+                    except Exception:
+                        pass
+
             # Filter new jobs (not seen in DB)
+            diag.start_phase("db_store")
             new_jobs: list[Job] = []
             for job in unique_jobs:
                 if not await db.is_job_seen(job.normalized_key()):
@@ -421,6 +612,20 @@ async def run_search(
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info(f"New jobs: {len(new_jobs)}")
+
+            # Update per-source with stored counts
+            for job in new_jobs:
+                src = job.source
+                if src in per_source and isinstance(per_source[src], dict):
+                    per_source[src].setdefault("stored", 0)
+                    per_source[src]["stored"] += 1
+
+            diag.end_phase("db_store")
+            diag.record_funnel("new_stored", len(new_jobs))
+
+            # Record data quality and skill gaps from all scored jobs
+            diag.record_data_quality(all_jobs)
+            diag.record_skill_gaps(all_jobs)
 
             # Stats
             stats = {
@@ -441,7 +646,7 @@ async def run_search(
 
                 # Markdown report
                 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-                md_report = generate_markdown_report(new_jobs, stats)
+                md_report = generate_markdown_report(new_jobs, stats, diagnostics=diag)
                 md_path = REPORTS_DIR / f"report_{ts}.md"
                 md_path.write_text(md_report, encoding="utf-8")
                 logger.info(f"Report saved: {md_path}")
@@ -463,6 +668,16 @@ async def run_search(
             # Log run
             await db.log_run(stats)
 
+        # Pipeline health summary (structured for automated analysis)
+        logger.info("PIPELINE_HEALTH: %s", json.dumps({
+            "total_fetched": stats.get("total_found", 0),
+            "new_stored": stats.get("new_jobs", 0),
+            "sources_active": stats.get("sources_queried", 0),
+            "sources_with_jobs": sum(1 for v in stats.get("per_source", {}).values()
+                                     if (v.get("stored", 0) if isinstance(v, dict) else v) > 0),
+        }))
+        # Full diagnostics (superset of PIPELINE_HEALTH)
+        logger.info("PIPELINE_DIAGNOSTICS: %s", diag.to_json_line())
         logger.info("Job360 run complete")
     finally:
         await db.close()
@@ -498,7 +713,9 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
         bucket_list = bucketed.get(idx, [])
         if bucket_list:
             label_name = BUCKETS[idx][0]
-            logger.info(f"  {BUCKETS[idx][1]} {label_name} ({len(bucket_list)} jobs):")
+            # Use ASCII marker instead of emoji (Windows cp1252 can't encode Unicode emoji)
+            marker = f"[{idx + 1}]"
+            logger.info(f"  {marker} {label_name} ({len(bucket_list)} jobs):")
             for i, j in enumerate(bucket_list, 1):
                 visa = " [VISA]" if j.get("visa_flag") else ""
                 salary = ""
@@ -515,4 +732,10 @@ if __name__ == "__main__":
     parser.add_argument("--no-email", action="store_true", help="Skip notifications")
     parser.add_argument("--dashboard", action="store_true", help="Launch dashboard after run")
     args = parser.parse_args()
-    asyncio.run(run_search(no_notify=args.no_email, launch_dashboard=args.dashboard))
+    try:
+        asyncio.run(run_search(no_notify=args.no_email, launch_dashboard=args.dashboard))
+    except Exception as exc:
+        import traceback
+        sys.stderr.write(f"\nFATAL: Pipeline crashed: {exc}\n")
+        traceback.print_exc()
+        sys.exit(1)

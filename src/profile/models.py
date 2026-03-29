@@ -104,4 +104,16 @@ class SearchConfig:
     core_domain_words: set[str] = field(default_factory=set)
     supporting_role_words: set[str] = field(default_factory=set)
     search_queries: list[str] = field(default_factory=list)
+    # Phase 1B: skills user explicitly does NOT want
+    excluded_skills: list[str] = field(default_factory=list)
+    # Phase 3A: preferred work arrangement ("remote", "hybrid", "onsite")
+    work_arrangement: str = ""
+    # Phase 3B: user-stated experience level (overrides CV-inferred)
+    target_experience_level: str = ""
+    # Phase 3C: free-text self-description for richer embedding
+    about_me: str = ""
+    # Phase 3D: preferred industries
+    industries: list[str] = field(default_factory=list)
+    # Phase 3E: auto-detected professional domains
+    detected_domains: list[str] = field(default_factory=list)
 

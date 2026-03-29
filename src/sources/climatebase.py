@@ -83,8 +83,14 @@ class ClimatebaseSource(BaseJobSource):
             job_id = item.get("id", "")
             apply_url = f"https://climatebase.org/jobs/{job_id}" if job_id else ""
 
-            salary_min = item.get("salary_from")
-            salary_max = item.get("salary_to")
+            try:
+                salary_min = float(item["salary_from"]) if item.get("salary_from") else None
+            except (ValueError, TypeError):
+                salary_min = None
+            try:
+                salary_max = float(item["salary_to"]) if item.get("salary_to") else None
+            except (ValueError, TypeError):
+                salary_max = None
 
             jobs.append(Job(
                 title=title,

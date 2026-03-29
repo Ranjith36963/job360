@@ -1,0 +1,47 @@
+Sophia Brooks
+Cyber Security Specialist | Networking | Data Protection
+
++44 20 7123 4567 | Nottingham, UK
+
+Summary
+With proven expertise and a strong foundation in network security, I am eager to expand my skill set. Over 7 years of experience, adept in Python automation, and a track record of enhancing data protection measures are at the forefront of my career achievements.
+
+Professional Experience
+
+Cyber Security Analyst, Clearview Security Solutions, London, UK
+05/2020 - Present
+- Analysed and streamlined security protocols, enhancing system defences against a 30% rise in cyber threats
+- Implemented firewall upgrades and intrusion detection systems, resulting in a 25% reduction in security breaches
+- Led a team of 5 in conducting comprehensive risk assessments, safeguarding key data assets for high-profile clients
+- Designed and administered regular network security awareness training, achieving a 40% improvement in staff security compliance
+- Managed and resolved over 50 security incidents, minimising data exposure and enforcing stringent remediation processes
+- Automated critical security operations using Python, increasing threat detection efficiency by 15%
+
+Network Security Engineer, TechGuard Solutions, Nottingham, UK
+12/2017 - 04/2020
+- Developed and executed security strategies that bolstered client data protection efforts by 20%
+- Orchestrated a major security upgrade for a financial services client, enhancing their transaction safety significantly
+- Conducted in-depth security audits, identifying and rectifying 50+ potential vulnerabilities
+- Coordinated with cross-functional teams to design robust security infrastructures for emerging technologies
+- Instituted security monitoring best practices, reducing incident response time by 45%
+
+IT Security Apprentice, NexGen CyberSecurity, Birmingham, UK
+08/2015 - 11/2017
+- Assisted in the successful deployment of enterprise-wide malware protection systems
+- Contributed to team efforts in securing networks, effectively neutralising 10+ advanced persistent threat (APT) campaigns
+- Supported clients through the management of security policy configurations on multiple platforms
+- Facilitated the completion of a collaborative project on cloud security, improving client cloud infrastructure resilience
+
+Education
+MSc Cyber Security, University College London, London, UK (2018-2020)
+BSc Computer Science, University of Nottingham, Nottingham, UK (2012-2015)
+
+Certifications
+Certified Ethical Hacker (CEH) - ECCouncil
+Python for Network Engineers - Network Academy
+
+Skills
+Cybersecurity, Network Engineering, Python Automation, Risk Assessments, Firewall Management, Intrusion Detection, SIEM, Penetration Testing, ISO 27001, Data Protection, Incident Response
+
+Languages
+English (Native), French (Intermediate)

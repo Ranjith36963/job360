@@ -680,8 +680,11 @@ def test_devitjobs_parses_response():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight.*"),
+                m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight\b.*"),
                       payload=DEVITJOBS_PAYLOAD)
+                # Mock detail page fetches (description comes from HTML)
+                m.get(re.compile(r"https://devitjobs\.uk/jobs/.*"), repeat=True,
+                      body='<script type="application/ld+json">{"description":"<p>ML role</p>"}</script>')
                 source = DevITJobsSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 # Only ML Engineer should pass relevance filter
@@ -1854,6 +1857,56 @@ def test_nomis_returns_empty_on_no_data():
                 source = NomisSource(session, search_config=_TEST_CONFIG)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ── TDD: Fix 1 — DevITjobs URL must be full https URL ──
+
+def test_devitjobs_url_has_https_prefix():
+    """DevITjobs slugs must be converted to full URLs."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = [{
+                "name": "AI Engineer",
+                "company": "TestCo",
+                "actualCity": "London",
+                "annualSalaryFrom": 50000,
+                "annualSalaryTo": 70000,
+                "hasVisaSponsorship": False,
+                "expLevel": "Mid",
+                "jobUrl": "TestCo-AI-Engineer",  # Slug without https
+                "publishedAt": "2024-01-15",
+            }]
+            with aioresponses() as m:
+                m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight\b.*"),
+                      payload=payload)
+                m.get(re.compile(r"https://devitjobs\.uk/jobs/.*"), repeat=True, body="")
+                source = DevITJobsSource(session, search_config=_TEST_CONFIG)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].apply_url.startswith("https://"), \
+                    f"URL must start with https://, got: {jobs[0].apply_url}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_devitjobs_url_already_full_unchanged():
+    """DevITjobs full URLs should not be double-prefixed."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight\b.*"),
+                      payload=DEVITJOBS_PAYLOAD)
+                m.get(re.compile(r"https://devitjobs\.uk/jobs/.*"), repeat=True, body="")
+                source = DevITJobsSource(session, search_config=_TEST_CONFIG)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].apply_url == "https://devitjobs.uk/jobs/revolut-ml-engineer"
         finally:
             await session.close()
     _run(_test())

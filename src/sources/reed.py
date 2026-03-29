@@ -28,8 +28,8 @@ class ReedSource(BaseJobSource):
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
-        # Search all job titles UK-wide
-        queries = self.job_titles[:12]
+        # Search using enriched queries (title + skill combos + location variants)
+        queries = self.search_queries[:12] or self.job_titles[:12]
         for query in queries:
             params = {
                 "keywords": query,

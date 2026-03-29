@@ -1,0 +1,39 @@
+Hugo Morales
+Senior Data Scientist
+
+HugoM@isp.com | +44 1234 555555 | York, United Kingdom
+
+Profile
+Versed in current advances in areas such as machine learning and statistics. Highly adept with tools, techniques and software for conducting statistical analysis and advanced computations.
+
+Work Experience
+
+Senior Data Scientist, Tower York Financial Services, York
+02/2020 - present
+- Formulate and implement credit risk models, including knowledge-based models and machine learning models
+- Hire, train and manage high-performing data analyst teams
+- Conceived and implemented credit policy strategies and processes from the ground up
+- Designed and deployed decision support system for credit origination and credit risk management
+
+Analytics Manager, AQL, Leeds
+06/2017 - 01/2020
+- Supervised team of three analysts in developing statistical modelling methods for enhancing efficiency of sales team
+- Led development of tools for tracking and analysing ongoing marketing campaign performance
+- Oversaw statistical and data modelling to gain actionable business insights for strategic decision-making
+- Designed predictive machine learning models
+
+Graduate Student Assistant, Statistics, University of York, York
+09/2016 - 05/2017
+- Assisted Statistics professors in assigning, monitoring and critiquing work of graduate students
+- Worked closely with professors developing lesson plans and creating/delivering content for classes
+- Administered and graded exams, quizzes and daily lessons
+
+Education
+Master of Science in Statistics, University of York, York
+09/2015 - 05/2017
+
+Bachelor of Science in Applied Mathematics, Universitat de Barcelona, Barcelona
+09/2011 - 05/2015
+
+Skills
+Deep Learning, Data Visualization, Predictive Modeling, Machine Learning, Probability Statistics, Customer Analytics, Microsoft Power BI, Python, R, SQL, Tableau, SPSS, TensorFlow, Scikit-learn

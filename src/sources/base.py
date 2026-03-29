@@ -63,22 +63,18 @@ class BaseJobSource(ABC):
         return []
 
     def _relevance_match(self, text: str) -> bool:
-        """Check if any relevance keyword appears as a whole word in text.
+        """Check if any relevance keyword appears in text (synonym-aware).
 
-        Uses word-boundary matching for short keywords to avoid false positives
-        (e.g. keyword 'R' matching 'Recruitment', 'Go' matching 'Good').
+        Uses synonym matching from description_matcher to catch equivalent terms
+        (e.g. "ML" matches "Machine Learning", "JS" matches "JavaScript").
+        Falls back to word-boundary matching for short keywords.
         """
         if not self.relevance_keywords:
             return True  # No keywords configured — don't filter
-        text_lower = text.lower()
+        from src.filters.description_matcher import text_contains_with_synonyms
         for kw in self.relevance_keywords:
-            kw_lower = kw.lower()
-            if len(kw_lower) <= 2:
-                if re.search(r'\b' + re.escape(kw_lower) + r'\b', text_lower):
-                    return True
-            else:
-                if kw_lower in text_lower:
-                    return True
+            if text_contains_with_synonyms(text, kw):
+                return True
         return False
 
     def _headers(self, extra: dict | None = None) -> dict:
@@ -112,6 +108,23 @@ class BaseJobSource(ABC):
                 f"{_CIRCUIT_BREAKER_THRESHOLD}): {e}"
             )
             return []
+
+    async def _gather_queries(self, coros: list, batch_size: int = 3) -> list:
+        """Run query coroutines in concurrent batches for faster fetching.
+
+        Instead of running N queries sequentially (N × timeout worst case),
+        runs them in batches of batch_size concurrently (N/batch_size × timeout).
+        """
+        results = []
+        for i in range(0, len(coros), batch_size):
+            batch = coros[i:i + batch_size]
+            batch_results = await asyncio.gather(*batch, return_exceptions=True)
+            for r in batch_results:
+                if isinstance(r, Exception):
+                    logger.warning(f"[{self.name}] Query batch error: {r}")
+                elif r is not None:
+                    results.append(r)
+        return results
 
     async def _request(self, method: str, url: str, *,
                        params: dict | None = None,

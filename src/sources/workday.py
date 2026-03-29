@@ -11,13 +11,13 @@ from src.config.companies import WORKDAY_COMPANIES, COMPANY_NAME_OVERRIDES
 logger = logging.getLogger("job360.sources.workday")
 
 # Parse "Posted 3 Days Ago", "Posted Today", "Posted Yesterday", "Posted 30+ Days Ago"
-_POSTED_RE = re.compile(r"Posted\s+(\d+)\s+Days?\s+Ago", re.IGNORECASE)
+_POSTED_RE = re.compile(r"Posted\s+(\d+)\+?\s+Days?\s+Ago", re.IGNORECASE)
 
 
 def _parse_posted_on(text: str) -> str:
     """Convert Workday 'Posted X Days Ago' to ISO date string."""
     if not text:
-        return datetime.now(timezone.utc).isoformat()
+        return ""  # Return empty so caller knows date is unknown
     lower = text.lower()
     if "today" in lower:
         return datetime.now(timezone.utc).isoformat()
@@ -27,7 +27,7 @@ def _parse_posted_on(text: str) -> str:
     if m:
         days = int(m.group(1))
         return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    return datetime.now(timezone.utc).isoformat()
+    return ""  # Unknown date — don't fake it as "now"
 
 
 class WorkdaySource(BaseJobSource):
@@ -86,7 +86,8 @@ class WorkdaySource(BaseJobSource):
                     if dedup_key in seen_keys:
                         continue
                     seen_keys.add(dedup_key)
-                    posted_on = item.get("postedOn", "")
+                    posted_on = item.get("postedOn", "") or item.get("bulletFields", [""])[0] if item.get("bulletFields") else item.get("postedOn", "")
+                    date_found = _parse_posted_on(posted_on) or datetime.now(timezone.utc).isoformat()
                     jobs.append(Job(
                         title=title,
                         company=company_name,
@@ -94,7 +95,7 @@ class WorkdaySource(BaseJobSource):
                         description="",
                         apply_url=apply_url,
                         source=self.name,
-                        date_found=_parse_posted_on(posted_on),
+                        date_found=date_found,
                     ))
 
         logger.info(f"Workday: found {len(jobs)} relevant jobs across {len(self._companies)} companies")

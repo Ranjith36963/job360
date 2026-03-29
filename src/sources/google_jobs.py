@@ -47,7 +47,7 @@ class GoogleJobsSource(BaseJobSource):
         jobs = []
         seen_keys = set()
 
-        for query in self.job_titles[:8]:
+        for query in (self.search_queries[:8] or self.job_titles[:8]):
             params = {
                 "engine": "google_jobs",
                 "q": query,

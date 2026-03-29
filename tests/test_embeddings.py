@@ -269,4 +269,4 @@ class TestScorerIntegration:
             config.secondary_skills, config.relevance_keywords,
         )
         score = scorer._dim_semantic("Data Scientist Python Machine Learning SQL")
-        assert 0 <= score <= 5
+        assert 0 <= score <= 10  # DIM_SEMANTIC = 10 after rebalance

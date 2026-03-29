@@ -1,10 +1,14 @@
-"""Optional LLM-powered CV summarization — supplements regex parsing."""
+"""Optional LLM-powered CV summarization — supplements regex parsing.
+
+Uses the multi-provider pool (``src.llm.client``) to distribute requests
+across free LLM providers.  Gemini Flash is preferred for CV parsing
+because quality matters most for a single profile-setup call.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("job360.profile.cv_summarizer")
@@ -38,68 +42,34 @@ class LLMExtraction:
 
 
 def is_configured() -> bool:
-    """Check if LLM API is configured."""
-    from src.config.settings import LLM_API_KEY
-    return bool(LLM_API_KEY)
-
-
-def _parse_response(raw: str) -> dict:
-    """Parse JSON from LLM response, handling markdown-fenced blocks."""
-    text = raw.strip()
-    # Try to extract JSON from markdown code fence
-    fence_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1).strip()
-    return json.loads(text)
+    """Check if at least one LLM provider has an API key set."""
+    from src.llm.client import is_configured as _configured
+    return _configured()
 
 
 def extract_from_cv_text(text: str) -> LLMExtraction:
     """Call LLM API to extract structured data from CV text."""
-    from src.config.settings import LLM_API_KEY, LLM_PROVIDER, LLM_MODEL
+    from src.llm.client import llm_complete, parse_json_response
+    from src.llm.providers import CV_PREFERRED_MODEL, CV_PREFERRED_PROVIDER
 
-    if not LLM_API_KEY:
-        return LLMExtraction(success=False, error="No LLM API key configured")
+    if not is_configured():
+        return LLMExtraction(success=False, error="No LLM providers configured")
 
     if len(text.strip()) < 50:
         return LLMExtraction(success=False, error="CV text too short for LLM extraction")
 
-    prompt = EXTRACTION_PROMPT.format(text=text[:8000])  # limit input size
+    prompt = EXTRACTION_PROMPT.format(text=text[:8000])
 
     try:
-        if LLM_PROVIDER == "anthropic":
-            try:
-                import anthropic
-            except ImportError:
-                return LLMExtraction(
-                    success=False,
-                    error="anthropic package not installed. Install with: pip install anthropic",
-                )
-            client = anthropic.Anthropic(api_key=LLM_API_KEY)
-            response = client.messages.create(
-                model=LLM_MODEL,
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = response.content[0].text
-        elif LLM_PROVIDER == "openai":
-            try:
-                import openai
-            except ImportError:
-                return LLMExtraction(
-                    success=False,
-                    error="openai package not installed. Install with: pip install openai",
-                )
-            client = openai.OpenAI(api_key=LLM_API_KEY)
-            response = client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-            )
-            raw = response.choices[0].message.content
-        else:
-            return LLMExtraction(success=False, error=f"Unknown LLM provider: {LLM_PROVIDER}")
+        raw = llm_complete(
+            prompt,
+            prefer=CV_PREFERRED_PROVIDER,
+            model_override=CV_PREFERRED_MODEL,
+        )
+        if raw is None:
+            return LLMExtraction(success=False, error="LLM returned no response")
 
-        data = _parse_response(raw)
+        data = parse_json_response(raw)
         return LLMExtraction(
             skills=data.get("skills", []),
             job_titles=data.get("job_titles", []),
@@ -108,8 +78,6 @@ def extract_from_cv_text(text: str) -> LLMExtraction:
             summary=data.get("summary", ""),
             years_experience=data.get("years_experience"),
         )
-    except ImportError as e:
-        return LLMExtraction(success=False, error=f"LLM library not installed: {e}")
     except json.JSONDecodeError:
         return LLMExtraction(success=False, error="Failed to parse LLM response as JSON")
     except Exception as e:

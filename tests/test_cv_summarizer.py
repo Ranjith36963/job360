@@ -6,52 +6,50 @@ from unittest.mock import patch, MagicMock
 from src.profile.cv_summarizer import (
     LLMExtraction,
     is_configured,
-    _parse_response,
     extract_from_cv_text,
     merge_llm_extraction,
 )
+from src.llm.client import parse_json_response
 from src.profile.models import CVData
 
 
 def test_is_configured_with_key():
-    with patch("src.profile.cv_summarizer.is_configured") as mock:
-        mock.return_value = True
-        assert is_configured() or mock.return_value
+    with patch("src.llm.client.get_configured_providers", return_value=[MagicMock()]):
+        assert is_configured() is True
 
 
 def test_is_configured_without_key():
-    with patch("src.config.settings.LLM_API_KEY", ""):
-        # Re-import to pick up patched value
-        assert not is_configured()
+    with patch("src.llm.client.get_configured_providers", return_value=[]):
+        assert is_configured() is False
 
 
 def test_parse_response_valid_json():
     raw = '{"skills": ["Python", "AWS"], "job_titles": ["Engineer"]}'
-    result = _parse_response(raw)
+    result = parse_json_response(raw)
     assert result["skills"] == ["Python", "AWS"]
 
 
 def test_parse_response_markdown_fenced():
     raw = '```json\n{"skills": ["Python"], "summary": "Engineer"}\n```'
-    result = _parse_response(raw)
+    result = parse_json_response(raw)
     assert result["skills"] == ["Python"]
 
 
 def test_parse_response_invalid_json():
     with pytest.raises(Exception):
-        _parse_response("This is not JSON at all")
+        parse_json_response("This is not JSON at all")
 
 
 def test_extract_short_text():
     """Text too short should fail gracefully."""
-    with patch("src.config.settings.LLM_API_KEY", "test-key"):
+    with patch("src.llm.client.get_configured_providers", return_value=[MagicMock()]):
         result = extract_from_cv_text("short")
         assert result.success is False
         assert "too short" in result.error
 
 
 def test_extract_no_key():
-    with patch("src.config.settings.LLM_API_KEY", ""):
+    with patch("src.llm.client.get_configured_providers", return_value=[]):
         result = extract_from_cv_text("A long enough CV text to process and extract data from.")
         assert result.success is False
 

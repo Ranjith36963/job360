@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("job360.embeddings")
 
 # Sentinel: None = not yet attempted, False = unavailable
 _model: object = None
@@ -75,7 +75,9 @@ def encode_batch(texts: list[str]) -> Optional[np.ndarray]:
         vecs = model.encode(texts, convert_to_numpy=True, show_progress_bar=False,
                             batch_size=64)
         norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-10
-        return vecs / norms
+        normalized = vecs / norms
+        logger.debug("encode_batch: %d texts → shape %s", len(texts), normalized.shape)
+        return normalized
     except Exception as e:
         logger.warning("Batch embedding failed: %s", e)
         return None
@@ -91,17 +93,21 @@ def build_profile_embedding(
     primary_skills: list[str],
     secondary_skills: list[str],
     relevance_keywords: list[str],
+    about_me: str = "",
 ) -> Optional[np.ndarray]:
     """Build a single embedding vector representing the user's professional profile.
 
-    Combines job titles + skills + keywords into a weighted text representation,
-    then encodes it into a single 384-dim vector.
+    Combines job titles + about_me + skills + keywords into a weighted text
+    representation, then encodes it into a single 384-dim vector.
     """
     parts = []
     # Job titles get repeated for emphasis (they're the strongest signal)
     for t in job_titles[:5]:
         parts.append(t)
         parts.append(t)
+    # About me — personal career narrative (rich semantic signal)
+    if about_me:
+        parts.append(about_me)
     # Primary skills — single mention each
     for s in primary_skills[:15]:
         parts.append(s)
@@ -122,14 +128,16 @@ def build_profile_embedding(
 def score_semantic_similarity(
     profile_embedding: Optional[np.ndarray],
     job_text: str,
-    max_points: int = 5,
+    max_points: int = 10,
+    job_embedding: Optional[np.ndarray] = None,
 ) -> int:
     """Score semantic similarity between profile embedding and job text.
 
     Args:
         profile_embedding: Pre-computed profile vector (384-dim, L2-normalized).
         job_text: Job title + description concatenated.
-        max_points: Maximum points to award (default 5 = DIM_SEMANTIC).
+        max_points: Maximum points to award (default 10 = DIM_SEMANTIC).
+        job_embedding: Optional pre-computed job vector. Skips re-encoding if provided.
 
     Returns:
         Integer score 0 to max_points.
@@ -137,7 +145,8 @@ def score_semantic_similarity(
     if profile_embedding is None:
         return 0
 
-    job_embedding = encode(job_text)
+    if job_embedding is None:
+        job_embedding = encode(job_text)
     if job_embedding is None:
         return 0
 

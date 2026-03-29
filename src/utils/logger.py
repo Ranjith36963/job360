@@ -23,6 +23,14 @@ class PIISanitizingFormatter(logging.Formatter):
         return msg
 
 
+class _FlushFilter(logging.Filter):
+    """Flush stdout after every log record (ensures subprocess output reaches pipe)."""
+
+    def filter(self, record):
+        sys.stdout.flush()
+        return True
+
+
 def setup_logging(log_level: str | None = None) -> logging.Logger:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("job360")
@@ -38,6 +46,7 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
     )
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(fmt)
+    console.addFilter(_FlushFilter())
     logger.addHandler(console)
     file_handler = RotatingFileHandler(
         LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3

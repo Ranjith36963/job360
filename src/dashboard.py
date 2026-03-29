@@ -1,6 +1,8 @@
 """Job360 Web Dashboard — Professional Streamlit UI."""
 
 import html
+import logging
+import re
 import sqlite3
 import json
 import subprocess
@@ -18,7 +20,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from src.config.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE
+from src.config.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE, DATA_DIR
 from src.profile.storage import load_profile, save_profile, profile_exists
 from src.profile.models import UserProfile, CVData, UserPreferences
 from src.profile.cv_parser import parse_cv_from_bytes
@@ -37,6 +39,44 @@ from src.notifications.report_generator import generate_markdown_report
 from src.models import Job
 
 
+# ---------------------------------------------------------------------------
+# Terminal logger — dual output:
+#   1. sys.stderr  → appears in the terminal where Streamlit was launched
+#   2. dashboard.log file → persists across sessions for debugging
+# ---------------------------------------------------------------------------
+_log = logging.getLogger("job360.dashboard")
+if not _log.handlers:
+    _log.setLevel(logging.DEBUG)
+    # stderr handler with immediate flush
+    _ch = logging.StreamHandler(sys.stderr)
+    _ch.setFormatter(logging.Formatter(
+        "%(asctime)s [DASHBOARD] %(message)s", datefmt="%H:%M:%S",
+    ))
+    _log.addHandler(_ch)
+    # File handler for persistent logs
+    _log_dir = DATA_DIR / "logs"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    _fh = logging.FileHandler(_log_dir / "dashboard.log", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _log.addHandler(_fh)
+
+
+def _tlog(msg: str) -> None:
+    """Write to BOTH the logger AND directly to stderr with flush.
+
+    Streamlit may buffer/redirect sys.stderr, so we also write to the
+    original file descriptor to guarantee terminal visibility.
+    """
+    _log.info(msg)
+    try:
+        sys.stderr.write(f"[DASHBOARD] {msg}\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def _run_async(coro):
     """Run async coroutine safely, handling existing event loops."""
     import asyncio
@@ -49,6 +89,148 @@ def _run_async(coro):
         with concurrent.futures.ThreadPoolExecutor() as pool:
             return pool.submit(asyncio.run, coro).result()
     return asyncio.run(coro)
+
+
+def _run_search_pipeline(project_root: Path) -> bool:
+    """Run the Job360 search pipeline with live progress.
+
+    Output is streamed to BOTH:
+      - Streamlit st.status() widget (for the user in the browser)
+      - Terminal logger (for developer debugging in the console)
+    Returns True when the search completes so the caller can clear cache.
+    """
+    _tlog("=" * 60)
+    _tlog("SEARCH PIPELINE TRIGGERED")
+    _tlog("=" * 60)
+
+    new_jobs_count = 0
+    sources_done = 0
+    sources_with_jobs = 0
+    total_raw = 0
+
+    with st.status("Searching job sources...", expanded=True) as status:
+        try:
+            cmd = [sys.executable, "-u", "-m", "src.main", "--no-email"]
+            _tlog(f"Subprocess: {' '.join(cmd)}")
+            _tlog(f"Working dir: {project_root}")
+
+            env = {**__import__("os").environ, "PYTHONUNBUFFERED": "1"}
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(project_root),
+                bufsize=1,
+                env=env,
+            )
+
+            for line in iter(proc.stdout.readline, ""):
+                line = line.rstrip()
+                if not line:
+                    continue
+
+                # Tee every line to terminal + log file
+                _tlog(f"  | {line}")
+
+                # Strip the log prefix to extract the message
+                # Format: "2026-03-24 19:25:43 [INFO] job360.xxx: message"
+                m = re.match(
+                    r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\[\w+\]\s+[\w.]+:\s*(.*)",
+                    line,
+                )
+                msg = m.group(1) if m else line
+
+                # Show source results in Streamlit
+                if "found" in msg and ("relevant" in msg or "jobs" in msg):
+                    source_name = msg.split(":")[0] if ":" in msg else ""
+                    sources_done += 1
+                    if "0 jobs" in msg or "0 relevant" in msg:
+                        st.caption(f"  {msg}")
+                    else:
+                        sources_with_jobs += 1
+                        st.write(f"  {msg}")
+                    status.update(label=f"Searching... {source_name} ({sources_done}/48)")
+                elif "Total raw jobs:" in msg:
+                    st.write(f"**{msg}**")
+                    trm = re.search(r"Total raw jobs:\s*(\d+)", msg)
+                    if trm:
+                        total_raw = int(trm.group(1))
+                elif "Removed" in msg and "foreign" in msg:
+                    st.write(msg)
+                elif "After dedup:" in msg:
+                    st.write(f"**{msg}**")
+                elif "After score filter" in msg:
+                    st.write(f"**{msg}**")
+                elif "New jobs:" in msg:
+                    st.write(f"**{msg}**")
+                    njm = re.search(r"New jobs:\s*(\d+)", msg)
+                    if njm:
+                        new_jobs_count = int(njm.group(1))
+                elif "No user profile found" in msg or "incomplete" in msg.lower():
+                    st.warning(msg)
+                    _tlog(f"PROFILE ISSUE: {msg}")
+                elif "Starting job search" in msg:
+                    st.write("Starting search pipeline...")
+                elif "no API key" in msg.lower() or "skipping" in msg.lower():
+                    pass  # Already logged via tee above
+
+            proc.wait(timeout=900)
+
+            _tlog("-" * 60)
+            _tlog("SEARCH SUMMARY:")
+            _tlog(f"  Exit code:       {proc.returncode}")
+            _tlog(f"  Sources checked: {sources_done}")
+            _tlog(f"  Sources w/jobs:  {sources_with_jobs}")
+            _tlog(f"  Total raw jobs:  {total_raw}")
+            _tlog(f"  New jobs stored: {new_jobs_count}")
+            _tlog("-" * 60)
+
+            if proc.returncode == 0:
+                if new_jobs_count > 0:
+                    status.update(
+                        label=f"Search complete  {new_jobs_count} new jobs!",
+                        state="complete",
+                        expanded=False,
+                    )
+                else:
+                    try:
+                        conn = _get_conn()
+                        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                        conn.close()
+                        if total > 0:
+                            status.update(
+                                label=f"Search complete  no new jobs (DB has {total} existing)",
+                                state="complete",
+                                expanded=False,
+                            )
+                        else:
+                            status.update(
+                                label="Search complete  no matching jobs found",
+                                state="complete",
+                                expanded=False,
+                            )
+                    except Exception:
+                        status.update(
+                            label="Search complete  no new jobs this run",
+                            state="complete",
+                            expanded=False,
+                        )
+                return True
+            else:
+                _tlog(f"ERROR: Search subprocess FAILED (exit code {proc.returncode})")
+                status.update(label="Search failed", state="error")
+                st.error("Search process failed. Check terminal output or data/logs/job360.log")
+                return False
+
+        except Exception as e:
+            _tlog(f"ERROR: Search pipeline exception: {e}")
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            status.update(label=f"Search error: {e}", state="error")
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +603,8 @@ def _remove_user_action(job_id: int) -> None:
 @st.cache_data(ttl=60)
 def load_jobs_7day() -> list[dict]:
     """Load jobs from last 7 days with score >= MIN_MATCH_SCORE."""
+    if not Path(str(DB_PATH)).exists():
+        return []
     conn = _get_conn()
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
@@ -633,6 +817,26 @@ df_runs = load_run_logs()
 _has_profile = profile_exists()
 _loaded_prof = load_profile() if _has_profile else None
 
+# ---------------------------------------------------------------------------
+# Startup diagnostics — printed to terminal on every page load
+# ---------------------------------------------------------------------------
+_db_exists = Path(str(DB_PATH)).exists()
+_db_size_kb = Path(str(DB_PATH)).stat().st_size // 1024 if _db_exists else 0
+_tlog("=" * 60)
+_tlog("DASHBOARD LOADED")
+_complete_str = str(_loaded_prof.is_complete) if _loaded_prof else "N/A"
+_tlog(f"  Profile:   {'YES' if _has_profile else 'NO'} (complete={_complete_str})")
+if _loaded_prof:
+    _p = _loaded_prof.preferences
+    _titles_preview = _p.target_job_titles[:3] if _p.target_job_titles else []
+    _tlog(f"  Titles:    {_titles_preview}")
+    _tlog(f"  Skills:    {len(_p.additional_skills)} total")
+    _tlog(f"  CV text:   {len(_loaded_prof.cv_data.raw_text)} chars")
+_tlog(f"  DB file:   {'EXISTS' if _db_exists else 'MISSING'} ({_db_size_kb} KB)")
+_tlog(f"  Jobs (7d): {len(all_jobs)} loaded")
+_tlog(f"  Run logs:  {len(df_runs)} entries")
+_tlog("=" * 60)
+
 # Extract existing values for form pre-population
 _existing_titles = ""
 _existing_skills = ""
@@ -642,6 +846,9 @@ _existing_locs: list[str] = []
 _existing_arrangement = ""
 _existing_salary_min = 0
 _existing_salary_max = 0
+_existing_excluded = ""
+_existing_industries = ""
+_existing_experience = ""
 
 if _loaded_prof:
     _p = _loaded_prof.preferences
@@ -653,6 +860,9 @@ if _loaded_prof:
     _existing_arrangement = _p.work_arrangement or ""
     _existing_salary_min = int(_p.salary_min) if _p.salary_min else 0
     _existing_salary_max = int(_p.salary_max) if _p.salary_max else 0
+    _existing_excluded = ", ".join(_p.excluded_skills) if _p.excluded_skills else ""
+    _existing_industries = ", ".join(_p.industries) if _p.industries else ""
+    _existing_experience = _p.experience_level or ""
 
 _arrangement_options = ["", "remote", "hybrid", "onsite"]
 _arrangement_idx = (
@@ -700,8 +910,29 @@ with st.sidebar:
             value=_existing_about,
             placeholder="Brief summary of your background",
         )
+        prof_excluded = st.text_input(
+            "Excluded Skills (comma-separated)",
+            value=_existing_excluded,
+            placeholder="e.g. PHP, Salesforce, SAP",
+        )
+        prof_industries = st.text_input(
+            "Preferred Industries (comma-separated)",
+            value=_existing_industries,
+            placeholder="e.g. Technology, Finance, Healthcare",
+        )
+        _experience_options = ["", "entry", "mid", "senior", "lead", "executive"]
+        _experience_idx = (
+            _experience_options.index(_existing_experience)
+            if _existing_experience in _experience_options
+            else 0
+        )
+        prof_experience = st.selectbox(
+            "Experience Level",
+            _experience_options,
+            index=_experience_idx,
+        )
         prof_negatives = st.text_input(
-            "Exclude Keywords (comma-separated)",
+            "Exclude Title Keywords (comma-separated)",
             value=_existing_neg,
             placeholder="e.g. intern, junior",
         )
@@ -735,9 +966,11 @@ with st.sidebar:
         prof_github = st.text_input("GitHub Username", placeholder="e.g. octocat")
 
         if st.button("Save Profile", type="primary", use_container_width=True):
+            _tlog(f"SAVE PROFILE clicked (cv={uploaded_cv is not None}, linkedin={uploaded_linkedin is not None}, github={bool(prof_github)})")
             cv_data = CVData()
             if uploaded_cv:
                 cv_data = parse_cv_from_bytes(uploaded_cv.read(), uploaded_cv.name)
+                _tlog(f"  CV parsed: {len(cv_data.skills)} skills, {len(cv_data.job_titles)} titles, {len(cv_data.raw_text)} chars")
 
             # Enrich from LinkedIn
             if uploaded_linkedin:
@@ -766,9 +999,12 @@ with st.sidebar:
             prefs = UserPreferences(
                 target_job_titles=[t.strip() for t in prof_titles.split(",") if t.strip()],
                 additional_skills=[s.strip() for s in prof_skills.split(",") if s.strip()],
+                excluded_skills=[s.strip() for s in prof_excluded.split(",") if s.strip()],
                 negative_keywords=[n.strip() for n in prof_negatives.split(",") if n.strip()],
                 preferred_locations=prof_locations,
+                industries=[i.strip() for i in prof_industries.split(",") if i.strip()],
                 work_arrangement=prof_arrangement,
+                experience_level=prof_experience,
                 salary_min=prof_salary_min if prof_salary_min > 0 else None,
                 salary_max=prof_salary_max if prof_salary_max > 0 else None,
                 about_me=prof_about,
@@ -778,8 +1014,55 @@ with st.sidebar:
                 prefs = merge_cv_and_preferences(cv_data.skills, cv_data.job_titles, prefs)
 
             profile = UserProfile(cv_data=cv_data, preferences=prefs)
+
+            # --- Smart Save: only wipe DB on domain change ---
+            from src.profile.domain_detector import detect_domains
+
+            _db_path = Path(str(DB_PATH))
+            _db_exists = _db_path.exists()
+
+            _should_wipe = False
+            _should_search = False
+
+            if not _loaded_prof or not _db_exists:
+                # First-time save or empty DB → search
+                _should_search = True
+            elif uploaded_cv is not None:
+                # New CV uploaded → check if domain changed
+                _old_domains = set(detect_domains(_loaded_prof))
+                _new_domains = set(detect_domains(profile))
+                if _old_domains != _new_domains:
+                    _should_wipe = True
+                    _should_search = True
+                elif not _old_domains and not _new_domains:
+                    # Detector can't classify either → compare raw text
+                    if (_loaded_prof.cv_data.raw_text or "").strip() != (cv_data.raw_text or "").strip():
+                        _should_wipe = True
+                        _should_search = True
+            # else: just preferences/LinkedIn/GitHub change → save only
+
             save_profile(profile)
-            st.toast("Profile saved! Next search will use your keywords.")
+            _tlog(f"  Profile saved (wipe={_should_wipe}, search={_should_search})")
+
+            if _should_wipe:
+                _tlog("  Wiping DB (domain change detected)")
+                for _suffix in ("", "-wal", "-shm"):
+                    _f = _db_path.parent / (_db_path.name + _suffix)
+                    if _f.exists():
+                        _f.unlink()
+                st.cache_data.clear()
+
+            if _should_search:
+                st.toast("Profile saved! Starting job search...")
+                completed = _run_search_pipeline(PROJECT_ROOT)
+                if completed:
+                    st.cache_data.clear()
+            else:
+                if uploaded_cv is not None:
+                    st.toast("Profile updated! Your existing jobs are still relevant.", icon="✅")
+                else:
+                    st.toast("Profile saved!", icon="✅")
+
             st.rerun()
 
     # Status indicator
@@ -809,7 +1092,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Top Bar — Title + Filter / Sort / Actions popovers
 # ---------------------------------------------------------------------------
-col_title, col_filters, col_sort, col_actions = st.columns([6, 1, 1, 1])
+col_title, col_filters, col_sort, col_refresh, col_actions = st.columns([5, 1, 1, 1, 1])
 
 with col_title:
     _mode_label = "Profile-driven" if _has_profile else "Upload CV to start"
@@ -866,13 +1149,25 @@ with col_sort:
             "Salary (low \u2192 high)",
         ])
 
+with col_refresh:
+    trigger_search = st.button(
+        "\U0001F680 Refresh", type="primary", use_container_width=True,
+    )
+
 with col_actions:
     with st.popover("\u26A1 Actions", use_container_width=True):
-        trigger_search = st.button(
-            "\U0001F680 Refresh Now", type="primary", use_container_width=True,
-        )
         export_csv_btn = st.button("\U0001F4E5 Export CSV", use_container_width=True)
         export_md_btn = st.button("\U0001F4DD Export Markdown", use_container_width=True)
+        st.divider()
+        st.markdown("**Danger Zone**")
+        _clear_confirm = st.checkbox(
+            "I confirm \u2014 delete all data (jobs + profile)", key="clear_db_confirm",
+        )
+        clear_db_btn = st.button(
+            "\U0001F5D1\uFE0F Clear All Data",
+            use_container_width=True,
+            disabled=not _clear_confirm,
+        )
 
 # ---------------------------------------------------------------------------
 # Apply filters
@@ -968,35 +1263,62 @@ filtered_jobs.sort(key=lambda j: j.get(_sort_key) or _sort_default, reverse=_sor
 # Trigger new search
 # ---------------------------------------------------------------------------
 if trigger_search:
-    with st.spinner("Fetching from all sources... this takes 2-3 minutes"):
-        result = subprocess.run(
-            [sys.executable, "-m", "src.main"],
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            timeout=300,
-        )
-    if result.returncode == 0:
-        st.toast("Search complete! Refreshing data...")
-        st.cache_data.clear()
-        st.rerun()
+    _tlog("REFRESH button clicked")
+    if not _has_profile:
+        _tlog("  WARNING: No profile — aborting search")
+        st.warning("Please upload your CV in the sidebar first.")
     else:
-        st.error(f"Search failed:\n```\n{result.stderr[-1000:]}\n```")
+        completed = _run_search_pipeline(PROJECT_ROOT)
+        if completed:
+            st.cache_data.clear()
+            st.rerun()
+
+# ---------------------------------------------------------------------------
+# Clear Database
+# ---------------------------------------------------------------------------
+if clear_db_btn and _clear_confirm:
+    _tlog("CLEAR ALL DATA clicked")
+    _db_path = Path(str(DB_PATH))
+    for _suffix in ("", "-wal", "-shm"):
+        _f = _db_path.parent / (_db_path.name + _suffix)
+        if _f.exists():
+            _f.unlink()
+            _tlog(f"  Deleted {_f}")
+    # Also clear user profile so sidebar resets to blank
+    from src.profile.storage import PROFILE_PATH
+    if PROFILE_PATH.exists():
+        PROFILE_PATH.unlink()
+        _tlog(f"  Deleted {PROFILE_PATH}")
+    st.cache_data.clear()
+    st.toast("All data cleared (jobs + profile)!", icon="\U0001F5D1\uFE0F")
+    st.rerun()
 
 # ---------------------------------------------------------------------------
 # Empty state
 # ---------------------------------------------------------------------------
 if not all_jobs:
-    st.markdown(
-        '<div class="welcome-box">'
-        '<div style="font-size:64px">\U0001F4BC</div>'
-        '<h2>Welcome to Job360</h2>'
-        '<p>Your intelligent job search companion</p>'
-        '<p>Upload your CV in the sidebar to get started, '
-        'then click <b>\u26A1 Actions \u2192 \U0001F680 Refresh Now</b>.</p>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    if _has_profile:
+        st.markdown(
+            '<div class="welcome-box">'
+            '<div style="font-size:64px">\U0001F50D</div>'
+            '<h2>Ready to Search</h2>'
+            '<p>Your profile is set up. Click <strong>Refresh</strong> above to search '
+            '48 job sources.</p>'
+            '<p style="color:#888;font-size:13px;">The first search takes 5\u201310 minutes '
+            'as it queries all sources.</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="welcome-box">'
+            '<div style="font-size:64px">\U0001F4BC</div>'
+            '<h2>Welcome to Job360</h2>'
+            '<p>Your intelligent job search companion</p>'
+            '<p>Upload your CV in the sidebar to get started.</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -1234,8 +1556,15 @@ with tab_jobs:
                     latest = df_runs.iloc[0]
                     ps = latest["per_source"]
                     if ps:
-                        ps_df = pd.DataFrame(list(ps.items()), columns=["Source", "Jobs Found"]).sort_values("Jobs Found", ascending=False)
-                        fig_bar = px.bar(ps_df, x="Source", y="Jobs Found", title="Latest Run \u2014 Per Source", color_discrete_sequence=["#34a853"])
+                        # per_source values may be dicts (quality metrics) or ints (legacy)
+                        ps_rows = []
+                        for src, val in ps.items():
+                            if isinstance(val, dict):
+                                ps_rows.append({"Source": src, "Fetched": val.get("fetched", 0), "Above Threshold": val.get("above_threshold", 0), "Stored": val.get("stored", 0)})
+                            else:
+                                ps_rows.append({"Source": src, "Fetched": val, "Above Threshold": 0, "Stored": 0})
+                        ps_df = pd.DataFrame(ps_rows).sort_values("Fetched", ascending=False)
+                        fig_bar = px.bar(ps_df, x="Source", y=["Fetched", "Above Threshold", "Stored"], title="Latest Run \u2014 Per Source Quality", barmode="group")
                         fig_bar.update_layout(height=300)
                         st.plotly_chart(fig_bar, use_container_width=True)
         else:

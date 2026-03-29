@@ -56,6 +56,8 @@ class ParsedJD:
     benefits: str = ""
     salary_mentioned: bool = False
     seniority_signal: str = ""  # "entry", "mid", "senior", "lead", "executive"
+    salary_min: Optional[float] = None     # extracted from JD text (GBP annual)
+    salary_max: Optional[float] = None     # extracted from JD text (GBP annual)
 
 
 # ── JD section detection ─────────────────────────────────────────────
@@ -105,6 +107,27 @@ _EXPERIENCE_ALT_RE = re.compile(
 
 _SALARY_RE = re.compile(
     r'(?:£|GBP)\s*[\d,]+|[\d,]+\s*(?:per\s+annum|p\.?a\.?|salary)',
+    re.IGNORECASE,
+)
+
+# Salary range extraction: "£60,000 - £80,000" or "£50k-£70k"
+_SALARY_RANGE_RE = re.compile(
+    r'£\s*(\d{2,3}[,.]?\d{3})\s*[-–to]+\s*£?\s*(\d{2,3}[,.]?\d{3})',
+    re.IGNORECASE,
+)
+# "£50k - £70k" variant
+_SALARY_K_RANGE_RE = re.compile(
+    r'£\s*(\d{2,3})\s*k\s*[-–to]+\s*£?\s*(\d{2,3})\s*k',
+    re.IGNORECASE,
+)
+# Single salary: "£45,000 per annum"
+_SALARY_SINGLE_RE = re.compile(
+    r'£\s*(\d{2,3}[,.]?\d{3})\s*(?:per\s+annum|p\.?a\.?|annual)',
+    re.IGNORECASE,
+)
+# Single k notation: "£45k"
+_SALARY_SINGLE_K_RE = re.compile(
+    r'£\s*(\d{2,3})\s*k\b',
     re.IGNORECASE,
 )
 
@@ -211,6 +234,42 @@ def _extract_experience_years(text: str) -> Optional[int]:
     return None
 
 
+def _extract_salary(text: str) -> tuple[Optional[float], Optional[float]]:
+    """Extract salary range from JD text (GBP annual).
+
+    Tries multiple patterns in order of specificity:
+    1. Range: £60,000-£80,000
+    2. K range: £50k-£70k
+    3. Single: £45,000 per annum
+    4. Single k: £45k
+    """
+    # Try range first
+    m = _SALARY_RANGE_RE.search(text)
+    if m:
+        lo = float(m.group(1).replace(",", "").replace(".", ""))
+        hi = float(m.group(2).replace(",", "").replace(".", ""))
+        return lo, hi
+
+    m = _SALARY_K_RANGE_RE.search(text)
+    if m:
+        lo = float(m.group(1)) * 1000
+        hi = float(m.group(2)) * 1000
+        return lo, hi
+
+    # Single value
+    m = _SALARY_SINGLE_RE.search(text)
+    if m:
+        val = float(m.group(1).replace(",", "").replace(".", ""))
+        return val, None
+
+    m = _SALARY_SINGLE_K_RE.search(text)
+    if m:
+        val = float(m.group(1)) * 1000
+        return val, None
+
+    return None, None
+
+
 def _detect_seniority(text: str) -> str:
     """Detect seniority level from JD text."""
     text_lower = text.lower()
@@ -251,11 +310,17 @@ def _classify_inline_skills(text: str) -> tuple[list[str], list[str]]:
     return sorted(required), sorted(preferred)
 
 
-def parse_jd(description: str) -> ParsedJD:
+def parse_jd(description: str, user_skills: list[str] | None = None) -> ParsedJD:
     """Parse a job description into structured components.
 
     Extracts required/preferred skills, experience requirements,
     qualifications, and seniority signals.
+
+    Args:
+        description: Raw job description text.
+        user_skills: Optional list of the user's own skills. When provided,
+            the parser scans for these skills (with synonym matching) after
+            the hardcoded regex extraction — making it domain-agnostic.
     """
     if not description or len(description) < 20:
         return ParsedJD()
@@ -289,6 +354,10 @@ def parse_jd(description: str) -> ParsedJD:
         result.required_skills = req
         result.preferred_skills = pref
 
+    # Phase 4A: scan for user's own skills (domain-agnostic matching)
+    if user_skills:
+        _enrich_with_user_skills(description, sections, result, user_skills)
+
     # Also scan qualifications section for skills
     if "qualifications" in sections and not result.qualifications:
         result.qualifications = _extract_qualifications(sections["qualifications"])
@@ -299,10 +368,52 @@ def parse_jd(description: str) -> ParsedJD:
     # Experience years
     result.experience_years = _extract_experience_years(description)
 
-    # Salary mention
-    result.salary_mentioned = bool(_SALARY_RE.search(description))
+    # Salary extraction + mention flag
+    result.salary_min, result.salary_max = _extract_salary(description)
+    result.salary_mentioned = result.salary_min is not None or bool(_SALARY_RE.search(description))
 
     # Seniority signal
     result.seniority_signal = _detect_seniority(description)
 
     return result
+
+
+def _enrich_with_user_skills(
+    description: str,
+    sections: dict[str, str],
+    result: ParsedJD,
+    user_skills: list[str],
+) -> None:
+    """Scan JD for user's skills using synonym matching, add any new finds.
+
+    Classifies found skills as required or preferred based on which JD section
+    they appear in. If no sections exist, defaults to required.
+    """
+    from src.filters.description_matcher import text_contains_with_synonyms
+
+    already_found = {s.lower() for s in result.required_skills + result.preferred_skills}
+
+    for skill in user_skills:
+        if skill.lower() in already_found:
+            continue
+        if not text_contains_with_synonyms(description, skill):
+            continue
+
+        # Classify based on section context
+        added = False
+        if sections:
+            if "preferred" in sections and text_contains_with_synonyms(
+                sections["preferred"], skill
+            ):
+                result.preferred_skills.append(skill)
+                added = True
+            elif "required" in sections and text_contains_with_synonyms(
+                sections["required"], skill
+            ):
+                result.required_skills.append(skill)
+                added = True
+
+        if not added:
+            # Found in description but not in a specific section → required
+            result.required_skills.append(skill)
+        already_found.add(skill.lower())

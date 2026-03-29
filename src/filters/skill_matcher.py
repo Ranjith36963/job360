@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from src.config.keywords import LOCATIONS
 from src.config.settings import TARGET_SALARY_MIN, TARGET_SALARY_MAX
 from src.filters.description_matcher import text_contains_with_synonyms
 
+logger = logging.getLogger("job360.scorer")
+
 # Weights for scoring components (total = 100) — legacy, kept for backward compat
 TITLE_WEIGHT = 40
 SKILL_WEIGHT = 40
@@ -16,28 +19,28 @@ LOCATION_WEIGHT = 10
 RECENCY_WEIGHT = 10
 
 # ── Multi-dimensional weights (total = 100) ──
-DIM_ROLE = 25
+DIM_ROLE = 20          # was 25 — reduced after title-matching precision fix (1E)
 DIM_SKILL = 25
 DIM_SENIORITY = 10
 DIM_EXPERIENCE = 10
 DIM_CREDENTIALS = 5
 DIM_LOCATION = 10
 DIM_RECENCY = 10
-DIM_SEMANTIC = 5
+DIM_SEMANTIC = 10      # was 5 — doubled to leverage embedding infrastructure (1E)
 
 
 @dataclass
 class ScoreBreakdown:
     """Per-dimension scoring breakdown for a job match."""
-    role: int = 0           # 0-25: title/role match
+    role: int = 0           # 0-20: title/role match
     skill: int = 0          # 0-25: skill overlap
     seniority: int = 0      # 0-10: seniority alignment
     experience: int = 0     # 0-10: experience years match
     credentials: int = 0    # 0-5:  qualification match
     location: int = 0       # 0-10: location match
     recency: int = 0        # 0-10: posting freshness
-    semantic: int = 0       # 0-5:  keyword overlap (placeholder for embeddings)
-    penalty: int = 0        # subtracted from total
+    semantic: int = 0       # 0-10: embedding similarity + keyword overlap
+    penalty: int = 0        # subtracted from total (negative titles + excluded skills)
     total: int = 0          # final 0-100 score
 
     # Match explanation lists (for Phase 2B display)
@@ -72,15 +75,30 @@ FOREIGN_INDICATORS = {
     "united states", "usa", "canada", "australia", "india", "germany", "france",
     "spain", "italy", "netherlands", "sweden", "norway", "denmark", "finland",
     "switzerland", "austria", "belgium", "ireland", "singapore", "japan",
-    "china", "brazil", "mexico", "south korea", "israel", "poland", "portugal",
-    "czech", "romania", "turkey", "south africa", "new zealand", "philippines",
+    "china", "brazil", "mexico", "south korea", "korea", "israel", "poland",
+    "portugal", "czech", "romania", "turkey", "south africa", "new zealand",
+    "philippines", "malaysia", "taiwan", "morocco", "serbia", "hungary",
+    "thailand", "vietnam", "indonesia", "argentina", "colombia", "chile",
+    "ukraine", "greece", "croatia", "luxembourg", "qatar", "saudi arabia",
     # Major non-UK cities
     "new york", "san francisco", "los angeles", "chicago", "seattle", "austin",
     "boston", "denver", "toronto", "vancouver", "montreal", "sydney", "melbourne",
     "berlin", "munich", "paris", "amsterdam", "stockholm", "copenhagen", "oslo",
-    "helsinki", "zurich", "dubai", "bangalore", "hyderabad", "mumbai", "pune",
-    "tokyo", "tel aviv",
-    # US state abbreviations (with comma prefix to avoid false matches)
+    "helsinki", "zurich", "dubai", "bangalore", "bengaluru", "hyderabad",
+    "mumbai", "pune", "chennai", "tokyo", "tel aviv", "ottawa", "palo alto",
+    "stuttgart", "warsaw", "warszawa", "belgrade", "casablanca", "taipei",
+    "shanghai", "beijing", "hong kong", "kuala lumpur", "kulim", "prague",
+    "budapest", "bucharest", "lisbon", "barcelona", "madrid", "milan", "rome",
+    "athens", "cairo", "nairobi", "lagos", "cape town", "johannesburg",
+    "buenos aires", "bogota", "santiago", "lima", "sao paulo",
+    "pistoia", "tuscany", "florence", "naples", "turin",
+    # US patterns (" us" and "us-" catch "Remote - US", "US-Remote", etc.)
+    " us", "us-",
+    # US/Canadian state/province names
+    "illinois", "maryland", "virginia", "washington, d.c.", "british columbia",
+    "california", "massachusetts", "colorado", "georgia", "north carolina",
+    "florida", "pennsylvania", "ohio", "new jersey", "oregon", "arizona",
+    "minnesota", "connecticut", "michigan", "tennessee", "texas",
     ", ca", ", ny", ", tx", ", wa", ", ma", ", co", ", il", ", ga", ", nc", ", va",
     ", fl", ", pa", ", oh", ", nj", ", or", ", az", ", mn", ", ct", ", md",
 }
@@ -165,25 +183,30 @@ def _recency_score(date_found: str) -> int:
 
 
 def is_foreign_only(location: str) -> bool:
-    """Return True if the location is foreign-only (no UK/remote mention).
+    """Return True if the location is foreign-only (no UK mention).
 
     Rules:
     - Empty/unknown location → False (benefit of doubt, might be UK)
-    - UK or remote term present → False (keep even if other countries mentioned)
-    - Foreign indicator with NO UK/remote → True (remove)
+    - UK term present → False (keep regardless of other countries)
+    - Foreign indicator present → True (remove, even if "remote" is mentioned)
+    - Pure remote (no foreign indicator) → False (keep)
+    - No indicators at all → False (benefit of doubt)
     """
     if not location:
         return False
     loc_lower = location.lower()
+    # UK terms always win — if UK is mentioned, keep the job
     for term in UK_TERMS:
         if term in loc_lower:
             return False
-    for term in REMOTE_TERMS:
-        if term in loc_lower:
-            return False
+    # Foreign indicators override "remote" — "Remote - US" is still foreign
     for indicator in FOREIGN_INDICATORS:
         if indicator in loc_lower:
             return True
+    # Pure remote with no foreign qualifier → keep
+    for term in REMOTE_TERMS:
+        if term in loc_lower:
+            return False
     return False
 
 
@@ -215,18 +238,35 @@ class JobScorer:
 
     def _title_score(self, job_title: str) -> int:
         title_lower = job_title.lower()
+        best = 0
         for target in self._config.job_titles:
-            if target.lower() == title_lower:
-                return TITLE_WEIGHT
-            if target.lower() in title_lower or title_lower in target.lower():
-                return TITLE_WEIGHT // 2
-        # Partial keyword overlap using dynamic domain words
+            target_lower = target.lower()
+            if target_lower == title_lower:
+                return TITLE_WEIGHT  # Exact match
+            # Word-overlap scoring (replaces substring matching)
+            target_words = set(re.findall(r'\w+', target_lower))
+            title_words = set(re.findall(r'\w+', title_lower))
+            shared = target_words & title_words
+            if not shared:
+                continue
+            max_len = max(len(target_words), len(title_words))
+            ratio = len(shared) / max_len if max_len else 0
+            # Require at least one core domain word for >50% credit
+            core_in_shared = shared & self._config.core_domain_words
+            if core_in_shared:
+                score = int(ratio * TITLE_WEIGHT)
+            else:
+                score = min(int(ratio * TITLE_WEIGHT), TITLE_WEIGHT // 4)
+            best = max(best, score)
+        if best > 0:
+            return best
+        # Fallback: domain word matching
         title_words = set(re.findall(r'\w+', title_lower))
         core_overlap = title_words & self._config.core_domain_words
         if not core_overlap:
             return 0
         support_overlap = title_words & self._config.supporting_role_words
-        return min(len(core_overlap) * 5 + len(support_overlap) * 3, TITLE_WEIGHT // 2)
+        return min(len(core_overlap) * 5 + len(support_overlap) * 3, TITLE_WEIGHT // 4)
 
     def _skill_score(self, text: str) -> int:
         points = 0
@@ -241,12 +281,26 @@ class JobScorer:
                 points += TERTIARY_POINTS
         return min(points, SKILL_CAP)
 
-    def _negative_penalty(self, job_title: str) -> int:
+    def _negative_penalty(self, job_title: str, description: str = "") -> int:
         title_lower = job_title.lower()
         for kw in self._config.negative_title_keywords:
-            if kw in title_lower:
-                return 30
+            if kw.lower() in title_lower:
+                return 30  # Title match — strongest signal
+        if description:
+            desc_lower = description.lower()
+            for kw in self._config.negative_title_keywords:
+                if kw.lower() in desc_lower:
+                    return 15  # Description-only match — weaker signal
         return 0
+
+    def _excluded_penalty(self, text: str) -> int:
+        """Penalty for jobs containing skills the user explicitly excluded."""
+        if not hasattr(self._config, 'excluded_skills') or not self._config.excluded_skills:
+            return 0
+        text_lower = text.lower()
+        hits = sum(1 for skill in self._config.excluded_skills
+                   if skill.lower() in text_lower)
+        return min(hits * 5, 15)  # -5 per match, capped at -15
 
     def score(self, job: Job) -> int:
         text = f"{job.title} {job.description}"
@@ -254,7 +308,8 @@ class JobScorer:
         skill_pts = self._skill_score(text)
         location_pts = _location_score(job.location)
         recency_pts = _recency_score(job.date_found)
-        penalty = self._negative_penalty(job.title)
+        penalty = self._negative_penalty(job.title, job.description)
+        penalty += self._excluded_penalty(text)
         total = title_pts + skill_pts + location_pts + recency_pts - penalty
         return min(max(total, 0), 100)
 
@@ -295,17 +350,31 @@ class JobScorer:
         # 5. Credentials (0-5)
         bd.credentials = self._dim_credentials(parsed_jd, cv_data)
 
-        # 6. Location (0-10)
+        # 6. Location (0-10) — with work arrangement preference
         bd.location = _location_score(job.location)
+        if hasattr(self._config, 'work_arrangement') and self._config.work_arrangement:
+            loc_lower = job.location.lower() if job.location else ""
+            text_lower = text.lower()
+            pref = self._config.work_arrangement.lower()
+            if pref == "remote":
+                if any(t in loc_lower or t in text_lower
+                       for t in ("remote", "work from home", "wfh")):
+                    bd.location = min(bd.location + 2, DIM_LOCATION)
+                elif "onsite" in loc_lower or "on-site" in loc_lower:
+                    bd.location = max(bd.location - 2, 0)
+            elif pref in ("onsite", "on-site"):
+                if "remote" in loc_lower and "onsite" not in loc_lower:
+                    bd.location = max(bd.location - 2, 0)
 
         # 7. Recency (0-10)
         bd.recency = _recency_score(job.date_found)
 
-        # 8. Semantic (0-5) — simple keyword overlap placeholder
-        bd.semantic = self._dim_semantic(text)
+        # 8. Semantic (0-10) — embedding similarity + keyword overlap
+        bd.semantic = self._dim_semantic(text, job_embedding_str=job.embedding)
 
-        # Penalty
-        bd.penalty = self._negative_penalty(job.title)
+        # Penalty (negative keywords + excluded skills)
+        bd.penalty = self._negative_penalty(job.title, job.description)
+        bd.penalty += self._excluded_penalty(text)
 
         # Transferable skills (from skill graph)
         bd.transferable_skills = self._find_transferable(
@@ -317,16 +386,41 @@ class JobScorer:
             bd.credentials + bd.location + bd.recency + bd.semantic -
             bd.penalty, 0), 100)
 
+        logger.debug(
+            '"%s @ %s" R=%d S=%d Sen=%d Exp=%d Cred=%d Loc=%d Rec=%d Sem=%d P=%d T=%d',
+            job.title[:40], job.company[:20],
+            bd.role, bd.skill, bd.seniority, bd.experience,
+            bd.credentials, bd.location, bd.recency, bd.semantic,
+            bd.penalty, bd.total,
+        )
+
         return bd
 
     def _dim_role(self, job_title: str) -> int:
-        """Score role/title match (0-25)."""
+        """Score role/title match (0-20)."""
         title_lower = job_title.lower()
+        best = 0
         for target in self._config.job_titles:
-            if target.lower() == title_lower:
-                return DIM_ROLE
-            if target.lower() in title_lower or title_lower in target.lower():
-                return DIM_ROLE * 3 // 4  # 75% for partial
+            target_lower = target.lower()
+            if target_lower == title_lower:
+                return DIM_ROLE  # Exact match
+            # Word-overlap scoring (replaces substring matching)
+            target_words = set(re.findall(r'\w+', target_lower))
+            title_words = set(re.findall(r'\w+', title_lower))
+            shared = target_words & title_words
+            if not shared:
+                continue
+            max_len = max(len(target_words), len(title_words))
+            ratio = len(shared) / max_len if max_len else 0
+            core_in_shared = shared & self._config.core_domain_words
+            if core_in_shared:
+                score = int(ratio * DIM_ROLE)
+            else:
+                score = min(int(ratio * DIM_ROLE), DIM_ROLE // 4)
+            best = max(best, score)
+        if best > 0:
+            return best
+        # Fallback: domain word matching
         title_words = set(re.findall(r'\w+', title_lower))
         core_overlap = title_words & self._config.core_domain_words
         if not core_overlap:
@@ -351,14 +445,14 @@ class JobScorer:
         missing_pref: list[str] = []
 
         # If we have a parsed JD, use its required/preferred classification
+        # Skills in parsed_jd are already confirmed to exist in the text
+        # (by _extract_skills or _enrich_with_user_skills) — no need to re-check
         if parsed_jd and hasattr(parsed_jd, 'required_skills') and parsed_jd.required_skills:
             for skill in parsed_jd.required_skills:
-                if text_contains_with_synonyms(text, skill) and skill.lower() in all_user_skills:
+                if skill.lower() in all_user_skills:
                     matched.append(skill)
-                elif skill.lower() not in all_user_skills:
-                    missing_req.append(skill)
                 else:
-                    matched.append(skill)
+                    missing_req.append(skill)
             for skill in parsed_jd.preferred_skills:
                 if skill.lower() in all_user_skills:
                     matched.append(skill)
@@ -370,18 +464,58 @@ class JobScorer:
         else:
             # Fallback to tier-based scoring (no ParsedJD)
             points = 0
+            matched_lower: set[str] = set()
             for skill in self._config.primary_skills:
                 if text_contains_with_synonyms(text, skill):
                     points += PRIMARY_POINTS
                     matched.append(skill)
+                    matched_lower.add(skill.lower())
             for skill in self._config.secondary_skills:
                 if text_contains_with_synonyms(text, skill):
                     points += SECONDARY_POINTS
                     matched.append(skill)
+                    matched_lower.add(skill.lower())
             for skill in self._config.tertiary_skills:
                 if text_contains_with_synonyms(text, skill):
                     points += TERTIARY_POINTS
                     matched.append(skill)
+                    matched_lower.add(skill.lower())
+
+            # When direct matches are sparse (title-only text), try two extras:
+            # 1. Component-word matching: "Generative AI" → check "AI" alone
+            # 2. Skill graph: title mentions related skill → partial credit
+            if points < DIM_SKILL // 2:
+                text_lower = text.lower()
+                # 1. Component words from multi-word skills (1pt each, primary only)
+                for skill in self._config.primary_skills:
+                    if skill.lower() in matched_lower:
+                        continue
+                    words = skill.split()
+                    if len(words) >= 2:
+                        for w in words:
+                            if len(w) >= 2 and re.search(r'\b' + re.escape(w.lower()) + r'\b', text_lower):
+                                points += 1
+                                matched.append(f"{skill}~")
+                                matched_lower.add(skill.lower())
+                                break
+
+                # 2. Skill graph: if title mentions a skill related to user's skill
+                try:
+                    from src.profile.skill_graph import SKILL_RELATIONSHIPS
+                    title_words = set(re.findall(r'\w+', text_lower))
+                    for user_skill in list(self._config.primary_skills)[:10]:
+                        if user_skill.lower() in matched_lower:
+                            continue
+                        key = user_skill.lower()
+                        if key in SKILL_RELATIONSHIPS:
+                            for related, conf in SKILL_RELATIONSHIPS[key]:
+                                if conf >= 0.7 and related.lower() in text_lower:
+                                    points += 1
+                                    matched.append(f"{user_skill}~graph")
+                                    matched_lower.add(user_skill.lower())
+                                    break
+                except ImportError:
+                    pass
 
         return min(points, DIM_SKILL), matched, missing_req, missing_pref
 
@@ -400,13 +534,15 @@ class JobScorer:
                          "principal": "lead", "head": "executive"}
             jd_level = level_map.get(jd_level, jd_level)
 
-        # Determine user seniority
+        # Determine user seniority — prefer explicit preference over CV-inferred
         cv_level = ""
-        if cv_data and hasattr(cv_data, 'computed_seniority'):
+        if hasattr(self._config, 'target_experience_level') and self._config.target_experience_level:
+            cv_level = self._config.target_experience_level
+        elif cv_data and hasattr(cv_data, 'computed_seniority'):
             cv_level = cv_data.computed_seniority
 
         if not jd_level or not cv_level:
-            return DIM_SENIORITY // 2  # Unknown = half credit
+            return 3  # Unknown = low credit (prevents irrelevant jobs reaching threshold)
 
         levels = ["entry", "mid", "senior", "lead", "executive"]
         try:
@@ -436,7 +572,7 @@ class JobScorer:
             cv_months = cv_data.total_experience_months
 
         if jd_years is None:
-            return DIM_EXPERIENCE // 2  # No requirement stated = half credit
+            return 3  # No requirement stated = low credit (prevents score inflation)
 
         cv_years = cv_months / 12
         if cv_years >= jd_years:
@@ -481,35 +617,51 @@ class JobScorer:
         try:
             from src.filters.embeddings import is_available, build_profile_embedding
             if is_available():
+                about_me = ""
+                if hasattr(self._config, 'about_me'):
+                    about_me = self._config.about_me
                 self._profile_embedding = build_profile_embedding(
                     job_titles=self._config.job_titles,
                     primary_skills=self._config.primary_skills,
                     secondary_skills=self._config.secondary_skills,
                     relevance_keywords=self._config.relevance_keywords,
+                    about_me=about_me,
                 )
         except Exception:
             self._profile_embedding = None
 
-    def _dim_semantic(self, text: str) -> int:
-        """Score semantic relevance (0-5) using embeddings or keyword fallback."""
+    def _dim_semantic(self, text: str, job_embedding_str: str = "") -> int:
+        """Score semantic relevance (0-10) using embeddings or keyword fallback."""
         # Try embeddings first
         self._ensure_profile_embedding()
+        base_score = 0
         if self._profile_embedding is not None:
             try:
                 from src.filters.embeddings import score_semantic_similarity
-                return score_semantic_similarity(
-                    self._profile_embedding, text, max_points=DIM_SEMANTIC
+                from src.filters.hybrid_retriever import deserialize_embedding
+                pre_emb = deserialize_embedding(job_embedding_str) if job_embedding_str else None
+                base_score = score_semantic_similarity(
+                    self._profile_embedding, text, max_points=DIM_SEMANTIC,
+                    job_embedding=pre_emb,
                 )
             except Exception:
                 pass  # Fall through to keyword overlap
 
-        # Fallback: keyword overlap
-        if not self._config.relevance_keywords:
-            return 0
-        text_lower = text.lower()
-        hits = sum(1 for kw in self._config.relevance_keywords if kw in text_lower)
-        ratio = hits / len(self._config.relevance_keywords) if self._config.relevance_keywords else 0
-        return min(int(ratio * DIM_SEMANTIC * 2), DIM_SEMANTIC)
+        if base_score == 0:
+            # Fallback: keyword overlap
+            if self._config.relevance_keywords:
+                text_lower = text.lower()
+                hits = sum(1 for kw in self._config.relevance_keywords if kw in text_lower)
+                ratio = hits / len(self._config.relevance_keywords)
+                base_score = min(int(ratio * DIM_SEMANTIC * 2), DIM_SEMANTIC)
+
+        # Phase 3D: industry mention bonus (+2, within DIM_SEMANTIC cap)
+        if hasattr(self._config, 'industries') and self._config.industries:
+            text_lower = text.lower()
+            if any(ind.lower() in text_lower for ind in self._config.industries):
+                base_score = min(base_score + 2, DIM_SEMANTIC)
+
+        return base_score
 
     def _find_transferable(self, missing: list[str],
                            parsed_jd: Optional[object] = None,

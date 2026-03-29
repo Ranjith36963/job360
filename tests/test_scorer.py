@@ -30,7 +30,9 @@ _AI_CONFIG = SearchConfig(
                              "site reliability", "quantum", "power platform",
                              "3d model artist", "sap"],
     locations=["London", "UK", "Remote", "Cambridge", "Manchester"],
-    visa_keywords=["visa sponsorship", "sponsorship", "right to work"],
+    visa_keywords=["visa sponsorship", "sponsorship", "right to work",
+                    "eligible to work", "settled status", "pre-settled status",
+                    "right of abode", "uk work permit", "immigration status"],
     core_domain_words={"ai", "ml", "llm", "rag", "nlp", "data", "genai",
                        "deep", "learning", "machine"},
     supporting_role_words={"engineer", "scientist", "researcher"},
@@ -401,6 +403,12 @@ def test_foreign_only_india():
     assert is_foreign_only("Bangalore, India") is True
 
 
+def test_foreign_only_bengaluru():
+    """Bengaluru (alternative spelling) should be flagged as foreign."""
+    assert is_foreign_only("Bengaluru") is True
+    assert is_foreign_only("IN - Bengaluru") is True
+
+
 def test_foreign_only_empty_location():
     """Empty location should NOT be flagged (benefit of doubt)."""
     assert is_foreign_only("") is False
@@ -414,6 +422,23 @@ def test_foreign_only_remote():
     assert is_foreign_only("Remote") is False
 
 
+def test_foreign_only_remote_with_foreign_country():
+    """Remote jobs tagged with a foreign country should be flagged."""
+    assert is_foreign_only("Remote - US") is True
+    assert is_foreign_only("India - Remote") is True
+    assert is_foreign_only("Remote - France") is True
+    assert is_foreign_only("Remote: United States") is True
+    assert is_foreign_only("US-Remote") is True
+    assert is_foreign_only("Germany, Berlin - Remote; Germany, Remote") is True
+    assert is_foreign_only("Remote-Friendly, United States") is True
+
+
+def test_foreign_only_remote_with_uk():
+    """Remote jobs tagged with UK should NOT be flagged."""
+    assert is_foreign_only("Remote - UK") is False
+    assert is_foreign_only("Cardiff, London or Remote (UK)") is False
+
+
 def test_foreign_only_unknown_location():
     """Unknown location with no indicators should NOT be flagged."""
     assert is_foreign_only("Somewhere nice") is False
@@ -424,6 +449,20 @@ def test_foreign_only_mixed_keeps_uk():
     assert is_foreign_only("Remote - UK, Canada, Germany") is False
 
 
+def test_foreign_only_newly_covered_cities():
+    """Cities/countries added to FOREIGN_INDICATORS should be flagged."""
+    assert is_foreign_only("Belgrade") is True
+    assert is_foreign_only("Casablanca") is True
+    assert is_foreign_only("Ottawa") is True
+    assert is_foreign_only("Palo Alto") is True
+    assert is_foreign_only("Stuttgart") is True
+    assert is_foreign_only("Warsaw") is True
+    assert is_foreign_only("Korea") is True
+    assert is_foreign_only("Malaysia, Kulim") is True
+    assert is_foreign_only("Taiwan, Taipei") is True
+    assert is_foreign_only("PRC, Shanghai") is True
+
+
 def test_foreign_only_removes_from_pipeline():
     """Foreign-only jobs should be filtered out before scoring."""
     jobs = [
@@ -431,11 +470,14 @@ def test_foreign_only_removes_from_pipeline():
         _make_job(title="AI Engineer", location="San Francisco, CA"),
         _make_job(title="AI Engineer", location=""),  # Unknown — keep
         _make_job(title="AI Engineer", location="Berlin, Germany"),
+        _make_job(title="AI Engineer", location="Remote - US"),  # Foreign remote
+        _make_job(title="AI Engineer", location="Remote"),  # Pure remote — keep
     ]
     filtered = [j for j in jobs if not is_foreign_only(j.location)]
-    assert len(filtered) == 2  # London + unknown kept
+    assert len(filtered) == 3  # London + unknown + pure remote kept
     assert filtered[0].location == "London, UK"
-    assert filtered[1].location == ""  # Unknown kept
+    assert filtered[1].location == ""
+    assert filtered[2].location == "Remote"
 
 
 # ---- Partial title scoring tests (via JobScorer) ----
@@ -447,15 +489,17 @@ def test_partial_title_needs_core_keyword(scorer):
 
 
 def test_partial_title_with_core_keyword(scorer):
-    """Titles with core domain words should get partial points."""
+    """Titles with core domain words get word-overlap credit."""
     score = scorer._title_score("AI Workspace Coordinator")
-    assert score == 5
+    # "AI" overlaps with target "AI Engineer" (1/3 ratio * 40 = 13, has core word)
+    assert score == 13
 
 
 def test_partial_title_multiple_core(scorer):
-    """Multiple core words should accumulate points."""
+    """Multiple core words get word-overlap credit."""
     score = scorer._title_score("GenAI LLM Specialist")
-    assert score == 10
+    # "GenAI" overlaps with "GenAI Engineer" (1/3 ratio * 40 = 13, has core word)
+    assert score == 13
 
 
 # ---- Multi-dimensional scoring tests (score_detailed) ----
@@ -528,11 +572,11 @@ class TestScoreDetailed:
         assert bd.experience == 10  # DIM_EXPERIENCE
 
     def test_experience_no_requirement(self, scorer):
-        """No experience requirement = half credit."""
+        """No experience requirement = low credit (prevents score inflation)."""
         parsed = ParsedJD()  # no experience_years
         job = _make_job(title="AI Engineer")
         bd = scorer.score_detailed(job, parsed_jd=parsed)
-        assert bd.experience == 5  # half of DIM_EXPERIENCE
+        assert bd.experience == 3  # reduced from 5 to prevent irrelevant jobs reaching threshold
 
     def test_credentials_match(self, scorer):
         """Matching qualifications should give credential points."""
@@ -599,3 +643,59 @@ class TestScoreDetailed:
         if bd2.missing_required:
             # May or may not find transferable depending on graph direction
             pass  # acceptable either way
+
+
+# ── TDD: Fix 2 — Irrelevant jobs must score below MIN_MATCH_SCORE ──
+
+
+def test_irrelevant_job_scores_below_threshold(scorer):
+    """A UK job with zero title/skill overlap must score below 30."""
+    job = _make_job(
+        title="Plumber",
+        description="Install and repair plumbing systems. NVQ Level 3 required.",
+        location="London, UK",
+    )
+    bd = scorer.score_detailed(job)
+    # Should NOT reach 30 (MIN_MATCH_SCORE) with zero relevance
+    assert bd.total < 30, (
+        f"Irrelevant job scored {bd.total} (role:{bd.role} skill:{bd.skill} "
+        f"sen:{bd.seniority} exp:{bd.experience} loc:{bd.location} rec:{bd.recency})"
+    )
+
+
+def test_irrelevant_job_half_credits_low(scorer):
+    """Unknown seniority/experience should give less than 5 half-credit."""
+    job = _make_job(title="Receptionist", description="Front desk duties.")
+    bd = scorer.score_detailed(job)
+    assert bd.seniority <= 3, f"Unknown seniority gave {bd.seniority}, expected <=3"
+    assert bd.experience <= 3, f"Unknown experience gave {bd.experience}, expected <=3"
+
+
+# ── TDD: Fix 6 — Visa detection for common patterns ──
+
+
+def test_visa_flag_eligible_to_work(scorer):
+    """'eligible to work in the UK' should trigger visa flag."""
+    job = _make_job(
+        title="AI Engineer",
+        description="Must be eligible to work in the UK. Python required.",
+    )
+    assert scorer.check_visa_flag(job), "Should flag 'eligible to work'"
+
+
+def test_visa_flag_settled_status(scorer):
+    """'settled status' should trigger visa flag."""
+    job = _make_job(
+        title="Data Scientist",
+        description="Candidates must have settled status or right of abode.",
+    )
+    assert scorer.check_visa_flag(job), "Should flag 'settled status'"
+
+
+def test_visa_flag_no_false_positive(scorer):
+    """Generic text without visa keywords should NOT flag."""
+    job = _make_job(
+        title="Software Engineer",
+        description="Build advisory dashboards for clients. Visage detection system.",
+    )
+    assert not scorer.check_visa_flag(job), "Should NOT flag 'advisory' or 'visage'"

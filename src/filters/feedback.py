@@ -1,6 +1,6 @@
 """Feedback loop: adjust job scores based on user liked/rejected signals.
 
-Computes a preference adjustment (+/- 5 points) by comparing new jobs
+Computes a preference adjustment (+/- 10 points) by comparing new jobs
 against the user's historical liked/not_interested actions. Uses embedding
 similarity when available, falls back to keyword overlap.
 """
@@ -12,11 +12,11 @@ from typing import Optional
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("job360.feedback")
 
-# Max adjustment from feedback signal
-FEEDBACK_BONUS = 5
-FEEDBACK_PENALTY = -5
+# Max adjustment from feedback signal (doubled from ±5 for meaningful impact)
+FEEDBACK_BONUS = 10
+FEEDBACK_PENALTY = -10
 
 
 async def load_feedback_signals(conn) -> dict:
@@ -91,6 +91,11 @@ def build_preference_vector(signals: dict) -> Optional[np.ndarray]:
     if norm < 1e-10:
         return None
 
+    logger.debug(
+        "Preference vector built: %d liked embeddings, %d rejected embeddings",
+        len(liked), len(rejected),
+    )
+
     return vec / norm
 
 
@@ -121,15 +126,19 @@ def compute_feedback_adjustment(
     # Strategy 1: embedding similarity
     if preference_vector is not None and job_embedding is not None:
         sim = float(np.dot(preference_vector, job_embedding))
-        # Map similarity: >0.3 → bonus, <-0.1 → penalty, else neutral
+        # Map similarity: >0.3 → bonus, <-0.1 → penalty, else graduated
         if sim > 0.3:
+            logger.debug("Feedback +%d for '%.40s' (sim=%.3f)", FEEDBACK_BONUS, job_text, sim)
             return FEEDBACK_BONUS
         if sim > 0.15:
-            return 3
+            logger.debug("Feedback +6 for '%.40s' (sim=%.3f)", job_text, sim)
+            return 6
         if sim < -0.1:
+            logger.debug("Feedback %d for '%.40s' (sim=%.3f)", FEEDBACK_PENALTY, job_text, sim)
             return FEEDBACK_PENALTY
         if sim < 0.0:
-            return -3
+            logger.debug("Feedback -6 for '%.40s' (sim=%.3f)", job_text, sim)
+            return -6
         return 0
 
     # Strategy 2: keyword overlap fallback
@@ -155,7 +164,7 @@ def _keyword_feedback(job_text: str, signals: dict) -> int:
             rejected_score += 1
 
     if liked_score > rejected_score:
-        return min(liked_score * 2, FEEDBACK_BONUS)
+        return min(liked_score * 3, FEEDBACK_BONUS)
     if rejected_score > liked_score:
-        return max(-rejected_score * 2, FEEDBACK_PENALTY)
+        return max(-rejected_score * 3, FEEDBACK_PENALTY)
     return 0

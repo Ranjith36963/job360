@@ -17,41 +17,33 @@ class AIJobsGlobalSource(BaseJobSource):
         if not self.search_queries:
             logger.info("AI Jobs Global: no search queries configured, skipping")
             return []
+
+        # Run queries concurrently in batches (not sequentially)
+        queries = self.search_queries[:5]  # WordPress site doesn't need 15 queries
+        coros = [self._fetch_single_query(q) for q in queries]
+        batch_results = await self._gather_queries(coros, batch_size=3)
+
+        # Merge and deduplicate
         jobs = []
-        seen_urls = set()
-
-        for query in self.search_queries:
-            # Try WP Job Manager AJAX endpoint
-            params = {
-                "action": "workscout_incremental_jobs_suggest",
-                "term": query,
-            }
-            data = await self._get_json(
-                "https://ai-jobs.global/wp-admin/admin-ajax.php",
-                params=params,
-            )
-
-            if data and isinstance(data, list):
-                for item in data:
-                    job = self._parse_ajax_item(item)
-                    if job and job.apply_url not in seen_urls:
-                        seen_urls.add(job.apply_url)
-                        jobs.append(job)
-                continue
-
-            # Fallback: try HTML with search param
-            html = await self._get_text(
-                "https://ai-jobs.global/",
-                params={"s": query, "post_type": "job_listing"},
-            )
-            if html:
-                for job in self._parse_html(html):
-                    if job.apply_url not in seen_urls:
-                        seen_urls.add(job.apply_url)
-                        jobs.append(job)
+        seen_urls: set[str] = set()
+        for query_jobs in batch_results:
+            for job in query_jobs:
+                if job.apply_url not in seen_urls:
+                    seen_urls.add(job.apply_url)
+                    jobs.append(job)
 
         logger.info(f"AI Jobs Global: found {len(jobs)} relevant jobs")
         return jobs
+
+    async def _fetch_single_query(self, query: str) -> list[Job]:
+        """Fetch jobs for a single query via HTML search (AJAX endpoint unreliable)."""
+        html = await self._get_text(
+            "https://ai-jobs.global/",
+            params={"s": query, "post_type": "job_listing"},
+        )
+        if html:
+            return self._parse_html(html)
+        return []
 
     def _parse_ajax_item(self, item: dict) -> Job | None:
         now = datetime.now(timezone.utc).isoformat()

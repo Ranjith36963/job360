@@ -28,7 +28,7 @@ class CareerjetSource(BaseJobSource):
         jobs = []
         seen_urls = set()
 
-        for query in self.job_titles[:6]:
+        for query in (self.search_queries[:6] or self.job_titles[:6]):
             params = {
                 "keywords": query,
                 "location": "United Kingdom",

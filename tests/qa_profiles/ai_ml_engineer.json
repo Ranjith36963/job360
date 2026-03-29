@@ -1,0 +1,29 @@
+{
+  "cv_data": {
+    "raw_text": "SENIOR AI/ML ENGINEER\n\nExperienced AI/ML Engineer with 5+ years building production machine learning systems. Expertise in deep learning, NLP, computer vision, and MLOps.\n\nSKILLS\nPython, PyTorch, TensorFlow, Scikit-learn, Hugging Face Transformers, LangChain, RAG, LLM Fine-tuning, GPT, Claude API, Generative AI, Foundation Models, Multimodal AI, Computer Vision, NLP, Reinforcement Learning, MLOps, Docker, Kubernetes, AWS SageMaker, GCP Vertex AI, MLflow, Weights & Biases, FastAPI, PostgreSQL, Redis, Git, CI/CD\n\nEXPERIENCE\nSenior ML Engineer | TechCorp Ltd | London | 2022-Present\n- Built production RAG pipeline serving 10M+ queries/month\n- Fine-tuned LLMs (Llama, Mistral) for domain-specific tasks\n- Deployed models on Kubernetes with auto-scaling\n\nML Engineer | DataCo | Manchester | 2020-2022\n- Developed computer vision system for quality inspection\n- Built NLP pipeline for document classification\n\nEDUCATION\nMaster of Science - Artificial Intelligence | University of Edinburgh | 2020\nBachelor of Science - Computer Science | University of Bristol | 2018",
+    "skills": ["Python", "PyTorch", "TensorFlow", "Scikit-learn", "Hugging Face", "LangChain", "RAG", "LLM Fine-tuning", "Generative AI", "Foundation Models", "Computer Vision", "NLP", "MLOps", "Docker", "Kubernetes", "AWS", "GCP", "FastAPI", "PostgreSQL", "Redis"],
+    "job_titles": ["Senior ML Engineer", "ML Engineer"],
+    "education": ["MSc Artificial Intelligence", "BSc Computer Science"],
+    "certifications": ["AWS Machine Learning Specialty"],
+    "summary": "Senior AI/ML Engineer with 5+ years experience in production ML systems",
+    "structured_education": [
+      {"degree": "Master of Science", "field_of_study": "Artificial Intelligence", "institution": "University of Edinburgh", "year": 2020},
+      {"degree": "Bachelor of Science", "field_of_study": "Computer Science", "institution": "University of Bristol", "year": 2018}
+    ],
+    "work_experiences": [],
+    "projects": [],
+    "total_experience_months": 60,
+    "computed_seniority": "senior"
+  },
+  "preferences": {
+    "target_job_titles": ["AI Engineer", "ML Engineer", "Machine Learning Engineer", "AI/ML Engineer", "Deep Learning Engineer", "NLP Engineer"],
+    "additional_skills": ["Transformer models", "Prompt engineering", "Vector databases"],
+    "excluded_skills": [],
+    "preferred_locations": ["London", "Remote"],
+    "industries": ["Technology", "AI", "Machine Learning"],
+    "work_arrangement": "hybrid",
+    "experience_level": "senior",
+    "negative_keywords": ["intern", "junior", "graduate", "php", "wordpress"],
+    "about_me": "Senior AI/ML engineer specializing in production LLM systems and RAG pipelines"
+  }
+}

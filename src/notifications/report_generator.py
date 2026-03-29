@@ -30,7 +30,7 @@ def _jobs_to_dicts(jobs: list[Job]) -> list[dict]:
     ]
 
 
-def generate_markdown_report(jobs: list[Job], stats: dict) -> str:
+def generate_markdown_report(jobs: list[Job], stats: dict, diagnostics=None) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         f"# Job360 Report - {now}",
@@ -82,6 +82,182 @@ def generate_markdown_report(jobs: list[Job], stats: dict) -> str:
                 f"| [Apply]({j['apply_url']}) |"
             )
         lines.append("")
+
+    # === Diagnostic sections (when PipelineDiagnostics is provided) ===
+    if diagnostics is not None:
+        try:
+            d = diagnostics.to_dict()
+            lines.append("---")
+            lines.append("")
+
+            # 1. Pipeline Funnel
+            funnel = d.get("funnel", [])
+            if funnel:
+                lines.append("## Pipeline Funnel")
+                lines.append("")
+                lines.append("| Stage | Count | % of Previous |")
+                lines.append("|-------|------:|:-------------:|")
+                prev = 0
+                for stage, count in funnel:
+                    pct = f"{count / prev * 100:.1f}%" if prev > 0 else "-"
+                    lines.append(f"| {stage} | {count:,} | {pct} |")
+                    prev = count
+                lines.append("")
+
+            # 2. Score Distribution
+            hist = d.get("scores", {}).get("histogram", {})
+            if hist and any(v > 0 for v in hist.values()):
+                max_count = max(hist.values()) or 1
+                lines.append("## Score Distribution")
+                lines.append("")
+                avg = d.get("scores", {}).get("avg_score", 0)
+                total = d.get("scores", {}).get("total_scored", 0)
+                lines.append(f"**{total:,} jobs scored** | Average: **{avg}**/100")
+                lines.append("")
+                lines.append("| Range | Count | Distribution |")
+                lines.append("|------:|------:|:------------|")
+                for label, count in hist.items():
+                    bar = "\u2588" * max(1, count * 30 // max_count) if count > 0 else ""
+                    lines.append(f"| {label} | {count} | {bar} |")
+                lines.append("")
+
+            # 3. Scoring Dimensions
+            dims = d.get("dimensions", {})
+            if dims:
+                lines.append("## Scoring Dimensions")
+                lines.append("")
+                lines.append("| Dimension | Max Possible | Avg | Best | Zero Count | Zero % |")
+                lines.append("|-----------|:-----------:|:---:|:----:|:----------:|:------:|")
+                for dim, info in dims.items():
+                    total_n = info.get("max", 0)  # max observed
+                    max_p = info.get("max_possible", 0)
+                    avg_v = info.get("avg", 0)
+                    zc = info.get("zero_count", 0)
+                    scored = d.get("scores", {}).get("total_scored", 1) or 1
+                    zp = f"{zc / scored * 100:.1f}%"
+                    lines.append(
+                        f"| {dim.capitalize()} | {max_p} | {avg_v} | {total_n} | {zc} | {zp} |"
+                    )
+                lines.append("")
+
+            # 4. Source Performance
+            per_source = stats.get("per_source", {})
+            source_rows = []
+            for src, data in per_source.items():
+                if isinstance(data, dict):
+                    fetched = data.get("fetched", 0)
+                    after_f = data.get("after_foreign_filter", 0)
+                    above = data.get("above_threshold", 0)
+                    stored = data.get("stored", 0)
+                    conv = f"{stored / fetched * 100:.1f}%" if fetched > 0 else "0%"
+                    source_rows.append((src, fetched, after_f, above, stored, conv))
+            if source_rows:
+                source_rows.sort(key=lambda r: r[4], reverse=True)  # Sort by stored
+                lines.append("## Source Performance")
+                lines.append("")
+                lines.append("| Source | Fetched | After Foreign | Above Threshold | Stored | Conversion |")
+                lines.append("|--------|--------:|--------------:|----------------:|-------:|-----------:|")
+                for src, fetched, after_f, above, stored, conv in source_rows:
+                    lines.append(
+                        f"| {src} | {fetched} | {after_f} | {above} | {stored} | {conv} |"
+                    )
+                lines.append("")
+
+            # 5. Deduplication
+            dedup = d.get("dedup", {})
+            if dedup.get("before", 0) > 0:
+                removed = dedup["before"] - dedup["after"]
+                pct = f"{removed / dedup['before'] * 100:.1f}%" if dedup["before"] else "0%"
+                lines.append("## Deduplication")
+                lines.append("")
+                lines.append(f"- **Total removed**: {removed} ({pct})")
+                lines.append(f"- By normalized key: {dedup.get('removed_by_key', 0)}")
+                lines.append(f"- By description similarity: {dedup.get('removed_by_similarity', 0)}")
+                lines.append("")
+
+            # 6. LLM Enrichment Impact
+            llm = d.get("llm", {})
+            if llm.get("cache_hits", 0) or llm.get("api_calls", 0):
+                lines.append("## LLM Enrichment")
+                lines.append("")
+                lines.append(f"- Cache hits: {llm.get('cache_hits', 0)}, API calls: {llm.get('api_calls', 0)}")
+                providers = llm.get("providers_used", [])
+                if providers:
+                    lines.append(f"- Providers: {', '.join(providers)}")
+                delta = llm.get("avg_score_delta", 0)
+                sign = "+" if delta >= 0 else ""
+                lines.append(f"- Avg score delta: {sign}{delta} points")
+                cc = llm.get("call_counts", {})
+                if cc:
+                    lines.append(f"- Calls per provider: {', '.join(f'{k}: {v}' for k, v in cc.items())}")
+                lines.append("")
+
+            # 7. Data Quality
+            dq = d.get("data_quality", {})
+            if dq.get("total_jobs", 0) > 0:
+                lines.append("## Data Quality")
+                lines.append("")
+                lines.append("| Metric | % |")
+                lines.append("|--------|--:|")
+                lines.append(f"| Has salary | {dq.get('pct_salary', 0)}% |")
+                lines.append(f"| Has description (>50 chars) | {dq.get('pct_description', 0)}% |")
+                lines.append(f"| Has location | {dq.get('pct_location', 0)}% |")
+                lines.append(f"| Has visa flag | {dq.get('pct_visa', 0)}% |")
+                lines.append("")
+
+            # 8. Top Skill Gaps
+            gaps = d.get("skill_gaps", [])
+            if gaps:
+                scored = d.get("scores", {}).get("total_scored", 1) or 1
+                lines.append("## Top Skill Gaps (Most Common Missing Required)")
+                lines.append("")
+                lines.append("| Skill | Times Required | % of Jobs |")
+                lines.append("|-------|---------------:|----------:|")
+                for skill, count in gaps[:15]:
+                    pct = f"{count / scored * 100:.1f}%"
+                    lines.append(f"| {skill} | {count} | {pct} |")
+                lines.append("")
+
+            # 9. Timing Breakdown
+            timings = d.get("timings", {})
+            if timings:
+                total_time = sum(timings.values())
+                lines.append("## Timing Breakdown")
+                lines.append("")
+                lines.append("| Phase | Time (s) | % |")
+                lines.append("|-------|:--------:|--:|")
+                for phase, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
+                    pct = f"{secs / total_time * 100:.1f}%" if total_time > 0 else "0%"
+                    lines.append(f"| {phase} | {secs:.1f} | {pct} |")
+                lines.append(f"| **Total** | **{total_time:.1f}** | **100%** |")
+                lines.append("")
+
+            # 10. Feedback Loop
+            fb = d.get("feedback", {})
+            if fb.get("liked_count", 0) or fb.get("rejected_count", 0):
+                lines.append("## Feedback Loop")
+                lines.append("")
+                lines.append(f"- Liked signals: {fb.get('liked_count', 0)}")
+                lines.append(f"- Rejected signals: {fb.get('rejected_count', 0)}")
+                lines.append(f"- Jobs adjusted: {fb.get('adjustments_made', 0)}")
+                lines.append(f"- Total adjustment: {fb.get('total_adj', 0):+d} points")
+                lines.append("")
+
+            # 11. Reranker
+            rr = d.get("reranker", {})
+            if rr.get("reranked_count", 0) > 0:
+                lines.append("## Reranker")
+                lines.append("")
+                lines.append(f"- Reranked: {rr.get('reranked_count', 0)} candidates")
+                lines.append(f"- Avg rerank score: {rr.get('avg_rerank_score', 0):.3f}")
+                lines.append(f"- Avg boost applied: {rr.get('avg_boost', 0):.1f} points")
+                lines.append("")
+
+        except Exception:
+            lines.append("")
+            lines.append("*Diagnostics generation failed — pipeline data may be incomplete.*")
+            lines.append("")
+
     return "\n".join(lines)
 
 

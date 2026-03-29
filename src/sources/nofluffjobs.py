@@ -45,6 +45,8 @@ class NoFluffJobsSource(BaseJobSource):
 
             category = item.get("category", "")
             technology = " ".join(item.get("technology", []) if isinstance(item.get("technology"), list) else [])
+            seniority_list = item.get("seniority", [])
+            seniority = ", ".join(seniority_list) if isinstance(seniority_list, list) else str(seniority_list) if seniority_list else ""
             text = f"{title} {category} {technology}".lower()
 
             if not self._relevance_match(text):
@@ -97,6 +99,19 @@ class NoFluffJobsSource(BaseJobSource):
                     except (ValueError, TypeError):
                         salary_max = None
 
+            # Build synthetic description from available metadata
+            # (listing API returns no description field)
+            desc_parts = []
+            if title:
+                desc_parts.append(title)
+            if category:
+                desc_parts.append(f"Category: {category}")
+            if technology:
+                desc_parts.append(f"Technologies: {technology}")
+            if seniority:
+                desc_parts.append(f"Seniority: {seniority}")
+            description = ". ".join(desc_parts)
+
             jobs.append(Job(
                 title=title,
                 company=item.get("company", ""),
@@ -104,6 +119,7 @@ class NoFluffJobsSource(BaseJobSource):
                 apply_url=apply_url,
                 source=self.name,
                 date_found=date_found,
+                description=description,
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))

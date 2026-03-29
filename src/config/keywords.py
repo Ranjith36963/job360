@@ -54,10 +54,15 @@ VISA_KEYWORDS = [
     "sponsorship",
     "right to work",
     "work permit",
-    "visa",
     "sponsored",
     "tier 2",
     "skilled worker visa",
+    "eligible to work",
+    "settled status",
+    "pre-settled status",
+    "right of abode",
+    "uk work permit",
+    "immigration status",
 ]
 
 # ---------------------------------------------------------------------------

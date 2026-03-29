@@ -24,9 +24,10 @@ class JobSpySource(BaseJobSource):
             logger.warning("python-jobspy not installed, skipping Indeed/Glassdoor")
             return []
 
-        jobs = []
-        queries = self.job_titles[:8]
-        for query in queries:
+        queries = self.job_titles[:4]  # Cap at 4 (scraping is expensive)
+
+        # Run queries concurrently in batches of 3
+        async def _scrape_query(query: str) -> list[Job]:
             try:
                 df = await asyncio.to_thread(
                     scrape_jobs,
@@ -39,9 +40,10 @@ class JobSpySource(BaseJobSource):
                 )
             except Exception as e:
                 logger.warning(f"JobSpy scrape failed for '{query}': {e}")
-                continue
+                return []
             if df is None or df.empty:
-                continue
+                return []
+            results = []
             for _, row in df.iterrows():
                 title = str(row.get("title", ""))
                 desc = str(row.get("description", ""))
@@ -68,7 +70,7 @@ class JobSpySource(BaseJobSource):
                 location = str(row.get("location", ""))
                 if str(row.get("is_remote", "")).lower() == "true" and "remote" not in location.lower():
                     location = f"{location}, Remote".strip(", ")
-                jobs.append(Job(
+                results.append(Job(
                     title=title,
                     company=str(row.get("company", "")),
                     location=location,
@@ -79,5 +81,14 @@ class JobSpySource(BaseJobSource):
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
+            return results
+
+        coros = [_scrape_query(q) for q in queries]
+        batch_results = await self._gather_queries(coros, batch_size=3)
+
+        jobs = []
+        for query_jobs in batch_results:
+            jobs.extend(query_jobs)
+
         logger.info(f"JobSpy: found {len(jobs)} relevant jobs from {', '.join(self._sites)}")
         return jobs

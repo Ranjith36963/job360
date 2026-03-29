@@ -221,3 +221,41 @@ class TestParseJDRealWorld:
         assert "Python" in result.required_skills
         assert result.seniority_signal == "senior"
         assert len(result.responsibilities) > 0
+
+
+# ── TDD: Fix 5 — Salary extraction from JD text ──
+
+
+class TestSalaryExtraction:
+    def test_gbp_range_extracted(self):
+        """£60,000-£80,000 should extract as salary_min=60000, salary_max=80000."""
+        jd = "Salary: £60,000 - £80,000 per annum. Python developer role."
+        result = parse_jd(jd)
+        assert result.salary_min == 60000, f"Expected 60000, got {result.salary_min}"
+        assert result.salary_max == 80000, f"Expected 80000, got {result.salary_max}"
+
+    def test_gbp_single_value(self):
+        """£45,000 per annum should extract as salary_min=45000."""
+        jd = "Offering £45,000 per annum plus benefits."
+        result = parse_jd(jd)
+        assert result.salary_min == 45000
+
+    def test_k_notation(self):
+        """£50k-£70k should extract correctly."""
+        jd = "Competitive salary of £50k - £70k depending on experience."
+        result = parse_jd(jd)
+        assert result.salary_min == 50000, f"Expected 50000, got {result.salary_min}"
+        assert result.salary_max == 70000, f"Expected 70000, got {result.salary_max}"
+
+    def test_no_salary_returns_none(self):
+        """JD without salary mention should return None."""
+        jd = "We are looking for a Python developer to join our team."
+        result = parse_jd(jd)
+        assert result.salary_min is None
+        assert result.salary_max is None
+
+    def test_salary_mentioned_still_works(self):
+        """salary_mentioned bool should still work alongside extraction."""
+        jd = "Salary: £60,000 - £80,000 per annum."
+        result = parse_jd(jd)
+        assert result.salary_mentioned is True

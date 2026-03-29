@@ -42,6 +42,8 @@ class YCCompaniesSource(BaseJobSource):
             slug = company.get("slug", "")
             apply_url = website or f"https://www.ycombinator.com/companies/{slug}"
 
+            # Use launched_at or batch date if available, else scrape time
+            date_found = company.get("launched_at", "") or company.get("batch_date", "") or now
             jobs.append(Job(
                 title=f"{name} - Careers (YC Company)",
                 company=name,
@@ -49,7 +51,7 @@ class YCCompaniesSource(BaseJobSource):
                 description=desc[:5000],
                 apply_url=apply_url,
                 source=self.name,
-                date_found=now,
+                date_found=str(date_found),
             ))
 
         # Cap results — these are company career page links, not individual job postings

@@ -45,7 +45,11 @@ def test_csv_export_correct_headers():
         headers = next(reader)
     expected = [
         "job_title", "company", "location", "salary",
-        "match_score", "apply_url", "source", "date_found", "visa_flag",
+        "match_score", "role", "skill", "seniority", "experience",
+        "credentials", "location_score", "recency", "semantic", "penalty",
+        "apply_url", "source", "date_found", "visa_flag",
+        "matched_skills", "missing_required", "missing_preferred",
+        "transferable_skills", "job_type", "experience_level",
     ]
     assert headers == expected
 

@@ -26,7 +26,7 @@ class AdzunaSource(BaseJobSource):
             logger.info("Adzuna: no API keys, skipping")
             return []
         jobs = []
-        queries = self.job_titles
+        queries = self.search_queries[:10] or self.job_titles
         for query in queries:
             params = {
                 "app_id": self._app_id,
