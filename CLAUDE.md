@@ -289,6 +289,49 @@ Target: **90%+ confidence** per active source = production-ready.
 - **Some sites block bots**: climatebase, weworkremotely return 403. Our stored data may still be correct.
 - **Date extraction**: Many sites don't expose posting dates in parseable meta tags. N/A results are validator limitations, not pipeline bugs.
 
+## Three-Pillar Quality Assurance System
+
+Search & match quality depends on THREE independent pillars. All three must be validated. When something fails, diagnose WHICH pillar caused it and WHY.
+
+### Pillar 1: Job Seeker Input Quality (CV Parsing)
+- **What:** Is the CV parser extracting skills, titles, education, certifications correctly?
+- **How:** Each test CV has ground-truth annotations (expected extractions). Parser output is compared against ground truth.
+- **Metrics:** Skills recall (%), titles recall (%), education recall (%), overall parsing confidence
+- **When it fails:** Jobs won't match because SearchConfig is missing key terms. Fix the parser, not the engine.
+- **Root cause examples:** Missed skills due to unusual formatting, wrong seniority detection, education not extracted from bullet points
+
+### Pillar 2: Job Provider Data Quality (Source Data)
+- **What:** Is each source providing clean, structured, accurate data?
+- **How:** Validate stored jobs against live web pages — URL alive, title match, date accuracy, description match
+- **Metrics:** Per-source confidence = URL(0.30) + Title(0.25) + Date(0.25) + Description(0.20)
+- **When it fails:** Engine gets bad input from sources. Fix the source adapter, not the engine.
+- **Root cause examples:** Stale dates, truncated descriptions, dead URLs, HTML not stripped, wrong location extracted
+
+### Pillar 3: Search & Match Engine Quality
+- **What:** Given correct inputs from BOTH sides, does the engine produce relevant matches?
+- **How:** Check result relevance — do data scientist CVs get data science jobs? Are scores proportional to actual relevance? Are irrelevant jobs filtered?
+- **Metrics:** Domain relevance (%), score distribution sanity, skill overlap accuracy, seniority alignment
+- **When it fails:** Both inputs are good but results are wrong. Fix the scoring algorithm, synonym matching, or relevance filtering.
+- **Root cause examples:** Synonym groups missing industry terms, seniority weighting wrong, domain words not weighted correctly, embedding similarity miscalibrated
+
+### QA Workflow
+```
+For each CV:
+  1. Parse CV → compare against ground truth → Pillar 1 confidence
+  2. Run search → validate source data → Pillar 2 confidence
+  3. Analyze results → check relevance/scores → Pillar 3 confidence
+  4. Diagnose: which pillar is weakest? Why?
+  5. Fix the weakest pillar → re-run → confidence converges upward
+  6. Update BENCHMARK.md with per-pillar results and root cause analysis
+```
+
+### Benchmark Philosophy
+- **Confidence = justification.** Every "this is right" needs a reason.
+- **Every test run updates MD files** — what happened, per-source, per-pillar, and WHY.
+- **Focus on free sources first** (41 of 48) — solve 90% before worrying about keyed APIs.
+- **Test CVs must be challenging** — real professional CVs with complex skill sets, not easy synthetic ones.
+- **Both inputs must be quality** — if either job seeker or job provider data is bad, the engine can't compensate.
+
 ## Related Documentation
 
 | File | Unique Purpose |

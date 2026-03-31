@@ -1,0 +1,50 @@
+Olivia Reeves
+Senior UX/Product Designer
+
+olivia.reeves@gmail.com | +44 7901 332876 | London, United Kingdom
+linkedin.com/in/oliviareeves-design | portfolio: oliviareeves.design
+
+Profile
+User experience designer with 7 years of experience shaping digital products used by millions. Specialise in user research, interaction design, and design systems for complex B2B SaaS platforms. Led design for products generating £40M+ ARR. Experienced in building and scaling design teams, establishing research practices, and bridging design with engineering through systematic design-to-development handoff processes.
+
+Work Experience
+
+Lead Product Designer, Deliveroo, London
+01/2022 - present
+- Lead UX for restaurant partner platform serving 45K+ restaurant owners across 11 markets
+- Redesigned menu management experience, reducing setup time from 4 hours to 45 minutes (89% improvement)
+- Established user research programme conducting 120+ interviews, usability tests, and contextual inquiries annually
+- Built and maintain component design system in Figma (400+ components) used by 12 designers and 40+ engineers
+- Led accessibility audit achieving WCAG 2.1 AA compliance, implementing screen reader support and keyboard navigation
+- Introduced Jobs-to-be-Done framework for product discovery, improving feature adoption rates by 35%
+- Collaborate with data science team to design experiment frameworks for product hypotheses
+
+Senior UX Designer, Sage, Newcastle
+04/2019 - 12/2021
+- Designed end-to-end experience for Sage Intacct (cloud accounting platform) serving 15K+ businesses
+- Led design sprint workshops for 6 product teams, facilitating problem framing, ideation, and rapid prototyping
+- Created information architecture for complex financial reporting module, reducing user task completion time by 40%
+- Built research repository in Dovetail, enabling cross-team insight sharing and reducing duplicate research by 60%
+- Mentored 3 junior designers through structured design critique sessions and portfolio development
+
+UX Designer, BBC, Manchester
+09/2017 - 03/2019
+- Designed responsive web experiences for BBC News and BBC Sport platforms (120M+ monthly users)
+- Conducted card sorting and tree testing studies to optimise navigation structure for BBC iPlayer
+- Created interactive prototypes in Principle and Framer for stakeholder presentations and user testing
+- Contributed to GEL (Global Experience Language) design system documentation and component patterns
+
+Education
+MA User Experience Design, University of the Arts London, London
+09/2016 - 09/2017 (Distinction)
+
+BA Graphic Design, Nottingham Trent University, Nottingham
+09/2012 - 06/2015 (First Class Honours)
+
+Certifications
+Nielsen Norman Group UX Certification (2021)
+Certified Usability Analyst (CUA), Human Factors International (2020)
+Google UX Design Professional Certificate (2019)
+
+Skills
+User Experience Design, User Interface Design, User Research, Usability Testing, Information Architecture, Interaction Design, Visual Design, Design Systems, Prototyping, Wireframing, Figma, Sketch, Adobe XD, InVision, Principle, Framer, Miro, Dovetail, UserTesting, Maze, Optimal Workshop, HTML/CSS, Accessibility (WCAG 2.1), Responsive Design, Mobile-First Design, Design Thinking, Design Sprints, Jobs-to-be-Done, Lean UX, Agile/Scrum, Stakeholder Management, Cross-Functional Collaboration, Design Leadership, Mentoring

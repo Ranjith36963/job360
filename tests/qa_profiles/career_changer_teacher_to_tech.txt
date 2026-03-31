@@ -1,0 +1,57 @@
+Robert Fitzpatrick
+Software Developer (Career Changer — Former Secondary School Teacher)
+
+rob.fitzpatrick@gmail.com | +44 7901 223456 | Cardiff, United Kingdom
+linkedin.com/in/robfitzpatrick-dev | github.com/rfitzdev
+
+Profile
+Career-changing software developer with a background in secondary mathematics education (6 years). Completed intensive 16-week Makers Academy bootcamp and 12 months of self-directed learning. Built 8 full-stack applications, contributed to 3 open-source projects, and earned AWS Cloud Practitioner certification. Bringing strong communication, problem-solving, and stakeholder management skills honed through classroom teaching. Seeking junior to mid-level developer role in an organisation that values diverse backgrounds and continuous learning.
+
+Work Experience
+
+Freelance Developer, Self-Employed, Cardiff
+01/2024 - present
+- Built full-stack inventory management system for local restaurant chain (3 locations) using React, Node.js, and PostgreSQL
+- Developed automated invoice processing tool using Python, Flask, and Tesseract OCR, saving client 15 hours/week
+- Created charity fundraising platform with Stripe integration, processing £12K in donations within first month
+- Maintain 3 WordPress sites for small business clients, implementing custom themes and WooCommerce storefronts
+
+Open Source Contributor
+06/2023 - present
+- Regular contributor to freeCodeCamp curriculum (14 merged PRs fixing JavaScript challenges and adding Welsh translations)
+- Built and maintained VS Code extension for classroom code review with 1,200+ installs
+- Contributed bug fixes to React Testing Library documentation
+
+Makers Academy Bootcamp, London
+09/2023 - 01/2024
+- 16-week intensive full-stack software development programme (10% acceptance rate)
+- Built team project: job board aggregator using Ruby on Rails, React, and PostgreSQL (team of 4, agile sprints)
+- Learned TDD, pair programming, OOP, MVC architecture, and code review best practices
+- Final project: mental health journaling app with sentiment analysis using Python, FastAPI, and GPT API
+
+Mathematics Teacher, Whitchurch High School, Cardiff
+09/2017 - 08/2023
+- Taught GCSE and A-Level Mathematics to classes of 30 students, achieving 82% A*-C pass rate (above national average)
+- Led implementation of MyMaths and GeoGebra digital tools across mathematics department
+- Designed and built department website using HTML, CSS, and JavaScript to share revision resources
+- Mentored 4 NQTs (Newly Qualified Teachers) through structured induction programme
+- Head of Year 10 responsible for pastoral care, parental engagement, and behaviour management for 180 students
+- Wrote Python scripts to automate exam data analysis and progress tracking, adopted by SLT for whole-school reporting
+
+Education
+Makers Academy, Software Development Bootcamp, London
+09/2023 - 01/2024
+
+PGCE Secondary Mathematics, Cardiff Metropolitan University, Cardiff
+09/2016 - 06/2017 (QTS achieved)
+
+BSc Mathematics, University of Bristol, Bristol
+09/2013 - 06/2016 (2:1)
+
+Certifications
+AWS Certified Cloud Practitioner (2024)
+Meta Front-End Developer Professional Certificate, Coursera (2023)
+CS50: Introduction to Computer Science, Harvard/edX (2023)
+
+Skills
+JavaScript, TypeScript, Python, Ruby, HTML, CSS, React, Next.js, Node.js, Express, Ruby on Rails, Flask, FastAPI, PostgreSQL, MongoDB, Redis, Git, GitHub, Docker, AWS (EC2, S3, Lambda, RDS), Vercel, Heroku, REST APIs, GraphQL, TDD (Jest, RSpec, pytest), Agile/Scrum, Pair Programming, CI/CD (GitHub Actions), Figma, Communication, Problem Solving, Mentoring, Stakeholder Management, Classroom Management, Curriculum Design

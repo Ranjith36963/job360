@@ -1,0 +1,60 @@
+Marcus Chen
+Supply Chain & Operations Manager
+
+marcus.chen@yahoo.co.uk | +44 7623 114578 | Birmingham, United Kingdom
+linkedin.com/in/marcuschen-supplychain
+
+Profile
+CIPS-qualified supply chain professional with 11 years of experience in end-to-end supply chain management across FMCG, automotive, and pharmaceutical industries. Expert in procurement strategy, demand planning, inventory optimisation, and logistics network design. Led £50M+ procurement transformations and managed global supplier relationships spanning 15 countries. Six Sigma Black Belt with proven ability to drive operational excellence through data-driven process improvement.
+
+Work Experience
+
+Head of Supply Chain, Jaguar Land Rover, Solihull
+02/2021 - present
+- Lead supply chain operations team of 25 professionals managing £1.2B annual procurement spend across 450+ Tier 1 suppliers
+- Drove strategic sourcing programme achieving £18M annual cost savings through supplier consolidation and contract renegotiation
+- Implemented SAP IBP (Integrated Business Planning) replacing legacy demand planning tools, improving forecast accuracy from 72% to 89%
+- Designed and executed supplier risk management framework using Resilinc, identifying and mitigating 23 critical supply disruptions
+- Led Brexit customs compliance programme, establishing bonded warehouse operations and securing AEO certification
+- Built digital twin of distribution network using AnyLogic simulation, optimising warehouse locations and reducing logistics costs by 12%
+- Managed APQP (Advanced Product Quality Planning) process for new model launches, coordinating with 80+ suppliers
+
+Senior Procurement Manager, GlaxoSmithKline, Ware
+06/2017 - 01/2021
+- Managed strategic procurement for Active Pharmaceutical Ingredients (API) category with £280M annual spend
+- Led negotiation of 5-year framework agreements with key suppliers, delivering £12M cumulative savings
+- Implemented Coupa Procurement platform across European operations, achieving 95% purchase order compliance
+- Built supplier performance scorecards using Tableau, tracking quality (PPM), delivery (OTIF), and cost metrics
+- Drove sustainability programme, achieving 30% reduction in Scope 3 supply chain emissions through local sourcing
+- Chaired monthly S&OP meetings aligning demand, supply, and finance teams on 18-month rolling forecast
+
+Supply Chain Analyst, Unilever, Port Sunlight
+08/2014 - 05/2017
+- Developed demand forecasting models using statistical methods (ARIMA, exponential smoothing) in Python and R
+- Optimised inventory holding across 6 UK distribution centres, reducing stock days from 42 to 31 while maintaining 98.5% service level
+- Conducted network optimisation study using AIMMS, recommending consolidation of 2 warehouses saving £3.5M annually
+- Built automated KPI reporting dashboards in Power BI tracking fill rates, stock turns, and distribution costs
+- Supported implementation of SAP APO for demand planning and supply network planning modules
+
+Graduate Trainee – Supply Chain, Nestlé, York
+07/2013 - 07/2014
+- Rotated across procurement, planning, warehousing, and logistics functions in 4 x 3-month placements
+- Completed Green Belt project improving raw material receipt process, reducing lead time by 2 days
+
+Education
+MSc Logistics and Supply Chain Management, Cranfield University, Cranfield
+09/2012 - 09/2013 (Distinction)
+- Winner: Best Dissertation Award — "Applying Machine Learning to Demand Sensing in FMCG Supply Chains"
+
+BEng Manufacturing Engineering, University of Birmingham, Birmingham
+09/2008 - 06/2012 (2:1)
+
+Certifications
+MCIPS (Member, Chartered Institute of Procurement & Supply) (2019)
+Six Sigma Black Belt, ASQ (2018)
+APICS CSCP (Certified Supply Chain Professional) (2017)
+SAP IBP Certified Application Associate (2022)
+IOSH Managing Safely (2016)
+
+Skills
+Strategic Sourcing, Category Management, Contract Negotiation, Supplier Relationship Management, Demand Planning, S&OP, Inventory Optimisation, Logistics Network Design, Warehouse Management, Customs & Trade Compliance, SAP MM/PP/APO/IBP, Coupa, Oracle Procurement Cloud, Ariba, Resilinc, Python, R, SQL, Power BI, Tableau, AnyLogic, AIMMS, Six Sigma (DMAIC, DFSS), Lean Manufacturing, APQP, PPAP, FMEA, Continuous Improvement, Change Management, Cross-Functional Leadership, Stakeholder Management

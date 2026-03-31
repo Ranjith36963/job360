@@ -175,7 +175,7 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
     # Cap at 15 queries
     queries = queries[:15]
 
-    return SearchConfig(
+    config = SearchConfig(
         job_titles=titles,
         primary_skills=primary,
         secondary_skills=secondary,
@@ -195,3 +195,23 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
         industries=list(prefs.industries),
         detected_domains=detected,
     )
+
+    # --- LLM Search Intelligence (enriches config with domain awareness) ---
+    try:
+        from src.profile.llm_search_intelligence import (
+            generate_search_intelligence,
+            enrich_search_config,
+        )
+        from src.llm.client import is_configured
+        if is_configured() and cv.raw_text:
+            intelligence = generate_search_intelligence(cv.raw_text)
+            config = enrich_search_config(config, intelligence)
+    except ImportError:
+        pass  # LLM libraries not installed
+    except Exception as e:
+        import logging
+        logging.getLogger("job360.profile.keyword_generator").warning(
+            f"LLM search intelligence failed (continuing with regex config): {e}"
+        )
+
+    return config

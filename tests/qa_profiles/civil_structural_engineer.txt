@@ -1,0 +1,52 @@
+Thomas Hargreaves
+Senior Structural Engineer
+
+tom.hargreaves@outlook.com | +44 7534 882910 | Manchester, United Kingdom
+linkedin.com/in/tomhargreaves-structures | CEng MICE MIStructE
+
+Profile
+Chartered structural engineer with 8 years of post-qualification experience in the design and delivery of complex building structures. Specialise in reinforced concrete, steel, and timber design for commercial, residential, and mixed-use developments. Experience ranges from £5M refurbishments to £200M+ new-build schemes. Strong computational design skills with proficiency in FEA modelling, BIM coordination, and automated design workflows.
+
+Work Experience
+
+Senior Structural Engineer, Buro Happold, Manchester
+09/2020 - present
+- Lead structural design for £180M mixed-use development in Manchester city centre (42-storey residential tower with 5-storey podium)
+- Manage team of 4 engineers delivering detailed design packages for reinforced concrete frame, foundation, and transfer structures
+- Designed innovative post-tensioned flat slab system reducing concrete usage by 18% compared to conventional RC flat slab
+- Lead BIM coordination using Revit Structure, managing clash detection with MEP and architecture teams through Navisworks
+- Developed parametric design tools using Grasshopper/Rhino and Python scripting, automating column sizing and reducing design iteration time by 60%
+- Conduct peer reviews of structural calculations and drawings for quality assurance across 3 project teams
+- Present structural concepts to planning committees and client design review panels
+
+Structural Engineer, WSP, Birmingham
+04/2017 - 08/2020
+- Designed steel and concrete structures for commercial office buildings ranging from £10M to £80M
+- Delivered structural design for 15-storey steel-framed office building at Birmingham Smithfield
+- Performed dynamic analysis for floor vibration assessment using LUSAS FEA software
+- Designed foundations including piled rafts, contiguous pile walls, and ground improvement schemes
+- Managed interfaces with geotechnical, façade, and fire engineering disciplines on multi-disciplinary projects
+- Conducted structural surveys and condition assessments for existing buildings, recommending strengthening strategies
+
+Graduate Structural Engineer, Arup, London
+09/2014 - 03/2017
+- Contributed to structural design of Tottenham Hotspur Stadium roof structure (world's first retractable NFL/football pitch)
+- Performed steel connection design and checking using Eurocode 3 and SCI publications
+- Built structural analysis models in Robot Structural Analysis and Oasys GSA
+- Assisted with temporary works design for construction-stage loading conditions
+- Achieved Chartered Engineer status (CEng) through ICE professional review
+
+Education
+MEng Civil and Structural Engineering, University of Manchester, Manchester
+09/2010 - 06/2014 (First Class Honours)
+- IStructE Prize for Best Structural Design Project
+
+Certifications
+Chartered Engineer (CEng), Engineering Council (2017)
+Member, Institution of Civil Engineers (MICE) (2017)
+Member, Institution of Structural Engineers (MIStructE) (2018)
+BREEAM AP (Accredited Professional) (2019)
+Temporary Works Coordinator (TWC), CIRIA (2020)
+
+Skills
+Structural Design (RC, Steel, Timber, Masonry), Reinforced Concrete Detailing, Post-Tensioned Design, Steel Connection Design, Foundation Design (Piled, Raft, Ground Improvement), Temporary Works, Structural Surveys, Eurocodes (EC2, EC3, EC4, EC5, EC8), British Standards, Revit Structure, Tekla Structures, Robot Structural Analysis, LUSAS, Oasys GSA, ETABS, SAFE, Grasshopper/Rhino, Python, MathCAD, AutoCAD, Navisworks, BIM Level 2, Computational Design, Parametric Engineering, FEA Modelling, Dynamic Analysis, Floor Vibration Assessment, CDM Regulations, Project Management, Technical Report Writing, Team Leadership

@@ -1,0 +1,183 @@
+{
+  "_description": "Ground truth annotations for CV parsing quality validation (Pillar 1). Each CV lists the expected extractions. The QA system compares parser output against these to measure parsing accuracy.",
+  "senior_software_engineer": {
+    "expected_skills": ["Go", "Python", "TypeScript", "Java", "Node.js", "FastAPI", "React", "PostgreSQL", "Redis", "MongoDB", "Kafka", "RabbitMQ", "Docker", "Kubernetes", "AWS", "Terraform", "Helm", "ArgoCD", "GitHub Actions", "Jenkins", "Grafana", "Prometheus", "OpenTelemetry", "Datadog", "REST APIs", "GraphQL", "gRPC", "Microservices", "Agile", "Scrum"],
+    "expected_titles": ["Senior Software Engineer", "Software Engineer", "Junior Software Engineer"],
+    "expected_education": ["MSc Computer Science", "BSc Mathematics"],
+    "expected_certifications": ["AWS Solutions Architect", "Certified Kubernetes Administrator", "Terraform Associate"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 8,
+    "domain": "software_engineering"
+  },
+  "devops_cloud_engineer": {
+    "expected_skills": ["AWS", "GCP", "Kubernetes", "Docker", "Istio", "Terraform", "Pulumi", "Ansible", "Helm", "ArgoCD", "Jenkins", "CircleCI", "GitHub Actions", "Python", "Go", "Bash", "Prometheus", "Grafana", "Datadog", "PagerDuty", "ELK Stack", "HashiCorp Vault", "Linux"],
+    "expected_titles": ["Staff Platform Engineer", "Senior DevOps Engineer", "DevOps Engineer", "Graduate Infrastructure Engineer"],
+    "expected_education": ["BEng Electronic and Electrical Engineering"],
+    "expected_certifications": ["AWS Solutions Architect", "Google Cloud Professional Cloud Architect", "Certified Kubernetes Administrator", "Terraform Associate"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 7,
+    "domain": "devops"
+  },
+  "data_engineer": {
+    "expected_skills": ["Python", "Scala", "SQL", "Java", "Apache Spark", "PySpark", "Apache Flink", "Apache Kafka", "Apache Airflow", "dbt", "Snowflake", "Redshift", "BigQuery", "AWS", "GCP", "Databricks", "PostgreSQL", "MongoDB", "Neo4j", "Redis", "Docker", "Kubernetes", "Terraform", "Looker", "Tableau"],
+    "expected_titles": ["Senior Data Engineer", "Data Engineer", "Junior Data Engineer"],
+    "expected_education": ["MSc Data Science", "BSc Computer Science"],
+    "expected_certifications": ["AWS Certified Data Analytics", "Databricks Certified Data Engineer", "Google Cloud Professional Data Engineer", "Apache Kafka Certified", "Snowflake SnowPro"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 6,
+    "domain": "data_engineering"
+  },
+  "data_scientist": {
+    "expected_skills": ["Deep Learning", "Data Visualization", "Predictive Modeling", "Machine Learning", "Python", "R", "SQL", "Tableau", "SPSS", "TensorFlow", "Scikit-learn", "Power BI"],
+    "expected_titles": ["Senior Data Scientist", "Analytics Manager"],
+    "expected_education": ["Master of Science in Statistics", "Bachelor of Science in Applied Mathematics"],
+    "expected_certifications": [],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 6,
+    "domain": "data_science"
+  },
+  "digital_marketing_manager": {
+    "expected_skills": ["SEO", "PPC", "Google Ads", "LinkedIn Ads", "Google Analytics", "HubSpot", "Salesforce Marketing Cloud", "Shopify", "WordPress", "Semrush", "Ahrefs", "Hotjar", "Content Marketing", "Email Marketing", "Affiliate Marketing"],
+    "expected_titles": ["Head of Digital Marketing", "Senior Digital Marketing Manager", "Digital Marketing Executive"],
+    "expected_education": ["BSc Business Management"],
+    "expected_certifications": ["Google Analytics 4", "HubSpot Marketing Hub", "Meta Certified", "Google Ads", "CIM Diploma"],
+    "expected_seniority": "lead",
+    "expected_experience_years_min": 8,
+    "domain": "marketing"
+  },
+  "financial_analyst": {
+    "expected_skills": ["Financial Modelling", "M&A", "Valuation Analysis", "Excel", "Python", "SQL", "Power BI", "Tableau", "Anaplan", "SAP", "Bloomberg Terminal"],
+    "expected_titles": ["Senior Financial Analyst", "FP&A Analyst", "Graduate Financial Analyst"],
+    "expected_education": ["MSc Finance and Investment", "BSc Economics"],
+    "expected_certifications": ["ACA", "CFA", "FMVA"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 8,
+    "domain": "finance"
+  },
+  "hr_business_partner": {
+    "expected_skills": ["HR Business Partnering", "Organisational Design", "Change Management", "Talent Acquisition", "Employee Relations", "Workday", "SAP SuccessFactors", "BambooHR", "UK Employment Law", "GDPR", "Power BI"],
+    "expected_titles": ["Senior HR Business Partner", "HR Business Partner", "HR Advisor"],
+    "expected_education": ["MA Human Resource Management", "BA Business Studies"],
+    "expected_certifications": ["CIPD Level 7", "Mental Health First Aider", "PRINCE2"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 9,
+    "domain": "human_resources"
+  },
+  "supply_chain_manager": {
+    "expected_skills": ["Strategic Sourcing", "Demand Planning", "SAP", "Coupa", "Python", "R", "SQL", "Power BI", "Tableau", "Six Sigma", "Lean Manufacturing"],
+    "expected_titles": ["Head of Supply Chain", "Senior Procurement Manager", "Supply Chain Analyst"],
+    "expected_education": ["MSc Logistics and Supply Chain Management", "BEng Manufacturing Engineering"],
+    "expected_certifications": ["MCIPS", "Six Sigma Black Belt", "CSCP", "SAP IBP"],
+    "expected_seniority": "lead",
+    "expected_experience_years_min": 11,
+    "domain": "supply_chain"
+  },
+  "ux_product_designer": {
+    "expected_skills": ["User Experience Design", "User Research", "Figma", "Sketch", "Adobe XD", "InVision", "Framer", "Miro", "HTML", "CSS", "Accessibility", "Design Systems", "Design Thinking"],
+    "expected_titles": ["Lead Product Designer", "Senior UX Designer", "UX Designer"],
+    "expected_education": ["MA User Experience Design", "BA Graphic Design"],
+    "expected_certifications": ["Nielsen Norman Group", "Certified Usability Analyst", "Google UX Design"],
+    "expected_seniority": "lead",
+    "expected_experience_years_min": 7,
+    "domain": "design"
+  },
+  "clinical_research_associate": {
+    "expected_skills": ["Clinical Trial Monitoring", "ICH-GCP", "Pharmacovigilance", "Medidata Rave", "SAS", "R", "SPSS", "Oncology", "Immunology"],
+    "expected_titles": ["Senior Clinical Research Associate", "Clinical Research Associate", "Clinical Trial Coordinator"],
+    "expected_education": ["PhD Molecular Biology", "MSci Natural Sciences"],
+    "expected_certifications": ["ICH-GCP", "Pharmacovigilance and Drug Safety"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 6,
+    "domain": "clinical_research"
+  },
+  "civil_structural_engineer": {
+    "expected_skills": ["Structural Design", "Reinforced Concrete", "Revit Structure", "Tekla Structures", "Robot Structural Analysis", "LUSAS", "Grasshopper", "Rhino", "Python", "AutoCAD", "Navisworks", "BIM"],
+    "expected_titles": ["Senior Structural Engineer", "Structural Engineer", "Graduate Structural Engineer"],
+    "expected_education": ["MEng Civil and Structural Engineering"],
+    "expected_certifications": ["Chartered Engineer", "MICE", "MIStructE", "BREEAM AP"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 8,
+    "domain": "structural_engineering"
+  },
+  "corporate_lawyer": {
+    "expected_skills": ["Mergers & Acquisitions", "Private Equity", "Venture Capital", "Corporate Finance", "Due Diligence", "Commercial Contracts", "GDPR", "Corporate Governance"],
+    "expected_titles": ["Senior Associate", "Associate", "Trainee Solicitor"],
+    "expected_education": ["GDL", "LPC", "BA Philosophy"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 8,
+    "domain": "legal"
+  },
+  "biomedical_scientist": {
+    "expected_skills": ["Clinical Biochemistry", "Haematology", "Molecular Diagnostics", "NGS", "PCR", "Python", "R", "Linux", "LIMS", "ISO 15189"],
+    "expected_titles": ["Senior Biomedical Scientist", "Biomedical Scientist", "Trainee Biomedical Scientist"],
+    "expected_education": ["PhD Applied Genomics", "MSc Biomedical Science", "BSc Biomedical Science"],
+    "expected_certifications": ["HCPC Registration", "IBMS Specialist Portfolio", "ISO 15189 Internal Auditor"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 7,
+    "domain": "biomedical_science"
+  },
+  "project_manager_construction": {
+    "expected_skills": ["Project Management", "NEC4", "JCT", "Primavera P6", "Microsoft Project", "BIM 360", "Navisworks", "Procore", "CDM Regulations", "Health & Safety"],
+    "expected_titles": ["Senior Project Manager", "Project Manager", "Assistant Project Manager"],
+    "expected_education": ["MSc Construction Project Management", "BEng Civil Engineering"],
+    "expected_certifications": ["Chartered Project Professional", "PRINCE2 Practitioner", "NEC4", "SMSTS", "BIM Level 2"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 10,
+    "domain": "construction_pm"
+  },
+  "environmental_sustainability": {
+    "expected_skills": ["Environmental Impact Assessment", "Carbon Footprint Analysis", "Lifecycle Assessment", "ESG Reporting", "ISO 14001", "Python", "R", "GIS", "Power BI", "BREEAM"],
+    "expected_titles": ["Head of Sustainability", "Senior Environmental Consultant", "Environmental Advisor"],
+    "expected_education": ["PhD Environmental Engineering", "MSc Environmental Policy and Management", "BSc Environmental Science"],
+    "expected_certifications": ["Chartered Environmentalist", "MIEMA", "NEBOSH", "ISO 14001 Lead Auditor", "BREEAM Assessor"],
+    "expected_seniority": "lead",
+    "expected_experience_years_min": 9,
+    "domain": "environmental"
+  },
+  "healthcare_administrator": {
+    "expected_skills": ["Healthcare Operations", "Waiting List Management", "Demand-Capacity Modelling", "Excel", "Python", "Power BI", "Cerner", "PRINCE2", "Lean Six Sigma"],
+    "expected_titles": ["Operations Manager", "Deputy Service Manager", "Healthcare Management Trainee"],
+    "expected_education": ["MSc Health Management", "BSc Health Sciences"],
+    "expected_certifications": ["Edward Jenner Programme", "Mary Seacole Programme", "Lean Six Sigma Green Belt", "PRINCE2 Practitioner"],
+    "expected_seniority": "lead",
+    "expected_experience_years_min": 8,
+    "domain": "healthcare_ops"
+  },
+  "career_changer_teacher_to_tech": {
+    "expected_skills": ["JavaScript", "TypeScript", "Python", "Ruby", "HTML", "CSS", "React", "Next.js", "Node.js", "Express", "Ruby on Rails", "Flask", "FastAPI", "PostgreSQL", "MongoDB", "Redis", "Git", "Docker", "AWS"],
+    "expected_titles": ["Freelance Developer", "Mathematics Teacher"],
+    "expected_education": ["Makers Academy", "PGCE Secondary Mathematics", "BSc Mathematics"],
+    "expected_certifications": ["AWS Certified Cloud Practitioner", "Meta Front-End Developer"],
+    "expected_seniority": "entry",
+    "expected_experience_years_min": 1,
+    "domain": "software_engineering",
+    "notes": "Career changer. Parser must identify developer as primary career, not teacher. Bootcamp should be detected."
+  },
+  "cybersecurity": {
+    "expected_skills": ["Cybersecurity", "Network Engineering", "Python", "Firewall Management", "Intrusion Detection", "SIEM", "Penetration Testing", "ISO 27001", "Data Protection", "Incident Response"],
+    "expected_titles": ["Cyber Security Analyst", "Network Security Engineer", "IT Security Apprentice"],
+    "expected_education": ["MSc Cyber Security", "BSc Computer Science"],
+    "expected_certifications": ["Certified Ethical Hacker"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 7,
+    "domain": "cybersecurity"
+  },
+  "nurse": {
+    "expected_skills": ["Patient Care", "Emergency and Critical Care", "EHR", "Intravenous Therapy"],
+    "expected_titles": ["Registered Nurse", "Night Nurse"],
+    "expected_education": ["Master of Science in Nursing", "Bachelor of Science in Biology"],
+    "expected_certifications": [],
+    "expected_seniority": "mid",
+    "expected_experience_years_min": 5,
+    "domain": "nursing"
+  },
+  "product_manager": {
+    "expected_skills": ["Product Management", "Product Design", "Product Lifecycle", "JIRA", "Agile Project Management", "Product Analytics", "Leadership and Management"],
+    "expected_titles": ["Senior Product Manager", "Digital Product Manager", "Junior Product Manager"],
+    "expected_education": ["Bachelor of Science in Product Design"],
+    "expected_certifications": ["Product Management Certificate"],
+    "expected_seniority": "senior",
+    "expected_experience_years_min": 10,
+    "domain": "product_management"
+  }
+}

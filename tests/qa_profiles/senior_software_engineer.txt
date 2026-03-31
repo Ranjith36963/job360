@@ -1,0 +1,52 @@
+Daniel Okafor
+Senior Software Engineer
+
+daniel.okafor@protonmail.com | +44 7421 893456 | Manchester, United Kingdom
+linkedin.com/in/danielokafor | github.com/dokafor
+
+Profile
+Full-stack software engineer with 9 years of experience building high-throughput distributed systems. Specialise in cloud-native microservices architecture, event-driven design, and developer platform tooling. Led teams of 3-12 engineers across fintech and e-commerce domains. Passionate about observability, CI/CD automation, and mentoring junior developers.
+
+Work Experience
+
+Senior Software Engineer, Monzo Bank, London
+03/2021 - present
+- Architected and delivered the real-time transaction enrichment pipeline processing 4M+ events/day using Kafka, Go, and PostgreSQL
+- Led migration of 23 legacy Java services to Kubernetes on AWS EKS, reducing infrastructure costs by 35% and deployment time from 45min to 8min
+- Designed and implemented distributed tracing across 140+ microservices using OpenTelemetry and Grafana Tempo
+- Mentored 6 junior and mid-level engineers through structured 1:1s and code review pairing sessions
+- Introduced contract testing with Pact, eliminating 70% of cross-service integration failures
+- Built internal developer portal using Backstage, consolidating service catalogue, API docs, and runbooks
+- On-call rotation lead for payments domain (99.99% SLA), authored 12 incident postmortems
+
+Software Engineer, ASOS, London
+06/2018 - 02/2021
+- Developed product recommendation engine serving 26M monthly active users using Python, FastAPI, and Redis
+- Built real-time inventory sync between warehouse systems and web platform using RabbitMQ and Celery
+- Implemented A/B testing framework integrated with LaunchDarkly feature flags, enabling 30+ concurrent experiments
+- Migrated monolithic .NET application to event-sourced microservices on Azure Service Bus
+- Reduced API response latency by 40% through query optimisation, connection pooling, and response caching with Varnish
+
+Junior Software Engineer, Sky, Leeds
+09/2015 - 05/2018
+- Developed RESTful APIs for Sky Go streaming platform using Node.js and Express
+- Built automated testing pipelines in Jenkins, achieving 92% code coverage across 3 services
+- Created monitoring dashboards in Grafana tracking service health, error rates, and customer impact metrics
+- Participated in architecture reviews and contributed to team RFC process for technical decisions
+- Implemented OAuth 2.0 and JWT-based authentication for customer-facing APIs
+
+Education
+MSc Computer Science, University of Manchester, Manchester
+09/2013 - 09/2014 (Distinction)
+- Thesis: "Optimising Message Broker Throughput in Event-Driven Architectures"
+
+BSc Mathematics, University of Lagos, Nigeria
+09/2009 - 06/2013 (First Class Honours)
+
+Certifications
+AWS Solutions Architect – Professional, Amazon Web Services (2023)
+Certified Kubernetes Administrator (CKA), Cloud Native Computing Foundation (2022)
+HashiCorp Certified: Terraform Associate (2021)
+
+Skills
+Go, Python, TypeScript, Java, Node.js, FastAPI, React, PostgreSQL, Redis, MongoDB, Kafka, RabbitMQ, Docker, Kubernetes, AWS (EKS, Lambda, DynamoDB, SQS, S3), Terraform, Helm, ArgoCD, GitHub Actions, Jenkins, Grafana, Prometheus, OpenTelemetry, Datadog, REST APIs, GraphQL, gRPC, Event Sourcing, CQRS, Microservices, Domain-Driven Design, Agile, Scrum, Technical Leadership

@@ -45,7 +45,7 @@ PROVIDERS: list[ProviderConfig] = [
     ProviderConfig(
         name="cerebras",
         base_url="https://api.cerebras.ai/v1",
-        model="gpt-oss-120b",  # llama-3.3-70b deprecated Feb 2026
+        model="llama-3.3-70b",  # gpt-oss-120b was 404, falling back
         api_key_env="CEREBRAS_API_KEY",
         rpm=30,
         priority=2,

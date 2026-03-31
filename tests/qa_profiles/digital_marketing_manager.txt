@@ -1,0 +1,51 @@
+Rebecca Thornton
+Digital Marketing Manager
+
+rebecca.thornton@gmail.com | +44 7912 445623 | Bristol, United Kingdom
+linkedin.com/in/rebeccathornton
+
+Profile
+Results-driven digital marketing manager with 8 years of experience leading multi-channel campaigns across B2B SaaS and consumer e-commerce. Proven track record of scaling organic traffic by 300%, managing £2M+ annual ad budgets, and building high-performing marketing teams. Deep expertise in SEO, paid media, marketing automation, and data-driven attribution modelling.
+
+Work Experience
+
+Head of Digital Marketing, Graphcore, Bristol
+09/2022 - present
+- Lead team of 8 (SEO, PPC, content, design) driving digital strategy for AI chip company with £500M+ valuation
+- Scaled organic search traffic from 45K to 180K monthly sessions through technical SEO overhaul and content programme
+- Manage £1.8M annual paid media budget across Google Ads, LinkedIn Ads, and programmatic display (DV360)
+- Built ABM (Account-Based Marketing) programme targeting Fortune 500 enterprises, generating 340 MQLs in first year
+- Implemented HubSpot Marketing Hub Enterprise with custom lead scoring, lifecycle stages, and attribution reporting
+- Launched developer community marketing initiative, growing newsletter to 12K subscribers and Discord to 3K members
+- Reduced customer acquisition cost by 28% through funnel optimisation and multi-touch attribution modelling in Looker
+
+Senior Digital Marketing Manager, Gymshark, Birmingham
+03/2019 - 08/2022
+- Led paid social strategy across Facebook/Instagram, TikTok, and Snapchat with £3.2M quarterly budget
+- Grew Instagram following from 2.8M to 5.6M through influencer partnership programme and UGC campaigns
+- Built and managed affiliate marketing programme generating £4.2M annual revenue across 800+ partners
+- Implemented personalisation engine using Dynamic Yield, increasing email click-through rates by 45%
+- Created data warehouse integration between Shopify, Google Analytics 4, and BigQuery for unified reporting
+- Managed agency relationships (creative, PR, media buying) with combined budget of £5M+
+
+Digital Marketing Executive, Hargreaves Lansdown, Bristol
+06/2016 - 02/2019
+- Managed Google Ads and Bing Ads accounts with combined monthly spend of £200K for investment platform
+- Executed email marketing campaigns to 1.2M subscriber base using Salesforce Marketing Cloud
+- Conducted A/B testing programme across landing pages and email sequences, improving conversion rates by 22%
+- Built SEO content strategy targeting long-tail financial keywords, growing organic blog traffic by 150%
+- Created monthly marketing performance dashboards in Google Data Studio and presented to C-suite
+
+Education
+BSc Business Management with Marketing, University of the West of England, Bristol
+09/2012 - 06/2015 (First Class Honours)
+
+Certifications
+Google Analytics 4 Professional Certificate (2023)
+HubSpot Marketing Hub Certification (2022)
+Meta Certified Digital Marketing Associate (2021)
+Google Ads Search & Display Certification (2020)
+CIM Diploma in Professional Digital Marketing (2018)
+
+Skills
+SEO (Technical, On-page, Off-page), PPC (Google Ads, Bing Ads, LinkedIn Ads), Paid Social (Meta, TikTok, Snapchat), Google Analytics 4, Google Tag Manager, Looker Studio, BigQuery, HubSpot, Salesforce Marketing Cloud, Mailchimp, Shopify, WordPress, Semrush, Ahrefs, Screaming Frog, Hotjar, Optimizely, Dynamic Yield, DV360, Programmatic Advertising, ABM, Content Marketing, Email Marketing, Affiliate Marketing, Influencer Marketing, Marketing Attribution, Lead Scoring, Conversion Rate Optimisation, Team Leadership, Budget Management, Agency Management, Stakeholder Reporting

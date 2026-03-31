@@ -1,0 +1,54 @@
+Fatima Al-Rashidi
+Data Engineer
+
+fatima.alrashidi@protonmail.com | +44 7834 556712 | London, United Kingdom
+linkedin.com/in/fatimaalrashidi | github.com/falrashidi
+
+Profile
+Data engineer with 6 years of experience building and maintaining data platforms at scale. Specialise in real-time streaming architectures, data lake design, and ML feature engineering pipelines. Experienced in both batch and streaming paradigms using Spark, Flink, and Kafka. Currently focused on building self-service data platforms that enable data scientists and analysts to work independently with governed, high-quality datasets.
+
+Work Experience
+
+Senior Data Engineer, Wise (formerly TransferWise), London
+08/2021 - present
+- Architect and maintain data platform processing 15TB daily across 500+ data pipelines serving 16M customers
+- Built real-time fraud detection feature pipeline using Apache Flink and Kafka Streams, reducing false positives by 28%
+- Designed data lake architecture on AWS (S3, Glue, Athena, Lake Formation) with automated data cataloguing and lineage tracking
+- Implemented dbt for data transformation layer with 800+ models, 95%+ test coverage, and automated documentation
+- Built ML feature store using Feast, serving 200+ features to 12 ML models with sub-50ms latency
+- Led migration from Redshift to Snowflake, improving query performance by 3x and reducing warehouse costs by 40%
+- Developed data quality framework using Great Expectations, catching 200+ data issues before downstream consumption
+- Mentor 4 junior data engineers through structured onboarding programme and weekly architecture reviews
+
+Data Engineer, Revolut, London
+03/2019 - 07/2021
+- Built event-driven data pipelines using Apache Kafka and Spark Structured Streaming for transaction analytics
+- Developed ETL/ELT workflows in Airflow orchestrating 300+ DAGs across credit risk, marketing, and product analytics domains
+- Implemented change data capture (CDC) pipeline from PostgreSQL to data warehouse using Debezium and Kafka Connect
+- Built automated data lineage tracking and impact analysis tools using Python and Neo4j graph database
+- Created self-service analytics layer using Looker with LookML models covering 40+ business metrics
+
+Junior Data Engineer, Sainsbury's (Argos Digital), London
+06/2017 - 02/2019
+- Developed batch ETL pipelines using PySpark on EMR for customer behaviour analytics and demand forecasting
+- Built data warehouse schemas (star/snowflake) in Redshift for product, inventory, and supply chain reporting
+- Automated data ingestion from 20+ source systems using AWS Glue and Step Functions
+- Supported migration of on-premise SQL Server data warehouse to cloud-native architecture on AWS
+
+Education
+MSc Data Science, University College London, London
+09/2016 - 09/2017 (Distinction)
+- Thesis: "Scalable Graph Processing for Social Network Analysis using Apache Spark GraphX"
+
+BSc Computer Science, University of Bath, Bath
+09/2012 - 06/2016 (First Class Honours)
+
+Certifications
+AWS Certified Data Analytics – Specialty (2023)
+Databricks Certified Data Engineer Professional (2022)
+Google Cloud Professional Data Engineer (2021)
+Apache Kafka Certified Developer (Confluent) (2020)
+Snowflake SnowPro Core Certification (2022)
+
+Skills
+Python, Scala, SQL, Java, Apache Spark, PySpark, Apache Flink, Apache Kafka, Kafka Streams, Kafka Connect, Apache Airflow, dbt, Snowflake, Redshift, BigQuery, AWS (S3, Glue, Athena, EMR, Lake Formation, Step Functions, Lambda), GCP (Dataflow, Pub/Sub, Dataproc), Databricks, Delta Lake, Apache Iceberg, PostgreSQL, MongoDB, Neo4j, Redis, Docker, Kubernetes, Terraform, Git, CI/CD, Looker, Tableau, Great Expectations, Feast, MLflow, Data Modelling (Star Schema, Snowflake Schema), Data Lake Architecture, Stream Processing, Batch Processing, CDC, Data Quality, Data Governance, Data Lineage, Feature Engineering, Agile/Scrum

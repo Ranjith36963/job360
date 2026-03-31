@@ -1,0 +1,58 @@
+Dr. Nathan Osei
+Senior Biomedical Scientist
+
+nathan.osei@nhs.net | +44 7623 998712 | Oxford, United Kingdom
+linkedin.com/in/nathanosei-biomed | HCPC Registered: BS12345
+
+Profile
+HCPC-registered Biomedical Scientist with 7 years of experience in clinical biochemistry and haematology. Currently specialising in genomics and molecular diagnostics within NHS pathology services. Track record of implementing new analytical methods, achieving ISO 15189 accreditation, and training junior staff. Passionate about translational research and applying next-generation sequencing technologies to improve diagnostic pathways.
+
+Work Experience
+
+Senior Biomedical Scientist, Oxford University Hospitals NHS Foundation Trust, Oxford
+04/2021 - present
+- Lead scientist in Molecular Diagnostics laboratory processing 500+ clinical samples weekly for cancer genomic profiling
+- Validated and implemented next-generation sequencing (NGS) panels for solid tumour and haematological malignancy testing
+- Manage quality management system achieving ISO 15189 UKAS accreditation with zero non-conformances in latest assessment
+- Developed bioinformatics pipeline using Python and R for variant calling, annotation, and clinical reporting
+- Train and supervise 8 Band 5-6 biomedical scientists and 4 trainee biomedical scientists
+- Chair laboratory safety committee, conducting risk assessments for COSHH and biological hazard management
+- Collaborate with clinical geneticists and oncologists on case reviews and multidisciplinary team meetings
+- Led COVID-19 diagnostic testing capacity expansion, scaling from 200 to 3,000 PCR tests/day during pandemic peak
+
+Biomedical Scientist, Royal Free London NHS Foundation Trust, London
+06/2018 - 03/2021
+- Performed clinical biochemistry analysis using Roche cobas 8000 and Siemens ADVIA platforms
+- Validated new immunoassay methods for thyroid function, cardiac markers, and tumour markers
+- Managed internal quality control (IQC) and external quality assessment (EQA) programmes across 15 analytes
+- Developed automated sample tracking workflows using Clinisys WinPath LIMS
+- Participated in NICE guideline implementation for point-of-care testing in Emergency Department
+- Presented research findings at Association of Clinical Biochemistry (ACB) annual conference
+
+Trainee Biomedical Scientist, King's College Hospital, London
+09/2016 - 05/2018
+- Completed IBMS Registration Training Portfolio across Clinical Biochemistry and Haematology
+- Performed routine analytical testing, maintenance of analysers, and troubleshooting instrument faults
+- Gained competency in blood transfusion, coagulation screening, and full blood count analysis
+- Achieved HCPC registration upon completion of training portfolio
+
+Education
+PhD Applied Genomics, University of Oxford, Oxford
+10/2021 - present (part-time, expected 2026)
+- Thesis: "Clinical Utility of Circulating Tumour DNA for Minimal Residual Disease Monitoring in Colorectal Cancer"
+
+MSc Biomedical Science, King's College London, London
+09/2015 - 09/2016 (Distinction)
+
+BSc Biomedical Science (IBMS Accredited), University of Westminster, London
+09/2012 - 06/2015 (First Class Honours)
+
+Certifications
+HCPC Registration (Biomedical Scientist) (2018)
+IBMS Specialist Portfolio: Clinical Biochemistry (2020)
+IBMS Specialist Portfolio: Molecular Pathology (2023)
+ISO 15189 Internal Auditor, BSI (2022)
+Good Clinical Laboratory Practice (GCLP), NIHR (2021)
+
+Skills
+Clinical Biochemistry, Haematology, Molecular Diagnostics, Next-Generation Sequencing (NGS), PCR, qPCR, RT-PCR, Sanger Sequencing, DNA/RNA Extraction, Library Preparation, Variant Calling & Annotation, Bioinformatics, Python, R, Linux, Galaxy, LIMS (Clinisys WinPath, Sunquest), Quality Management (ISO 15189), UKAS Accreditation, Internal Quality Control (IQC), External Quality Assessment (EQA), Method Validation, COSHH, Risk Assessment, Point-of-Care Testing, Blood Sciences, Immunoassay, Roche cobas, Siemens ADVIA, Illumina MiSeq/NextSeq, Scientific Writing, Training & Supervision, Multidisciplinary Team Working

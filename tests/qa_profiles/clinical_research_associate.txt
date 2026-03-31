@@ -1,0 +1,55 @@
+Dr. Eleanor Chambers
+Senior Clinical Research Associate
+
+eleanor.chambers@nhs.net | +44 7712 559834 | Cambridge, United Kingdom
+linkedin.com/in/eleanorchambers-cra
+
+Profile
+GCP-certified clinical research professional with 6 years of experience managing Phase II-IV clinical trials across oncology, immunology, and rare diseases. Proven track record of managing multi-site trials across 8 countries, ensuring regulatory compliance (MHRA, EMA, FDA), and maintaining 100% audit-readiness. Strong background in biostatistics and data management, with hands-on experience in EDC systems and risk-based monitoring.
+
+Work Experience
+
+Senior Clinical Research Associate, AstraZeneca, Cambridge
+03/2021 - present
+- Monitor 12 active clinical trial sites across UK, Germany, France, and Spain for Phase III oncology programme (NSCLC)
+- Conduct on-site and remote monitoring visits ensuring ICH-GCP compliance, protocol adherence, and source data verification
+- Manage CRA team of 4 for multi-national rare disease trial with 35 sites across 8 countries
+- Led root cause analysis for 3 critical protocol deviations, implementing CAPAs that prevented recurrence
+- Collaborate with Medical Affairs, Pharmacovigilance, and Biostatistics on safety signal assessment and DSMB reporting
+- Achieved 100% compliance in 2 MHRA GCP inspections and 1 FDA pre-approval inspection
+- Train and mentor 6 junior CRAs on monitoring best practices, query resolution, and regulatory requirements
+- Manage trial master file (TMF) in Veeva Vault ensuring completeness and audit-readiness
+
+Clinical Research Associate, IQVIA, London
+01/2019 - 02/2021
+- Monitored Phase II/III immunology trials for top-5 pharma sponsor across 8 UK sites
+- Conducted informed consent verification, eligibility review, and adverse event reconciliation for 450+ patients
+- Managed site start-up activities including ethics submissions, contracts negotiation, and pharmacy set-up
+- Performed risk-based monitoring using RBQM principles and centralised statistical monitoring tools
+- Maintained electronic data capture (EDC) oversight using Medidata Rave, resolving 2,000+ queries with 98% closure rate
+
+Clinical Trial Coordinator, Addenbrooke's Hospital (CUH), Cambridge
+06/2017 - 12/2018
+- Coordinated 4 concurrent Phase II oncology trials, managing patient screening, enrolment, and follow-up schedules
+- Prepared and maintained Investigator Site Files (ISFs) and ensured compliance with HRA requirements
+- Collected and processed biological samples according to laboratory manuals and shipping requirements
+- Assisted Principal Investigators with ethics committee submissions and annual safety reporting
+
+Education
+PhD Molecular Biology, University of Cambridge, Cambridge
+10/2013 - 06/2017
+- Thesis: "Epigenetic Regulation of T-Cell Exhaustion in the Tumour Microenvironment"
+- Published 4 peer-reviewed papers in Nature Immunology and Journal of Clinical Investigation
+
+MSci Natural Sciences, University of Cambridge, Cambridge
+10/2009 - 06/2013 (First Class Honours)
+
+Certifications
+ICH-GCP Certification (Transcelerate), renewed 2024
+NIHR Associate PI Training (2023)
+Pharmacovigilance and Drug Safety Certificate, University of Basel (2021)
+Good Clinical Practice (Advanced), NIHR (2020)
+Project Management for Clinical Trials, DIA (2019)
+
+Skills
+Clinical Trial Monitoring, ICH-GCP Compliance, Protocol Development, Site Management, Risk-Based Quality Management (RBQM), Regulatory Affairs (MHRA, EMA, FDA, HRA), Pharmacovigilance, Safety Reporting (SAE/SUSAR), Data Management, Electronic Data Capture (Medidata Rave, Oracle InForm, Veeva Vault), CTMS (Veeva CTMS, Oracle Siebel), TMF Management, Biostatistics, SAS, R, SPSS, Clinical SAS Programming, CDISC (SDTM, ADaM), Medical Writing, Informed Consent, Oncology, Immunology, Rare Diseases, Stakeholder Management, Cross-Cultural Communication, Team Leadership

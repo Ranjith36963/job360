@@ -1,0 +1,60 @@
+Dr. Hannah Llewellyn
+Environmental & Sustainability Manager
+
+hannah.llewellyn@outlook.co.uk | +44 7745 889023 | Bristol, United Kingdom
+linkedin.com/in/hannahllewellyn-env | MIEMA CEnv
+
+Profile
+Chartered Environmentalist with 9 years of experience leading environmental management, carbon reduction, and sustainability strategy across construction, energy, and corporate sectors. Expert in environmental impact assessment (EIA), carbon footprint analysis, and ESG reporting frameworks. Led organisations to achieve net zero commitments, Science-Based Targets, and ISO 14001 certification. Experienced in translating complex environmental regulations into practical business strategies.
+
+Work Experience
+
+Head of Sustainability, National Grid, Warwick
+01/2022 - present
+- Lead sustainability strategy team of 12 delivering National Grid's £4B net zero transition programme
+- Developed and published Science-Based Targets initiative (SBTi) commitments across Scope 1, 2, and 3 emissions
+- Manage annual carbon footprint calculation across 20,000+ assets using GHG Protocol Corporate Standard
+- Built ESG reporting framework aligned with TCFD, SASB, and GRI standards for annual sustainability report
+- Led implementation of environmental data management system (Sphera) across UK and US operations
+- Coordinated with OFGEM on regulatory submissions for environmental obligations and incentive mechanisms
+- Delivered £12M biodiversity net gain programme across 150 infrastructure projects using Defra Metric 4.0
+- Chaired quarterly Environmental Leadership Forum with Group CEO and Board Non-Executive Directors
+
+Senior Environmental Consultant, Arup, Bristol
+04/2018 - 12/2021
+- Led Environmental Impact Assessments (EIA) for major infrastructure projects including offshore wind farms and highway schemes
+- Managed environmental workstreams for £2.8B Bristol Temple Quarter regeneration programme
+- Conducted lifecycle assessment (LCA) studies for 6 construction projects using One Click LCA and SimaPro
+- Developed carbon reduction strategies achieving 30%+ embodied carbon savings against RIBA 2030 targets
+- Trained and mentored 5 graduate environmental consultants through chartership support programme
+- Built automated carbon calculation tools using Python and Excel VBA, adopted across European practice
+
+Environmental Advisor, Wessex Water, Bath
+06/2015 - 03/2018
+- Managed ISO 14001 Environmental Management System across 600+ operational sites
+- Conducted environmental audits, incident investigations, and regulatory compliance assessments
+- Prepared environmental permit applications and variations for Environment Agency (EA)
+- Led water company's first carbon footprint disclosure under CDP, achieving B-rating
+- Coordinated ecological surveys and habitat management plans for 40+ water infrastructure sites
+
+Education
+PhD Environmental Engineering, University of Bristol, Bristol
+10/2018 - 06/2022 (part-time)
+- Thesis: "Quantifying Embodied Carbon in UK Infrastructure: A Machine Learning Approach to Lifecycle Assessment"
+- Published 3 papers in Journal of Cleaner Production and Building and Environment
+
+MSc Environmental Policy and Management, University of Bristol, Bristol
+09/2013 - 09/2014 (Distinction)
+
+BSc Environmental Science, University of Exeter, Exeter
+09/2010 - 06/2013 (First Class Honours)
+
+Certifications
+Chartered Environmentalist (CEnv), Society for the Environment (2019)
+Full Member, Institute of Environmental Management and Assessment (MIEMA) (2018)
+NEBOSH Environmental Management Certificate (2016)
+ISO 14001:2015 Lead Auditor, BSI (2017)
+BREEAM New Construction Assessor, BRE (2019)
+
+Skills
+Environmental Impact Assessment (EIA), Carbon Footprint Analysis (GHG Protocol), Lifecycle Assessment (LCA), Net Zero Strategy, Science-Based Targets (SBTi), ESG Reporting (TCFD, SASB, GRI, CDP), ISO 14001, Environmental Auditing, Biodiversity Net Gain (BNG), Ecological Assessment, Environmental Permitting, Regulatory Compliance (Environment Agency, OFGEM), Sustainability Strategy, Circular Economy, One Click LCA, SimaPro, Sphera, Python, R, GIS (QGIS, ArcGIS), Excel VBA, Power BI, Defra Metric 4.0, BREEAM, CEEQUAL, CDM Regulations, Stakeholder Engagement, Board-Level Reporting, Team Leadership, Training & Mentoring

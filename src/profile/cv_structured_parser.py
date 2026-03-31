@@ -103,10 +103,11 @@ def _duration_months(start: Optional[tuple[int, int]],
 
 # ── Experience parsing ────────────────────────────────────────────────
 
-# "Title at Company", "Title - Company", "Title | Company", "Title, Company"
+# "Title at Company", "Title - Company", "Title | Company", "Title, Company, Location"
 _TITLE_COMPANY_RE = re.compile(
     r'^(.+?)\s+(?:at|@)\s+(.+?)$'
-    r'|^(.+?)\s+[-–—|]\s+(.+?)$',
+    r'|^(.+?)\s+[-–—|]\s+(.+?)$'
+    r'|^([A-Z][^,\n]{3,60}),\s+([A-Z][^,\n]{2,60})(?:,\s+[A-Za-z][a-zA-Z\s]*)*$',
     re.MULTILINE,
 )
 
@@ -150,6 +151,12 @@ def _parse_experience_section(text: str) -> list[WorkExperience]:
                 current.duration_months = _duration_months(start, end)
             continue
 
+        # Skip bullet/description lines before checking title patterns
+        if stripped.startswith(('-', '•', '·', '*', '–')):
+            if current:
+                desc_lines.append(stripped)
+            continue
+
         # Try to detect a title/company line
         tc_match = _TITLE_COMPANY_RE.match(stripped)
         if tc_match:
@@ -160,8 +167,8 @@ def _parse_experience_section(text: str) -> list[WorkExperience]:
                 entries.append(current)
                 desc_lines = []
 
-            title = (tc_match.group(1) or tc_match.group(3) or "").strip()
-            company = (tc_match.group(2) or tc_match.group(4) or "").strip()
+            title = (tc_match.group(1) or tc_match.group(3) or tc_match.group(5) or "").strip()
+            company = (tc_match.group(2) or tc_match.group(4) or tc_match.group(6) or "").strip()
             if 3 < len(title) < 80:
                 current = WorkExperience(title=title, company=company)
             continue

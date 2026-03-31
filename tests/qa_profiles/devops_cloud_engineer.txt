@@ -1,0 +1,55 @@
+Priya Sharma
+DevOps & Cloud Infrastructure Engineer
+
+priya.sharma@outlook.com | +44 7834 221098 | Edinburgh, United Kingdom
+linkedin.com/in/priyasharma-devops
+
+Profile
+Platform engineer with 7 years of experience designing, building, and operating cloud infrastructure at scale. Deep expertise in AWS and GCP, infrastructure-as-code, container orchestration, and SRE practices. Track record of reducing deployment friction, improving system reliability from 99.5% to 99.99%, and building self-service platforms that accelerate developer velocity.
+
+Work Experience
+
+Staff Platform Engineer, Skyscanner, Edinburgh
+01/2022 - present
+- Designed and built internal developer platform serving 400+ engineers, reducing service onboarding from 2 weeks to 4 hours
+- Migrated 180+ services from EC2-based deployments to EKS with Istio service mesh, achieving zero-downtime deployments
+- Implemented GitOps workflow using ArgoCD and Kustomize, processing 200+ deployments/day across 3 environments
+- Built observability stack (Prometheus, Thanos, Grafana, PagerDuty) with custom SLO dashboards reducing MTTD by 60%
+- Led chaos engineering programme using Gremlin, identifying 14 critical failure modes before they impacted customers
+- Automated infrastructure provisioning with Terraform modules and custom Crossplane providers, managing 2,000+ AWS resources
+- Reduced monthly AWS spend by £180K through Reserved Instances strategy, right-sizing, and Spot Fleet adoption
+
+Senior DevOps Engineer, FanDuel, Edinburgh
+04/2019 - 12/2021
+- Managed Kubernetes clusters (GKE) handling 500K concurrent users during peak sporting events
+- Built CI/CD pipelines in CircleCI and Tekton for 60+ microservices with automated canary deployments
+- Implemented secrets management using HashiCorp Vault with dynamic credentials for database and API access
+- Designed multi-region disaster recovery architecture with RPO <1min and RTO <5min using GCP Cloud Spanner
+- Created Terraform module library adopted across 8 engineering teams, standardising infrastructure patterns
+
+DevOps Engineer, NCR, Dundee
+08/2017 - 03/2019
+- Automated infrastructure provisioning on AWS using CloudFormation and Ansible for payment processing systems
+- Built Docker containerisation strategy for legacy Java applications, reducing environment setup from 2 days to 30 minutes
+- Implemented centralised logging with ELK Stack (Elasticsearch, Logstash, Kibana) aggregating logs from 40+ services
+- Managed Jenkins CI/CD pipelines and introduced infrastructure testing with Terratest and InSpec
+
+Graduate Infrastructure Engineer, Capgemini, Glasgow
+07/2016 - 07/2017
+- Supported client Azure environments across financial services accounts
+- Automated routine operations using PowerShell and Python scripts, saving 15 hours/week of manual work
+- Obtained Azure Administrator certification within 6 months of joining
+
+Education
+BEng Electronic and Electrical Engineering, University of Edinburgh, Edinburgh
+09/2012 - 06/2016 (2:1)
+
+Certifications
+AWS Solutions Architect – Professional (2023)
+Google Cloud Professional Cloud Architect (2022)
+Certified Kubernetes Administrator (CKA) (2021)
+HashiCorp Certified: Terraform Associate (2020)
+AWS Certified DevOps Engineer – Professional (2019)
+
+Skills
+AWS (EKS, EC2, Lambda, RDS, S3, CloudFront, IAM, VPC), GCP (GKE, Cloud Spanner, BigQuery, Pub/Sub), Kubernetes, Docker, Istio, Terraform, Pulumi, Crossplane, Ansible, Helm, Kustomize, ArgoCD, Flux, Jenkins, CircleCI, GitHub Actions, Tekton, Python, Go, Bash, PowerShell, Prometheus, Grafana, Thanos, Datadog, PagerDuty, ELK Stack, HashiCorp Vault, Consul, Linux, Networking (TCP/IP, DNS, Load Balancing), SRE, Platform Engineering, Infrastructure as Code, GitOps, Chaos Engineering

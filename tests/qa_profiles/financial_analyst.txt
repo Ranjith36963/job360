@@ -1,0 +1,53 @@
+James Whitfield
+Senior Financial Analyst
+
+james.whitfield@outlook.co.uk | +44 7745 398217 | London, United Kingdom
+linkedin.com/in/jameswhitfield-finance
+
+Profile
+Chartered Accountant and senior financial analyst with 8 years of experience across investment banking, corporate finance, and FP&A. Specialise in financial modelling, M&A due diligence, valuation analysis, and management reporting. Strong technical skills in Excel, SQL, and Python for data-driven financial analysis. Seeking a role in strategic finance or corporate development.
+
+Work Experience
+
+Senior Financial Analyst, Barclays Investment Bank, London
+01/2022 - present
+- Lead financial modelling and valuation workstreams for M&A transactions ranging from £50M to £2.5B
+- Built and maintain 15+ DCF, LBO, and comparable company analysis models used across the TMT coverage group
+- Prepare board-level presentations and investment committee memoranda for potential acquisitions and divestitures
+- Conduct extensive due diligence on target companies, analysing 3-statement financial models, working capital trends, and quality of earnings
+- Developed automated reporting pipeline using Python and SQL, reducing monthly close reporting time from 5 days to 1.5 days
+- Mentor 3 junior analysts on financial modelling standards, presentation skills, and client management
+
+FP&A Analyst, Rolls-Royce, Derby
+06/2019 - 12/2021
+- Managed the annual budgeting and quarterly forecasting process for Defence division (£3.2B revenue)
+- Built variance analysis dashboards in Power BI tracking actuals vs budget across 12 cost centres
+- Developed 5-year strategic plan financial models supporting capital allocation decisions worth £400M+
+- Partnered with engineering leadership to build business cases for R&D investments and programme bids
+- Led implementation of Anaplan for rolling forecasts, replacing legacy Excel-based planning processes
+- Presented monthly financial reviews to divisional CFO and senior leadership team
+
+Graduate Financial Analyst, PwC, Birmingham
+09/2016 - 05/2019
+- Performed financial due diligence on 20+ transactions across healthcare, consumer goods, and technology sectors
+- Built financial models for Quality of Earnings reports, adjusting EBITDA for one-off items, working capital normalisation, and run-rate synergies
+- Prepared data room analyses and vendor due diligence reports for private equity clients
+- Supported audit engagements for FTSE 250 clients, testing revenue recognition, provisions, and related party disclosures
+- Achieved ACA qualification while working full-time, passing all 15 exams on first attempt
+
+Education
+MSc Finance and Investment, University of Warwick, Coventry
+09/2015 - 09/2016 (Distinction)
+- Thesis: "Impact of ESG Factors on Long-Term Equity Returns in FTSE 100 Companies"
+
+BSc Economics, London School of Economics, London
+09/2012 - 06/2015 (First Class Honours)
+
+Certifications
+Associate Chartered Accountant (ACA), ICAEW (2019)
+CFA Level II Candidate, CFA Institute (in progress)
+Financial Modelling & Valuation Analyst (FMVA), CFI (2020)
+Advanced Excel for Financial Modelling, Wall Street Prep (2018)
+
+Skills
+Financial Modelling (DCF, LBO, Comps, Precedents), M&A Due Diligence, Valuation Analysis, FP&A, Budgeting & Forecasting, Management Reporting, Variance Analysis, Quality of Earnings, Working Capital Analysis, Capital Allocation, Business Cases, Excel (Advanced: VBA, Power Query, Data Tables), Python (pandas, numpy, matplotlib), SQL, Power BI, Tableau, Anaplan, SAP, Oracle Financials, Bloomberg Terminal, Capital IQ, IFRS, UK GAAP, Stakeholder Management, Board Presentations
