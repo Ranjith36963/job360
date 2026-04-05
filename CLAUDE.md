@@ -58,7 +58,7 @@ python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
 python -m src.cli view --visa-only                  # Filter by visa
 
 # Tests (all use mocked HTTP via aioresponses)
-python -m pytest tests/ -v                              # Run all 376 tests
+python -m pytest tests/ -v                              # Run all 387 tests
 python -m pytest tests/test_scorer.py -v                # Scoring tests (58)
 python -m pytest tests/test_sources.py -v               # All 48 sources (65)
 python -m pytest tests/test_profile.py -v               # Profile system (56)
@@ -107,9 +107,9 @@ job360/
 │       ├── logger.py        # Rotating file + console logging (5MB, 3 backups)
 │       ├── rate_limiter.py  # Async semaphore + delay rate limiter
 │       └── time_buckets.py  # Time bucketing for CLI view + console summary
-├── tests/                   # 376 tests across 17 files
+├── tests/                   # 387 tests across 18 files
 │   ├── conftest.py          # Shared fixtures (sample_ai_job, sample_visa_job, etc.)
-│   └── test_*.py            # 17 test modules
+│   └── test_*.py            # 18 test modules
 ├── data/                    # Runtime data (gitignored)
 │   ├── jobs.db              # SQLite database
 │   ├── user_profile.json    # User profile (optional)
@@ -178,7 +178,7 @@ Groups by `job.normalized_key()` = (normalized company, normalized title). Keeps
 
 ## Testing
 
-**376 tests** across 17 test files. Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
+**387 tests** across 18 test files (count is `pytest --collect-only` output; parametrized tests expand into multiple collected items). Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
 
 Key test files:
 - `test_sources.py` — 65 tests: all 48 sources with mocked HTTP responses
@@ -190,7 +190,7 @@ Key test files:
 - `test_notifications.py` — 19 tests: Email, Slack, Discord sending
 - `test_deduplicator.py` — 13 tests: dedup logic, company suffix stripping
 - `test_cli.py` — 11 tests: CLI commands, `len(SOURCE_REGISTRY) == 48` assertion (update when adding/removing sources)
-- `test_main.py` — 9 tests: orchestrator with mocked sources
+- `test_main.py` — 12 tests: orchestrator with mocked sources
 
 ## Environment
 

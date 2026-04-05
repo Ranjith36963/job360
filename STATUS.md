@@ -3,8 +3,8 @@
 ## Current State: Phase 2 Complete
 
 **Last updated:** 2026-03-17
-**Total tests:** 388+ across 18 test modules
-**Source files:** 73+ Python modules | **Test files:** 18 test modules
+**Total tests:** 387 across 18 test modules
+**Source files:** 74 Python modules | **Test files:** 18 test modules
 **Job sources:** 48 registered in SOURCE_REGISTRY
 
 ---
@@ -114,7 +114,7 @@
 - Email, Slack, Discord notifications (when configured)
 - CLI commands: run, view, dashboard, status, sources, setup-profile
 - Streamlit dashboard with filters, charts, profile setup
-- 376 tests pass (3 skip on Windows)
+- 387 tests pass (3 skip on Windows)
 
 ---
 
@@ -169,7 +169,7 @@
 | `test_cron.py` | cron_run.sh | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | `test_rate_limiter.py` | `rate_limiter.py` | 5 |
-| **Total** | | **388+** (3 skip on Windows) |
+| **Total** | | **387** (3 skip on Windows) |
 
 ### Not covered or lightly covered
 

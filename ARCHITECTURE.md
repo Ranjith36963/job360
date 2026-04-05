@@ -66,7 +66,7 @@ job360/
 |       +-- time_buckets.py  # Time bucketing, score colors, bucket_summary_counts
 +-- tests/
 |   +-- conftest.py          # Shared fixtures (sample_ai_job, etc.)
-|   +-- test_*.py            # 17 test files, 376 tests
+|   +-- test_*.py            # 18 test files, 387 tests
 +-- data/                    # Runtime data (gitignored)
 |   +-- jobs.db              # SQLite database
 |   +-- user_profile.json    # User profile (optional)

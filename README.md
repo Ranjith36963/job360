@@ -161,7 +161,7 @@ flowchart TD
 - **Split requirements** — prod deps in `requirements.txt`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (376 tests)
+### Testing (387 tests)
 
 | Test file | Count | What it covers |
 |-----------|-------|----------------|
@@ -174,13 +174,14 @@ flowchart TD
 | `test_notifications.py` | 19 | Email, Slack, Discord sending |
 | `test_deduplicator.py` | 13 | Cross-source dedup logic |
 | `test_cli.py` | 11 | CLI commands + options + SOURCE_REGISTRY assertions |
-| `test_main.py` | 9 | Orchestrator integration |
+| `test_main.py` | 12 | Orchestrator integration |
 | `test_notification_base.py` | 7 | ABC, format_salary, channel discovery |
-| `test_database.py` | 6 | SQLite operations |
+| `test_database.py` | 9 | SQLite operations, migrations, source history |
 | `test_reports.py` | 6 | Markdown + HTML report generation |
 | `test_setup.py` | 6 | setup.sh validation |
 | `test_cli_view.py` | 5 | Rich terminal table viewer |
 | `test_cron.py` | 5 | cron_setup.sh validation |
+| `test_rate_limiter.py` | 5 | Async rate limiter (acquire/release, concurrency, delay) |
 | `test_csv_export.py` | 4 | CSV export format |
 
 ## Quick Start
@@ -410,7 +411,7 @@ job360/
 ## Testing
 
 ```bash
-# Run all 376 tests
+# Run all 387 tests
 python -m pytest tests/ -v
 
 # Run specific test file
@@ -420,7 +421,7 @@ python -m pytest tests/test_scorer.py -v
 python -m pytest tests/ -v -s
 ```
 
-All 376 tests pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+All 387 tests pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
 
 ## Output
 
