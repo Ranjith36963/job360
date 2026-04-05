@@ -1,0 +1,30 @@
+# Gitleaks configuration for Job360.
+#
+# Extends the upstream default ruleset and adds a repo-level allowlist for
+# known false positives so `gitleaks detect` exits 0 on a clean working tree.
+# New findings still surface normally.
+
+title = "Job360 gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives audited and dispositioned"
+
+regexes = [
+  # 80,000 Hours uses a public Algolia search-only key.
+  # Algolia issues two key types: admin (secret) and search (public, embedded
+  # in frontend JS). This one is verified public: the exact same string appears
+  # in the rendered HTML of https://jobs.80000hours.org/ and is part of the
+  # normal Algolia client SDK initialization. Gitleaks cannot distinguish
+  # admin from search keys by regex alone — trufflehog v3 correctly classifies
+  # it as "unverified" after attempting Algolia authentication.
+  # Location: src/sources/eightykhours.py:13
+  '''d1d7f2c8696e7b36837d5ed337c4a319''',
+
+  # Test fixture placeholder used to assert that providers reject obviously
+  # fake API keys. Not a real credential.
+  # Location: tests/test_llm_providers.py:70
+  '''TEST_NONEXISTENT_KEY_12345''',
+]

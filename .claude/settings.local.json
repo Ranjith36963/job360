@@ -96,7 +96,17 @@
       "Bash(gitleaks detect:*)",
       "Bash(trufflehog filesystem:*)",
       "Bash(trufflehog --regex --entropy True \"file://$\\(pwd\\)\")",
-      "Bash(trufflehog --regex --entropy True --max_depth 1 \"file://$\\(pwd\\)\")"
+      "Bash(trufflehog --regex --entropy True --max_depth 1 \"file://$\\(pwd\\)\")",
+      "Bash(where scoop:*)",
+      "Bash(where winget:*)",
+      "Bash(where choco:*)",
+      "Bash(where go:*)",
+      "Read(//c/tmp/**)",
+      "Bash(pwd -W)",
+      "Bash(mkdir -p /tmp/trufflehog-extract)",
+      "Bash(tar -xzf /tmp/trufflehog.tar.gz)",
+      "Bash(gitleaks version:*)",
+      "Bash(trufflehog:*)"
     ]
   },
   "disabledMcpjsonServers": [
