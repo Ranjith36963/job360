@@ -89,7 +89,14 @@
       "WebFetch(domain:medium.com)",
       "Read(//c/Users/Ranjith/.claude/skills/**)",
       "Read(//c/Users/Ranjith/.claude/plugins/marketplaces/**)",
-      "Bash(npm audit:*)"
+      "Bash(npm audit:*)",
+      "Bash(gitleaks --version)",
+      "Bash(trufflehog --regex --entropy=True --max_depth=5 \"file://$\\(pwd\\)\")",
+      "Bash(gitleaks protect:*)",
+      "Bash(gitleaks detect:*)",
+      "Bash(trufflehog filesystem:*)",
+      "Bash(trufflehog --regex --entropy True \"file://$\\(pwd\\)\")",
+      "Bash(trufflehog --regex --entropy True --max_depth 1 \"file://$\\(pwd\\)\")"
     ]
   },
   "disabledMcpjsonServers": [
