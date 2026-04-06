@@ -19,7 +19,7 @@ from src.storage.database import JobDatabase
 from src.storage.csv_export import export_to_csv
 from src.filters.skill_matcher import score_job, check_visa_flag, detect_experience_level, salary_in_range, JobScorer
 from src.filters.deduplicator import deduplicate
-from src.profile.storage import load_profile
+from src.profile.storage import load_profile, profile_exists
 from src.profile.keyword_generator import generate_search_config
 from src.notifications.report_generator import generate_markdown_report
 from src.notifications.base import get_configured_channels
@@ -245,7 +245,11 @@ async def run_search(
         scorer = JobScorer(search_config)
         logger.info("  Using dynamic keywords from user profile")
     else:
-        logger.info("  No user profile found, using default keywords")
+        if profile_exists():
+            logger.warning("  Profile file exists but could not be loaded — using default keywords. "
+                           "Run 'job360 setup-profile' to rebuild.")
+        else:
+            logger.info("  No user profile found, using default keywords")
     logger.info("=" * 60)
 
     # Init database
@@ -285,7 +289,7 @@ async def run_search(
                     logger.warning(f"Source {source.name} timed out")
                     return None
                 except Exception as e:
-                    logger.error(f"Source {source.name} failed: {e}")
+                    logger.error(f"Source {source.name} failed: {e}", exc_info=True)
                     return None
 
             results = await asyncio.gather(
@@ -328,7 +332,7 @@ async def run_search(
                         f"Sources returning 0 that previously had jobs: {', '.join(newly_empty)}"
                     )
             except Exception as e:
-                logger.debug(f"Source health check skipped: {e}")
+                logger.warning(f"Source health check failed (skipped): {type(e).__name__}: {e}")
 
             logger.info(f"Total raw jobs: {len(all_jobs)}")
 

@@ -36,7 +36,7 @@ class JSearchSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("JSearch: no API key, skipping")
+            logger.warning("JSearch: no API key, skipping")
             return []
         jobs = []
         consecutive_failures = 0

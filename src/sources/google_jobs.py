@@ -42,7 +42,7 @@ class GoogleJobsSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("GoogleJobs: no SERPAPI_KEY, skipping")
+            logger.warning("GoogleJobs: no SERPAPI_KEY, skipping")
             return []
 
         jobs = []

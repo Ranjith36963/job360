@@ -23,7 +23,7 @@ class CareerjetSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Careerjet: no CAREERJET_AFFID, skipping")
+            logger.warning("Careerjet: no CAREERJET_AFFID, skipping")
             return []
 
         jobs = []

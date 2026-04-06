@@ -24,7 +24,7 @@ class ReedSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Reed: no API key, skipping")
+            logger.warning("Reed: no API key, skipping")
             return []
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()

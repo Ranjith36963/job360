@@ -24,7 +24,7 @@ class JoobleSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Jooble: no API key, skipping")
+            logger.warning("Jooble: no API key, skipping")
             return []
         jobs = []
         seen_ids = set()

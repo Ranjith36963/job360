@@ -56,10 +56,15 @@ def _build_email(jobs: list[Job], stats: dict, csv_path: str | None = None) -> M
 
 
 def _send_sync(msg: MIMEMultipart):
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        raise RuntimeError("SMTP authentication failed — check SMTP_EMAIL/SMTP_PASSWORD")
+    except smtplib.SMTPException as e:
+        raise RuntimeError(f"SMTP error: {type(e).__name__}") from None
 
 
 async def send_email(jobs: list[Job], stats: dict, csv_path: str | None = None):

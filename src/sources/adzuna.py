@@ -24,7 +24,7 @@ class AdzunaSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Adzuna: no API keys, skipping")
+            logger.warning("Adzuna: no API keys, skipping")
             return []
         jobs = []
         queries = self.job_titles
