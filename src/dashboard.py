@@ -282,7 +282,9 @@ def render_job_table(jobs: list[dict]) -> str:
         score = job.get("match_score", 0)
         color = score_color_hex(score)
         visa = job.get("visa_flag", False)
-        url = html.escape(job.get("apply_url", "#"))
+        raw_url = job.get("apply_url", "#").strip()
+        parsed_scheme = raw_url.split(":", 1)[0].lower() if ":" in raw_url else ""
+        url = html.escape(raw_url) if parsed_scheme in ("http", "https", "") else "#"
         title = html.escape(job.get("title", "Unknown"))
         company = html.escape(job.get("company", "Unknown"))
         location = html.escape(job.get("location", "N/A"))
@@ -314,7 +316,7 @@ def render_job_table(jobs: list[dict]) -> str:
         rows.append(
             f'<tr class="jrow">'
             f'<td><span class="jrow-score" style="background:{color}">{score}</span></td>'
-            f'<td class="jrow-title"><a href="{url}" target="_blank">{title}</a>'
+            f'<td class="jrow-title"><a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
             f'<span class="jrow-company">@ {company}</span></td>'
             f'<td class="jrow-loc">{location}</td>'
             f'<td class="jrow-salary">{salary}</td>'
@@ -382,7 +384,14 @@ with st.sidebar:
         if st.button("Save Profile"):
             cv_data = CVData()
             if uploaded_cv:
-                cv_data = parse_cv_from_bytes(uploaded_cv.read(), uploaded_cv.name)
+                _max_mb = 10
+                _suffix = uploaded_cv.name.rsplit(".", 1)[-1].lower() if "." in uploaded_cv.name else ""
+                if uploaded_cv.size > _max_mb * 1024 * 1024:
+                    st.error(f"CV file exceeds {_max_mb} MB limit.")
+                elif _suffix not in ("pdf", "docx"):
+                    st.error("Only PDF and DOCX files are accepted.")
+                else:
+                    cv_data = parse_cv_from_bytes(uploaded_cv.read(), uploaded_cv.name)
 
             # Enrich from LinkedIn
             if uploaded_linkedin:

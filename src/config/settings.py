@@ -44,6 +44,10 @@ MAX_DAYS_OLD = 7
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
 
+# 80,000 Hours Algolia (search-only key, safe for client-side use)
+EIGHTYKHOURS_ALGOLIA_APP_ID = os.getenv("EIGHTYKHOURS_ALGOLIA_APP_ID", "W6KM1UDIB3")
+EIGHTYKHOURS_ALGOLIA_SEARCH_KEY = os.getenv("EIGHTYKHOURS_ALGOLIA_SEARCH_KEY", "d1d7f2c8696e7b36837d5ed337c4a319")
+
 # Rate limits (requests per second)
 RATE_LIMITS = {
     "reed": {"concurrent": 1, "delay": 2.0},

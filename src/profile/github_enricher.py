@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -126,10 +127,18 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> Any:
         return None
 
 
+_GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,37}[a-zA-Z0-9])?$')
+
+
 async def fetch_github_profile(
     username: str, session: aiohttp.ClientSession | None = None
 ) -> dict:
     """Fetch public repos, languages, and topics for a GitHub user."""
+    _empty = {"repositories": [], "languages": {}, "topics": [], "skills_inferred": []}
+    if not _GITHUB_USERNAME_RE.match(username):
+        logger.warning("Invalid GitHub username format: %r", username)
+        return _empty
+
     own_session = session is None
     if own_session:
         session = aiohttp.ClientSession()

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone, timedelta
 
 import aiosqlite
@@ -62,7 +63,14 @@ class JobDatabase:
             # Add future columns here, e.g.:
             # ("salary_currency", "TEXT DEFAULT ''"),
         ]
+        _safe_name = re.compile(r'^[a-z_][a-z0-9_]{0,62}$')
+        _safe_type = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
         for col_name, col_def in migrations:
+            if not _safe_name.match(col_name):
+                raise ValueError(f"Unsafe migration column name: {col_name!r}")
+            col_type = col_def.split()[0].upper() if col_def else ""
+            if col_type not in _safe_type:
+                raise ValueError(f"Unsafe migration column type: {col_def!r}")
             if col_name not in existing:
                 await self._conn.execute(
                     f"ALTER TABLE jobs ADD COLUMN {col_name} {col_def}"

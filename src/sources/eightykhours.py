@@ -8,9 +8,12 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.eightykhours")
 
-# 80,000 Hours uses Algolia for their job board (jobs.80000hours.org)
-_ALGOLIA_APP_ID = "W6KM1UDIB3"
-_ALGOLIA_API_KEY = "d1d7f2c8696e7b36837d5ed337c4a319"
+# 80,000 Hours uses Algolia for their job board (jobs.80000hours.org).
+# This is a search-only Algolia API key designed for client-side use.
+# Override via env vars for rotation; fallback defaults work out-of-the-box.
+from src.config.settings import EIGHTYKHOURS_ALGOLIA_APP_ID, EIGHTYKHOURS_ALGOLIA_SEARCH_KEY
+_ALGOLIA_APP_ID = EIGHTYKHOURS_ALGOLIA_APP_ID
+_ALGOLIA_API_KEY = EIGHTYKHOURS_ALGOLIA_SEARCH_KEY
 _ALGOLIA_INDEX = "jobs_prod"
 _ALGOLIA_URL = f"https://{_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{_ALGOLIA_INDEX}/query"
 
