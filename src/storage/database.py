@@ -85,10 +85,11 @@ class JobDatabase:
         )
         return await cursor.fetchone() is not None
 
-    async def insert_job(self, job: Job):
+    async def insert_job(self, job: Job) -> bool:
+        """Insert a job if not already present. Returns True if actually inserted."""
         company, title = job.normalized_key()
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        cursor = await self._conn.execute(
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
              apply_url, source, date_found, match_score, visa_flag,
@@ -102,7 +103,32 @@ class JobDatabase:
                 job.experience_level, company, title, now,
             ),
         )
+        return cursor.rowcount == 1
+
+    async def insert_jobs_batch(self, jobs: list[Job]) -> list[Job]:
+        """Insert jobs in a single transaction. Returns only the actually-inserted jobs."""
+        inserted = []
+        now = datetime.now(timezone.utc).isoformat()
+        for job in jobs:
+            company, title = job.normalized_key()
+            cursor = await self._conn.execute(
+                """INSERT OR IGNORE INTO jobs
+                (title, company, location, salary_min, salary_max, description,
+                 apply_url, source, date_found, match_score, visa_flag,
+                 experience_level, normalized_company, normalized_title, first_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job.title, job.company, job.location,
+                    job.salary_min, job.salary_max, job.description,
+                    job.apply_url, job.source, job.date_found,
+                    job.match_score, int(job.visa_flag),
+                    job.experience_level, company, title, now,
+                ),
+            )
+            if cursor.rowcount == 1:
+                inserted.append(job)
         await self._conn.commit()
+        return inserted
 
     async def count_jobs(self) -> int:
         cursor = await self._conn.execute("SELECT COUNT(*) FROM jobs")
@@ -152,6 +178,15 @@ class JobDatabase:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = await self._conn.execute(
             "DELETE FROM jobs WHERE first_seen < ?", (cutoff,)
+        )
+        await self._conn.commit()
+        return cursor.rowcount
+
+    async def purge_old_run_logs(self, days: int = 90) -> int:
+        """Delete run_log entries older than `days` ago. Returns count deleted."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cursor = await self._conn.execute(
+            "DELETE FROM run_log WHERE timestamp < ?", (cutoff,)
         )
         await self._conn.commit()
         return cursor.rowcount

@@ -254,10 +254,13 @@ async def run_search(
     await db.init_db()
 
     try:
-        # Auto-purge old jobs (>30 days)
+        # Auto-purge old data
         purged = await db.purge_old_jobs(days=30)
         if purged:
             logger.info(f"Purged {purged} jobs older than 30 days")
+        purged_logs = await db.purge_old_run_logs(days=90)
+        if purged_logs:
+            logger.info(f"Purged {purged_logs} run_log entries older than 90 days")
 
         # Create session
         timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
@@ -360,12 +363,8 @@ async def run_search(
                 logger.info("Job360 dry run complete")
                 return stats
 
-            # Filter new jobs (not seen in DB)
-            new_jobs: list[Job] = []
-            for job in unique_jobs:
-                if not await db.is_job_seen(job.normalized_key()):
-                    await db.insert_job(job)
-                    new_jobs.append(job)
+            # Insert new jobs in a single transaction (fixes overcount race F-012)
+            new_jobs = await db.insert_jobs_batch(unique_jobs)
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info(f"New jobs: {len(new_jobs)}")
