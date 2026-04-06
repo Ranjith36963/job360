@@ -58,7 +58,7 @@ python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
 python -m src.cli view --visa-only                  # Filter by visa
 
 # Tests (all use mocked HTTP via aioresponses)
-python -m pytest tests/ -v                              # Run all 376 tests
+python -m pytest tests/ -v                              # Run all 400 tests
 python -m pytest tests/test_scorer.py -v                # Scoring tests (58)
 python -m pytest tests/test_sources.py -v               # All 48 sources (65)
 python -m pytest tests/test_profile.py -v               # Profile system (56)
@@ -78,7 +78,7 @@ job360/
 │   ├── models.py            # Job dataclass with normalized_key() for dedup
 │   ├── config/
 │   │   ├── settings.py      # Env vars, paths, RATE_LIMITS (48 entries), thresholds
-│   │   ├── keywords.py      # Default AI/ML keywords + KNOWN_SKILLS (391) + KNOWN_TITLE_PATTERNS (107)
+│   │   ├── keywords.py      # Default AI/ML keywords + KNOWN_SKILLS (392) + KNOWN_TITLE_PATTERNS (107)
 │   │   └── companies.py     # ATS company slugs (~104 companies across 10 ATS platforms)
 │   ├── profile/
 │   │   ├── models.py        # CVData, UserPreferences, UserProfile, SearchConfig dataclasses
@@ -107,9 +107,9 @@ job360/
 │       ├── logger.py        # Rotating file + console logging (5MB, 3 backups)
 │       ├── rate_limiter.py  # Async semaphore + delay rate limiter
 │       └── time_buckets.py  # Time bucketing for CLI view + console summary
-├── tests/                   # 376 tests across 17 files
+├── tests/                   # 400 tests across 18 files
 │   ├── conftest.py          # Shared fixtures (sample_ai_job, sample_visa_job, etc.)
-│   └── test_*.py            # 17 test modules
+│   └── test_*.py            # 18 test modules
 ├── data/                    # Runtime data (gitignored)
 │   ├── jobs.db              # SQLite database
 │   ├── user_profile.json    # User profile (optional)
@@ -134,7 +134,7 @@ The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **S
 - `src/cli_view.py` — Rich terminal table viewer for browsing jobs from the DB
 - `src/models.py` — `Job` dataclass with `normalized_key()` for dedup (strips company suffixes like Ltd/Inc/PLC and region suffixes like UK/US/EMEA, lowercases)
 - `src/config/settings.py` — All env vars, paths, `RATE_LIMITS` dict (48 entries, per-source), thresholds. Constants: `MIN_MATCH_SCORE=30`, `MAX_RETRIES=3`, `RETRY_BACKOFF=[1,2,4]`, `REQUEST_TIMEOUT=30`.
-- `src/config/keywords.py` — Default AI/ML keywords: `JOB_TITLES` (25), skills in 3 tiers (`PRIMARY_SKILLS` 15 / `SECONDARY_SKILLS` 17 / `TERTIARY_SKILLS` 11), `LOCATIONS` (26: 24 UK + Remote + Hybrid), `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS` (60 entries across 12 categories), `KNOWN_SKILLS` (391-entry set for CV parsing), `KNOWN_TITLE_PATTERNS` (107 entries). Used as fallback when no user profile exists.
+- `src/config/keywords.py` — Default AI/ML keywords: `JOB_TITLES` (25), skills in 3 tiers (`PRIMARY_SKILLS` 15 / `SECONDARY_SKILLS` 17 / `TERTIARY_SKILLS` 11), `LOCATIONS` (26: 24 UK + Remote + Hybrid), `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS` (60 entries across 12 categories), `KNOWN_SKILLS` (392-entry set for CV parsing), `KNOWN_TITLE_PATTERNS` (107 entries). Used as fallback when no user profile exists.
 - `src/config/companies.py` — ATS company slugs: Greenhouse (25), Lever (12), Workable (8), Ashby (9), SmartRecruiters (6), Pinpoint (8), Recruitee (8), Workday (15 — dict format with tenant/wd/site/name), Personio (10), SuccessFactors (3 — dict format with name/sitemap_url). ~104 companies total.
 - `src/profile/` — Dynamic user profile system:
   - `models.py` — `CVData` (includes linkedin_positions, linkedin_skills, github_languages, github_topics, github_skills_inferred fields), `UserPreferences` (includes github_username), `UserProfile`, `SearchConfig` dataclasses. `SearchConfig.from_defaults()` returns the hard-coded AI/ML keywords.
@@ -178,7 +178,7 @@ Groups by `job.normalized_key()` = (normalized company, normalized title). Keeps
 
 ## Testing
 
-**376 tests** across 17 test files. Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
+**400 tests** across 18 test files. Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
 
 Key test files:
 - `test_sources.py` — 65 tests: all 48 sources with mocked HTTP responses
