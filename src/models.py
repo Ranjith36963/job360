@@ -1,6 +1,6 @@
 import html
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 _COMPANY_SUFFIXES = re.compile(

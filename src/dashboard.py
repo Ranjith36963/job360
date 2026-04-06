@@ -339,10 +339,15 @@ def render_job_table(jobs: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Load data
+# Load data (lazy — only runs inside Streamlit runtime, not on bare import)
 # ---------------------------------------------------------------------------
-all_jobs = load_jobs_7day()
-df_runs = load_run_logs()
+try:
+    all_jobs = load_jobs_7day()
+    df_runs = load_run_logs()
+except Exception:
+    all_jobs = []
+    import pandas as pd
+    df_runs = pd.DataFrame()
 
 # ---------------------------------------------------------------------------
 # Sidebar — Profile Setup
