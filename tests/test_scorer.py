@@ -1,5 +1,4 @@
 from datetime import datetime, timezone, timedelta
-from freezegun import freeze_time
 from src.models import Job
 from src.filters.skill_matcher import (
     score_job, check_visa_flag, _recency_score, _text_contains,
@@ -99,7 +98,6 @@ def test_more_skills_higher_score():
 # ---- Recency scoring tests ----
 
 
-@freeze_time("2026-04-05 12:00:00", tz_offset=0)
 def test_recency_today_gets_full_points():
     """A job posted today should score higher than same job posted 30 days ago."""
     today = datetime.now(timezone.utc).isoformat()
@@ -109,14 +107,12 @@ def test_recency_today_gets_full_points():
     assert score_job(job_today) > score_job(job_old)
 
 
-@freeze_time("2026-04-05 12:00:00", tz_offset=0)
 def test_recency_old_job_gets_zero():
     """A job older than 7 days should get 0 recency points."""
     old_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     assert _recency_score(old_date) == 0
 
 
-@freeze_time("2026-04-05 12:00:00", tz_offset=0)
 def test_recency_3_day_old_job():
     """A job 3 days old should get 8 recency points."""
     date_3d = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
@@ -130,7 +126,6 @@ def test_recency_invalid_date_no_crash():
     assert _recency_score("2025-13-99") == 0
 
 
-@freeze_time("2026-04-05 12:00:00", tz_offset=0)
 def test_score_can_reach_100():
     """A perfect job (exact title + many skills + UK location + today's date) should hit 100."""
     job = _make_job(
@@ -148,7 +143,6 @@ def test_score_can_reach_100():
     assert score == 100, f"Expected 100, got {score}"
 
 
-@freeze_time("2026-04-05 12:00:00", tz_offset=0)
 def test_recency_score_tiers():
     """Direct unit test of _recency_score at each tier boundary."""
     now = datetime.now(timezone.utc)
