@@ -64,3 +64,29 @@ def sample_visa_job():
         source="lever",
         date_found=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@pytest.fixture
+def sample_non_uk_job():
+    return Job(
+        title="Software Engineer",
+        company="Bay Area Corp",
+        location="San Francisco, CA",
+        description="Backend development role.",
+        apply_url="https://example.com/sf-job",
+        source="linkedin",
+        date_found=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@pytest.fixture
+def sample_empty_description_job():
+    return Job(
+        title="AI Engineer",
+        company="Mystery Co",
+        location="London",
+        description="",
+        apply_url="https://example.com/mystery",
+        source="greenhouse",
+        date_found=datetime.now(timezone.utc).isoformat(),
+    )

@@ -43,5 +43,5 @@ class AIJobsSource(BaseJobSource):
                 date_found=date_found,
             ))
 
-        logger.info(f"AIJobs: found {len(jobs)} relevant jobs")
+        logger.info("AIJobs: found %s relevant jobs", len(jobs))
         return jobs

@@ -51,7 +51,7 @@ class AIJobsGlobalSource(BaseJobSource):
                         seen_urls.add(job.apply_url)
                         jobs.append(job)
 
-        logger.info(f"AI Jobs Global: found {len(jobs)} relevant jobs")
+        logger.info("AI Jobs Global: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_ajax_item(self, item: dict) -> Job | None:
@@ -116,5 +116,5 @@ class AIJobsGlobalSource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"AI Jobs Global: HTML parsing failed: {e}")
+            logger.warning("AI Jobs Global: HTML parsing failed: %s", e)
             return []

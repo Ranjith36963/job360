@@ -66,7 +66,7 @@ def extract_text_from_pdf(file_path: str) -> str:
                 if page_text:
                     text_parts.append(page_text)
     except Exception as e:
-        logger.error(f"Failed to read PDF {file_path}: {e}")
+        logger.error("Failed to read PDF %s: %s", file_path, e)
         return ""
     return "\n".join(text_parts)
 
@@ -83,7 +83,7 @@ def extract_text_from_docx(file_path: str) -> str:
         doc = docx.Document(file_path)
         return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
     except Exception as e:
-        logger.error(f"Failed to read DOCX {file_path}: {e}")
+        logger.error("Failed to read DOCX %s: %s", file_path, e)
         return ""
 
 
@@ -96,10 +96,10 @@ def extract_text(file_path: str) -> str:
     elif ext == ".docx":
         return extract_text_from_docx(file_path)
     elif ext == ".doc":
-        logger.warning(f"Legacy .doc format not supported. Please convert to .docx: {file_path}")
+        logger.warning("Legacy .doc format not supported. Please convert to .docx: %s", file_path)
         return ""
     else:
-        logger.warning(f"Unsupported file type: {ext}")
+        logger.warning("Unsupported file type: %s", ext)
         return ""
 
 

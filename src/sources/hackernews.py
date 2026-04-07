@@ -122,5 +122,5 @@ class HackerNewsSource(BaseJobSource):
                 date_found=created_at,
             ))
 
-        logger.info(f"HackerNews: found {len(jobs)} relevant jobs")
+        logger.info("HackerNews: found %s relevant jobs", len(jobs))
         return jobs

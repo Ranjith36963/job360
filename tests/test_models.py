@@ -167,3 +167,25 @@ def test_normalized_key_strips_region_suffix_variants():
                   apply_url="x", source="a", date_found="x")
         company, _ = job.normalized_key()
         assert company == "acme", f"Failed to strip region suffix '{suffix}'"
+
+
+# ---- Normalization divergence documentation tests (F-015, F-030) ----
+
+
+def test_normalized_key_consistency():
+    """normalized_key() produces consistent results for equivalent companies."""
+    j1 = Job(title="AI Engineer", company="DeepMind Ltd", apply_url="x", source="a", date_found="x")
+    j2 = Job(title="AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
+    assert j1.normalized_key() == j2.normalized_key()
+
+
+def test_normalized_key_does_not_strip_seniority():
+    """normalized_key() intentionally does NOT strip seniority prefixes.
+
+    The deduplicator's _normalize_title() does strip seniority for within-run grouping,
+    but normalized_key() preserves it for the DB UNIQUE constraint. This divergence is
+    by design — see deduplicator.py docstring and CLAUDE.md Rule 1.
+    """
+    j1 = Job(title="Senior AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
+    j2 = Job(title="AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
+    assert j1.normalized_key() != j2.normalized_key(), "Seniority should NOT be stripped by normalized_key"

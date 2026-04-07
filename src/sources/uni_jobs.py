@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource, _sanitize_xml
+from src.sources.base import BaseJobSource, _sanitize_xml, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.uni_jobs")
 
@@ -28,7 +28,8 @@ class UniJobsSource(BaseJobSource):
                 continue
             jobs.extend(self._parse_feed(xml_text, feed["name"]))
 
-        logger.info(f"University Jobs: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("University Jobs: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_feed(self, xml_text: str, university: str) -> list[Job]:
@@ -36,7 +37,7 @@ class UniJobsSource(BaseJobSource):
         try:
             root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"University Jobs [{university}]: XML parse error: {e}")
+            logger.warning("University Jobs [%s]: XML parse error: %s", university, e)
             return []
 
         channel = root.find("channel")

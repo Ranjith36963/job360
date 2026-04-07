@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.reed")
 
@@ -24,7 +24,7 @@ class ReedSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Reed: no API key, skipping")
+            logger.warning("Reed: no API key, skipping")
             return []
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
@@ -59,5 +59,6 @@ class ReedSource(BaseJobSource):
                         source=self.name,
                         date_found=date_found,
                     ))
-        logger.info(f"Reed: found {len(jobs)} jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Reed: found %s jobs", len(jobs))
         return jobs

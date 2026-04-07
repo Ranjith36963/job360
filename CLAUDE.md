@@ -58,11 +58,12 @@ python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
 python -m src.cli view --visa-only                  # Filter by visa
 
 # Tests (all use mocked HTTP via aioresponses)
-python -m pytest tests/ -v                              # Run all 387 tests
-python -m pytest tests/test_scorer.py -v                # Scoring tests (58)
+python -m pytest tests/ -v                              # Run all 397 tests
+python -m pytest tests/test_scorer.py -v                # Scoring tests (63)
 python -m pytest tests/test_sources.py -v               # All 48 sources (65)
 python -m pytest tests/test_profile.py -v               # Profile system (56)
 python -m pytest tests/test_linkedin_github.py -v       # LinkedIn/GitHub enrichment (54)
+python -m pytest tests/test_dashboard.py -v             # Dashboard helpers (6)
 python -m pytest tests/test_scorer.py::test_name -v     # Single test
 ```
 
@@ -107,9 +108,9 @@ job360/
 │       ├── logger.py        # Rotating file + console logging (5MB, 3 backups)
 │       ├── rate_limiter.py  # Async semaphore + delay rate limiter
 │       └── time_buckets.py  # Time bucketing for CLI view + console summary
-├── tests/                   # 387 tests across 18 files
+├── tests/                   # 397 tests across 19 files
 │   ├── conftest.py          # Shared fixtures (sample_ai_job, sample_visa_job, etc.)
-│   └── test_*.py            # 18 test modules
+│   └── test_*.py            # 19 test modules
 ├── data/                    # Runtime data (gitignored)
 │   ├── jobs.db              # SQLite database
 │   ├── user_profile.json    # User profile (optional)
@@ -178,19 +179,20 @@ Groups by `job.normalized_key()` = (normalized company, normalized title). Keeps
 
 ## Testing
 
-**387 tests** across 18 test files (count is `pytest --collect-only` output; parametrized tests expand into multiple collected items). Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
+**397 tests** across 19 test files (count is `pytest --collect-only` output; parametrized tests expand into multiple collected items). Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`, `sample_non_uk_job`, `sample_empty_description_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
 
 Key test files:
 - `test_sources.py` — 65 tests: all 48 sources with mocked HTTP responses
-- `test_scorer.py` — 58 tests: scoring components, penalties, word boundaries, experience detection
+- `test_scorer.py` — 63 tests: scoring components, penalties, word boundaries, experience detection, visa negation, location ordering
 - `test_profile.py` — 56 tests: SearchConfig defaults, UserProfile, CV parser, preferences, storage, keyword generator, JobScorer (including cross-domain scoring)
 - `test_linkedin_github.py` — 54 tests: LinkedIn ZIP parsing, GitHub API enrichment, CVData merging
 - `test_time_buckets.py` — 33 tests: time bucket grouping logic
-- `test_models.py` — 19 tests: Job dataclass, normalization, salary sanitization
+- `test_models.py` — 21 tests: Job dataclass, normalization, salary sanitization, normalization divergence documentation
 - `test_notifications.py` — 19 tests: Email, Slack, Discord sending
 - `test_deduplicator.py` — 13 tests: dedup logic, company suffix stripping
 - `test_cli.py` — 11 tests: CLI commands, `len(SOURCE_REGISTRY) == 48` assertion (update when adding/removing sources)
 - `test_main.py` — 12 tests: orchestrator with mocked sources
+- `test_dashboard.py` — 6 tests: URL sanitization (`_safe_url`) for XSS prevention
 
 ## Environment
 

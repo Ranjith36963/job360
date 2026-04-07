@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.bcs_jobs")
 
@@ -38,7 +38,8 @@ class BCSJobsSource(BaseJobSource):
             return []
 
         jobs = self._parse_html(html)
-        logger.info(f"BCS Jobs: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("BCS Jobs: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_html(self, html: str) -> list[Job]:
@@ -81,5 +82,5 @@ class BCSJobsSource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"BCS Jobs: HTML parsing failed: {e}")
+            logger.warning("BCS Jobs: HTML parsing failed: %s", e)
             return []

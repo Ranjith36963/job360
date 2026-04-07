@@ -23,7 +23,7 @@ class FindworkSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Findwork: no FINDWORK_API_KEY, skipping")
+            logger.warning("Findwork: no FINDWORK_API_KEY, skipping")
             return []
 
         jobs = []
@@ -65,5 +65,5 @@ class FindworkSource(BaseJobSource):
                 date_found=date_found,
             ))
 
-        logger.info(f"Findwork: found {len(jobs)} relevant jobs")
+        logger.info("Findwork: found %s relevant jobs", len(jobs))
         return jobs

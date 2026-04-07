@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import aiohttp
+
+_GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
 
 from src.config.settings import GITHUB_TOKEN
 from src.profile.models import CVData
@@ -118,11 +121,11 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> Any:
                 logger.warning("GitHub API rate limited")
                 return None
             if resp.status != 200:
-                logger.warning(f"GitHub API {resp.status} for {url}")
+                logger.warning("GitHub API %s for %s", resp.status, url)
                 return None
             return await resp.json()
     except Exception as e:
-        logger.warning(f"GitHub API error: {e}")
+        logger.warning("GitHub API error: %s", e)
         return None
 
 
@@ -130,6 +133,10 @@ async def fetch_github_profile(
     username: str, session: aiohttp.ClientSession | None = None
 ) -> dict:
     """Fetch public repos, languages, and topics for a GitHub user."""
+    if not _GITHUB_USERNAME_RE.match(username):
+        logger.warning("Invalid GitHub username format: %s", username)
+        return {"repositories": [], "languages": {}, "topics": [], "skills_inferred": []}
+
     own_session = session is None
     if own_session:
         session = aiohttp.ClientSession()
@@ -168,7 +175,7 @@ async def fetch_github_profile(
         lang_results = await asyncio.gather(*lang_tasks, return_exceptions=True)
         for result in lang_results:
             if isinstance(result, Exception):
-                logger.debug(f"Language fetch failed: {result}")
+                logger.debug("Language fetch failed: %s", result)
             elif isinstance(result, dict):
                 for lang, bytes_count in result.items():
                     aggregated_languages[lang] = aggregated_languages.get(lang, 0) + bytes_count

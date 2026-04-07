@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.careerjet")
 
@@ -23,7 +23,7 @@ class CareerjetSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Careerjet: no CAREERJET_AFFID, skipping")
+            logger.warning("Careerjet: no CAREERJET_AFFID, skipping")
             return []
 
         jobs = []
@@ -88,5 +88,6 @@ class CareerjetSource(BaseJobSource):
                     salary_max=salary_max,
                 ))
 
-        logger.info(f"Careerjet: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Careerjet: found %s relevant jobs", len(jobs))
         return jobs

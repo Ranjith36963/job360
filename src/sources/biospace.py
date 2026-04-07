@@ -31,7 +31,7 @@ class BioSpaceSource(BaseJobSource):
             if jobs:
                 break  # Got results, no need to try fallback URLs
 
-        logger.info(f"BioSpace: found {len(jobs)} relevant jobs")
+        logger.info("BioSpace: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_feed(self, xml_text: str) -> list[Job]:
@@ -39,7 +39,7 @@ class BioSpaceSource(BaseJobSource):
         try:
             root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"BioSpace: XML parse error: {e}")
+            logger.warning("BioSpace: XML parse error: %s", e)
             return []
 
         channel = root.find("channel")

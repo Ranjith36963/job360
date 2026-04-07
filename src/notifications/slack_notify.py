@@ -86,10 +86,10 @@ async def send_slack(jobs: list[Job], stats: dict):
     async with aiohttp.ClientSession() as session:
         async with session.post(SLACK_WEBHOOK_URL, json=payload) as resp:
             if resp.status == 200:
-                logger.info(f"Slack notification sent ({len(jobs)} jobs)")
+                logger.info("Slack notification sent (%s jobs)", len(jobs))
             else:
                 body = await resp.text()
-                logger.error(f"Slack webhook failed ({resp.status}): {body}")
+                logger.error("Slack webhook failed (%s): %s", resp.status, body)
 
 
 class SlackChannel(NotificationChannel):

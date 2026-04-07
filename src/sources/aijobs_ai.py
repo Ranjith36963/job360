@@ -40,7 +40,7 @@ class AIJobsAISource(BaseJobSource):
                     seen_urls.add(job.apply_url)
                     jobs.append(job)
 
-        logger.info(f"AI Jobs AI: found {len(jobs)} relevant jobs")
+        logger.info("AI Jobs AI: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_html(self, html: str) -> list[Job]:
@@ -83,7 +83,7 @@ class AIJobsAISource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"AI Jobs AI: HTML parsing failed: {e}")
+            logger.warning("AI Jobs AI: HTML parsing failed: %s", e)
             return []
 
     @staticmethod

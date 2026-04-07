@@ -32,7 +32,7 @@ class SuccessFactorsSource(BaseJobSource):
                 continue
             jobs.extend(self._parse_sitemap(xml_text, company_name))
 
-        logger.info(f"SuccessFactors: found {len(jobs)} relevant jobs")
+        logger.info("SuccessFactors: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_sitemap(self, xml_text: str, company_name: str) -> list[Job]:
@@ -42,7 +42,7 @@ class SuccessFactorsSource(BaseJobSource):
         try:
             root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"SuccessFactors [{company_name}]: XML parse error: {e}")
+            logger.warning("SuccessFactors [%s]: XML parse error: %s", company_name, e)
             return []
 
         # Sitemap namespace

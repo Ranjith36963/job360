@@ -21,7 +21,7 @@ class RealWorkFromAnywhereSource(BaseJobSource):
             return []
 
         jobs = self._parse_feed(xml_text)
-        logger.info(f"RealWorkFromAnywhere: found {len(jobs)} relevant jobs")
+        logger.info("RealWorkFromAnywhere: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_feed(self, xml_text: str) -> list[Job]:
@@ -29,7 +29,7 @@ class RealWorkFromAnywhereSource(BaseJobSource):
         try:
             root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"RealWorkFromAnywhere: XML parse error: {e}")
+            logger.warning("RealWorkFromAnywhere: XML parse error: %s", e)
             return []
 
         channel = root.find("channel")

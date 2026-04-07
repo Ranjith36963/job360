@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.remotive")
 
@@ -50,5 +50,6 @@ class RemotiveSource(BaseJobSource):
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))
-        logger.info(f"Remotive: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Remotive: found %s relevant jobs", len(jobs))
         return jobs

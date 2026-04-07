@@ -66,10 +66,10 @@ async def send_discord(jobs: list[Job], stats: dict):
     async with aiohttp.ClientSession() as session:
         async with session.post(DISCORD_WEBHOOK_URL, json=payload) as resp:
             if resp.status in (200, 204):
-                logger.info(f"Discord notification sent ({len(jobs)} jobs)")
+                logger.info("Discord notification sent (%s jobs)", len(jobs))
             else:
                 body = await resp.text()
-                logger.error(f"Discord webhook failed ({resp.status}): {body}")
+                logger.error("Discord webhook failed (%s): %s", resp.status, body)
 
 
 class DiscordChannel(NotificationChannel):

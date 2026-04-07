@@ -6,10 +6,25 @@ import sqlite3
 import json
 import subprocess
 import sys
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 logger = logging.getLogger("job360.dashboard")
+
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _safe_url(url: str) -> str:
+    """Sanitize URL to prevent javascript: and data: URI attacks."""
+    if not url:
+        return "#"
+    stripped = url.strip()
+    parsed = urllib.parse.urlparse(stripped)
+    if parsed.scheme and parsed.scheme.lower() not in ("http", "https"):
+        return "#"
+    return html.escape(stripped)
+
 
 # Ensure project root is on sys.path so "src" package resolves
 # when Streamlit runs this file directly.
@@ -282,7 +297,7 @@ def render_job_table(jobs: list[dict]) -> str:
         score = job.get("match_score", 0)
         color = score_color_hex(score)
         visa = job.get("visa_flag", False)
-        url = html.escape(job.get("apply_url", "#"))
+        url = _safe_url(job.get("apply_url", ""))
         title = html.escape(job.get("title", "Unknown"))
         company = html.escape(job.get("company", "Unknown"))
         location = html.escape(job.get("location", "N/A"))
@@ -314,7 +329,7 @@ def render_job_table(jobs: list[dict]) -> str:
         rows.append(
             f'<tr class="jrow">'
             f'<td><span class="jrow-score" style="background:{color}">{score}</span></td>'
-            f'<td class="jrow-title"><a href="{url}" target="_blank">{title}</a>'
+            f'<td class="jrow-title"><a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
             f'<span class="jrow-company">@ {company}</span></td>'
             f'<td class="jrow-loc">{location}</td>'
             f'<td class="jrow-salary">{salary}</td>'
@@ -337,10 +352,12 @@ def render_job_table(jobs: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Load data
+# Load data (lazy — avoids crash if DB doesn't exist at import time)
 # ---------------------------------------------------------------------------
-all_jobs = load_jobs_7day()
-df_runs = load_run_logs()
+def _load_data():
+    return load_jobs_7day(), load_run_logs()
+
+all_jobs, df_runs = _load_data()
 
 # ---------------------------------------------------------------------------
 # Sidebar — Profile Setup
@@ -350,6 +367,9 @@ _has_profile = profile_exists()
 with st.sidebar:
     with st.expander("Profile Setup", expanded=not _has_profile):
         uploaded_cv = st.file_uploader("Upload CV", type=["pdf", "docx"])
+        if uploaded_cv and uploaded_cv.size > MAX_UPLOAD_SIZE:
+            st.error(f"File too large ({uploaded_cv.size / 1024 / 1024:.1f} MB). Maximum: 10 MB.")
+            uploaded_cv = None
         prof_titles = st.text_area("Target Job Titles (comma-separated)",
                                    placeholder="e.g. Software Engineer, Product Manager")
         prof_skills = st.text_area("Skills (comma-separated)",
@@ -373,6 +393,9 @@ with st.sidebar:
         st.markdown("**LinkedIn Data Export**")
         st.caption("Download your data from LinkedIn Settings > Get a copy of your data")
         uploaded_linkedin = st.file_uploader("Upload LinkedIn ZIP", type=["zip"])
+        if uploaded_linkedin and uploaded_linkedin.size > MAX_UPLOAD_SIZE:
+            st.error(f"File too large ({uploaded_linkedin.size / 1024 / 1024:.1f} MB). Maximum: 10 MB.")
+            uploaded_linkedin = None
 
         # GitHub username
         st.markdown("---")

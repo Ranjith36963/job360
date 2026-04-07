@@ -59,5 +59,5 @@ class NomisSource(BaseJobSource):
                 date_found=now,
             ))
 
-        logger.info(f"Nomis: found {len(jobs)} vacancy records")
+        logger.info("Nomis: found %s vacancy records", len(jobs))
         return jobs

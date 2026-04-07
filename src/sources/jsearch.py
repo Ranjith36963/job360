@@ -36,7 +36,7 @@ class JSearchSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("JSearch: no API key, skipping")
+            logger.warning("JSearch: no API key, skipping")
             return []
         jobs = []
         consecutive_failures = 0
@@ -62,7 +62,7 @@ class JSearchSource(BaseJobSource):
             if not data or "data" not in data:
                 consecutive_failures += 1
                 if consecutive_failures >= 2:
-                    logger.warning(f"JSearch: {consecutive_failures} consecutive failures, stopping early")
+                    logger.warning("JSearch: %s consecutive failures, stopping early", consecutive_failures)
                     break
                 continue
             consecutive_failures = 0
@@ -95,5 +95,5 @@ class JSearchSource(BaseJobSource):
                     source=self.name,
                     date_found=date_found,
                 ))
-        logger.info(f"JSearch: found {len(jobs)} jobs")
+        logger.info("JSearch: found %s jobs", len(jobs))
         return jobs

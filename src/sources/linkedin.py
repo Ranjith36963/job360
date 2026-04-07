@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.linkedin")
 
@@ -77,9 +77,10 @@ class LinkedInSource(BaseJobSource):
                     if len(jobs) >= 50:
                         break
             except Exception as e:
-                logger.warning(f"LinkedIn: HTML parsing failed for query '{query}': {e}")
+                logger.warning("LinkedIn: HTML parsing failed for query '%s': %s", query, e)
             await asyncio.sleep(3)
             if len(jobs) >= 50:
                 break
-        logger.info(f"LinkedIn: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("LinkedIn: found %s relevant jobs", len(jobs))
         return jobs

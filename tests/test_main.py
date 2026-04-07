@@ -298,12 +298,13 @@ def test_run_search_auto_purge():
 
 def test_source_instance_count_matches_build_sources():
     """SOURCE_INSTANCE_COUNT constant must match actual _build_sources output."""
-    async def _test():
-        timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            sources = _build_sources(session)
-            assert len(sources) == SOURCE_INSTANCE_COUNT
     import aiohttp
+
+    async def _test():
+        with aioresponses():
+            async with aiohttp.ClientSession() as session:
+                sources = _build_sources(session)
+                assert len(sources) == SOURCE_INSTANCE_COUNT
     _run(_test())
 
 

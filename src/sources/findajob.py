@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.findajob")
 
@@ -57,7 +57,7 @@ class FindAJobSource(BaseJobSource):
                 continue
             matches = _JOB_LINK_RE.findall(html)
             if not matches:
-                logger.debug(f"FindAJob: no job links found for query '{query}'")
+                logger.debug("FindAJob: no job links found for query '%s'", query)
                 continue
             for path, title in matches:
                 url = f"https://findajob.dwp.gov.uk{path}"
@@ -91,5 +91,6 @@ class FindAJobSource(BaseJobSource):
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
-        logger.info(f"FindAJob: found {len(jobs)} jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("FindAJob: found %s jobs", len(jobs))
         return jobs

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.indeed")
 
@@ -39,7 +39,7 @@ class JobSpySource(BaseJobSource):
                     hours_old=168,
                 )
             except Exception as e:
-                logger.warning(f"JobSpy scrape failed for '{query}': {e}")
+                logger.warning("JobSpy scrape failed for '%s': %s", query, e)
                 continue
             if df is None or df.empty:
                 continue
@@ -80,5 +80,6 @@ class JobSpySource(BaseJobSource):
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
-        logger.info(f"JobSpy: found {len(jobs)} relevant jobs from {', '.join(self._sites)}")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("JobSpy: found %s relevant jobs from %s", len(jobs), ", ".join(self._sites))
         return jobs

@@ -32,7 +32,7 @@ def _read_csv(zf: zipfile.ZipFile, filename: str) -> list[dict]:
         reader = csv.DictReader(io.StringIO(raw))
         return list(reader)
     except Exception as e:
-        logger.warning(f"Failed to read {filename}: {e}")
+        logger.warning("Failed to read %s: %s", filename, e)
         return []
 
 
@@ -122,7 +122,7 @@ def parse_linkedin_zip(file_path: str) -> dict:
         with zipfile.ZipFile(file_path, "r") as zf:
             return _parse_zip(zf)
     except (zipfile.BadZipFile, Exception) as e:
-        logger.warning(f"Failed to parse LinkedIn ZIP: {e}")
+        logger.warning("Failed to parse LinkedIn ZIP: %s", e)
         return _empty_linkedin_data()
 
 
@@ -132,7 +132,7 @@ def parse_linkedin_zip_from_bytes(content: bytes) -> dict:
         with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
             return _parse_zip(zf)
     except (zipfile.BadZipFile, Exception) as e:
-        logger.warning(f"Failed to parse LinkedIn ZIP: {e}")
+        logger.warning("Failed to parse LinkedIn ZIP: %s", e)
         return _empty_linkedin_data()
 
 

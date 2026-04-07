@@ -108,7 +108,7 @@ class BaseJobSource(ABC):
 
                 async with self._session.request(method, url, **kwargs) as resp:
                     if resp.status in _NO_RETRY_STATUSES:
-                        logger.debug(f"[{self.name}] HTTP {resp.status} from {url}")
+                        logger.debug("[%s] HTTP %s from %s", self.name, resp.status, url)
                         return None
                     if resp.status == 429:
                         retry_after = resp.headers.get("Retry-After")
@@ -117,15 +117,15 @@ class BaseJobSource(ABC):
                         else:
                             wait = RETRY_BACKOFF[attempt] * 3
                         logger.warning(
-                            f"[{self.name}] Rate limited (429), waiting {wait}s "
-                            f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                            "[%s] Rate limited (429), waiting %ss (attempt %s/%s)",
+                            self.name, wait, attempt + 1, MAX_RETRIES
                         )
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(wait)
                             continue
                         return None
                     if resp.status >= 400:
-                        logger.warning(f"[{self.name}] HTTP {resp.status} from {url}")
+                        logger.warning("[%s] HTTP %s from %s", self.name, resp.status, url)
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(RETRY_BACKOFF[attempt])
                             continue
@@ -134,7 +134,7 @@ class BaseJobSource(ABC):
                         return await resp.text()
                     return await resp.json(content_type=None)
             except exceptions as e:
-                logger.warning(f"[{self.name}] Request error: {e}")
+                logger.warning("[%s] Request error: %s", self.name, e)
                 if attempt < MAX_RETRIES - 1:
                     await asyncio.sleep(RETRY_BACKOFF[attempt])
             finally:

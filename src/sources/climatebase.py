@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.climatebase")
 
@@ -39,7 +39,8 @@ class ClimatebaseSource(BaseJobSource):
                     seen_ids.add(job_id)
                     jobs.append(job)
 
-        logger.info(f"Climatebase: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Climatebase: found %s relevant jobs", len(jobs))
         return jobs
 
     def _extract_jobs_from_next_data(self, html: str) -> list[Job]:
@@ -99,7 +100,7 @@ class ClimatebaseSource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"Climatebase: HTML/JSON parsing failed: {e}")
+            logger.warning("Climatebase: HTML/JSON parsing failed: %s", e)
             return []
 
     def _parse_html_fallback(self, html: str) -> list[Job]:
@@ -132,5 +133,5 @@ class ClimatebaseSource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"Climatebase: HTML fallback parsing failed: {e}")
+            logger.warning("Climatebase: HTML fallback parsing failed: %s", e)
             return []

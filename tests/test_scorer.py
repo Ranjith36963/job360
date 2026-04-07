@@ -454,3 +454,45 @@ def test_partial_title_multiple_core():
     # "GenAI LLM Specialist" → core: {"genai", "llm"}, support: {} → 10
     score = _title_score("GenAI LLM Specialist")
     assert score == 10
+
+
+# ---- Visa negation regression tests (F-001, F-008) ----
+
+
+def test_visa_no_sponsorship_not_flagged():
+    """'No sponsorship available' should NOT flag as visa sponsorship."""
+    job = _make_job(description="No sponsorship available. Must have right to work.")
+    assert check_visa_flag(job) is False
+
+
+def test_visa_company_sponsored_benefits():
+    """'Company-sponsored benefits' should NOT flag as visa sponsorship."""
+    job = _make_job(description="Company-sponsored benefits include health insurance.")
+    assert check_visa_flag(job) is False
+
+
+# ---- JobScorer negative penalty word boundary regression test (F-009) ----
+
+
+def test_jobscorer_negative_penalty_word_boundary():
+    """JobScorer._negative_penalty should use word boundaries, not substring."""
+    config = SearchConfig(
+        negative_title_keywords=["sales"],
+    )
+    scorer = JobScorer(config)
+    assert scorer._negative_penalty("Wholesale Manager") == 0
+    assert scorer._negative_penalty("Sales Engineer") == 30
+
+
+# ---- Foreign location penalty regression tests (F-029, F-036) ----
+
+
+def test_london_ontario_foreign_penalty():
+    """'London, Ontario' should be penalised as a foreign location."""
+    assert _foreign_location_penalty("London, Ontario") == 15
+
+
+def test_london_uk_no_penalty():
+    """Plain 'London' and 'London, UK' should NOT be penalised."""
+    assert _foreign_location_penalty("London") == 0
+    assert _foreign_location_penalty("London, UK") == 0

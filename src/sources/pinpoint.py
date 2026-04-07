@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.config.companies import PINPOINT_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.pinpoint")
@@ -58,5 +58,6 @@ class PinpointSource(BaseJobSource):
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
-        logger.info(f"Pinpoint: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Pinpoint: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

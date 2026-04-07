@@ -232,7 +232,7 @@ async def run_search(
     logger.info("=" * 60)
     logger.info("Job360 - Starting job search run")
     if source_filter:
-        logger.info(f"  Source filter: {source_filter}")
+        logger.info("  Source filter: %s", source_filter)
     if dry_run:
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
 
@@ -257,16 +257,17 @@ async def run_search(
         # Auto-purge old jobs (>30 days)
         purged = await db.purge_old_jobs(days=30)
         if purged:
-            logger.info(f"Purged {purged} jobs older than 30 days")
+            logger.info("Purged %s jobs older than 30 days", purged)
 
         # Create session
+        connector = aiohttp.TCPConnector(limit=30, limit_per_host=5)
         timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             # Build sources
             sources = _build_sources(session, source_filter, search_config=search_config)
 
             if not sources:
-                logger.error(f"No sources matched filter: {source_filter}")
+                logger.error("No sources matched filter: %s", source_filter)
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
             # Fetch from all sources concurrently
@@ -278,31 +279,35 @@ async def run_search(
                 try:
                     return await asyncio.wait_for(source.fetch_jobs(), timeout=120)
                 except asyncio.TimeoutError:
-                    logger.warning(f"Source {source.name} timed out")
+                    logger.warning("Source %s timed out", source.name)
                     return None
                 except Exception as e:
-                    logger.error(f"Source {source.name} failed: {e}")
+                    logger.error("Source %s failed: %s", source.name, e, exc_info=True)
                     return None
 
-            results = await asyncio.gather(*[_fetch_source(s) for s in sources])
+            results = await asyncio.gather(*[_fetch_source(s) for s in sources], return_exceptions=True)
 
             failed_sources = []
             for source, result in zip(sources, results):
                 source_count += 1
-                if result is None:
+                if isinstance(result, BaseException):
                     per_source[source.name] = 0
                     failed_sources.append(source.name)
-                    logger.warning(f"  {source.name}: FAILED")
+                    logger.warning("  %s: FAILED (%s)", source.name, type(result).__name__)
+                elif result is None:
+                    per_source[source.name] = 0
+                    failed_sources.append(source.name)
+                    logger.warning("  %s: FAILED", source.name)
                 elif result:
                     per_source[source.name] = len(result)
                     all_jobs.extend(result)
-                    logger.info(f"  {source.name}: {len(result)} jobs")
+                    logger.info("  %s: %s jobs", source.name, len(result))
                 else:
                     per_source[source.name] = 0
-                    logger.info(f"  {source.name}: 0 jobs")
+                    logger.info("  %s: 0 jobs", source.name)
 
             if failed_sources:
-                logger.warning(f"Failed sources ({len(failed_sources)}): {', '.join(failed_sources)}")
+                logger.warning("Failed sources (%s): %s", len(failed_sources), ", ".join(failed_sources))
 
             # Source health: detect sources returning 0 that previously returned jobs
             try:
@@ -315,12 +320,12 @@ async def run_search(
                             newly_empty.append(name)
                 if newly_empty:
                     logger.warning(
-                        f"Sources returning 0 that previously had jobs: {', '.join(newly_empty)}"
+                        "Sources returning 0 that previously had jobs: %s", ", ".join(newly_empty)
                     )
             except Exception as e:
-                logger.debug(f"Source health check skipped: {e}")
+                logger.warning("Source health check skipped: %s", e)
 
-            logger.info(f"Total raw jobs: {len(all_jobs)}")
+            logger.info("Total raw jobs: %s", len(all_jobs))
 
             # Score all jobs
             for job in all_jobs:
@@ -334,11 +339,11 @@ async def run_search(
 
             # Deduplicate
             unique_jobs = deduplicate(all_jobs)
-            logger.info(f"After dedup: {len(unique_jobs)} unique jobs")
+            logger.info("After dedup: %s unique jobs", len(unique_jobs))
 
             # Filter by minimum score
             unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
-            logger.info(f"After score filter (>={MIN_MATCH_SCORE}): {len(unique_jobs)} jobs")
+            logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
 
             if dry_run:
                 # Dry run: show results without DB writes or notifications
@@ -353,15 +358,15 @@ async def run_search(
                 logger.info("Job360 dry run complete")
                 return stats
 
-            # Filter new jobs (not seen in DB)
+            # Insert new jobs (INSERT OR IGNORE returns rowcount=1 for actual inserts)
             new_jobs: list[Job] = []
             for job in unique_jobs:
-                if not await db.is_job_seen(job.normalized_key()):
-                    await db.insert_job(job)
+                if await db.insert_job(job):
                     new_jobs.append(job)
+            await db.commit()
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
-            logger.info(f"New jobs: {len(new_jobs)}")
+            logger.info("New jobs: %s", len(new_jobs))
 
             # Stats
             stats = {
@@ -378,14 +383,14 @@ async def run_search(
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
                 await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
-                logger.info(f"CSV exported: {csv_path}")
+                logger.info("CSV exported: %s", csv_path)
 
                 # Markdown report
                 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
                 md_report = generate_markdown_report(new_jobs, stats)
                 md_path = REPORTS_DIR / f"report_{ts}.md"
-                md_path.write_text(md_report, encoding="utf-8")
-                logger.info(f"Report saved: {md_path}")
+                await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
+                logger.info("Report saved: %s", md_path)
 
                 # Notifications via channel abstraction
                 if not no_notify:
@@ -393,7 +398,7 @@ async def run_search(
                         try:
                             await channel.send(new_jobs, stats, csv_path=csv_path)
                         except Exception as e:
-                            logger.error(f"{channel.name} notification failed: {e}")
+                            logger.error("%s notification failed: %s", channel.name, e)
 
                 # Print time-bucketed summary to console
                 _print_bucketed_summary(new_jobs, "Results")
@@ -431,23 +436,25 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
     bucketed = bucket_jobs(job_dicts, min_score=0)
     counts = bucket_summary_counts(bucketed)
     logger.info("=" * 60)
-    logger.info(f"Job360 {label}: {len(jobs)} jobs found")
-    logger.info(f"  24h: {counts['last_24h']} | 24-48h: {counts['24_48h']} | "
-                f"48-72h: {counts['48_72h']} | 3-7d: {counts['3_7d']}")
+    logger.info("Job360 %s: %s jobs found", label, len(jobs))
+    logger.info("  24h: %s | 24-48h: %s | 48-72h: %s | 3-7d: %s",
+                counts['last_24h'], counts['24_48h'], counts['48_72h'], counts['3_7d'])
     logger.info("=" * 60)
     for idx in range(4):
         bucket_list = bucketed.get(idx, [])
         if bucket_list:
             label_name = BUCKETS[idx][0]
-            logger.info(f"  {BUCKETS[idx][1]} {label_name} ({len(bucket_list)} jobs):")
+            logger.info("  %s %s (%s jobs):", BUCKETS[idx][1], label_name, len(bucket_list))
             for i, j in enumerate(bucket_list, 1):
                 visa = " [VISA]" if j.get("visa_flag") else ""
                 salary = ""
                 if j.get("salary_min") and j.get("salary_max"):
-                    salary = f" | {int(j['salary_min']):,}-{int(j['salary_max']):,}"
-                posted = f" | {_format_date(j.get('date_found', ''))}"
-                src = f" [{j.get('source', '')}]"
-                logger.info(f"    {i}. [{j['match_score']}] {j['title']} @ {j['company']}{salary}{visa}{posted}{src}")
+                    salary = " | %s-%s" % (f"{int(j['salary_min']):,}", f"{int(j['salary_max']):,}")
+                posted = " | %s" % _format_date(j.get('date_found', ''))
+                src = " [%s]" % j.get('source', '')
+                logger.info("    %s. [%s] %s @ %s%s%s%s%s",
+                            i, j['match_score'], j['title'], j['company'],
+                            salary, visa, posted, src)
     logger.info("=" * 60)
 
 

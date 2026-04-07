@@ -54,6 +54,8 @@ FOREIGN_INDICATORS = {
     "berlin", "munich", "paris", "amsterdam", "stockholm", "copenhagen", "oslo",
     "helsinki", "zurich", "dubai", "bangalore", "hyderabad", "mumbai", "pune",
     "tokyo", "tel aviv",
+    # Canadian provinces that overlap with UK city names
+    "ontario", "quebec",
     # US state abbreviations (with comma prefix to avoid false matches)
     ", ca", ", ny", ", tx", ", wa", ", ma", ", co", ", il", ", ga", ", nc", ", va",
     ", fl", ", pa", ", oh", ", nj", ", or", ", az", ", mn", ", ct", ", md",
@@ -79,6 +81,22 @@ _EXPERIENCE_PATTERNS = {
     "principal": re.compile(r'\bprincipal\b', re.IGNORECASE),
     "head": re.compile(r'\b(head\s+of|director|vp)\b', re.IGNORECASE),
 }
+
+
+_VISA_NEGATIONS = (
+    "no sponsorship", "not sponsor", "cannot sponsor",
+    "unable to sponsor", "don't sponsor", "do not sponsor",
+    "without sponsorship",
+    "company-sponsored", "employer-sponsored",
+)
+
+
+def _has_visa_keyword(text: str, keywords: list) -> bool:
+    """Check for visa keywords while respecting negation phrases."""
+    text_lower = text.lower()
+    if any(neg in text_lower for neg in _VISA_NEGATIONS):
+        return False
+    return any(kw.lower() in text_lower for kw in keywords)
 
 
 @lru_cache(maxsize=512)
@@ -186,17 +204,17 @@ def _foreign_location_penalty(location: str) -> int:
     if not location:
         return 0  # Unknown location — might be UK, don't penalise
     loc_lower = location.lower()
-    # Check UK / remote terms first — if present, no penalty
+    # Check foreign indicators FIRST — catches "London, Ontario" etc.
+    for indicator in FOREIGN_INDICATORS:
+        if indicator in loc_lower:
+            return 15
+    # Then check UK / remote terms — if present, no penalty
     for term in UK_TERMS:
         if term in loc_lower:
             return 0
     for term in REMOTE_TERMS:
         if term in loc_lower:
             return 0
-    # Check for foreign indicators
-    for indicator in FOREIGN_INDICATORS:
-        if indicator in loc_lower:
-            return 15
     return 0  # Unknown location — don't penalise
 
 
@@ -230,8 +248,8 @@ def score_job(job: Job) -> int:
 
 
 def check_visa_flag(job: Job) -> bool:
-    text = f"{job.title} {job.description}".lower()
-    return any(kw.lower() in text for kw in VISA_KEYWORDS)
+    text = f"{job.title} {job.description}"
+    return _has_visa_keyword(text, VISA_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
@@ -275,9 +293,8 @@ class JobScorer:
         return min(points, SKILL_CAP)
 
     def _negative_penalty(self, job_title: str) -> int:
-        title_lower = job_title.lower()
         for kw in self._config.negative_title_keywords:
-            if kw in title_lower:
+            if _text_contains(job_title, kw.strip()):
                 return 30
         return 0
 
@@ -293,5 +310,5 @@ class JobScorer:
         return min(max(total, 0), 100)
 
     def check_visa_flag(self, job: Job) -> bool:
-        text = f"{job.title} {job.description}".lower()
-        return any(kw.lower() in text for kw in self._config.visa_keywords)
+        text = f"{job.title} {job.description}"
+        return _has_visa_keyword(text, self._config.visa_keywords)

@@ -35,14 +35,14 @@ class PersonioSource(BaseJobSource):
             if not xml_text:
                 consecutive_failures += 1
                 if consecutive_failures >= 2:
-                    logger.warning(f"Personio: {consecutive_failures} consecutive failures, stopping early")
+                    logger.warning("Personio: %s consecutive failures, stopping early", consecutive_failures)
                     break
                 continue
             consecutive_failures = 0
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             jobs.extend(self._parse_feed(xml_text, company_name, slug))
 
-        logger.info(f"Personio: found {len(jobs)} relevant jobs")
+        logger.info("Personio: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_feed(self, xml_text: str, company_name: str, slug: str) -> list[Job]:
@@ -50,7 +50,7 @@ class PersonioSource(BaseJobSource):
         try:
             root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"Personio [{slug}]: XML parse error: {e}")
+            logger.warning("Personio [%s]: XML parse error: %s", slug, e)
             return []
 
         for position in root.iter("position"):

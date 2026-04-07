@@ -52,5 +52,5 @@ class LeverSource(BaseJobSource):
                     source=self.name,
                     date_found=date_found,
                 ))
-        logger.info(f"Lever: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
+        logger.info("Lever: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

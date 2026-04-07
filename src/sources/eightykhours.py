@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timezone
 
 import aiohttp
@@ -9,8 +10,9 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote
 logger = logging.getLogger("job360.sources.eightykhours")
 
 # 80,000 Hours uses Algolia for their job board (jobs.80000hours.org)
-_ALGOLIA_APP_ID = "W6KM1UDIB3"
-_ALGOLIA_API_KEY = "d1d7f2c8696e7b36837d5ed337c4a319"
+# These are public search-only keys; overridable via env vars.
+_ALGOLIA_APP_ID = os.getenv("EIGHTYKHOURS_ALGOLIA_APP_ID", "W6KM1UDIB3")
+_ALGOLIA_API_KEY = os.getenv("EIGHTYKHOURS_ALGOLIA_API_KEY", "d1d7f2c8696e7b36837d5ed337c4a319")
 _ALGOLIA_INDEX = "jobs_prod"
 _ALGOLIA_URL = f"https://{_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{_ALGOLIA_INDEX}/query"
 
@@ -88,5 +90,5 @@ class EightyKHoursSource(BaseJobSource):
                     date_found=date_found,
                 ))
 
-        logger.info(f"80,000 Hours: found {len(jobs)} relevant jobs")
+        logger.info("80,000 Hours: found %s relevant jobs", len(jobs))
         return jobs

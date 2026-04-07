@@ -50,5 +50,5 @@ class RecruiteeSource(BaseJobSource):
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
-        logger.info(f"Recruitee: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
+        logger.info("Recruitee: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

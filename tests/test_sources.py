@@ -1573,7 +1573,8 @@ def test_jobtensor_parses_html():
                 source = JobTensorSource(session)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
-                assert all(j.source == "jobtensor" for j in jobs) if jobs else True
+                if jobs:
+                    assert all(j.source == "jobtensor" for j in jobs)
         finally:
             await session.close()
     _run(_test())
@@ -1663,7 +1664,8 @@ def test_bcs_jobs_parses_html():
                 # BCS might not match our regex patterns exactly in mocked HTML,
                 # so just verify it returns a list without errors
                 assert isinstance(jobs, list)
-                assert jobs[0].source == "bcs_jobs" if jobs else True
+                if jobs:
+                    assert jobs[0].source == "bcs_jobs"
         finally:
             await session.close()
     _run(_test())
@@ -1733,7 +1735,8 @@ def test_successfactors_parses_sitemap():
                 jobs = await source.fetch_jobs()
                 # Sitemap parsing extracts titles from URLs
                 assert isinstance(jobs, list)
-                assert all(j.source == "successfactors" for j in jobs) if jobs else True
+                if jobs:
+                    assert all(j.source == "successfactors" for j in jobs)
         finally:
             await session.close()
     _run(_test())
@@ -1762,7 +1765,8 @@ def test_aijobs_global_parses_html():
                 source = AIJobsGlobalSource(session)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
-                assert all(j.source == "aijobs_global" for j in jobs) if jobs else True
+                if jobs:
+                    assert all(j.source == "aijobs_global" for j in jobs)
         finally:
             await session.close()
     _run(_test())
@@ -1789,7 +1793,8 @@ def test_aijobs_ai_parses_html():
                 source = AIJobsAISource(session)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
-                assert all(j.source == "aijobs_ai" for j in jobs) if jobs else True
+                if jobs:
+                    assert all(j.source == "aijobs_ai" for j in jobs)
         finally:
             await session.close()
     _run(_test())

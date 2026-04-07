@@ -68,7 +68,7 @@ class WorkdaySource(BaseJobSource):
                 data = await self._post_json(api_url, body=body, headers=headers)
                 if data is None:
                     # API rejected request (422/404/etc) — skip remaining queries for this company
-                    logger.debug(f"Workday [{company_name}]: API unavailable, skipping")
+                    logger.debug("Workday [%s]: API unavailable, skipping", company_name)
                     company_failed = True
                     continue
                 if "jobPostings" not in data:
@@ -98,5 +98,5 @@ class WorkdaySource(BaseJobSource):
                         date_found=_parse_posted_on(posted_on),
                     ))
 
-        logger.info(f"Workday: found {len(jobs)} relevant jobs across {len(self._companies)} companies")
+        logger.info("Workday: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

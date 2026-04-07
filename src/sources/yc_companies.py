@@ -55,8 +55,8 @@ class YCCompaniesSource(BaseJobSource):
 
         # Cap results — these are company career page links, not individual job postings
         if len(jobs) > MAX_RESULTS_PER_SOURCE:
-            logger.info(f"YC Companies: capping {len(jobs)} results to {MAX_RESULTS_PER_SOURCE}")
+            logger.info("YC Companies: capping %s results to %s", len(jobs), MAX_RESULTS_PER_SOURCE)
             jobs = jobs[:MAX_RESULTS_PER_SOURCE]
 
-        logger.info(f"YC Companies: found {len(jobs)} relevant UK companies")
+        logger.info("YC Companies: found %s relevant UK companies", len(jobs))
         return jobs

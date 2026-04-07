@@ -110,8 +110,8 @@ class NoFluffJobsSource(BaseJobSource):
             ))
 
             if len(jobs) >= _MAX_RESULTS:
-                logger.info(f"NoFluffJobs: hit cap of {_MAX_RESULTS} results")
+                logger.info("NoFluffJobs: hit cap of %s results", _MAX_RESULTS)
                 break
 
-        logger.info(f"NoFluffJobs: found {len(jobs)} relevant jobs")
+        logger.info("NoFluffJobs: found %s relevant jobs", len(jobs))
         return jobs

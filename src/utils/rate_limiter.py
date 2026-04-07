@@ -8,7 +8,11 @@ class RateLimiter:
 
     async def acquire(self):
         await self._semaphore.acquire()
-        await asyncio.sleep(self._delay)
+        try:
+            await asyncio.sleep(self._delay)
+        except asyncio.CancelledError:
+            self._semaphore.release()
+            raise
 
     def release(self):
         self._semaphore.release()

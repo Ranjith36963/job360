@@ -1,4 +1,7 @@
 import csv
+import os
+import tempfile
+
 from src.models import Job
 
 
@@ -19,19 +22,28 @@ def _format_salary(job: Job) -> str:
 
 
 def export_to_csv(jobs: list[Job], filepath: str) -> str:
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(HEADERS)
-        for job in jobs:
-            writer.writerow([
-                job.title,
-                job.company,
-                job.location,
-                _format_salary(job),
-                job.match_score,
-                job.apply_url,
-                job.source,
-                job.date_found,
-                "Yes" if job.visa_flag else "No",
-            ])
+    """Export jobs to CSV atomically (write to temp file, then rename)."""
+    dir_path = os.path.dirname(filepath) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".csv.tmp")
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(HEADERS)
+            for job in jobs:
+                writer.writerow([
+                    job.title,
+                    job.company,
+                    job.location,
+                    _format_salary(job),
+                    job.match_score,
+                    job.apply_url,
+                    job.source,
+                    job.date_found,
+                    "Yes" if job.visa_flag else "No",
+                ])
+        os.replace(tmp_path, filepath)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
     return filepath

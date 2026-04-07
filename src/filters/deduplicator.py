@@ -16,7 +16,16 @@ _PAREN_RE = re.compile(r'\s*\([^)]*\)\s*$')
 
 
 def _normalize_title(title: str) -> str:
-    """Normalize a job title for dedup grouping."""
+    """Normalize a job title for dedup grouping.
+
+    NOTE: This is intentionally MORE aggressive than Job.normalized_key().
+    The DB UNIQUE constraint uses normalized_key() (company suffix + lowercase only),
+    while dedup uses this function (also strips seniority, job codes, parentheticals).
+    This means dedup groups are wider than DB unique keys — by design:
+    - Dedup merges "Senior ML Engineer" and "ML Engineer" within a single run
+    - DB preserves them as separate records across runs
+    Do NOT unify these without a full DB migration (see CLAUDE.md Rule 1).
+    """
     t = title.strip()
     t = _TRAILING_CODE_RE.sub('', t)
     t = _PAREN_RE.sub('', t)

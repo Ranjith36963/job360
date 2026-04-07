@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.jobtensor")
 
@@ -34,7 +34,8 @@ class JobTensorSource(BaseJobSource):
             hits = data.get("hits", [])
             if hits:
                 jobs = self._parse_api_results(hits)
-                logger.info(f"JobTensor: found {len(jobs)} relevant jobs (API)")
+                jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+                logger.info("JobTensor: found %s relevant jobs (API)", len(jobs))
                 return jobs
 
         # Fallback: try HTML scraping with context extraction
@@ -43,7 +44,8 @@ class JobTensorSource(BaseJobSource):
             return []
 
         jobs = self._parse_html(html)
-        logger.info(f"JobTensor: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("JobTensor: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_api_results(self, hits: list) -> list[Job]:
@@ -121,5 +123,5 @@ class JobTensorSource(BaseJobSource):
 
             return jobs
         except Exception as e:
-            logger.warning(f"JobTensor: HTML parsing failed: {e}")
+            logger.warning("JobTensor: HTML parsing failed: %s", e)
             return []

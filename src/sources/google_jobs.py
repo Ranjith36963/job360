@@ -5,7 +5,7 @@ import re
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.google_jobs")
 
@@ -42,7 +42,7 @@ class GoogleJobsSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("GoogleJobs: no SERPAPI_KEY, skipping")
+            logger.warning("GoogleJobs: no SERPAPI_KEY, skipping")
             return []
 
         jobs = []
@@ -113,5 +113,6 @@ class GoogleJobsSource(BaseJobSource):
                     salary_max=salary_max,
                 ))
 
-        logger.info(f"GoogleJobs: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("GoogleJobs: found %s relevant jobs", len(jobs))
         return jobs

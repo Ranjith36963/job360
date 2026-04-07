@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _sanitize_xml, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.nhs_jobs")
 
@@ -42,15 +42,16 @@ class NHSJobsSource(BaseJobSource):
                     seen_ids.add(key)
                     jobs.append(job)
 
-        logger.info(f"NHS Jobs: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("NHS Jobs: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_xml(self, xml_text: str) -> list[Job]:
         jobs = []
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
-            logger.warning(f"NHS Jobs: XML parse error: {e}")
+            logger.warning("NHS Jobs: XML parse error: %s", e)
             return []
 
         for vacancy in root.iter("vacancy"):

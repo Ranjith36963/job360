@@ -84,5 +84,5 @@ class TheMuseSource(BaseJobSource):
                         experience_level=experience_level,
                     ))
 
-        logger.info(f"TheMuse: found {len(jobs)} relevant jobs")
+        logger.info("TheMuse: found %s relevant jobs", len(jobs))
         return jobs

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.himalayas")
 
@@ -40,5 +40,6 @@ class HimalayasSource(BaseJobSource):
                 source=self.name,
                 date_found=date_found,
             ))
-        logger.info(f"Himalayas: found {len(jobs)} relevant jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Himalayas: found %s relevant jobs", len(jobs))
         return jobs

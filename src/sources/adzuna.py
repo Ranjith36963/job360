@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.models import Job
-from src.sources.base import BaseJobSource
+from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.adzuna")
 
@@ -24,7 +24,7 @@ class AdzunaSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         if not self.is_configured:
-            logger.info("Adzuna: no API keys, skipping")
+            logger.warning("Adzuna: no API keys, skipping")
             return []
         jobs = []
         queries = self.job_titles
@@ -58,5 +58,6 @@ class AdzunaSource(BaseJobSource):
                     source=self.name,
                     date_found=date_found,
                 ))
-        logger.info(f"Adzuna: found {len(jobs)} jobs")
+        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        logger.info("Adzuna: found %s jobs", len(jobs))
         return jobs

@@ -11,8 +11,6 @@ logger = logging.getLogger("job360.cli_view")
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
-
 from src.config.settings import DB_PATH, MIN_MATCH_SCORE
 from src.utils.time_buckets import (
     BUCKETS,

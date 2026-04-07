@@ -39,7 +39,7 @@ class HNJobsSource(BaseJobSource):
                 if job:
                     jobs.append(job)
 
-        logger.info(f"HN Jobs: found {len(jobs)} relevant jobs")
+        logger.info("HN Jobs: found %s relevant jobs", len(jobs))
         return jobs
 
     def _parse_item(self, item: dict) -> Job | None:
