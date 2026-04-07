@@ -51,6 +51,23 @@ class JobDatabase:
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
             CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'applied',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
         """)
         await self._conn.commit()
         await self._migrate()
@@ -194,6 +211,124 @@ class JobDatabase:
             for name, count in per_source.items():
                 source_history.setdefault(name, []).append(count)
         return source_history
+
+    # --- User Actions ---
+
+    async def insert_action(self, job_id: int, action: str, notes: str = "") -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO user_actions (job_id, action, notes, created_at) VALUES (?, ?, ?, ?)",
+            (job_id, action, notes, now),
+        )
+        await self._conn.commit()
+        return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
+
+    async def delete_action(self, job_id: int) -> None:
+        await self._conn.execute("DELETE FROM user_actions WHERE job_id = ?", (job_id,))
+        await self._conn.commit()
+
+    async def get_actions(self) -> list[dict]:
+        cursor = await self._conn.execute(
+            "SELECT job_id, action, notes, created_at FROM user_actions ORDER BY created_at DESC"
+        )
+        return [{"job_id": r[0], "action": r[1], "notes": r[2], "created_at": r[3]}
+                for r in await cursor.fetchall()]
+
+    async def get_action_counts(self) -> dict[str, int]:
+        cursor = await self._conn.execute(
+            "SELECT action, COUNT(*) FROM user_actions GROUP BY action"
+        )
+        return {r[0]: r[1] for r in await cursor.fetchall()}
+
+    async def get_action_for_job(self, job_id: int) -> str | None:
+        cursor = await self._conn.execute(
+            "SELECT action FROM user_actions WHERE job_id = ?", (job_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    # --- Applications (Pipeline) ---
+
+    async def create_application(self, job_id: int) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO applications (job_id, stage, created_at, updated_at) VALUES (?, 'applied', ?, ?)",
+            (job_id, now, now),
+        )
+        await self._conn.commit()
+        return await self._get_application(job_id)
+
+    async def advance_application(self, job_id: int, stage: str) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "UPDATE applications SET stage = ?, updated_at = ? WHERE job_id = ?",
+            (stage, now, job_id),
+        )
+        await self._conn.commit()
+        return await self._get_application(job_id)
+
+    async def _get_application(self, job_id: int) -> dict:
+        cursor = await self._conn.execute(
+            """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
+                      j.title, j.company
+               FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
+               WHERE a.job_id = ?""",
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return {}
+        return {"job_id": row[0], "stage": row[1], "created_at": row[2],
+                "updated_at": row[3], "notes": row[4] or "",
+                "title": row[5] or "", "company": row[6] or ""}
+
+    async def get_applications(self, stage: str | None = None) -> list[dict]:
+        if stage:
+            cursor = await self._conn.execute(
+                """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
+                          j.title, j.company
+                   FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
+                   WHERE a.stage = ? ORDER BY a.updated_at DESC""",
+                (stage,),
+            )
+        else:
+            cursor = await self._conn.execute(
+                """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
+                          j.title, j.company
+                   FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
+                   ORDER BY a.updated_at DESC"""
+            )
+        return [{"job_id": r[0], "stage": r[1], "created_at": r[2], "updated_at": r[3],
+                 "notes": r[4] or "", "title": r[5] or "", "company": r[6] or ""}
+                for r in await cursor.fetchall()]
+
+    async def get_application_counts(self) -> dict[str, int]:
+        cursor = await self._conn.execute(
+            "SELECT stage, COUNT(*) FROM applications GROUP BY stage"
+        )
+        return {r[0]: r[1] for r in await cursor.fetchall()}
+
+    async def get_stale_applications(self, days: int = 7) -> list[dict]:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cursor = await self._conn.execute(
+            """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
+                      j.title, j.company
+               FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
+               WHERE a.updated_at < ? AND a.stage NOT IN ('offer', 'rejected')
+               ORDER BY a.updated_at ASC""",
+            (cutoff,),
+        )
+        return [{"job_id": r[0], "stage": r[1], "created_at": r[2], "updated_at": r[3],
+                 "notes": r[4] or "", "title": r[5] or "", "company": r[6] or ""}
+                for r in await cursor.fetchall()]
+
+    async def get_job_by_id(self, job_id: int) -> dict | None:
+        cursor = await self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row))
 
     async def close(self):
         if self._conn:
