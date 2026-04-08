@@ -8,7 +8,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.api.dependencies import get_db, save_upload_to_temp
-from src.api.models import GitHubResponse, LinkedInResponse, ProfileResponse, ProfileSummary
+from src.api.models import CVDetail, GitHubResponse, LinkedInResponse, ProfileResponse, ProfileSummary
 from src.profile.cv_parser import parse_cv
 from src.profile.github_enricher import enrich_cv_from_github, fetch_github_profile
 from src.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_zip
@@ -30,9 +30,20 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         education=profile.cv_data.education,
         experience_level=profile.preferences.experience_level,
     )
+    cv = profile.cv_data
+    cv_detail = CVDetail(
+        raw_text=cv.raw_text,
+        skills=cv.skills,
+        job_titles=cv.job_titles,
+        education=cv.education,
+        certifications=cv.certifications,
+        summary_text=cv.summary,
+        experience_text=getattr(cv, "experience_text", ""),
+    )
     return ProfileResponse(
         summary=summary,
         preferences=asdict(profile.preferences),
+        cv_detail=cv_detail if cv.raw_text else None,
     )
 
 

@@ -89,9 +89,21 @@ class ProfileSummary(BaseModel):
     experience_level: str
 
 
+class CVDetail(BaseModel):
+    """Full extracted CV data for transparent display."""
+    raw_text: str = ""
+    skills: list[str] = []
+    job_titles: list[str] = []
+    education: list[str] = []
+    certifications: list[str] = []
+    summary_text: str = ""
+    experience_text: str = ""
+
+
 class ProfileResponse(BaseModel):
     summary: ProfileSummary
     preferences: dict
+    cv_detail: CVDetail | None = None
 
 
 class LinkedInResponse(BaseModel):

@@ -13,11 +13,11 @@ logger = logging.getLogger("job360.profile.cv_parser")
 # Section header patterns (case-insensitive)
 _SECTION_PATTERNS = {
     "skills": re.compile(
-        r'^(?:skills|technical\s+skills|core\s+skills|key\s+skills|competencies|technologies|tools)\s*[:\-]?\s*$',
+        r'^(?:(?:core|technical|key|professional)?\s*skills|competencies|technologies|tools)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
     ),
     "experience": re.compile(
-        r'^(?:experience|work\s+experience|employment|professional\s+experience|career\s+history)\s*[:\-]?\s*$',
+        r'^(?:(?:professional\s+|work\s+)?experience|employment|career\s+history)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
     ),
     "education": re.compile(
@@ -25,18 +25,30 @@ _SECTION_PATTERNS = {
         re.IGNORECASE | re.MULTILINE,
     ),
     "certifications": re.compile(
-        r'^(?:certifications?|certificates?|accreditations?|licenses?)\s*[:\-]?\s*$',
+        r'^(?:licenses?\s*(?:&|and|,)\s*certifications?|certifications?\s*(?:&|and|,)\s*licenses?|certifications?|certificates?|accreditations?|licenses?)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
     ),
     "summary": re.compile(
-        r'^(?:summary|profile|objective|about\s+me|personal\s+statement|overview)\s*[:\-]?\s*$',
+        r'^(?:(?:professional\s+|executive\s+|career\s+)?summary|profile|objective|about\s+me|personal\s+statement|overview)\s*[:\-]?\s*$',
         re.IGNORECASE | re.MULTILINE,
     ),
 }
 
-# Pattern to detect "Title at Company" in experience sections
+# Pattern to detect "Title at Company" or "Company | Date" in experience sections
 _TITLE_AT_COMPANY = re.compile(
     r'^(.+?)\s+(?:at|@|-|–|,)\s+(.+?)$',
+    re.MULTILINE,
+)
+
+# Pattern for "Company | Date | Location" style headers
+_COMPANY_DATE_LINE = re.compile(
+    r'^(.+?)\s*\|\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{4}',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Pattern for standalone role titles (e.g., "AI Solutions Engineer – R&D Department")
+_ROLE_TITLE_LINE = re.compile(
+    r'^([A-Z][A-Za-z\s/]+(?:Engineer|Developer|Scientist|Analyst|Manager|Intern|Lead|Architect|Consultant|Designer|Specialist)(?:\s*[–\-]\s*.+)?)\s*$',
     re.MULTILINE,
 )
 
@@ -136,13 +148,35 @@ def _extract_skills_from_text(text: str) -> list[str]:
 
 
 def _extract_titles_from_experience(text: str) -> list[str]:
-    """Extract job titles from experience section text."""
-    titles = []
+    """Extract company names and job titles from experience section text.
+
+    Returns entries like "Company | Date" and "Role Title" for display.
+    """
+    entries = []
+    seen = set()
+
+    # Method 1: "Company | Date | Location" header lines
+    for match in _COMPANY_DATE_LINE.finditer(text):
+        line = match.group(0).strip()
+        if line.lower() not in seen:
+            entries.append(line)
+            seen.add(line.lower())
+
+    # Method 2: Standalone role title lines
+    for match in _ROLE_TITLE_LINE.finditer(text):
+        title = match.group(1).strip()
+        if title.lower() not in seen:
+            entries.append(title)
+            seen.add(title.lower())
+
+    # Method 3: "Title at/- Company" pattern → extract the title part
     for match in _TITLE_AT_COMPANY.finditer(text):
         title = match.group(1).strip()
-        if 3 < len(title) < 80:
-            titles.append(title)
-    return titles
+        if 3 < len(title) < 80 and title.lower() not in seen:
+            entries.append(title)
+            seen.add(title.lower())
+
+    return entries
 
 
 def _extract_tech_names(text: str) -> list[str]:
@@ -179,19 +213,23 @@ def parse_cv(file_path: str) -> CVData:
     if "experience" in sections:
         cv.job_titles = _extract_titles_from_experience(sections["experience"])
 
-    # Extract education
+    # Extract education (full section, no truncation)
     if "education" in sections:
         lines = [l.strip() for l in sections["education"].split("\n") if l.strip()]
-        cv.education = lines[:10]
+        cv.education = lines
 
     # Extract certifications
     if "certifications" in sections:
         lines = [l.strip() for l in sections["certifications"].split("\n") if l.strip()]
-        cv.certifications = lines[:10]
+        cv.certifications = lines
 
     # Extract summary
     if "summary" in sections:
-        cv.summary = sections["summary"][:500]
+        cv.summary = sections["summary"][:1000]
+
+    # Store experience section text for display
+    if "experience" in sections:
+        cv.experience_text = sections["experience"]
 
     return cv
 

@@ -66,9 +66,20 @@ export interface ProfileSummary {
   experience_level: string;
 }
 
+export interface CVDetail {
+  raw_text: string;
+  skills: string[];
+  job_titles: string[];
+  education: string[];
+  certifications: string[];
+  summary_text: string;
+  experience_text: string;
+}
+
 export interface ProfileResponse {
   summary: ProfileSummary;
   preferences: Record<string, unknown>;
+  cv_detail?: CVDetail | null;
 }
 
 export interface PreferencesRequest {

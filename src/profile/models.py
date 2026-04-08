@@ -25,6 +25,7 @@ class CVData:
     education: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
     summary: str = ""
+    experience_text: str = ""
     # LinkedIn-sourced data
     linkedin_positions: list[dict] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
