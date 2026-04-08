@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { User, CheckCircle, AlertCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CVUpload } from "@/components/profile/CVUpload";
-import { CVViewer } from "@/components/profile/CVViewer";
 import { PreferencesForm } from "@/components/profile/PreferencesForm";
 import {
   getProfile,
@@ -276,6 +275,7 @@ export default function ProfilePage() {
               onLinkedinUpload={handleLinkedinUpload}
               onGithubEnrich={handleGithubEnrich}
               profile={profile?.summary ?? null}
+              cvDetail={profile?.cv_detail ?? null}
               loading={loadingProfile}
             />
 
@@ -288,12 +288,6 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* ── CV Viewer — full CV with highlights ────── */}
-        {profile?.cv_detail && (
-          <div className="animate-fade-in-up stagger-3 mt-6">
-            <CVViewer cv={profile.cv_detail} />
-          </div>
-        )}
       </div>
     </div>
   );

@@ -7,31 +7,92 @@ import {
   CheckCircle,
   GitBranch,
   Link2,
-  X,
   Briefcase,
   AlertCircle,
-  Save,
+  Wrench,
+  GraduationCap,
+  Award,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import type { ProfileSummary } from "@/lib/types";
+import type { ProfileSummary, CVDetail } from "@/lib/types";
 
 interface CVUploadProps {
   onUpload: (file: File) => Promise<void>;
   onLinkedinUpload?: (file: File) => Promise<void>;
   onGithubEnrich?: (username: string) => Promise<void>;
   profile: ProfileSummary | null;
+  cvDetail?: CVDetail | null;
   loading: boolean;
 }
+
+// ── Highlight engine ──────────────────────────────────────
+// Marks extracted terms inline within the full CV text using
+// neon-colored backgrounds by category.
+
+interface HighlightTerm {
+  text: string;
+  category: "skill" | "title" | "education" | "certification";
+}
+
+const CATEGORY_STYLES: Record<string, string> = {
+  skill: "bg-primary/25 text-primary border-b-2 border-primary/60 rounded-sm px-0.5",
+  title: "bg-blue-500/25 text-blue-300 border-b-2 border-blue-400/60 rounded-sm px-0.5",
+  education: "bg-amber-500/20 text-amber-300 border-b-2 border-amber-400/50 rounded-sm px-0.5",
+  certification: "bg-purple-500/20 text-purple-300 border-b-2 border-purple-400/50 rounded-sm px-0.5",
+};
+
+function buildHighlightedCV(
+  rawText: string,
+  terms: HighlightTerm[]
+): React.ReactNode[] {
+  if (!terms.length) return [rawText];
+
+  // Sort longest-first so "Machine Learning" matches before "Machine"
+  const sorted = [...terms]
+    .filter((t) => t.text.length > 2)
+    .sort((a, b) => b.text.length - a.text.length);
+
+  // Build regex from all terms
+  const escaped = sorted.map((t) => ({
+    pattern: t.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    category: t.category,
+  }));
+
+  if (!escaped.length) return [rawText];
+
+  const regex = new RegExp(
+    `(${escaped.map((e) => e.pattern).join("|")})`,
+    "gi"
+  );
+  const parts = rawText.split(regex);
+
+  return parts.map((part, i) => {
+    const match = sorted.find(
+      (t) => t.text.toLowerCase() === part.toLowerCase()
+    );
+    if (match) {
+      return (
+        <mark key={i} className={CATEGORY_STYLES[match.category]}>
+          {part}
+        </mark>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+// ── Component ─────────────────────────────────────────────
 
 export function CVUpload({
   onUpload,
   onLinkedinUpload,
   onGithubEnrich,
   profile,
+  cvDetail,
   loading,
 }: CVUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -121,6 +182,28 @@ export function CVUpload({
     }
   }, [githubUsername, onGithubEnrich]);
 
+  // Build highlight terms from CV detail
+  const highlightTerms: HighlightTerm[] = [];
+  if (cvDetail) {
+    for (const skill of cvDetail.skills) {
+      highlightTerms.push({ text: skill, category: "skill" });
+    }
+    for (const title of cvDetail.job_titles) {
+      highlightTerms.push({ text: title, category: "title" });
+    }
+    for (const edu of cvDetail.education) {
+      // Only highlight degree lines, not bullet points
+      if (edu.length > 10 && !edu.startsWith("•") && !edu.startsWith("�")) {
+        highlightTerms.push({ text: edu, category: "education" });
+      }
+    }
+    for (const cert of cvDetail.certifications) {
+      if (cert.length > 10) {
+        highlightTerms.push({ text: cert, category: "certification" });
+      }
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* ── CV Upload Section ───────────────────────────── */}
@@ -135,7 +218,7 @@ export function CVUpload({
             </h3>
             <p className="text-xs text-muted-foreground">
               {hasCV
-                ? "Your CV has been parsed and analyzed"
+                ? "Your CV has been parsed — highlighted text drives your job matching"
                 : "PDF or DOCX — we extract skills, titles, and more"}
             </p>
           </div>
@@ -144,7 +227,7 @@ export function CVUpload({
           )}
         </div>
 
-        {/* Drop zone */}
+        {/* Drop zone (when no CV or re-uploading) */}
         {!hasCV || uploading ? (
           <div
             onDragOver={handleDragOver}
@@ -164,7 +247,6 @@ export function CVUpload({
               onChange={handleFileSelect}
               className="hidden"
             />
-
             {uploading || loading ? (
               <div className="flex flex-col items-center gap-3">
                 <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
@@ -189,65 +271,71 @@ export function CVUpload({
             )}
           </div>
         ) : (
-          /* CV parsed results */
+          /* ── CV parsed: stats bar + full CV with highlights ── */
           <div className="space-y-4">
-            {/* Skills count */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                Skills extracted:
-              </span>
-              <Badge variant="secondary" className="font-mono">
-                {profile.skills_count}
-              </Badge>
-            </div>
-
-            {/* Job titles */}
-            {profile.job_titles.length > 0 && (
-              <div>
-                <span className="text-sm text-muted-foreground block mb-2">
-                  Job titles found:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {profile.job_titles.map((title) => (
-                    <span
-                      key={title}
-                      className="skill-matched inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium"
-                    >
-                      <Briefcase className="mr-1.5 h-3 w-3" />
-                      {title}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Education */}
-            {profile.education.length > 0 && (
-              <div>
-                <span className="text-sm text-muted-foreground block mb-2">
-                  Education:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {profile.education.map((edu) => (
-                    <Badge key={edu} variant="outline" className="text-xs">
-                      {edu}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Experience level */}
-            {profile.experience_level && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  Experience level:
-                </span>
-                <Badge variant="secondary" className="capitalize">
-                  {profile.experience_level}
+            {/* Compact stats bar */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <Wrench className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs text-muted-foreground">Skills:</span>
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {profile.skills_count}
                 </Badge>
               </div>
+              <div className="flex items-center gap-1.5">
+                <Briefcase className="h-3.5 w-3.5 text-blue-400" />
+                <span className="text-xs text-muted-foreground">Roles:</span>
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {profile.job_titles.length}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <GraduationCap className="h-3.5 w-3.5 text-amber-400" />
+                <span className="text-xs text-muted-foreground">Education:</span>
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {profile.education.length}
+                </Badge>
+              </div>
+              {cvDetail && cvDetail.certifications.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Award className="h-3.5 w-3.5 text-purple-400" />
+                  <span className="text-xs text-muted-foreground">Certs:</span>
+                  <Badge variant="secondary" className="font-mono text-xs">
+                    {cvDetail.certifications.length}
+                  </Badge>
+                </div>
+              )}
+            </div>
+
+            {/* Full CV text with inline highlights */}
+            {cvDetail && cvDetail.raw_text && (
+              <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
+                <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
+                  {buildHighlightedCV(cvDetail.raw_text, highlightTerms)}
+                </pre>
+              </div>
             )}
+
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+              <span className="font-medium">Highlighted = extracted for job matching:</span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-2 rounded-sm bg-primary/30 border-b-2 border-primary/60" />
+                Skills
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-2 rounded-sm bg-blue-500/30 border-b-2 border-blue-400/60" />
+                Roles
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-2 rounded-sm bg-amber-500/25 border-b-2 border-amber-400/50" />
+                Education
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-2 rounded-sm bg-purple-500/25 border-b-2 border-purple-400/50" />
+                Certifications
+              </span>
+            </div>
 
             {/* Re-upload button */}
             <Button
@@ -255,7 +343,7 @@ export function CVUpload({
               size="sm"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading || loading}
-              className="mt-2 gap-2"
+              className="gap-2"
             >
               <Upload className="h-3.5 w-3.5" />
               Re-upload CV
@@ -267,17 +355,6 @@ export function CVUpload({
               onChange={handleFileSelect}
               className="hidden"
             />
-
-            {/* Save Profile button */}
-            <Button
-              className="w-full mt-4 gap-2 bg-primary text-primary-foreground hover:brightness-110"
-              onClick={() => {
-                /* CV is auto-saved on upload — visual confirmation */
-              }}
-            >
-              <Save className="h-4 w-4" />
-              Save Profile
-            </Button>
           </div>
         )}
       </div>
@@ -380,7 +457,7 @@ export function CVUpload({
           </div>
         </div>
 
-        {/* Hint if neither enrichment has been done */}
+        {/* Hint if neither enrichment */}
         {profile && !profile.has_linkedin && !profile.has_github && (
           <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/10 p-3">
             <AlertCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
