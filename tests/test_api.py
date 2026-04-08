@@ -79,3 +79,60 @@ async def test_pipeline_list_empty():
         resp = await client.get("/api/pipeline")
     assert resp.status_code == 200
     assert resp.json()["applications"] == []
+
+
+@pytest.mark.asyncio
+async def test_full_api_workflow():
+    """Integration test: health → status → sources → jobs → actions → pipeline → profile."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Health
+        resp = await client.get("/api/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Status
+        resp = await client.get("/api/status")
+        assert resp.status_code == 200
+        assert resp.json()["sources_total"] == 48
+
+        # Sources
+        resp = await client.get("/api/sources")
+        assert resp.status_code == 200
+        assert len(resp.json()["sources"]) == 48
+
+        # Jobs (empty DB)
+        resp = await client.get("/api/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+        # Jobs export (empty CSV)
+        resp = await client.get("/api/jobs/export")
+        assert resp.status_code == 200
+        assert "text/csv" in resp.headers.get("content-type", "")
+
+        # Action counts (empty)
+        resp = await client.get("/api/actions/counts")
+        assert resp.status_code == 200
+
+        # Actions list (empty)
+        resp = await client.get("/api/actions")
+        assert resp.status_code == 200
+
+        # Pipeline counts (empty)
+        resp = await client.get("/api/pipeline/counts")
+        assert resp.status_code == 200
+
+        # Pipeline list (empty)
+        resp = await client.get("/api/pipeline")
+        assert resp.status_code == 200
+        assert resp.json()["applications"] == []
+
+        # Pipeline reminders (empty)
+        resp = await client.get("/api/pipeline/reminders")
+        assert resp.status_code == 200
+
+        # Profile (404 when none)
+        with patch("src.api.routes.profile.load_profile", return_value=None):
+            resp = await client.get("/api/profile")
+            assert resp.status_code == 404

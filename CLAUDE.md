@@ -36,6 +36,10 @@ Job360 is an automated UK job search system supporting **any professional domain
 bash setup.sh                  # Creates venv, installs deps, validates .env
 source venv/bin/activate       # Activate virtualenv (Linux/Mac)
 
+# API server (for Next.js frontend)
+python -m src.cli api                              # Start FastAPI on localhost:8000
+python -m src.cli api --port 3001 --host 0.0.0.0   # Custom host/port
+
 # Run the pipeline
 python -m src.cli run                              # Full pipeline (all 48 sources)
 python -m src.cli run --source arbeitnow           # Single source
@@ -73,7 +77,12 @@ python -m pytest tests/test_scorer.py::test_name -v     # Single test
 job360/
 ├── src/
 │   ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (48), _build_sources()
-│   ├── cli.py               # Click CLI: run, dashboard, status, sources, view, setup-profile
+│   ├── cli.py               # Click CLI: run, api, dashboard, status, sources, view, setup-profile
+│   ├── api/
+│   │   ├── main.py          # FastAPI app with CORS, lifespan (DB init/close)
+│   │   ├── models.py        # Pydantic request/response models (matches frontend types.ts)
+│   │   ├── dependencies.py  # Shared deps: get_db(), save_upload_to_temp()
+│   │   └── routes/          # 6 route modules: health, jobs, actions, profile, search, pipeline
 │   ├── cli_view.py          # Rich terminal table viewer (time-bucketed)
 │   ├── dashboard.py         # Streamlit web dashboard with profile setup sidebar
 │   ├── models.py            # Job dataclass with normalized_key() for dedup
@@ -108,9 +117,9 @@ job360/
 │       ├── logger.py        # Rotating file + console logging (5MB, 3 backups)
 │       ├── rate_limiter.py  # Async semaphore + delay rate limiter
 │       └── time_buckets.py  # Time bucketing for CLI view + console summary
-├── tests/                   # 397 tests across 19 files
+├── tests/                   # 409 tests across 20 files
 │   ├── conftest.py          # Shared fixtures (sample_ai_job, sample_visa_job, etc.)
-│   └── test_*.py            # 19 test modules
+│   └── test_*.py            # 20 test modules
 ├── data/                    # Runtime data (gitignored)
 │   ├── jobs.db              # SQLite database
 │   ├── user_profile.json    # User profile (optional)
@@ -193,6 +202,7 @@ Key test files:
 - `test_cli.py` — 11 tests: CLI commands, `len(SOURCE_REGISTRY) == 48` assertion (update when adding/removing sources)
 - `test_main.py` — 12 tests: orchestrator with mocked sources
 - `test_dashboard.py` — 6 tests: URL sanitization (`_safe_url`) for XSS prevention
+- `test_api.py` — 9 tests: FastAPI endpoints (health, status, sources, jobs, actions, profile, pipeline, integration)
 
 ## Environment
 

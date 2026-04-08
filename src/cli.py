@@ -88,6 +88,16 @@ def view(hours, min_score, source, visa_only, db_path):
                  visa_only=visa_only, db_path=db_path)
 
 
+@cli.command()
+@click.option("--port", default=8000, help="Port to run the API server on.")
+@click.option("--host", default="127.0.0.1", help="Host to bind to.")
+def api(port, host):
+    """Start the FastAPI backend server."""
+    import uvicorn
+    click.echo(f"Starting Job360 API on {host}:{port}")
+    uvicorn.run("src.api.main:app", host=host, port=port, reload=True)
+
+
 @cli.command("sources")
 def list_sources():
     """List all available job sources."""
