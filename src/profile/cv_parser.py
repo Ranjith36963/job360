@@ -265,6 +265,109 @@ def _extract_tech_names(text: str) -> list[str]:
     return [m for m in matches if m not in noise and len(m) > 1]
 
 
+def _extract_deep_skills(full_text: str, existing_skills: list[str]) -> list[str]:
+    """Deep-scan the ENTIRE CV for professional terms a recruiter would notice.
+
+    Goes beyond the CORE SKILLS section to find:
+    - Technology + context phrases (AWS Bedrock, Docker deployment)
+    - Achievement metrics (95% accuracy, reducing latency by 35%)
+    - Domain expertise phrases (fraud detection models, predictive maintenance)
+    - Methodology terms (multi-agent workflow, hyperparameter optimisation)
+    - Compound tool/platform names (OpenAI API, Gemini API)
+    """
+    extra = []
+    existing_lower = {s.lower() for s in existing_skills}
+    existing_text = " ".join(existing_skills).lower()
+
+    # --- Pattern 1: Specific technology compound phrases ---
+    # Only match "TechPrefix + Noun" patterns that are real professional terms
+    tech_compounds = re.compile(
+        r'\b((?:AWS|Docker|Redis|Cloud|RAG|LLM|ML|AI|Data|CI/CD|Vector|Neural|'
+        r'Deep|Machine|Transfer|Reinforcement|Computer|Speech|Audio|Video|'
+        r'Multi-agent|Hyperparameter|Feature|Model|NLP|Fraud|Predictive|Traffic)'
+        r'\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)\b',
+        re.IGNORECASE,
+    )
+    # Filter: only keep if the phrase ends with a meaningful noun
+    meaningful_suffixes = {
+        'pipeline', 'pipelines', 'deployment', 'infrastructure', 'engineering',
+        'architecture', 'automation', 'detection', 'prediction', 'recognition',
+        'processing', 'generation', 'optimisation', 'optimization', 'caching',
+        'monitoring', 'versioning', 'learning', 'networks', 'vision',
+        'models', 'model', 'systems', 'system', 'solutions', 'assistant',
+        'workflow', 'workflows', 'agents', 'maintenance', 'scheduling',
+        'analysis', 'understanding', 'embedding', 'embeddings',
+        'specialist', 'mlops', 'bedrock', 'sagemaker', 'cloudwatch',
+    }
+
+    for match in tech_compounds.finditer(full_text):
+        phrase = match.group(1).strip()
+        last_word = phrase.split()[-1].lower()
+        if last_word in meaningful_suffixes and phrase.lower() not in existing_lower:
+            if phrase.lower() not in existing_text and len(phrase) < 50:
+                extra.append(phrase)
+                existing_lower.add(phrase.lower())
+
+    # --- Pattern 2: Achievement metrics ---
+    # "achieving 90% accuracy", "reducing query latency by 35%"
+    achievement_pattern = re.compile(
+        r'(?:achieving|delivered|improved|reducing|accelerated|cutting|enhancing|increasing)\s+'
+        r'[^.]{5,80}?\d+%[^.]{0,40}',
+        re.IGNORECASE,
+    )
+    for match in achievement_pattern.finditer(full_text):
+        phrase = match.group(0).strip().rstrip('.')
+        if phrase.lower() not in existing_lower and len(phrase) < 120:
+            extra.append(phrase)
+            existing_lower.add(phrase.lower())
+
+    # --- Pattern 3: Domain expertise phrases (noun + professional noun) ---
+    # "fraud detection", "predictive maintenance", "traffic prediction"
+    # Only match adjective/noun + domain-noun patterns — no verbs as prefix
+    domain_phrases = re.compile(
+        r'\b([A-Za-z]+\s+(?:detection|prediction|recognition|processing|generation|'
+        r'optimisation|optimization|deployment|monitoring|engineering|'
+        r'infrastructure|automation|management|analysis|understanding|'
+        r'classification|maintenance|scheduling|caching|pipelines?|'
+        r'workflows?|intelligence))\b',
+        re.IGNORECASE,
+    )
+    # Words that should NOT start a domain phrase (verbs, articles, etc.)
+    bad_prefixes = {
+        'the', 'a', 'an', 'this', 'that', 'my', 'our', 'their', 'its',
+        'and', 'or', 'for', 'with', 'from', 'into', 'by', 'to',
+        'evaluated', 'streamline', 'optimise', 'optimize', 'improve',
+        'built', 'designed', 'developed', 'integrated', 'collected',
+        'conducted', 'ensuring', 'enabling', 'performing', 'achieving',
+    }
+    for match in domain_phrases.finditer(full_text):
+        phrase = match.group(1).strip()
+        first_word = phrase.split()[0].lower()
+        pl = phrase.lower()
+        if first_word in bad_prefixes:
+            continue
+        if pl not in existing_lower and pl not in existing_text and len(phrase) > 8:
+            extra.append(phrase)
+            existing_lower.add(pl)
+
+    # --- Pattern 4: Headline role from CV header ---
+    # First 5 lines often contain the person's stated role
+    header_lines = full_text.split('\n')[:5]
+    role_keywords = [
+        'engineer', 'scientist', 'developer', 'analyst', 'architect',
+        'specialist', 'consultant', 'manager', 'lead', 'director',
+        'researcher', 'designer', 'intern',
+    ]
+    for line in header_lines:
+        line_stripped = line.strip()
+        if any(kw in line_stripped.lower() for kw in role_keywords):
+            if line_stripped.lower() not in existing_lower:
+                extra.append(line_stripped)
+                existing_lower.add(line_stripped.lower())
+
+    return extra
+
+
 def parse_cv(file_path: str) -> CVData:
     """Parse a CV file and extract structured data."""
     raw_text = extract_text(file_path)
@@ -304,6 +407,38 @@ def parse_cv(file_path: str) -> CVData:
     if not cv.skills:
         # Fallback: try to find tech names from full text
         cv.skills = _extract_tech_names(raw_text)[:30]
+
+    # Deep scan: extract technology phrases, achievements, domain terms
+    # from the ENTIRE CV — not just the skills section
+    # Use line-joined text to avoid newline-broken phrases
+    joined_text = re.sub(r'\n(?!\s*[A-Z•·▪\ufffd])', ' ', raw_text)
+    deep_extras = _extract_deep_skills(joined_text, cv.skills)
+
+    # Clean: remove entries with newlines, URLs, "of" prefixes, and short junk
+    cleaned = []
+    seen_lower = {s.lower() for s in cv.skills}
+    for entry in deep_extras:
+        entry = entry.strip()
+        # Skip entries with newlines, URLs, or starting with prepositions
+        if '\n' in entry or 'http' in entry or 'linkedin' in entry.lower():
+            continue
+        if entry.lower().startswith(('of ', 'in ', 'on ', 'at ', 'to ', 'by ')):
+            continue
+        # Skip if too long (sentence fragments from achievements)
+        if len(entry) > 55:
+            continue
+        # Skip generic academic phrases
+        if entry.lower() in ('science engineering', 'flow analysis', 'error analysis',
+                              'agent workflow', 'training workflows', 'preprocessing pipelines'):
+            continue
+        # Skip if a shorter version already exists (dedup "RAG pipelines" vs "RAG pipeline")
+        base = entry.lower().rstrip('s')
+        if base in seen_lower or (base + 's') in seen_lower:
+            continue
+        cleaned.append(entry)
+        seen_lower.add(entry.lower())
+
+    cv.skills.extend(cleaned)
 
     # Extract job titles from experience
     if "experience" in sections:
