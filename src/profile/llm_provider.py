@@ -1,0 +1,78 @@
+"""Multi-provider LLM pool for CV analysis. Gemini → Groq fallback. Zero cost."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from src.config.settings import GEMINI_API_KEY, GROQ_API_KEY
+
+logger = logging.getLogger("job360.profile.llm_provider")
+
+
+async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
+    """Send a prompt to the first available LLM provider and return parsed JSON.
+
+    Provider priority: Gemini (free 15 RPM) → Groq (free 30 RPM).
+    Raises RuntimeError if no provider is available or all fail.
+    """
+    errors = []
+
+    if GEMINI_API_KEY:
+        try:
+            return await _call_gemini(prompt, system)
+        except Exception as e:
+            errors.append(f"Gemini: {e}")
+            logger.warning("Gemini failed, trying next provider: %s", e)
+
+    if GROQ_API_KEY:
+        try:
+            return await _call_groq(prompt, system)
+        except Exception as e:
+            errors.append(f"Groq: {e}")
+            logger.warning("Groq failed: %s", e)
+
+    if not GEMINI_API_KEY and not GROQ_API_KEY:
+        raise RuntimeError(
+            "No LLM API key configured. Set GEMINI_API_KEY or GROQ_API_KEY in .env. "
+            "Both offer free tiers — see https://ai.google.dev and https://console.groq.com"
+        )
+
+    raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
+
+
+async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
+    """Call Google Gemini API (free tier: 15 RPM, 1M tokens/day)."""
+    import google.generativeai as genai
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(
+        "gemini-2.0-flash",
+        system_instruction=system or None,
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            temperature=0.1,
+        ),
+    )
+    response = await model.generate_content_async(prompt)
+    return json.loads(response.text)
+
+
+async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
+    """Call Groq API (free tier: 30 RPM, 14.4K tokens/day on llama3)."""
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=GROQ_API_KEY)
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    response = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)

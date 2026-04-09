@@ -24,6 +24,10 @@ FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
+# LLM providers for CV analysis (free tiers)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
 # Email
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
