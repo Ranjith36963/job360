@@ -35,10 +35,16 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         raw_text=cv.raw_text,
         skills=cv.skills,
         job_titles=cv.job_titles,
+        companies=getattr(cv, "companies", []),
         education=cv.education,
         certifications=cv.certifications,
         summary_text=cv.summary,
         experience_text=getattr(cv, "experience_text", ""),
+        name=getattr(cv, "name", ""),
+        headline=getattr(cv, "headline", ""),
+        location=getattr(cv, "location", ""),
+        achievements=getattr(cv, "achievements", []),
+        highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
     return ProfileResponse(
         summary=summary,

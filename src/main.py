@@ -17,7 +17,7 @@ from src.utils.logger import setup_logging
 from src.models import Job
 from src.storage.database import JobDatabase
 from src.storage.csv_export import export_to_csv
-from src.filters.skill_matcher import score_job, check_visa_flag, detect_experience_level, salary_in_range, JobScorer
+from src.filters.skill_matcher import check_visa_flag, detect_experience_level, salary_in_range, JobScorer
 from src.filters.deduplicator import deduplicate
 from src.profile.storage import load_profile
 from src.profile.keyword_generator import generate_search_config
@@ -238,14 +238,28 @@ async def run_search(
 
     # Load user profile for dynamic keywords
     profile = load_profile()
-    search_config = None
-    scorer = None
-    if profile and profile.is_complete:
-        search_config = generate_search_config(profile)
-        scorer = JobScorer(search_config)
-        logger.info("  Using dynamic keywords from user profile")
-    else:
-        logger.info("  No user profile found, using default keywords")
+    if not profile or not profile.is_complete:
+        logger.error("=" * 60)
+        logger.error("No user profile found. Job360 requires a CV or preferences.")
+        logger.error("")
+        logger.error("Get started with one of:")
+        logger.error("  python -m src.cli setup-profile --cv path/to/cv.pdf")
+        logger.error("  python -m src.cli dashboard  # then use Profile sidebar")
+        logger.error("")
+        logger.error("Without a profile, no hardcoded AI/ML defaults are used —")
+        logger.error("scoring would return zero matches for every job.")
+        logger.error("=" * 60)
+        return {
+            "total_found": 0,
+            "new_jobs": 0,
+            "sources_queried": 0,
+            "per_source": {},
+            "error": "no_profile",
+        }
+
+    search_config = generate_search_config(profile)
+    scorer = JobScorer(search_config)
+    logger.info("  Using dynamic keywords from user profile")
     logger.info("=" * 60)
 
     # Init database
@@ -327,14 +341,10 @@ async def run_search(
 
             logger.info("Total raw jobs: %s", len(all_jobs))
 
-            # Score all jobs
+            # Score all jobs using the user's profile (scorer always exists — guarded at start)
             for job in all_jobs:
-                if scorer:
-                    job.match_score = scorer.score(job)
-                    job.visa_flag = scorer.check_visa_flag(job)
-                else:
-                    job.match_score = score_job(job)
-                    job.visa_flag = check_visa_flag(job)
+                job.match_score = scorer.score(job)
+                job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
 
             # Deduplicate

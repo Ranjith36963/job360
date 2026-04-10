@@ -138,7 +138,11 @@ async def parse_cv_async(file_path: str) -> CVData:
     """Parse a CV file using LLM analysis. Works for ANY professional domain."""
     raw_text = extract_text(file_path)
     if not raw_text:
-        return CVData()
+        raise RuntimeError(
+            f"Failed to extract text from {file_path}. "
+            "File may be corrupted, empty, or in an unsupported format. "
+            "Only PDF and DOCX files are supported."
+        )
 
     from src.profile.llm_provider import llm_extract
 
@@ -169,70 +173,124 @@ def parse_cv(file_path: str) -> CVData:
         return asyncio.run(parse_cv_async(file_path))
 
 
+def _coerce_str_list(value) -> list[str]:
+    """Defensive coercion of LLM output to a clean list[str].
+
+    Handles weaker models that may return strings, None, dicts, or mixed types
+    for fields that should be list[str]. Never raises — always returns a list.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        # Weaker models sometimes return comma-separated strings
+        return [s.strip() for s in value.split(",") if s.strip()]
+    if isinstance(value, dict):
+        # Model confused the schema — return values as strings
+        return [str(v) for v in value.values() if v]
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            if isinstance(item, str):
+                if item.strip():
+                    result.append(item.strip())
+            elif isinstance(item, dict):
+                # Extract "name" field if present, else stringify
+                name = item.get("name") or item.get("skill") or item.get("title")
+                if name:
+                    result.append(str(name))
+            elif item is not None:
+                result.append(str(item))
+        return result
+    return []
+
+
+def _coerce_str(value) -> str:
+    """Defensive coercion to a string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, dict)):
+        return ""  # Wrong type — don't use
+    return str(value)
+
+
 def _llm_result_to_cvdata(raw_text: str, result: dict) -> CVData:
-    """Convert LLM JSON response to CVData dataclass."""
-    # Skills: merge explicit skills + achievement phrases for highlighting
-    skills = result.get("skills", [])
-    achievements = result.get("achievements", [])
+    """Convert LLM JSON response to CVData dataclass.
 
-    # Add name, headline, location for highlighting in the CV viewer
-    name = result.get("name", "")
-    headline = result.get("headline", "")
-    location = result.get("location", "")
-    highlight_extras = [x for x in [name, headline, location] if x]
+    Defensive: all fields are type-guarded so weaker LLMs (Cerebras llama3.1-8b,
+    Groq llama-3.3-70b) that deviate from the schema don't crash the parser.
+    """
+    # Scoring-semantic fields (flow into SearchConfig)
+    skills = _coerce_str_list(result.get("skills"))
 
-    # Education: flatten to list of strings for display
-    education_lines = []
-    for edu in result.get("education", []):
-        if isinstance(edu, dict):
-            degree = edu.get("degree", "")
-            institution = edu.get("institution", "")
-            dates = edu.get("dates", "")
-            if degree:
-                education_lines.append(degree)
-            if institution:
-                line = institution
-                if dates:
-                    line += f" | {dates}"
-                education_lines.append(line)
-            for detail in edu.get("details", []):
-                education_lines.append(detail)
-        elif isinstance(edu, str):
-            education_lines.append(edu)
+    # Display-only fields (NOT used in scoring — kept separate to avoid pollution)
+    name = _coerce_str(result.get("name"))
+    headline = _coerce_str(result.get("headline"))
+    location = _coerce_str(result.get("location"))
+    achievements = _coerce_str_list(result.get("achievements"))
 
-    # Experience: build job_titles list + experience_text
-    job_titles = []
-    experience_lines = []
-    for exp in result.get("experience", []):
-        if isinstance(exp, dict):
-            company = exp.get("company", "")
-            title = exp.get("title", "")
-            dates = exp.get("dates", "")
-            if company and dates:
-                job_titles.append(f"{company} | {dates}")
-            if title:
-                job_titles.append(title)
-            for bullet in exp.get("bullets", []):
-                experience_lines.append(bullet)
-        elif isinstance(exp, str):
-            job_titles.append(exp)
+    # Education: flatten nested dicts to list of strings for display
+    education_lines: list[str] = []
+    edu_raw = result.get("education", [])
+    if isinstance(edu_raw, list):
+        for edu in edu_raw:
+            if isinstance(edu, dict):
+                degree = _coerce_str(edu.get("degree"))
+                institution = _coerce_str(edu.get("institution"))
+                dates = _coerce_str(edu.get("dates"))
+                if degree:
+                    education_lines.append(degree)
+                if institution:
+                    line = institution
+                    if dates:
+                        line += f" | {dates}"
+                    education_lines.append(line)
+                for detail in _coerce_str_list(edu.get("details")):
+                    education_lines.append(detail)
+            elif isinstance(edu, str):
+                education_lines.append(edu)
 
-    # Certifications
-    certifications = result.get("certifications", [])
-    if isinstance(certifications, list):
-        certifications = [c if isinstance(c, str) else str(c) for c in certifications]
+    # Experience: separate job_titles (roles) from companies — don't overload one field
+    job_titles: list[str] = []
+    companies: list[str] = []
+    experience_lines: list[str] = []
+    exp_raw = result.get("experience", [])
+    if isinstance(exp_raw, list):
+        for exp in exp_raw:
+            if isinstance(exp, dict):
+                company = _coerce_str(exp.get("company"))
+                title = _coerce_str(exp.get("title"))
+                if title:
+                    job_titles.append(title)
+                if company:
+                    companies.append(company)
+                for bullet in _coerce_str_list(exp.get("bullets")):
+                    experience_lines.append(bullet)
+            elif isinstance(exp, str):
+                job_titles.append(exp)
+
+    # Certifications: already type-guarded
+    certifications = _coerce_str_list(result.get("certifications"))
 
     # Summary
-    summary = result.get("summary", "")
+    summary = _coerce_str(result.get("summary"))
 
     return CVData(
         raw_text=raw_text,
-        skills=highlight_extras + skills + achievements,
+        # Scoring-semantic: ONLY clean skills (no name/headline/achievements pollution)
+        skills=skills,
         job_titles=job_titles,
+        companies=companies,
         education=education_lines,
         certifications=certifications,
         summary=summary,
         experience_text="\n".join(experience_lines),
+        # Display-only (accessed via CVData.highlights property for CV viewer)
+        name=name,
+        headline=headline,
+        location=location,
+        achievements=achievements,
     )
 
 

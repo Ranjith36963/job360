@@ -32,7 +32,7 @@ class FindAJobSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        queries = self.search_queries
+        queries = self.search_queries[:6]  # Bounded to prevent source timeout
         if not queries:
             logger.info("FindAJob: no search queries in profile, skipping")
             return []

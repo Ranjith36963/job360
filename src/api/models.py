@@ -94,10 +94,19 @@ class CVDetail(BaseModel):
     raw_text: str = ""
     skills: list[str] = []
     job_titles: list[str] = []
+    companies: list[str] = []
     education: list[str] = []
     certifications: list[str] = []
     summary_text: str = ""
     experience_text: str = ""
+    # Display-only fields (NOT used in scoring)
+    name: str = ""
+    headline: str = ""
+    location: str = ""
+    achievements: list[str] = []
+    # Aggregated highlights for the CV viewer — merges skills + titles +
+    # companies + achievements + name/headline/location for in-text highlighting
+    highlights: list[str] = []
 
 
 class ProfileResponse(BaseModel):

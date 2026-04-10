@@ -35,6 +35,13 @@ def run(source, dry_run, log_level, db_path, no_email, dashboard):
             no_notify=no_email,
             launch_dashboard=dashboard,
         ))
+        # C1: Exit with error message if no profile was found
+        if stats.get("error") == "no_profile":
+            click.secho("\nERROR: No user profile found. Job360 needs your CV to match jobs.", fg="red", err=True)
+            click.echo("")
+            click.echo("  python -m src.cli setup-profile --cv path/to/your_cv.pdf")
+            click.echo("  python -m src.cli dashboard  # then use Profile sidebar")
+            raise SystemExit(2)
         click.echo(f"Done: {stats['total_found']} found, {stats['new_jobs']} new, {stats['sources_queried']} sources.")
     except KeyboardInterrupt:
         click.echo("\nJob360: Search interrupted. Exiting gracefully.")
