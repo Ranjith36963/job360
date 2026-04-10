@@ -13,7 +13,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
 
-def _parse_hn_comment(text: str, relevance_keywords: list[str]) -> dict | None:
+def _parse_hn_comment(text: str) -> dict | None:
     """Parse a HN 'Who is Hiring' comment into job fields.
 
     First line typically follows: Company | Location | Remote | URL
@@ -40,16 +40,8 @@ def _parse_hn_comment(text: str, relevance_keywords: list[str]) -> dict | None:
     # Use full text as description
     description = clean[:5000]
 
-    # Infer title from relevance keywords in the text
-    title = ""
-    text_lower = clean.lower()
-    for kw in relevance_keywords:
-        if kw in text_lower:
-            title = f"{company} - Hiring"
-            break
-
-    if not title:
-        return None
+    # Use company name as the title (scorer will evaluate actual relevance)
+    title = f"{company} - Hiring" if company else "Unknown - Hiring"
 
     return {
         "company": company,
@@ -98,11 +90,7 @@ class HackerNewsSource(BaseJobSource):
             if not comment_text:
                 continue
 
-            text_lower = comment_text.lower()
-            if not any(kw in text_lower for kw in self.relevance_keywords):
-                continue
-
-            parsed = _parse_hn_comment(comment_text, self.relevance_keywords)
+            parsed = _parse_hn_comment(comment_text)
             if not parsed:
                 continue
 

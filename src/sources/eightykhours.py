@@ -62,10 +62,6 @@ class EightyKHoursSource(BaseJobSource):
                 else:
                     location = str(locations) if locations else ""
 
-                text = f"{title} {company}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 if not _is_uk_or_remote(location):
                     continue
 

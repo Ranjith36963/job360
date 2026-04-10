@@ -76,9 +76,6 @@ class WorkdaySource(BaseJobSource):
                 for item in data["jobPostings"]:
                     title = item.get("title", "")
                     location = item.get("locationsText", "")
-                    text = f"{title} {location}".lower()
-                    if not any(kw in text for kw in self.relevance_keywords):
-                        continue
                     if not _is_uk_or_remote(location):
                         continue
                     ext_path = item.get("externalPath", "")

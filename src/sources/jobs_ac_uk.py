@@ -53,10 +53,6 @@ class JobsAcUkSource(BaseJobSource):
             description = (item.findtext("description") or "").strip()
             pub_date = (item.findtext("pubDate") or "").strip()
 
-            text = f"{title} {description}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             # Extract company from title (often "Role - University")
             company = "Unknown"
             if " - " in title:

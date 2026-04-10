@@ -70,10 +70,6 @@ class ClimatebaseSource(BaseJobSource):
                 title = item.get("title", "")
                 company = item.get("name_of_employer", "") or item.get("company", "") or "Unknown"
 
-                text = f"{title} {company}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 locations = item.get("locations", [])
                 if isinstance(locations, list):
                     location = ", ".join(str(l) for l in locations) if locations else "United Kingdom"
@@ -116,10 +112,6 @@ class ClimatebaseSource(BaseJobSource):
 
             for match in link_pattern.finditer(html):
                 path, title = match.group(1), match.group(2).strip()
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 apply_url = f"https://climatebase.org{path}"
                 jobs.append(Job(
                     title=title,

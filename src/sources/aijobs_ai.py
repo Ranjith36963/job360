@@ -55,10 +55,6 @@ class AIJobsAISource(BaseJobSource):
                 if len(title) < 5 or title.lower() in ("view all", "see more", "load more"):
                     continue
 
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 # Try to extract company/location from nearby HTML
                 pos = match.start()
                 block = html[max(0, pos - 500):pos + 1000]

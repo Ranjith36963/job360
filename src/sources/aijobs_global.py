@@ -61,10 +61,6 @@ class AIJobsGlobalSource(BaseJobSource):
         if not title:
             return None
 
-        text = title.lower()
-        if not any(kw in text for kw in self.relevance_keywords):
-            return None
-
         location = item.get("location", "") or ""
         if not _is_uk_or_remote(location):
             return None
@@ -98,10 +94,6 @@ class AIJobsGlobalSource(BaseJobSource):
                 url, title = match.group(1), match.group(2).strip()
 
                 if len(title) < 5:
-                    continue
-
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
                     continue
 
                 jobs.append(Job(

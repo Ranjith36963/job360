@@ -30,9 +30,6 @@ class LeverSource(BaseJobSource):
             for item in data:
                 title = item.get("text", "")
                 desc = item.get("descriptionPlain", item.get("description", ""))
-                text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 categories = item.get("categories", {})
                 location = categories.get("location", "") if isinstance(categories, dict) else ""
                 if not _is_uk_or_remote(location):

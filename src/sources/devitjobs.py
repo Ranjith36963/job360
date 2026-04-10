@@ -21,10 +21,6 @@ class DevITJobsSource(BaseJobSource):
         jobs = []
         for item in data:
             title = item.get("name", "")
-            text = title.lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             company = item.get("company", "")
             location = item.get("actualCity", "")
             apply_url = item.get("jobUrl", "")

@@ -29,9 +29,6 @@ class RecruiteeSource(BaseJobSource):
             for item in data["offers"]:
                 title = item.get("title", "")
                 desc = item.get("description", "")
-                text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 location = item.get("location", "")
                 if not _is_uk_or_remote(location):
                     continue

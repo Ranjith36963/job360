@@ -19,9 +19,6 @@ class ArbeitnowSource(BaseJobSource):
         if not data or "data" not in data:
             return []
         for item in data["data"]:
-            text = f"{item.get('title', '')} {item.get('description', '')} {' '.join(item.get('tags', []))}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
             date_found = item.get("created_at") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("title", ""),

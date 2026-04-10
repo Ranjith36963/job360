@@ -48,9 +48,6 @@ class NoFluffJobsSource(BaseJobSource):
             technology = " ".join(item.get("technology", []) if isinstance(item.get("technology"), list) else [])
             text = f"{title} {category} {technology}".lower()
 
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             # Location handling
             location_obj = item.get("location", {})
             if isinstance(location_obj, dict):

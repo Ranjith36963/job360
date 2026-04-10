@@ -63,10 +63,6 @@ class NHSJobsSource(BaseJobSource):
             vacancy_id = (vacancy.findtext("id") or "").strip()
             advert_url = (vacancy.findtext("advertUrl") or "").strip()
 
-            text = f"{title} {salary}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             apply_url = advert_url or f"https://www.jobs.nhs.uk/candidate/jobadvert/{vacancy_id}"
 
             # Parse salary range

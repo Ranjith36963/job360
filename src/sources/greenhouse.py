@@ -33,9 +33,6 @@ class GreenhouseSource(BaseJobSource):
                 title = item.get("title", "")
                 content = item.get("content", "")
                 plain = _HTML_TAG_RE.sub(" ", content)
-                text = f"{title} {plain}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 loc = item.get("location", {})
                 location = loc.get("name", "") if isinstance(loc, dict) else str(loc)
                 if not _is_uk_or_remote(location):

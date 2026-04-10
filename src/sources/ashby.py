@@ -29,9 +29,6 @@ class AshbySource(BaseJobSource):
             for item in data["jobs"]:
                 title = item.get("title", "")
                 desc = item.get("descriptionPlain", "")
-                text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 location = item.get("location", "")
                 if not _is_uk_or_remote(location):
                     continue

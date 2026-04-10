@@ -57,10 +57,6 @@ class JobTensorSource(BaseJobSource):
             company = item.get("company", "") or item.get("company_name", "") or "Unknown"
             location = item.get("location", "") or item.get("city", "") or "UK"
 
-            text = f"{title} {company}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             slug = item.get("slug", "") or item.get("url", "")
             if slug.startswith("http"):
                 apply_url = slug
@@ -106,10 +102,6 @@ class JobTensorSource(BaseJobSource):
 
             for match in link_pattern.finditer(html):
                 path, title = match.group(1), match.group(2).strip()
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 apply_url = f"https://jobtensor.com{path}"
                 jobs.append(Job(
                     title=title,

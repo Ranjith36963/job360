@@ -47,10 +47,6 @@ class WorkAnywhereSource(BaseJobSource):
             description = (item.findtext("description") or "").strip()
             pub_date = (item.findtext("pubDate") or "").strip()
 
-            text = f"{title} {description}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             # Check for UK/Europe/GMT timezone compatibility
             location_text = f"{title} {description}"
             if not _is_uk_or_remote(location_text):

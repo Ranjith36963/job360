@@ -60,9 +60,6 @@ class LinkedInSource(BaseJobSource):
                         continue
                     seen_urls.add(url)
                     title = titles[i].strip()
-                    text = title.lower()
-                    if not any(kw in text for kw in self.relevance_keywords):
-                        continue
                     company = companies[i].strip() if i < len(companies) else ""
                     location = locations[i].strip() if i < len(locations) else "UK"
                     jobs.append(Job(

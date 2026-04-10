@@ -45,9 +45,6 @@ class LandingJobsSource(BaseJobSource):
 
                 title = item.get("title", "")
                 tags = " ".join(item.get("tags", []))
-                text = f"{title} {tags}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
 
                 # Build location string
                 location_parts = []

@@ -55,10 +55,6 @@ class BCSJobsSource(BaseJobSource):
                 if title.lower() in ("jobs", "careers", "job board", "search", "view all"):
                     continue
 
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 if path.startswith("http"):
                     apply_url = path
                 elif path.startswith("/"):

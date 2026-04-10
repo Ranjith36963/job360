@@ -49,9 +49,6 @@ class TheMuseSource(BaseJobSource):
                     description = _HTML_TAG_RE.sub("", contents)[:5000]
                     text = f"{title} {description}".lower()
 
-                    if not any(kw in text for kw in self.relevance_keywords):
-                        continue
-
                     locations = item.get("locations", [])
                     location = ", ".join(
                         loc.get("name", "") for loc in locations if isinstance(loc, dict)

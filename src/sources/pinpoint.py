@@ -32,9 +32,6 @@ class PinpointSource(BaseJobSource):
             for item in postings:
                 title = item.get("title", "")
                 desc = item.get("description", "")
-                text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
                     location = loc.get("name", str(loc))

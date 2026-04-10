@@ -68,10 +68,6 @@ class PersonioSource(BaseJobSource):
                     value = desc.findtext("value") or ""
                     description += f"{name}: {value}\n"
 
-            text = f"{title} {description} {department}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
-
             if not _is_uk_or_remote(office):
                 continue
 

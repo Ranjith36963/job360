@@ -68,9 +68,6 @@ class GoogleJobsSource(BaseJobSource):
                 description = item.get("description", "")
                 text = f"{title} {description}".lower()
 
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
-
                 # Deduplicate within this source
                 dedup_key = (company.lower(), title.lower())
                 if dedup_key in seen_keys:

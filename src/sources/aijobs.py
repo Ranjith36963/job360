@@ -25,8 +25,6 @@ class AIJobsSource(BaseJobSource):
             location = item.get("location", "")
             text = f"{title} {description}".lower()
 
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
             if not _is_uk_or_remote(location):
                 continue
 

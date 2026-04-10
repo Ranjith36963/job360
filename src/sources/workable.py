@@ -29,9 +29,6 @@ class WorkableSource(BaseJobSource):
             for item in data["results"]:
                 title = item.get("title", "")
                 desc = item.get("shortDescription", "")
-                text = f"{title} {desc}".lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
                     location = f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", ")

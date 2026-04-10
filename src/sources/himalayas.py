@@ -22,10 +22,6 @@ class HimalayasSource(BaseJobSource):
         if not data or "jobs" not in data:
             return []
         for item in data["jobs"]:
-            categories = " ".join(item.get("categories", [])) if isinstance(item.get("categories"), list) else ""
-            text = f"{item.get('title', '')} {item.get('excerpt', '')} {categories}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
             loc_restrictions = item.get("locationRestrictions", [])
             location = ", ".join(loc_restrictions) if isinstance(loc_restrictions, list) else str(loc_restrictions)
             date_found = item.get("pubDate") or item.get("createdAt") or datetime.now(timezone.utc).isoformat()

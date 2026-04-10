@@ -24,10 +24,6 @@ class RemoteOKSource(BaseJobSource):
         for item in data[1:]:
             if not isinstance(item, dict):
                 continue
-            tags = " ".join(item.get("tags", [])) if isinstance(item.get("tags"), list) else ""
-            text = f"{item.get('position', '')} {item.get('description', '')} {tags}".lower()
-            if not any(kw in text for kw in self.relevance_keywords):
-                continue
             date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
             jobs.append(Job(
                 title=item.get("position", ""),

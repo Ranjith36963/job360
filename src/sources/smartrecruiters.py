@@ -31,9 +31,6 @@ class SmartRecruitersSource(BaseJobSource):
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in data["content"]:
                 title = item.get("name", "")
-                text = title.lower()
-                if not any(kw in text for kw in self.relevance_keywords):
-                    continue
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
                     city = loc.get("city", "")
