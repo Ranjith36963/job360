@@ -9,12 +9,19 @@ from typing import Optional
 @dataclass
 class CVData:
     raw_text: str = ""
+    # Scoring-semantic fields — these flow into SearchConfig and influence matching
     skills: list[str] = field(default_factory=list)
     job_titles: list[str] = field(default_factory=list)
+    companies: list[str] = field(default_factory=list)
     education: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
     summary: str = ""
     experience_text: str = ""
+    # Display-only fields — used by CV viewer for highlighting, NOT for scoring
+    name: str = ""
+    headline: str = ""
+    location: str = ""
+    achievements: list[str] = field(default_factory=list)
     # LinkedIn-sourced data
     linkedin_positions: list[dict] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
@@ -23,6 +30,22 @@ class CVData:
     github_languages: dict[str, int] = field(default_factory=dict)
     github_topics: list[str] = field(default_factory=list)
     github_skills_inferred: list[str] = field(default_factory=list)
+
+    @property
+    def highlights(self) -> list[str]:
+        """All terms to highlight in the CV viewer (scoring-safe aggregation)."""
+        result = []
+        if self.name:
+            result.append(self.name)
+        if self.headline:
+            result.append(self.headline)
+        if self.location:
+            result.append(self.location)
+        result.extend(self.skills)
+        result.extend(self.job_titles)
+        result.extend(self.companies)
+        result.extend(self.achievements)
+        return result
 
 
 @dataclass

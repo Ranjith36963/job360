@@ -31,7 +31,9 @@ class JSearchSource(BaseJobSource):
             "X-RapidAPI-Key": self._api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
-        queries = self.search_queries
+        # Bounded to 4 queries: JSearch has 3.0s rate limit + 2.0s sleep between
+        # calls = ~20s base, plus retries. Source timeout is 120s (main.py).
+        queries = self.search_queries[:4]
         if not queries:
             logger.info("JSearch: no search queries in profile, skipping")
             return []

@@ -18,7 +18,7 @@ class AIJobsGlobalSource(BaseJobSource):
         jobs = []
         seen_urls = set()
 
-        queries = self.search_queries
+        queries = self.search_queries[:6]  # Bounded to prevent source timeout
         if not queries:
             logger.info("AI Jobs Global: no search queries in profile, skipping")
             return []

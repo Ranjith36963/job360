@@ -19,7 +19,7 @@ class NHSJobsSource(BaseJobSource):
         jobs = []
         seen_ids = set()
 
-        queries = self.search_queries
+        queries = self.search_queries[:6]  # Bounded to prevent source timeout
         if not queries:
             logger.info("NHS Jobs: no search queries in profile, skipping")
             return []

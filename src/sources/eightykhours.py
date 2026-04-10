@@ -30,7 +30,7 @@ class EightyKHoursSource(BaseJobSource):
             "Content-Type": "application/json",
         }
 
-        queries = self.search_queries
+        queries = self.search_queries[:6]  # Bounded to prevent source timeout
         if not queries:
             logger.info("80,000 Hours: no search queries in profile, skipping")
             return []

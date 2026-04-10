@@ -469,15 +469,29 @@ class TestLLMCVParser:
         }
 
         cv = _llm_result_to_cvdata("raw cv text here", result)
+        # Scoring-semantic fields: ONLY clean skills (no name/achievement pollution)
         assert "Python" in cv.skills
         assert "AWS Bedrock" in cv.skills
-        assert "achieving 95% response accuracy" in cv.skills
-        assert "Ranjith Guruprakash" in cv.skills  # name for highlighting
-        assert any("Calnex" in t for t in cv.job_titles)
+        assert "Ranjith Guruprakash" not in cv.skills  # name is in cv.name, not skills
+        assert "achieving 95% response accuracy" not in cv.skills  # in cv.achievements
+        # Display-only fields
+        assert cv.name == "Ranjith Guruprakash"
+        assert "Generative AI" in cv.headline
+        assert "Kingdom" in cv.location
+        assert "achieving 95% response accuracy" in cv.achievements
+        # Companies and titles are separate
+        assert any("Calnex" in c for c in cv.companies)
         assert any("AI Solutions Engineer" in t for t in cv.job_titles)
+        assert "Calnex" not in " ".join(cv.job_titles)  # company stays out of titles
+        # Education and certifications
         assert any("MSc" in e for e in cv.education)
         assert any("AWS" in c for c in cv.certifications)
         assert "1.5 years" in cv.summary
+        # highlights property merges everything for the CV viewer
+        assert "Ranjith Guruprakash" in cv.highlights
+        assert "Python" in cv.highlights
+        assert "Calnex" in cv.highlights
+        assert "achieving 95% response accuracy" in cv.highlights
 
     def test_llm_result_to_cvdata_medical_cv(self):
         """LLM result for a medical CV works just as well — domain-agnostic."""
@@ -510,10 +524,18 @@ class TestLLMCVParser:
         assert "Echocardiography" in cv.skills
         assert "HIPAA" in cv.skills
         assert "Patient Triage" in cv.skills
-        assert "Dr. Sarah Thompson" in cv.skills  # name for highlighting
+        # Scoring-safe: name is NOT in skills
+        assert "Dr. Sarah Thompson" not in cv.skills
+        assert cv.name == "Dr. Sarah Thompson"
+        assert cv.headline == "Cardiology Consultant"
         assert any("Cardiology Consultant" in t for t in cv.job_titles)
+        assert any("NHS Royal Free" in c for c in cv.companies)
         assert any("Oxford" in e for e in cv.education)
         assert any("MRCP" in c for c in cv.certifications)
+        # Highlights for CV viewer merges everything
+        assert "Dr. Sarah Thompson" in cv.highlights
+        assert "HIPAA" in cv.highlights
+        assert "NHS Royal Free" in cv.highlights
 
     def test_llm_result_to_cvdata_empty(self):
         """Empty LLM result produces empty CVData without crashing."""
@@ -524,6 +546,70 @@ class TestLLMCVParser:
         assert cv.skills == []
         assert cv.job_titles == []
         assert cv.education == []
+
+    def test_llm_result_type_guard_string_skills(self):
+        """Weaker LLMs may return 'skills' as a comma-separated string — handle it."""
+        from src.profile.cv_parser import _llm_result_to_cvdata
+
+        result = {"skills": "Python, Java, Docker, Kubernetes"}
+        cv = _llm_result_to_cvdata("text", result)
+        assert "Python" in cv.skills
+        assert "Java" in cv.skills
+        assert "Docker" in cv.skills
+        assert "Kubernetes" in cv.skills
+
+    def test_llm_result_type_guard_none_skills(self):
+        """LLM returning None for skills should not crash."""
+        from src.profile.cv_parser import _llm_result_to_cvdata
+
+        cv = _llm_result_to_cvdata("text", {"skills": None, "achievements": None})
+        assert cv.skills == []
+        assert cv.achievements == []
+
+    def test_llm_result_type_guard_dict_items(self):
+        """LLM returning list of dicts instead of strings — extract name field."""
+        from src.profile.cv_parser import _llm_result_to_cvdata
+
+        result = {
+            "skills": [{"name": "Python"}, {"name": "Docker"}, {"skill": "AWS"}]
+        }
+        cv = _llm_result_to_cvdata("text", result)
+        assert "Python" in cv.skills
+        assert "Docker" in cv.skills
+        assert "AWS" in cv.skills
+
+    def test_llm_result_type_guard_wrong_types(self):
+        """Numbers, bools, nested dicts should be coerced or dropped, never crash."""
+        from src.profile.cv_parser import _llm_result_to_cvdata
+
+        result = {
+            "name": 123,  # wrong type
+            "skills": ["Python", None, 42, {"name": "Docker"}],  # mixed
+            "headline": ["not", "a", "string"],  # wrong type
+            "summary": None,
+        }
+        cv = _llm_result_to_cvdata("text", result)
+        assert cv.name == "123"  # coerced
+        assert cv.headline == ""  # wrong type → empty
+        assert cv.summary == ""
+        assert "Python" in cv.skills
+        assert "Docker" in cv.skills
+        # None and 42 dropped from list cleanly
+
+
+class TestCVParserFailures:
+    """Tests for C2 — parse_cv_async must raise, not silently return empty."""
+
+    @pytest.mark.asyncio
+    async def test_parse_cv_async_raises_on_empty_text(self):
+        """If text extraction yields empty string, raise RuntimeError."""
+        import pytest
+        from unittest.mock import patch
+        from src.profile.cv_parser import parse_cv_async
+
+        with patch("src.profile.cv_parser.extract_text", return_value=""):
+            with pytest.raises(RuntimeError, match="Failed to extract text"):
+                await parse_cv_async("broken.pdf")
 
 
 class TestCVParserEdgeCases:
