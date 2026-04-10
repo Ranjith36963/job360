@@ -9,19 +9,6 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.jsearch")
 
-# Broader queries to improve UK coverage (stay within 100 req/month free tier)
-JSEARCH_QUERIES = [
-    "AI Engineer UK",
-    "Machine Learning Engineer London",
-    "Data Scientist UK",
-    "NLP Engineer London",
-    "MLOps Engineer UK",
-    "Deep Learning Engineer London",
-    "Computer Vision Engineer UK",
-    "LLM Engineer UK",
-]
-
-
 class JSearchSource(BaseJobSource):
     name = "jsearch"
     category = "keyed_api"
@@ -44,7 +31,10 @@ class JSearchSource(BaseJobSource):
             "X-RapidAPI-Key": self._api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
-        queries = self.search_queries if self.search_queries else JSEARCH_QUERIES
+        queries = self.search_queries
+        if not queries:
+            logger.info("JSearch: no search queries in profile, skipping")
+            return []
         for i, query in enumerate(queries):
             if i > 0:
                 await asyncio.sleep(2.0)

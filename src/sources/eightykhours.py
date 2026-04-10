@@ -16,12 +16,6 @@ _ALGOLIA_API_KEY = os.getenv("EIGHTYKHOURS_ALGOLIA_API_KEY", "d1d7f2c8696e7b3683
 _ALGOLIA_INDEX = "jobs_prod"
 _ALGOLIA_URL = f"https://{_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{_ALGOLIA_INDEX}/query"
 
-_SEARCH_QUERIES = [
-    "AI", "machine learning", "data science", "deep learning",
-    "NLP", "computer vision", "MLOps",
-]
-
-
 class EightyKHoursSource(BaseJobSource):
     """80,000 Hours — high-impact AI safety jobs via Algolia API."""
     name = "eightykhours"
@@ -36,7 +30,12 @@ class EightyKHoursSource(BaseJobSource):
             "Content-Type": "application/json",
         }
 
-        for query in _SEARCH_QUERIES:
+        queries = self.search_queries
+        if not queries:
+            logger.info("80,000 Hours: no search queries in profile, skipping")
+            return []
+
+        for query in queries:
             body = {
                 "query": query,
                 "hitsPerPage": 50,

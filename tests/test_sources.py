@@ -50,6 +50,12 @@ from src.sources.successfactors import SuccessFactorsSource
 from src.sources.aijobs_global import AIJobsGlobalSource
 from src.sources.aijobs_ai import AIJobsAISource
 from src.sources.nomis import NomisSource
+from src.profile.models import SearchConfig
+
+
+def _make_search_config(queries: list[str]) -> SearchConfig:
+    """Return a minimal SearchConfig with the given search queries."""
+    return SearchConfig(search_queries=queries)
 
 
 def _run(coro):
@@ -133,11 +139,24 @@ def test_jsearch_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://jsearch\.p\.rapidapi\.com/search.*"), payload=JSEARCH_PAYLOAD, repeat=True)
-                source = JSearchSource(session, api_key="test-key")
+                sc = _make_search_config(["GenAI Engineer UK"])
+                source = JSearchSource(session, api_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "GenAI Engineer"
                 assert jobs[0].source == "jsearch"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_jsearch_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = JSearchSource(session, api_key="test-key")
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())
@@ -326,11 +345,24 @@ def test_findajob_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://findajob\.dwp\.gov\.uk/search.*"),
                       body=html, content_type="text/html", repeat=True)
-                source = FindAJobSource(session)
+                sc = _make_search_config(["AI engineer UK"])
+                source = FindAJobSource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "findajob"
                 assert "findajob.dwp.gov.uk" in jobs[0].apply_url
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_findajob_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = FindAJobSource(session)
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())
@@ -413,11 +445,24 @@ def test_linkedin_parses_html():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
                       body=html, content_type="text/html", repeat=True)
-                source = LinkedInSource(session)
+                sc = _make_search_config(["AI engineer UK"])
+                source = LinkedInSource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "linkedin"
                 assert "linkedin.com" in jobs[0].apply_url
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = LinkedInSource(session)
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())
@@ -1323,7 +1368,8 @@ def test_nhs_jobs_parses_xml():
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.jobs\.nhs\.uk/api/v1/search_xml.*"),
                       body=NHS_JOBS_XML, content_type="application/xml", repeat=True)
-                source = NHSJobsSource(session)
+                sc = _make_search_config(["data scientist"])
+                source = NHSJobsSource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "nhs_jobs"
@@ -1331,6 +1377,18 @@ def test_nhs_jobs_parses_xml():
                 assert jobs[0].company == "NHS Digital"
                 assert jobs[0].salary_min == 40000
                 assert jobs[0].salary_max == 55000
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nhs_jobs_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = NHSJobsSource(session)
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())
@@ -1630,12 +1688,25 @@ def test_eightykhours_parses_algolia():
             with aioresponses() as m:
                 m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"),
                        payload=EIGHTYKHOURS_ALGOLIA_RESPONSE, repeat=True)
-                source = EightyKHoursSource(session)
+                sc = _make_search_config(["AI safety researcher"])
+                source = EightyKHoursSource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "eightykhours"
                 assert "AI Safety" in jobs[0].title
                 assert jobs[0].company == "SafetyOrg"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_eightykhours_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = EightyKHoursSource(session)
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())
@@ -1762,11 +1833,24 @@ def test_aijobs_global_parses_html():
                 m.get(re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
                       payload=[{"label": "ML Engineer", "url": "https://ai-jobs.global/jobs/123", "company": "GlobalCo", "location": "London, UK"}],
                       repeat=True)
-                source = AIJobsGlobalSource(session)
+                sc = _make_search_config(["ML engineer"])
+                source = AIJobsGlobalSource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
                 if jobs:
                     assert all(j.source == "aijobs_global" for j in jobs)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_aijobs_global_skips_without_queries():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = AIJobsGlobalSource(session)
+            jobs = await source.fetch_jobs()
+            assert jobs == []
         finally:
             await session.close()
     _run(_test())

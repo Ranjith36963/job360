@@ -9,9 +9,6 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.aijobs_global")
 
-_SEARCH_QUERIES = ["AI", "machine learning", "data science", "deep learning"]
-
-
 class AIJobsGlobalSource(BaseJobSource):
     """AI Jobs Worldwide — ai-jobs.global (WordPress + WP Job Manager)."""
     name = "aijobs_global"
@@ -21,7 +18,12 @@ class AIJobsGlobalSource(BaseJobSource):
         jobs = []
         seen_urls = set()
 
-        for query in _SEARCH_QUERIES:
+        queries = self.search_queries
+        if not queries:
+            logger.info("AI Jobs Global: no search queries in profile, skipping")
+            return []
+
+        for query in queries:
             # Try WP Job Manager AJAX endpoint
             params = {
                 "action": "workscout_incremental_jobs_suggest",
