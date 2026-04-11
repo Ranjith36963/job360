@@ -296,11 +296,12 @@ def render_job_table(
     """Render a list of jobs as a single compact HTML table string.
 
     The skill-tier arguments are threaded through to extract_matched_skills
-    so the tooltip can highlight profile-specific skills. When None is passed
-    (e.g. dashboard called without a loaded profile), extract_matched_skills
-    falls back to its own defaults — which are now empty, so the tooltip
-    silently disappears. Callers should pass search_config.primary_skills etc.
-    whenever a profile is loaded, otherwise the tooltip renders nothing.
+    so the tooltip can highlight profile-specific skills. When empty lists
+    are passed (or None), no matches render and the tooltip is suppressed —
+    extract_matched_skills iterates whatever list it receives, and the
+    dashboard caller below passes empty lists when no profile is loaded.
+    Callers should pass search_config.primary_skills etc. whenever a
+    profile is loaded, otherwise the tooltip renders nothing.
     """
     if not jobs:
         return '<p style="color:#999;font-size:13px;padding:4px 0;">No jobs in this period</p>'
