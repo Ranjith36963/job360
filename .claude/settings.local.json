@@ -130,7 +130,8 @@
       "Bash(where markdownlint:*)",
       "Bash(where alex:*)",
       "Bash(where write-good:*)",
-      "Bash(npm list:*)"
+      "Bash(npm list:*)",
+      "Bash(mv data:*)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -3,10 +3,50 @@ name = "job360"
 version = "1.0.0"
 description = "Automated UK job search system supporting any professional domain"
 requires-python = ">=3.9"
+dependencies = [
+    "aiohttp>=3.9.0",
+    "aiosqlite>=0.19.0",
+    "python-dotenv>=1.0.0",
+    "jinja2>=3.1.0",
+    "click>=8.1.0",
+    "streamlit>=1.30.0",
+    "pandas>=2.0.0",
+    "plotly>=5.18.0",
+    "pdfplumber>=0.10.0",
+    "python-docx>=1.1.0",
+    "rich>=13.0.0",
+    "humanize>=4.9.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27.0",
+    "google-generativeai>=0.8.0",
+    "groq>=0.11.0",
+    "cerebras-cloud-sdk>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "aioresponses>=0.7.0",
+    "fpdf2>=2.7.0",
+]
+indeed = [
+    "python-jobspy",
+]
+
+[project.scripts]
+job360 = "src.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py39"
