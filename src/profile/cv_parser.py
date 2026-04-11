@@ -158,7 +158,7 @@ async def parse_cv_async(file_path: str) -> CVData:
 
 
 def parse_cv(file_path: str) -> CVData:
-    """Synchronous wrapper for parse_cv_async (used by CLI and Streamlit)."""
+    """Synchronous wrapper for parse_cv_async (used by CLI)."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

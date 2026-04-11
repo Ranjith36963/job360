@@ -127,7 +127,7 @@ def parse_linkedin_zip(file_path: str) -> dict:
 
 
 def parse_linkedin_zip_from_bytes(content: bytes) -> dict:
-    """Parse from in-memory bytes (for Streamlit file_uploader)."""
+    """Parse from in-memory bytes (for HTTP file upload handlers)."""
     try:
         with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
             return _parse_zip(zf)

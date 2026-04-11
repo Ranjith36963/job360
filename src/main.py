@@ -244,7 +244,7 @@ async def run_search(
         logger.error("")
         logger.error("Get started with one of:")
         logger.error("  python -m src.cli setup-profile --cv path/to/cv.pdf")
-        logger.error("  python -m src.cli dashboard  # then use Profile sidebar")
+        logger.error("  python -m src.cli api  # then upload a CV via http://localhost:3000/profile")
         logger.error("")
         logger.error("Without a profile, no hardcoded AI/ML defaults are used —")
         logger.error("scoring would return zero matches for every job.")

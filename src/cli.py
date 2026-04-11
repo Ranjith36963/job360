@@ -40,7 +40,7 @@ def run(source, dry_run, log_level, db_path, no_email, dashboard):
             click.secho("\nERROR: No user profile found. Job360 needs your CV to match jobs.", fg="red", err=True)
             click.echo("")
             click.echo("  python -m src.cli setup-profile --cv path/to/your_cv.pdf")
-            click.echo("  python -m src.cli dashboard  # then use Profile sidebar")
+            click.echo("  python -m src.cli api  # then upload a CV via http://localhost:3000/profile")
             raise SystemExit(2)
         click.echo(f"Done: {stats['total_found']} found, {stats['new_jobs']} new, {stats['sources_queried']} sources.")
     except KeyboardInterrupt:
@@ -147,7 +147,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
         if cv_data.job_titles:
             click.echo(f"  Found {len(cv_data.job_titles)} job titles: {', '.join(cv_data.job_titles[:5])}")
     else:
-        click.echo("No CV provided. You can add one later via the dashboard.")
+        click.echo("No CV provided. You can add one later via the frontend (http://localhost:3000/profile) or the /api/profile endpoint.")
 
     # Parse LinkedIn export if provided
     if linkedin_path:
