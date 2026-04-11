@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 48 sources (via `SOURCE_REGISTRY` in `src/main.py`), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Streamlit dashboard. Users can personalise searches by providing a CV (PDF/DOCX), LinkedIn data export (ZIP), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, it defaults to the original AI/ML keywords.
+Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 48 sources (via `SOURCE_REGISTRY` in `src/main.py`), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Next.js frontend (FastAPI backend at `src/api/`, frontend at `frontend/`). Users can personalise searches by providing a CV (PDF/DOCX), LinkedIn data export (ZIP), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, it defaults to the original AI/ML keywords.
 
 ## Tech Stack
 
@@ -15,9 +15,6 @@ Job360 is an automated UK job search system supporting **any professional domain
 | python-dotenv | >=1.0.0 | .env file loading |
 | jinja2 | >=3.1.0 | HTML report templates |
 | click | >=8.1.0 | CLI framework |
-| streamlit | >=1.30.0 | Web dashboard |
-| pandas | >=2.0.0 | Data manipulation in dashboard |
-| plotly | >=5.18.0 | Charts in dashboard |
 | pdfplumber | >=0.10.0 | PDF text extraction for CV parsing |
 | python-docx | >=1.1.0 | DOCX text extraction for CV parsing |
 | rich | >=13.0.0 | Terminal table rendering |
@@ -46,7 +43,6 @@ python -m src.cli run --source arbeitnow           # Single source
 python -m src.cli run --dry-run --log-level DEBUG   # Dry run with debug
 python -m src.cli run --db-path /tmp/test.db        # Custom DB path
 python -m src.cli run --no-email                    # Skip notifications
-python -m src.cli run --dashboard                   # Launch dashboard after
 
 # Profile setup (personalise for any domain)
 python -m src.cli setup-profile --cv path/to/cv.pdf                    # CV only
@@ -55,19 +51,17 @@ python -m src.cli setup-profile --cv cv.pdf --github username          # CV + Gi
 python -m src.cli setup-profile --linkedin data.zip --github user      # All enrichment sources
 
 # Other CLI commands
-python -m src.cli dashboard    # Launch Streamlit UI
 python -m src.cli status       # Last run stats
 python -m src.cli sources      # List all 48 sources
 python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
 python -m src.cli view --visa-only                  # Filter by visa
 
 # Tests (all use mocked HTTP via aioresponses)
-python -m pytest tests/ -v                              # Run all 397 tests
+python -m pytest tests/ -v                              # Run all tests
 python -m pytest tests/test_scorer.py -v                # Scoring tests (63)
 python -m pytest tests/test_sources.py -v               # All 48 sources (65)
 python -m pytest tests/test_profile.py -v               # Profile system (56)
 python -m pytest tests/test_linkedin_github.py -v       # LinkedIn/GitHub enrichment (54)
-python -m pytest tests/test_dashboard.py -v             # Dashboard helpers (6)
 python -m pytest tests/test_scorer.py::test_name -v     # Single test
 ```
 
@@ -77,14 +71,13 @@ python -m pytest tests/test_scorer.py::test_name -v     # Single test
 job360/
 ├── src/
 │   ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (48), _build_sources()
-│   ├── cli.py               # Click CLI: run, api, dashboard, status, sources, view, setup-profile
+│   ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │   ├── api/
 │   │   ├── main.py          # FastAPI app with CORS, lifespan (DB init/close)
 │   │   ├── models.py        # Pydantic request/response models (matches frontend types.ts)
 │   │   ├── dependencies.py  # Shared deps: get_db(), save_upload_to_temp()
 │   │   └── routes/          # 6 route modules: health, jobs, actions, profile, search, pipeline
 │   ├── cli_view.py          # Rich terminal table viewer (time-bucketed)
-│   ├── dashboard.py         # Streamlit web dashboard with profile setup sidebar
 │   ├── models.py            # Job dataclass with normalized_key() for dedup
 │   ├── config/
 │   │   ├── settings.py      # Env vars, paths, RATE_LIMITS (48 entries), thresholds
@@ -140,7 +133,7 @@ The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **S
 ### Key modules
 
 - `src/main.py` — Central orchestrator with `run_search()` and `SOURCE_REGISTRY` dict (48 entries) mapping source names to classes. `_build_sources()` instantiates all sources with their config. Both `"indeed"` and `"glassdoor"` map to `JobSpySource`.
-- `src/cli.py` — Click CLI with `run`, `dashboard`, `status`, `sources`, `view`, `setup-profile` commands. `setup-profile` accepts `--cv`, `--linkedin`, and `--github` options.
+- `src/cli.py` — Click CLI with `run`, `api`, `status`, `sources`, `view`, `setup-profile` commands. `setup-profile` accepts `--cv`, `--linkedin`, and `--github` options.
 - `src/cli_view.py` — Rich terminal table viewer for browsing jobs from the DB
 - `src/models.py` — `Job` dataclass with `normalized_key()` for dedup (strips company suffixes like Ltd/Inc/PLC and region suffixes like UK/US/EMEA, lowercases)
 - `src/config/settings.py` — All env vars, paths, `RATE_LIMITS` dict (48 entries, per-source), thresholds. Constants: `MIN_MATCH_SCORE=30`, `MAX_RETRIES=3`, `RETRY_BACKOFF=[1,2,4]`, `REQUEST_TIMEOUT=30`.
@@ -201,8 +194,8 @@ Key test files:
 - `test_deduplicator.py` — 13 tests: dedup logic, company suffix stripping
 - `test_cli.py` — 11 tests: CLI commands, `len(SOURCE_REGISTRY) == 48` assertion (update when adding/removing sources)
 - `test_main.py` — 12 tests: orchestrator with mocked sources
-- `test_dashboard.py` — 6 tests: URL sanitization (`_safe_url`) for XSS prevention
 - `test_api.py` — 9 tests: FastAPI endpoints (health, status, sources, jobs, actions, profile, pipeline, integration)
+- `test_e2e_profile_upload.py` — 4 tests: CV upload → profile retrieval round-trip with mocked LLM
 
 ## Environment
 

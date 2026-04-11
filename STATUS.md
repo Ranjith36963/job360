@@ -26,7 +26,6 @@
 | BaseJobSource properties | `src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
 | 47 source file refactor | `src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `src/main.py` | Done -- loads profile, creates scorer, passes config |
-| Dashboard Profile UI | `src/dashboard.py` | Done -- sidebar expander with CV upload + form |
 | CLI setup-profile | `src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `tests/test_profile.py` | Done -- 56 tests covering all profile modules |
 | Dependencies | `requirements.txt` | Done -- added pdfplumber, python-docx |
@@ -80,7 +79,7 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| DB error logging | `src/cli_view.py`, `src/dashboard.py` | Done -- `except Exception` blocks now log errors before returning empty |
+| DB error logging | `src/cli_view.py` | Done -- `except Exception` blocks now log errors before returning empty |
 | Magic number elimination | `src/main.py`, `tests/test_main.py` | Done -- `SOURCE_INSTANCE_COUNT` constant replaces hard-coded 47 |
 | Schema migration | `src/storage/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
 | Source health tracking | `src/main.py`, `src/storage/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
@@ -112,9 +111,9 @@
 - Deduplication merges same jobs from different sources
 - SQLite database with auto-purge (30 days)
 - Email, Slack, Discord notifications (when configured)
-- CLI commands: run, view, dashboard, status, sources, setup-profile
-- Streamlit dashboard with filters, charts, profile setup
-- 387 tests pass (3 skip on Windows)
+- CLI commands: run, api, view, status, sources, setup-profile
+- Next.js frontend (`frontend/`) talking to FastAPI backend (`src/api/`) with filters, profile setup, CV viewer
+- Full test suite passes (3 skip on Windows)
 
 ---
 
@@ -173,10 +172,9 @@
 
 ### Not covered or lightly covered
 
-- `src/dashboard.py` — Streamlit UI is not unit-tested (would need Streamlit testing framework)
 - `src/utils/rate_limiter.py` — now has 5 dedicated tests in `test_rate_limiter.py`
 - Live HTTP behavior — all tests use mocked responses, so real API format changes are not caught by tests
-- Profile dashboard sidebar — interactive Streamlit profile form is not tested
+- Next.js frontend pixel-level UI — Playwright browser testing not yet wired; API-level round-trip is covered by `test_e2e_profile_upload.py`
 - Edge cases in LinkedIn ZIP parsing — malformed ZIPs, missing CSVs tested but exotic edge cases possible
 
 ---

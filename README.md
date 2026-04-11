@@ -1,12 +1,12 @@
 # Job360
 
-Automated UK job search system supporting any professional domain. Aggregates jobs from 48 sources, scores them 0-100 against your profile (CV, LinkedIn, GitHub, or manual preferences), deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, Rich terminal table, and a Streamlit dashboard. Without a profile, defaults to AI/ML job search.
+Automated UK job search system supporting any professional domain. Aggregates jobs from 48 sources, scores them 0-100 against your profile (CV, LinkedIn, GitHub, or manual preferences), deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, Rich terminal table, and a Next.js frontend (FastAPI backend). Without a profile, defaults to AI/ML job search.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    CLI["CLI (Click)\njob360 run / view / dashboard / status / sources / setup-profile"]
+    CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
     Cron["Cron 4AM/4PM\nEurope/London"]
 
     subgraph Sources["48 Job Sources"]
@@ -87,7 +87,8 @@ flowchart TD
     DB --> CSV[CSV Export]
     DB --> Report[Markdown Report]
     DB --> RichTable[Rich Terminal Table\ncli view]
-    DB --> Dashboard[Streamlit Dashboard]
+    DB --> FastAPI[FastAPI backend\nsrc/api/]
+    FastAPI --> NextJS[Next.js frontend\nfrontend/]
 ```
 
 ## Features
@@ -130,23 +131,20 @@ flowchart TD
 - **NotificationChannel ABC** — add a new channel (e.g. Telegram) by implementing one class
 
 ### CLI (Click)
-- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email`, `--dashboard` options
+- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email` options
 - `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only`, `--db-path` filters
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
-- `dashboard` — launch Streamlit web UI
+- `api` — start the FastAPI backend (`src/api/`) on `localhost:8000`
 - `status` — show last run stats from database
 - `sources` — list all 48 available sources
 
-### Dashboard (Streamlit)
-- Sidebar filters: text search, score range, source, location, visa sponsorship
+### Web UI (Next.js frontend + FastAPI backend)
+- **Backend** (`src/api/`): FastAPI routes at `/api/jobs`, `/api/profile`, `/api/actions`, `/api/pipeline`, `/api/search`, `/api/health`
+- **Frontend** (`frontend/`): Next.js 16 app with pages for job board, profile setup, search, pipeline tracking
 - Profile setup: CV upload + LinkedIn ZIP + GitHub username + preferences form
-- KPI row: total jobs, avg score, top score, visa sponsors, sources count
-- Score distribution histogram + jobs by source pie chart
-- Sortable job listings table with clickable apply links
-- CSV export button
-- Run history with timeline chart
-- Previous exports file browser
-- Trigger new search from UI
+- CV viewer with inline neon-highlighted extractions (skills, titles, companies, achievements)
+- Sortable job listings with clickable apply links
+- Run with `python -m src.cli api` and `cd frontend && npm run dev`
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
@@ -210,8 +208,9 @@ python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin-export.zip --git
 # 6. View results in terminal
 python -m src.cli view --hours 24 --min-score 50
 
-# 7. Launch dashboard
-python -m src.cli dashboard
+# 7. Run the web UI (FastAPI + Next.js)
+python -m src.cli api                  # Backend on :8000
+cd frontend && npm run dev             # Frontend on :3000 (in another terminal)
 
 # 8. Schedule (optional)
 bash cron_setup.sh
@@ -232,9 +231,6 @@ python -m src.cli run --dry-run
 
 # Skip email notifications
 python -m src.cli run --no-email
-
-# Launch dashboard after pipeline completes
-python -m src.cli run --dashboard
 
 # Debug logging
 python -m src.cli run --log-level DEBUG
@@ -257,8 +253,9 @@ python -m src.cli view --hours 24 --min-score 50
 python -m src.cli view --source reed --visa-only
 python -m src.cli view --db-path /tmp/test.db
 
-# Launch Streamlit dashboard
-python -m src.cli dashboard
+# Start the FastAPI backend for the Next.js frontend
+python -m src.cli api                      # defaults to localhost:8000
+python -m src.cli api --port 3001 --host 0.0.0.0
 
 # Show last run stats
 python -m src.cli status
@@ -362,10 +359,10 @@ for channel in get_configured_channels():
 job360/
 ├── src/
 │   ├── main.py                  # Central orchestrator (run_search, SOURCE_REGISTRY)
-│   ├── cli.py                   # Click CLI (run, view, dashboard, status, sources, setup-profile)
+│   ├── cli.py                   # Click CLI (run, api, view, status, sources, setup-profile)
 │   ├── cli_view.py              # Rich terminal table viewer (time-bucketed)
 │   ├── models.py                # Job dataclass with company normalisation
-│   ├── dashboard.py             # Streamlit web dashboard (filters, charts, KPIs, profile setup)
+│   ├── api/                     # FastAPI backend (main, routes/, models, dependencies)
 │   ├── config/
 │   │   ├── settings.py          # Env vars, rate limits, timeouts, thresholds
 │   │   ├── keywords.py          # Default keywords + KNOWN_SKILLS (391) + KNOWN_TITLE_PATTERNS (107)
@@ -435,6 +432,7 @@ Each run produces:
 | Email | Inbox | HTML digest with top jobs + CSV attachment |
 | Slack | Channel | Block Kit message with top 10 jobs |
 | Discord | Channel | Embed message with top 10 jobs |
-| Dashboard | `http://localhost:8501` | Interactive Streamlit UI |
+| Web UI | `http://localhost:3000` | Next.js frontend (run `cd frontend && npm run dev`) |
+| API | `http://localhost:8000` | FastAPI backend (run `python -m src.cli api`) |
 | Console | Terminal | Time-bucketed summary of new jobs found |
 | Logs | `data/logs/job360.log` | Rotating log file (5MB, 3 backups) |

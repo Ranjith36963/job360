@@ -8,7 +8,7 @@ Job360 is a UK-focused job search aggregator that fetches jobs from 48 sources, 
 User Input                    Pipeline                         Output
 -----------                   --------                         ------
                           +-> Sources (48) --+
-CLI / Dashboard --+       |   (async fetch)  |
+CLI / Frontend ---+       |   (async fetch)  |
                   |       |                  v
 Profile (CV+Prefs)+--> main.py ---------> Scorer ---------> Deduplicator
   + LinkedIn ZIP  |   (orchestrator)    (0-100 score)     (normalized_key)
@@ -16,9 +16,11 @@ Profile (CV+Prefs)+--> main.py ---------> Scorer ---------> Deduplicator
 .env (API keys) --+                                            v
                                                           SQLite DB
                                                                |
-                                          +--------------------+--------------------+
-                                          |          |         |         |          |
-                                        Email     Slack    Discord     CSV     Dashboard
+                                          +--------------------+----------------+
+                                          |          |         |         |      |
+                                        Email     Slack    Discord     CSV   FastAPI
+                                                                                |
+                                                                     Next.js frontend
 ```
 
 ---
@@ -29,9 +31,9 @@ Profile (CV+Prefs)+--> main.py ---------> Scorer ---------> Deduplicator
 job360/
 +-- src/
 |   +-- main.py              # Orchestrator: run_search(), _build_sources(), SOURCE_REGISTRY (48)
-|   +-- cli.py               # Click CLI: run, dashboard, status, sources, view, setup-profile
+|   +-- cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 |   +-- cli_view.py          # Rich terminal table viewer
-|   +-- dashboard.py         # Streamlit web UI with profile setup sidebar
+|   +-- api/                 # FastAPI backend (main, routes/, models, dependencies)
 |   +-- models.py            # Job dataclass with normalized_key()
 |   +-- config/
 |   |   +-- settings.py      # Env vars, paths, RATE_LIMITS (48 entries), thresholds
@@ -598,9 +600,6 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | python-dotenv >=1.0.0 | .env file loading |
 | jinja2 >=3.1.0 | HTML report templates |
 | click >=8.1.0 | CLI framework |
-| streamlit >=1.30.0 | Web dashboard |
-| pandas >=2.0.0 | Data manipulation in dashboard |
-| plotly >=5.18.0 | Charts in dashboard |
 | pdfplumber >=0.10.0 | PDF text extraction (CV parsing) |
 | python-docx >=1.1.0 | DOCX text extraction (CV parsing) |
 | rich >=13.0.0 | Terminal table rendering |
