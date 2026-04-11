@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.config.settings import USER_AGENT
+from src.core.settings import USER_AGENT
 
 logger = logging.getLogger("job360.sources.remoteok")
 

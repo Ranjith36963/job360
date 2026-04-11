@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.models import Job
-from src.config.settings import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD, NOTIFY_EMAIL
-from src.notifications.base import NotificationChannel
-from src.notifications.report_generator import generate_html_report
+from src.core.settings import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD, NOTIFY_EMAIL
+from src.services.notifications.base import NotificationChannel
+from src.services.notifications.report_generator import generate_html_report
 from src.utils.time_buckets import bucket_jobs, bucket_summary_counts
 
 logger = logging.getLogger("job360.email")

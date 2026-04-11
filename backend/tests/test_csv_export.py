@@ -3,7 +3,7 @@ import tempfile
 from datetime import datetime, timezone
 
 from src.models import Job
-from src.storage.csv_export import export_to_csv
+from src.repositories.csv_export import export_to_csv
 
 
 def _make_job(**overrides):

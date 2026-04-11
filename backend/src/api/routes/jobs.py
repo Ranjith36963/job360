@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from src.api.dependencies import get_db
 from src.api.models import JobResponse, JobListResponse
-from src.storage.database import JobDatabase
+from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["jobs"])
 

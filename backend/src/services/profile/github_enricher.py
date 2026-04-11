@@ -11,8 +11,8 @@ import aiohttp
 
 _GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
 
-from src.config.settings import GITHUB_TOKEN
-from src.profile.models import CVData
+from src.core.settings import GITHUB_TOKEN
+from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.github")
 

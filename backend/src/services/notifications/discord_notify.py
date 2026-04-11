@@ -3,8 +3,8 @@ import logging
 import aiohttp
 
 from src.models import Job
-from src.config.settings import DISCORD_WEBHOOK_URL
-from src.notifications.base import NotificationChannel, format_salary
+from src.core.settings import DISCORD_WEBHOOK_URL
+from src.services.notifications.base import NotificationChannel, format_salary
 
 logger = logging.getLogger("job360.discord")
 

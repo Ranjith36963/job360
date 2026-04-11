@@ -1,11 +1,11 @@
 from datetime import datetime, timezone, timedelta
 from src.models import Job
-from src.filters.skill_matcher import (
+from src.services.skill_matcher import (
     score_job, check_visa_flag, _recency_score, _text_contains,
     _negative_penalty, detect_experience_level, salary_in_range,
     _location_score, _foreign_location_penalty, JobScorer,
 )
-from src.profile.models import SearchConfig
+from src.services.profile.models import SearchConfig
 
 
 def _make_job(**overrides):
@@ -287,8 +287,8 @@ def test_negative_penalty_empty_defaults():
 
 def test_jobscorer_negative_penalty_dynamic():
     """JobScorer uses user-configured negative keywords, not hardcoded defaults."""
-    from src.profile.models import SearchConfig
-    from src.filters.skill_matcher import JobScorer
+    from src.services.profile.models import SearchConfig
+    from src.services.skill_matcher import JobScorer
 
     config = SearchConfig(negative_title_keywords=["sales", "marketing"])
     scorer = JobScorer(config)
@@ -350,28 +350,28 @@ def test_detect_no_level():
 
 def test_greater_london_gets_points():
     """'Greater London' should get full location points."""
-    from src.filters.skill_matcher import LOCATION_WEIGHT
+    from src.services.skill_matcher import LOCATION_WEIGHT
     assert _location_score("Greater London") == LOCATION_WEIGHT
 
 
 def test_city_of_london_gets_points():
-    from src.filters.skill_matcher import LOCATION_WEIGHT
+    from src.services.skill_matcher import LOCATION_WEIGHT
     assert _location_score("City of London") == LOCATION_WEIGHT
 
 
 def test_scotland_gets_points():
     """Scotland should get location points via alias to UK."""
-    from src.filters.skill_matcher import LOCATION_WEIGHT
+    from src.services.skill_matcher import LOCATION_WEIGHT
     assert _location_score("Scotland") == LOCATION_WEIGHT
 
 
 def test_remote_gets_points():
-    from src.filters.skill_matcher import LOCATION_WEIGHT
+    from src.services.skill_matcher import LOCATION_WEIGHT
     assert _location_score("Remote") == LOCATION_WEIGHT - 2
 
 
 def test_wfh_gets_points():
-    from src.filters.skill_matcher import LOCATION_WEIGHT
+    from src.services.skill_matcher import LOCATION_WEIGHT
     assert _location_score("Work from home") == LOCATION_WEIGHT - 2
 
 
@@ -442,7 +442,7 @@ def test_title_score_no_hardcoded_ai_bias():
     For domain-agnostic scaling, ANY title that's not in JOB_TITLES should
     return 0 — regardless of whether it contains AI buzzwords.
     """
-    from src.filters.skill_matcher import _title_score
+    from src.services.skill_matcher import _title_score
     # "Technical Program Manager" has no match in JOB_TITLES → 0
     assert _title_score("Technical Program Manager") == 0
     # "AI Workspace Coordinator" also has no match — no AI word boost allowed
@@ -453,8 +453,8 @@ def test_title_score_no_hardcoded_ai_bias():
 
 def test_jobscorer_title_score_works_for_medical_user():
     """JobScorer must work for non-tech users using their actual titles."""
-    from src.profile.models import SearchConfig
-    from src.filters.skill_matcher import JobScorer
+    from src.services.profile.models import SearchConfig
+    from src.services.skill_matcher import JobScorer
 
     config = SearchConfig(
         job_titles=["Cardiology Consultant", "Cardiologist"],

@@ -248,7 +248,7 @@ def test_run_search_auto_purge():
     async def _test():
         import tempfile as tf, os
         from datetime import datetime as dt, timezone as tz, timedelta
-        from src.storage.database import JobDatabase
+        from src.repositories.database import JobDatabase
 
         with tf.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name

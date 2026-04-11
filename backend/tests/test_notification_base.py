@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from src.models import Job
-from src.notifications.base import format_salary, get_all_channels, get_configured_channels
+from src.services.notifications.base import format_salary, get_all_channels, get_configured_channels
 
 
 def _make_job(**overrides):
@@ -45,22 +45,22 @@ def test_get_all_channels_returns_three():
 
 def test_get_configured_channels_none_configured():
     """With no env vars, no channels should be configured."""
-    with patch("src.notifications.email_notify.SMTP_EMAIL", ""), \
-         patch("src.notifications.email_notify.SMTP_PASSWORD", ""), \
-         patch("src.notifications.email_notify.NOTIFY_EMAIL", ""), \
-         patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", ""), \
-         patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.email_notify.SMTP_EMAIL", ""), \
+         patch("src.services.notifications.email_notify.SMTP_PASSWORD", ""), \
+         patch("src.services.notifications.email_notify.NOTIFY_EMAIL", ""), \
+         patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", ""), \
+         patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
         channels = get_configured_channels()
         assert len(channels) == 0
 
 
 def test_get_configured_channels_slack_only():
     """With only Slack configured, only Slack channel should be returned."""
-    with patch("src.notifications.email_notify.SMTP_EMAIL", ""), \
-         patch("src.notifications.email_notify.SMTP_PASSWORD", ""), \
-         patch("src.notifications.email_notify.NOTIFY_EMAIL", ""), \
-         patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"), \
-         patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.email_notify.SMTP_EMAIL", ""), \
+         patch("src.services.notifications.email_notify.SMTP_PASSWORD", ""), \
+         patch("src.services.notifications.email_notify.NOTIFY_EMAIL", ""), \
+         patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"), \
+         patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
         channels = get_configured_channels()
         assert len(channels) == 1
         assert channels[0].name == "Slack"

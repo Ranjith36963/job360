@@ -50,7 +50,7 @@ from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
 from src.sources.scrapers.aijobs_ai import AIJobsAISource
 from src.sources.other.nomis import NomisSource
-from src.profile.models import SearchConfig
+from src.services.profile.models import SearchConfig
 
 
 def _make_search_config(queries: list[str]) -> SearchConfig:

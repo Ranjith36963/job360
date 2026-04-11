@@ -36,11 +36,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from src.config.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE
-from src.profile.storage import load_profile, save_profile, profile_exists
-from src.profile.models import UserProfile, CVData, UserPreferences
-from src.profile.cv_parser import parse_cv_from_bytes
-from src.profile.preferences import merge_cv_and_preferences
+from src.core.settings import DB_PATH, EXPORTS_DIR, MIN_MATCH_SCORE
+from src.services.profile.storage import load_profile, save_profile, profile_exists
+from src.services.profile.models import UserProfile, CVData, UserPreferences
+from src.services.profile.cv_parser import parse_cv_from_bytes
+from src.services.profile.preferences import merge_cv_and_preferences
 from src.utils.time_buckets import (
     BUCKETS,
     bucket_jobs,
@@ -51,7 +51,7 @@ from src.utils.time_buckets import (
     score_color_hex,
     extract_matched_skills,
 )
-from src.notifications.report_generator import generate_markdown_report
+from src.services.notifications.report_generator import generate_markdown_report
 from src.models import Job
 
 
@@ -417,7 +417,7 @@ with st.sidebar:
             # Enrich from LinkedIn
             if uploaded_linkedin:
                 try:
-                    from src.profile.linkedin_parser import parse_linkedin_zip_from_bytes, enrich_cv_from_linkedin
+                    from src.services.profile.linkedin_parser import parse_linkedin_zip_from_bytes, enrich_cv_from_linkedin
                     linkedin_data = parse_linkedin_zip_from_bytes(uploaded_linkedin.read())
                     cv_data = enrich_cv_from_linkedin(cv_data, linkedin_data)
                     n_skills = len(linkedin_data.get("skills", []))
@@ -430,7 +430,7 @@ with st.sidebar:
             if prof_github:
                 try:
                     import asyncio
-                    from src.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
+                    from src.services.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
                     github_data = _run_async(fetch_github_profile(prof_github))
                     cv_data = enrich_cv_from_github(cv_data, github_data)
                     n_repos = len(github_data.get("repositories", []))

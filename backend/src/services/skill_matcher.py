@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 
 from src.models import Job
-from src.config.keywords import (
+from src.core.keywords import (
     JOB_TITLES,
     LOCATIONS,
     PRIMARY_SKILLS,
@@ -12,7 +12,7 @@ from src.config.keywords import (
     VISA_KEYWORDS,
     NEGATIVE_TITLE_KEYWORDS,
 )
-from src.config.settings import TARGET_SALARY_MIN, TARGET_SALARY_MAX
+from src.core.settings import TARGET_SALARY_MIN, TARGET_SALARY_MAX
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -254,7 +254,7 @@ class JobScorer:
     """Score jobs using dynamic keyword sets from a SearchConfig."""
 
     def __init__(self, config):
-        """Accept a SearchConfig (from src.profile.models)."""
+        """Accept a SearchConfig (from src.services.profile.models)."""
         self._config = config
 
     def _title_score(self, job_title: str) -> int:

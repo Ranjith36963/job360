@@ -37,9 +37,9 @@ def format_salary(job: Job) -> str:
 
 def get_all_channels() -> list[NotificationChannel]:
     """Return instances of all notification channel classes."""
-    from src.notifications.email_notify import EmailChannel
-    from src.notifications.slack_notify import SlackChannel
-    from src.notifications.discord_notify import DiscordChannel
+    from src.services.notifications.email_notify import EmailChannel
+    from src.services.notifications.slack_notify import SlackChannel
+    from src.services.notifications.discord_notify import DiscordChannel
     return [EmailChannel(), SlackChannel(), DiscordChannel()]
 
 

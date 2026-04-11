@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.config.settings import MAX_RESULTS_PER_SOURCE
+from src.core.settings import MAX_RESULTS_PER_SOURCE
 
 logger = logging.getLogger("job360.sources.yc_companies")
 

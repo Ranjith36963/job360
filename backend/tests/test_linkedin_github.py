@@ -10,8 +10,8 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 
-from src.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
-from src.profile.linkedin_parser import (
+from src.services.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
+from src.services.profile.linkedin_parser import (
     parse_linkedin_zip,
     parse_linkedin_zip_from_bytes,
     enrich_cv_from_linkedin,
@@ -22,15 +22,15 @@ from src.profile.linkedin_parser import (
     _parse_certifications,
     _parse_profile,
 )
-from src.profile.github_enricher import (
+from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,
     _infer_skills,
     LANGUAGE_TO_SKILL,
     TOPIC_TO_SKILL,
 )
-from src.profile.keyword_generator import generate_search_config
-from src.profile.storage import save_profile, load_profile
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.profile.storage import save_profile, load_profile
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ class TestStorageWithNewFields:
         )
         profile = UserProfile(cv_data=cv, preferences=prefs)
 
-        with patch("src.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
+        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
             save_profile(profile)
             loaded = load_profile()
             assert loaded is not None
@@ -478,7 +478,7 @@ class TestStorageWithNewFields:
         }
         path = tmp_path / "profile.json"
         path.write_text(json.dumps(old_profile_data), encoding="utf-8")
-        with patch("src.profile.storage.PROFILE_PATH", path):
+        with patch("src.services.profile.storage.PROFILE_PATH", path):
             loaded = load_profile()
             assert loaded is not None
             assert loaded.cv_data.skills == ["Java"]
@@ -494,7 +494,7 @@ class TestStorageWithNewFields:
         }
         path = tmp_path / "profile.json"
         path.write_text(json.dumps(future_data), encoding="utf-8")
-        with patch("src.profile.storage.PROFILE_PATH", path):
+        with patch("src.services.profile.storage.PROFILE_PATH", path):
             loaded = load_profile()
             assert loaded is not None
             assert loaded.cv_data.skills == ["Python"]

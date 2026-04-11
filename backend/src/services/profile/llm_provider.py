@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from src.config.settings import GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY
+from src.core.settings import GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY
 
 logger = logging.getLogger("job360.profile.llm_provider")
 

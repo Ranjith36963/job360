@@ -10,12 +10,12 @@ from unittest.mock import patch, AsyncMock
 import pytest
 
 from src.models import Job
-from src.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
-from src.profile.preferences import validate_preferences, merge_cv_and_preferences
-from src.profile.keyword_generator import generate_search_config
-from src.profile.storage import save_profile, load_profile, profile_exists
-from src.filters.skill_matcher import JobScorer
-from src.config.keywords import VISA_KEYWORDS
+from src.services.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
+from src.services.profile.preferences import validate_preferences, merge_cv_and_preferences
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.profile.storage import save_profile, load_profile, profile_exists
+from src.services.skill_matcher import JobScorer
+from src.core.keywords import VISA_KEYWORDS
 
 
 # -----------------------------------------------------------------------
@@ -170,7 +170,7 @@ class TestProfileStorage:
                 salary_min=50000,
             ),
         )
-        with patch("src.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
+        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
             save_profile(profile)
             loaded = load_profile()
             assert loaded is not None
@@ -180,23 +180,23 @@ class TestProfileStorage:
             assert loaded.preferences.salary_min == 50000
 
     def test_load_returns_none_when_missing(self, tmp_path):
-        with patch("src.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
+        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
             assert load_profile() is None
 
     def test_profile_exists_false(self, tmp_path):
-        with patch("src.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
+        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
             assert not profile_exists()
 
     def test_profile_exists_true(self, tmp_path):
         path = tmp_path / "profile.json"
         path.write_text("{}")
-        with patch("src.profile.storage.PROFILE_PATH", path):
+        with patch("src.services.profile.storage.PROFILE_PATH", path):
             assert profile_exists()
 
     def test_load_handles_corrupt_json(self, tmp_path):
         path = tmp_path / "profile.json"
         path.write_text("not valid json {{{{")
-        with patch("src.profile.storage.PROFILE_PATH", path):
+        with patch("src.services.profile.storage.PROFILE_PATH", path):
             assert load_profile() is None
 
 
@@ -339,7 +339,7 @@ class TestJobScorer:
         assert 0 <= score <= 100
 
     def test_default_scorer_visa_matches(self, default_scorer, sample_visa_job):
-        from src.filters.skill_matcher import check_visa_flag
+        from src.services.skill_matcher import check_visa_flag
         assert default_scorer.check_visa_flag(sample_visa_job) == check_visa_flag(sample_visa_job)
 
     def test_custom_scorer_sales_job_scores_high(self, custom_scorer):
@@ -432,7 +432,7 @@ class TestStorageEdgeCases:
     def test_storage_roundtrip_empty_file(self, tmp_path):
         """Empty PROFILE_PATH should return None, not crash."""
         path = tmp_path / ""  # empty suffix
-        with patch("src.profile.storage.PROFILE_PATH", path):
+        with patch("src.services.profile.storage.PROFILE_PATH", path):
             assert load_profile() is None
 
 
@@ -445,7 +445,7 @@ class TestLLMCVParser:
 
     def test_llm_result_to_cvdata_tech_cv(self):
         """LLM result for a tech CV populates CVData correctly."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         result = {
             "name": "Ranjith Guruprakash",
@@ -495,7 +495,7 @@ class TestLLMCVParser:
 
     def test_llm_result_to_cvdata_medical_cv(self):
         """LLM result for a medical CV works just as well — domain-agnostic."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         result = {
             "name": "Dr. Sarah Thompson",
@@ -539,7 +539,7 @@ class TestLLMCVParser:
 
     def test_llm_result_to_cvdata_empty(self):
         """Empty LLM result produces empty CVData without crashing."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         cv = _llm_result_to_cvdata("some raw text", {})
         assert cv.raw_text == "some raw text"
@@ -549,7 +549,7 @@ class TestLLMCVParser:
 
     def test_llm_result_type_guard_string_skills(self):
         """Weaker LLMs may return 'skills' as a comma-separated string — handle it."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         result = {"skills": "Python, Java, Docker, Kubernetes"}
         cv = _llm_result_to_cvdata("text", result)
@@ -560,7 +560,7 @@ class TestLLMCVParser:
 
     def test_llm_result_type_guard_none_skills(self):
         """LLM returning None for skills should not crash."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         cv = _llm_result_to_cvdata("text", {"skills": None, "achievements": None})
         assert cv.skills == []
@@ -568,7 +568,7 @@ class TestLLMCVParser:
 
     def test_llm_result_type_guard_dict_items(self):
         """LLM returning list of dicts instead of strings — extract name field."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         result = {
             "skills": [{"name": "Python"}, {"name": "Docker"}, {"skill": "AWS"}]
@@ -580,7 +580,7 @@ class TestLLMCVParser:
 
     def test_llm_result_type_guard_wrong_types(self):
         """Numbers, bools, nested dicts should be coerced or dropped, never crash."""
-        from src.profile.cv_parser import _llm_result_to_cvdata
+        from src.services.profile.cv_parser import _llm_result_to_cvdata
 
         result = {
             "name": 123,  # wrong type
@@ -605,9 +605,9 @@ class TestCVParserFailures:
         """If text extraction yields empty string, raise RuntimeError."""
         import pytest
         from unittest.mock import patch
-        from src.profile.cv_parser import parse_cv_async
+        from src.services.profile.cv_parser import parse_cv_async
 
-        with patch("src.profile.cv_parser.extract_text", return_value=""):
+        with patch("src.services.profile.cv_parser.extract_text", return_value=""):
             with pytest.raises(RuntimeError, match="Failed to extract text"):
                 await parse_cv_async("broken.pdf")
 
@@ -615,6 +615,6 @@ class TestCVParserFailures:
 class TestCVParserEdgeCases:
     def test_doc_format_rejected(self):
         """Legacy .doc files should return empty string with warning."""
-        from src.profile.cv_parser import extract_text
+        from src.services.profile.cv_parser import extract_text
         result = extract_text("resume.doc")
         assert result == ""

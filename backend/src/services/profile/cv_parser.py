@@ -11,7 +11,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from src.profile.models import CVData
+from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.cv_parser")
 
@@ -144,7 +144,7 @@ async def parse_cv_async(file_path: str) -> CVData:
             "Only PDF and DOCX files are supported."
         )
 
-    from src.profile.llm_provider import llm_extract
+    from src.services.profile.llm_provider import llm_extract
 
     prompt = _CV_PROMPT.format(cv_text=raw_text)
 

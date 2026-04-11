@@ -7,7 +7,7 @@ import io
 import logging
 import zipfile
 
-from src.profile.models import CVData
+from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.linkedin")
 

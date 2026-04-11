@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.profile.models import UserPreferences
+from src.services.profile.models import UserPreferences
 
 
 def _split_and_clean(value: str) -> list[str]:

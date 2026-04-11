@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from src.models import Job
-from src.filters.deduplicator import deduplicate
+from src.services.deduplicator import deduplicate
 
 
 def _make_job(**overrides):

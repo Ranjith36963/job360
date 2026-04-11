@@ -3,12 +3,12 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.models import Job
-from src.notifications.slack_notify import (
+from src.services.notifications.slack_notify import (
     is_slack_configured,
     _build_payload,
     send_slack,
 )
-from src.notifications.discord_notify import (
+from src.services.notifications.discord_notify import (
     is_discord_configured,
     _build_embeds,
     send_discord,
@@ -40,12 +40,12 @@ SAMPLE_STATS = {"total_found": 50, "new_jobs": 5, "per_source": {"reed": 30, "ad
 
 
 def test_slack_not_configured_when_empty():
-    with patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", ""):
         assert is_slack_configured() is False
 
 
 def test_slack_configured_when_set():
-    with patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/X"):
+    with patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/X"):
         assert is_slack_configured() is True
 
 
@@ -87,13 +87,13 @@ def test_slack_payload_overflow_message():
 
 @pytest.mark.asyncio
 async def test_send_slack_skips_when_not_configured():
-    with patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", ""):
         await send_slack([_make_job()], SAMPLE_STATS)  # should not raise
 
 
 @pytest.mark.asyncio
 async def test_send_slack_skips_empty_jobs():
-    with patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"):
+    with patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"):
         await send_slack([], SAMPLE_STATS)  # should not raise
 
 
@@ -107,8 +107,8 @@ async def test_send_slack_posts_webhook():
     mock_session.__aexit__ = AsyncMock(return_value=False)
     mock_session.post = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_resp), __aexit__=AsyncMock(return_value=False)))
 
-    with patch("src.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"), \
-         patch("src.notifications.slack_notify.aiohttp.ClientSession", return_value=mock_session):
+    with patch("src.services.notifications.slack_notify.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test"), \
+         patch("src.services.notifications.slack_notify.aiohttp.ClientSession", return_value=mock_session):
         await send_slack([_make_job()], SAMPLE_STATS)
         mock_session.post.assert_called_once()
 
@@ -117,12 +117,12 @@ async def test_send_slack_posts_webhook():
 
 
 def test_discord_not_configured_when_empty():
-    with patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
         assert is_discord_configured() is False
 
 
 def test_discord_configured_when_set():
-    with patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/123/abc"):
+    with patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/123/abc"):
         assert is_discord_configured() is True
 
 
@@ -176,13 +176,13 @@ def test_discord_embed_salary_formatting():
 
 @pytest.mark.asyncio
 async def test_send_discord_skips_when_not_configured():
-    with patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
+    with patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", ""):
         await send_discord([_make_job()], SAMPLE_STATS)
 
 
 @pytest.mark.asyncio
 async def test_send_discord_skips_empty_jobs():
-    with patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test"):
+    with patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test"):
         await send_discord([], SAMPLE_STATS)
 
 
@@ -196,7 +196,7 @@ async def test_send_discord_posts_webhook():
     mock_session.__aexit__ = AsyncMock(return_value=False)
     mock_session.post = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_resp), __aexit__=AsyncMock(return_value=False)))
 
-    with patch("src.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test"), \
-         patch("src.notifications.discord_notify.aiohttp.ClientSession", return_value=mock_session):
+    with patch("src.services.notifications.discord_notify.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test"), \
+         patch("src.services.notifications.discord_notify.aiohttp.ClientSession", return_value=mock_session):
         await send_discord([_make_job()], SAMPLE_STATS)
         mock_session.post.assert_called_once()

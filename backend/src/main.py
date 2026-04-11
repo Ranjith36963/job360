@@ -8,21 +8,21 @@ from pathlib import Path
 
 import aiohttp
 
-from src.config.settings import (
+from src.core.settings import (
     REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
     JOOBLE_API_KEY, SERPAPI_KEY, CAREERJET_AFFID, FINDWORK_API_KEY,
     DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
 )
 from src.utils.logger import setup_logging
 from src.models import Job
-from src.storage.database import JobDatabase
-from src.storage.csv_export import export_to_csv
-from src.filters.skill_matcher import check_visa_flag, detect_experience_level, salary_in_range, JobScorer
-from src.filters.deduplicator import deduplicate
-from src.profile.storage import load_profile
-from src.profile.keyword_generator import generate_search_config
-from src.notifications.report_generator import generate_markdown_report
-from src.notifications.base import get_configured_channels
+from src.repositories.database import JobDatabase
+from src.repositories.csv_export import export_to_csv
+from src.services.skill_matcher import check_visa_flag, detect_experience_level, salary_in_range, JobScorer
+from src.services.deduplicator import deduplicate
+from src.services.profile.storage import load_profile
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.notifications.report_generator import generate_markdown_report
+from src.services.notifications.base import get_configured_channels
 
 from src.sources.apis_keyed.reed import ReedSource
 from src.sources.apis_keyed.adzuna import AdzunaSource

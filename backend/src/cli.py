@@ -59,7 +59,7 @@ def dashboard():
 def status():
     """Show the last run stats from the database."""
     import sqlite3
-    from src.config.settings import DB_PATH
+    from src.core.settings import DB_PATH
 
     if not DB_PATH.exists():
         click.echo("No database found. Run 'job360 run' first.")
@@ -122,10 +122,10 @@ def list_sources():
               help="GitHub username to fetch public repos.")
 def setup_profile(cv_path, linkedin_path, github_username):
     """Set up your user profile for personalised job search."""
-    from src.profile.models import CVData, UserPreferences, UserProfile
-    from src.profile.cv_parser import parse_cv
-    from src.profile.preferences import merge_cv_and_preferences
-    from src.profile.storage import save_profile, profile_exists
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.cv_parser import parse_cv
+    from src.services.profile.preferences import merge_cv_and_preferences
+    from src.services.profile.storage import save_profile, profile_exists
 
     click.echo("Job360 Profile Setup")
     click.echo("=" * 40)
@@ -151,7 +151,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
 
     # Parse LinkedIn export if provided
     if linkedin_path:
-        from src.profile.linkedin_parser import parse_linkedin_zip, enrich_cv_from_linkedin
+        from src.services.profile.linkedin_parser import parse_linkedin_zip, enrich_cv_from_linkedin
         click.echo(f"\nParsing LinkedIn export: {linkedin_path}")
         linkedin_data = parse_linkedin_zip(linkedin_path)
         cv_data = enrich_cv_from_linkedin(cv_data, linkedin_data)
@@ -161,7 +161,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
 
     # Fetch GitHub data if username provided
     if github_username:
-        from src.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
+        from src.services.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
         click.echo(f"\nFetching GitHub repos for: {github_username}")
         github_data = asyncio.run(fetch_github_profile(github_username))
         cv_data = enrich_cv_from_github(cv_data, github_data)

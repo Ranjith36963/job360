@@ -9,12 +9,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.api.dependencies import get_db, save_upload_to_temp
 from src.api.models import CVDetail, GitHubResponse, LinkedInResponse, ProfileResponse, ProfileSummary
-from src.profile.cv_parser import parse_cv_async
-from src.profile.github_enricher import enrich_cv_from_github, fetch_github_profile
-from src.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_zip
-from src.profile.models import UserPreferences, UserProfile
-from src.profile.preferences import merge_cv_and_preferences
-from src.profile.storage import load_profile, save_profile
+from src.services.profile.cv_parser import parse_cv_async
+from src.services.profile.github_enricher import enrich_cv_from_github, fetch_github_profile
+from src.services.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_zip
+from src.services.profile.models import UserPreferences, UserProfile
+from src.services.profile.preferences import merge_cv_and_preferences
+from src.services.profile.storage import load_profile, save_profile
 
 router = APIRouter(tags=["profile"])
 

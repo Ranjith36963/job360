@@ -5,7 +5,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.config.companies import ASHBY_COMPANIES, COMPANY_NAME_OVERRIDES
+from src.core.companies import ASHBY_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.ashby")
 

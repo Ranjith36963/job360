@@ -2,8 +2,8 @@
 import tempfile
 import os
 
-from src.storage.database import JobDatabase
-from src.config.settings import DB_PATH
+from src.repositories.database import JobDatabase
+from src.core.settings import DB_PATH
 
 _db: JobDatabase | None = None
 

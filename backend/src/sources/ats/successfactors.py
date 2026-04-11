@@ -7,7 +7,7 @@ import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
-from src.config.companies import SUCCESSFACTORS_COMPANIES
+from src.core.companies import SUCCESSFACTORS_COMPANIES
 
 logger = logging.getLogger("job360.sources.successfactors")
 

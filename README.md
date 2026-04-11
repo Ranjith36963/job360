@@ -158,7 +158,7 @@ flowchart TD
 - **Logging** — rotating file handler (5MB max, 3 backups) + console output
 - **Dry-run mode** — fetch and score without writing to DB or sending notifications
 - **Auto-purge** — jobs older than 30 days are automatically deleted on each run
-- **Split requirements** — prod deps in `requirements.txt`, dev/test in `requirements-dev.txt`
+- **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
 ### Testing (412 tests)
@@ -305,7 +305,7 @@ When a user profile is loaded, the scorer uses dynamic keywords from the profile
 
 ## Notification Channels
 
-The notification system uses an abstract base class (`NotificationChannel` in `src/notifications/base.py`) with auto-discovery:
+The notification system uses an abstract base class (`NotificationChannel` in `backend/src/notifications/base.py`) with auto-discovery:
 
 ```
 NotificationChannel (ABC)
@@ -321,33 +321,33 @@ for channel in get_configured_channels():
     await channel.send(new_jobs, stats)
 ```
 
-**Adding a new channel** (e.g. Telegram): create `src/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
+**Adding a new channel** (e.g. Telegram): create `backend/src/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
 
 ## Adding a New Job Source
 
-1. Create `src/sources/yoursource.py`, extend `BaseJobSource`
+1. Create `backend/src/sources/yoursource.py`, extend `BaseJobSource`
 2. Implement `async fetch_jobs() -> list[Job]`
 3. Use `self.relevance_keywords` and `self.job_titles` for filtering (not direct imports)
 4. If custom `__init__`, accept `search_config=None` and pass to `super().__init__(session, search_config=search_config)`
-5. Register in `SOURCE_REGISTRY` dict in `src/main.py`
-6. Add to `_build_sources()` list in `src/main.py` (passing `search_config=sc`)
-7. Add rate limit entry in `RATE_LIMITS` dict in `src/config/settings.py`
-8. Add mocked tests in `tests/test_sources.py`
-9. Update the `len(SOURCE_REGISTRY) == N` assertion and expected source set in `tests/test_cli.py`
-10. If keyed: add env var to `src/config/settings.py` and `.env.example`
+5. Register in `SOURCE_REGISTRY` dict in `backend/src/main.py`
+6. Add to `_build_sources()` list in `backend/src/main.py` (passing `search_config=sc`)
+7. Add rate limit entry in `RATE_LIMITS` dict in `backend/src/config/settings.py`
+8. Add mocked tests in `backend/tests/test_sources.py`
+9. Update the `len(SOURCE_REGISTRY) == N` assertion and expected source set in `backend/tests/test_cli.py`
+10. If keyed: add env var to `backend/src/config/settings.py` and `.env.example`
 
 ## Configuration
 
-### Default Keywords (`src/config/keywords.py`)
+### Default Keywords (`backend/src/config/keywords.py`)
 - **25 job titles**: AI Engineer, ML Engineer, Machine Learning Engineer, GenAI Engineer, Generative AI Engineer, LLM Engineer, NLP Engineer, Data Scientist, MLOps Engineer, AI/ML Engineer, Deep Learning Engineer, Computer Vision Engineer, RAG Engineer, AI Solutions Engineer, AI Research Engineer, Applied ML Engineer, Python AI Developer, AI Researcher, ML Scientist, Machine Learning Scientist, AI Platform Engineer, AI Infrastructure Engineer, Conversational AI Engineer, Applied Scientist, Research Scientist
 - **15 primary skills** (3pts each): Python, PyTorch, TensorFlow, LangChain, RAG, LLM, Generative AI, Hugging Face, Transformers, OpenAI, NLP, Deep Learning, Neural Networks, Computer Vision, Prompt Engineering
 - **17 secondary skills** (2pts each): Scikit-learn, Keras, AWS, SageMaker, Bedrock, Docker, Kubernetes, FastAPI, ChromaDB, FAISS, OpenSearch, Redis, pgvector, Gemini, Agentic AI, LLM fine-tuning, Fine-tuning
 - **11 tertiary skills** (1pt each): CI/CD, MLflow, Git, Linux, n8n, Data Pipelines, ETL, Feature Engineering, S3, CloudWatch, Machine Learning
 - **24 UK locations** + Remote/Hybrid
 - **60 negative title keywords** across 12 categories (sales, IT ops, healthcare, legal, finance, etc.)
-- **LLM-only CV parsing** via `src/profile/llm_provider.py` (multi-provider: Gemini, Groq, Cerebras with free-tier fallback). The earlier 391-entry `KNOWN_SKILLS` regex set was removed in commit 3ba1342.
+- **LLM-only CV parsing** via `backend/src/profile/llm_provider.py` (multi-provider: Gemini, Groq, Cerebras with free-tier fallback). The earlier 391-entry `KNOWN_SKILLS` regex set was removed in commit 3ba1342.
 
-### ATS Companies (`src/config/companies.py`)
+### ATS Companies (`backend/src/config/companies.py`)
 - **Greenhouse** (25): DeepMind, Monzo, Deliveroo, Darktrace, Stability AI, Anthropic, Graphcore, Wayve, PolyAI, Synthesia, Wise, Snyk, Stripe, Cloudflare, Databricks, Dataiku, Ocado Technology, Tractable, Paddle, Harness, Isomorphic Labs, Speechmatics, Onfido, Oxford Nanopore, Bloomberg
 - **Lever** (12): Mistral, Healx, Palantir, Spotify, ZOE, Tractable, Helsing, SecondMind, MosaicML, Faculty, Dyson, Five AI
 - **Workable** (8): BenevolentAI, Exscientia, Oxa, Cervest, Hugging Face, Labelbox, Runway, Adept
@@ -363,7 +363,7 @@ for channel in get_configured_channels():
 
 ```
 job360/
-├── src/
+├── backend/src/
 │   ├── main.py                  # Central orchestrator (run_search, SOURCE_REGISTRY)
 │   ├── cli.py                   # Click CLI (run, view, dashboard, status, sources, setup-profile)
 │   ├── cli_view.py              # Rich terminal table viewer (time-bucketed)
@@ -378,7 +378,7 @@ job360/
 │   │   ├── cv_parser.py         # PDF/DOCX text extraction; LLM-only skill/title extraction
 │   │   ├── llm_provider.py      # Multi-provider LLM client (Gemini/Groq/Cerebras) for CV parsing
 │   │   ├── preferences.py       # Form validation, CV+preferences merge
-│   │   ├── storage.py           # JSON persistence (data/user_profile.json)
+│   │   ├── storage.py           # JSON persistence (backend/data/user_profile.json)
 │   │   ├── keyword_generator.py # UserProfile -> SearchConfig conversion
 │   │   ├── linkedin_parser.py   # LinkedIn data export ZIP parser
 │   │   └── github_enricher.py   # GitHub public API enricher
@@ -401,11 +401,11 @@ job360/
 │       ├── logger.py            # Rotating file + console logging
 │       ├── rate_limiter.py      # Async semaphore + delay rate limiter
 │       └── time_buckets.py      # Time bucket grouping for CLI view
-├── tests/                       # 412 tests across 21 files
+├── backend/tests/                       # 412 tests across 21 files
 │   ├── conftest.py              # Shared fixtures (sample jobs)
 │   └── test_*.py                # 21 test modules
-├── data/                        # Exports, reports, logs (gitignored)
-├── requirements.txt             # Production dependencies (19 packages)
+├── backend/data/                        # Exports, reports, logs (gitignored)
+├── backend/pyproject.toml             # Production dependencies (19 packages)
 ├── requirements-dev.txt         # Dev/test dependencies (pytest, aioresponses, fpdf2)
 ├── .env.example                 # Template for API keys and webhooks
 ├── setup.sh                     # Setup script (Python 3.9+ check, venv, deps)
@@ -416,13 +416,13 @@ job360/
 
 ```bash
 # Run all 412 tests
-python -m pytest tests/ -v
+python -m pytest backend/tests/ -v
 
 # Run specific test file
-python -m pytest tests/test_scorer.py -v
+python -m pytest backend/tests/test_scorer.py -v
 
 # Run with output
-python -m pytest tests/ -v -s
+python -m pytest backend/tests/ -v -s
 ```
 
 All 412 tests pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
@@ -433,12 +433,12 @@ Each run produces:
 
 | Output | Location | Description |
 |--------|----------|-------------|
-| CSV | `data/exports/jobs_YYYYMMDD_HHMMSS.csv` | Full job data with scores |
-| Markdown | `data/reports/report_YYYYMMDD_HHMMSS.md` | Ranked job tables |
+| CSV | `backend/data/exports/jobs_YYYYMMDD_HHMMSS.csv` | Full job data with scores |
+| Markdown | `backend/data/reports/report_YYYYMMDD_HHMMSS.md` | Ranked job tables |
 | Rich table | Terminal (`python -m src.cli view`) | Time-bucketed terminal table with filters |
 | Email | Inbox | HTML digest with top jobs + CSV attachment |
 | Slack | Channel | Block Kit message with top 10 jobs |
 | Discord | Channel | Embed message with top 10 jobs |
 | Dashboard | `http://localhost:8501` | Interactive Streamlit UI |
 | Console | Terminal | Time-bucketed summary of new jobs found |
-| Logs | `data/logs/job360.log` | Rotating log file (5MB, 3 backups) |
+| Logs | `backend/data/logs/job360.log` | Rotating log file (5MB, 3 backups) |

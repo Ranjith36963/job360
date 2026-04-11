@@ -7,7 +7,7 @@ from logging.handlers import RotatingFileHandler
 
 _RUN_ID = uuid.uuid4().hex[:8]
 
-from src.config.settings import LOGS_DIR
+from src.core.settings import LOGS_DIR
 
 
 def setup_logging(log_level: str | None = None) -> logging.Logger:

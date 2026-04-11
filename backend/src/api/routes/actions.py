@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.dependencies import get_db
 from src.api.models import ActionRequest, ActionResponse, ActionsListResponse
-from src.storage.database import JobDatabase
+from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["actions"])
 

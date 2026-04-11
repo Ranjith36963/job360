@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from src.models import Job
-from src.storage.database import JobDatabase
+from src.repositories.database import JobDatabase
 
 
 @pytest.fixture

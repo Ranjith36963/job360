@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
-from src.config.keywords import VISA_KEYWORDS, LOCATIONS
-from src.profile.models import SearchConfig, UserProfile
+from src.core.keywords import VISA_KEYWORDS, LOCATIONS
+from src.services.profile.models import SearchConfig, UserProfile
 
 
 # Words to ignore when building relevance keywords

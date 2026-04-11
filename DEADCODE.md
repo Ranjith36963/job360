@@ -1,7 +1,7 @@
 # Dead Code Report — Job360
 
 **Generated:** 2026-04-10
-**Scope:** `src/`, `tests/`, top-level docs (excluding `.claude/worktrees/` which are git worktree copies)
+**Scope:** `backend/src/`, `backend/tests/`, top-level docs (excluding `.claude/worktrees/` which are git worktree copies)
 **Method:** Parallel static analysis using `vulture 2.16` (AST), `ruff` (F401/F811/F841), and cross-reference grep
 **Status:** Report only — no files modified.
 
@@ -11,7 +11,7 @@
 
 The three recent LLM-migration commits (`804725c`, `8c4ed82`, `3ba1342`) were surgical on the CV-parsing side but left behind two kinds of debris:
 
-1. **Import-level leftovers** — 34 unused `aiohttp` imports across `src/sources/` (sources no longer fetch HTTP directly; they use `BaseJobSource._get_json` / `_get_text`).
+1. **Import-level leftovers** — 34 unused `aiohttp` imports across `backend/src/sources/` (sources no longer fetch HTTP directly; they use `BaseJobSource._get_json` / `_get_text`).
 2. **A parallel scoring code path** — `score_job()` + `PRIMARY/SECONDARY/TERTIARY_SKILLS` are technically reachable but practically dead because `SearchConfig.from_defaults()` now returns empty lists.
 
 The docs haven't caught up to either change — test counts, file counts, and the "hard-coded AI/ML keywords" phrasing are all wrong in 4 of the project's `.md` files.
@@ -37,95 +37,95 @@ The docs haven't caught up to either change — test counts, file counts, and th
 
 - **Vulture (80% confidence):** 4 findings (3 are standard `__exit__` parameters, 1 is a `PropertyMock` import)
 - **Vulture (60% confidence):** 104 findings total (100 additional beyond 80%), ~70 are false positives (Pydantic fields, Click commands, FastAPI routes, mock setters, `row_factory`)
-- **Ruff F401 (unused imports):** 56 findings (36 in `src/`, 20 in `tests/`)
+- **Ruff F401 (unused imports):** 56 findings (36 in `backend/src/`, 20 in `backend/tests/`)
 - **Ruff F811/F841/F501:** 2 findings (both F841)
 - **57 of 59 ruff findings are auto-fixable** via `ruff check --fix`
 
 ---
 
-## 1. High-Confidence Dead Code in `src/`
+## 1. High-Confidence Dead Code in `backend/src/`
 
 ### 1.1 Unused Imports — Systematic `aiohttp` Leftover (34 files)
 
 Every source file below imports `aiohttp` but never uses it directly — all HTTP calls now go through `BaseJobSource._get_json` / `_get_text`. This is a mechanical leftover from a past refactor.
 
 ```
-src/sources/aijobs.py:4
-src/sources/aijobs_ai.py:5
-src/sources/aijobs_global.py:5
-src/sources/arbeitnow.py:4
-src/sources/bcs_jobs.py:5
-src/sources/biospace.py:5
-src/sources/climatebase.py:6
-src/sources/devitjobs.py:4
-src/sources/eightykhours.py:5
-src/sources/hackernews.py:5
-src/sources/himalayas.py:4
-src/sources/hn_jobs.py:5
-src/sources/jobicy.py:4
-src/sources/jobs_ac_uk.py:5
-src/sources/jobtensor.py:6
-src/sources/landingjobs.py:4
-src/sources/nhs_jobs.py:5
-src/sources/nofluffjobs.py:4
-src/sources/nomis.py:4
-src/sources/realworkfromanywhere.py:5
-src/sources/remoteok.py:4
-src/sources/remotive.py:4
-src/sources/themuse.py:5
-src/sources/uni_jobs.py:5
-src/sources/weworkremotely.py:5
-src/sources/workanywhere.py:6
-src/sources/yc_companies.py:4
+backend/src/sources/apis_free/aijobs.py:4
+backend/src/sources/scrapers/aijobs_ai.py:5
+backend/src/sources/scrapers/aijobs_global.py:5
+backend/src/sources/apis_free/arbeitnow.py:4
+backend/src/sources/scrapers/bcs_jobs.py:5
+backend/src/sources/feeds/biospace.py:5
+backend/src/sources/scrapers/climatebase.py:6
+backend/src/sources/apis_free/devitjobs.py:4
+backend/src/sources/scrapers/eightykhours.py:5
+backend/src/sources/other/hackernews.py:5
+backend/src/sources/apis_free/himalayas.py:4
+backend/src/sources/apis_free/hn_jobs.py:5
+backend/src/sources/apis_free/jobicy.py:4
+backend/src/sources/feeds/jobs_ac_uk.py:5
+backend/src/sources/scrapers/jobtensor.py:6
+backend/src/sources/apis_free/landingjobs.py:4
+backend/src/sources/feeds/nhs_jobs.py:5
+backend/src/sources/other/nofluffjobs.py:4
+backend/src/sources/other/nomis.py:4
+backend/src/sources/feeds/realworkfromanywhere.py:5
+backend/src/sources/apis_free/remoteok.py:4
+backend/src/sources/apis_free/remotive.py:4
+backend/src/sources/other/themuse.py:5
+backend/src/sources/feeds/uni_jobs.py:5
+backend/src/sources/feeds/weworkremotely.py:5
+backend/src/sources/feeds/workanywhere.py:6
+backend/src/sources/apis_free/yc_companies.py:4
 ```
 
-**Safe to fix:** `ruff check --fix --select F401 src/sources/`
+**Safe to fix:** `ruff check --fix --select F401 backend/src/sources/`
 
-### 1.2 Other Unused Imports in `src/`
+### 1.2 Other Unused Imports in `backend/src/`
 
 | File:Line                               | Symbol                  |
 | --------------------------------------- | ----------------------- |
-| `src/api/routes/profile.py:8`           | `Depends`               |
-| `src/api/routes/profile.py:10`          | `get_db`                |
-| `src/cli.py:121`                        | `profile_exists`        |
-| `src/dashboard.py:39`                   | `EXPORTS_DIR`           |
-| `src/dashboard.py:432`                  | `asyncio`               |
-| `src/main.py:7`                         | `Path`                  |
-| `src/notifications/report_generator.py:5` | `format_relative_time`  |
-| `src/utils/logger.py:5`                 | `Path`                  |
-| `src/utils/time_buckets.py:3`           | `re`                    |
-| `src/utils/time_buckets.py:4`           | `timedelta`             |
+| `backend/src/api/routes/profile.py:8`           | `Depends`               |
+| `backend/src/api/routes/profile.py:10`          | `get_db`                |
+| `backend/src/cli.py:121`                        | `profile_exists`        |
+| `backend/src/dashboard.py:39`                   | `EXPORTS_DIR`           |
+| `backend/src/dashboard.py:432`                  | `asyncio`               |
+| `backend/src/main.py:7`                         | `Path`                  |
+| `backend/src/notifications/report_generator.py:5` | `format_relative_time`  |
+| `backend/src/utils/logger.py:5`                 | `Path`                  |
+| `backend/src/utils/time_buckets.py:3`           | `re`                    |
+| `backend/src/utils/time_buckets.py:4`           | `timedelta`             |
 
-### 1.3 Unused Imports in `tests/` (20 total)
+### 1.3 Unused Imports in `backend/tests/` (20 total)
 
 | File:Line                           | Symbol(s)                                                        |
 | ----------------------------------- | ---------------------------------------------------------------- |
-| `tests/test_cli.py:1`               | `patch`, `MagicMock`                                             |
-| `tests/test_cli.py:101`             | `CVData`                                                         |
-| `tests/test_cron.py:1`              | `os`                                                             |
-| `tests/test_dashboard.py:3`         | `PropertyMock`                                                   |
-| `tests/test_linkedin_github.py:7`   | `fields` (from dataclasses)                                      |
-| `tests/test_linkedin_github.py:8`   | `Path`                                                           |
-| `tests/test_linkedin_github.py:13`  | `SearchConfig`                                                   |
-| `tests/test_linkedin_github.py:18`  | `_find_csv_in_zip`                                               |
-| `tests/test_linkedin_github.py:29`  | `LANGUAGE_TO_SKILL`                                              |
-| `tests/test_linkedin_github.py:30`  | `TOPIC_TO_SKILL`                                                 |
-| `tests/test_llm_provider.py:3`      | `MagicMock`                                                      |
-| `tests/test_models.py:1`            | `datetime`, `timezone`                                           |
-| `tests/test_profile.py:3-8`         | `json`, `os`, `tempfile`, `Path`, `AsyncMock` (5 imports)        |
-| `tests/test_rate_limiter.py:4`      | `pytest`                                                         |
+| `backend/tests/test_cli.py:1`               | `patch`, `MagicMock`                                             |
+| `backend/tests/test_cli.py:101`             | `CVData`                                                         |
+| `backend/tests/test_cron.py:1`              | `os`                                                             |
+| `backend/tests/test_dashboard.py:3`         | `PropertyMock`                                                   |
+| `backend/tests/test_linkedin_github.py:7`   | `fields` (from dataclasses)                                      |
+| `backend/tests/test_linkedin_github.py:8`   | `Path`                                                           |
+| `backend/tests/test_linkedin_github.py:13`  | `SearchConfig`                                                   |
+| `backend/tests/test_linkedin_github.py:18`  | `_find_csv_in_zip`                                               |
+| `backend/tests/test_linkedin_github.py:29`  | `LANGUAGE_TO_SKILL`                                              |
+| `backend/tests/test_linkedin_github.py:30`  | `TOPIC_TO_SKILL`                                                 |
+| `backend/tests/test_llm_provider.py:3`      | `MagicMock`                                                      |
+| `backend/tests/test_models.py:1`            | `datetime`, `timezone`                                           |
+| `backend/tests/test_profile.py:3-8`         | `json`, `os`, `tempfile`, `Path`, `AsyncMock` (5 imports)        |
+| `backend/tests/test_rate_limiter.py:4`      | `pytest`                                                         |
 
 ### 1.4 Genuinely Unused Functions/Classes (Vulture-verified)
 
-- **`src/utils/logger.py:37` — `JSONFormatter` class** — defined but never instantiated or imported anywhere. The module only exports `setup_logging`.
-- **`src/utils/logger.py:51` — `get_logger()`** — defined but never called. All modules use `logging.getLogger("job360.xxx")` directly.
+- **`backend/src/utils/logger.py:37` — `JSONFormatter` class** — defined but never instantiated or imported anywhere. The module only exports `setup_logging`.
+- **`backend/src/utils/logger.py:51` — `get_logger()`** — defined but never called. All modules use `logging.getLogger("job360.xxx")` directly.
 
 ### 1.5 Unused Local Variables (ruff F841)
 
-- **`src/sources/careerjet.py:65`** — `salary = item.get("salary", "")` — assigned, never read. Only `salary_min`/`salary_max` are used further down.
-- **`tests/test_main.py:239`** — `stats` — assigned but never asserted.
+- **`backend/src/sources/apis_keyed/careerjet.py:65`** — `salary = item.get("salary", "")` — assigned, never read. Only `salary_min`/`salary_max` are used further down.
+- **`backend/tests/test_main.py:239`** — `stats` — assigned but never asserted.
 
-### 1.6 Unused Test Fixtures in `tests/conftest.py`
+### 1.6 Unused Test Fixtures in `backend/tests/conftest.py`
 
 Four fixtures defined but zero test files reference them as parameters:
 
@@ -138,8 +138,8 @@ Note: `CLAUDE.md` lists these as "provides..." in conftest, but grep confirms ze
 
 ### 1.7 Unused Module-Level Test Constants
 
-- `tests/test_sources.py:1170` — `HN_JOBS_ITEM_2` — defined but never referenced
-- `tests/test_sources.py:1747` — `AIJOBS_GLOBAL_HTML` — defined but never referenced
+- `backend/tests/test_sources.py:1170` — `HN_JOBS_ITEM_2` — defined but never referenced
+- `backend/tests/test_sources.py:1747` — `AIJOBS_GLOBAL_HTML` — defined but never referenced
 
 ---
 
@@ -147,21 +147,21 @@ Note: `CLAUDE.md` lists these as "provides..." in conftest, but grep confirms ze
 
 ### 2.1 Truly Dead (1 finding)
 
-- **`src/config/settings.py:45` — `MAX_DAYS_OLD = 7`**
-  Zero references anywhere in `src/` or `tests/`. Only echoed in `ARCHITECTURE.md:553`. Auto-purge uses a hard-coded `days=30` literal in `src/storage/database.py::purge_old_jobs()` instead.
+- **`backend/src/config/settings.py:45` — `MAX_DAYS_OLD = 7`**
+  Zero references anywhere in `backend/src/` or `backend/tests/`. Only echoed in `ARCHITECTURE.md:553`. Auto-purge uses a hard-coded `days=30` literal in `backend/src/storage/database.py::purge_old_jobs()` instead.
 
 ### 2.2 Ghost Constants — Already Removed, Only Docs Lag
 
 Both were removed in commit `3ba1342` ("chore: remove KNOWN_SKILLS (300+) and KNOWN_TITLE_PATTERNS (68) — replaced by LLM"):
 
-- **`src/config/keywords.py::KNOWN_SKILLS`** — fully removed. Lines 183-187 contain only a removal comment. Zero Python references remain.
-- **`src/config/keywords.py::KNOWN_TITLE_PATTERNS`** — same: removed, zero Python references.
+- **`backend/src/config/keywords.py::KNOWN_SKILLS`** — fully removed. Lines 183-187 contain only a removal comment. Zero Python references remain.
+- **`backend/src/config/keywords.py::KNOWN_TITLE_PATTERNS`** — same: removed, zero Python references.
 
 The code is clean; only the docs in `CLAUDE.md`, `README.md`, `STATUS.md`, and `ARCHITECTURE.md` still mention them. See Section 4.
 
 ### 2.3 Dead-in-Spirit — Live Only on a Path Nothing Exercises
 
-These constants exist and are imported, but the only code that reaches them is the legacy `score_job()` fallback, which runs only when `profile.is_complete` is False. And `SearchConfig.from_defaults()` at `src/profile/models.py:74-94` now returns **empty** skill/title lists, so the "no profile" branch was effectively neutralized.
+These constants exist and are imported, but the only code that reaches them is the legacy `score_job()` fallback, which runs only when `profile.is_complete` is False. And `SearchConfig.from_defaults()` at `backend/src/profile/models.py:74-94` now returns **empty** skill/title lists, so the "no profile" branch was effectively neutralized.
 
 | Constant                    | Entries | Only consumer(s)                                             |
 | --------------------------- | ------- | ------------------------------------------------------------ |
@@ -182,20 +182,20 @@ Right now the code is in limbo between the two.
 
 ### 2.4 All ATS Company Slug Lists — Confirmed LIVE
 
-Every one of the 9 company lists in `src/config/companies.py` is consumed by its matching source file. Nothing to prune:
+Every one of the 9 company lists in `backend/src/config/companies.py` is consumed by its matching source file. Nothing to prune:
 
 | Constant                 | Entries | Consumer                          |
 | ------------------------ | ------- | --------------------------------- |
-| `GREENHOUSE_COMPANIES`   | 25      | `src/sources/greenhouse.py`       |
-| `LEVER_COMPANIES`        | 12      | `src/sources/lever.py`            |
-| `WORKABLE_COMPANIES`     | 8       | `src/sources/workable.py`         |
-| `ASHBY_COMPANIES`        | 9       | `src/sources/ashby.py`            |
-| `SMARTRECRUITERS_COMPANIES` | 6    | `src/sources/smartrecruiters.py`  |
-| `PINPOINT_COMPANIES`     | 8       | `src/sources/pinpoint.py`         |
-| `RECRUITEE_COMPANIES`    | 8       | `src/sources/recruitee.py`        |
-| `WORKDAY_COMPANIES`      | 15      | `src/sources/workday.py`          |
-| `PERSONIO_COMPANIES`     | 10      | `src/sources/personio.py`         |
-| `SUCCESSFACTORS_COMPANIES`| 3      | `src/sources/successfactors.py`   |
+| `GREENHOUSE_COMPANIES`   | 25      | `backend/src/sources/ats/greenhouse.py`       |
+| `LEVER_COMPANIES`        | 12      | `backend/src/sources/ats/lever.py`            |
+| `WORKABLE_COMPANIES`     | 8       | `backend/src/sources/ats/workable.py`         |
+| `ASHBY_COMPANIES`        | 9       | `backend/src/sources/ats/ashby.py`            |
+| `SMARTRECRUITERS_COMPANIES` | 6    | `backend/src/sources/ats/smartrecruiters.py`  |
+| `PINPOINT_COMPANIES`     | 8       | `backend/src/sources/ats/pinpoint.py`         |
+| `RECRUITEE_COMPANIES`    | 8       | `backend/src/sources/ats/recruitee.py`        |
+| `WORKDAY_COMPANIES`      | 15      | `backend/src/sources/ats/workday.py`          |
+| `PERSONIO_COMPANIES`     | 10      | `backend/src/sources/ats/personio.py`         |
+| `SUCCESSFACTORS_COMPANIES`| 3      | `backend/src/sources/ats/successfactors.py`   |
 | `COMPANY_NAME_OVERRIDES` | —       | All 9 slug-based ATS sources      |
 
 **Total:** 104 company slugs.
@@ -208,64 +208,64 @@ All 13 env-var constants are read by at least one source/notification/filter mod
 
 ## 3. Orphan Files / Modules — NONE FOUND
 
-Good news: **every Python file in `src/` is reachable** from an entry point or registry.
+Good news: **every Python file in `backend/src/` is reachable** from an entry point or registry.
 
-- All 48 source files properly registered in `SOURCE_REGISTRY` (`src/main.py:78-128`)
-- All API route modules properly included as routers in `src/api/main.py`
+- All 48 source files properly registered in `SOURCE_REGISTRY` (`backend/src/main.py:78-128`)
+- All API route modules properly included as routers in `backend/src/api/main.py`
 - All CLI commands properly decorated with `@click.command`
-- All notification channels discovered via `get_configured_channels()` in `src/notifications/base.py`
+- All notification channels discovered via `get_configured_channels()` in `backend/src/notifications/base.py`
 - **No orphan test files** — no tests exist for modules that were deleted
 - **No stub files** — all `__init__.py` files are intentionally empty
-- **No unused env vars** — every `.env.example` entry is read by `src/config/settings.py`
+- **No unused env vars** — every `.env.example` entry is read by `backend/src/config/settings.py`
 
 ### 3.1 Dynamic-Dispatch False Positives (NOT orphans — keep)
 
 The following were flagged by vulture but are actually loaded via decorators/registries — do NOT treat as dead:
 
 **Pydantic model fields** (used by FastAPI serialization at runtime):
-- `src/api/models.py:10` — `HealthResponse.version`
-- `src/api/models.py:27` — `StatusResponse.sources_total`
-- `src/api/models.py:32-55` — `JobResponse.id`, `job_type`, `role`, `seniority`, `experience`, `credentials`, `location_score`, `recency`, `semantic`, `matched_skills`, `missing_required`, `transferable_skills`
-- `src/api/models.py:72` — `LinkedInResponse.ok` / `GitHubResponse.ok` (lines 110, 115)
-- `src/api/models.py:84-87` — `ProfileSummary.skills_count`, `cv_length`, `has_linkedin`, `has_github`
-- `src/api/models.py:99` — `CVDetail.summary_text`
-- `src/api/models.py:127` — `PipelineProgress.progress`
-- `src/api/models.py:135` — `PipelineItem.updated_at`
-- `src/api/models.py:142` — `applications`
-- `src/api/models.py:150` — `reminders`
+- `backend/src/api/models.py:10` — `HealthResponse.version`
+- `backend/src/api/models.py:27` — `StatusResponse.sources_total`
+- `backend/src/api/models.py:32-55` — `JobResponse.id`, `job_type`, `role`, `seniority`, `experience`, `credentials`, `location_score`, `recency`, `semantic`, `matched_skills`, `missing_required`, `transferable_skills`
+- `backend/src/api/models.py:72` — `LinkedInResponse.ok` / `GitHubResponse.ok` (lines 110, 115)
+- `backend/src/api/models.py:84-87` — `ProfileSummary.skills_count`, `cv_length`, `has_linkedin`, `has_github`
+- `backend/src/api/models.py:99` — `CVDetail.summary_text`
+- `backend/src/api/models.py:127` — `PipelineProgress.progress`
+- `backend/src/api/models.py:135` — `PipelineItem.updated_at`
+- `backend/src/api/models.py:142` — `applications`
+- `backend/src/api/models.py:150` — `reminders`
 
 **Click CLI commands** (discovered via `@cli.command()` decorator):
-- `src/cli.py:78` — `view()`
-- `src/cli.py:91` — `api()`
-- `src/cli.py:101` — `list_sources()` (registered as `"sources"`)
-- `src/cli.py:109` — `setup_profile()` (registered as `"setup-profile"`)
+- `backend/src/cli.py:78` — `view()`
+- `backend/src/cli.py:91` — `api()`
+- `backend/src/cli.py:101` — `list_sources()` (registered as `"sources"`)
+- `backend/src/cli.py:109` — `setup_profile()` (registered as `"setup-profile"`)
 
 **FastAPI route handlers** (registered via `@router.get/post` decorators):
-- `src/api/routes/actions.py:13` — `set_action`
-- `src/api/routes/actions.py:37` — `list_actions`
-- `src/api/routes/actions.py:47` — `action_counts`
-- `src/api/routes/health.py:15` — `health_check`
-- `src/api/routes/jobs.py:67` — `export_jobs`
-- `src/api/routes/jobs.py:107` — `list_jobs`
-- `src/api/routes/jobs.py:178` — `get_job`
-- `src/api/routes/pipeline.py:34` — `list_pipeline`
-- `src/api/routes/pipeline.py:46` — `pipeline_counts`
-- `src/api/routes/pipeline.py:55` — `pipeline_reminders`
-- `src/api/routes/profile.py:50` — `get_profile`
-- `src/api/routes/profile.py:59` — `upsert_profile`
-- `src/api/routes/profile.py:116` — `upload_linkedin`
-- `src/api/routes/profile.py:134` — `upload_github`
-- `src/api/routes/search.py:18` — `start_search`
-- `src/api/routes/search.py:36` — `search_status`
+- `backend/src/api/routes/actions.py:13` — `set_action`
+- `backend/src/api/routes/actions.py:37` — `list_actions`
+- `backend/src/api/routes/actions.py:47` — `action_counts`
+- `backend/src/api/routes/health.py:15` — `health_check`
+- `backend/src/api/routes/jobs.py:67` — `export_jobs`
+- `backend/src/api/routes/jobs.py:107` — `list_jobs`
+- `backend/src/api/routes/jobs.py:178` — `get_job`
+- `backend/src/api/routes/pipeline.py:34` — `list_pipeline`
+- `backend/src/api/routes/pipeline.py:46` — `pipeline_counts`
+- `backend/src/api/routes/pipeline.py:55` — `pipeline_reminders`
+- `backend/src/api/routes/profile.py:50` — `get_profile`
+- `backend/src/api/routes/profile.py:59` — `upsert_profile`
+- `backend/src/api/routes/profile.py:116` — `upload_linkedin`
+- `backend/src/api/routes/profile.py:134` — `upload_github`
+- `backend/src/api/routes/search.py:18` — `start_search`
+- `backend/src/api/routes/search.py:36` — `search_status`
 
 **`row_factory` attribute assignments** — load-bearing (rows consumed as dict-like downstream):
-- `src/cli.py:62`
-- `src/cli_view.py:32`
-- `src/dashboard.py:230`
-- `src/storage/database.py:20`
+- `backend/src/cli.py:62`
+- `backend/src/cli_view.py:32`
+- `backend/src/dashboard.py:230`
+- `backend/src/storage/database.py:20`
 
 **Standard `__exit__` / `__aexit__` parameters** — conventional, cannot be removed:
-- `src/utils/rate_limiter.py:24` — `exc_type`, `exc_val`, `exc_tb`
+- `backend/src/utils/rate_limiter.py:24` — `exc_type`, `exc_val`, `exc_tb`
 
 ---
 
@@ -283,7 +283,7 @@ The docs are the biggest source of "dead" information. Grouped by file.
 | 95   | `cv_parser.py — PDF/DOCX … section detection, skill/title extraction` | LLM-only now (`804725c`)                                   |
 | 101  | "47 source files"                                                   | Actual: **48** source files                                 |
 | 120  | "409 tests across 20 files"                                         | Actual: **407 across 21**                                   |
-| 129  | "12 packages" in requirements.txt                                   | Actual: **18**                                              |
+| 129  | "12 packages" in backend/pyproject.toml                                   | Actual: **18**                                              |
 | 147  | `KNOWN_SKILLS (391-entry set)`                                      | Removed                                                     |
 | 150  | `SearchConfig.from_defaults() returns the hard-coded AI/ML keywords` | Returns empty lists                                        |
 | 151  | `cv_parser.py … extraction using KNOWN_SKILLS and KNOWN_TITLE_PATTERNS` | LLM-only                                                 |
@@ -292,7 +292,7 @@ The docs are the biggest source of "dead" information. Grouped by file.
 | 246  | "all 47 source files"                                               | Actual: **48**                                              |
 
 **Missing documentation:**
-- Folder-structure block (lines 77-134) does **not** mention `src/llm/`, `src/pipeline/`, `src/validation/`, or `src/profile/llm_provider.py` — these exist but are undocumented.
+- Folder-structure block (lines 77-134) does **not** mention `backend/src/llm/`, `backend/src/pipeline/`, `backend/src/validation/`, or `backend/src/profile/llm_provider.py` — these exist but are undocumented.
 - Env-var table (lines 216-229) is missing `GEMINI_API_KEY` and `GROQ_API_KEY` rows.
 
 ### 4.2 `README.md` — 9 stale claims
@@ -340,7 +340,7 @@ The docs are the biggest source of "dead" information. Grouped by file.
 
 ### 4.5 `.env.example` — Clean
 
-Every variable is read by `src/config/settings.py`. The docs are out of sync, not the file itself.
+Every variable is read by `backend/src/config/settings.py`. The docs are out of sync, not the file itself.
 
 ---
 
@@ -350,11 +350,11 @@ Every variable is read by `src/config/settings.py`. The docs are out of sync, no
 | ------------------------------ | ----------------- |
 | `SOURCE_REGISTRY` entries      | **48**            |
 | `RATE_LIMITS` entries          | **48**            |
-| Source `.py` files in `src/sources/` | **48** (excl. `__init__.py`) |
+| Source `.py` files in `backend/src/sources/` | **48** (excl. `__init__.py`) |
 | Total ATS company slugs        | **104**           |
 | Tests collected                | **407**           |
 | Test files (`test_*.py`)       | **21**            |
-| `requirements.txt` packages    | **18**            |
+| `backend/pyproject.toml` packages    | **18**            |
 | `JOB_TITLES`                   | 25                |
 | `PRIMARY_SKILLS`               | 15                |
 | `SECONDARY_SKILLS`             | 17                |
@@ -373,7 +373,7 @@ Cheapest to most expensive. **All recommendations — no action taken yet.**
 ### Priority 1 — Trivial (1 command)
 
 ```bash
-ruff check --fix --select F401,F841 src/ tests/
+ruff check --fix --select F401,F841 backend/src/ backend/tests/
 ```
 
 Eliminates 56 unused imports + 2 unused local variables in one shot.
@@ -381,12 +381,12 @@ Eliminates 56 unused imports + 2 unused local variables in one shot.
 ### Priority 2 — Small mechanical deletes (~5 min)
 
 Delete:
-- `JSONFormatter` class and `get_logger` function from `src/utils/logger.py`
-- `MAX_DAYS_OLD` from `src/config/settings.py:45`
-- Four unused fixtures from `tests/conftest.py` (`sample_unrelated_job`, `sample_duplicate_jobs`, `sample_non_uk_job`, `sample_empty_description_job`)
-- Two unused constants in `tests/test_sources.py` (`HN_JOBS_ITEM_2`, `AIJOBS_GLOBAL_HTML`)
-- Unused `salary` local in `src/sources/careerjet.py:65`
-- Unused `stats` local in `tests/test_main.py:239`
+- `JSONFormatter` class and `get_logger` function from `backend/src/utils/logger.py`
+- `MAX_DAYS_OLD` from `backend/src/config/settings.py:45`
+- Four unused fixtures from `backend/tests/conftest.py` (`sample_unrelated_job`, `sample_duplicate_jobs`, `sample_non_uk_job`, `sample_empty_description_job`)
+- Two unused constants in `backend/tests/test_sources.py` (`HN_JOBS_ITEM_2`, `AIJOBS_GLOBAL_HTML`)
+- Unused `salary` local in `backend/src/sources/apis_keyed/careerjet.py:65`
+- Unused `stats` local in `backend/tests/test_main.py:239`
 
 ### Priority 3 — Medium doc sync (~30 min)
 
@@ -398,7 +398,7 @@ Sync `CLAUDE.md`, `README.md`, `STATUS.md`, `ARCHITECTURE.md` to reality:
 - Remove `KNOWN_SKILLS` and `KNOWN_TITLE_PATTERNS` references
 - Update CV parser description to "LLM-based, multi-provider"
 - Add `GEMINI_API_KEY` / `GROQ_API_KEY` to env-var tables
-- Document `src/llm/`, `src/pipeline/`, `src/validation/` packages in CLAUDE.md folder tree
+- Document `backend/src/llm/`, `backend/src/pipeline/`, `backend/src/validation/` packages in CLAUDE.md folder tree
 - Update STATUS.md "Last updated" timestamp
 
 The `sync` skill or `claude-md-management:revise-claude-md` would be the right tool for this pass.
@@ -406,7 +406,7 @@ The `sync` skill or `claude-md-management:revise-claude-md` would be the right t
 ### Priority 4 — Design decision (not mechanical)
 
 Decide fate of the legacy `score_job()` path:
-- **Option A (full LLM commit):** Delete `score_job()`, `_title_score`, `_skill_score`, `_negative_penalty` in `src/filters/skill_matcher.py`, `_DEFAULT_*` fallbacks in `src/sources/base.py`, the skill iteration in `src/utils/time_buckets.py`, and the 6 dead-in-spirit constants. Update `test_scorer.py` accordingly.
+- **Option A (full LLM commit):** Delete `score_job()`, `_title_score`, `_skill_score`, `_negative_penalty` in `backend/src/filters/skill_matcher.py`, `_DEFAULT_*` fallbacks in `backend/src/sources/base.py`, the skill iteration in `backend/src/utils/time_buckets.py`, and the 6 dead-in-spirit constants. Update `test_scorer.py` accordingly.
 - **Option B (restore defaults):** Repopulate `SearchConfig.from_defaults()` with generic keywords so the "no profile" fallback works meaningfully again.
 
 The current state is neither — it's vestigial code that technically runs but produces empty matches.
@@ -417,18 +417,18 @@ The current state is neither — it's vestigial code that technically runs but p
 
 - **Tools:**
   - `vulture 2.16` at `--min-confidence 80` and `--min-confidence 60`
-  - `ruff check --select F401,F811,F841,F501 src/ tests/`
+  - `ruff check --select F401,F811,F841,F501 backend/src/ backend/tests/`
   - `grep` / `Glob` for cross-reference verification
 - **Excluded from scope:**
   - `.claude/worktrees/` (git worktree copies — would produce duplicate noise)
   - `__pycache__/`
   - `frontend/` (Next.js, not Python)
 - **Included in scope:**
-  - `src/` (48 source files + supporting modules)
-  - `tests/` (21 test files)
+  - `backend/src/` (48 source files + supporting modules)
+  - `backend/tests/` (21 test files)
   - Top-level docs (`CLAUDE.md`, `README.md`, `STATUS.md`, `ARCHITECTURE.md`)
   - `.env.example`
-  - `requirements.txt` / `requirements-dev.txt`
+  - `backend/pyproject.toml` / `requirements-dev.txt`
 
 ## Appendix B — Commit Signals That Guided the Analysis
 

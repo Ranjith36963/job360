@@ -27,7 +27,7 @@ Profile (CV+Prefs)+--> main.py ---------> Scorer ---------> Deduplicator
 
 ```
 job360/
-+-- src/
++-- backend/src/
 |   +-- main.py              # Orchestrator: run_search(), _build_sources(), SOURCE_REGISTRY (48)
 |   +-- cli.py               # Click CLI: run, dashboard, status, sources, view, setup-profile
 |   +-- cli_view.py          # Rich terminal table viewer
@@ -41,7 +41,7 @@ job360/
 |   |   +-- models.py        # CVData, UserPreferences, UserProfile, SearchConfig
 |   |   +-- cv_parser.py     # PDF/DOCX text extraction + section parsing
 |   |   +-- preferences.py   # Form validation, CV+preferences merge
-|   |   +-- storage.py       # JSON persistence (data/user_profile.json)
+|   |   +-- storage.py       # JSON persistence (backend/data/user_profile.json)
 |   |   +-- keyword_generator.py  # UserProfile -> SearchConfig conversion
 |   |   +-- linkedin_parser.py    # LinkedIn ZIP export parser
 |   |   +-- github_enricher.py    # GitHub public API enricher
@@ -65,10 +65,10 @@ job360/
 |       +-- logger.py        # Logging setup (file + console)
 |       +-- rate_limiter.py  # Per-source rate limiting
 |       +-- time_buckets.py  # Time bucketing, score colors, bucket_summary_counts
-+-- tests/
++-- backend/tests/
 |   +-- conftest.py          # Shared fixtures (sample_ai_job, etc.)
 |   +-- test_*.py            # 21 test files, 412 tests
-+-- data/                    # Runtime data (gitignored)
++-- backend/data/                    # Runtime data (gitignored)
 |   +-- jobs.db              # SQLite database
 |   +-- user_profile.json    # User profile (optional)
 |   +-- exports/             # CSV exports per run
@@ -76,7 +76,7 @@ job360/
 |   +-- logs/                # Log files
 +-- .env                     # API keys (gitignored)
 +-- .env.example             # Template for .env
-+-- requirements.txt         # Production dependencies (12 packages)
++-- backend/pyproject.toml         # Production dependencies (12 packages)
 +-- requirements-dev.txt     # Test dependencies (includes prod via -r)
 +-- setup.sh                 # Setup script (venv, deps, validation)
 +-- cron_setup.sh            # Cron scheduling (4AM/4PM Europe/London)
@@ -89,7 +89,7 @@ job360/
 ### 1. Profile Loading (`main.py:run_search`)
 
 ```python
-profile = load_profile()                    # data/user_profile.json
+profile = load_profile()                    # backend/data/user_profile.json
 if profile and profile.is_complete:
     search_config = generate_search_config(profile)  # UserProfile -> SearchConfig
     scorer = JobScorer(search_config)                 # Dynamic scorer
@@ -194,8 +194,8 @@ for job in unique_jobs:
 # Sort by (match_score, salary_in_range) descending
 new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
 
-# Export CSV to data/exports/
-# Generate markdown report to data/reports/
+# Export CSV to backend/data/exports/
+# Generate markdown report to backend/data/reports/
 # Send notifications (email, Slack, Discord) if configured and --no-email not set
 # Print time-bucketed summary to console
 # Log run to run_log table
@@ -236,7 +236,7 @@ In dry-run mode: scoring and dedup still happen, but no DB writes and no notific
 
 ## Source Architecture
 
-### BaseJobSource (`src/sources/base.py`)
+### BaseJobSource (`backend/src/sources/base.py`)
 
 ```
 BaseJobSource (ABC)
@@ -307,7 +307,7 @@ BCSJobsSource, AIJobsGlobalSource, AIJobsAISource
 
 ## Job Normalization and Deduplication
 
-### Job Dataclass (`src/models.py`)
+### Job Dataclass (`backend/src/models.py`)
 
 ```python
 @dataclass
@@ -599,15 +599,15 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 4. **Normalization for dedup:** Company names are aggressively normalized (strip suffixes, regions, lowercase) to merge "Anthropic Ltd" and "Anthropic" as the same employer. This is deliberately aggressive — false positives (merging different companies) are considered less harmful than false negatives (duplicate listings).
 
-5. **Profile as optional overlay:** The entire profile system is additive. Removing `data/user_profile.json` restores exact pre-Phase-1 behavior. No existing function signatures were changed — new functionality was added alongside existing code.
+5. **Profile as optional overlay:** The entire profile system is additive. Removing `backend/data/user_profile.json` restores exact pre-Phase-1 behavior. No existing function signatures were changed — new functionality was added alongside existing code.
 
-6. **python-jobspy as optional dependency:** Not listed in requirements.txt because it has heavy transitive dependencies. Indeed/Glassdoor source gracefully skips if not installed.
+6. **python-jobspy as optional dependency:** Not listed in backend/pyproject.toml because it has heavy transitive dependencies. Indeed/Glassdoor source gracefully skips if not installed.
 
 ---
 
 ## Dependencies
 
-### Production (requirements.txt)
+### Production (backend/pyproject.toml)
 
 | Package | Purpose |
 |---------|---------|
@@ -623,7 +623,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | python-docx >=1.1.0 | DOCX text extraction (CV parsing) |
 | rich >=13.0.0 | Terminal table rendering |
 | humanize >=4.9.0 | Relative time formatting |
-| fastapi >=0.115.0 | API server for Next.js frontend (`src/api/`) |
+| fastapi >=0.115.0 | API server for Next.js frontend (`backend/src/api/`) |
 | uvicorn[standard] >=0.30.0 | ASGI server for FastAPI |
 | python-multipart >=0.0.9 | File upload support for FastAPI |
 | httpx >=0.27.0 | Async HTTP client (used by API + LLM providers) |
@@ -633,7 +633,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 ### Dev (requirements-dev.txt)
 
-Includes all production deps (via `-r requirements.txt`) plus:
+Includes all production deps (via `-r backend/pyproject.toml`) plus:
 
 | Package | Purpose |
 |---------|---------|
@@ -642,8 +642,8 @@ Includes all production deps (via `-r requirements.txt`) plus:
 | aioresponses >=0.7.0 | Mock aiohttp responses |
 | fpdf2 >=2.7.0 | Generate test PDF files for CV parser tests |
 
-### Optional (not in requirements.txt)
+### Optional (not in backend/pyproject.toml)
 
 | Package | Purpose |
 |---------|---------|
-| python-jobspy | Indeed/Glassdoor scraping (src/sources/indeed.py) |
+| python-jobspy | Indeed/Glassdoor scraping (backend/src/sources/other/indeed.py) |

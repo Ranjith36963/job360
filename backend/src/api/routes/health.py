@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends
 from src.api.dependencies import get_db
 from src.api.models import HealthResponse, StatusResponse, SourceInfo, SourcesResponse
 from src.main import SOURCE_REGISTRY
-from src.profile.storage import profile_exists
-from src.storage.database import JobDatabase
+from src.services.profile.storage import profile_exists
+from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["health"])
 

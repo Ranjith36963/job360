@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a FastAPI backend that bridges the existing Python pipeline to the Next.js frontend, implementing all 21 endpoints defined in `frontend/lib/api.ts`.
+**Goal:** Build a FastAPI backend that bridges the existing Python pipeline to the Next.js frontend, implementing all 21 endpoints defined in `frontend/src/lib/api.ts`.
 
 **Architecture:** Thin API layer wrapping existing modules (`database.py`, `main.py`, `profile/*`, `csv_export.py`). Two new DB tables (`user_actions`, `applications`) for features the Streamlit dashboard doesn't have. In-memory dict for search progress tracking (single-user tool, no persistence needed). All routes async, CORS enabled for `localhost:3000`.
 
@@ -13,9 +13,9 @@
 ## File Structure
 
 ```
-src/api/
+backend/src/api/
 ├── main.py              # FastAPI app, CORS, lifespan (DB init/close)
-├── models.py            # All Pydantic request/response models (matches frontend/lib/types.ts)
+├── models.py            # All Pydantic request/response models (matches frontend/src/lib/types.ts)
 ├── dependencies.py      # Shared dependencies: get_db(), temp file helpers
 ├── routes/
 │   ├── health.py        # GET /api/health, /api/status, /api/sources
@@ -27,24 +27,24 @@ src/api/
 ```
 
 **Existing files to modify:**
-- `src/storage/database.py` — Add `user_actions` + `applications` tables to `init_db()`, add query methods
-- `requirements.txt` — Add `fastapi`, `uvicorn[standard]`, `python-multipart`
+- `backend/src/storage/database.py` — Add `user_actions` + `applications` tables to `init_db()`, add query methods
+- `backend/pyproject.toml` — Add `fastapi`, `uvicorn[standard]`, `python-multipart`
 
 **Test file:**
-- `tests/test_api.py` — All API endpoint tests using `httpx.AsyncClient` + `TestClient`
+- `backend/tests/test_api.py` — All API endpoint tests using `httpx.AsyncClient` + `TestClient`
 
 ---
 
 ## Task 1: Add Dependencies and Pydantic Models
 
 **Files:**
-- Modify: `requirements.txt`
-- Create: `src/api/__init__.py`
-- Create: `src/api/models.py`
+- Modify: `backend/pyproject.toml`
+- Create: `backend/src/api/__init__.py`
+- Create: `backend/src/api/models.py`
 
-- [ ] **Step 1: Add FastAPI dependencies to requirements.txt**
+- [ ] **Step 1: Add FastAPI dependencies to backend/pyproject.toml**
 
-Add these lines to `requirements.txt`:
+Add these lines to `backend/pyproject.toml`:
 ```
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
@@ -55,22 +55,22 @@ httpx>=0.27.0
 - [ ] **Step 2: Create empty `__init__.py`**
 
 ```bash
-touch src/api/__init__.py
-touch src/api/routes/__init__.py
+touch backend/src/api/__init__.py
+touch backend/src/api/routes/__init__.py
 ```
 
 - [ ] **Step 3: Install dependencies**
 
 ```bash
-pip install -r requirements.txt
+pip install -r backend/pyproject.toml
 ```
 
 - [ ] **Step 4: Create Pydantic models**
 
-Create `src/api/models.py` with all request/response models matching `frontend/lib/types.ts`:
+Create `backend/src/api/models.py` with all request/response models matching `frontend/src/lib/types.ts`:
 
 ```python
-"""Pydantic models for the FastAPI backend — matches frontend/lib/types.ts."""
+"""Pydantic models for the FastAPI backend — matches frontend/src/lib/types.ts."""
 from __future__ import annotations
 
 from pydantic import BaseModel
@@ -227,7 +227,7 @@ class PipelineRemindersResponse(BaseModel):
 - [ ] **Step 5: Commit**
 
 ```bash
-git add requirements.txt src/api/__init__.py src/api/routes/__init__.py src/api/models.py
+git add backend/pyproject.toml backend/src/api/__init__.py backend/src/api/routes/__init__.py backend/src/api/models.py
 git commit -m "feat(api): add FastAPI deps and Pydantic models matching frontend types"
 ```
 
@@ -236,12 +236,12 @@ git commit -m "feat(api): add FastAPI deps and Pydantic models matching frontend
 ## Task 2: FastAPI App Scaffold and Dependencies
 
 **Files:**
-- Create: `src/api/main.py`
-- Create: `src/api/dependencies.py`
+- Create: `backend/src/api/main.py`
+- Create: `backend/src/api/dependencies.py`
 
 - [ ] **Step 1: Write test for health endpoint**
 
-Create `tests/test_api.py`:
+Create `backend/tests/test_api.py`:
 
 ```python
 """Tests for FastAPI backend API."""
@@ -265,13 +265,13 @@ async def test_health_returns_ok():
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-python -m pytest tests/test_api.py::test_health_returns_ok -v
+python -m pytest backend/tests/test_api.py::test_health_returns_ok -v
 ```
 Expected: FAIL — `src.api.main` does not exist yet.
 
 - [ ] **Step 3: Create dependencies module**
 
-Create `src/api/dependencies.py`:
+Create `backend/src/api/dependencies.py`:
 
 ```python
 """Shared dependencies for FastAPI routes."""
@@ -319,7 +319,7 @@ def save_upload_to_temp(content: bytes, suffix: str) -> str:
 
 - [ ] **Step 4: Create FastAPI app**
 
-Create `src/api/main.py`:
+Create `backend/src/api/main.py`:
 
 ```python
 """FastAPI application for Job360 backend."""
@@ -360,7 +360,7 @@ app.include_router(pipeline.router, prefix="/api")
 
 - [ ] **Step 5: Create stub health route**
 
-Create `src/api/routes/health.py`:
+Create `backend/src/api/routes/health.py`:
 
 ```python
 """Health, status, and sources endpoints."""
@@ -380,31 +380,31 @@ async def health_check():
 
 Create minimal stubs for remaining routes so `main.py` imports don't fail:
 
-`src/api/routes/jobs.py`:
+`backend/src/api/routes/jobs.py`:
 ```python
 from fastapi import APIRouter
 router = APIRouter(tags=["jobs"])
 ```
 
-`src/api/routes/actions.py`:
+`backend/src/api/routes/actions.py`:
 ```python
 from fastapi import APIRouter
 router = APIRouter(tags=["actions"])
 ```
 
-`src/api/routes/profile.py`:
+`backend/src/api/routes/profile.py`:
 ```python
 from fastapi import APIRouter
 router = APIRouter(tags=["profile"])
 ```
 
-`src/api/routes/search.py`:
+`backend/src/api/routes/search.py`:
 ```python
 from fastapi import APIRouter
 router = APIRouter(tags=["search"])
 ```
 
-`src/api/routes/pipeline.py`:
+`backend/src/api/routes/pipeline.py`:
 ```python
 from fastapi import APIRouter
 router = APIRouter(tags=["pipeline"])
@@ -413,14 +413,14 @@ router = APIRouter(tags=["pipeline"])
 - [ ] **Step 7: Run test to verify it passes**
 
 ```bash
-python -m pytest tests/test_api.py::test_health_returns_ok -v
+python -m pytest backend/tests/test_api.py::test_health_returns_ok -v
 ```
 Expected: PASS
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/api/ tests/test_api.py
+git add backend/src/api/ backend/tests/test_api.py
 git commit -m "feat(api): FastAPI app scaffold with health endpoint and CORS"
 ```
 
@@ -429,12 +429,12 @@ git commit -m "feat(api): FastAPI app scaffold with health endpoint and CORS"
 ## Task 3: Database Schema — user_actions and applications Tables
 
 **Files:**
-- Modify: `src/storage/database.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/storage/database.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Write failing test for action insert**
 
-Add to `tests/test_api.py`:
+Add to `backend/tests/test_api.py`:
 
 ```python
 import aiosqlite
@@ -481,13 +481,13 @@ async def test_db_insert_and_advance_application(tmp_path):
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python -m pytest tests/test_api.py::test_db_insert_and_get_action tests/test_api.py::test_db_insert_and_advance_application -v
+python -m pytest backend/tests/test_api.py::test_db_insert_and_get_action backend/tests/test_api.py::test_db_insert_and_advance_application -v
 ```
 Expected: FAIL — `insert_action` not defined.
 
 - [ ] **Step 3: Add tables and methods to database.py**
 
-Add to `src/storage/database.py` `init_db()` method, after the existing `CREATE TABLE` statements:
+Add to `backend/src/storage/database.py` `init_db()` method, after the existing `CREATE TABLE` statements:
 
 ```python
 await self._conn.execute("""
@@ -647,21 +647,21 @@ async def get_job_by_id(self, job_id: int) -> dict | None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-python -m pytest tests/test_api.py::test_db_insert_and_get_action tests/test_api.py::test_db_insert_and_advance_application -v
+python -m pytest backend/tests/test_api.py::test_db_insert_and_get_action backend/tests/test_api.py::test_db_insert_and_advance_application -v
 ```
 Expected: PASS
 
 - [ ] **Step 5: Run existing DB tests to verify no regressions**
 
 ```bash
-python -m pytest tests/test_database.py -v
+python -m pytest backend/tests/test_database.py -v
 ```
 Expected: All 9 pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/storage/database.py tests/test_api.py
+git add backend/src/storage/database.py backend/tests/test_api.py
 git commit -m "feat(db): add user_actions and applications tables with query methods"
 ```
 
@@ -670,12 +670,12 @@ git commit -m "feat(db): add user_actions and applications tables with query met
 ## Task 4: Health, Status, and Sources Routes
 
 **Files:**
-- Modify: `src/api/routes/health.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/health.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Add to `tests/test_api.py`:
+Add to `backend/tests/test_api.py`:
 
 ```python
 @pytest.mark.asyncio
@@ -704,12 +704,12 @@ async def test_sources_returns_list():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python -m pytest tests/test_api.py::test_status_returns_counts tests/test_api.py::test_sources_returns_list -v
+python -m pytest backend/tests/test_api.py::test_status_returns_counts backend/tests/test_api.py::test_sources_returns_list -v
 ```
 
 - [ ] **Step 3: Implement health routes**
 
-Update `src/api/routes/health.py`:
+Update `backend/src/api/routes/health.py`:
 
 ```python
 """Health, status, and sources endpoints."""
@@ -763,13 +763,13 @@ async def list_sources():
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-python -m pytest tests/test_api.py::test_health_returns_ok tests/test_api.py::test_status_returns_counts tests/test_api.py::test_sources_returns_list -v
+python -m pytest backend/tests/test_api.py::test_health_returns_ok backend/tests/test_api.py::test_status_returns_counts backend/tests/test_api.py::test_sources_returns_list -v
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/api/routes/health.py tests/test_api.py
+git add backend/src/api/routes/health.py backend/tests/test_api.py
 git commit -m "feat(api): implement /status and /sources endpoints"
 ```
 
@@ -778,12 +778,12 @@ git commit -m "feat(api): implement /status and /sources endpoints"
 ## Task 5: Jobs List and Detail Routes
 
 **Files:**
-- Modify: `src/api/routes/jobs.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/jobs.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Write failing test for jobs list**
 
-Add to `tests/test_api.py`:
+Add to `backend/tests/test_api.py`:
 
 ```python
 @pytest.mark.asyncio
@@ -800,7 +800,7 @@ async def test_jobs_list_returns_empty():
 
 - [ ] **Step 2: Implement jobs routes**
 
-Update `src/api/routes/jobs.py`:
+Update `backend/src/api/routes/jobs.py`:
 
 ```python
 """Job listing, detail, and export endpoints."""
@@ -953,13 +953,13 @@ async def get_job(job_id: int, db: JobDatabase = Depends(get_db)):
 - [ ] **Step 3: Run tests**
 
 ```bash
-python -m pytest tests/test_api.py -v
+python -m pytest backend/tests/test_api.py -v
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/api/routes/jobs.py tests/test_api.py
+git add backend/src/api/routes/jobs.py backend/tests/test_api.py
 git commit -m "feat(api): implement /jobs list, detail, and export endpoints"
 ```
 
@@ -968,8 +968,8 @@ git commit -m "feat(api): implement /jobs list, detail, and export endpoints"
 ## Task 6: User Actions Routes
 
 **Files:**
-- Modify: `src/api/routes/actions.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/actions.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Write failing test**
 
@@ -986,7 +986,7 @@ async def test_action_counts_empty():
 
 - [ ] **Step 2: Implement actions routes**
 
-Update `src/api/routes/actions.py`:
+Update `backend/src/api/routes/actions.py`:
 
 ```python
 """Job action endpoints (bookmark, apply, reject)."""
@@ -1035,8 +1035,8 @@ async def action_counts(db: JobDatabase = Depends(get_db)):
 - [ ] **Step 3: Run tests and commit**
 
 ```bash
-python -m pytest tests/test_api.py -v
-git add src/api/routes/actions.py tests/test_api.py
+python -m pytest backend/tests/test_api.py -v
+git add backend/src/api/routes/actions.py backend/tests/test_api.py
 git commit -m "feat(api): implement job action CRUD endpoints"
 ```
 
@@ -1045,8 +1045,8 @@ git commit -m "feat(api): implement job action CRUD endpoints"
 ## Task 7: Profile Routes
 
 **Files:**
-- Modify: `src/api/routes/profile.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/profile.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Write failing test**
 
@@ -1062,7 +1062,7 @@ async def test_profile_returns_404_when_none():
 
 - [ ] **Step 2: Implement profile routes**
 
-Update `src/api/routes/profile.py`:
+Update `backend/src/api/routes/profile.py`:
 
 ```python
 """Profile management endpoints (CV upload, LinkedIn, GitHub)."""
@@ -1209,8 +1209,8 @@ async def enrich_github(username: str = Form(...)):
 - [ ] **Step 3: Run tests and commit**
 
 ```bash
-python -m pytest tests/test_api.py -v
-git add src/api/routes/profile.py tests/test_api.py
+python -m pytest backend/tests/test_api.py -v
+git add backend/src/api/routes/profile.py backend/tests/test_api.py
 git commit -m "feat(api): implement profile CRUD with CV/LinkedIn/GitHub upload"
 ```
 
@@ -1219,12 +1219,12 @@ git commit -m "feat(api): implement profile CRUD with CV/LinkedIn/GitHub upload"
 ## Task 8: Search Routes (with Progress Tracking)
 
 **Files:**
-- Modify: `src/api/routes/search.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/search.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Implement search routes with in-memory progress tracking**
 
-Update `src/api/routes/search.py`:
+Update `backend/src/api/routes/search.py`:
 
 ```python
 """Search trigger and progress polling endpoints."""
@@ -1287,8 +1287,8 @@ async def search_status(run_id: str):
 - [ ] **Step 2: Run tests and commit**
 
 ```bash
-python -m pytest tests/test_api.py -v
-git add src/api/routes/search.py tests/test_api.py
+python -m pytest backend/tests/test_api.py -v
+git add backend/src/api/routes/search.py backend/tests/test_api.py
 git commit -m "feat(api): implement search trigger with async progress tracking"
 ```
 
@@ -1297,12 +1297,12 @@ git commit -m "feat(api): implement search trigger with async progress tracking"
 ## Task 9: Pipeline Routes
 
 **Files:**
-- Modify: `src/api/routes/pipeline.py`
-- Test: `tests/test_api.py`
+- Modify: `backend/src/api/routes/pipeline.py`
+- Test: `backend/tests/test_api.py`
 
 - [ ] **Step 1: Implement pipeline routes**
 
-Update `src/api/routes/pipeline.py`:
+Update `backend/src/api/routes/pipeline.py`:
 
 ```python
 """Application pipeline (Kanban board) endpoints."""
@@ -1373,13 +1373,13 @@ async def advance_application(
 - [ ] **Step 2: Run all API tests**
 
 ```bash
-python -m pytest tests/test_api.py -v
+python -m pytest backend/tests/test_api.py -v
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/api/routes/pipeline.py tests/test_api.py
+git add backend/src/api/routes/pipeline.py backend/tests/test_api.py
 git commit -m "feat(api): implement application pipeline endpoints"
 ```
 
@@ -1388,12 +1388,12 @@ git commit -m "feat(api): implement application pipeline endpoints"
 ## Task 10: Integration Test and CLI Entry Point
 
 **Files:**
-- Modify: `tests/test_api.py`
-- Modify: `src/cli.py` (add `api` command)
+- Modify: `backend/tests/test_api.py`
+- Modify: `backend/src/cli.py` (add `api` command)
 
 - [ ] **Step 1: Add full integration test**
 
-Add to `tests/test_api.py`:
+Add to `backend/tests/test_api.py`:
 
 ```python
 @pytest.mark.asyncio
@@ -1435,7 +1435,7 @@ async def test_full_workflow():
 
 - [ ] **Step 2: Add CLI command to start API server**
 
-Add to `src/cli.py`:
+Add to `backend/src/cli.py`:
 
 ```python
 @cli.command()
@@ -1451,8 +1451,8 @@ def api(port: int, host: str):
 - [ ] **Step 3: Run full test suite**
 
 ```bash
-python -m pytest tests/test_api.py -v
-python -m pytest tests/ --ignore=tests/test_main.py --ignore=tests/test_sources.py -v --timeout=60
+python -m pytest backend/tests/test_api.py -v
+python -m pytest backend/tests/ --ignore=backend/tests/test_main.py --ignore=backend/tests/test_sources.py -v --timeout=60
 ```
 
 - [ ] **Step 4: Manual smoke test**
@@ -1469,7 +1469,7 @@ curl http://localhost:8000/api/jobs
 - [ ] **Step 5: Final commit**
 
 ```bash
-git add src/api/ src/cli.py src/storage/database.py tests/test_api.py requirements.txt
+git add backend/src/api/ backend/src/cli.py backend/src/storage/database.py backend/tests/test_api.py backend/pyproject.toml
 git commit -m "feat(api): complete FastAPI backend with 21 endpoints for Next.js frontend"
 ```
 
@@ -1489,7 +1489,7 @@ python -m src.cli api                              # Start FastAPI on localhost:
 python -m src.cli api --port 3001 --host 0.0.0.0   # Custom host/port
 ```
 
-Update folder structure to include `src/api/`.
+Update folder structure to include `backend/src/api/`.
 Update test count.
 
 - [ ] **Step 2: Commit**

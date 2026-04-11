@@ -7,8 +7,8 @@ import logging
 from dataclasses import asdict, fields
 from pathlib import Path
 
-from src.config.settings import DATA_DIR
-from src.profile.models import CVData, UserPreferences, UserProfile
+from src.core.settings import DATA_DIR
+from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 logger = logging.getLogger("job360.profile.storage")
 

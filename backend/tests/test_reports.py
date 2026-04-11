@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from src.models import Job
-from src.notifications.report_generator import generate_markdown_report, generate_html_report
+from src.services.notifications.report_generator import generate_markdown_report, generate_html_report
 
 
 def _make_job(**overrides):

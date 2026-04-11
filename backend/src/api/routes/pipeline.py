@@ -12,7 +12,7 @@ from src.api.models import (
     PipelineListResponse,
     PipelineRemindersResponse,
 )
-from src.storage.database import JobDatabase
+from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["pipeline"])
 

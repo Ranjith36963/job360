@@ -101,7 +101,7 @@ class SearchConfig:
         hardcoded AI/ML keywords. The user MUST upload a CV or set preferences
         for meaningful job matching.
         """
-        from src.config.keywords import LOCATIONS, VISA_KEYWORDS
+        from src.core.keywords import LOCATIONS, VISA_KEYWORDS
         return cls(
             job_titles=[],
             primary_skills=[],

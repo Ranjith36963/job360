@@ -6,7 +6,7 @@ from typing import Optional
 
 import humanize
 
-from src.config.keywords import PRIMARY_SKILLS, SECONDARY_SKILLS, TERTIARY_SKILLS
+from src.core.keywords import PRIMARY_SKILLS, SECONDARY_SKILLS, TERTIARY_SKILLS
 
 # ---------------------------------------------------------------------------
 # Bucket definitions: (label, emoji_unicode, emoji_rich, max_hours, css_class)

@@ -98,8 +98,8 @@ def test_setup_profile_help():
 
 def test_setup_profile_preserves_github_username(tmp_path):
     """BUG-1 regression: github_username must survive merge in CLI flow."""
-    from src.profile.models import CVData, UserPreferences
-    from src.profile.preferences import merge_cv_and_preferences
+    from src.services.profile.models import CVData, UserPreferences
+    from src.services.profile.preferences import merge_cv_and_preferences
 
     prefs = UserPreferences(
         target_job_titles=["Engineer"],

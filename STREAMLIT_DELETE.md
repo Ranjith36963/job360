@@ -9,12 +9,12 @@
 
 ## TL;DR
 
-Streamlit removal is **safe and surgically clean**. The blast radius is tiny because the dashboard is a **pure downstream consumer** — it imports from the rest of the codebase, but **only one thing in the entire codebase imports from it**: `tests/test_dashboard.py` importing `_safe_url`. That test file goes away with the dashboard.
+Streamlit removal is **safe and surgically clean**. The blast radius is tiny because the dashboard is a **pure downstream consumer** — it imports from the rest of the codebase, but **only one thing in the entire codebase imports from it**: `backend/tests/test_dashboard.py` importing `_safe_url`. That test file goes away with the dashboard.
 
 **Totals:**
-- **2 files deleted entirely** (844 lines): `src/dashboard.py` (727) + `tests/test_dashboard.py` (117)
-- **3 files surgically edited** (~20 lines touched): `src/cli.py`, `src/main.py`, `tests/test_cli.py`
-- **3 dependencies removed**: `streamlit`, `pandas`, `plotly` → `requirements.txt` shrinks 18 → 15
+- **2 files deleted entirely** (844 lines): `backend/src/dashboard.py` (727) + `backend/tests/test_dashboard.py` (117)
+- **3 files surgically edited** (~20 lines touched): `backend/src/cli.py`, `backend/src/main.py`, `backend/tests/test_cli.py`
+- **3 dependencies removed**: `streamlit`, `pandas`, `plotly` → `backend/pyproject.toml` shrinks 18 → 15
 - **0 impact on:** FastAPI backend, Next.js frontend, 48 job sources, scoring, storage, cron, or 397 of 407 tests
 - **2 secondary dead functions surfaced** (judgment call): `parse_cv_from_bytes` and `parse_linkedin_zip_from_bytes`
 
@@ -24,7 +24,7 @@ Streamlit removal is **safe and surgically clean**. The blast radius is tiny bec
 
 ```
                      ┌─────────────────────────┐
-                     │   src/dashboard.py      │  ← The ONLY Streamlit importer
+                     │   backend/src/dashboard.py      │  ← The ONLY Streamlit importer
                      │   (727 lines)           │
                      └──┬──────────────────────┘
                         │ imports FROM (8 deps)
@@ -38,7 +38,7 @@ Streamlit removal is **safe and surgically clean**. The blast radius is tiny bec
 
      WHO IMPORTS src.dashboard?
      ────────────────────────────
-     tests/test_dashboard.py       ← only consumer (imports _safe_url)
+     backend/tests/test_dashboard.py       ← only consumer (imports _safe_url)
      (nothing else in the repo)
 ```
 
@@ -46,20 +46,20 @@ Streamlit removal is **safe and surgically clean**. The blast radius is tiny bec
 
 | Target | Consumers outside `dashboard.py` |
 | --- | --- |
-| `from src.dashboard import _safe_url` | `tests/test_dashboard.py:85` only |
-| `import streamlit` | `src/dashboard.py:35` only |
-| `import pandas` | `src/dashboard.py:36` only |
-| `import plotly.express` | `src/dashboard.py:37` only |
+| `from src.dashboard import _safe_url` | `backend/tests/test_dashboard.py:85` only |
+| `import streamlit` | `backend/src/dashboard.py:35` only |
+| `import pandas` | `backend/src/dashboard.py:36` only |
+| `import plotly.express` | `backend/src/dashboard.py:37` only |
 | `from src.api.* import dashboard` | **zero matches** — FastAPI is fully independent |
-| `from src.dashboard import *` (anywhere in `src/`) | **zero matches** |
+| `from src.dashboard import *` (anywhere in `backend/src/`) | **zero matches** |
 
-The FastAPI backend (`src/api/`) has **zero references to "dashboard"** anywhere in its code. The cron script (`cron_setup.sh`) schedules `python -m src.main` and never mentions the dashboard. Next.js (`frontend/`) is pure TypeScript/React and has no Python dependency at all.
+The FastAPI backend (`backend/src/api/`) has **zero references to "dashboard"** anywhere in its code. The cron script (`cron_setup.sh`) schedules `python -m src.main` and never mentions the dashboard. Next.js (`frontend/`) is pure TypeScript/React and has no Python dependency at all.
 
 ---
 
 ## 2. Files to DELETE Entirely
 
-### 2.1 `src/dashboard.py` — 727 lines
+### 2.1 `backend/src/dashboard.py` — 727 lines
 
 The entire Streamlit UI. Contains:
 - `_safe_url()` — URL sanitization helper (only used inside this file + its test)
@@ -70,11 +70,11 @@ The entire Streamlit UI. Contains:
 - Calls `parse_cv_from_bytes` and `parse_linkedin_zip_from_bytes` (see Section 7 for secondary impact)
 
 **Previously flagged as partially dead in `DEADCODE.md`:**
-- `src/dashboard.py:39` — unused `EXPORTS_DIR` import
-- `src/dashboard.py:432` — unused `asyncio` import
+- `backend/src/dashboard.py:39` — unused `EXPORTS_DIR` import
+- `backend/src/dashboard.py:432` — unused `asyncio` import
 - Those findings become moot — the whole file goes.
 
-### 2.2 `tests/test_dashboard.py` — 117 lines
+### 2.2 `backend/tests/test_dashboard.py` — 117 lines
 
 Contains 6 tests, all exercising `_safe_url`:
 - `test_safe_url_blocks_javascript` (line 88)
@@ -84,10 +84,10 @@ Contains 6 tests, all exercising `_safe_url`:
 - `test_safe_url_handles_empty` (line 109)
 - `test_safe_url_handles_relative` (line 114)
 
-The file has a module-level Streamlit mock (lines 5-79) that injects a fake `streamlit` module into `sys.modules` so the `src/dashboard.py` import statement doesn't explode during pytest. All this scaffolding disappears cleanly.
+The file has a module-level Streamlit mock (lines 5-79) that injects a fake `streamlit` module into `sys.modules` so the `backend/src/dashboard.py` import statement doesn't explode during pytest. All this scaffolding disappears cleanly.
 
 **Previously flagged as partially dead in `DEADCODE.md`:**
-- `tests/test_dashboard.py:3` — unused `PropertyMock` import (moot — file deleted).
+- `backend/tests/test_dashboard.py:3` — unused `PropertyMock` import (moot — file deleted).
 
 **Test count delta:** `407 → 401` (6 tests removed).
 
@@ -95,7 +95,7 @@ The file has a module-level Streamlit mock (lines 5-79) that injects a fake `str
 
 ## 3. Files to SURGICALLY EDIT
 
-### 3.1 `src/cli.py` (218 lines → ~208 lines)
+### 3.1 `backend/src/cli.py` (218 lines → ~208 lines)
 
 Remove the `dashboard` CLI command + the `--dashboard` flag from the `run` command:
 
@@ -105,10 +105,10 @@ Remove the `dashboard` CLI command + the `--dashboard` flag from the `run` comma
 | 27 | `def run(source, dry_run, log_level, db_path, no_email, dashboard):` | **EDIT** — remove `dashboard` parameter |
 | 36 | `launch_dashboard=dashboard,` | **DELETE** (inside `run_search` call) |
 | 43 | `click.echo("  python -m src.cli dashboard  # then use Profile sidebar")` | **EDIT** — update to reference frontend URL (e.g. `http://localhost:3000/profile`) or the API |
-| 50-55 | Entire `@cli.command() def dashboard():` block that subprocess-runs `streamlit run src/dashboard.py` | **DELETE** (6 lines) |
+| 50-55 | Entire `@cli.command() def dashboard():` block that subprocess-runs `streamlit run backend/src/dashboard.py` | **DELETE** (6 lines) |
 | 150 | `click.echo("No CV provided. You can add one later via the dashboard.")` | **EDIT** — change to "via the frontend" or "via the /api/profile endpoint" |
 
-### 3.2 `src/main.py` (476 lines → ~468 lines)
+### 3.2 `backend/src/main.py` (476 lines → ~468 lines)
 
 Remove the `launch_dashboard` parameter and the subprocess block:
 
@@ -119,13 +119,13 @@ Remove the `launch_dashboard` parameter and the subprocess block:
 | 426 | `# Launch dashboard if requested` | **DELETE** |
 | 427 | `if launch_dashboard:` | **DELETE** |
 | 428 | `logger.info("Launching Streamlit dashboard...")` | **DELETE** |
-| 429 | `subprocess.Popen([sys.executable, "-m", "streamlit", "run", "src/dashboard.py"])` | **DELETE** |
+| 429 | `subprocess.Popen([sys.executable, "-m", "streamlit", "run", "backend/src/dashboard.py"])` | **DELETE** |
 | 474 | `parser.add_argument("--dashboard", action="store_true", help="Launch dashboard after run")` | **DELETE** |
 | 476 | `asyncio.run(run_search(no_notify=args.no_email, launch_dashboard=args.dashboard))` | **EDIT** — remove `launch_dashboard=args.dashboard` |
 
-Also: `import subprocess` / `import sys` at the top of `main.py` may become unused once this block is removed. Verify with `ruff check --select F401 src/main.py` after editing.
+Also: `import subprocess` / `import sys` at the top of `main.py` may become unused once this block is removed. Verify with `ruff check --select F401 backend/src/main.py` after editing.
 
-### 3.3 `tests/test_cli.py` (119 lines → ~115 lines)
+### 3.3 `backend/tests/test_cli.py` (119 lines → ~115 lines)
 
 Three test assertions reference the dashboard CLI surface:
 
@@ -135,7 +135,7 @@ Three test assertions reference the dashboard CLI surface:
 | 65 | `"""run --help should show --no-email and --dashboard flags."""` (test docstring) | **EDIT** — remove `--dashboard` |
 | 69 | `assert "--dashboard" in result.output` | **DELETE** |
 
-Also: the `SOURCE_REGISTRY` count assertion (`len(SOURCE_REGISTRY) == 48` at `tests/test_cli.py:47`) is **unaffected** — source registry isn't touched.
+Also: the `SOURCE_REGISTRY` count assertion (`len(SOURCE_REGISTRY) == 48` at `backend/tests/test_cli.py:47`) is **unaffected** — source registry isn't touched.
 
 ---
 
@@ -147,23 +147,23 @@ These don't affect correctness but will look wrong after removal. Worth updating
 
 | File:Line | Current docstring | Suggested edit |
 | --- | --- | --- |
-| `src/profile/cv_parser.py:161` | `"""Synchronous wrapper for parse_cv_async (used by CLI and Streamlit)."""` | Remove "and Streamlit" |
-| `src/profile/cv_parser.py:298` | `"""Parse CV from in-memory bytes (for Streamlit file_uploader)."""` | Change to "for HTTP file upload" or delete function entirely (see Section 7) |
-| `src/profile/linkedin_parser.py:130` | `"""Parse from in-memory bytes (for Streamlit file_uploader)."""` | Change to "for HTTP file upload" |
-| `src/utils/time_buckets.py:1` | `"""Shared time-bucketing utilities for dashboard, CLI, and email views."""` | Change to "for CLI and email views" |
+| `backend/src/profile/cv_parser.py:161` | `"""Synchronous wrapper for parse_cv_async (used by CLI and Streamlit)."""` | Remove "and Streamlit" |
+| `backend/src/profile/cv_parser.py:298` | `"""Parse CV from in-memory bytes (for Streamlit file_uploader)."""` | Change to "for HTTP file upload" or delete function entirely (see Section 7) |
+| `backend/src/profile/linkedin_parser.py:130` | `"""Parse from in-memory bytes (for Streamlit file_uploader)."""` | Change to "for HTTP file upload" |
+| `backend/src/utils/time_buckets.py:1` | `"""Shared time-bucketing utilities for dashboard, CLI, and email views."""` | Change to "for CLI and email views" |
 
 ### 4.2 User-facing strings that mention "dashboard"
 
 | File:Line | Current string | Suggested edit |
 | --- | --- | --- |
-| `src/cli.py:150` | `"No CV provided. You can add one later via the dashboard."` | "… via the frontend (`http://localhost:3000/profile`) or the `/api/profile` endpoint." |
-| `src/notifications/slack_notify.py:62` | `"_...and {X} more jobs. Check email or dashboard for full list._"` | Change "dashboard" → "frontend" |
-| `src/notifications/discord_notify.py:39` | Same text as Slack | Same edit |
-| `src/main.py:247` | Log error mentioning `python -m src.cli dashboard` | Update guidance string |
+| `backend/src/cli.py:150` | `"No CV provided. You can add one later via the dashboard."` | "… via the frontend (`http://localhost:3000/profile`) or the `/api/profile` endpoint." |
+| `backend/src/notifications/slack_notify.py:62` | `"_...and {X} more jobs. Check email or dashboard for full list._"` | Change "dashboard" → "frontend" |
+| `backend/src/notifications/discord_notify.py:39` | Same text as Slack | Same edit |
+| `backend/src/main.py:247` | Log error mentioning `python -m src.cli dashboard` | Update guidance string |
 
 ---
 
-## 5. Dependency Removal — `requirements.txt`
+## 5. Dependency Removal — `backend/pyproject.toml`
 
 Current file (lines 1-19):
 
@@ -193,15 +193,15 @@ cerebras-cloud-sdk>=1.0.0
 
 ### Why each is safe to remove
 
-- **`streamlit>=1.30.0`** — imported only at `src/dashboard.py:35`. Zero other references.
-- **`pandas>=2.0.0`** — imported only at `src/dashboard.py:36`. `grep ^import pandas` and `^from pandas` across the repo returned **zero matches** outside dashboard. Critical: the FastAPI routes do NOT use pandas for response construction, and no test imports pandas. Safe to drop.
-- **`plotly>=5.18.0`** — imported only at `src/dashboard.py:37` (`import plotly.express as px`). Zero other references.
+- **`streamlit>=1.30.0`** — imported only at `backend/src/dashboard.py:35`. Zero other references.
+- **`pandas>=2.0.0`** — imported only at `backend/src/dashboard.py:36`. `grep ^import pandas` and `^from pandas` across the repo returned **zero matches** outside dashboard. Critical: the FastAPI routes do NOT use pandas for response construction, and no test imports pandas. Safe to drop.
+- **`plotly>=5.18.0`** — imported only at `backend/src/dashboard.py:37` (`import plotly.express as px`). Zero other references.
 
 ### Verification command (for when you do the removal)
 
 ```bash
-ruff check --select F401 src/ tests/        # should show no pandas/plotly/streamlit imports
-grep -rn "import pandas\|import plotly\|import streamlit" src/ tests/  # should return nothing
+ruff check --select F401 backend/src/ backend/tests/        # should show no pandas/plotly/streamlit imports
+grep -rn "import pandas\|import plotly\|import streamlit" backend/src/ backend/tests/  # should return nothing
 ```
 
 ---
@@ -220,22 +220,22 @@ grep -rn "import pandas\|import plotly\|import streamlit" src/ tests/  # should 
 
 Removing the dashboard orphans **2 functions** that currently exist only to service its file-upload UI:
 
-### 7.1 `src/profile/cv_parser.py:297 — parse_cv_from_bytes`
+### 7.1 `backend/src/profile/cv_parser.py:297 — parse_cv_from_bytes`
 
-- **Production consumers:** `src/dashboard.py:409` only
+- **Production consumers:** `backend/src/dashboard.py:409` only
 - **Test consumers:** **zero**
 - **Verdict:** **fully dead after dashboard removal.** Safe to delete the function body (lines 297-313).
-- Leave `parse_cv` (line 160, the sync wrapper) — it's used by `src/cli.py:138`.
-- Leave `parse_cv_async` (the real implementation) — it's used by `src/api/routes/profile.py:12`.
+- Leave `parse_cv` (line 160, the sync wrapper) — it's used by `backend/src/cli.py:138`.
+- Leave `parse_cv_async` (the real implementation) — it's used by `backend/src/api/routes/profile.py:12`.
 
-### 7.2 `src/profile/linkedin_parser.py:129 — parse_linkedin_zip_from_bytes`
+### 7.2 `backend/src/profile/linkedin_parser.py:129 — parse_linkedin_zip_from_bytes`
 
-- **Production consumers:** `src/dashboard.py:421` only
-- **Test consumers:** **`tests/test_linkedin_github.py`** — 8 test references (lines 16, 171, 186, 198, 618, 626, 645, 794, 804)
+- **Production consumers:** `backend/src/dashboard.py:421` only
+- **Test consumers:** **`backend/tests/test_linkedin_github.py`** — 8 test references (lines 16, 171, 186, 198, 618, 626, 645, 794, 804)
 - **Verdict:** **design decision needed.**
   - **Option A:** Delete the function AND those 8 tests — cleanest, but loses the bytes-based test coverage
   - **Option B:** Keep the function as a standalone utility — the tests keep passing, and it's a legitimate "parse from bytes" API even without a Streamlit file_uploader
-  - The file-path variant `parse_linkedin_zip` (line 120) stays regardless — it's used by `src/api/routes/profile.py:14` and `src/cli.py:154`
+  - The file-path variant `parse_linkedin_zip` (line 120) stays regardless — it's used by `backend/src/api/routes/profile.py:14` and `backend/src/cli.py:154`
 - **Recommendation:** Option B. The tests justify keeping it, and the function is generic enough to serve a future frontend or API upload path.
 
 ### 7.3 Why these matter
@@ -256,7 +256,7 @@ Four main `.md` files reference the Streamlit dashboard. **All references need u
 | 18-20 | Dependency table rows for streamlit / pandas / plotly | **DELETE** all 3 rows |
 | 49 | `python -m src.cli run --dashboard   # Launch dashboard after` | **DELETE** line |
 | 58 | `python -m src.cli dashboard    # Launch Streamlit UI` | **DELETE** line |
-| 70 | `python -m pytest tests/test_dashboard.py -v             # Dashboard helpers (6)` | **DELETE** line |
+| 70 | `python -m pytest backend/tests/test_dashboard.py -v             # Dashboard helpers (6)` | **DELETE** line |
 | 80 | `│   ├── cli.py               # Click CLI: run, api, dashboard, status, sources, view, setup-profile` | Remove "dashboard," from comment |
 | 87 | `│   ├── dashboard.py         # Streamlit web dashboard with profile setup sidebar` | **DELETE** line |
 | 143 | "Click CLI with `run`, `dashboard`, `status`, `sources`, `view`, `setup-profile` commands" | Remove "`dashboard`, " |
@@ -284,11 +284,11 @@ Four main `.md` files reference the Streamlit dashboard. **All references need u
 
 | Line | Content | Action |
 | --- | --- | --- |
-| 29 | `Dashboard Profile UI | src/dashboard.py | Done -- sidebar expander with CV upload + form` | **DELETE** row |
-| 83 | `DB error logging | src/cli_view.py, src/dashboard.py | ...` | Change to just `src/cli_view.py` |
+| 29 | `Dashboard Profile UI | backend/src/dashboard.py | Done -- sidebar expander with CV upload + form` | **DELETE** row |
+| 83 | `DB error logging | backend/src/cli_view.py, backend/src/dashboard.py | ...` | Change to just `backend/src/cli_view.py` |
 | 115 | `- CLI commands: run, view, dashboard, status, sources, setup-profile` | Remove "dashboard, " |
 | 116 | `- Streamlit dashboard with filters, charts, profile setup` | **DELETE** line |
-| 176 | `- src/dashboard.py — Streamlit UI is not unit-tested (would need Streamlit testing framework)` | **DELETE** line |
+| 176 | `- backend/src/dashboard.py — Streamlit UI is not unit-tested (would need Streamlit testing framework)` | **DELETE** line |
 | 179 | `- Profile dashboard sidebar — interactive Streamlit profile form is not tested` | **DELETE** line |
 
 ### 8.4 `ARCHITECTURE.md` — 6+ references
@@ -307,10 +307,10 @@ The dead-code report I committed in `2c7c7b5` contains line references that beco
 
 | `DEADCODE.md` Line | Reference | Fate |
 | --- | --- | --- |
-| 91 | `src/dashboard.py:39` — `EXPORTS_DIR` (unused import) | Moot — file deleted |
-| 92 | `src/dashboard.py:432` — `asyncio` (unused import) | Moot — file deleted |
-| 106 | `tests/test_dashboard.py:3` — `PropertyMock` (unused import) | Moot — file deleted |
-| 264 | `src/dashboard.py:230` — `row_factory` (false positive) | Moot — file deleted |
+| 91 | `backend/src/dashboard.py:39` — `EXPORTS_DIR` (unused import) | Moot — file deleted |
+| 92 | `backend/src/dashboard.py:432` — `asyncio` (unused import) | Moot — file deleted |
+| 106 | `backend/tests/test_dashboard.py:3` — `PropertyMock` (unused import) | Moot — file deleted |
+| 264 | `backend/src/dashboard.py:230` — `row_factory` (false positive) | Moot — file deleted |
 | 364 | CLI commands list includes "`dashboard`" | Update to remove dashboard |
 
 Consider this either (a) a reason to regenerate `DEADCODE.md` after the Streamlit removal, or (b) acceptable historical debt — the commit message documents what it represented at the time.
@@ -329,12 +329,12 @@ Found 2 references:
 
 This section exists so you can sleep at night. For each subsystem, I verified (via grep) that it has zero coupling to the dashboard.
 
-### 9.1 FastAPI backend (`src/api/`) — ✅ Fully independent
+### 9.1 FastAPI backend (`backend/src/api/`) — ✅ Fully independent
 
-- `grep -rn "dashboard" src/api/` → **0 matches**
-- `grep -rn "streamlit" src/api/` → **0 matches**
-- API routes in `src/api/routes/profile.py` use `parse_cv_async`, `parse_linkedin_zip`, `enrich_cv_from_linkedin` — **not** the `_from_bytes` variants
-- The API handles file uploads via `src/api/dependencies.py::save_upload_to_temp` which saves to a tempfile path — then passes the path to the file-path-based parsers. No dashboard code path involved.
+- `grep -rn "dashboard" backend/src/api/` → **0 matches**
+- `grep -rn "streamlit" backend/src/api/` → **0 matches**
+- API routes in `backend/src/api/routes/profile.py` use `parse_cv_async`, `parse_linkedin_zip`, `enrich_cv_from_linkedin` — **not** the `_from_bytes` variants
+- The API handles file uploads via `backend/src/api/dependencies.py::save_upload_to_temp` which saves to a tempfile path — then passes the path to the file-path-based parsers. No dashboard code path involved.
 
 ### 9.2 Next.js frontend (`frontend/`) — ✅ Fully independent
 
@@ -342,22 +342,22 @@ This section exists so you can sleep at night. For each subsystem, I verified (v
 - Communicates with the FastAPI backend over HTTP.
 - Deleting the Streamlit dashboard has zero impact on the frontend's build, routing, or runtime.
 
-### 9.3 All 48 job sources (`src/sources/`) — ✅ Untouched
+### 9.3 All 48 job sources (`backend/src/sources/`) — ✅ Untouched
 
-- `grep -rn "dashboard\|streamlit" src/sources/` → **0 matches**
+- `grep -rn "dashboard\|streamlit" backend/src/sources/` → **0 matches**
 - Sources extend `BaseJobSource`, which knows nothing about rendering.
 
-### 9.4 Scoring (`src/filters/`) — ✅ Untouched
+### 9.4 Scoring (`backend/src/filters/`) — ✅ Untouched
 
 - `JobScorer` and `score_job` are pure functions over `Job` objects and `SearchConfig`.
 - Zero rendering coupling.
 
-### 9.5 Storage (`src/storage/`) — ✅ Untouched
+### 9.5 Storage (`backend/src/storage/`) — ✅ Untouched
 
 - `database.py` and `csv_export.py` know nothing about Streamlit.
 - SQL queries are consumed identically by CLI, API, and dashboard — only the first two remain.
 
-### 9.6 Notifications (`src/notifications/`) — ✅ Untouched (2 cosmetic string updates)
+### 9.6 Notifications (`backend/src/notifications/`) — ✅ Untouched (2 cosmetic string updates)
 
 - No imports of streamlit/dashboard.
 - Only the literal text `"Check email or dashboard for full list."` in Slack and Discord message templates references the dashboard — cosmetic only (see Section 4.2).
@@ -367,17 +367,17 @@ This section exists so you can sleep at night. For each subsystem, I verified (v
 - Entire file is 51 lines and schedules `python -m src.main` twice daily (4AM/4PM London).
 - Zero dashboard or streamlit references.
 
-### 9.8 Pipeline orchestrator (`src/main.py::run_search`) — ✅ Mostly untouched
+### 9.8 Pipeline orchestrator (`backend/src/main.py::run_search`) — ✅ Mostly untouched
 
 - The pipeline itself (fetching, scoring, deduplication, storage, notifications) is independent.
 - Only the **final** step — an optional `launch_dashboard` branch — touches Streamlit. Ripping out that branch (Section 3.2) leaves the pipeline fully functional.
 
 ### 9.9 Test suite — 401/407 tests unaffected
 
-- 6 tests in `tests/test_dashboard.py` — deleted with the file
-- ~3 assertions in `tests/test_cli.py` — updated (file stays)
+- 6 tests in `backend/tests/test_dashboard.py` — deleted with the file
+- ~3 assertions in `backend/tests/test_cli.py` — updated (file stays)
 - All other 397 tests: **zero changes**
-- `tests/test_linkedin_github.py` 8 tests depend on `parse_linkedin_zip_from_bytes` — see Section 7.2 judgment call (recommended: keep)
+- `backend/tests/test_linkedin_github.py` 8 tests depend on `parse_linkedin_zip_from_bytes` — see Section 7.2 judgment call (recommended: keep)
 
 ---
 
@@ -387,14 +387,14 @@ When you're ready to execute the removal, this order minimizes the chance of a b
 
 1. **Doc-only commit** — update `CLAUDE.md`, `README.md`, `STATUS.md`, `ARCHITECTURE.md` (Sections 8.1-8.4). Safe to ship first because docs don't affect runtime.
 2. **Cosmetic strings commit** — update the 4 user-facing strings in Section 4.2 and the 4 docstrings in Section 4.1.
-3. **Core removal commit** — delete `src/dashboard.py`, delete `tests/test_dashboard.py`, edit `src/cli.py`, edit `src/main.py`, edit `tests/test_cli.py`, edit `setup.sh`, edit `requirements.txt`. This is the big one.
-4. **Secondary dead code commit** — delete `parse_cv_from_bytes` from `src/profile/cv_parser.py` (Section 7.1). Keep `parse_linkedin_zip_from_bytes` (Section 7.2).
-5. **Verification commit (if needed)** — run `ruff check --fix --select F401 src/ tests/` to catch any newly-orphaned imports (e.g. `subprocess`, `sys` at the top of `main.py`). Commit the fix if ruff touches anything.
+3. **Core removal commit** — delete `backend/src/dashboard.py`, delete `backend/tests/test_dashboard.py`, edit `backend/src/cli.py`, edit `backend/src/main.py`, edit `backend/tests/test_cli.py`, edit `setup.sh`, edit `backend/pyproject.toml`. This is the big one.
+4. **Secondary dead code commit** — delete `parse_cv_from_bytes` from `backend/src/profile/cv_parser.py` (Section 7.1). Keep `parse_linkedin_zip_from_bytes` (Section 7.2).
+5. **Verification commit (if needed)** — run `ruff check --fix --select F401 backend/src/ backend/tests/` to catch any newly-orphaned imports (e.g. `subprocess`, `sys` at the top of `main.py`). Commit the fix if ruff touches anything.
 
 After each commit, run:
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest backend/tests/ -v
 python -m src.cli --help                # verify CLI still works
 python -m src.cli run --dry-run         # verify pipeline still works
 python -m src.cli api                   # verify API still starts
@@ -406,10 +406,10 @@ python -m src.cli api                   # verify API still starts
 
 | Metric | Before | After | Delta |
 | --- | --- | --- | --- |
-| Python files in `src/` | 48 (in `src/sources/`) + X elsewhere | same − 1 | `-1 file` |
-| Test files (`tests/test_*.py`) | 21 | 20 | `-1 file` |
+| Python files in `backend/src/` | 48 (in `backend/src/sources/`) + X elsewhere | same − 1 | `-1 file` |
+| Test files (`backend/tests/test_*.py`) | 21 | 20 | `-1 file` |
 | Test count (pytest collected) | 407 | 401 | `-6 tests` |
-| `requirements.txt` packages | 18 | 15 | `-3 packages` |
+| `backend/pyproject.toml` packages | 18 | 15 | `-3 packages` |
 | Lines deleted | — | — | `~870 lines` |
 | Lines edited (non-delete) | — | — | `~40 lines` |
 | Orphan functions cleaned up | — | — | 1 (`parse_cv_from_bytes`); 1 judgment call (`parse_linkedin_zip_from_bytes`) |
@@ -429,26 +429,26 @@ These are the exact read-only commands that produced this report. Re-running the
 
 ```bash
 # 1. Find every file that mentions streamlit or dashboard
-grep -rn "streamlit" src/ tests/ --include="*.py"
-grep -rn "dashboard" src/ tests/ --include="*.py"
+grep -rn "streamlit" backend/src/ backend/tests/ --include="*.py"
+grep -rn "dashboard" backend/src/ backend/tests/ --include="*.py"
 
 # 2. Find every actual Python import of streamlit
-grep -rn "^import streamlit\|^from streamlit" src/ tests/ --include="*.py"
+grep -rn "^import streamlit\|^from streamlit" backend/src/ backend/tests/ --include="*.py"
 
 # 3. Find who imports FROM src.dashboard
-grep -rn "from src\.dashboard\|from \.dashboard\|import dashboard" src/ tests/ --include="*.py"
+grep -rn "from src\.dashboard\|from \.dashboard\|import dashboard" backend/src/ backend/tests/ --include="*.py"
 
 # 4. Find every file that imports pandas or plotly
-grep -rn "^import pandas\|^from pandas\|^import plotly\|^from plotly" src/ tests/ --include="*.py"
+grep -rn "^import pandas\|^from pandas\|^import plotly\|^from plotly" backend/src/ backend/tests/ --include="*.py"
 
-# 5. Find every use of _safe_url (the only symbol tests/test_dashboard.py imports)
-grep -rn "_safe_url" src/ tests/ --include="*.py"
+# 5. Find every use of _safe_url (the only symbol backend/tests/test_dashboard.py imports)
+grep -rn "_safe_url" backend/src/ backend/tests/ --include="*.py"
 
 # 6. Find parse_cv_from_bytes and parse_linkedin_zip_from_bytes consumers
-grep -rn "parse_cv_from_bytes\|parse_linkedin_zip_from_bytes" src/ tests/ --include="*.py"
+grep -rn "parse_cv_from_bytes\|parse_linkedin_zip_from_bytes" backend/src/ backend/tests/ --include="*.py"
 
 # 7. Check FastAPI backend independence
-grep -rn "dashboard\|streamlit" src/api/
+grep -rn "dashboard\|streamlit" backend/src/api/
 
 # 8. Check shell scripts
 grep -rn "dashboard\|streamlit" *.sh
@@ -463,15 +463,15 @@ I ran each question-to-answer pair multiple times against different grep queries
 
 | Claim | Verification method 1 | Verification method 2 | Status |
 | --- | --- | --- | --- |
-| Only `src/dashboard.py` imports streamlit | `grep "^import streamlit" **/*.py` → 1 match | `grep "streamlit" src/ -l` (file-list) → only dashboard.py | ✅ Corroborated |
-| `pandas` is dashboard-only | `grep "^import pandas" **/*.py` → 1 match | `grep "pd\." src/` outside dashboard → 0 matches | ✅ Corroborated |
-| `plotly` is dashboard-only | `grep "^import plotly" **/*.py` → 1 match | `grep "px\." src/` outside dashboard → 0 matches | ✅ Corroborated |
-| `_safe_url` is dashboard-only | Grep for `_safe_url` across `**/*.py` → 2 files (src + test) | Grep in `src/api/` for `_safe_url` → 0 matches | ✅ Corroborated |
-| FastAPI has no dashboard coupling | `grep "dashboard" src/api/` → 0 matches | `grep "streamlit" src/api/` → 0 matches | ✅ Corroborated |
+| Only `backend/src/dashboard.py` imports streamlit | `grep "^import streamlit" **/*.py` → 1 match | `grep "streamlit" backend/src/ -l` (file-list) → only dashboard.py | ✅ Corroborated |
+| `pandas` is dashboard-only | `grep "^import pandas" **/*.py` → 1 match | `grep "pd\." backend/src/` outside dashboard → 0 matches | ✅ Corroborated |
+| `plotly` is dashboard-only | `grep "^import plotly" **/*.py` → 1 match | `grep "px\." backend/src/` outside dashboard → 0 matches | ✅ Corroborated |
+| `_safe_url` is dashboard-only | Grep for `_safe_url` across `**/*.py` → 2 files (src + test) | Grep in `backend/src/api/` for `_safe_url` → 0 matches | ✅ Corroborated |
+| FastAPI has no dashboard coupling | `grep "dashboard" backend/src/api/` → 0 matches | `grep "streamlit" backend/src/api/` → 0 matches | ✅ Corroborated |
 | Cron does not reference dashboard | Full `Read` of `cron_setup.sh` (51 lines) | `grep "dashboard\|streamlit" cron_setup.sh` → 0 matches | ✅ Corroborated |
-| `parse_cv_from_bytes` is dashboard-only | Grep for function name → `src/dashboard.py:409` + definition | Checked FastAPI routes for its usage → not imported | ✅ Corroborated |
-| `parse_linkedin_zip_from_bytes` is dashboard + tests | Grep → `src/dashboard.py:421` + 8 test matches | Checked FastAPI (`src/api/routes/profile.py`) → uses `parse_linkedin_zip` (file-path variant) instead | ✅ Corroborated |
-| 3 imports in `cv_parser.py` / `linkedin_parser.py` docstrings mention Streamlit (not code) | Grep for `streamlit` in src/profile/ → 3 matches | Read each line to confirm they're inside `"""..."""` | ✅ Corroborated |
+| `parse_cv_from_bytes` is dashboard-only | Grep for function name → `backend/src/dashboard.py:409` + definition | Checked FastAPI routes for its usage → not imported | ✅ Corroborated |
+| `parse_linkedin_zip_from_bytes` is dashboard + tests | Grep → `backend/src/dashboard.py:421` + 8 test matches | Checked FastAPI (`backend/src/api/routes/profile.py`) → uses `parse_linkedin_zip` (file-path variant) instead | ✅ Corroborated |
+| 3 imports in `cv_parser.py` / `linkedin_parser.py` docstrings mention Streamlit (not code) | Grep for `streamlit` in backend/src/profile/ → 3 matches | Read each line to confirm they're inside `"""..."""` | ✅ Corroborated |
 | `time_buckets.py` mentions dashboard only in its docstring | Grep for `dashboard` in time_buckets.py → 1 match at line 1 | Read line 1 to confirm it's a docstring | ✅ Corroborated |
 
 ---
