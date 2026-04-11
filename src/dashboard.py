@@ -287,8 +287,21 @@ def load_run_logs() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Job table renderer
 # ---------------------------------------------------------------------------
-def render_job_table(jobs: list[dict]) -> str:
-    """Render a list of jobs as a single compact HTML table string."""
+def render_job_table(
+    jobs: list[dict],
+    primary_skills: list[str] | None = None,
+    secondary_skills: list[str] | None = None,
+    tertiary_skills: list[str] | None = None,
+) -> str:
+    """Render a list of jobs as a single compact HTML table string.
+
+    The skill-tier arguments are threaded through to extract_matched_skills
+    so the tooltip can highlight profile-specific skills. When None is passed
+    (e.g. dashboard called without a loaded profile), extract_matched_skills
+    falls back to its own defaults — which are now empty, so the tooltip
+    silently disappears. Callers should pass search_config.primary_skills etc.
+    whenever a profile is loaded, otherwise the tooltip renders nothing.
+    """
     if not jobs:
         return '<p style="color:#999;font-size:13px;padding:4px 0;">No jobs in this period</p>'
 
@@ -310,8 +323,13 @@ def render_job_table(jobs: list[dict]) -> str:
         if visa:
             badges += ' <span class="jrow-pill jrow-pill-visa">Visa</span>'
 
-        # Skills tooltip
-        skills = extract_matched_skills(job.get("description", ""))
+        # Skills tooltip — uses profile skills when available, falls back to empty
+        skills = extract_matched_skills(
+            job.get("description", ""),
+            primary=primary_skills,
+            secondary=secondary_skills,
+            tertiary=tertiary_skills,
+        )
         skill_count = sum(len(v) for v in skills.values())
         if skill_count:
             tip_lines = []
@@ -632,6 +650,20 @@ for idx in range(4):
     )
 st.markdown('<div class="bucket-nav">' + "".join(nav_pills) + '</div>', unsafe_allow_html=True)
 
+# Build skill tier lists from the loaded profile (or empty if no profile).
+# Without this, render_job_table's tooltip silently renders nothing because
+# the fallback PRIMARY_SKILLS/SECONDARY_SKILLS/TERTIARY_SKILLS are empty
+# (emptied in commit a01c1b3 when hardcoded AI/ML defaults were removed).
+_table_profile = load_profile()
+if _table_profile and _table_profile.is_complete:
+    from src.profile.keyword_generator import generate_search_config
+    _table_sc = generate_search_config(_table_profile)
+    _primary = _table_sc.primary_skills
+    _secondary = _table_sc.secondary_skills
+    _tertiary = _table_sc.tertiary_skills
+else:
+    _primary = _secondary = _tertiary = []
+
 for idx in range(4):
     label, emoji_unicode, _, _, _ = BUCKETS[idx]
     bucket_list = bucketed.get(idx, [])
@@ -642,7 +674,15 @@ for idx in range(4):
         f'{emoji_unicode} {label}<span class="bucket-count">{count}</span></div>',
         unsafe_allow_html=True,
     )
-    st.markdown(render_job_table(bucket_list), unsafe_allow_html=True)
+    st.markdown(
+        render_job_table(
+            bucket_list,
+            primary_skills=_primary,
+            secondary_skills=_secondary,
+            tertiary_skills=_tertiary,
+        ),
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Export buttons

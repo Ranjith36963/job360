@@ -2,6 +2,20 @@
 import sys
 from unittest.mock import MagicMock, PropertyMock
 
+# Force-import real pandas and plotly BEFORE we touch sys.modules. If we don't,
+# the `sys.modules.setdefault("pandas", MagicMock())` call below would install
+# a MagicMock as "pandas" when this file is collected first, and OTHER test
+# files that later do `import pandas as pd` would get the MagicMock instead of
+# real pandas — silently breaking downstream tests like test_jobspy_parses_dataframe
+# (df.iterrows() on a MagicMock yields nothing). Importing here guarantees the
+# real modules are cached in sys.modules before any mocking happens.
+import pandas  # noqa: F401
+try:
+    import plotly  # noqa: F401
+    import plotly.express  # noqa: F401
+except ImportError:
+    pass
+
 # Build a streamlit mock that survives src/dashboard.py module-level execution.
 # The dashboard calls st.file_uploader() which returns an object whose .size is
 # compared with int, st.number_input() whose return is compared with 0, etc.
@@ -76,13 +90,13 @@ _st.sidebar.expander.return_value = _expander
 # cache_data decorator should be a pass-through
 _st.cache_data = lambda **kwargs: (lambda fn: fn)
 
-# Inject mocks before importing dashboard
+# Inject streamlit mock before importing dashboard.
+# NOTE: do NOT mock pandas/plotly here — we force-imported the real ones above
+# to keep sys.modules clean for downstream tests. Only streamlit is mocked
+# because the dashboard's top-level Streamlit calls would error otherwise.
 sys.modules["streamlit"] = _st
-sys.modules.setdefault("pandas", MagicMock())
-sys.modules.setdefault("plotly", MagicMock())
-sys.modules.setdefault("plotly.express", MagicMock())
 
-from src.dashboard import _safe_url
+from src.dashboard import _safe_url, render_job_table
 
 
 def test_safe_url_blocks_javascript():
@@ -115,3 +129,68 @@ def test_safe_url_handles_relative():
     """Relative URLs (no scheme) should be allowed."""
     result = _safe_url("/jobs/123")
     assert "/jobs/123" in result
+
+
+# ---------------------------------------------------------------------------
+# render_job_table skill-tier tooltip (B3 regression fix)
+# ---------------------------------------------------------------------------
+
+_SAMPLE_JOB = {
+    "match_score": 75,
+    "visa_flag": False,
+    "apply_url": "https://example.com/job/1",
+    "title": "AI Engineer",
+    "company": "DeepMind",
+    "location": "London, UK",
+    "salary_display": "",
+    "date_found": "2026-04-10T12:00:00+00:00",
+    "source": "greenhouse",
+    "description": "We need a Python and PyTorch expert. RAG and LangChain experience required.",
+}
+
+
+def test_render_job_table_empty_returns_placeholder():
+    html_out = render_job_table([])
+    assert "No jobs in this period" in html_out
+
+
+def test_render_job_table_tooltip_empty_without_skills():
+    """Without a profile's skill lists, the tooltip should silently render nothing.
+
+    This is the B3 regression: when no profile is loaded, PRIMARY_SKILLS etc.
+    are empty, so the tooltip should omit the 'N skills' badge entirely —
+    rather than rendering a misleading '0 skills' bubble.
+    """
+    html_out = render_job_table([_SAMPLE_JOB])
+    assert "skills</span>" not in html_out
+    assert "jrow-skills-tip" not in html_out
+
+
+def test_render_job_table_tooltip_uses_passed_skills():
+    """When profile skills are passed, the tooltip should render and list matches."""
+    html_out = render_job_table(
+        [_SAMPLE_JOB],
+        primary_skills=["python", "pytorch"],
+        secondary_skills=["langchain"],
+        tertiary_skills=["rag"],
+    )
+    # Tooltip badge is present
+    assert "jrow-skills-tip" in html_out
+    # All four matches are rendered (case-insensitive match in the description)
+    assert "4 skills" in html_out
+    # Tier labels appear in the tooltip
+    assert "Primary:" in html_out
+    assert "Secondary:" in html_out
+    assert "Tertiary:" in html_out
+
+
+def test_render_job_table_tooltip_skips_unmatched_skills():
+    """Passed skills that don't appear in the description should not render."""
+    html_out = render_job_table(
+        [_SAMPLE_JOB],
+        primary_skills=["python", "rust", "golang"],  # only "python" matches
+    )
+    assert "1 skills" in html_out
+    # Rust and Golang should NOT appear in the tooltip text
+    assert "Rust" not in html_out
+    assert "Golang" not in html_out

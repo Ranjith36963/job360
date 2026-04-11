@@ -3,13 +3,51 @@ import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
+
+import pytest
 from aioresponses import aioresponses
 
 from src.main import run_search, SOURCE_INSTANCE_COUNT, _build_sources
+from src.profile.models import CVData, UserPreferences, UserProfile
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _minimal_profile() -> UserProfile:
+    """Minimal UserProfile that satisfies `is_complete` for run_search tests.
+
+    Has enough content to pass the C1 guard in src/main.py without touching
+    data/user_profile.json on disk. Scoring will be weak (few skills) but
+    that's fine — test_main.py asserts pipeline *mechanics*, not ranking
+    quality. Scoring correctness is covered by test_scorer.py.
+    """
+    return UserProfile(
+        cv_data=CVData(
+            raw_text="Test CV body for run_search tests.",
+            skills=["python", "pytorch", "tensorflow", "langchain", "rag", "llm"],
+            job_titles=["ai engineer", "machine learning engineer"],
+        ),
+        preferences=UserPreferences(
+            target_job_titles=["AI Engineer", "ML Engineer"],
+            additional_skills=["python", "pytorch"],
+            preferred_locations=["London", "Remote"],
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _patch_load_profile_for_run_search():
+    """Make run_search see a valid profile without relying on the filesystem.
+
+    The C1 guard added in main.py:240-261 returns early when load_profile()
+    is None, which previously broke these tests on clean checkouts (no
+    data/user_profile.json). Patch at `src.main.load_profile` (where it's
+    used) rather than `src.profile.storage.load_profile` (where it's defined).
+    """
+    with patch("src.main.load_profile", return_value=_minimal_profile()):
+        yield
 
 
 # Shared mock endpoint setup for all free sources
@@ -333,4 +371,52 @@ def test_dry_run_skips_db_writes():
                 stats = await run_search(db_path=":memory:", dry_run=True)
                 assert stats["sources_queried"] > 0
                 assert isinstance(stats["total_found"], int)
+    _run(_test())
+
+
+def test_run_search_early_returns_when_no_profile():
+    """C1 guard: with no profile, run_search must short-circuit without touching sources.
+
+    Stacks a second patch on top of the autouse fixture — patch-stack LIFO,
+    so return_value=None wins. Verifies:
+      * stats["error"] == "no_profile"   (locks in the exact key the CLI checks)
+      * sources_queried == 0             (proves no HTTP work was attempted)
+      * per_source is empty              (proves _build_sources was skipped)
+      * _build_sources is NEVER called    (no sources instantiated)
+    """
+    async def _test():
+        with patch("src.main.load_profile", return_value=None), \
+             patch("src.main._build_sources") as mock_build, \
+             _patch_no_notifications():
+            stats = await run_search(db_path=":memory:")
+            assert stats.get("error") == "no_profile"
+            assert stats["sources_queried"] == 0
+            assert stats["total_found"] == 0
+            assert stats["new_jobs"] == 0
+            assert stats["per_source"] == {}
+            # _build_sources must not have been called — this is the whole point
+            # of the guard: skip the expensive HTTP fan-out when we know scoring
+            # would return zero for every job.
+            mock_build.assert_not_called()
+    _run(_test())
+
+
+def test_run_search_early_returns_when_profile_incomplete():
+    """C1 guard also triggers on profiles with no CV text and no preferences.
+
+    UserProfile.is_complete returns False when cv_data.raw_text is empty AND
+    preferences has no target_job_titles / additional_skills. Verify that case
+    is caught by the same guard as the None case.
+    """
+    async def _test():
+        empty = UserProfile(cv_data=CVData(), preferences=UserPreferences())
+        assert empty.is_complete is False  # precondition
+
+        with patch("src.main.load_profile", return_value=empty), \
+             patch("src.main._build_sources") as mock_build, \
+             _patch_no_notifications():
+            stats = await run_search(db_path=":memory:")
+            assert stats.get("error") == "no_profile"
+            assert stats["sources_queried"] == 0
+            mock_build.assert_not_called()
     _run(_test())

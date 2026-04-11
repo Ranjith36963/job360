@@ -49,6 +49,10 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
 
 
+# RESERVED: Used by the planned LLM-based bulk job scorer (not wired yet).
+# Do NOT delete on a dead-code sweep — the Cerebras-first provider ordering
+# is intentionally different from llm_extract() because bulk scoring needs
+# low latency (Cerebras ~2000 tok/sec) more than daily quota headroom.
 async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
     """Fast scoring — Cerebras (fastest ~2000 tok/sec) → Groq → Gemini fallback.
 

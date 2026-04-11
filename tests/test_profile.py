@@ -603,7 +603,6 @@ class TestCVParserFailures:
     @pytest.mark.asyncio
     async def test_parse_cv_async_raises_on_empty_text(self):
         """If text extraction yields empty string, raise RuntimeError."""
-        import pytest
         from unittest.mock import patch
         from src.profile.cv_parser import parse_cv_async
 

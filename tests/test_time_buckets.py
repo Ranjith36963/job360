@@ -175,9 +175,17 @@ def test_format_relative_time_unknown():
 # ---------------------------------------------------------------------------
 # extract_matched_skills
 # ---------------------------------------------------------------------------
+# Since commit a01c1b3 emptied the hardcoded PRIMARY/SECONDARY/TERTIARY_SKILLS
+# defaults, callers MUST pass their own skill lists (typically from
+# search_config.primary_skills, etc.). Tests below verify the explicit-list path.
+_TEST_PRIMARY = ["Python", "PyTorch", "LangChain"]
+_TEST_SECONDARY = ["Docker", "Kubernetes"]
+_TEST_TERTIARY = ["CI/CD", "Git"]
+
+
 def test_extract_matched_skills_primary():
     text = "Experience with Python and PyTorch required. Knowledge of LangChain preferred."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, primary=_TEST_PRIMARY)
     assert "Python" in skills["primary"]
     assert "PyTorch" in skills["primary"]
     assert "LangChain" in skills["primary"]
@@ -185,14 +193,14 @@ def test_extract_matched_skills_primary():
 
 def test_extract_matched_skills_secondary():
     text = "Must know Docker and Kubernetes."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, secondary=_TEST_SECONDARY)
     assert "Docker" in skills["secondary"]
     assert "Kubernetes" in skills["secondary"]
 
 
 def test_extract_matched_skills_tertiary():
     text = "CI/CD experience and Git proficiency expected."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(text, tertiary=_TEST_TERTIARY)
     assert "CI/CD" in skills["tertiary"]
     assert "Git" in skills["tertiary"]
 

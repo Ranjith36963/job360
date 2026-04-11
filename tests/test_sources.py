@@ -58,6 +58,17 @@ def _make_search_config(queries: list[str]) -> SearchConfig:
     return SearchConfig(search_queries=queries)
 
 
+def _make_search_config_with_titles(titles: list[str]) -> SearchConfig:
+    """Return a SearchConfig with job_titles populated for sources that iterate them.
+
+    Keyed APIs like Reed, Adzuna, Jooble, Careerjet, Google Jobs, Workday and
+    JobSpy iterate over self.job_titles. Since hardcoded defaults were emptied
+    (commit a01c1b3), these sources must receive an explicit SearchConfig in
+    tests or they short-circuit with zero queries.
+    """
+    return SearchConfig(job_titles=titles, search_queries=titles)
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -94,7 +105,8 @@ def test_reed_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"), payload=REED_PAYLOAD, repeat=True)
-                source = ReedSource(session, api_key="test-key")
+                sc = _make_search_config_with_titles(["AI Engineer"])
+                source = ReedSource(session, api_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
@@ -123,7 +135,8 @@ def test_adzuna_parses_response():
         try:
             with aioresponses() as m:
                 m.get(re.compile(r"https://api\.adzuna\.com/v1/api/jobs/gb/search/1.*"), payload=ADZUNA_PAYLOAD, repeat=True)
-                source = AdzunaSource(session, app_id="test-id", app_key="test-key")
+                sc = _make_search_config_with_titles(["ML Engineer"])
+                source = AdzunaSource(session, app_id="test-id", app_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
@@ -404,7 +417,8 @@ def test_jooble_parses_response():
                     "link": "https://jooble.org/jobs/1001",
                     "updated": "2024-01-10",
                 }]}, repeat=True)
-                source = JoobleSource(session, api_key="test-key")
+                sc = _make_search_config_with_titles(["ML Engineer"])
+                source = JoobleSource(session, api_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jooble"
@@ -567,7 +581,8 @@ def test_jobspy_parses_dataframe():
             mock_module = MagicMock()
             mock_module.scrape_jobs = MagicMock(return_value=df)
             with patch.dict(sys.modules, {"jobspy": mock_module}):
-                source = JobSpySource(session)
+                sc = _make_search_config_with_titles(["AI Engineer"])
+                source = JobSpySource(session, search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 2
                 indeed_jobs = [j for j in jobs if j.source == "indeed"]
@@ -613,7 +628,8 @@ def test_workday_parses_response():
                     payload=WORKDAY_PAYLOAD,
                     repeat=True,
                 )
-                source = WorkdaySource(session, companies=companies)
+                sc = _make_search_config_with_titles(["AI Engineer"])
+                source = WorkdaySource(session, companies=companies, search_config=sc)
                 jobs = await source.fetch_jobs()
                 # Only AI Engineer should pass relevance filter; Marketing Manager should not
                 ai_jobs = [j for j in jobs if "AI" in j.title]
@@ -677,7 +693,8 @@ def test_google_jobs_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://serpapi\.com/search.*"),
                       payload=GOOGLE_JOBS_PAYLOAD, repeat=True)
-                source = GoogleJobsSource(session, api_key="test-key")
+                sc = _make_search_config_with_titles(["AI Engineer"])
+                source = GoogleJobsSource(session, api_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
@@ -1063,7 +1080,8 @@ def test_careerjet_parses_response():
             with aioresponses() as m:
                 m.get(re.compile(r"https://search\.api\.careerjet\.net/.*"),
                       payload=CAREERJET_PAYLOAD, repeat=True)
-                source = CareerjetSource(session, affid="test-affid")
+                sc = _make_search_config_with_titles(["AI Engineer"])
+                source = CareerjetSource(session, affid="test-affid", search_config=sc)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].title == "AI Engineer"
