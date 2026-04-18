@@ -144,3 +144,78 @@ def test_update_last_seen_resets_misses(db):
         assert row[1] == "active"
 
     asyncio.run(_run())
+
+
+# ---- Integration with _ghost_detection_pass in src.main ----
+
+
+class _FakeSource:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_pass_marks_absent_jobs_and_resets_observed(db):
+    from src.main import _ghost_detection_pass
+    from src.models import Job
+
+    async def _run():
+        job_a = Job(title="A", company="X", apply_url="https://a", source="reed",
+                    date_found="2026-04-18T00:00:00+00:00")
+        job_b = Job(title="B", company="Y", apply_url="https://b", source="reed",
+                    date_found="2026-04-18T00:00:00+00:00")
+        await db.insert_job(job_a)
+        await db.insert_job(job_b)
+        # Next scrape sees only A
+        source = _FakeSource("reed")
+        result = [job_a]
+        history = {"reed": [2, 2, 2]}  # rolling avg 2; current 1 = 50%, below 70% threshold
+        missed = await _ghost_detection_pass(db, [source], [result], history)
+        # Gate kicks in — NO absence sweep
+        assert missed == {}
+    asyncio.run(_run())
+
+
+def test_pass_runs_sweep_when_scrape_is_healthy(db):
+    from src.main import _ghost_detection_pass
+    from src.models import Job
+
+    async def _run():
+        job_a = Job(title="A", company="X", apply_url="https://a", source="reed",
+                    date_found="2026-04-18T00:00:00+00:00")
+        job_b = Job(title="B", company="Y", apply_url="https://b", source="reed",
+                    date_found="2026-04-18T00:00:00+00:00")
+        await db.insert_job(job_a)
+        await db.insert_job(job_b)
+        source = _FakeSource("reed")
+        # Current scrape sees both → 100% of 2-job rolling avg → well above gate
+        history = {"reed": [2, 2, 2]}
+        missed = await _ghost_detection_pass(db, [source], [[job_a, job_b]], history)
+        assert missed.get("reed", 0) == 0
+
+        # Now A disappears; current = 1; avg still 2; 50% < 70% → skip
+        history2 = {"reed": [2, 2, 1]}  # skewed avg = 1.66, 1/1.66 = 0.60 < 0.7
+        missed = await _ghost_detection_pass(db, [source], [[job_a]], history2)
+        assert missed == {}
+
+        # Empty rolling window → no gate → sweep runs
+        missed = await _ghost_detection_pass(db, [source], [[job_a]], {})
+        assert missed.get("reed", 0) == 1
+    asyncio.run(_run())
+
+
+def test_pass_skips_failed_sources(db):
+    from src.main import _ghost_detection_pass
+    from src.models import Job
+
+    async def _run():
+        job_a = Job(title="A", company="X", apply_url="https://a", source="reed",
+                    date_found="2026-04-18T00:00:00+00:00")
+        await db.insert_job(job_a)
+        source = _FakeSource("reed")
+        # Exception result → must NOT be treated as "job disappeared"
+        missed = await _ghost_detection_pass(db, [source], [RuntimeError("oops")], {})
+        assert missed == {}
+        # None result → same
+        missed = await _ghost_detection_pass(db, [source], [None], {})
+        assert missed == {}
+    asyncio.run(_run())

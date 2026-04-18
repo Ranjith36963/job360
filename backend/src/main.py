@@ -131,6 +131,52 @@ SOURCE_REGISTRY = {
 SOURCE_INSTANCE_COUNT = 47
 
 
+async def _ghost_detection_pass(
+    db,
+    sources,
+    results,
+    history: dict[str, list[int]],
+    completeness_threshold: float = 0.7,
+) -> dict[str, int]:
+    """Per-source absence sweep with scrape-completeness gate.
+
+    For each (source, result) pair from the main asyncio.gather:
+      * Skip if the scrape failed (exception or None).
+      * Skip if result count < `completeness_threshold` × rolling-7d average
+        (pillar_3_batch_1.md §3 Step 1 — don't treat a rate-limited scrape
+        as ghost evidence).
+      * Otherwise: call update_last_seen for every observed job key, then
+        mark_missed_for_source for the rest.
+
+    Returns {source_name: missed_count} for observability.
+    """
+    missed_by_source: dict[str, int] = {}
+    for source, result in zip(sources, results):
+        if isinstance(result, BaseException) or result is None:
+            continue
+        past = history.get(source.name, [])
+        rolling_avg = (sum(past) / len(past)) if past else 0.0
+        if rolling_avg > 0 and len(result) < completeness_threshold * rolling_avg:
+            logger.warning(
+                "  %s: result count (%s) below %.0f%% of 7-day avg (%.1f) — "
+                "skipping absence sweep",
+                source.name, len(result),
+                completeness_threshold * 100, rolling_avg,
+            )
+            continue
+        seen: set[tuple[str, str]] = {job.normalized_key() for job in result}
+        for key in seen:
+            await db.update_last_seen(key)
+        missed = await db.mark_missed_for_source(source.name, seen)
+        missed_by_source[source.name] = missed
+        if missed:
+            logger.info(
+                "  %s: marked %s existing job(s) as missed this cycle",
+                source.name, missed,
+            )
+    return missed_by_source
+
+
 def _format_date(date_str: str) -> str:
     """Parse date_found into a short 'Posted: 28 Feb 2026' format."""
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
@@ -322,7 +368,7 @@ async def run_search(
 
             # Source health: detect sources returning 0 that previously returned jobs
             try:
-                history = await db.get_last_source_counts(5)
+                history = await db.get_last_source_counts(7)
                 newly_empty = []
                 for name, count in per_source.items():
                     if count == 0 and name in history:
@@ -335,6 +381,16 @@ async def run_search(
                     )
             except Exception as e:
                 logger.warning("Source health check skipped: %s", e)
+                history = {}
+
+            # Ghost detection: update last_seen for observed jobs; mark absent jobs as missed.
+            # Per pillar_3_batch_1.md §3 Step 1, skip the absence sweep for any source whose
+            # current result count is below 70% of its 7-day rolling average — a rate-limited
+            # or blocked scrape must NEVER be interpreted as jobs disappearing.
+            try:
+                await _ghost_detection_pass(db, sources, results, history)
+            except Exception as e:
+                logger.warning("Ghost-detection pass skipped: %s", e)
 
             logger.info("Total raw jobs: %s", len(all_jobs))
 
