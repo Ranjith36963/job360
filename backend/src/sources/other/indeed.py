@@ -49,11 +49,20 @@ class JobSpySource(BaseJobSource):
                 text = f"{title} {desc}".lower()
                 site = str(row.get("site", "indeed")).lower()
                 source_name = site if site in ("indeed", "glassdoor") else "indeed"
+                now_iso = datetime.now(timezone.utc).isoformat()
                 date_posted = row.get("date_posted")
                 if hasattr(date_posted, "isoformat"):
-                    date_found = date_posted.isoformat()
+                    posted_at = date_posted.isoformat()
+                    raw_date = posted_at
+                    confidence = "high"
+                elif date_posted:
+                    posted_at = str(date_posted)
+                    raw_date = posted_at
+                    confidence = "high"
                 else:
-                    date_found = str(date_posted) if date_posted else datetime.now(timezone.utc).isoformat()
+                    posted_at = None
+                    raw_date = None
+                    confidence = "low"
                 salary_min = row.get("min_amount")
                 salary_max = row.get("max_amount")
                 try:
@@ -74,7 +83,10 @@ class JobSpySource(BaseJobSource):
                     description=desc[:5000],
                     apply_url=str(row.get("job_url", "")),
                     source=source_name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_date,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))
