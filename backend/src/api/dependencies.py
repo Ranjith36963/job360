@@ -13,6 +13,12 @@ async def init_db() -> JobDatabase:
     if _db is None:
         _db = JobDatabase(str(DB_PATH))
         await _db.init_db()
+        # Batch 2: apply additive migrations (users, sessions, user_feed,
+        # notification_ledger, user_channels). Idempotent — safe to call on
+        # every boot. See docs/plans/batch-2-plan.md Phase 0.
+        from migrations import runner
+
+        await runner.up(str(DB_PATH))
     return _db
 
 
