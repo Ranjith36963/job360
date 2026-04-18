@@ -318,7 +318,79 @@ Key test files:
 8. **When adding/removing sources:** Update `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, the test assertion `len(SOURCE_REGISTRY) == N` in `test_cli.py`, and the expected source set in the same file.
 9. **Scoring changes require test verification.** The scoring algorithm is tested with 53 tests across edge cases. Run `test_scorer.py` and `test_profile.py` after any change to `skill_matcher.py`.
 
+## Batch 2 additions (pillar 3 multi-user delivery layer)
+
+Multi-user delivery landed in `pillar3/batch-2` (see `docs/plans/batch-2-plan.md`).
+Key surfaces a future session needs to know:
+
+### New tables (managed by `backend/migrations/`)
+
+| Table | Owner migration | Purpose |
+|---|---|---|
+| `users` | `0001_auth` | authenticated users |
+| `sessions` | `0001_auth` | signed-cookie session rows (FK → users) |
+| `user_feed` | `0003_user_feed` | SSOT per-user view — dashboard + notification worker both read |
+| `notification_ledger` | `0004_notification_ledger` | per-channel idempotency + retry audit |
+| `user_channels` | `0005_user_channels` | Fernet-encrypted Apprise credentials |
+| `_schema_migrations` | `runner.py` on first run | applied-migration registry |
+
+`user_actions` and `applications` were rebuilt in `0002_multi_tenant` to add
+`user_id` + widen `UNIQUE(job_id)` → `UNIQUE(user_id, job_id)`. Pre-Batch-2
+rows were backfilled to the placeholder user
+`00000000-0000-0000-0000-000000000001` (see `src/core/tenancy.DEFAULT_TENANT_ID`).
+The `jobs` table is **unchanged** — it remains a shared catalog (rule #1).
+
+### New modules
+
+- `backend/migrations/runner.py` — forward/reverse SQL migration runner (CLI: `python -m migrations.runner {up|down|status} [db_path]`)
+- `src/services/auth/{passwords,sessions}.py` — argon2id + itsdangerous-signed cookies (30-day expiry)
+- `src/services/feed.py` — `FeedService` with `list_for_user`, `list_pending_notifications`, `mark_notified`, `update_status`, `cascade_stale`, `upsert_feed_row`
+- `src/services/prefilter.py` — 3-stage cascade (location → experience → skill overlap) — blueprint §2 99% elimination rule
+- `src/services/channels/{crypto,dispatcher}.py` — Fernet encryption + Apprise wrapper (lazy import; tests monkeypatch `apprise.Apprise`)
+- `src/workers/tasks.py` — `score_and_ingest`, `mark_ledger_sent/failed`, `idempotency_key` — pure async (no `arq` import) so pytest never touches Redis
+- `src/api/auth_deps.py` — `require_user` / `optional_user` FastAPI dependencies reading the `job360_session` cookie
+- `src/api/routes/{auth,channels}.py` — `/api/auth/*`, `/api/settings/channels/*`
+
+### New env vars
+
+| Var | Required | Default | Used by |
+|---|---|---|---|
+| `SESSION_SECRET` | Yes in prod | dev fallback | `itsdangerous` HMAC for session cookies |
+| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | dev fallback | Fernet encryption of channel credentials |
+| `FRONTEND_ORIGIN` | No | `http://localhost:3000` | CORS allow-list (comma-sep) |
+| `REDIS_URL` | Only when running ARQ worker | `redis://localhost:6379` | ARQ broker (runtime only, tests skip) |
+
+### New deps
+
+- `argon2-cffi>=25.1.0` — argon2id password hashing
+- `itsdangerous>=2.2.0` — signed cookie HMAC
+- `apprise>=1.9.9` — multi-channel notification sending
+- `pydantic[email]` (via `email-validator>=2.3.0`) — `EmailStr` validation
+- `cryptography>=42.0.0` — Fernet (transitive already, now explicit)
+
+### How to run
+
+```bash
+# Apply Batch 2 migrations (idempotent — safe on every boot)
+cd backend && python -m migrations.runner up
+
+# FastAPI boot auto-runs the migration runner after legacy init_db()
+# — see src/api/dependencies.py
+
+# ARQ worker (not required for CLI / read-only usage):
+#   arq src.workers.settings.WorkerSettings       # to be added in follow-up
+```
+
+### Additional CLAUDE rules
+
+10. **Never INSERT into `jobs` with a `user_id` or `tenant_id` column** — it does not have one, by design. `jobs` is the shared catalog (blueprint §3). Per-user state lives in `user_feed`, `user_actions`, `applications`.
+11. **Never import `apprise` at module top level** in library code — Apprise pulls ~30 MB of deps. Import lazily inside the function that uses it (see `dispatcher._get_apprise_cls`). Tests monkeypatch `apprise.Apprise`; real sends happen only under ARQ worker context.
+12. **Every new per-user FastAPI route MUST take `user: CurrentUser = Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from a URL parameter or body — that is a trivial IDOR vulnerability.
+
 ## Related Documentation
 
 - `STATUS.md` — Project phase status, what's complete, what's next, known issues, test coverage table
 - `ARCHITECTURE.md` — Deep technical reference: data flow diagrams, directory structure, scoring algorithm detail, source categories, database schema, config variables, dependency list
+- `docs/IMPLEMENTATION_LOG.md` — pillar 3 batch-by-batch completion log (read FIRST for current state)
+- `docs/plans/batch-2-decisions.md` — irreversible architectural decisions (ARQ, Apprise, polling, session cookies, SQLite-for-now)
+- `docs/plans/batch-2-plan.md` — Batch 2 TDD implementation plan with locked baseline
