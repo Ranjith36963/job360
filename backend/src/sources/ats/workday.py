@@ -85,6 +85,15 @@ class WorkdaySource(BaseJobSource):
                         continue
                     seen_keys.add(dedup_key)
                     posted_on = item.get("postedOn", "")
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    # Workday postedOn is a relative string ("Posted 3 Days
+                    # Ago"); parsed value is approximate — medium confidence.
+                    if posted_on:
+                        parsed_posted_at = _parse_posted_on(posted_on)
+                        confidence = "medium"
+                    else:
+                        parsed_posted_at = None
+                        confidence = "low"
                     jobs.append(Job(
                         title=title,
                         company=company_name,
@@ -92,7 +101,10 @@ class WorkdaySource(BaseJobSource):
                         description="",
                         apply_url=apply_url,
                         source=self.name,
-                        date_found=_parse_posted_on(posted_on),
+                        date_found=now_iso,
+                        posted_at=parsed_posted_at,
+                        date_confidence=confidence,
+                        date_posted_raw=posted_on or None,
                     ))
 
         logger.info("Workday: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
