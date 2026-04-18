@@ -57,6 +57,9 @@ class NomisSource(BaseJobSource):
                 apply_url="https://www.nomisweb.co.uk/reports/lmp/gor/contents.aspx",
                 source=self.name,
                 date_found=now,
+                posted_at=None,
+                date_confidence="low",
+                date_posted_raw=None,
             ))
 
         logger.info("Nomis: found %s vacancy records", len(jobs))
