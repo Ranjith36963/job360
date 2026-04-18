@@ -47,6 +47,11 @@ from src.sources.feeds.uni_jobs import UniJobsSource
 from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
 from src.sources.scrapers.aijobs_ai import AIJobsAISource
+from src.sources.apis_free.teaching_vacancies import TeachingVacanciesSource
+from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
+from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
+from src.sources.ats.rippling import RipplingSource
+from src.sources.ats.comeet import ComeetSource
 from src.services.profile.models import SearchConfig
 
 
@@ -1812,3 +1817,397 @@ def test_aijobs_ai_parses_html():
     _run(_test())
 
 
+# =============================================================================
+# Batch 3 new sources: Teaching Vacancies, GOV.UK Apprenticeships,
+# NHS Jobs XML, Rippling ATS, Comeet ATS
+# =============================================================================
+
+
+# ---- Teaching Vacancies ----
+# Rate-limit note: no documented cap per
+# https://teaching-vacancies.service.gov.uk/pages/api_specification
+# We poll on the 15-min rss tier → well within politeness envelope.
+
+TEACHING_VACANCIES_PAYLOAD = {
+    "jobs": [
+        {
+            "title": "Secondary Mathematics Teacher",
+            "hiringOrganization": {"name": "Camden School for Girls"},
+            "jobLocation": {"address": {"addressLocality": "London"}},
+            "datePosted": "2026-04-15T09:00:00Z",
+            "url": "https://teaching-vacancies.service.gov.uk/jobs/abc",
+            "description": "Full-time mathematics teacher position",
+        },
+        {
+            "title": "Primary Teacher",
+            "hiringOrganization": {"name": "St. Paul's Primary"},
+            "jobLocation": {"address": {"addressLocality": "Manchester"}},
+            "datePosted": "2026-04-14T10:00:00Z",
+            "url": "https://teaching-vacancies.service.gov.uk/jobs/def",
+            "description": "KS2 teacher",
+        },
+    ]
+}
+
+
+def test_teaching_vacancies_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(TeachingVacanciesSource.API_URL, payload=TEACHING_VACANCIES_PAYLOAD)
+                source = TeachingVacanciesSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 2
+                assert jobs[0].source == "teaching_vacancies"
+                assert jobs[0].title == "Secondary Mathematics Teacher"
+                assert jobs[0].company == "Camden School for Girls"
+                assert jobs[0].location == "London"
+                # Batch 1 contract: real datePosted → high confidence
+                assert jobs[0].date_confidence == "high"
+                assert jobs[0].posted_at == "2026-04-15T09:00:00Z"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_teaching_vacancies_returns_empty_on_no_data():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(TeachingVacanciesSource.API_URL, payload={"jobs": []})
+                source = TeachingVacanciesSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_teaching_vacancies_handles_http_error():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(TeachingVacanciesSource.API_URL, status=503, repeat=True)
+                source = TeachingVacanciesSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- GOV.UK Apprenticeships ----
+# Rate-limit: 150 requests per 5 minutes per published docs at
+# https://findapprenticeship.service.gov.uk/pages/api — we poll every 15 min
+# with ≤5 keyword queries, so a full scrape uses ≤5 requests (3.3% of budget).
+
+GOV_APPRENTICESHIPS_PAYLOAD = {
+    "vacancies": [
+        {
+            "title": "Digital Marketing Apprentice",
+            "employerName": "Octopus Energy",
+            "location": "London",
+            "postedDate": "2026-04-12T00:00:00Z",
+            "vacancyUrl": "https://findapprenticeship.service.gov.uk/vacancy/1234",
+            "description": "Digital marketing L3 apprenticeship",
+        },
+        {
+            "title": "Software Engineering Apprentice",
+            "employerName": "BAE Systems",
+            "location": "Portsmouth",
+            "postedDate": "2026-04-11T00:00:00Z",
+            "vacancyUrl": "https://findapprenticeship.service.gov.uk/vacancy/5678",
+            "description": "Level 6 software engineer degree apprenticeship",
+        },
+    ]
+}
+
+
+def test_gov_apprenticeships_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
+                    payload=GOV_APPRENTICESHIPS_PAYLOAD, repeat=True,
+                )
+                sc = _make_search_config(["apprentice"])
+                source = GovApprenticeshipsSource(session, search_config=sc)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 2
+                assert jobs[0].source == "gov_apprenticeships"
+                assert jobs[0].date_confidence == "high"
+                assert "Octopus" in jobs[0].company
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_empty_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
+                    payload={"vacancies": []}, repeat=True,
+                )
+                source = GovApprenticeshipsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_http_error():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
+                    status=500, repeat=True,
+                )
+                source = GovApprenticeshipsSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- NHS Jobs XML ----
+
+NHS_JOBS_XML_FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<vacancies>
+  <vacancy>
+    <id>V001</id>
+    <title>Clinical Data Scientist</title>
+    <employer>NHS Digital</employer>
+    <location>Leeds</location>
+    <createdDate>2026-04-16T08:30:00Z</createdDate>
+    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/V001</advertUrl>
+  </vacancy>
+  <vacancy>
+    <id>V002</id>
+    <title>Senior ML Engineer</title>
+    <employer>NHS England</employer>
+    <location>London</location>
+    <createdDate>2026-04-15T14:00:00Z</createdDate>
+    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/V002</advertUrl>
+  </vacancy>
+</vacancies>"""
+
+
+def test_nhs_jobs_xml_parses_feed():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(NHSJobsXMLSource.FEED_URL, body=NHS_JOBS_XML_FEED,
+                      content_type="application/xml")
+                source = NHSJobsXMLSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 2
+                assert jobs[0].source == "nhs_jobs_xml"
+                # Batch 1 contract: createdDate is a real posting date → high
+                assert jobs[0].date_confidence == "high"
+                assert jobs[0].posted_at == "2026-04-16T08:30:00Z"
+                assert jobs[0].company == "NHS Digital"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nhs_jobs_xml_empty_feed():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(NHSJobsXMLSource.FEED_URL,
+                      body="<?xml version='1.0'?><vacancies/>",
+                      content_type="application/xml")
+                source = NHSJobsXMLSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nhs_jobs_xml_parse_error():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(NHSJobsXMLSource.FEED_URL, body="not xml at all",
+                      content_type="text/plain")
+                source = NHSJobsXMLSource(session)
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Rippling ATS ----
+
+RIPPLING_PAYLOAD = {
+    "jobs": [
+        {
+            "id": "r-123",
+            "name": "Backend Engineer",
+            "locations": [{"name": "London, UK"}],
+            "createdAt": "2026-04-17T10:00:00Z",
+            "hostedUrl": "https://ats.rippling.com/rippling/apply/r-123",
+            "description": "Python + distributed systems",
+        },
+        {
+            "id": "r-124",
+            "name": "US Only Role",
+            "locations": [{"name": "San Francisco"}],
+            "createdAt": "2026-04-17T10:00:00Z",
+            "hostedUrl": "https://ats.rippling.com/rippling/apply/r-124",
+            "description": "US-only",
+        },
+    ]
+}
+
+
+def test_rippling_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
+                    payload=RIPPLING_PAYLOAD, repeat=True,
+                )
+                source = RipplingSource(session, companies=["rippling"])
+                jobs = await source.fetch_jobs()
+                # US-only filtered out by _is_uk_or_remote
+                assert len(jobs) == 1
+                assert jobs[0].source == "rippling"
+                assert jobs[0].title == "Backend Engineer"
+                assert jobs[0].date_confidence == "high"
+                assert jobs[0].posted_at == "2026-04-17T10:00:00Z"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_rippling_empty_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
+                    payload={"jobs": []}, repeat=True,
+                )
+                source = RipplingSource(session, companies=["rippling"])
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_rippling_http_error():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
+                    status=500, repeat=True,
+                )
+                source = RipplingSource(session, companies=["rippling"])
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- Comeet ATS ----
+
+COMEET_PAYLOAD = [
+    {
+        "uid": "c-001",
+        "name": "Data Engineer",
+        "location": {"name": "London, UK"},
+        "time_created": "2026-04-16T12:00:00Z",
+        "url_comeet": "https://www.comeet.co/jobs/acme/c-001",
+        "description": "Data pipelines",
+    },
+    {
+        "uid": "c-002",
+        "name": "Tokyo-Only Role",
+        "location": {"name": "Tokyo, Japan"},
+        "time_created": "2026-04-16T12:00:00Z",
+        "url_comeet": "https://www.comeet.co/jobs/acme/c-002",
+        "description": "Japan only",
+    },
+]
+
+
+def test_comeet_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    payload=COMEET_PAYLOAD, repeat=True,
+                )
+                source = ComeetSource(session, companies=["celonis-process-mining"])
+                jobs = await source.fetch_jobs()
+                # India-only filtered out
+                assert len(jobs) == 1
+                assert jobs[0].source == "comeet"
+                assert jobs[0].title == "Data Engineer"
+                assert jobs[0].date_confidence == "high"
+                assert jobs[0].posted_at == "2026-04-16T12:00:00Z"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_comeet_empty_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    payload=[], repeat=True,
+                )
+                source = ComeetSource(session, companies=["celonis-process-mining"])
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_comeet_http_error():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    status=500, repeat=True,
+                )
+                source = ComeetSource(session, companies=["celonis-process-mining"])
+                jobs = await source.fetch_jobs()
+                assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())

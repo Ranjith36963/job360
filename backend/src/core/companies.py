@@ -121,3 +121,26 @@ SUCCESSFACTORS_COMPANIES = [
     {"name": "Thales UK", "sitemap_url": "https://careers.thalesgroup.com/sitemap.xml"},
     # MBDA removed: careers.mbda-systems.com DNS resolution fails
 ]
+
+
+# Rippling ATS public board: https://ats.rippling.com/api/board/{slug}/jobs
+# Added in Batch 3 — slug list is a starter set of UK-facing companies
+# known to use Rippling for hiring. Expand via the Feashliaa repo later.
+RIPPLING_COMPANIES = [
+    "rippling",         # Rippling itself (primary test fixture)
+    "checkr",           # Global reach
+    "figma",            # Engineering hires in London
+    "scalepath",        # UK AI/ML
+    "linear",           # Tooling, UK eng
+]
+
+
+# Comeet ATS public board: https://www.comeet.co/careers-api/2.0/company/{slug}/positions
+# Added in Batch 3 — same UK-facing starter set as Rippling.
+COMEET_COMPANIES = [
+    "celonis-process-mining",
+    "riskified",
+    "lightricks",
+    "fiverr",
+    "placer-ai",
+]
