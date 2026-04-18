@@ -32,7 +32,12 @@ class AshbySource(BaseJobSource):
                 location = item.get("location", "")
                 if not _is_uk_or_remote(location):
                     continue
-                date_found = item.get("publishedAt") or item.get("updatedAt") or datetime.now(timezone.utc).isoformat()
+                # Ashby publishedAt is the real posting date; updatedAt is a
+                # mutation timestamp and must not populate posted_at.
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_published = item.get("publishedAt")
+                posted_at = raw_published if raw_published else None
+                confidence = "high" if raw_published else "low"
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -40,7 +45,10 @@ class AshbySource(BaseJobSource):
                     description=desc[:5000],
                     apply_url=item.get("applicationUrl", item.get("jobUrl", "")),
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_published,
                 ))
         logger.info("Ashby: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
