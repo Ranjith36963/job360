@@ -13,7 +13,6 @@ TARGETS = [
     REPO / "README.md",
     REPO / "STATUS.md",
     REPO / "DEADCODE.md",
-    REPO / "STREAMLIT_DELETE.md",
     REPO / "docs" / "superpowers" / "plans" / "2026-04-07-fastapi-backend.md",
 ]
 

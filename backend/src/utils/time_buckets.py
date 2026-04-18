@@ -1,4 +1,4 @@
-"""Shared time-bucketing utilities for dashboard, CLI, and email views."""
+"""Shared time-bucketing utilities for CLI and email views."""
 
 import re
 from datetime import datetime, timezone, timedelta

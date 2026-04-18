@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to execute task-by-task. Checkbox (`- [ ]`) syntax.
 
-**Goal:** Make time-bucketing, recency scoring, and dashboard display reflect **when employers posted the job** — not scraper time — and add disappearance tracking so stale jobs stop polluting results.
+**Goal:** Make time-bucketing, recency scoring, and the frontend's posted-date display reflect **when employers posted the job** — not scraper time — and add disappearance tracking so stale jobs stop polluting results.
 
 **Architecture:** Split the overloaded `date_found` field into two semantically distinct fields: `date_posted` (employer, nullable) and `discovered_at` (scraper). Every consumer reads `date_posted` first with explicit unknown handling. Disappearance tracked via per-source `run_hash` snapshot diff.
 
@@ -94,7 +94,7 @@ These files/lines were not in the original plan's touch list:
 
 - Workday already uses CXS endpoint — `backend/src/sources/ats/workday.py:52` hits `POST /wday/cxs/{tenant}/{site}/jobs`, 15 dict-format companies in `companies.py:58-74`, 2 passing tests.
 - ChromaDB / sentence-transformers **not** in `backend/pyproject.toml` — ghost detection is greenfield.
-- Dashboard (`backend/src/dashboard.py`) is alive, not being deleted. `STREAMLIT_DELETE.md` in git history is a stale review branch.
+- The interactive UI is the Next.js frontend at `frontend/src/app/`, consumed via the FastAPI backend. No Python-rendered UI module exists.
 - `nomis` + `yc_companies` are not job sources (market stats / company directory) — removal stands.
 - `is_new: bool = True` on `Job` dataclass is dead code (grep confirms zero runtime readers, one test assertion). Delete in Phase 0.4.
 
@@ -124,7 +124,7 @@ These files/lines were not in the original plan's touch list:
 
 **Core schema & scoring:** `backend/src/models.py` · `backend/src/storage/database.py` · `backend/src/storage/csv_export.py` · `backend/src/filters/skill_matcher.py` · `backend/src/utils/time_buckets.py` · `backend/src/main.py`
 
-**Consumers:** `backend/src/dashboard.py` · `backend/src/cli_view.py` · `backend/src/api/models.py` · `backend/src/api/routes/jobs.py` · `backend/src/notifications/email_notify.py` · `backend/src/notifications/report_generator.py`
+**Consumers:** `backend/src/cli_view.py` · `backend/src/api/models.py` · `backend/src/api/routes/jobs.py` · `backend/src/notifications/email_notify.py` · `backend/src/notifications/report_generator.py`
 
 **All 46 sources:** `backend/src/sources/**/*.py` (grouped into `apis_keyed/`, `apis_free/`, `ats/`, `feeds/`, `scrapers/`, `other/` — see Phase 1 batching table)
 
@@ -151,7 +151,7 @@ These files/lines were not in the original plan's touch list:
 |---|---|---|---|
 | **0** | DB schema migration + Job dataclass + conftest fixtures + delete `is_new` | Low | — |
 | **1** | 46-source `date_posted` refactor + 3 batched commits + remove nomis/yc | Medium | 0 |
-| **2** | Time bucketing + recency scoring + backfill policy + dashboard/CLI/API/CSV/reports + frontend | Medium | 1 |
+| **2** | Time bucketing + recency scoring + backfill policy + CLI/API/CSV/reports + frontend | Medium | 1 |
 | **3** | Run hash + corrected upsert + corrected mark_disappeared + purge + notifications | Medium | 0 |
 | **4** | Greenhouse `updated_at` + NHS future-date fix | Low | 1 |
 | **5** | Optional ghost detection (SQLite age-based, no ML) | High | 3 |
@@ -313,17 +313,13 @@ Commit: `refactor(time_buckets): prefer date_posted over first_seen`
 
 Commit: `feat(db): persist date_posted and discovered_at on insert`
 
-**Task 2.4 — Dashboard**
+**Task 2.4 — CLI view**
 
-`backend/src/dashboard.py:241,253,305,669`. Load `date_posted` + `discovered_at` in SELECT. Change ORDER BY to `COALESCE(date_posted, first_seen) DESC`. Update `age_hours` computation. Add "Posted date unknown" filter option. Update `format_relative_time` call site to pass `date_posted ?? date_found`.
-
-Commit: `refactor(dashboard): prefer date_posted; add unknown bucket`
-
-**Task 2.5 — CLI view**
-
-`backend/src/cli_view.py:36,82,122`. Same pattern as dashboard — ORDER BY, `format_relative_time`, `parse_date_safe` all prefer `date_posted`.
+`backend/src/cli_view.py:36,82,122`. Change ORDER BY to `COALESCE(date_posted, first_seen) DESC`. `format_relative_time` and `parse_date_safe` all prefer `date_posted`. Add handling for the "Posted date unknown" bucket.
 
 Commit: `refactor(cli_view): prefer date_posted for bucketing`
+
+(The former "Task 2.4 — Dashboard" covered a Python-side UI module that no longer exists in the codebase; Task 2.4 has been folded into the CLI-view task.)
 
 **Task 2.6 — API response model + routes**
 
@@ -510,7 +506,7 @@ Commit: `fix(sources/nhs_jobs): parse pubDate (posting), not closingDate (deadli
 
 ### Phase 5 — Ghost detection (dependency-free)
 
-Add `ghost_flag INTEGER DEFAULT 0` column. `flag_ghosts(threshold_days=45)` updates rows where `disappeared_at IS NULL AND first_seen < cutoff`. Dashboard excludes `ghost_flag=1` by default with a toggle to show. **Do NOT pursue the ChromaDB/embedding path** until this proves insufficient — that's +500 MB of deps for marginal gain.
+Add `ghost_flag INTEGER DEFAULT 0` column. `flag_ghosts(threshold_days=45)` updates rows where `disappeared_at IS NULL AND first_seen < cutoff`. The frontend (and API default) exclude `ghost_flag=1` jobs by default with a toggle to show. **Do NOT pursue the ChromaDB/embedding path** until this proves insufficient — that's +500 MB of deps for marginal gain.
 
 ### Phase 6 — BambooHR
 

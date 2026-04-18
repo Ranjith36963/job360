@@ -36,7 +36,7 @@ def _build_embeds(jobs: list[Job], stats: dict) -> dict:
 
     description = "\n\n".join(lines)
     if len(sorted_jobs) > 10:
-        description += f"\n\n*...and {len(sorted_jobs) - 10} more jobs. Check email or dashboard for full list.*"
+        description += f"\n\n*...and {len(sorted_jobs) - 10} more jobs. Check email or the Job360 frontend for the full list.*"
 
     embed = {
         "title": f"🔍 Job360: {new} new jobs found",

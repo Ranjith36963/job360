@@ -4,7 +4,7 @@
 
 **Goal:** Build a FastAPI backend that bridges the existing Python pipeline to the Next.js frontend, implementing all 21 endpoints defined in `frontend/src/lib/api.ts`.
 
-**Architecture:** Thin API layer wrapping existing modules (`database.py`, `main.py`, `profile/*`, `csv_export.py`). Two new DB tables (`user_actions`, `applications`) for features the Streamlit dashboard doesn't have. In-memory dict for search progress tracking (single-user tool, no persistence needed). All routes async, CORS enabled for `localhost:3000`.
+**Architecture:** Thin API layer wrapping existing modules (`database.py`, `main.py`, `profile/*`, `csv_export.py`). Two new DB tables (`user_actions`, `applications`) for user-action tracking and application-pipeline state. In-memory dict for search progress tracking (single-user tool, no persistence needed). All routes async, CORS enabled for `localhost:3000`.
 
 **Tech Stack:** FastAPI, Pydantic v2, aiosqlite (existing), uvicorn, python-multipart (file uploads)
 

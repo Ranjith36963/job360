@@ -12,7 +12,6 @@ def test_cli_help():
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "run" in result.output
-    assert "dashboard" in result.output
     assert "status" in result.output
     assert "sources" in result.output
 
@@ -62,11 +61,10 @@ def test_source_registry_has_48_sources():
 
 
 def test_run_help_shows_new_flags():
-    """run --help should show --no-email and --dashboard flags."""
+    """run --help should show --no-email flag."""
     result = runner.invoke(cli, ["run", "--help"])
     assert result.exit_code == 0
     assert "--no-email" in result.output
-    assert "--dashboard" in result.output
 
 
 def test_view_help():

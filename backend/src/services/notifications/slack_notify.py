@@ -59,7 +59,7 @@ def _build_payload(jobs: list[Job], stats: dict) -> dict:
         blocks.append({
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": f"_...and {len(sorted_jobs) - 10} more jobs. Check email or dashboard for full list._"},
+                {"type": "mrkdwn", "text": f"_...and {len(sorted_jobs) - 10} more jobs. Check email or the Job360 frontend for the full list._"},
             ],
         })
 
