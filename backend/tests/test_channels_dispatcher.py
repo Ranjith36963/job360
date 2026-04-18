@@ -172,3 +172,31 @@ def test_format_payload_variants():
     assert dispatcher.format_payload("slack", "T", "B")[1].startswith("*T*")
     assert dispatcher.format_payload("discord", "T", "B")[1].startswith("**T**")
     assert dispatcher.format_payload("email", "T", "B") == ("T", "B")
+
+
+@pytest.mark.asyncio
+async def test_test_send_rejects_cross_user_channel_id(channel_db):
+    """Defense-in-depth: dispatcher returns 'not found' when caller's
+    user_id does not own the channel, even if they pass a real channel_id."""
+    async with aiosqlite.connect(channel_db) as db:
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("mallory", "m@x", "!"),
+        )
+        await db.commit()
+    alice_cid = await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
+
+    with patch("apprise.Apprise") as MockApp:
+        instance = MockApp.return_value
+        instance.notify.return_value = True
+        if hasattr(instance, "async_notify"):
+            del instance.async_notify
+
+        async with aiosqlite.connect(channel_db) as db:
+            # Mallory supplies alice's real channel_id but their own user_id.
+            result = await dispatcher.test_send(db, alice_cid, user_id="mallory")
+
+    assert result.ok is False
+    assert "not found" in result.error
+    # Apprise was never called — ownership check rejected before dispatch.
+    assert MockApp.return_value.notify.call_count == 0

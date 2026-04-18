@@ -13,7 +13,7 @@ event loop, and tell me how it went."
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import aiosqlite
 
@@ -123,15 +123,27 @@ async def _notify_async(ap, *, title: str, body: str) -> bool:
 
 
 async def test_send(
-    db: aiosqlite.Connection, channel_id: int
+    db: aiosqlite.Connection, channel_id: int, *, user_id: Optional[str] = None
 ) -> ChannelSendResult:
-    """Send a test notification to a single channel. UI wires this to the
-    "Send test" button on the channel config page."""
+    """Send a test notification to a single channel.
+
+    Ownership check: when ``user_id`` is supplied the SELECT filters by
+    both ``id`` and ``user_id`` so the service boundary itself refuses to
+    dispatch to a channel the caller does not own. Defense-in-depth — the
+    HTTP layer already does the check, but future callers (ARQ tasks,
+    admin routes, digest path) that forget it won't leak here either.
+    """
     apprise = _get_apprise_cls()
     db.row_factory = aiosqlite.Row
-    cur = await db.execute(
-        "SELECT * FROM user_channels WHERE id = ?", (channel_id,)
-    )
+    if user_id is None:
+        cur = await db.execute(
+            "SELECT * FROM user_channels WHERE id = ?", (channel_id,)
+        )
+    else:
+        cur = await db.execute(
+            "SELECT * FROM user_channels WHERE id = ? AND user_id = ?",
+            (channel_id, user_id),
+        )
     row = await cur.fetchone()
     if row is None:
         return ChannelSendResult(

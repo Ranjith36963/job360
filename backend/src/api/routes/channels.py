@@ -106,7 +106,8 @@ async def delete_channel(
 async def test_send_channel(
     channel_id: int, user: CurrentUser = Depends(require_user)
 ) -> TestSendResult:
-    # Ownership check — 404 for not-yours.
+    # Two-layer ownership check: HTTP SELECT here AND dispatcher filters
+    # internally on user_id. Either layer rejects a cross-user attempt.
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -119,7 +120,7 @@ async def test_send_channel(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="channel not found",
             )
-        result = await dispatcher.test_send(db, channel_id)
+        result = await dispatcher.test_send(db, channel_id, user_id=user.id)
     return TestSendResult(
         ok=result.ok,
         error=result.error or None,
