@@ -29,6 +29,13 @@ class Job:
     visa_flag: bool = False
     is_new: bool = True
     experience_level: str = ""
+    # Pillar 3 Batch 1 — 5-column date model.
+    # posted_at: source-claimed posting date (None when no trustworthy field).
+    # date_confidence: high / medium / low / fabricated / repost_backdated.
+    # date_posted_raw: raw pre-parse value from source, audit-only.
+    posted_at: Optional[str] = None
+    date_confidence: str = "low"
+    date_posted_raw: Optional[str] = None
 
     def __post_init__(self):
         # Decode HTML entities in title and company

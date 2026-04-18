@@ -136,17 +136,60 @@ class JobDatabase:
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
              apply_url, source, date_found, match_score, visa_flag,
-             experience_level, normalized_company, normalized_title, first_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             experience_level, normalized_company, normalized_title, first_seen,
+             posted_at, first_seen_at, last_seen_at, date_confidence,
+             date_posted_raw)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title, job.company, job.location,
                 job.salary_min, job.salary_max, job.description,
                 job.apply_url, job.source, job.date_found,
                 job.match_score, int(job.visa_flag),
                 job.experience_level, company, title, now,
+                job.posted_at, now, now, job.date_confidence,
+                job.date_posted_raw,
             ),
         )
         return cursor.rowcount > 0
+
+    async def update_last_seen(self, normalized_key: tuple[str, str]) -> None:
+        """Mark a job as re-seen this scrape cycle. Resets ghost-detection counters."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "UPDATE jobs SET last_seen_at = ?, consecutive_misses = 0, "
+            "staleness_state = 'active' "
+            "WHERE normalized_company = ? AND normalized_title = ?",
+            (now, normalized_key[0], normalized_key[1]),
+        )
+        await self._conn.commit()
+
+    async def mark_missed_for_source(
+        self, source: str, seen_keys: set[tuple[str, str]]
+    ) -> int:
+        """Increment consecutive_misses for every job of `source` not in `seen_keys`.
+
+        Scrape-completeness gates (rolling-average checks) are the CALLER's
+        responsibility — only call this after a scrape is deemed healthy, per
+        pillar_3_batch_1.md §3 Step 1. Returns the count of jobs marked missed.
+        """
+        cursor = await self._conn.execute(
+            "SELECT id, normalized_company, normalized_title "
+            "FROM jobs WHERE source = ?",
+            (source,),
+        )
+        rows = await cursor.fetchall()
+        missed_ids = [
+            row[0] for row in rows
+            if (row[1], row[2]) not in seen_keys
+        ]
+        for job_id in missed_ids:
+            await self._conn.execute(
+                "UPDATE jobs SET consecutive_misses = consecutive_misses + 1 "
+                "WHERE id = ?",
+                (job_id,),
+            )
+        await self._conn.commit()
+        return len(missed_ids)
 
     async def commit(self):
         """Commit pending changes."""
