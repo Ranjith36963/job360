@@ -38,6 +38,14 @@ class JobDatabase:
                 normalized_company TEXT NOT NULL,
                 normalized_title TEXT NOT NULL,
                 first_seen TEXT NOT NULL,
+                posted_at TEXT,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                last_updated_at TEXT,
+                date_confidence TEXT DEFAULT 'low',
+                date_posted_raw TEXT,
+                consecutive_misses INTEGER DEFAULT 0,
+                staleness_state TEXT DEFAULT 'active',
                 UNIQUE(normalized_company, normalized_title)
             );
             CREATE TABLE IF NOT EXISTS run_log (
@@ -51,6 +59,8 @@ class JobDatabase:
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
             CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
+            CREATE INDEX IF NOT EXISTS idx_jobs_staleness_state ON jobs(staleness_state);
+            CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at);
             CREATE TABLE IF NOT EXISTS user_actions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL,
@@ -80,8 +90,15 @@ class JobDatabase:
         # Define columns added after initial schema.
         # Format: (column_name, column_definition)
         migrations = [
-            # Add future columns here, e.g.:
-            # ("salary_currency", "TEXT DEFAULT ''"),
+            # Pillar 3 Batch 1 — 5-column date model + ghost detection hooks.
+            ("posted_at",          "TEXT"),
+            ("first_seen_at",      "TEXT"),
+            ("last_seen_at",       "TEXT"),
+            ("last_updated_at",    "TEXT"),
+            ("date_confidence",    "TEXT DEFAULT 'low'"),
+            ("date_posted_raw",    "TEXT"),
+            ("consecutive_misses", "INTEGER DEFAULT 0"),
+            ("staleness_state",    "TEXT DEFAULT 'active'"),
         ]
         for col_name, col_def in migrations:
             if col_name not in existing:
