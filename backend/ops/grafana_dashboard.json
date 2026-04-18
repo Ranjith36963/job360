@@ -1,0 +1,152 @@
+{
+  "annotations": {"list": []},
+  "description": "Job360 freshness KPIs — Pillar 3 Batch 1",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Row 1 — Bucket accuracy gauges",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false
+    },
+    {
+      "type": "gauge",
+      "title": "bucket_accuracy_24h (target ≥ 90%)",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_bucket_accuracy_24h"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "orange", "value": 0.8},
+              {"color": "green", "value": 0.9}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "bucket_accuracy_48h (target ≥ 85%)",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_bucket_accuracy_48h"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "orange", "value": 0.75},
+              {"color": "green", "value": 0.85}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "bucket_accuracy_7d (target ≥ 80%)",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_bucket_accuracy_7d"}]
+    },
+    {
+      "type": "gauge",
+      "title": "date_reliability_ratio (target ≥ 70%)",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_date_reliability_ratio"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "orange", "value": 0.6},
+              {"color": "green", "value": 0.7}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Row 2 — Notification latency + delivery",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "stale_listing_rate (target ≤ 5%)",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 10},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_stale_listing_rate"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "type": "table",
+      "title": "notification_delivery_success_rate (per-channel ≥ 99%)",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 10},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_notification_delivery_success_rate", "format": "table"}]
+    },
+    {
+      "type": "row",
+      "title": "Row 3 — Per-source crawl health",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "collapsed": false
+    },
+    {
+      "type": "table",
+      "title": "crawl_freshness_lag by source (alert > 2× interval)",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 17},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "job360_crawl_freshness_lag_seconds", "format": "table"}]
+    },
+    {
+      "type": "row",
+      "title": "Row 4 — Volume trends",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Jobs ingested per hour by bucket",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "job360_bucket_accuracy_24h", "legendFormat": "24h"},
+        {"expr": "job360_bucket_accuracy_48h", "legendFormat": "48h"},
+        {"expr": "job360_bucket_accuracy_7d",  "legendFormat": "7d"},
+        {"expr": "job360_bucket_accuracy_21d", "legendFormat": "21d"}
+      ]
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["job360", "freshness", "pillar3"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Job360 — Freshness KPIs",
+  "uid": "job360-freshness",
+  "version": 1,
+  "weekStart": ""
+}
