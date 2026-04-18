@@ -25,7 +25,10 @@ class RemotiveSource(BaseJobSource):
             title = item.get("title", "")
             desc = item.get("description", "")
             tags = " ".join(item.get("tags", []))
-            date_found = item.get("publication_date") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_pub = item.get("publication_date")
+            posted_at = raw_pub if raw_pub else None
+            confidence = "high" if raw_pub else "low"
             salary = item.get("salary", "")
             salary_min = None
             salary_max = None
@@ -43,7 +46,10 @@ class RemotiveSource(BaseJobSource):
                 description=desc[:5000],
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_pub,
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))
