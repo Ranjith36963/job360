@@ -21,6 +21,8 @@ from src.services.profile.storage import load_profile
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.notifications.base import get_configured_channels
+from src.services.circuit_breaker import default_registry as default_breaker_registry
+from src.services.circuit_breaker import BreakerState
 
 from src.sources.apis_keyed.reed import ReedSource
 from src.sources.apis_keyed.adzuna import AdzunaSource
@@ -356,22 +358,37 @@ async def run_search(
             if failed_sources:
                 logger.warning("Failed sources (%s): %s", len(failed_sources), ", ".join(failed_sources))
 
-            # Source health: detect sources returning 0 that previously returned jobs
+            # Source health: per-source circuit breakers replace the former
+            # `newly_empty` heuristic. A source that returns 0 jobs or raises
+            # an exception increments its breaker's failure counter; after N
+            # consecutive failures the breaker trips OPEN and future ticks
+            # skip the fetch until the cooldown elapses (half-open probe).
+            # See services/circuit_breaker.py and pillar_3_batch_3.md §"Circuit
+            # breakers replace the newly_empty flag".
+            registry = default_breaker_registry()
             try:
                 history = await db.get_last_source_counts(7)
-                newly_empty = []
-                for name, count in per_source.items():
-                    if count == 0 and name in history:
-                        past_counts = history[name]
-                        if any(c > 0 for c in past_counts):
-                            newly_empty.append(name)
-                if newly_empty:
-                    logger.warning(
-                        "Sources returning 0 that previously had jobs: %s", ", ".join(newly_empty)
-                    )
             except Exception as e:
-                logger.warning("Source health check skipped: %s", e)
+                logger.warning("Source history fetch skipped: %s", e)
                 history = {}
+
+            newly_opened: list[str] = []
+            for source, result in zip(sources, results):
+                breaker = registry.get(source.name)
+                fetch_failed = isinstance(result, BaseException) or result is None or not result
+                if fetch_failed:
+                    previous_state = breaker.state
+                    breaker.record_failure()
+                    if breaker.state == BreakerState.OPEN and previous_state != BreakerState.OPEN:
+                        newly_opened.append(source.name)
+                else:
+                    breaker.record_success()
+
+            if newly_opened:
+                logger.warning(
+                    "Circuit breaker OPEN for source(s) after consecutive failures: %s",
+                    ", ".join(newly_opened),
+                )
 
             # Ghost detection: update last_seen for observed jobs; mark absent jobs as missed.
             # Per pillar_3_batch_1.md §3 Step 1, skip the absence sweep for any source whose
