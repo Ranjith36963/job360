@@ -273,6 +273,15 @@ class JobDatabase:
         return source_history
 
     # --- User Actions ---
+    #
+    # TODO(batch-2.1): accept user_id on every method, filter all queries by it.
+    # Currently every INSERT defaults to DEFAULT_TENANT_ID via column DEFAULT,
+    # and every SELECT/DELETE is tenant-blind. Batch 2 ships the schema
+    # (UNIQUE(user_id, job_id), FK → users) but defers route auth-gating
+    # to Batch 2.1/3. If two real users ever both hit /api/jobs/{id}/action
+    # before that wiring lands, the second writer silently overwrites the
+    # first via INSERT OR REPLACE. The batch-2 docs/IMPLEMENTATION_LOG.md
+    # completion entry names this deferral explicitly (§"What got deferred").
 
     async def insert_action(self, job_id: int, action: str, notes: str = "") -> dict:
         now = datetime.now(timezone.utc).isoformat()
@@ -308,6 +317,10 @@ class JobDatabase:
         return row[0] if row else None
 
     # --- Applications (Pipeline) ---
+    #
+    # TODO(batch-2.1): same caveat as user_actions above — schema carries
+    # user_id + UNIQUE(user_id, job_id), but these methods are still
+    # tenant-blind and rely on column DEFAULT for writes.
 
     async def create_application(self, job_id: int) -> dict:
         now = datetime.now(timezone.utc).isoformat()

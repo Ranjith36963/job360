@@ -288,7 +288,7 @@ Reviewer: your worktree is `.claude/worktrees/reviewer` on `pillar3/batch-1-revi
 
 1. **Migration runner** (`backend/migrations/`) — forward/reverse SQL files + idempotent runner + `_schema_migrations` registry. 5 migrations applied: `0000_baseline` (no-op record), `0001_auth`, `0002_multi_tenant`, `0003_user_feed`, `0004_notification_ledger`, `0005_user_channels`.
 2. **Auth** — argon2id (argon2-cffi) + itsdangerous-signed cookies + 30-day expiry. Routes: `POST /api/auth/{register,login,logout}`, `GET /api/auth/me`. Cookie: `job360_session`, HttpOnly, SameSite=Lax, Secure=off in dev.
-3. **Tenancy** — `user_actions` and `applications` rebuilt with `user_id` + `UNIQUE(user_id, job_id)`; legacy single-user rows backfilled to placeholder user `00000000-0000-0000-0000-000000000001`. `jobs` catalog untouched per CLAUDE.md rule #1. Six tenant-isolation tests in a dedicated `TestTenantIsolation` class prove A↔B separation.
+3. **Tenancy schema** — `user_actions` and `applications` rebuilt with `user_id` + `UNIQUE(user_id, job_id)`; legacy single-user rows backfilled to placeholder user `00000000-0000-0000-0000-000000000001`. `jobs` catalog untouched per CLAUDE.md rule #1. Seven tests in a dedicated `TestTenantIsolation` class prove A↔B separation **at the SQL layer**. ⚠️ **The repository layer (`JobDatabase.insert_action` / `delete_action` / `get_actions` / `get_action_counts` / `get_action_for_job` / `create_application` / `advance_application` / `_get_application` / `get_applications` / `get_application_counts` / `get_stale_applications`) is still tenant-blind — writes default to `DEFAULT_TENANT_ID` via the column DEFAULT, reads have no `WHERE user_id = ?` filter.** Commit `1a4c07d`'s subject "per-user user_actions + applications" should have read "SCHEMA for per-user user_actions + applications (repo layer auth-gating deferred to Batch 2.1)". TODO markers added above `insert_action` and `create_application` in commit `0e45c3e`. Review-response commit `575eb8c`-equivalent wiring (threading `Depends(require_user)` through existing routes + adding `user_id` params to the 11 methods) is explicit Batch 2.1 scope. See §"What got deferred" item 1.
 4. **`user_feed` SSOT + FeedService** — one table, same service class feeds both dashboard (FastAPI) and notification worker. Cascade stale / update status / mark notified / upsert idempotent per (user, job).
 5. **99% pre-filter cascade** — `location → experience → skill overlap`, each stage can be unit-tested independently. Permissive on missing signals (false positives cheap, false negatives expensive).
 6. **Worker task + notification ledger** — `score_and_ingest` runs pre-filter + scoring + feed upsert + optional instant-notify enqueue. Ledger `UNIQUE(user_id, job_id, channel)` gives per-channel idempotency for free. Tasks are pure async — no `arq` import at module level so pytest never touches Redis.
@@ -298,7 +298,7 @@ Reviewer: your worktree is `.claude/worktrees/reviewer` on `pillar3/batch-1-revi
 
 ### What got deferred
 
-- **Wrapping existing `/api/jobs`, `/api/actions`, `/api/profile`, `/api/pipeline`, `/api/search` in `Depends(require_user)`.** Batch 2 ships the dependency and the tenant-scoped channel routes; rolling it across pre-existing endpoints is mechanical but would compound with the 6 pre-existing `test_api.py` failures. Punt to Batch 2.1 or Batch 3.
+- **Wrapping existing `/api/jobs`, `/api/actions`, `/api/profile`, `/api/pipeline`, `/api/search` in `Depends(require_user)` AND adding `user_id` params to the 11 `JobDatabase` action/application methods.** Batch 2 ships the dependency (`src/api/auth_deps.py::require_user`) and the tenant-scoped `/api/auth` + `/api/settings/channels` routes; rolling it across pre-existing endpoints is mechanical but would compound with the 6 pre-existing `test_api.py` failures. **Net effect today:** two real users who both hit `/api/jobs/{id}/action` alias-collapse onto the placeholder tenant — the second writer's `INSERT OR REPLACE` overwrites the first. Mitigation: the existing UI does not register users (there is only one `user_profile.json`), so the collision path is not reachable via the shipped frontend. Explicit Batch 2.1 scope.
 - **ARQ runtime settings module** (`src/workers/settings.py` with `WorkerSettings` + Redis pool). Tasks are runnable in-process today via direct function call; productionising the scheduler is a Batch 3 follow-up.
 - **Digest timer / quiet hours** — schema + preference columns are ready (blueprint §1 shape), but the scheduled `send_digest` ARQ job is not wired in this batch.
 - **Migration from single-user `user_profile.json` to a per-user `user_profiles` table.** The file continues to work for the CLI path (tenant = default user); multi-user CVs / LinkedIn / GitHub per user is Batch 3.
@@ -307,6 +307,26 @@ Reviewer: your worktree is `.claude/worktrees/reviewer` on `pillar3/batch-1-revi
 - **Channel payload richness** — Slack Block Kit, Discord embeds, Telegram MarkdownV2. Current `format_payload()` returns plain markup. Upgrade is a local change in `services/channels/dispatcher.py`.
 - **CSRF protection** — `SameSite=Lax` covers non-mutating GETs today; double-submit CSRF tokens land when the frontend moves off same-origin.
 - **Password reset / email verification / 2FA.** Explicitly excluded per plan "Out-of-scope".
+
+### Review-response commits (round 2)
+
+After the reviewer flagged three P1s + two Ps:
+
+- `ab8155a` `fix(security): fail-closed on missing SESSION_SECRET / CHANNEL_ENCRYPTION_KEY (P1-3)` — raises `RuntimeError` with a generator hint instead of silently using a committed dev default; cookie `Secure` flag now gates on `JOB360_ENV=="prod"`; pinned 5 new runtime deps (P2-1) in `pyproject.toml` (argon2-cffi, itsdangerous, apprise, email-validator, cryptography).
+- `5920703` `fix(worker): per-user JobScorer invocation in score_and_ingest (P1-2)` — replaced the catalog-level `job.match_score` lookup with a real `JobScorer.score(job)` call per user, either via `ctx['scorer']` (tests) or a shared `SearchConfig` loaded from `user_profile.json` (production pre-Batch-3). Test now proves per-user scoring by returning `{alice: 85, bob: 70}` from the injected scorer and asserting on the call list.
+- `48cea56` `fix(channels): dispatcher.test_send enforces user_id ownership (P2-2)` — defense-in-depth; the service boundary now refuses to dispatch to a channel the caller does not own, even if the HTTP-layer check is forgotten. New `test_test_send_rejects_cross_user_channel_id` proves mallory cannot dispatch via alice's `channel_id`.
+- `(this commit)` `docs: P1-1 overclaim reword + D6 reconciliation + TODO markers` — the reword in §"What shipped" item 3 above, TODO markers above `insert_action` + `create_application` in `backend/src/repositories/database.py`, and the D6 REVISION block in `docs/plans/batch-2-decisions.md`.
+
+Not addressed in round 2 (accepted deferrals):
+
+- **P1-1 — full repo-layer tenant scoping.** Option (b) per reviewer. Option (a) wiring is explicit Batch 2.1.
+- **P2-3 — `asyncio.to_thread` wrap around sync `Apprise.notify`.** Not reachable in Batch 2 (ARQ worker not wired); must land before the worker schedule ships in Batch 3.
+- **P2-4 — migration 0002 column-mirror test.** Acceptable as a Batch 3 polish; risk is low since no Batch 1.x/2.x migration between 0001 and 0002 adds columns.
+- **P2-5 — per-user `instant_threshold`.** Depends on the Batch 3 `user_profiles` table.
+- **P3-1 — dead `idempotency_key()` helper.** Kept; the call site for Redis-backed pre-DB dedup is a clean addition in Batch 3.
+- **P3-3 — `core/tenancy.py` thin-module concern.** Kept — adding a `require_tenant` helper that just delegates to `require_user` would be ceremony.
+- **P3-4 — `resolve_session` last_seen slide error handling.** Kept as-is.
+- **P3-5 — migration runner stem-on-exception log line.** Low priority.
 
 ### Surprises / lessons
 

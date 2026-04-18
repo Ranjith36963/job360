@@ -119,6 +119,8 @@
 
 Existing single-user data migrates as `tenant_id = user_id = '00000000-0000-0000-0000-000000000001'` (well-known local-admin UUID).
 
+> **REVISION 2026-04-18** (post-review): implementation landed with a SINGLE `user_id` column, not two (no separate `tenant_id`). Reason: re-reading blueprint §3 ("jobs is a shared catalog, user_feed is per-user") clarified that `jobs` must NOT carry a tenant scope at all, so the only per-user tables are `user_actions`, `applications`, `user_feed`, `notification_ledger`, `user_channels` — all naturally scoped by `user_id`. Shared-workspace tenancy in Batch 4+ will come via a separate `tenants` join table (`user_tenants(user_id, tenant_id, role)`) rather than adding a second column to every per-user row. YAGNI-correct for the consumer product we're actually shipping.
+
 ---
 
 ## D7. Notification trigger policy — three-tier (blueprint §1) vs binary digest-only vs "always instant"
