@@ -47,7 +47,10 @@ class ReedSource(BaseJobSource):
                 if not data or "results" not in data:
                     continue
                 for item in data["results"]:
-                    date_found = item.get("date") or item.get("datePosted") or datetime.now(timezone.utc).isoformat()
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    raw_date = item.get("date") or item.get("datePosted")
+                    posted_at = raw_date if raw_date else None
+                    confidence = "high" if raw_date else "low"
                     jobs.append(Job(
                         title=item.get("jobTitle", ""),
                         company=item.get("employerName", ""),
@@ -57,7 +60,10 @@ class ReedSource(BaseJobSource):
                         description=item.get("jobDescription", ""),
                         apply_url=f"https://www.reed.co.uk/jobs/{item.get('jobId', '')}",
                         source=self.name,
-                        date_found=date_found,
+                        date_found=now_iso,
+                        posted_at=posted_at,
+                        date_confidence=confidence,
+                        date_posted_raw=raw_date,
                     ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Reed: found %s jobs", len(jobs))
