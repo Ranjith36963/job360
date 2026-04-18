@@ -56,7 +56,10 @@ class TheMuseSource(BaseJobSource):
 
                 refs = item.get("refs", {})
                 apply_url = refs.get("landing_page", "") if isinstance(refs, dict) else ""
-                date_found = item.get("publication_date") or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_pub = item.get("publication_date")
+                posted_at = raw_pub if raw_pub else None
+                confidence = "high" if raw_pub else "low"
 
                 # Experience level from levels array
                 levels = item.get("levels", [])
@@ -74,7 +77,10 @@ class TheMuseSource(BaseJobSource):
                     description=description,
                     apply_url=apply_url,
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_pub,
                     experience_level=experience_level,
                 ))
 
