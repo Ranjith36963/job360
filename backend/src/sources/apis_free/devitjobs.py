@@ -24,7 +24,10 @@ class DevITJobsSource(BaseJobSource):
             company = item.get("company", "")
             location = item.get("actualCity", "")
             apply_url = item.get("jobUrl", "")
-            date_found = item.get("publishedAt") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_published = item.get("publishedAt")
+            posted_at = raw_published if raw_published else None
+            confidence = "high" if raw_published else "low"
 
             salary_min = item.get("annualSalaryFrom")
             salary_max = item.get("annualSalaryTo")
@@ -48,7 +51,10 @@ class DevITJobsSource(BaseJobSource):
                 location=location,
                 apply_url=apply_url,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_published,
                 salary_min=salary_min,
                 salary_max=salary_max,
                 visa_flag=visa_flag,
