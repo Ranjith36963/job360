@@ -65,6 +65,9 @@ class LinkedInSource(BaseJobSource):
                         apply_url=url,
                         source=self.name,
                         date_found=datetime.now(timezone.utc).isoformat(),
+                        posted_at=None,
+                        date_confidence="low",
+                        date_posted_raw=None,
                     ))
                     if len(jobs) >= 50:
                         break
