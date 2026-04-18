@@ -163,7 +163,12 @@ def _location_score(location: str) -> int:
 
 
 def _recency_score(date_found: str) -> int:
-    """Score based on job posting age. Recent jobs score higher."""
+    """Score based on job posting age. Recent jobs score higher.
+
+    Legacy helper — accepts a single date string. For the 5-column date model,
+    prefer `recency_score_for_job(job)` which honours `posted_at` +
+    `date_confidence` so fabricated dates no longer inflate freshness.
+    """
     if not date_found:
         return 0
     try:
@@ -181,6 +186,29 @@ def _recency_score(date_found: str) -> int:
         return 6
     if days_old <= 7:
         return 4
+    return 0
+
+
+_TRUSTWORTHY_CONFIDENCE = frozenset({"high", "medium", "repost_backdated"})
+
+
+def recency_score_for_job(job: Job) -> int:
+    """Pillar 3 Batch 1 recency scorer driven by the 5-column date model.
+
+    Precedence (per pillar_3_batch_1.md §1):
+      1. 'fabricated' confidence → 0 (never inflates)
+      2. posted_at + trustworthy confidence → full recency band
+      3. posted_at + low confidence → falls back to date_found capped at 60%
+      4. no posted_at + date_found → 60% of band (discovery ≠ posting)
+      5. neither → 0 points, no penalty
+    """
+    if job.date_confidence == "fabricated":
+        return 0
+    if job.posted_at and job.date_confidence in _TRUSTWORTHY_CONFIDENCE:
+        return _recency_score(job.posted_at)
+    if job.date_found:
+        raw = _recency_score(job.date_found)
+        return int(raw * 0.6)
     return 0
 
 
@@ -233,7 +261,7 @@ def score_job(job: Job) -> int:
     title_pts = _title_score(job.title)
     skill_pts = _skill_score(text)
     location_pts = _location_score(job.location)
-    recency_pts = _recency_score(job.date_found)
+    recency_pts = recency_score_for_job(job)
     penalty = _negative_penalty(job.title)
     foreign_penalty = _foreign_location_penalty(job.location)
     total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
@@ -296,7 +324,7 @@ class JobScorer:
         title_pts = self._title_score(job.title)
         skill_pts = self._skill_score(text)
         location_pts = _location_score(job.location)
-        recency_pts = _recency_score(job.date_found)
+        recency_pts = recency_score_for_job(job)
         penalty = self._negative_penalty(job.title)
         foreign_penalty = _foreign_location_penalty(job.location)
         total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
