@@ -114,20 +114,98 @@ Before merging to `main`, each batch must:
 
 ## Batch 1 — Date Model + Ghost Detection
 
-**Status:** Not started
+**Status:** Ready for review (not yet merged to main)
 
-**Reference:** `docs/research/pillar_3_batch_1.md`
+**Reference:** `docs/research/pillar_3_batch_1.md` · Plan: `docs/plans/batch-1-plan.md`
 
-**Scope:** 5-column date model migration, fix 14 fabricating sources + 3 wrong-field sources, recency-scoring update for `None` dates, ghost detection state machine, 10 KPI exporter for Prometheus + Grafana.
+**Scope:** 5-column date model migration, fix 39 fabricating + 3 wrong-field sources, recency-scoring update for `None` dates, ghost-detection state machine, 10-KPI exporter for Prometheus + Grafana.
 
 **Branch:** `pillar3/batch-1`
 
 **Pre-flight:**
-1. **Delete phase-4 debris dirs first** — `rm -rf backend/src/{filters,llm,pipeline,validation}/` (all empty `__pycache__`-only, leftover from phase-4 rename per `CurrentStatus.md` §15). Prevents stale-bytecode import ambiguity during schema work.
-2. **Schema migration agent must run first and alone** — touches `models.py` + `database.py` (load-bearing per CLAUDE.md rules #1 and #3).
-3. **Scope reminder** — 39 fabricator sources to fix (not 14 as earlier docs claimed), plus 3 wrong-field sources. Plan agent split accordingly.
+1. **Delete phase-4 debris dirs first** — already clean in this worktree (worktree was branched from `d364e9d`; the debris dirs are empty-`__pycache__` only and exist only in the outer working copy, so no commit needed).
+2. **Schema migration agent must run first and alone** — done in commit `b6c088b` (touches only `database.py` + new test file).
+3. **Scope reminder** — 39 fabricator sources (not 14 as earlier docs claimed), plus 3 wrong-field sources.
 
-_Completion entry will be appended here when merged._
+---
+
+## Batch 1 — Completion Entry (DRAFT — reviewer validates before merge)
+
+**Generated:** 2026-04-18 (generator worktree on `pillar3/batch-1`)
+**Branch:** `pillar3/batch-1` — 50 commits ahead of `main`
+**Base:** `main` @ `d02d56c`
+**Commit range:** `d02d56c..HEAD`
+
+### Test deltas
+
+| Metric | Baseline (clean-main, pre-Batch-1) | After Batch 1 | Delta |
+|---|---:|---:|---:|
+| Passing | **371** | **414** | **+43** |
+| Failing | **24** (all in 4 pre-existing buckets) | **24** (same 4 buckets) | 0 |
+| Skipped | **3** | **3** | 0 |
+| Run time | 169.53s | 170.39s | +0.86s |
+
+**Zero regressions.** Every one of the 24 remaining failures was present at baseline and falls into one of the four pre-existing buckets (API sqlite init, cron/setup path drift, 7 source parsers, 3 matched_skills stale assertions). The +43 delta is entirely new Batch 1 tests (`test_date_schema.py` ×13 · `test_ghost_detection.py` ×18 · `test_kpi_exporter.py` ×4 · `test_models.py` ×2 · `test_scorer.py` ×7 · `test_sources.py` ×3 new assertion blocks, counted inline with their existing test function).
+
+**New tests added in Batch 1:**
+- `tests/test_date_schema.py` — 13 tests covering the 5-column additive migration + idempotency
+- `tests/test_ghost_detection.py` — 18 tests covering state-machine transitions + DB integration
+- `tests/test_kpi_exporter.py` — 4 tests covering KPI compute paths (empty-DB safety, key completeness, mixed confidence, per-source crawl lag)
+- `tests/test_models.py` — 2 new tests for 5-column Job fields
+- `tests/test_scorer.py` — 7 new tests for the recency-scorer 5-column rewrite
+- `tests/test_sources.py` — 3 new assertion blocks in jooble / greenhouse / nhs_jobs tests
+
+**Tests removed/replaced:** 0 — all net-new.
+**Pre-existing failures unchanged:** 24 (API sqlite ×6, cron/setup paths ×8, source parsers ×7 incl. `test_jooble_parses_response`, matched_skills ×3).
+
+### KPI deltas
+
+- `date_reliability_ratio` — baseline estimated ~60–65% (heavy fabrication). Post-Batch-1 this is now measurable via `backend/scripts/measure_date_reliability.py`. Run it after the next scrape to capture the real post-Batch-1 ratio. On the test fixtures alone the measurement script shows fabrication counts dropping to zero.
+- `bucket_accuracy_24h` — now computable (was unmeasurable pre-Batch-1; no column for it).
+- `stale_listing_rate` — now computable; starts at 0 until ghost-detection runs.
+- Source count — unchanged at 48 / 47 unique per rule #8.
+- `crawl_freshness_lag_seconds` — now emitted per-source.
+
+### What shipped
+
+1. **5-column date model** (`b6c088b`) — added `posted_at`, `first_seen_at`, `last_seen_at`, `last_updated_at`, `date_confidence`, `date_posted_raw`, `consecutive_misses`, `staleness_state` to the `jobs` table. Legacy `date_found`/`first_seen` columns preserved for back-compat. Migration is idempotent; fresh DBs get columns via inline `CREATE TABLE`.
+2. **Job dataclass extensions** (`09cfe2d`) — `posted_at: Optional[str]`, `date_confidence: str = "low"`, `date_posted_raw: Optional[str]`. `normalized_key()` UNTOUCHED per rule #1.
+3. **DB ghost-detection helpers** (`09cfe2d`) — `update_last_seen(key)` and `mark_missed_for_source(source, seen_keys)`.
+4. **Recency scorer rewrite** (`d0a2ec7`) — new `recency_score_for_job()` honours `posted_at` + `date_confidence`. Fabricated confidence → 0 (no inflation). Low-confidence first-seen fallback capped at 60%. Both `score_job()` and `JobScorer.score()` flow through it.
+5. **3 wrong-field source fixes** (`c83ad57`) — jooble (`updated`), greenhouse (`updated_at`), nhs_jobs (`closingDate`). Raw values preserved in `date_posted_raw`.
+6. **Ghost-detection state machine** (`6beea35`) — `backend/src/services/ghost_detection.py`. `StalenessState` enum, `transition()`, `should_exclude_from_24h()`, `evaluate_job_state()`. CONFIRMED_EXPIRED is sticky.
+7. **10-KPI Prometheus exporter + Grafana dashboard** (`9e7708d`) — `backend/ops/exporter.py`, `backend/ops/grafana_dashboard.json`, `backend/scripts/measure_date_reliability.py`. `prometheus_client` is an optional import; `compute_kpis()` runs pure SQL.
+8. **44 source commits** — 39 fabricators × 1 commit each + 5 extras where the subagent identified a real posting date and recovered it to `posted_at` with `date_confidence='high'` (or `'medium'` for parsed relative strings). Confidence breakdown (from commit messages): **~30 `high`, ~2 `medium`, ~14 `low`**.
+9. **docs/plans/batch-1-plan.md** — the TDD plan this batch followed, with clean-main baseline locked at top.
+
+### What got deferred
+
+- **Direct-URL verification step** in the ghost-detection flow (404/410 → `confirmed_expired`) — library scaffolding is in place (state exists, transition logic is sticky on `confirmed_expired`), but no code calls it yet. Punted to a Batch 1.5 or Batch 3 follow-up.
+- **Repost detection via all-MiniLM-L6-v2 embeddings** — pillar_3_batch_1.md §3 Step 5 explicitly deferred to "Phase 2". Not implemented.
+- **Scrape-completeness gate integration in `src/main.py`** — `mark_missed_for_source` exists and is safe to call; the caller code path in `run_search()` is not yet wired up. Batch 2 / Batch 3 work.
+- **Notification latency + pipeline-E2E + per-channel delivery KPIs** — stubbed in `compute_kpis()` with `None` until a notification audit log exists (Batch 2 deliverable).
+- **`test_jooble_parses_response`** is a pre-existing source-parser-bucket failure (present in baseline). Not touched in Batch 1; the Batch-1 assertions added to the green paths of jooble / greenhouse / nhs_jobs prove the new fields are set correctly on the records that DO come through.
+
+### Surprises / lessons
+
+- **Fabricator count was 39, not 14**, as `CurrentStatus.md` §5 spelled out clearly. Earlier research docs under-counted.
+- **The Job-dataclass defaults (`posted_at=None, date_confidence="low"`) made the 44 per-source edits about *explicit intent* rather than *correctness*.** A source that was NOT touched would still produce semantically correct output under the new model — the recency scorer would cap its recency at 60%. Making the edits explicit is a reviewer-ergonomics choice, not a correctness requirement.
+- **Pre-flight debris cleanup was a no-op inside the worktree** — `backend/src/{filters,llm,pipeline,validation}/` only exist as stale `__pycache__` dirs in the *outer* working copy, not in the clean worktree. The plan documents this honestly instead of pretending a commit happened.
+- **Git-Bash on Windows does not mount `/tmp`** — baseline log redirects had to use `/c/temp/batch1/` to land in a Windows-addressable path.
+
+### CLAUDE.md / docs updated
+
+- `docs/plans/batch-1-plan.md` — new (the TDD plan).
+- `docs/IMPLEMENTATION_LOG.md` — this completion entry.
+- `CLAUDE.md` — **no changes yet** because the 48/47 source count and the load-bearing rules #1/#2/#3 are unchanged. A reviewer may want to add a 1-line note pointing to the 5-column date model for future batches.
+
+### Memory file saved
+
+- `project_pillar3_batch_1_done.md` — will be saved by the reviewer after merge (generator worktree does not write into user memory).
+
+### Handoff
+
+Reviewer: your worktree is `.claude/worktrees/reviewer` on `pillar3/batch-1-review`. The audit checklist is in `docs/batch_prompts.md:152-238`. This completion entry is a DRAFT — please verify every claim against the actual diff before merging.
 
 ---
 
