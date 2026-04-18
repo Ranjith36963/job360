@@ -59,7 +59,9 @@ class WorkAnywhereSource(BaseJobSource):
                     company = title.split(sep, 1)[1].strip()
                     break
 
-            date_found = self._parse_rss_date(pub_date)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            posted_at = self._parse_rss_date(pub_date) if pub_date else None
+            confidence = "high" if pub_date else "low"
 
             jobs.append(Job(
                 title=title,
@@ -68,7 +70,10 @@ class WorkAnywhereSource(BaseJobSource):
                 description=description[:5000],
                 apply_url=link,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=pub_date or None,
             ))
 
         return jobs
