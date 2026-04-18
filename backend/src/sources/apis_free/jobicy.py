@@ -29,7 +29,10 @@ class JobicySource(BaseJobSource):
         for item in data["jobs"]:
             title = item.get("jobTitle", "")
             description = item.get("jobExcerpt", "")
-            date_found = item.get("pubDate") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_pub = item.get("pubDate")
+            posted_at = raw_pub if raw_pub else None
+            confidence = "high" if raw_pub else "low"
             jobs.append(Job(
                 title=title,
                 company=item.get("companyName", ""),
@@ -39,7 +42,10 @@ class JobicySource(BaseJobSource):
                 description=description,
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_pub,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Jobicy: found %s relevant jobs", len(jobs))

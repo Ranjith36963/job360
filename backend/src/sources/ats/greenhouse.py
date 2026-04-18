@@ -37,7 +37,12 @@ class GreenhouseSource(BaseJobSource):
                 location = loc.get("name", "") if isinstance(loc, dict) else str(loc)
                 if not _is_uk_or_remote(location):
                     continue
-                date_found = item.get("updated_at") or datetime.now(timezone.utc).isoformat()
+                # Greenhouse public API exposes only `updated_at` (edit timestamp),
+                # never a `created_at`. Using it as posted_at would contaminate the
+                # 24h bucket every time an employer tweaks salary or department.
+                # Keep in date_posted_raw for audit; posted_at=None + confidence=low.
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_updated_at = item.get("updated_at")
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -45,7 +50,10 @@ class GreenhouseSource(BaseJobSource):
                     description=plain[:5000],
                     apply_url=item.get("absolute_url", ""),
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=raw_updated_at,
                 ))
         logger.info("Greenhouse: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

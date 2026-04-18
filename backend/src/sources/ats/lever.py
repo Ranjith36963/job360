@@ -34,12 +34,15 @@ class LeverSource(BaseJobSource):
                 location = categories.get("location", "") if isinstance(categories, dict) else ""
                 if not _is_uk_or_remote(location):
                     continue
-                # Lever createdAt is milliseconds since epoch
+                # Lever createdAt is milliseconds since epoch — real posting date.
+                now_iso = datetime.now(timezone.utc).isoformat()
                 created_at = item.get("createdAt")
                 if created_at and isinstance(created_at, (int, float)):
-                    date_found = datetime.fromtimestamp(created_at / 1000, tz=timezone.utc).isoformat()
+                    posted_at = datetime.fromtimestamp(created_at / 1000, tz=timezone.utc).isoformat()
+                    confidence = "high"
                 else:
-                    date_found = datetime.now(timezone.utc).isoformat()
+                    posted_at = None
+                    confidence = "low"
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -47,7 +50,10 @@ class LeverSource(BaseJobSource):
                     description=desc[:5000],
                     apply_url=item.get("hostedUrl", ""),
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=str(created_at) if created_at else None,
                 ))
         logger.info("Lever: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

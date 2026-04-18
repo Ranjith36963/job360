@@ -44,6 +44,9 @@ class WorkableSource(BaseJobSource):
                     apply_url=apply_url,
                     source=self.name,
                     date_found=datetime.now(timezone.utc).isoformat(),
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=None,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Workable: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

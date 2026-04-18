@@ -30,6 +30,26 @@ def test_job_defaults():
     assert job.match_score == 0
     assert job.visa_flag is False
     assert job.is_new is True
+    # Pillar 3 Batch 1 — 5-column date model default fields
+    assert job.posted_at is None
+    assert job.date_confidence == "low"
+    assert job.date_posted_raw is None
+
+
+def test_job_accepts_five_column_date_fields():
+    job = Job(
+        title="ML Engineer",
+        company="Test Co",
+        apply_url="https://example.com",
+        source="reed",
+        date_found="2024-01-01T00:00:00Z",
+        posted_at="2026-04-15T10:00:00+00:00",
+        date_confidence="high",
+        date_posted_raw="2026-04-15T10:00:00Z",
+    )
+    assert job.posted_at == "2026-04-15T10:00:00+00:00"
+    assert job.date_confidence == "high"
+    assert job.date_posted_raw == "2026-04-15T10:00:00Z"
 
 
 def test_normalized_key():

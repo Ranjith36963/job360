@@ -75,7 +75,12 @@ class NoFluffJobsSource(BaseJobSource):
             posting_id = item.get("id", "") or item.get("url", "")
             apply_url = f"https://nofluffjobs.com/job/{posting_id}" if posting_id else ""
 
-            date_found = item.get("posted") or item.get("renewed") or datetime.now(timezone.utc).isoformat()
+            # Only 'posted' is a real post date; 'renewed' is a mutation date
+            # (listing refresh) and must not populate posted_at.
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_posted = item.get("posted")
+            posted_at = raw_posted if raw_posted else None
+            confidence = "high" if raw_posted else "low"
 
             # Salary
             salary_obj = item.get("salary", {})
@@ -101,7 +106,10 @@ class NoFluffJobsSource(BaseJobSource):
                 location=location,
                 apply_url=apply_url,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_posted,
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))

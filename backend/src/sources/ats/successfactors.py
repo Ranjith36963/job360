@@ -72,6 +72,9 @@ class SuccessFactorsSource(BaseJobSource):
                 apply_url=loc,
                 source=self.name,
                 date_found=now,
+                posted_at=None,
+                date_confidence="low",
+                date_posted_raw=None,
             ))
 
         # Also try plain URL tags without namespace
@@ -93,6 +96,9 @@ class SuccessFactorsSource(BaseJobSource):
                     apply_url=loc,
                     source=self.name,
                     date_found=now,
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=None,
                 ))
 
         return jobs

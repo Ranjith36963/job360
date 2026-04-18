@@ -24,7 +24,10 @@ class RemoteOKSource(BaseJobSource):
         for item in data[1:]:
             if not isinstance(item, dict):
                 continue
-            date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_date = item.get("date")
+            posted_at = raw_date if raw_date else None
+            confidence = "high" if raw_date else "low"
             jobs.append(Job(
                 title=item.get("position", ""),
                 company=item.get("company", ""),
@@ -34,7 +37,10 @@ class RemoteOKSource(BaseJobSource):
                 description=item.get("description", ""),
                 apply_url=item.get("url", ""),
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_date,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("RemoteOK: found %s relevant jobs", len(jobs))

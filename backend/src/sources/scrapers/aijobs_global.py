@@ -78,6 +78,9 @@ class AIJobsGlobalSource(BaseJobSource):
             apply_url=apply_url,
             source=self.name,
             date_found=now,
+            posted_at=None,
+            date_confidence="low",
+            date_posted_raw=None,
         )
 
     def _parse_html(self, html: str) -> list[Job]:
@@ -106,6 +109,9 @@ class AIJobsGlobalSource(BaseJobSource):
                     apply_url=url,
                     source=self.name,
                     date_found=now,
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=None,
                 ))
 
             return jobs

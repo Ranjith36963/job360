@@ -33,7 +33,10 @@ class RecruiteeSource(BaseJobSource):
                 if not _is_uk_or_remote(location):
                     continue
                 apply_url = item.get("careers_url", "") or item.get("url", "")
-                date_found = item.get("published_at") or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_published = item.get("published_at")
+                posted_at = raw_published if raw_published else None
+                confidence = "high" if raw_published else "low"
                 salary_min = item.get("min_salary")
                 salary_max = item.get("max_salary")
                 jobs.append(Job(
@@ -43,7 +46,10 @@ class RecruiteeSource(BaseJobSource):
                     description=desc[:5000],
                     apply_url=apply_url,
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_published,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))

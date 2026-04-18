@@ -46,7 +46,11 @@ class JoobleSource(BaseJobSource):
                 if job_id in seen_ids:
                     continue
                 seen_ids.add(job_id)
-                date_found = item.get("updated") or datetime.now(timezone.utc).isoformat()
+                # Jooble's "updated" is a mutation date, not a posting date —
+                # using it as posted_at would fabricate freshness. Keep it in
+                # date_posted_raw for audit; posted_at=None + confidence=low.
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_updated = item.get("updated")
                 salary_text = item.get("salary", "")
                 salary_min = None
                 salary_max = None
@@ -64,7 +68,10 @@ class JoobleSource(BaseJobSource):
                     description=item.get("snippet", ""),
                     apply_url=item.get("link", ""),
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=raw_updated,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))

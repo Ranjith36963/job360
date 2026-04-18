@@ -266,6 +266,9 @@ def test_greenhouse_parses_response():
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "greenhouse"
+                # Batch 1: Greenhouse must NOT fabricate posted_at from updated_at
+                assert jobs[0].posted_at is None
+                assert jobs[0].date_confidence == "low"
         finally:
             await session.close()
     _run(_test())
@@ -409,6 +412,10 @@ def test_jooble_parses_response():
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jooble"
                 assert jobs[0].title == "ML Engineer"
+                # Batch 1: Jooble's "updated" is a mutation date — NOT posted_at
+                assert jobs[0].posted_at is None
+                assert jobs[0].date_confidence == "low"
+                assert jobs[0].date_posted_raw == "2024-01-10"
         finally:
             await session.close()
     _run(_test())
@@ -1377,6 +1384,9 @@ def test_nhs_jobs_parses_xml():
                 assert jobs[0].company == "NHS Digital"
                 assert jobs[0].salary_min == 40000
                 assert jobs[0].salary_max == 55000
+                # Batch 1: closingDate is a deadline, not posted_at
+                assert jobs[0].posted_at is None
+                assert jobs[0].date_confidence == "low"
         finally:
             await session.close()
     _run(_test())

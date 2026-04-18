@@ -73,6 +73,9 @@ class JobTensorSource(BaseJobSource):
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now,
+                posted_at=None,
+                date_confidence="low",
+                date_posted_raw=None,
             ))
 
         return jobs
@@ -111,6 +114,9 @@ class JobTensorSource(BaseJobSource):
                     apply_url=apply_url,
                     source=self.name,
                     date_found=now,
+                    posted_at=None,
+                    date_confidence="low",
+                    date_posted_raw=None,
                 ))
 
             return jobs

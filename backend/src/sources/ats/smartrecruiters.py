@@ -40,7 +40,10 @@ class SmartRecruitersSource(BaseJobSource):
                     location = str(loc)
                 ref = item.get("ref", "")
                 apply_url = ref if ref.startswith("http") else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
-                date_found = item.get("releasedDate") or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_released = item.get("releasedDate")
+                posted_at = raw_released if raw_released else None
+                confidence = "high" if raw_released else "low"
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -48,7 +51,10 @@ class SmartRecruitersSource(BaseJobSource):
                     description="",
                     apply_url=apply_url,
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_released,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("SmartRecruiters: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

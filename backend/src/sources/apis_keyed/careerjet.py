@@ -56,7 +56,10 @@ class CareerjetSource(BaseJobSource):
                     continue
                 seen_urls.add(apply_url)
 
-                date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_date = item.get("date")
+                posted_at = raw_date if raw_date else None
+                confidence = "high" if raw_date else "low"
 
                 # Parse salary if available
                 salary = item.get("salary", "")
@@ -80,7 +83,10 @@ class CareerjetSource(BaseJobSource):
                     description=description[:5000],
                     apply_url=apply_url,
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_date,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))

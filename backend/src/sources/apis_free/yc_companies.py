@@ -48,6 +48,9 @@ class YCCompaniesSource(BaseJobSource):
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now,
+                posted_at=None,
+                date_confidence="low",
+                date_posted_raw=None,
             ))
 
         # Cap results — these are company career page links, not individual job postings

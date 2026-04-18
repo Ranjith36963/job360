@@ -98,7 +98,10 @@ class HackerNewsSource(BaseJobSource):
             if not _is_uk_or_remote(location):
                 continue
 
-            created_at = child.get("created_at") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_created = child.get("created_at")
+            posted_at = raw_created if raw_created else None
+            confidence = "high" if raw_created else "low"
 
             jobs.append(Job(
                 title=parsed["title"],
@@ -107,7 +110,10 @@ class HackerNewsSource(BaseJobSource):
                 description=parsed["description"],
                 apply_url=parsed["apply_url"],
                 source=self.name,
-                date_found=created_at,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_created,
             ))
 
         logger.info("HackerNews: found %s relevant jobs", len(jobs))

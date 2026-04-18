@@ -50,7 +50,10 @@ class FindworkSource(BaseJobSource):
             if not _is_uk_or_remote(location):
                 continue
 
-            date_found = item.get("date_posted") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_posted = item.get("date_posted")
+            posted_at = raw_posted if raw_posted else None
+            confidence = "high" if raw_posted else "low"
             apply_url = item.get("url", "")
 
             jobs.append(Job(
@@ -60,7 +63,10 @@ class FindworkSource(BaseJobSource):
                 description=description[:5000],
                 apply_url=apply_url,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_posted,
             ))
 
         logger.info("Findwork: found %s relevant jobs", len(jobs))

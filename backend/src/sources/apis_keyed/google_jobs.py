@@ -82,8 +82,17 @@ class GoogleJobsSource(BaseJobSource):
 
                 # Extract date
                 extensions = item.get("detected_extensions", {})
-                posted_at = extensions.get("posted_at", "")
-                date_found = _parse_posted_at(posted_at)
+                raw_posted = extensions.get("posted_at", "")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                # SerpApi posted_at is a relative string ("3 days ago"); parsed
+                # value is approximate — medium confidence. If absent, no
+                # trustworthy posted_at.
+                if raw_posted:
+                    parsed_posted_at = _parse_posted_at(raw_posted)
+                    confidence = "medium"
+                else:
+                    parsed_posted_at = None
+                    confidence = "low"
 
                 # Extract salary if available
                 salary_str = extensions.get("salary", "")
@@ -105,7 +114,10 @@ class GoogleJobsSource(BaseJobSource):
                     description=description[:5000],
                     apply_url=apply_url,
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=parsed_posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_posted or None,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 ))

@@ -158,10 +158,16 @@ def test_score_can_reach_100():
         tertiary_skills=[],
     )
     scorer = JobScorer(config)
+    # Maxing recency under the 5-column date model requires an honest
+    # (high-confidence) posted_at. Pre-Batch-1 this relied on the scorer
+    # reading date_found directly — which rewarded fabrication.
+    now_iso = datetime.now(timezone.utc).isoformat()
     job = _make_job(
         title="AI Engineer",
         location="London, UK",
-        date_found=datetime.now(timezone.utc).isoformat(),
+        date_found=now_iso,
+        posted_at=now_iso,
+        date_confidence="high",
         description=(
             "We need an AI Engineer skilled in Python, PyTorch, TensorFlow, "
             "LangChain, RAG pipelines, LLM fine-tuning, NLP, Deep Learning, "
@@ -510,3 +516,95 @@ def test_london_uk_no_penalty():
     """Plain 'London' and 'London, UK' should NOT be penalised."""
     assert _foreign_location_penalty("London") == 0
     assert _foreign_location_penalty("London, UK") == 0
+
+
+# ---- Pillar 3 Batch 1: 5-column date model recency tests ----
+
+from src.services.skill_matcher import recency_score_for_job  # noqa: E402
+
+
+def test_recency_posted_at_high_confidence_scores_full_band():
+    """High-confidence posted_at within 1 day → full 10 points."""
+    today = datetime.now(timezone.utc).isoformat()
+    job = _make_job(
+        date_found="2020-01-01T00:00:00+00:00",   # old first_seen
+        posted_at=today,
+        date_confidence="high",
+    )
+    assert recency_score_for_job(job) == 10
+
+
+def test_recency_posted_at_medium_confidence_scores_full_band():
+    """Medium-confidence posted_at should also hit the full band (parsed relative)."""
+    today = datetime.now(timezone.utc).isoformat()
+    job = _make_job(
+        date_found="",
+        posted_at=today,
+        date_confidence="medium",
+    )
+    assert recency_score_for_job(job) == 10
+
+
+def test_recency_none_posted_at_with_low_confidence_falls_back_to_first_seen():
+    """When posted_at is None and confidence is low, fall back to first_seen capped at 60%."""
+    today = datetime.now(timezone.utc).isoformat()
+    job = _make_job(
+        date_found=today,          # first_seen = today → raw would be 10
+        posted_at=None,
+        date_confidence="low",
+    )
+    # 10 * 0.6 = 6 (honest discovery, not honest posting)
+    assert recency_score_for_job(job) == 6
+
+
+def test_recency_fabricated_confidence_scores_zero():
+    """Fabricated-confidence posted_at must never inflate recency."""
+    today = datetime.now(timezone.utc).isoformat()
+    job = _make_job(
+        date_found=today,
+        posted_at=today,
+        date_confidence="fabricated",
+    )
+    assert recency_score_for_job(job) == 0
+
+
+def test_recency_no_dates_at_all_scores_zero():
+    """If neither posted_at nor date_found is present, no penalty and no score."""
+    job = _make_job(
+        date_found="",
+        posted_at=None,
+        date_confidence="low",
+    )
+    assert recency_score_for_job(job) == 0
+
+
+def test_recency_repost_backdated_treated_as_trustworthy():
+    """repost_backdated dates should be trusted like high confidence."""
+    today = datetime.now(timezone.utc).isoformat()
+    job = _make_job(
+        date_found="",
+        posted_at=today,
+        date_confidence="repost_backdated",
+    )
+    assert recency_score_for_job(job) == 10
+
+
+def test_score_job_uses_recency_for_job_helper():
+    """Module-level score_job must flow through the new helper so low-confidence
+    sources no longer get the +10 inflation."""
+    today = datetime.now(timezone.utc).isoformat()
+    job_fabricated = _make_job(
+        title="Plumber",
+        date_found=today,
+        posted_at=today,
+        date_confidence="fabricated",
+    )
+    job_honest = _make_job(
+        title="Plumber",
+        date_found=today,
+        posted_at=today,
+        date_confidence="high",
+    )
+    # Both have the same non-recency components — the ONLY difference
+    # must come from the recency band.
+    assert score_job(job_honest) - score_job(job_fabricated) == 10

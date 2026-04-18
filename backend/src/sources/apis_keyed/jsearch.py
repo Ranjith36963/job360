@@ -70,7 +70,10 @@ class JSearchSource(BaseJobSource):
                 if not _is_uk_or_remote(location):
                     continue
 
-                date_found = item.get("job_posted_at_datetime_utc") or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                raw_posted = item.get("job_posted_at_datetime_utc")
+                posted_at = raw_posted if raw_posted else None
+                confidence = "high" if raw_posted else "low"
                 jobs.append(Job(
                     title=title,
                     company=item.get("employer_name", ""),
@@ -80,7 +83,10 @@ class JSearchSource(BaseJobSource):
                     description=description[:5000],
                     apply_url=item.get("job_apply_link", ""),
                     source=self.name,
-                    date_found=date_found,
+                    date_found=now_iso,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_posted,
                 ))
         logger.info("JSearch: found %s jobs", len(jobs))
         return jobs

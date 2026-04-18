@@ -24,7 +24,10 @@ class HimalayasSource(BaseJobSource):
         for item in data["jobs"]:
             loc_restrictions = item.get("locationRestrictions", [])
             location = ", ".join(loc_restrictions) if isinstance(loc_restrictions, list) else str(loc_restrictions)
-            date_found = item.get("pubDate") or item.get("createdAt") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_pub = item.get("pubDate") or item.get("createdAt")
+            posted_at = raw_pub if raw_pub else None
+            confidence = "high" if raw_pub else "low"
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("companyName", ""),
@@ -34,7 +37,10 @@ class HimalayasSource(BaseJobSource):
                 description=item.get("excerpt", ""),
                 apply_url=item.get("applicationUrl", item.get("url", "")),
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_pub,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Himalayas: found %s relevant jobs", len(jobs))

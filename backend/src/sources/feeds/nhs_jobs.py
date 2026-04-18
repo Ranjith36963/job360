@@ -63,7 +63,11 @@ class NHSJobsSource(BaseJobSource):
             # Parse salary range
             salary_min, salary_max = self._parse_salary(salary)
 
-            date_found = self._parse_date(closing_date)
+            # closingDate is the posting DEADLINE, not the post date. Using it as
+            # date_found would produce dates in the future (which inflate recency)
+            # or old posts labelled "today". posted_at=None until the XML feed
+            # exposes a real postedDate; closing_date retained in date_posted_raw.
+            now_iso = datetime.now(timezone.utc).isoformat()
 
             jobs.append(Job(
                 title=title,
@@ -72,7 +76,10 @@ class NHSJobsSource(BaseJobSource):
                 description=f"{title} - {salary}" if salary else title,
                 apply_url=apply_url,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=None,
+                date_confidence="low",
+                date_posted_raw=closing_date or None,
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))
@@ -98,14 +105,3 @@ class NHSJobsSource(BaseJobSource):
         if len(nums) == 1:
             return float(nums[0]), None
         return None, None
-
-    @staticmethod
-    def _parse_date(date_str: str) -> str:
-        if not date_str:
-            return datetime.now(timezone.utc).isoformat()
-        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d %b %Y"):
-            try:
-                return datetime.strptime(date_str.strip(), fmt).isoformat()
-            except ValueError:
-                continue
-        return datetime.now(timezone.utc).isoformat()

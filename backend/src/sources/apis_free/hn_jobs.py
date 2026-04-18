@@ -60,8 +60,10 @@ class HNJobsSource(BaseJobSource):
         if not _is_uk_or_remote(location_text):
             return None
 
+        now_iso = datetime.now(timezone.utc).isoformat()
         ts = item.get("time", 0)
-        date_found = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else datetime.now(timezone.utc).isoformat()
+        posted_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+        confidence = "high" if ts else "low"
 
         return Job(
             title=title,
@@ -70,5 +72,8 @@ class HNJobsSource(BaseJobSource):
             description=text[:5000] if text else title,
             apply_url=url or f"https://news.ycombinator.com/item?id={item.get('id', '')}",
             source=self.name,
-            date_found=date_found,
+            date_found=now_iso,
+            posted_at=posted_at,
+            date_confidence=confidence,
+            date_posted_raw=str(ts) if ts else None,
         )
