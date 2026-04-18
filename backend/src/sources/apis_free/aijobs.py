@@ -28,7 +28,10 @@ class AIJobsSource(BaseJobSource):
             if not _is_uk_or_remote(location):
                 continue
 
-            date_found = item.get("date") or datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            raw_date = item.get("date")
+            posted_at = raw_date if raw_date else None
+            confidence = "high" if raw_date else "low"
             apply_url = item.get("url", "")
 
             jobs.append(Job(
@@ -38,7 +41,10 @@ class AIJobsSource(BaseJobSource):
                 description=description[:5000],
                 apply_url=apply_url,
                 source=self.name,
-                date_found=date_found,
+                date_found=now_iso,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=raw_date,
             ))
 
         logger.info("AIJobs: found %s relevant jobs", len(jobs))
