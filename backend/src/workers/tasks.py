@@ -93,14 +93,16 @@ async def score_and_ingest(
         targets = [(u["id"], FilterProfile(), 80) for u in users]
 
     # Stage 4 of the 99% cascade (decisions doc D8): per-user scoring via
-    # JobScorer. Pre-Batch-3 every user shares one SearchConfig (loaded from
-    # user_profile.json when it exists, else defaults). Per-user
-    # SearchConfig lands with the Batch 3 user_profiles table — the call
-    # site here is correct today and lights up for real then.
+    # JobScorer. Batch 3.5.2: each user scores against THEIR OWN SearchConfig
+    # loaded from the user_profiles table. The cache is local to this call
+    # so two concurrent worker invocations never share scorer state.
     scorer_fn: Optional[Callable[[str, Job], int]] = ctx.get("scorer")
-    default_scorer: Optional[JobScorer] = None
-    if scorer_fn is None:
-        default_scorer = JobScorer(_default_search_config())
+    user_scorers: dict[str, JobScorer] = {}
+
+    def _scorer_for(user_id: str) -> JobScorer:
+        if user_id not in user_scorers:
+            user_scorers[user_id] = JobScorer(_search_config_for(user_id))
+        return user_scorers[user_id]
 
     for user_id, profile, threshold in targets:
         if not passes_prefilter(profile, job):
@@ -108,8 +110,7 @@ async def score_and_ingest(
         if scorer_fn is not None:
             score = int(scorer_fn(user_id, job))
         else:
-            assert default_scorer is not None  # narrowing for type-checker
-            score = int(default_scorer.score(job))
+            score = int(_scorer_for(user_id).score(job))
         bucket = _bucket_for_row(job_row)
         await feed.upsert_feed_row(
             user_id=user_id, job_id=job_id, score=score, bucket=bucket
@@ -305,25 +306,36 @@ async def mark_ledger_failed_task(
 
 # ---------- helpers ----------------------------------------------------
 
-def _default_search_config() -> SearchConfig:
-    """Load the single shared SearchConfig for now.
+def _search_config_for(user_id: str) -> SearchConfig:
+    """Build the user's SearchConfig from their stored profile, else defaults.
 
-    Pre-Batch-3 there is no ``user_profiles`` table. The legacy
-    ``user_profile.json`` path is read by ``src.services.profile.storage``
-    at the CLI boundary; if that file exists, the stored profile is used.
-    If it does not, we fall back to ``SearchConfig.from_defaults()``.
-    Batch 3 replaces this with a per-user config keyed by ``user_id``.
+    Reads from the user_profiles table (Batch 3.5.2). On any failure —
+    no row, schema drift, JSON decode — falls back to
+    ``SearchConfig.from_defaults()`` so the worker never crashes on a
+    bad row.
     """
     try:
         from src.services.profile.keyword_generator import generate_search_config
         from src.services.profile.storage import load_profile
 
-        profile = load_profile()
+        profile = load_profile(user_id)
         if profile and profile.is_complete:
             return generate_search_config(profile)
-    except Exception:  # noqa: BLE001 — any profile load failure → defaults
+    except Exception:  # noqa: BLE001
         pass
     return SearchConfig.from_defaults()
+
+
+def _default_search_config() -> SearchConfig:
+    """Back-compat shim for pre-Batch-3.5.2 callers / existing tests.
+
+    New code should call ``_search_config_for(user_id)`` directly. This
+    function now reads the DEFAULT_TENANT_ID row from user_profiles and
+    is therefore functionally equivalent to the single-file era from a
+    CLI perspective.
+    """
+    from src.core.tenancy import DEFAULT_TENANT_ID
+    return _search_config_for(DEFAULT_TENANT_ID)
 
 
 
