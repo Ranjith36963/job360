@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_db
 from src.api.models import HealthResponse, StatusResponse, SourceInfo, SourcesResponse
+from src.core.tenancy import DEFAULT_TENANT_ID
 from src.main import SOURCE_REGISTRY
 from src.services.profile.storage import profile_exists
 from src.repositories.database import JobDatabase
@@ -35,7 +36,10 @@ async def status(db: JobDatabase = Depends(get_db)):
         last_run=last_run,
         sources_total=len(SOURCE_REGISTRY),
         sources_active=sources_active,
-        profile_exists=profile_exists(),
+        # Public /health endpoint reports "has the single-tenant deployment
+        # been set up?". Checking DEFAULT_TENANT_ID preserves CLI-era semantics
+        # — per-user existence checks belong inside authenticated routes.
+        profile_exists=profile_exists(DEFAULT_TENANT_ID),
     )
 
 

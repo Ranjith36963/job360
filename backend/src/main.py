@@ -17,6 +17,7 @@ from src.repositories.database import JobDatabase
 from src.repositories.csv_export import export_to_csv
 from src.services.skill_matcher import check_visa_flag, detect_experience_level, salary_in_range, JobScorer
 from src.services.deduplicator import deduplicate
+from src.core.tenancy import DEFAULT_TENANT_ID
 from src.services.profile.storage import load_profile
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.notifications.report_generator import generate_markdown_report
@@ -292,7 +293,9 @@ async def run_search(
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
 
     # Load user profile for dynamic keywords
-    profile = load_profile()
+    # CLI run path — single-tenant by design. See docs/plans/batch-3.5.2-plan.md
+    # Deliverable E. Per-user profiles are the HTTP API's job.
+    profile = load_profile(DEFAULT_TENANT_ID)
     if not profile or not profile.is_complete:
         logger.error("=" * 60)
         logger.error("No user profile found. Job360 requires a CV or preferences.")

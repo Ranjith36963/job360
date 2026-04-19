@@ -56,14 +56,13 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
 
 @router.get("/profile", response_model=ProfileResponse)
 async def get_profile(user: CurrentUser = Depends(require_user)):
-    """Return the current user profile summary.
+    """Return the caller's profile summary.
 
-    Gate-only per Batch 3.5.1 — storage is still single-file at
-    `backend/data/user_profile.json`. Per-user profile storage is a
-    separate batch; for now the gate just refuses unauthenticated
-    reads. Two authenticated users share the same profile file.
+    Per-user storage landed in Batch 3.5.2 — each user has their own row
+    in ``user_profiles`` keyed by ``user.id``. No more silent overwrites
+    between authenticated users.
     """
-    profile = load_profile()
+    profile = load_profile(user.id)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
     return _build_profile_response(profile)
@@ -75,8 +74,8 @@ async def upsert_profile(
     preferences: str = Form(None),
     user: CurrentUser = Depends(require_user),
 ):
-    """Create or update the user profile with CV and/or preferences."""
-    profile = load_profile() or UserProfile()
+    """Create or update the caller's profile with CV and/or preferences."""
+    profile = load_profile(user.id) or UserProfile()
 
     # Parse CV if provided
     if cv is not None:
@@ -123,7 +122,7 @@ async def upsert_profile(
         )
         profile.preferences = merged_prefs
 
-    save_profile(profile)
+    save_profile(profile, user.id)
     return _build_profile_response(profile)
 
 
@@ -142,9 +141,9 @@ async def upload_linkedin(
         linkedin_data = parse_linkedin_pdf(tmp_path)
         merged = bool(linkedin_data.get("skills") or linkedin_data.get("positions"))
         if merged:
-            profile = load_profile() or UserProfile()
+            profile = load_profile(user.id) or UserProfile()
             profile.cv_data = enrich_cv_from_linkedin(profile.cv_data, linkedin_data)
-            save_profile(profile)
+            save_profile(profile, user.id)
     finally:
         try:
             os.unlink(tmp_path)
@@ -158,10 +157,10 @@ async def upload_github(
     username: str = Form(...),
     user: CurrentUser = Depends(require_user),
 ):
-    """Enrich user profile with GitHub public data."""
+    """Enrich the caller's profile with GitHub public data."""
     github_data = await fetch_github_profile(username)
-    profile = load_profile() or UserProfile()
+    profile = load_profile(user.id) or UserProfile()
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = username
-    save_profile(profile)
+    save_profile(profile, user.id)
     return GitHubResponse(ok=True, merged=True)

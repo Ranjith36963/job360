@@ -106,7 +106,8 @@ def fake_profile(monkeypatch):
             target_job_titles=["Engineer"], additional_skills=["python"],
         ),
     )
-    monkeypatch.setattr(main_mod, "load_profile", lambda: stub)
+    # Batch 3.5.2 changed load_profile's signature to take a user_id.
+    monkeypatch.setattr(main_mod, "load_profile", lambda uid: stub)
     # `generate_search_config` is also bound in main; return a minimal
     # SearchConfig that won't crash JobScorer init.
     config = SearchConfig(

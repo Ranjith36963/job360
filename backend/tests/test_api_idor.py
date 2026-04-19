@@ -398,3 +398,118 @@ def test_search_status_for_unknown_run_id_returns_404(api, monkeypatch):
     _register(api, "alice@example.com")
     r = api.get("/api/search/nonexistent123/status")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Batch 3.5.2 — HTTP-level profile tenancy (per-user user_profiles table)
+# ---------------------------------------------------------------------------
+#
+# Note: the low-level user_profiles table tests live in
+# tests/test_profile_storage.py. These HTTP-level tests prove the
+# end-to-end path from request -> require_user -> save_profile(user.id)
+# -> load_profile(user.id). Covers the Deliverable C wiring.
+
+
+def _upsert_prefs_for_current_user(api, titles, skills):
+    """POST /api/profile with preferences only (no CV file) — keeps the test
+    offline and avoids the CV-parser / LLM dependency."""
+    import json as _json
+    prefs = {
+        "target_job_titles": titles,
+        "additional_skills": skills,
+        "excluded_skills": [],
+        "preferred_locations": [],
+        "industries": [],
+        "salary_min": None,
+        "salary_max": None,
+        "work_arrangement": "",
+        "experience_level": "",
+        "negative_keywords": [],
+        "about_me": "",
+        "github_username": "",
+    }
+    r = api.post("/api/profile", data={"preferences": _json.dumps(prefs)})
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_profile_isolation_alice_not_visible_to_bob(api):
+    """Alice saves a profile; Bob hitting GET /api/profile gets 404
+    (his row doesn't exist), NOT Alice's data."""
+    _register(api, "alice@example.com")
+    _upsert_prefs_for_current_user(api, ["Alice's Job"], ["python"])
+
+    r_alice = api.get("/api/profile")
+    assert r_alice.status_code == 200
+    alice_body = r_alice.json()
+    assert "Alice's Job" in alice_body["preferences"]["target_job_titles"]
+
+    # Switch to Bob
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    _register(api, "bob@example.com")
+
+    r_bob = api.get("/api/profile")
+    # Bob has no profile row yet — 404, NOT Alice's body
+    assert r_bob.status_code == 404, (
+        f"Bob saw alice's profile instead of 404: {r_bob.status_code} / {r_bob.text}"
+    )
+
+
+def test_profile_upsert_per_user_does_not_overwrite_peer(api):
+    """Alice saves; Bob saves with different data; Alice's data survives."""
+    _register(api, "alice@example.com")
+    _upsert_prefs_for_current_user(api, ["Data Engineer"], ["sql"])
+
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    _register(api, "bob@example.com")
+    _upsert_prefs_for_current_user(api, ["ML Engineer"], ["pytorch"])
+
+    # Alice logs back in and checks her row is untouched
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    r_login = api.post("/api/auth/login", json={
+        "email": "alice@example.com", "password": "s3cretpassword"
+    })
+    assert r_login.status_code == 200, r_login.text
+
+    r_alice = api.get("/api/profile")
+    assert r_alice.status_code == 200
+    titles = r_alice.json()["preferences"]["target_job_titles"]
+    assert "Data Engineer" in titles, (
+        f"Bob's write clobbered Alice's row: titles={titles}"
+    )
+    assert "ML Engineer" not in titles, (
+        f"Bob's titles leaked into Alice's profile: titles={titles}"
+    )
+
+
+def test_profile_github_endpoint_is_per_user(api, monkeypatch):
+    """Alice posts a github username; Bob's profile must not get enriched."""
+    # Stub fetch_github_profile + enrich_cv_from_github so the test stays offline.
+    async def _fake_fetch(username):
+        return {"languages": {"Python": 1}, "topics": [], "repos": []}
+
+    def _fake_enrich(cv_data, github_data):
+        # Return a copy with github_languages set — just enough to verify
+        # per-user write without a real GitHub API call.
+        import dataclasses
+        return dataclasses.replace(cv_data, github_languages={"Python": 1})
+
+    import src.api.routes.profile as profile_route
+    monkeypatch.setattr(profile_route, "fetch_github_profile", _fake_fetch)
+    monkeypatch.setattr(profile_route, "enrich_cv_from_github", _fake_enrich)
+
+    _register(api, "alice@example.com")
+    r = api.post("/api/profile/github", data={"username": "alice-gh"})
+    assert r.status_code == 200, r.text
+
+    # Bob — no /profile/github call made yet
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    _register(api, "bob@example.com")
+
+    r_bob = api.get("/api/profile")
+    # Bob has no row yet, so 404 — Alice's GitHub enrichment must not bleed over
+    assert r_bob.status_code == 404
