@@ -1,25 +1,47 @@
-"""Search routes for Job360 FastAPI backend."""
+"""Search routes for Job360 FastAPI backend.
+
+Batch 3.5.1: gate both routes with `Depends(require_user)` and scope
+each `_runs[run_id]` record to the creating user via a stored
+`user_id` field. Cross-user reads return 404 (not 403) — existence
+hiding so run_id enumeration gives no oracle.
+"""
 from __future__ import annotations
 
 import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.api.auth_deps import CurrentUser, require_user
 from src.api.models import SearchStartResponse, SearchStatusResponse
 from src.main import run_search
 
 router = APIRouter(tags=["search"])
 
+# Module-level in-memory store. Pure-process, not persisted across
+# restarts — search runs are ephemeral poll targets. Each record carries
+# a `user_id` so GET can reject cross-user reads with a 404.
 _runs: dict[str, dict] = {}
 
 
 @router.post("/search", response_model=SearchStartResponse)
-async def start_search(source: Optional[str] = Query(None)):
-    """Start an async job search run. Returns a run_id to poll for status."""
+async def start_search(
+    source: Optional[str] = Query(None),
+    user: CurrentUser = Depends(require_user),
+):
+    """Start an async job search run. Returns a run_id to poll for status.
+
+    The run_id record is tagged with `user.id`; only the creating user
+    can later read its status.
+    """
     run_id = uuid.uuid4().hex[:12]
-    _runs[run_id] = {"status": "running", "progress": "Starting...", "result": None}
+    _runs[run_id] = {
+        "user_id": user.id,
+        "status": "running",
+        "progress": "Starting...",
+        "result": None,
+    }
 
     async def _run():
         try:
@@ -34,13 +56,20 @@ async def start_search(source: Optional[str] = Query(None)):
 
 
 @router.get("/search/{run_id}/status", response_model=SearchStatusResponse)
-async def search_status(run_id: str):
-    """Poll the status of a running or completed search."""
+async def search_status(
+    run_id: str,
+    user: CurrentUser = Depends(require_user),
+):
+    """Poll the status of a running or completed search.
+
+    Existence-hiding: unknown run_id OR run owned by a different user
+    both return 404 with the same body. An attacker enumerating run_ids
+    cannot distinguish "does not exist" from "exists but not mine".
+    """
     run = _runs.get(run_id)
-    if not run:
-        return SearchStatusResponse(
-            run_id=run_id,
-            status="not_found",
-            progress="Unknown run ID",
-        )
-    return SearchStatusResponse(run_id=run_id, **run)
+    if run is None or run.get("user_id") != user.id:
+        raise HTTPException(status_code=404, detail="run not found")
+    # Strip user_id from the response payload — it's an internal scoping
+    # field, not part of the public SearchStatusResponse contract.
+    payload = {k: v for k, v in run.items() if k != "user_id"}
+    return SearchStatusResponse(run_id=run_id, **payload)
