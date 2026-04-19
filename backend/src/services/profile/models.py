@@ -30,6 +30,11 @@ class CVData:
     github_languages: dict[str, int] = field(default_factory=dict)
     github_topics: list[str] = field(default_factory=list)
     github_skills_inferred: list[str] = field(default_factory=list)
+    # Batch 1.2 — skills inferred from GitHub dependency-file parsing
+    # (requirements.txt / package.json / Cargo.toml / etc.). Kept
+    # separate from github_skills_inferred so downstream can audit
+    # where a skill came from (language signal vs declared dependency).
+    github_frameworks: list[str] = field(default_factory=list)
     # Batch 1.1 — archetype classification (CareerDomain enum value).
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).
