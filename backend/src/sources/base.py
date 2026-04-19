@@ -157,14 +157,37 @@ class BaseJobSource(ABC):
 
     async def _get_json_conditional(self, url: str, params: dict | None = None,
                                      headers: dict | None = None) -> dict | list | None:
-        """Conditional GET that honours ETag / Last-Modified.
+        """Conditional GET returning JSON — see :meth:`_conditional_fetch`."""
+        return await self._conditional_fetch(url, params=params,
+                                              headers=headers, as_text=False)
+
+    async def _get_text_conditional(self, url: str, params: dict | None = None,
+                                     headers: dict | None = None) -> str | None:
+        """Conditional GET returning text (RSS/XML).
+
+        Batch 3.5.3 sibling of :meth:`_get_json_conditional`; same
+        semantics with ``resp.text()`` instead of ``resp.json()``.
+        """
+        return await self._conditional_fetch(url, params=params,
+                                              headers=headers, as_text=True)
+
+    async def _conditional_fetch(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        headers: dict | None = None,
+        as_text: bool = False,
+    ) -> dict | list | str | None:
+        """Shared body for the conditional JSON/text helpers.
 
         On first call, captures any ETag/Last-Modified header returned by
-        the server. On subsequent calls, sends If-None-Match / If-Modified-Since
-        so the server can reply 304 Not Modified; we then return the cached
-        body without re-parsing. Zero-body 304s preserve bandwidth and parse
-        cost for sources that change infrequently (ATS boards between polls,
-        RSS feeds with honest Last-Modified, etc.).
+        the server. On subsequent calls, sends If-None-Match /
+        If-Modified-Since so the server can reply 304 Not Modified; we
+        then return the cached body without re-parsing. Zero-body 304s
+        preserve bandwidth and parse cost for sources that change
+        infrequently (ATS boards between polls, RSS feeds with honest
+        Last-Modified, etc.).
 
         Falls back to a plain GET when the server provides no validator.
         """
@@ -192,7 +215,10 @@ class BaseJobSource(ABC):
                 if resp.status >= 400:
                     logger.warning("[%s] HTTP %s from %s", self.name, resp.status, url)
                     return None
-                body = await resp.json(content_type=None)
+                body = (
+                    await resp.text() if as_text
+                    else await resp.json(content_type=None)
+                )
                 etag = resp.headers.get("ETag")
                 last_modified = resp.headers.get("Last-Modified")
                 if etag or last_modified:

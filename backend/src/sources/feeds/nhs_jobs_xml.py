@@ -24,9 +24,20 @@ class NHSJobsXMLSource(BaseJobSource):
     FEED_URL = "https://www.jobs.nhs.uk/api/v1/feed/all_current_vacancies.xml"
 
     async def fetch_jobs(self) -> list[Job]:
-        xml_text = await self._get_text(self.FEED_URL)
+        # Batch 3.5.3 pilot: nhs_jobs_xml is the one RSS/XML source whose
+        # preflight probe confirmed live ETag → 304 roundtrip support.
+        # Bandwidth + parse savings on subsequent polls when the feed
+        # hasn't changed (typical NHS Jobs cadence — batched updates).
+        # See docs/plans/batch-3.5.3-preflight.md.
+        xml_text = await self._get_text_conditional(self.FEED_URL)
         if not xml_text:
             return []
+        # Log cache effectiveness so operators can eyeball the hit rate
+        # in prod until Batch 4 wires Prometheus.
+        logger.info(
+            "nhs_jobs_xml conditional fetch — cache %s",
+            self._conditional_cache.get_metrics(),
+        )
         return self._parse_xml(xml_text)
 
     def _parse_xml(self, xml_text: str) -> list[Job]:
