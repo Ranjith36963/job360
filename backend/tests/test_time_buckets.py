@@ -175,9 +175,18 @@ def test_format_relative_time_unknown():
 # ---------------------------------------------------------------------------
 # extract_matched_skills
 # ---------------------------------------------------------------------------
+# Batch 3.5.4: pass explicit primary/secondary/tertiary lists because
+# core/keywords.py's defaults were emptied when per-user SearchConfig
+# landed (Batch 2). In production the caller always passes a SearchConfig;
+# the tests need to do the same.
+
+
 def test_extract_matched_skills_primary():
     text = "Experience with Python and PyTorch required. Knowledge of LangChain preferred."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(
+        text,
+        primary=["Python", "PyTorch", "LangChain"],
+    )
     assert "Python" in skills["primary"]
     assert "PyTorch" in skills["primary"]
     assert "LangChain" in skills["primary"]
@@ -185,14 +194,20 @@ def test_extract_matched_skills_primary():
 
 def test_extract_matched_skills_secondary():
     text = "Must know Docker and Kubernetes."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(
+        text,
+        secondary=["Docker", "Kubernetes"],
+    )
     assert "Docker" in skills["secondary"]
     assert "Kubernetes" in skills["secondary"]
 
 
 def test_extract_matched_skills_tertiary():
     text = "CI/CD experience and Git proficiency expected."
-    skills = extract_matched_skills(text)
+    skills = extract_matched_skills(
+        text,
+        tertiary=["CI/CD", "Git"],
+    )
     assert "CI/CD" in skills["tertiary"]
     assert "Git" in skills["tertiary"]
 

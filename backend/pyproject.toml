@@ -35,6 +35,13 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "aioresponses>=0.7.0",
     "fpdf2>=2.7.0",
+    # Batch 3.5.4 — test-order flake hunter. Loaded on demand via
+    # `pytest -p randomly --randomly-seed=<n>`; do NOT enable by
+    # default. Default CI runs use `-p no:randomly` to preserve
+    # deterministic ordering for the green-baseline contract. Use
+    # during cleanup batches only, once a run shows 0f across N
+    # seeds it's safe to flip CI over.
+    "pytest-randomly>=4.0",
 ]
 indeed = [
     "python-jobspy",
@@ -51,6 +58,12 @@ include = ["src*"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+# Batch 3.5.4 — disable pytest-randomly by default. When the plugin
+# is installed (dev dep) it auto-activates; the CI contract is
+# "deterministic green baseline", so we opt out unless the developer
+# explicitly enables it via `pytest -p randomly ...` during a
+# flake-hunt session.
+addopts = "-p no:randomly"
 
 [tool.ruff]
 target-version = "py39"

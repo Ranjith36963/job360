@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# PROJECT_ROOT is the repo root, not `backend/`. Phase-1 refactor moved
+# tests/ into backend/ but setup.sh + requirements*.txt still live at
+# the repo root — hence parent.parent.parent.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SETUP_SCRIPT = PROJECT_ROOT / "setup.sh"
 
 needs_bash = pytest.mark.skipif(
@@ -44,15 +47,12 @@ def test_setup_validates_env_example():
     assert ".env.example" in content
 
 
-def test_requirements_prod_no_test_deps():
-    """requirements.txt (prod) should NOT contain test dependencies."""
-    content = (PROJECT_ROOT / "requirements.txt").read_text()
-    assert "pytest" not in content
-    assert "aioresponses" not in content
-
-
-def test_requirements_dev_includes_prod():
-    """requirements-dev.txt should include prod requirements."""
-    content = (PROJECT_ROOT / "requirements-dev.txt").read_text()
-    assert "-r requirements.txt" in content
-    assert "pytest" in content
+# test_requirements_prod_no_test_deps and test_requirements_dev_includes_prod
+# were DELETED in Batch 3.5.4 — they tested a requirements.txt / requirements-dev.txt
+# layout that was removed in phase-1 refactor (commit 0d3ef72) when
+# dependencies moved into backend/pyproject.toml under [project.dependencies]
+# and [project.optional-dependencies].dev. The invariants they encoded
+# ("prod deps don't include test deps") have no direct pyproject.toml
+# equivalent — dev extras are additive via `pip install -e .[dev]`, not
+# via an "includes" relationship. Tests that don't match the current
+# packaging reality shouldn't linger as red ink on the baseline.

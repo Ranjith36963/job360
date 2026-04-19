@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# PROJECT_ROOT is the repo root, not `backend/`. Phase-1 refactor moved
+# tests/ into backend/ but the tracked scripts (cron_setup.sh, setup.sh,
+# requirements*.txt) still live at the repo root — hence parent.parent.parent.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CRON_SCRIPT = PROJECT_ROOT / "cron_setup.sh"
 
 needs_bash = pytest.mark.skipif(
