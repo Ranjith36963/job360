@@ -91,58 +91,172 @@ def parse_requirements_txt(content: str) -> set[str]:
 
 # ── pyproject.toml (pypi) ───────────────────────────────────────────
 
-_PEP621_DEPS_RE = re.compile(
-    r"^\s*dependencies\s*=\s*\[([^\]]*)\]", re.MULTILINE | re.DOTALL
-)
-_POETRY_DEPS_RE = re.compile(
-    r"^\[tool\.poetry\.dependencies\](.*?)(?:^\[|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-_POETRY_DEV_DEPS_RE = re.compile(
-    r"^\[tool\.poetry\.group\.dev\.dependencies\](.*?)(?:^\[|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-_OPTIONAL_TABLE_RE = re.compile(
-    r"^\[project\.optional-dependencies\](.*?)(?:^\[|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-_DEP_NAME_RE = re.compile(r"^\s*\"([A-Za-z0-9][A-Za-z0-9._-]*)")
+# Named-only-from-requirement-specifier regex. Takes a PEP-508 spec
+# ("uvicorn[standard]>=0.30.0") and extracts the bare pkg name.
+_REQ_SPEC_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 _POETRY_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=")
 
 
-def parse_pyproject_toml(content: str) -> set[str]:
-    """Extract names from both PEP-621 ([project] deps) and Poetry layouts.
+def _req_name(spec: str) -> str | None:
+    """Extract the bare pkg name from a PEP-508 requirement specifier."""
+    m = _REQ_SPEC_NAME_RE.match(spec)
+    return m.group(1).lower() if m else None
 
-    Deliberately regex-based — avoids adding a ``tomli``/``tomllib``
-    dependency (the latter is 3.11+) and stays permissive on malformed
-    files. Good-enough: we don't need version semantics.
+
+def _parse_pyproject_via_tomllib(content: str) -> set[str] | None:
+    """Parse pyproject.toml via ``tomllib`` (3.11+) or ``tomli`` if present.
+
+    Returns ``None`` when neither lib is available, so the caller can
+    fall back to the regex path. Returns an empty set if parsing
+    succeeds but finds no deps.
+    """
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[import-not-found]
+        except ImportError:
+            return None
+    try:
+        data = tomllib.loads(content)
+    except Exception:  # noqa: BLE001
+        return set()
+
+    names: set[str] = set()
+    project = data.get("project") or {}
+    for spec in project.get("dependencies") or []:
+        if isinstance(spec, str):
+            nm = _req_name(spec)
+            if nm:
+                names.add(nm)
+    optional = project.get("optional-dependencies") or {}
+    if isinstance(optional, dict):
+        for group in optional.values():
+            if isinstance(group, list):
+                for spec in group:
+                    if isinstance(spec, str):
+                        nm = _req_name(spec)
+                        if nm:
+                            names.add(nm)
+
+    # Poetry layout (still common in the wild)
+    poetry = ((data.get("tool") or {}).get("poetry")) or {}
+    for key in ("dependencies", "dev-dependencies"):
+        section = poetry.get(key)
+        if isinstance(section, dict):
+            for k in section.keys():
+                if isinstance(k, str) and k.lower() != "python":
+                    names.add(k.lower())
+    groups = poetry.get("group") or {}
+    if isinstance(groups, dict):
+        for group in groups.values():
+            if isinstance(group, dict):
+                deps = group.get("dependencies") or {}
+                if isinstance(deps, dict):
+                    for k in deps.keys():
+                        if isinstance(k, str) and k.lower() != "python":
+                            names.add(k.lower())
+    return names
+
+
+def _find_balanced_bracket_span(text: str, start: int) -> tuple[int, int] | None:
+    """Given ``[`` at ``text[start]``, return the half-open span that
+    contains its matching ``]`` by counting nested brackets and
+    skipping over TOML quoted strings.
+
+    Handles ``uvicorn[standard]`` nested brackets and both `"..."` and
+    `'...'` single-line strings. Triple-quoted strings are not common
+    in ``dependencies = [...]`` lists so are not specially handled.
+    """
+    assert text[start] == "["
+    depth = 1
+    i = start + 1
+    n = len(text)
+    while i < n and depth > 0:
+        c = text[i]
+        if c in ('"', "'"):
+            # Skip quoted string; handle simple escapes.
+            quote = c
+            j = i + 1
+            while j < n and text[j] != quote:
+                if text[j] == "\\":
+                    j += 2
+                else:
+                    j += 1
+            i = j + 1
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return (start + 1, i)
+        i += 1
+    return None
+
+
+def _parse_pyproject_via_regex(content: str) -> set[str]:
+    """Fallback parser used when neither ``tomllib`` nor ``tomli`` exists.
+
+    Review fix #2 — the previous regex ``\\[([^\\]]*)\\]`` terminated on
+    the first ``]``, silently dropping everything after the first
+    dependency with extras like ``uvicorn[standard]``. This version
+    bracket-counts to find the real list terminator.
     """
     names: set[str] = set()
 
-    # PEP 621 — dependencies = ["pkg==1", ...]
-    for block in _PEP621_DEPS_RE.findall(content):
-        for line in block.splitlines():
-            m = _DEP_NAME_RE.match(line)
-            if m:
-                names.add(m.group(1).lower())
+    # PEP 621 — dependencies = [...]
+    for m in re.finditer(r"^\s*dependencies\s*=\s*\[", content, re.MULTILINE):
+        span = _find_balanced_bracket_span(content, m.end() - 1)
+        if span is None:
+            continue
+        body = content[span[0]:span[1]]
+        # Each dep is a quoted PEP-508 spec
+        for spec_m in re.finditer(r'"([^"]+)"', body):
+            nm = _req_name(spec_m.group(1))
+            if nm:
+                names.add(nm)
 
-    # PEP 621 — [project.optional-dependencies] groups = { dev = [...], ... }
-    for block in _OPTIONAL_TABLE_RE.findall(content):
-        for m in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)', block):
-            names.add(m.group(1).lower())
+    # PEP 621 — [project.optional-dependencies] block.
+    # Find the section header, read up to the next top-level ``[``.
+    opt_header_re = re.compile(r"^\[project\.optional-dependencies\](.*?)(?=^\[|\Z)",
+                               re.MULTILINE | re.DOTALL)
+    for block_m in opt_header_re.finditer(content):
+        block = block_m.group(1)
+        for spec_m in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*[^"]*)"', block):
+            nm = _req_name(spec_m.group(1))
+            if nm:
+                names.add(nm)
 
-    # Poetry — [tool.poetry.dependencies] + dev group
-    for rx in (_POETRY_DEPS_RE, _POETRY_DEV_DEPS_RE):
-        m = rx.search(content)
-        if m:
-            for line in m.group(1).splitlines():
-                pm = _POETRY_NAME_RE.match(line.strip())
-                if pm:
-                    nm = pm.group(1).lower()
-                    if nm != "python":  # poetry's python floor is not a dep
-                        names.add(nm)
+    # Poetry — [tool.poetry.dependencies] / .dev / .group.X.dependencies
+    poetry_sections = re.compile(
+        r"^\[tool\.poetry(?:\.group\.[A-Za-z0-9_-]+)?\."
+        r"(?:dependencies|dev-dependencies)\](.*?)(?=^\[|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    for block_m in poetry_sections.finditer(content):
+        for line in block_m.group(1).splitlines():
+            pm = _POETRY_NAME_RE.match(line.strip())
+            if pm:
+                nm = pm.group(1).lower()
+                if nm != "python":
+                    names.add(nm)
 
     return names
+
+
+def parse_pyproject_toml(content: str) -> set[str]:
+    """Extract names from PEP-621 and Poetry layouts.
+
+    Prefers ``tomllib`` (Python 3.11+ stdlib) so we get correct
+    semantics without any regex care; falls back to ``tomli`` if
+    present; falls back further to a bracket-counting regex that
+    handles nested brackets like ``uvicorn[standard]``.
+    """
+    toml_result = _parse_pyproject_via_tomllib(content)
+    if toml_result is not None:
+        return toml_result
+    return _parse_pyproject_via_regex(content)
 
 
 # ── Cargo.toml (cargo) ──────────────────────────────────────────────

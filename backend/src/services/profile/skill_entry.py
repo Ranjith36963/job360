@@ -144,8 +144,15 @@ def build_skill_entries_from_profile(profile, last_seen: Optional[str] = None) -
     ``confidence`` and ``esco_uri`` placeholders. If callers pass
     ``last_seen``, every emitted entry gets stamped with it — useful
     for recency tie-breaks across a multi-profile merge.
+
+    Review fix #8: dedup same-(source, name) duplicates so the same
+    source never contributes two rows for one skill (``["Python",
+    "python"]`` in a CV emitted 2 entries pre-fix). Cross-source
+    duplicates still emit multi-row — merge_skill_entries collapses
+    them.
     """
     out: list[SkillEntry] = []
+    seen_per_source: set[tuple[str, str]] = set()
 
     def _add(name: str, source: str) -> None:
         if not isinstance(name, str):
@@ -153,6 +160,10 @@ def build_skill_entries_from_profile(profile, last_seen: Optional[str] = None) -
         name = name.strip()
         if not name:
             return
+        key = (source, name.casefold())
+        if key in seen_per_source:
+            return
+        seen_per_source.add(key)
         out.append(SkillEntry.from_source(name, source, last_seen=last_seen))
 
     prefs = getattr(profile, "preferences", None)

@@ -143,10 +143,21 @@ async def llm_extract_validated(
                 attempt,
                 max_retries + 1,
             )
+            # Review fix #6 — trim to first 5 validation errors so the
+            # combined retry prompt stays well under a weak model's
+            # context window. ValidationError.__str__() on a CV with
+            # many nested list errors can exceed Cerebras llama3.1-8b's
+            # 8K window and convert a recoverable validation failure
+            # into a hard provider failure.
+            first_errors = ve.errors()[:5]
+            error_lines = "\n".join(
+                f"- {err.get('loc')}: {err.get('msg')}" for err in first_errors
+            )
             current_prompt = (
                 f"{prompt}\n\n"
-                f"Your previous response failed schema validation with these errors:\n"
-                f"{ve}\n"
+                f"Your previous response failed schema validation (showing first "
+                f"{len(first_errors)} of {len(ve.errors())} errors):\n"
+                f"{error_lines}\n"
                 f"Emit JSON matching the schema exactly. Do not include prose. "
                 f"Correct EVERY field flagged above."
             )

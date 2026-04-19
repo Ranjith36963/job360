@@ -188,18 +188,36 @@ async def parse_cv_async(file_path: str) -> CVData:
             "Only PDF and DOCX files are supported."
         )
 
-    from src.services.profile.llm_provider import llm_extract_validated
+    from src.services.profile.llm_provider import llm_extract, llm_extract_validated
     from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
 
     prompt = _CV_PROMPT.format(cv_text=raw_text)
 
     try:
         schema = await llm_extract_validated(prompt, CVSchema, system=_CV_SYSTEM)
+        return cv_schema_to_cvdata(schema, raw_text)
     except RuntimeError as e:
+        # Review fix #3 — preserve pre-Batch-1.1 graceful-degradation
+        # contract. Validation exhaustion (LLM produced JSON that
+        # couldn't be coerced after retries) falls back to the
+        # defensive path so callers still get a best-effort CVData.
+        # Genuine provider-chain failures (no API keys, all providers
+        # down) still raise so operators are alerted.
+        msg = str(e).lower()
+        if "validation" in msg:
+            logger.warning(
+                "CVSchema validation exhausted retries; using defensive coercion: %s", e
+            )
+            try:
+                raw = await llm_extract(prompt, system=_CV_SYSTEM)
+                return _llm_result_to_cvdata(raw_text, raw)
+            except Exception as e2:  # noqa: BLE001
+                logger.warning(
+                    "Defensive fallback also failed; returning CVData with raw_text only: %s", e2
+                )
+                return CVData(raw_text=raw_text)
         logger.error("LLM CV analysis failed: %s", e)
         raise
-
-    return cv_schema_to_cvdata(schema, raw_text)
 
 
 def parse_cv(file_path: str) -> CVData:

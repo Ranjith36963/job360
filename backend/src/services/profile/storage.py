@@ -233,7 +233,11 @@ def _maybe_hydrate_legacy_json(user_id: str) -> None:
         prefs = UserPreferences(
             **_filter_fields(data.get("preferences", {}), UserPreferences)
         )
-        save_profile(UserProfile(cv_data=cv, preferences=prefs), user_id)
+        save_profile(
+            UserProfile(cv_data=cv, preferences=prefs),
+            user_id,
+            source_action="legacy_hydrate",  # Review fix #5
+        )
         LEGACY_PROFILE_PATH.unlink()
         logger.info(
             "Hydrated legacy %s into user_profiles[%s] and deleted the JSON",

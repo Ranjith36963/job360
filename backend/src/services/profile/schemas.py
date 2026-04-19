@@ -225,4 +225,10 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         location=schema.location or "",
         achievements=list(schema.achievements),
         career_domain=schema.career_domain.value if schema.career_domain else None,
+        # Review fix #1 — CVSchema.industries + CVSchema.languages were
+        # being silently dropped. They are now plumbed through to the
+        # matching CVData fields so the JSON Resume export shows real
+        # values for CVs that list them.
+        industries=list(schema.industries),
+        cv_languages=list(schema.languages),
     )

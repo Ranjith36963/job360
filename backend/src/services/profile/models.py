@@ -48,6 +48,13 @@ class CVData:
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).
     career_domain: Optional[str] = None
+    # Batch 1.x.1 (review fix #1) — CV-extracted fields that the
+    # CVSchema already parses but the original adapter silently
+    # dropped. Separate from ``linkedin_*`` equivalents so the JSON
+    # Resume export distinguishes CV-stated languages/industries from
+    # LinkedIn-stated ones.
+    industries: list[str] = field(default_factory=list)
+    cv_languages: list[str] = field(default_factory=list)
 
     def to_json_resume(self) -> dict:
         """Batch 1.8 — return a JSON Resume canonical-schema dict.
