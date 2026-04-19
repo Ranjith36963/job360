@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
 from src.api.models import JobResponse, JobListResponse
 from src.repositories.database import JobDatabase
@@ -65,8 +66,11 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
 
 
 @router.get("/jobs/export")
-async def export_jobs(db: JobDatabase = Depends(get_db)):
-    """Download all recent jobs as CSV."""
+async def export_jobs(
+    db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_user),
+):
+    """Download all recent jobs as CSV (catalog is shared; auth gates access)."""
     rows = await db.get_recent_jobs(days=7, min_score=0)
     output = io.StringIO()
     headers = [
@@ -115,6 +119,7 @@ async def list_jobs(
     limit: int = Query(100),
     offset: int = Query(0),
     db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_user),
 ):
     days = (hours // 24) + 1 if hours else 7
     all_rows = await db.get_recent_jobs(days=days, min_score=min_score or 0)
@@ -152,7 +157,7 @@ async def list_jobs(
 
     jobs = []
     for row in page:
-        job_action = await db.get_action_for_job(row["id"])
+        job_action = await db.get_action_for_job(row["id"], user.id)
         # Filter by action if specified
         if action is not None and job_action != action:
             continue
@@ -176,9 +181,13 @@ async def list_jobs(
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: int, db: JobDatabase = Depends(get_db)):
+async def get_job(
+    job_id: int,
+    db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_user),
+):
     row = await db.get_job_by_id(job_id)
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    job_action = await db.get_action_for_job(job_id)
+    job_action = await db.get_action_for_job(job_id, user.id)
     return _row_to_job_response(row, job_action)

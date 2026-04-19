@@ -189,6 +189,120 @@ async def mark_ledger_failed(
     await db.commit()
 
 
+# ---------- ARQ ctx-based fan-out tasks --------------------------------
+#
+# These are the top-level functions registered in
+# src.workers.settings.WorkerSettings.functions. ARQ contract: first arg
+# is `ctx: dict` with 'db' (aiosqlite.Connection) and optionally 'enqueue'.
+
+
+async def send_notification(
+    ctx: dict,
+    user_id: str,
+    job_id: int,
+    urgency: str = "instant",
+) -> dict[str, int]:
+    """Dispatch a per-user notification across every enabled channel.
+
+    Reads user_feed for job context, asks the dispatcher to fan out to
+    every enabled channel for ``user_id``, and writes one
+    ``notification_ledger`` row per channel — ``sent`` on success,
+    ``failed`` (with error_message) on Apprise exception.
+
+    Idempotency: each (user_id, job_id, channel) gets at most one ledger
+    row per the UNIQUE(user_id, job_id, channel) constraint from
+    migration 0004. A retry simply re-reads the row and flips its
+    status; no duplicate inserts.
+
+    Parameters
+    ----------
+    ctx : dict
+        Must contain ``'db'`` (aiosqlite.Connection). Optionally:
+        ``'dispatcher'`` — a test hook returning
+        ``list[ChannelSendResult]``; when absent, uses the real
+        ``services.channels.dispatcher.dispatch``.
+    user_id : str
+        Target user.
+    job_id : int
+        ``jobs.id`` primary key.
+    urgency : str
+        One of ``'instant' | 'digest'`` (for future routing; currently
+        unused beyond audit).
+
+    Returns ``{'sent': int, 'failed': int}``.
+    """
+    db: aiosqlite.Connection = ctx["db"]
+    db.row_factory = aiosqlite.Row
+
+    # Fetch job context for the notification body
+    cur = await db.execute(
+        "SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,)
+    )
+    job_row = await cur.fetchone()
+    if job_row is None:
+        return {"sent": 0, "failed": 0}
+
+    title = f"{job_row['title']} @ {job_row['company']}"
+    body = f"Job360 match: {job_row['title']}\n{job_row['apply_url']}"
+
+    # Test hook: ctx['dispatcher'] short-circuits the real Apprise path.
+    # In production, we import lazily to dodge Apprise's ~30MB dep chain
+    # per CLAUDE.md rule #11.
+    dispatcher_fn = ctx.get("dispatcher")
+    if dispatcher_fn is None:
+        from src.services.channels.dispatcher import dispatch as real_dispatch
+        dispatcher_fn = real_dispatch
+
+    results = await dispatcher_fn(db, user_id=user_id, title=title, body=body)
+
+    sent = 0
+    failed = 0
+    for result in results:
+        channel_key = result.channel_type or f"channel:{result.channel_id}"
+        # Ensure a ledger row exists (idempotent per UNIQUE constraint).
+        await _record_ledger_if_new(
+            db, user_id=user_id, job_id=job_id, channel=channel_key
+        )
+        if result.ok:
+            await mark_ledger_sent(
+                db, user_id=user_id, job_id=job_id, channel=channel_key
+            )
+            sent += 1
+        else:
+            await mark_ledger_failed(
+                db,
+                user_id=user_id,
+                job_id=job_id,
+                channel=channel_key,
+                error=result.error or "unknown error",
+            )
+            failed += 1
+
+    return {"sent": sent, "failed": failed}
+
+
+async def mark_ledger_sent_task(
+    ctx: dict, user_id: str, job_id: int, channel: str
+) -> None:
+    """ARQ ctx wrapper around :func:`mark_ledger_sent`."""
+    await mark_ledger_sent(
+        ctx["db"], user_id=user_id, job_id=job_id, channel=channel
+    )
+
+
+async def mark_ledger_failed_task(
+    ctx: dict, user_id: str, job_id: int, channel: str, error: str
+) -> None:
+    """ARQ ctx wrapper around :func:`mark_ledger_failed`."""
+    await mark_ledger_failed(
+        ctx["db"],
+        user_id=user_id,
+        job_id=job_id,
+        channel=channel,
+        error=error,
+    )
+
+
 # ---------- helpers ----------------------------------------------------
 
 def _default_search_config() -> SearchConfig:

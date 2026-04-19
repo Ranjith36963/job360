@@ -23,6 +23,7 @@ from src.services.notifications.report_generator import generate_markdown_report
 from src.services.notifications.base import get_configured_channels
 from src.services.circuit_breaker import default_registry as default_breaker_registry
 from src.services.circuit_breaker import BreakerState
+from src.services.scheduler import TieredScheduler
 
 from src.sources.apis_keyed.reed import ReedSource
 from src.sources.apis_keyed.adzuna import AdzunaSource
@@ -338,34 +339,52 @@ async def run_search(
                 logger.error("No sources matched filter: %s", source_filter)
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
-            # Fetch from all sources concurrently
+            # Fetch via TieredScheduler (Batch 3.5 Deliverable E):
+            #   * One-shot CLI runs pass force=True so every source dispatches
+            #     exactly once — the tier intervals only matter for the
+            #     long-lived daemon path (not in scope for this batch).
+            #   * The scheduler consults the breaker registry BEFORE
+            #     dispatch; OPEN-state sources are skipped without
+            #     invoking fetch_jobs. Success / failure is auto-recorded
+            #     into each breaker by the scheduler, replacing the
+            #     post-hoc loop we had in Batch 3.
+            #   * Ghost-detection still needs an (all-sources-aligned)
+            #     results list — we reconstruct it from the scheduler's
+            #     return value, filling None for skipped sources (which
+            #     _ghost_detection_pass already treats as skip-sweep).
             all_jobs: list[Job] = []
             per_source: dict[str, int] = {}
             source_count = 0
+            failed_sources: list[str] = []
 
-            async def _fetch_source(source):
-                try:
-                    return await asyncio.wait_for(source.fetch_jobs(), timeout=120)
-                except asyncio.TimeoutError:
-                    logger.warning("Source %s timed out", source.name)
-                    return None
-                except Exception as e:
-                    logger.error("Source %s failed: %s", source.name, e, exc_info=True)
-                    return None
+            registry = default_breaker_registry()
+            pre_states = {s.name: registry.get(s.name).state for s in sources}
 
-            results = await asyncio.gather(*[_fetch_source(s) for s in sources], return_exceptions=True)
+            scheduler = TieredScheduler(sources, registry)
+            paired = await scheduler.tick(force=True)
 
-            failed_sources = []
-            for source, result in zip(sources, results):
+            results_by_name: dict = {name: None for name in (s.name for s in sources)}
+            for src, result in paired:
+                results_by_name[src.name] = result
+
+            for source in sources:
                 source_count += 1
+                result = results_by_name.get(source.name)
                 if isinstance(result, BaseException):
                     per_source[source.name] = 0
                     failed_sources.append(source.name)
                     logger.warning("  %s: FAILED (%s)", source.name, type(result).__name__)
                 elif result is None:
+                    # Skipped by breaker (OPEN) or never dispatched
                     per_source[source.name] = 0
-                    failed_sources.append(source.name)
-                    logger.warning("  %s: FAILED", source.name)
+                    breaker_state = registry.get(source.name).state
+                    if breaker_state == BreakerState.OPEN:
+                        logger.info(
+                            "  %s: skipped (breaker OPEN)", source.name
+                        )
+                    else:
+                        failed_sources.append(source.name)
+                        logger.warning("  %s: FAILED", source.name)
                 elif result:
                     per_source[source.name] = len(result)
                     all_jobs.extend(result)
@@ -377,37 +396,26 @@ async def run_search(
             if failed_sources:
                 logger.warning("Failed sources (%s): %s", len(failed_sources), ", ".join(failed_sources))
 
-            # Source health: per-source circuit breakers replace the former
-            # `newly_empty` heuristic. A source that returns 0 jobs or raises
-            # an exception increments its breaker's failure counter; after N
-            # consecutive failures the breaker trips OPEN and future ticks
-            # skip the fetch until the cooldown elapses (half-open probe).
-            # See services/circuit_breaker.py and pillar_3_batch_3.md §"Circuit
-            # breakers replace the newly_empty flag".
-            registry = default_breaker_registry()
-            try:
-                history = await db.get_last_source_counts(7)
-            except Exception as e:
-                logger.warning("Source history fetch skipped: %s", e)
-                history = {}
-
-            newly_opened: list[str] = []
-            for source, result in zip(sources, results):
-                breaker = registry.get(source.name)
-                fetch_failed = isinstance(result, BaseException) or result is None or not result
-                if fetch_failed:
-                    previous_state = breaker.state
-                    breaker.record_failure()
-                    if breaker.state == BreakerState.OPEN and previous_state != BreakerState.OPEN:
-                        newly_opened.append(source.name)
-                else:
-                    breaker.record_success()
-
+            # Surface newly-opened breakers (post-scheduler state diff)
+            newly_opened = [
+                s.name for s in sources
+                if pre_states.get(s.name) != BreakerState.OPEN
+                and registry.get(s.name).state == BreakerState.OPEN
+            ]
             if newly_opened:
                 logger.warning(
                     "Circuit breaker OPEN for source(s) after consecutive failures: %s",
                     ", ".join(newly_opened),
                 )
+
+            # Ghost-detection input expects a results list aligned with sources
+            results = [results_by_name.get(s.name) for s in sources]
+
+            try:
+                history = await db.get_last_source_counts(7)
+            except Exception as e:
+                logger.warning("Source history fetch skipped: %s", e)
+                history = {}
 
             # Ghost detection: update last_seen for observed jobs; mark absent jobs as missed.
             # Per pillar_3_batch_1.md §3 Step 1, skip the absence sweep for any source whose

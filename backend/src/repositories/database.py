@@ -274,79 +274,94 @@ class JobDatabase:
 
     # --- User Actions ---
     #
-    # TODO(batch-2.1): accept user_id on every method, filter all queries by it.
-    # Currently every INSERT defaults to DEFAULT_TENANT_ID via column DEFAULT,
-    # and every SELECT/DELETE is tenant-blind. Batch 2 ships the schema
-    # (UNIQUE(user_id, job_id), FK → users) but defers route auth-gating
-    # to Batch 2.1/3. If two real users ever both hit /api/jobs/{id}/action
-    # before that wiring lands, the second writer silently overwrites the
-    # first via INSERT OR REPLACE. The batch-2 docs/IMPLEMENTATION_LOG.md
-    # completion entry names this deferral explicitly (§"What got deferred").
+    # Batch 3.5 Deliverable C: every method now takes user_id and scopes
+    # queries by it. Schema UNIQUE(user_id, job_id) is from migration
+    # 0002_multi_tenant; this layer is the matching read/write surface.
 
-    async def insert_action(self, job_id: int, action: str, notes: str = "") -> dict:
+    async def insert_action(
+        self, job_id: int, action: str, user_id: str, notes: str = ""
+    ) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(
-            "INSERT OR REPLACE INTO user_actions (job_id, action, notes, created_at) VALUES (?, ?, ?, ?)",
-            (job_id, action, notes, now),
+            """INSERT INTO user_actions (user_id, job_id, action, notes, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, job_id)
+               DO UPDATE SET action = excluded.action,
+                             notes = excluded.notes,
+                             created_at = excluded.created_at""",
+            (user_id, job_id, action, notes, now),
         )
         await self._conn.commit()
         return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
 
-    async def delete_action(self, job_id: int) -> None:
-        await self._conn.execute("DELETE FROM user_actions WHERE job_id = ?", (job_id,))
+    async def delete_action(self, job_id: int, user_id: str) -> None:
+        await self._conn.execute(
+            "DELETE FROM user_actions WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        )
         await self._conn.commit()
 
-    async def get_actions(self) -> list[dict]:
+    async def get_actions(self, user_id: str) -> list[dict]:
         cursor = await self._conn.execute(
-            "SELECT job_id, action, notes, created_at FROM user_actions ORDER BY created_at DESC"
+            """SELECT job_id, action, notes, created_at
+               FROM user_actions
+               WHERE user_id = ?
+               ORDER BY created_at DESC""",
+            (user_id,),
         )
         return [{"job_id": r[0], "action": r[1], "notes": r[2], "created_at": r[3]}
                 for r in await cursor.fetchall()]
 
-    async def get_action_counts(self) -> dict[str, int]:
+    async def get_action_counts(self, user_id: str) -> dict[str, int]:
         cursor = await self._conn.execute(
-            "SELECT action, COUNT(*) FROM user_actions GROUP BY action"
+            """SELECT action, COUNT(*) FROM user_actions
+               WHERE user_id = ? GROUP BY action""",
+            (user_id,),
         )
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
-    async def get_action_for_job(self, job_id: int) -> str | None:
+    async def get_action_for_job(self, job_id: int, user_id: str) -> str | None:
         cursor = await self._conn.execute(
-            "SELECT action FROM user_actions WHERE job_id = ?", (job_id,)
+            "SELECT action FROM user_actions WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
         )
         row = await cursor.fetchone()
         return row[0] if row else None
 
     # --- Applications (Pipeline) ---
     #
-    # TODO(batch-2.1): same caveat as user_actions above — schema carries
-    # user_id + UNIQUE(user_id, job_id), but these methods are still
-    # tenant-blind and rely on column DEFAULT for writes.
+    # Batch 3.5 Deliverable C: same user_id-scoping treatment as actions.
 
-    async def create_application(self, job_id: int) -> dict:
+    async def create_application(self, job_id: int, user_id: str) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(
-            "INSERT OR IGNORE INTO applications (job_id, stage, created_at, updated_at) VALUES (?, 'applied', ?, ?)",
-            (job_id, now, now),
+            """INSERT OR IGNORE INTO applications
+               (user_id, job_id, stage, created_at, updated_at)
+               VALUES (?, ?, 'applied', ?, ?)""",
+            (user_id, job_id, now, now),
         )
         await self._conn.commit()
-        return await self._get_application(job_id)
+        return await self._get_application(job_id, user_id)
 
-    async def advance_application(self, job_id: int, stage: str) -> dict:
+    async def advance_application(
+        self, job_id: int, stage: str, user_id: str
+    ) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(
-            "UPDATE applications SET stage = ?, updated_at = ? WHERE job_id = ?",
-            (stage, now, job_id),
+            """UPDATE applications SET stage = ?, updated_at = ?
+               WHERE user_id = ? AND job_id = ?""",
+            (stage, now, user_id, job_id),
         )
         await self._conn.commit()
-        return await self._get_application(job_id)
+        return await self._get_application(job_id, user_id)
 
-    async def _get_application(self, job_id: int) -> dict:
+    async def _get_application(self, job_id: int, user_id: str) -> dict:
         cursor = await self._conn.execute(
             """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                       j.title, j.company
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-               WHERE a.job_id = ?""",
-            (job_id,),
+               WHERE a.user_id = ? AND a.job_id = ?""",
+            (user_id, job_id),
         )
         row = await cursor.fetchone()
         if not row:
@@ -355,41 +370,52 @@ class JobDatabase:
                 "updated_at": row[3], "notes": row[4] or "",
                 "title": row[5] or "", "company": row[6] or ""}
 
-    async def get_applications(self, stage: str | None = None) -> list[dict]:
+    async def get_applications(
+        self, user_id: str, stage: str | None = None
+    ) -> list[dict]:
         if stage:
             cursor = await self._conn.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                           j.title, j.company
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-                   WHERE a.stage = ? ORDER BY a.updated_at DESC""",
-                (stage,),
+                   WHERE a.user_id = ? AND a.stage = ?
+                   ORDER BY a.updated_at DESC""",
+                (user_id, stage),
             )
         else:
             cursor = await self._conn.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                           j.title, j.company
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-                   ORDER BY a.updated_at DESC"""
+                   WHERE a.user_id = ?
+                   ORDER BY a.updated_at DESC""",
+                (user_id,),
             )
         return [{"job_id": r[0], "stage": r[1], "created_at": r[2], "updated_at": r[3],
                  "notes": r[4] or "", "title": r[5] or "", "company": r[6] or ""}
                 for r in await cursor.fetchall()]
 
-    async def get_application_counts(self) -> dict[str, int]:
+    async def get_application_counts(self, user_id: str) -> dict[str, int]:
         cursor = await self._conn.execute(
-            "SELECT stage, COUNT(*) FROM applications GROUP BY stage"
+            """SELECT stage, COUNT(*) FROM applications
+               WHERE user_id = ? GROUP BY stage""",
+            (user_id,),
         )
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
-    async def get_stale_applications(self, days: int = 7) -> list[dict]:
+    async def get_stale_applications(
+        self, user_id: str, days: int = 7
+    ) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = await self._conn.execute(
             """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                       j.title, j.company
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-               WHERE a.updated_at < ? AND a.stage NOT IN ('offer', 'rejected')
+               WHERE a.user_id = ?
+                 AND a.updated_at < ?
+                 AND a.stage NOT IN ('offer', 'rejected')
                ORDER BY a.updated_at ASC""",
-            (cutoff,),
+            (user_id, cutoff),
         )
         return [{"job_id": r[0], "stage": r[1], "created_at": r[2], "updated_at": r[3],
                  "notes": r[4] or "", "title": r[5] or "", "company": r[6] or ""}
