@@ -158,46 +158,11 @@ class TestPreferences:
 
 
 # -----------------------------------------------------------------------
-# Profile storage (uses temp directory)
+# Profile storage — see tests/test_profile_storage.py for per-user
+# DB-backed tests (Batch 3.5.2). The old JSON-file TestProfileStorage
+# class that lived here was replaced when storage moved from
+# data/user_profile.json to the user_profiles table.
 # -----------------------------------------------------------------------
-
-class TestProfileStorage:
-    def test_save_and_load_roundtrip(self, tmp_path):
-        profile = UserProfile(
-            cv_data=CVData(raw_text="My CV", skills=["Python", "SQL"]),
-            preferences=UserPreferences(
-                target_job_titles=["Engineer"],
-                salary_min=50000,
-            ),
-        )
-        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
-            save_profile(profile)
-            loaded = load_profile()
-            assert loaded is not None
-            assert loaded.cv_data.raw_text == "My CV"
-            assert loaded.cv_data.skills == ["Python", "SQL"]
-            assert loaded.preferences.target_job_titles == ["Engineer"]
-            assert loaded.preferences.salary_min == 50000
-
-    def test_load_returns_none_when_missing(self, tmp_path):
-        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
-            assert load_profile() is None
-
-    def test_profile_exists_false(self, tmp_path):
-        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "nonexistent.json"):
-            assert not profile_exists()
-
-    def test_profile_exists_true(self, tmp_path):
-        path = tmp_path / "profile.json"
-        path.write_text("{}")
-        with patch("src.services.profile.storage.PROFILE_PATH", path):
-            assert profile_exists()
-
-    def test_load_handles_corrupt_json(self, tmp_path):
-        path = tmp_path / "profile.json"
-        path.write_text("not valid json {{{{")
-        with patch("src.services.profile.storage.PROFILE_PATH", path):
-            assert load_profile() is None
 
 
 # -----------------------------------------------------------------------
@@ -427,14 +392,6 @@ class TestJobScorer:
 # -----------------------------------------------------------------------
 # Edge cases — storage, cv_parser, single-char skills
 # -----------------------------------------------------------------------
-
-class TestStorageEdgeCases:
-    def test_storage_roundtrip_empty_file(self, tmp_path):
-        """Empty PROFILE_PATH should return None, not crash."""
-        path = tmp_path / ""  # empty suffix
-        with patch("src.services.profile.storage.PROFILE_PATH", path):
-            assert load_profile() is None
-
 
 # -----------------------------------------------------------------------
 # LLM CV Parser

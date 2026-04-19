@@ -110,7 +110,15 @@ def list_sources():
 @click.option("--github", "github_username", default=None,
               help="GitHub username to fetch public repos.")
 def setup_profile(cv_path, linkedin_path, github_username):
-    """Set up your user profile for personalised job search."""
+    """Set up your user profile for personalised job search.
+
+    The CLI is single-tenant by design — every ``python -m src.cli``
+    invocation writes to ``DEFAULT_TENANT_ID``. Per-user profiles are
+    the HTTP API's job (``/api/profile`` with a session cookie). No
+    ``--user-id`` flag; that's scope creep. Batch 3.5.2 intentionally
+    leaves this contract in place (Deliverable E).
+    """
+    from src.core.tenancy import DEFAULT_TENANT_ID
     from src.services.profile.models import CVData, UserPreferences, UserProfile
     from src.services.profile.cv_parser import parse_cv
     from src.services.profile.preferences import merge_cv_and_preferences
@@ -201,8 +209,8 @@ def setup_profile(cv_path, linkedin_path, github_username):
         prefs = merge_cv_and_preferences(cv_data.skills, cv_data.job_titles, prefs)
 
     profile = UserProfile(cv_data=cv_data, preferences=prefs)
-    path = save_profile(profile)
-    click.echo(f"\nProfile saved to {path}")
+    save_profile(profile, DEFAULT_TENANT_ID)
+    click.echo("\nProfile saved to user_profiles table (DEFAULT_TENANT_ID).")
     click.echo("Next pipeline run will use your personalised keywords.")
 
 

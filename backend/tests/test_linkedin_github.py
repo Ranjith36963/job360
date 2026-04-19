@@ -610,65 +610,13 @@ class TestEnrichCVFromGitHub:
 # Storage with new fields
 # ---------------------------------------------------------------------------
 
-class TestStorageWithNewFields:
-    def test_roundtrip_with_linkedin_github_fields(self, tmp_path):
-        cv = CVData(
-            raw_text="My CV",
-            skills=["Python"],
-            linkedin_skills=["SQL", "Docker"],
-            linkedin_positions=[{"title": "Engineer", "company": "Google"}],
-            linkedin_industry="Technology",
-            github_languages={"Python": 50000},
-            github_topics=["machine-learning"],
-            github_skills_inferred=["TypeScript"],
-        )
-        prefs = UserPreferences(
-            target_job_titles=["ML Engineer"],
-            github_username="testuser",
-        )
-        profile = UserProfile(cv_data=cv, preferences=prefs)
-
-        with patch("src.services.profile.storage.PROFILE_PATH", tmp_path / "profile.json"):
-            save_profile(profile)
-            loaded = load_profile()
-            assert loaded is not None
-            assert loaded.cv_data.linkedin_skills == ["SQL", "Docker"]
-            assert loaded.cv_data.linkedin_industry == "Technology"
-            assert loaded.cv_data.github_languages == {"Python": 50000}
-            assert loaded.cv_data.github_topics == ["machine-learning"]
-            assert loaded.cv_data.github_skills_inferred == ["TypeScript"]
-            assert loaded.preferences.github_username == "testuser"
-
-    def test_load_old_profile_without_new_fields(self, tmp_path):
-        old_profile_data = {
-            "cv_data": {"raw_text": "Old CV", "skills": ["Java"], "job_titles": [],
-                        "education": [], "certifications": [], "summary": ""},
-            "preferences": {"target_job_titles": ["Developer"], "additional_skills": [],
-                           "excluded_skills": [], "preferred_locations": [], "industries": [],
-                           "salary_min": None, "salary_max": None, "work_arrangement": "",
-                           "experience_level": "", "negative_keywords": [], "about_me": ""},
-        }
-        path = tmp_path / "profile.json"
-        path.write_text(json.dumps(old_profile_data), encoding="utf-8")
-        with patch("src.services.profile.storage.PROFILE_PATH", path):
-            loaded = load_profile()
-            assert loaded is not None
-            assert loaded.cv_data.skills == ["Java"]
-            assert loaded.cv_data.linkedin_skills == []
-            assert loaded.cv_data.github_skills_inferred == []
-            assert loaded.preferences.github_username == ""
-
-    def test_load_profile_with_unknown_keys(self, tmp_path):
-        future_data = {
-            "cv_data": {"raw_text": "CV", "skills": ["Python"], "future_field": "something"},
-            "preferences": {"target_job_titles": ["Engineer"], "unknown_pref": True},
-        }
-        path = tmp_path / "profile.json"
-        path.write_text(json.dumps(future_data), encoding="utf-8")
-        with patch("src.services.profile.storage.PROFILE_PATH", path):
-            loaded = load_profile()
-            assert loaded is not None
-            assert loaded.cv_data.skills == ["Python"]
+# TestStorageWithNewFields was deleted in Batch 3.5.2 — storage moved
+# from data/user_profile.json to the user_profiles DB table, so the
+# PROFILE_PATH monkey-patch it used no longer exists. Equivalent
+# per-user round-trip + schema-drift + unknown-key coverage lives in
+# tests/test_profile_storage.py (Batch 3.5.2). See
+# docs/plans/batch-3.5.2-plan.md Deliverable B for the migration
+# rationale.
 
 
 # ---------------------------------------------------------------------------
