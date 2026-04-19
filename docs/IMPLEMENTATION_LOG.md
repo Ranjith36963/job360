@@ -495,6 +495,268 @@ _Completion entry will be appended here when merged._
 
 ---
 
+## Batch 3.5 — Stabilisation (IDOR + ARQ runtime + scheduler wire-up)
+
+**Status:** READY_FOR_REVIEW 2026-04-19
+
+**Reference:** `docs/plans/batch-3.5-plan.md`
+
+**Scope:** Close three Batch-2/3 deferrals that matter most for multi-user
+safety + launchability.
+
+  - **Deliverable C** — IDOR fix on legacy `/api/jobs`, `/api/actions`,
+    `/api/pipeline` routes (CLAUDE.md rule #12).
+  - **Deliverable D** — ARQ runtime executable (`send_notification`,
+    `WorkerSettings`, `REDIS_URL`-driven `redis_settings`).
+  - **Deliverable E** — wire `TieredScheduler.tick(force=True)` into
+    `run_search`, replacing the Batch-3 `asyncio.gather` block.
+
+**Branch:** `pillar3/batch-3.5` — 5 commits on top of Batch 3 merge
+
+---
+
+## Batch 3.5 — Completion Entry (DRAFT — reviewer validates before merge)
+
+**Generated:** 2026-04-19 (generator worktree on `pillar3/batch-3.5`)
+**Branch:** `pillar3/batch-3.5`
+**Base:** `main` @ Batch 3 merge (post-merge origin/main = `fad1744`)
+
+### Commits (5)
+
+| Commit | Subject |
+|---|---|
+| `f8cf829` | docs(pillar3): Batch 3.5 plan (IDOR fix + ARQ runtime + scheduler wiring) |
+| `56a66f3` | fix(api): scope per-user routes by user_id (IDOR) |
+| (D)      | feat(workers): implement send_notification + WorkerSettings |
+| `328e72f` | feat(scheduler): wire TieredScheduler into run_search |
+| (I)      | docs(pillar3): Batch 3.5 completion entry |
+
+### Test deltas
+
+| Metric | Baseline (post-Batch-3) | After Batch 3.5 | Delta |
+|---|---:|---:|---:|
+| Passing | **529** | **558** | **+29** |
+| Failing | **24** (pre-existing 5 buckets) | **23** (same buckets, 1 flaky source flipped green) | −1 |
+| Skipped | **3** | **3** | 0 |
+
+Command: `cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q`
+Baseline log: `/tmp/pytest_baseline_3_5.log`
+Post-Batch log: `/tmp/post_e_v2.log`
+
+**Zero regressions.** The 28 newly-added tests all pass in full-suite
+context. The −1 failure is a flaky source parser that flipped green
+this run (pre-existing bucket — not caused or fixed by Batch 3.5).
+
+**New test files (+28 passing):**
+  - `backend/tests/test_api_idor.py` — 17 tests
+    (parametrized unauth-401 × 10 + action-isolation × 3 + pipeline-isolation × 3 + roundtrip × 1)
+  - `backend/tests/test_worker_settings.py` — 3 tests
+    (functions list, REDIS_URL parsing, no-top-level-arq-import)
+  - `backend/tests/test_worker_send_notification.py` — 5 tests
+    (dispatches + marks sent, failed + error_message, mixed counts, idempotency, unknown job no-op)
+  - `backend/tests/test_main_scheduler_wiring.py` — 3 tests
+    (tick called force=True, each source called once, breaker-OPEN skipped)
+
+**Tests removed/replaced:** 0 — all net-new.
+
+### KPI deltas (where measurable)
+
+  - **Multi-user safety:** Before — two real users hitting
+    `/api/jobs/{id}/action` alias-collapse onto the placeholder tenant
+    and clobber each other (docs/IMPLEMENTATION_LOG.md Batch 2 entry §P1-1
+    deferral). After — every per-user route requires
+    `Depends(require_user)`; every repo method takes `user_id` and
+    scopes queries. `INSERT OR REPLACE` replaced with `ON CONFLICT(user_id,
+    job_id) DO UPDATE` matching migration 0002's widened UNIQUE.
+  - **Launchability:** Before — Batch 2 tasks could only be called
+    directly from tests; no `WorkerSettings` meant `arq` couldn't boot.
+    After — `arq src.workers.settings.WorkerSettings` starts the worker
+    with 4 functions registered and `redis_settings` parsed from
+    `REDIS_URL`. Smoke: `python -c "from src.workers.settings import
+    WorkerSettings; print([f.__name__ for f in WorkerSettings.functions])"`
+    → `['score_and_ingest', 'send_notification', 'mark_ledger_sent_task',
+    'mark_ledger_failed_task']` (verified 2026-04-19).
+  - **Freshness benefit:** Before — Batch 3 built the scheduler but
+    `main.py::run_search` still used `asyncio.gather`, so tier
+    intervals had zero production effect on the CLI path. After —
+    scheduler dispatches, breaker-OPEN sources are skipped, per-source
+    success/failure routes into the breaker in a single place.
+
+### What shipped (with file:line anchors)
+
+**Deliverable C — IDOR fix on legacy routes** (commit `56a66f3`):
+
+1. Route handlers threaded with `Depends(require_user)`:
+    - `backend/src/api/routes/actions.py:4` — import `CurrentUser, require_user`
+    - `backend/src/api/routes/actions.py:19,37,46,59` — 4 endpoints gated
+    - `backend/src/api/routes/pipeline.py:12` — import
+    - `backend/src/api/routes/pipeline.py:43,55,67,80,95` — 5 endpoints gated
+    - `backend/src/api/routes/jobs.py:10` — import
+    - `backend/src/api/routes/jobs.py:71,122,187` — 3 endpoints gated
+2. Repo methods threaded with `user_id` (`backend/src/repositories/database.py`):
+    - `insert_action(job_id, action, user_id, notes)` L282
+    - `delete_action(job_id, user_id)` L297
+    - `get_actions(user_id)` L304
+    - `get_action_counts(user_id)` L315
+    - `get_action_for_job(job_id, user_id)` L323
+    - `create_application(job_id, user_id)` L335
+    - `advance_application(job_id, stage, user_id)` L347
+    - `_get_application(job_id, user_id)` L358
+    - `get_applications(user_id, stage)` L374
+    - `get_application_counts(user_id)` L398
+    - `get_stale_applications(user_id, days)` L407
+3. `insert_action` SQL switched from `INSERT OR REPLACE(UNIQUE job_id)` to
+   `ON CONFLICT(user_id, job_id) DO UPDATE` matching migration 0002's
+   widened `UNIQUE(user_id, job_id)` constraint.
+4. Tests: `backend/tests/test_api_idor.py` — 17 tests all GREEN
+   (auth requirement parametrized over 10 endpoints + cross-user
+   isolation for actions AND pipeline + positive-control round-trip).
+
+**Deliverable D — ARQ runtime** (commit D):
+
+5. `backend/src/workers/settings.py:80` — `class WorkerSettings` with
+   `functions = [score_and_ingest, send_notification,
+   mark_ledger_sent_task, mark_ledger_failed_task]` (line 87).
+   `arq` import is lazy (only inside `_load_arq_redis_settings()`) per
+   CLAUDE.md rule #11 — verified by
+   `backend/tests/test_worker_settings.py::test_arq_not_imported_at_module_top`
+   which blocks `arq` imports via `sys.meta_path` and re-imports the
+   module without error.
+6. `backend/src/workers/tasks.py:199` — `async def send_notification(
+   ctx, user_id, job_id, urgency)` — reads the `jobs` row for title +
+   apply_url, calls `services.channels.dispatcher.dispatch` (or
+   `ctx['dispatcher']` in tests), writes one ledger row per channel via
+   `mark_ledger_sent` / `mark_ledger_failed`, returns `{'sent', 'failed'}`.
+7. `backend/src/workers/tasks.py:283` — `mark_ledger_sent_task(ctx, ...)`
+   and L292 `mark_ledger_failed_task(ctx, ...)` ctx wrappers for the
+   fan-out path.
+8. `_RedisSettings` stand-in dataclass at `backend/src/workers/settings.py:44`
+   exposes `.host` / `.port` / `.database` matching ARQ's
+   `RedisSettings` field names — structural compat, no hard dep at
+   test time.
+9. Tests: `backend/tests/test_worker_settings.py` (3 tests) +
+   `backend/tests/test_worker_send_notification.py` (5 tests) all GREEN.
+
+**Deliverable E — TieredScheduler wire-up** (commit `328e72f`):
+
+10. `backend/src/main.py:26` — `from src.services.scheduler import
+    TieredScheduler` import added.
+11. `backend/src/main.py:363` — `scheduler = TieredScheduler(sources,
+    registry)` replaces the `asyncio.gather(*[_fetch_source(s) ...])`
+    call at the old L356 site. `scheduler.tick(force=True)` returns
+    `[(source, result|Exception), ...]` which is reshaped back into
+    the downstream `per_source` / `results` contract via
+    `results_by_name` dict lookup.
+12. Breaker consultation moved FROM post-hoc record-failure loop TO
+    the scheduler's `can_proceed()` check before dispatch. Skipped
+    sources log `"%s: skipped (breaker OPEN)"` instead of
+    `"%s: FAILED"`.
+13. Tests: `backend/tests/test_main_scheduler_wiring.py` — 3 tests
+    (`test_run_search_uses_tiered_scheduler` — spy tick;
+    `test_each_registered_source_called_exactly_once` — 3 fake sources;
+    `test_breaker_open_source_is_skipped` — pre-trip breaker).
+
+### What got deferred
+
+- **`profile.py` + `search.py` auth-gating.** Neither touches
+  `user_actions` / `applications` / `user_feed`, so neither is an IDOR
+  vector per CLAUDE.md rule #10. Gating them is a separate
+  hardening decision (preventing unauthenticated scrapes / reading the
+  single-user profile JSON). Explicitly scope-ceilinged in the plan.
+- **Per-user `user_profiles` table.** `src/services/profile/storage.py`
+  still reads a single global `data/user_profile.json`. Batch 2
+  already named this as a deferral; Batch 3.5 doesn't move it.
+- **ARQ `run_forever` hookup to a system service** (systemd /
+  docker-compose / Render cron). `WorkerSettings` exists; `arq` can
+  boot. But there is no launcher config in `ops/` yet. Batch 4 scope.
+- **Tier-based concurrency in the scheduler.** `TieredScheduler.tick`
+  fan-outs via `asyncio.gather` without per-tier semaphores; the only
+  concurrency limit is per-source `RateLimiter` in `BaseJobSource`.
+  Explicit per-tier concurrency caps can land alongside the long-
+  running daemon if load profiling calls for them.
+- **Postgres migration** (Batch 2 §D4) — still deferred.
+- **Direct-URL 404→confirmed_expired ghost-detection verifier** (Batch 1
+  §deferred) — still deferred.
+
+### Pre-existing failure bucket — 5 test_api.py tests flip but don't grow
+
+Baseline Batch 3 left 6 test_api.py tests failing at the sqlite init
+path (`AttributeError: NoneType`). Post-Batch-3.5, 5 of them fail with
+`assert 401 == 200` instead — the new auth gate fires before the
+sqlite-init codepath they were failing on. Net failure count for that
+bucket is still 6 (with `test_status_returns_counts` staying at sqlite
+and `test_full_api_workflow` moving to 401). Fixing either path means
+registering a fixture user + patching `DB_PATH` + `_db` singleton
+reset, and belongs with the wider `test_api.py` rehabilitation that
+belongs in a follow-up. No regression — same count, different error
+surface.
+
+### Surprises / lessons
+
+- **Fixture binding trap — `from ... import name`**. The first pass of
+  `test_main_scheduler_wiring.py::fake_profile` monkeypatched
+  `src.services.profile.storage.load_profile`. That left
+  `src.main.load_profile` pointing at the unpatched original because
+  `main.py` did `from ... import load_profile` at module top, so the
+  storage module-level symbol is NOT what main reads. The fix is to
+  patch the BOUND name (`src.main.load_profile`) — three scheduler
+  tests passed in isolation but failed in full-suite context until the
+  monkeypatch targeted the right reference. Added a lesson-note to the
+  commit message.
+- **`git checkout -B <branch> origin/main` auto-sets upstream to
+  origin/main**. The first `git push` has to use `-u origin
+  pillar3/batch-3.5` to create a distinct remote branch; otherwise
+  git refuses to push to `origin/main` directly (good safety).
+  Documented in the handoff command for the reviewer.
+- **5 test_api.py tests now fail with 401 instead of NoneType**. I
+  interpreted that as "same bucket, new surface" rather than a new
+  regression, because the failure COUNT is unchanged. Calling this out
+  explicitly in the completion entry so the reviewer can judge whether
+  to block merge on the surface change or accept it.
+
+### CLAUDE.md / docs updated
+
+- `docs/plans/batch-3.5-plan.md` — new (the TDD plan; 150 lines).
+- `docs/IMPLEMENTATION_LOG.md` — this completion entry.
+- `CLAUDE.md` — no changes needed. The Batch 3 appendix's rule #12
+  wording already covers the IDOR contract that Deliverable C
+  enforces; repo-layer method signatures are implementation detail
+  that doesn't rise to CLAUDE.md scope. If the reviewer wants a
+  one-liner pointing future contributors at the user_id convention
+  on `JobDatabase` action/application methods, that can land with
+  merge-cleanup.
+
+### Memory file saved
+
+- `project_pillar3_batch_3_5_done.md` — to be written by the reviewer
+  after merge (generator worktree does not write into user memory).
+
+### Handoff
+
+Reviewer: your worktree is `.claude/worktrees/reviewer` on
+`pillar3/batch-3.5-review`. This completion entry is a DRAFT — verify
+every file:line anchor against the actual diff and the final
+full-suite regression run before merging. Particular review targets:
+
+1. **SQL injection safety of `insert_action` ON CONFLICT rewrite.** The
+   new SQL uses `?` placeholders; verify no f-string slipped in.
+2. **Ledger idempotency under real-world retry.** `send_notification`
+   assumes the UNIQUE(user_id, job_id, channel) constraint fires on
+   double-inserts; `test_send_notification_is_idempotent_per_channel`
+   proves this, but spot-check the SQL path in `_record_ledger_if_new`.
+3. **Scheduler results shape parity**. The `results = [...]` list
+   constructed at `main.py:396` must align with `sources` for
+   `_ghost_detection_pass` to work. Skipped (breaker-OPEN) sources
+   become `None` — same shape the function already tolerates (per
+   the `if isinstance(result, BaseException) or result is None:
+   continue` guard at `main.py:~163`).
+4. **`WorkerSettings.redis_settings` is a stand-in dataclass, not the
+   real ARQ `RedisSettings`.** ARQ accepts it structurally. If the
+   reviewer wants the real class, `_load_arq_redis_settings()` is
+   the lazy-load path — called by ARQ at boot, not at import.
+
+---
+
 ## Completion Entry Template
 
 When a batch merges, append a section using this template:
