@@ -54,6 +54,16 @@ MAX_DAYS_OLD = 7
 MIN_TITLE_GATE = float(os.getenv("MIN_TITLE_GATE", "0.15"))
 MIN_SKILL_GATE = float(os.getenv("MIN_SKILL_GATE", "0.15"))
 
+# Pillar 2 Batch 2.9 — multi-dimensional scoring weights.
+# JobScorer.score() adds these on top of the legacy 4-component formula
+# (title + skill + location + recency). The sum (legacy 100 + 30 new)
+# is clamped to 100 at the call site, so individual weights can be tuned
+# via env vars without changing the ceiling.
+SALARY_WEIGHT = int(os.getenv("SALARY_WEIGHT", "10"))
+SENIORITY_WEIGHT = int(os.getenv("SENIORITY_WEIGHT", "8"))
+VISA_WEIGHT = int(os.getenv("VISA_WEIGHT", "6"))
+WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
+
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))

@@ -317,11 +317,31 @@ def check_visa_flag(job: Job) -> bool:
 
 
 class JobScorer:
-    """Score jobs using dynamic keyword sets from a SearchConfig."""
+    """Score jobs using dynamic keyword sets from a SearchConfig.
 
-    def __init__(self, config):
-        """Accept a SearchConfig (from src.services.profile.models)."""
+    Pillar 2 Batch 2.9 — optional multi-dimensional scoring. When a caller
+    passes ``user_preferences`` + an ``enrichment_lookup`` callable, the
+    scorer consults `JobEnrichment` data to compute four additional
+    dimensions (salary / seniority / visa / workplace) on top of the
+    legacy 4-component formula (title + skill + location + recency). The
+    dimension weights live in `core/settings.py` and sum to 30 on top of
+    the old 100, clamped to 100 post-addition.
+    """
+
+    def __init__(self, config, *, user_preferences=None, enrichment_lookup=None):
+        """Accept a SearchConfig (from src.services.profile.models).
+
+        Optional kwargs (Batch 2.9):
+          * ``user_preferences`` — a `UserPreferences` dataclass with
+            `salary_min`, `salary_max`, `experience_level`, `needs_visa`,
+            `preferred_workplace` fields consulted by the new dimensions.
+          * ``enrichment_lookup`` — a callable `(job) -> JobEnrichment | None`
+            that returns the enriched row for a given job. Defaults to a
+            lambda that returns None (no enrichment dims contribute).
+        """
         self._config = config
+        self._user_preferences = user_preferences
+        self._enrichment_lookup = enrichment_lookup or (lambda job: None)
 
     def _title_score(self, job_title: str) -> int:
         title_lower = job_title.lower()
@@ -368,7 +388,29 @@ class JobScorer:
         recency_pts = recency_score_for_job(job)
         penalty = self._negative_penalty(job.title)
         foreign_penalty = _foreign_location_penalty(job.location)
-        total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+        base = (
+            title_pts + skill_pts + location_pts + recency_pts
+            - penalty - foreign_penalty
+        )
+
+        # Pillar 2 Batch 2.9 — additional enrichment-driven dimensions.
+        dim_bonus = 0
+        if self._user_preferences is not None:
+            enrichment = self._enrichment_lookup(job)
+            if enrichment is not None:
+                # Lazy import to avoid import cycles during first test collection.
+                from src.services.scoring_dimensions import (
+                    salary_score, seniority_score, visa_score, workplace_score,
+                )
+                prefs = self._user_preferences
+                dim_bonus += salary_score(
+                    enrichment, prefs.salary_min, prefs.salary_max
+                )
+                dim_bonus += seniority_score(enrichment, prefs.experience_level)
+                dim_bonus += visa_score(enrichment, prefs.needs_visa)
+                dim_bonus += workplace_score(enrichment, prefs.preferred_workplace)
+
+        total = base + dim_bonus
         return min(max(total, 0), 100)
 
     def check_visa_flag(self, job: Job) -> bool:

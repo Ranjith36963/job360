@@ -268,6 +268,14 @@ class UserPreferences:
     negative_keywords: list[str] = field(default_factory=list)
     about_me: str = ""
     github_username: str = ""
+    # Pillar 2 Batch 2.9 — multi-dimensional scoring inputs.
+    # `preferred_workplace` is the enum form of `work_arrangement` so the
+    # dimension scorer can match against `JobEnrichment.workplace_type`
+    # without string juggling. None → user has no preference → neutral score.
+    # `needs_visa` gates the visa scorer — when False the dim returns 0
+    # (no reward for something the user doesn't need).
+    preferred_workplace: Optional[str] = None   # "remote" | "hybrid" | "onsite" | None
+    needs_visa: bool = False
 
 
 @dataclass

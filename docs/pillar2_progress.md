@@ -424,3 +424,84 @@ Rollout steps for the operator:
   between `match_score` (max 100) and `_completeness` (max ~45). That
   keeps `match_score` dominant while still resolving a score tie decisively
   toward the enriched candidate.
+
+---
+
+## Batch 2.9 — Multi-dimensional scoring from enriched fields — MERGED
+
+**Merged:** <pending commit> on 2026-04-21
+
+**Plan coverage:**
+- Plan §4 Batch 2.9
+- Report item(s): #10 (salary) + #13 (7+ scoring dimensions)
+
+**Touches:**
+- **New file** `backend/src/core/fx.py`: +45 lines — 18-currency → GBP
+  rate table (GBP, USD, EUR, CAD, AUD, CHF, SEK, NOK, DKK, JPY, INR, SGD,
+  HKD, PLN, CZK, NZD, ZAR, AED). Unknown codes return 1.0 (safe degraded
+  behaviour — better to over-include than silently drop).
+- **New file** `backend/src/services/salary.py`: +85 lines —
+  `normalize_salary(salary, to_annual=True, to_currency="GBP")` returning
+  `(min_gbp_annual, max_gbp_annual)` or None. Frequency conversion
+  (hourly×2080 / daily×260 / weekly×52 / monthly×12). Tolerates both
+  Pydantic `SalaryBand` models and plain dicts (DB JSON path). Swapped
+  min/max are corrected, single-point bands mirror, unknown frequency
+  treated as annual.
+- **New file** `backend/src/services/scoring_dimensions.py`: +165 lines —
+  four scorers:
+    - `seniority_score` 0..8 (full on exact match, 62 % at 1-rank delta,
+      25 % at 2-rank, 0 at 3+; neutral half-weight on missing signal)
+    - `salary_score` 0..10 (band-overlap divided by smaller-span; neutral
+      5/10 when enrichment or user range missing — per research report)
+    - `visa_score` 0..6 (only awarded when `needs_visa=True`; 0 when user
+      doesn't need it; half on unknown/missing)
+    - `workplace_score` 0..6 (exact match → full, hybrid-as-compromise → half,
+      polar opposite → 0)
+- `backend/src/core/settings.py`: +11 lines — `SALARY_WEIGHT`,
+  `SENIORITY_WEIGHT`, `VISA_WEIGHT`, `WORKPLACE_WEIGHT` env-overridable
+  defaults (10/8/6/6).
+- `backend/src/services/profile/models.py`: +11 lines — `preferred_workplace:
+  Optional[str]` + `needs_visa: bool` added to `UserPreferences` with
+  safe defaults (None/False) so pre-Batch-2.9 profiles keep working.
+- `backend/src/services/skill_matcher.py`: +22 lines — `JobScorer.__init__`
+  widened with optional `user_preferences` + `enrichment_lookup` kwargs;
+  `JobScorer.score()` adds the four new dimension bonuses when both are
+  provided. Lazy import of `scoring_dimensions` inside `score()` keeps the
+  import graph acyclic. Legacy call sites (no kwargs) get identical
+  pre-Batch-2.9 behaviour.
+
+**Tests added:**
+- **New file** `backend/tests/test_salary.py` (+19 tests): FX identity +
+  USD/EUR conversion + unknown-currency passthrough, full annual / hourly /
+  daily / monthly / weekly roll-ups, single-point bands, swapped bounds,
+  dict input, enum + string frequency, non-GBP / non-annual rejection.
+- **New file** `backend/tests/test_scoring_dimensions.py` (+30 tests):
+  each of the 4 scorers at full / partial / 0 / neutral cases, plus 3
+  `JobScorer` integration tests (enriched outscores base, None-lookup
+  preserves base behaviour, perfect job caps at 100).
+
+**Test delta (broad, minus `test_main` + `test_sources`):** 825p/3s → 874p/3s (+49).
+
+**Deferred from this batch:**
+- Live FX rates — correctly held per plan ("hard-coded annual rates at
+  `core/fx.py`"). Rates bank what the plan said: coarse averages, not
+  payroll-grade.
+- Salary history / market comparison — out of scope.
+- Interview-likelihood / growth-trajectory dims (career-ops) — require
+  engagement telemetry, deferred to Batch 4.
+- Archetype-specific weight profiles — §9 deferred.
+
+**Post-merge notes:**
+- Opt-in integration: a legacy caller that does `JobScorer(config)` keeps
+  getting the 4-component formula. Only callers that pass BOTH
+  `user_preferences` and `enrichment_lookup` get the enrichment-driven
+  dimensions. This preserves backward compatibility for pipeline.py,
+  tests, and the CLI view.
+- The final `min(max(total, 0), 100)` cap is unchanged — a "perfect" job
+  can still max at 100 because base 70 (title 40 + skill 40 + loc 10 +
+  recency 10 − 0 − 0) caps at 100 before dims even add, and
+  dim_bonus maxes at 30 (10 + 8 + 6 + 6). With enrichment boosts the
+  sum can exceed 100, but the clamp handles it.
+- Test `test_jobscorer_dim_bonus_caps_at_100` explicitly verifies the
+  clamp; `test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base`
+  proves no double-counting of dimensions when the lookup is empty.
