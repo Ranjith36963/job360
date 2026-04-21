@@ -195,6 +195,19 @@ def reset_index_for_testing(data_dir: Optional[Path] = None) -> None:
     _INDEX = _ESCOIndex(data_dir=data_dir or _DEFAULT_ESCO_DIR)
 
 
+def is_available() -> bool:
+    """Pillar 2 Batch 2.6 — tell callers whether the ESCO index is live.
+
+    Downstream callers (Batch 2.6 `skill_matcher`) use this to decide
+    whether to route skills through ESCO-based canonicalisation in addition
+    to the Batch-2.3 static table. Returns False when the index artefacts
+    are missing or when the sentence-transformers dep isn't installed,
+    matching the "optional enrichment, never fatal" pattern.
+    """
+    _INDEX._load()
+    return _INDEX.available
+
+
 def index_status() -> dict:
     """Return a small dict describing current index state. Used by ops surfaces."""
     _INDEX._load()

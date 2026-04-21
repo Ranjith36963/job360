@@ -505,3 +505,87 @@ Rollout steps for the operator:
 - Test `test_jobscorer_dim_bonus_caps_at_100` explicitly verifies the
   clamp; `test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base`
   proves no double-counting of dimensions when the lookup is empty.
+
+---
+
+## Batch 2.6 — Embeddings + ChromaDB + ESCO activation — MERGED
+
+**Merged:** <pending commit> on 2026-04-21
+
+**Plan coverage:**
+- Plan §4 Batch 2.6
+- Report item(s): #8 (bi-encoder semantic search) + #16 (ESCO taxonomy)
+
+**Touches:**
+- `backend/pyproject.toml`: +10 lines — new `[semantic]` extra (supersedes
+  `[esco]`) that installs `sentence-transformers`, `numpy`, and `chromadb`
+  in one go. `[esco]` is retained as a deprecated alias.
+- **New file** `backend/src/services/embeddings.py`: +155 lines —
+  `encode_job(job, enrichment, encoder_factory=...)` returns a 384-dim
+  vector. CLAUDE.md rule #11 compliance: `sentence_transformers` + `numpy`
+  are imported lazily inside functions. Chunking policy: when job
+  description exceeds 300 words, split into 300-token windows with 50-word
+  overlap and max-pool per-chunk vectors (research report's
+  asymmetric-search trick). Encoder cache is module-level with
+  `reset_cache_for_testing()` for tests.
+- **New file** `backend/src/services/vector_index.py`: +115 lines — thin
+  `VectorIndex` over a ChromaDB persistent collection at
+  `backend/data/chroma/`. Methods: `upsert(job_id, vector, metadata)`,
+  `query(vector, k, filter_metadata)`, `delete(job_id)`, `count()`. Tests
+  inject a fake client to avoid real Chroma on pytest.
+- **New migration pair** `backend/migrations/0009_job_embeddings.{up,down}.sql` —
+  `job_embeddings` audit table (job_id FK, model_version, embedding_updated_at).
+  No user_id (shared catalog per CLAUDE.md rule #10). Index on
+  `model_version` for drift detection. Auto-discovered by the runner.
+- `backend/src/core/settings.py`: +5 lines — `SEMANTIC_ENABLED` env flag.
+- `backend/src/services/profile/skill_normalizer.py`: +12 lines —
+  `is_available()` helper so downstream callers (Batch 2.6 + 2.7) degrade
+  gracefully when the ESCO artefacts are missing. (The existing `_ESCOIndex`
+  class already handles the missing-index case via its `.available` flag.)
+- **New script** `scripts/build_job_embeddings.py`: +95 lines — one-shot
+  backfill that walks rows in `job_enrichment` missing a matching
+  `job_embeddings` entry (for the current `MODEL_NAME`), encodes each via
+  `encode_job()`, and upserts to ChromaDB. Idempotent: re-running skips
+  already-embedded jobs.
+
+**Tests added:**
+- **New file** `backend/tests/test_embeddings.py` (+15 tests):
+  `_chunk_words` + `_pool_chunk_vectors` helpers, `encode_job`
+  determinism, chunk-triggering on long descriptions, degraded no-enrichment
+  mode, empty-title fallback, `VectorIndex` upsert/query/delete/count with a
+  fake client (deterministic toy distance).
+- **New file** `backend/tests/test_skill_normalizer_activation.py` (+6 tests):
+  `is_available()` contract (absent / partial / empty-dir / reset), ops
+  `index_status()` reflects data_dir, `SEMANTIC_ENABLED` flag is boolean.
+
+**Test delta (broad, minus `test_main` + `test_sources`):** 874p/3s → 895p/3s (+21).
+
+**Deferred from this batch:**
+- Live-fire ESCO index build — the `scripts/build_esco_index.py` already
+  exists from Pillar 1; the operator runs it after `pip install '.[semantic]'`.
+- First-time job-embedding backfill — the `scripts/build_job_embeddings.py`
+  script is provided; gated behind `SEMANTIC_ENABLED=true` at the CLI.
+- Real ChromaDB persistence testing — held behind the mocked client since
+  pytest must stay fast and offline.
+- Fallback to FAISS — explicitly out-of-scope; stop condition #4 in the
+  generator prompt says escalate to reviewer if Chroma flakes in CI.
+
+**Post-merge notes:**
+- CLAUDE.md rule #11 literally targets `apprise`; the same principle
+  (~30 MB of heavy deps) applies to `sentence_transformers` (~300 MB) and
+  `chromadb` (~30 MB + dependencies). Both are imported lazily inside the
+  functions that use them. Neither appears at module top. Tests never
+  trigger a real import — they inject `encoder_factory` / `client=...`.
+- The 300-word chunking threshold uses word splits rather than proper
+  token splits to avoid shipping a dedicated tokenizer in library code —
+  this is a conservative approximation (English words average ≈1.3 tokens
+  in the MiniLM vocab so 300 words ≈ 400 tokens; good enough for the
+  short-query/long-document asymmetry the report flags).
+- Chunking path activates on `job.description`, not on the 250-char
+  `requirements_summary` — a reconciliation of the plan's two slightly
+  inconsistent mentions of the source field. Summary is always short,
+  description is where the long tail lives, and that's where chunking
+  actually pays off.
+- Vector dimensions are stored as plain Python `list[float]` in the
+  `encode_job` return value so downstream code doesn't need numpy to
+  persist. ChromaDB accepts plain lists.

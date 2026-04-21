@@ -64,6 +64,13 @@ SENIORITY_WEIGHT = int(os.getenv("SENIORITY_WEIGHT", "8"))
 VISA_WEIGHT = int(os.getenv("VISA_WEIGHT", "6"))
 WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
 
+# Pillar 2 Batch 2.6 — semantic stack feature flag.
+# When false (default), embeddings + ChromaDB + ESCO normalisation all skip.
+# When true, callers that check this flag activate the semantic retrieval path.
+SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "false").lower() in {
+    "1", "true", "yes", "on"
+}
+
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))

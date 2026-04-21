@@ -46,11 +46,20 @@ dev = [
 indeed = [
     "python-jobspy",
 ]
-# Batch 1.3b (Pillar 1) — ESCO skill normalisation. Heavy deps
-# (~300 MB for sentence-transformers + torch CPU wheel); keep optional.
-# Enable with ``pip install '.[esco]'`` then run
+# Pillar 2 Batch 2.6 — semantic stack (renamed from ``[esco]`` so one
+# install path covers BOTH ESCO skill canonicalisation AND Batch-2.6 job
+# embeddings + ChromaDB vector search). Heavy deps (~300 MB for
+# sentence-transformers + torch CPU wheel, plus ChromaDB); keep optional.
+# Enable with ``pip install '.[semantic]'`` then run
 # ``python scripts/build_esco_index.py --esco-csv skills_en.csv``
 # to generate ``backend/data/esco/{labels.json,embeddings.npy}``.
+semantic = [
+    "sentence-transformers>=2.2",
+    "numpy>=1.24",
+    "chromadb>=0.5",
+]
+# Deprecated alias — kept for compatibility with any operator workflow
+# still referencing the old extra. Points at the same packages.
 esco = [
     "sentence-transformers>=2.2",
     "numpy>=1.24",
