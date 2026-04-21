@@ -629,26 +629,29 @@ class TestEnrichCVFromGitHub:
 
 class TestKeywordGeneratorWithEnrichedData:
     def test_linkedin_skills_in_search_config(self):
+        # Batch 2.3 — skill lists exit the SearchConfig in canonical (lower-case,
+        # alias-resolved) form. "Spark" aliases to "apache spark".
         profile = UserProfile(
             cv_data=CVData(raw_text="test", skills=["Python"], linkedin_skills=["SQL", "Docker"]),
             preferences=UserPreferences(target_job_titles=["Data Engineer"], additional_skills=["Spark"]),
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert "Spark" in all_skills
-        assert "Python" in all_skills
-        assert "SQL" in all_skills
-        assert "Docker" in all_skills
+        assert "apache spark" in all_skills  # canonical for "Spark"
+        assert "python" in all_skills
+        assert "sql" in all_skills
+        assert "docker" in all_skills
 
     def test_github_skills_in_search_config(self):
+        # Batch 2.3 — canonical (lower-case) skill assertion.
         profile = UserProfile(
             cv_data=CVData(raw_text="test", skills=["Python"], github_skills_inferred=["TypeScript", "React"]),
             preferences=UserPreferences(target_job_titles=["Full Stack Developer"]),
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert "TypeScript" in all_skills
-        assert "React" in all_skills
+        assert "typescript" in all_skills
+        assert "react" in all_skills
 
     def test_linkedin_positions_as_titles(self):
         profile = UserProfile(
@@ -676,6 +679,7 @@ class TestKeywordGeneratorWithEnrichedData:
         assert "technology" in config.relevance_keywords
 
     def test_deduplication_across_all_sources(self):
+        # Batch 2.3 — canonical (lower-case) skill assertion.
         profile = UserProfile(
             cv_data=CVData(
                 raw_text="test",
@@ -687,19 +691,20 @@ class TestKeywordGeneratorWithEnrichedData:
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert all_skills.count("Python") == 1
-        assert all_skills.count("SQL") == 1
-        assert "Docker" in all_skills
-        assert "Go" in all_skills
+        assert all_skills.count("python") == 1
+        assert all_skills.count("sql") == 1
+        assert "docker" in all_skills
+        assert "go" in all_skills
 
     def test_empty_enrichment_fields_no_change(self):
+        # Batch 2.3 — canonical (lower-case) skill assertion.
         profile = UserProfile(
             cv_data=CVData(raw_text="test", skills=["Python", "SQL"]),
             preferences=UserPreferences(target_job_titles=["Engineer"]),
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert set(all_skills) == {"Python", "SQL"}
+        assert set(all_skills) == {"python", "sql"}
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +784,7 @@ class TestCombinedEnrichment:
         assert "Engineer" in cv.job_titles
 
     def test_all_sources_skill_dedup_in_search_config(self):
+        # Batch 2.3 — canonical (lower-case) skill assertion.
         profile = UserProfile(
             cv_data=CVData(
                 raw_text="test",
@@ -790,10 +796,10 @@ class TestCombinedEnrichment:
         )
         config = generate_search_config(profile)
         all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert all_skills.count("Python") == 1
-        assert all_skills.count("SQL") == 1
-        assert "Docker" in all_skills
-        assert "Go" in all_skills
+        assert all_skills.count("python") == 1
+        assert all_skills.count("sql") == 1
+        assert "docker" in all_skills
+        assert "go" in all_skills
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,616 @@
+"""Pillar 2 Batch 2.3 — static skill synonym table.
+
+A canonical-form dictionary that maps common aliases, abbreviations and
+spelling variants of skills to a single canonical string. Used on both the
+job-side and profile-side of the scoring pipeline so that e.g. "k8s" in a
+CV and "kubernetes" in a job description count as the same skill.
+
+Design:
+  - Flat `_ALIASES_TO_CANONICAL` dict — O(1) lookup, no external dependencies.
+  - Lower-cased keys; `canonicalize_skill()` normalises case + whitespace
+    before lookup.
+  - Unknown skills pass through unchanged (lower-cased + stripped) so the
+    scorer's word-boundary path keeps working for the long tail.
+  - Covers tech + UK-professional domains (medical, finance, legal, HR,
+    marketing). Expandable — adding an entry is a one-line change.
+
+Batch 2.6 will add embedding-based skill similarity on top of this table for
+the long tail that cannot be enumerated statically (ESCO activation). The
+static table remains the first-pass because it is zero-latency and produces
+exact matches for the canonical acronyms users actually type.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+
+# ---------------------------------------------------------------------------
+# Alias → canonical mappings
+# ---------------------------------------------------------------------------
+#
+# Convention: keys and values are lower-cased. Values are the canonical form
+# that the scorer will match against. Multi-word canonicals are allowed; the
+# skill-matching path is word-boundary aware, so "machine learning" will
+# still match inside a job description.
+
+_ALIASES_TO_CANONICAL: dict[str, str] = {
+    # --- Programming languages ---
+    "js": "javascript",
+    "ecmascript": "javascript",
+    "node": "node.js",
+    "nodejs": "node.js",
+    "node js": "node.js",
+    "ts": "typescript",
+    "py": "python",
+    "python3": "python",
+    "py3": "python",
+    "rb": "ruby",
+    "c sharp": "c#",
+    "csharp": "c#",
+    "cs": "c#",
+    "c plus plus": "c++",
+    "cpp": "c++",
+    "c-plus-plus": "c++",
+    "golang": "go",
+    "rs": "rust",
+    "swift lang": "swift",
+    "objc": "objective-c",
+    "obj-c": "objective-c",
+    "objective c": "objective-c",
+    "kotlin lang": "kotlin",
+    "kt": "kotlin",
+    "scala lang": "scala",
+    "ocaml lang": "ocaml",
+    "fsharp": "f#",
+    "f sharp": "f#",
+    "perl5": "perl",
+    "php7": "php",
+    "php8": "php",
+    "r-lang": "r",
+    "r lang": "r",
+    "matlab lang": "matlab",
+    "sql lang": "sql",
+    "tsql": "t-sql",
+    "t sql": "t-sql",
+    "plsql": "pl/sql",
+    "pl sql": "pl/sql",
+    "pl/sql": "pl/sql",
+
+    # --- Frontend frameworks & libraries ---
+    "reactjs": "react",
+    "react.js": "react",
+    "react js": "react",
+    "next": "next.js",
+    "nextjs": "next.js",
+    "next js": "next.js",
+    "nuxtjs": "nuxt",
+    "nuxt.js": "nuxt",
+    "vuejs": "vue",
+    "vue.js": "vue",
+    "vue js": "vue",
+    "angularjs": "angular",
+    "angular.js": "angular",
+    "ng": "angular",
+    "svelte js": "svelte",
+    "sveltekit": "svelte",
+    "ember.js": "ember",
+    "emberjs": "ember",
+    "backbone.js": "backbone",
+    "jquery.js": "jquery",
+    "lit-html": "lit",
+    "alpinejs": "alpine.js",
+    "tailwind": "tailwind css",
+    "tailwindcss": "tailwind css",
+    "tw": "tailwind css",
+    "mui": "material ui",
+    "material-ui": "material ui",
+    "chakra": "chakra ui",
+    "chakra-ui": "chakra ui",
+    "styled components": "styled-components",
+    "css3": "css",
+    "html5": "html",
+    "sass/scss": "sass",
+    "scss": "sass",
+    "redux toolkit": "redux",
+    "rtk": "redux",
+    "react query": "tanstack query",
+    "react-query": "tanstack query",
+
+    # --- Backend frameworks ---
+    "fast api": "fastapi",
+    "fast-api": "fastapi",
+    "django rest framework": "drf",
+    "django-rest-framework": "drf",
+    "flask py": "flask",
+    "expressjs": "express",
+    "express.js": "express",
+    "express js": "express",
+    "spring framework": "spring",
+    "spring boot framework": "spring boot",
+    "springboot": "spring boot",
+    "spring-boot": "spring boot",
+    "asp.net": "asp.net",
+    "aspnet": "asp.net",
+    "asp net": "asp.net",
+    "dotnet": ".net",
+    "dot net": ".net",
+    ".net core": ".net",
+    "dotnetcore": ".net",
+    "ror": "ruby on rails",
+    "rails": "ruby on rails",
+    "laravel php": "laravel",
+    "symfony php": "symfony",
+    "nestjs": "nest.js",
+    "nest.js": "nest.js",
+    "koa.js": "koa",
+    "graph ql": "graphql",
+    "gql": "graphql",
+    "rest apis": "rest api",
+    "restful": "rest api",
+    "soap apis": "soap",
+    "grpc apis": "grpc",
+    "gprc": "grpc",
+
+    # --- Databases ---
+    "pg": "postgresql",
+    "postgres": "postgresql",
+    "psql": "postgresql",
+    "postgre": "postgresql",
+    "mariadb db": "mariadb",
+    "mongo": "mongodb",
+    "mongo db": "mongodb",
+    "dynamo": "dynamodb",
+    "dynamo db": "dynamodb",
+    "rds": "amazon rds",
+    "redis db": "redis",
+    "memcached db": "memcached",
+    "cassandra db": "cassandra",
+    "elastic": "elasticsearch",
+    "elasticsearch db": "elasticsearch",
+    "es": "elasticsearch",
+    "opensearch db": "opensearch",
+    "sqlserver": "sql server",
+    "mssql": "sql server",
+    "ms sql": "sql server",
+    "sqlite3": "sqlite",
+    "cockroach": "cockroachdb",
+    "couchdb db": "couchdb",
+    "neo4j db": "neo4j",
+    "firestore db": "firestore",
+    "snowflake db": "snowflake",
+    "bigquery db": "bigquery",
+    "bq": "bigquery",
+    "redshift db": "amazon redshift",
+    "redshift": "amazon redshift",
+    "clickhouse db": "clickhouse",
+    "duckdb db": "duckdb",
+    "pinecone db": "pinecone",
+    "chroma": "chromadb",
+    "chroma db": "chromadb",
+    "weaviate db": "weaviate",
+    "qdrant db": "qdrant",
+    "milvus db": "milvus",
+
+    # --- Cloud ---
+    "aws": "amazon web services",
+    "amazon aws": "amazon web services",
+    "gcp": "google cloud platform",
+    "google cloud": "google cloud platform",
+    "gcp platform": "google cloud platform",
+    "azure cloud": "azure",
+    "ms azure": "azure",
+    "microsoft azure": "azure",
+    "digital ocean": "digitalocean",
+    "do": "digitalocean",
+    "heroku cloud": "heroku",
+    "vercel cloud": "vercel",
+    "netlify cloud": "netlify",
+    "railway cloud": "railway",
+    "render cloud": "render",
+    "fly.io": "fly",
+    "cloudflare workers": "cloudflare",
+    "cf": "cloudflare",
+    "s3": "amazon s3",
+    "ec2": "amazon ec2",
+    "lambda": "aws lambda",
+    "aws lambdas": "aws lambda",
+    "cloudfront": "amazon cloudfront",
+    "cloudwatch": "amazon cloudwatch",
+    "cloudformation": "aws cloudformation",
+    "eks": "amazon eks",
+    "ecs": "amazon ecs",
+    "iam": "aws iam",
+    "sqs": "amazon sqs",
+    "sns": "amazon sns",
+    "kms": "aws kms",
+    "gke": "google kubernetes engine",
+    "gcs": "google cloud storage",
+    "bigtable": "google bigtable",
+    "aks": "azure kubernetes service",
+    "azure functions": "azure functions",
+    "azure devops": "azure devops",
+
+    # --- DevOps / containers / CI-CD ---
+    "k8s": "kubernetes",
+    "kube": "kubernetes",
+    "kubectl": "kubernetes",
+    "docker containers": "docker",
+    "container": "docker",
+    "containers": "docker",
+    "podman containers": "podman",
+    "helm charts": "helm",
+    "tf": "terraform",
+    "terraform iac": "terraform",
+    "pulumi iac": "pulumi",
+    "ansible playbooks": "ansible",
+    "puppet agent": "puppet",
+    "chef config": "chef",
+    "argo cd": "argocd",
+    "argo-cd": "argocd",
+    "gh actions": "github actions",
+    "github-actions": "github actions",
+    "gitlab ci": "gitlab ci/cd",
+    "gitlab-ci": "gitlab ci/cd",
+    "gitlab cicd": "gitlab ci/cd",
+    "circle ci": "circleci",
+    "circle-ci": "circleci",
+    "travis-ci": "travis ci",
+    "jenkins ci": "jenkins",
+    "prom": "prometheus",
+    "grafana dashboards": "grafana",
+    "elk stack": "elk",
+    "datadog monitoring": "datadog",
+    "dd": "datadog",
+    "new relic": "newrelic",
+    "splunk logs": "splunk",
+    "sentry errors": "sentry",
+
+    # --- AI / ML / data ---
+    "ml": "machine learning",
+    "dl": "deep learning",
+    "rl": "reinforcement learning",
+    "nlp": "natural language processing",
+    "nlu": "natural language understanding",
+    "cv": "computer vision",
+    "genai": "generative ai",
+    "gen-ai": "generative ai",
+    "gen ai": "generative ai",
+    "gai": "generative ai",
+    "llm": "large language model",
+    "llms": "large language model",
+    "vlm": "vision-language model",
+    "rag": "retrieval augmented generation",
+    "rag pipelines": "retrieval augmented generation",
+    "sft": "supervised fine-tuning",
+    "rlhf": "reinforcement learning from human feedback",
+    "peft": "parameter-efficient fine-tuning",
+    "lora": "lora",
+    "qlora": "qlora",
+    "ann": "artificial neural network",
+    "cnn": "convolutional neural network",
+    "rnn": "recurrent neural network",
+    "gnn": "graph neural network",
+    "gan": "generative adversarial network",
+    "vae": "variational autoencoder",
+    "lstm": "long short-term memory",
+    "transformer models": "transformer",
+    "transformers": "transformer",
+    "tf learn": "tensorflow",
+    "tensor flow": "tensorflow",
+    "pytorch lightning": "pytorch",
+    "torch": "pytorch",
+    "hf": "hugging face",
+    "huggingface": "hugging face",
+    "hf transformers": "hugging face",
+    "sklearn": "scikit-learn",
+    "scikit learn": "scikit-learn",
+    "xgb": "xgboost",
+    "lgbm": "lightgbm",
+    "catboost ml": "catboost",
+    "mlflow ml": "mlflow",
+    "kubeflow ml": "kubeflow",
+    "sagemaker": "amazon sagemaker",
+    "vertex ai": "google vertex ai",
+    "openai api": "openai",
+    "anthropic api": "anthropic",
+    "claude api": "anthropic",
+    "gemini api": "gemini",
+    "mistral api": "mistral",
+    "cohere api": "cohere",
+    "langchain lib": "langchain",
+    "llama-index": "llamaindex",
+    "llama index": "llamaindex",
+    "chain of thought": "chain-of-thought",
+
+    # --- Data engineering ---
+    "airflow": "apache airflow",
+    "dbt cloud": "dbt",
+    "dbt-core": "dbt",
+    "kafka": "apache kafka",
+    "spark": "apache spark",
+    "pyspark": "apache spark",
+    "flink": "apache flink",
+    "storm": "apache storm",
+    "hive": "apache hive",
+    "pig": "apache pig",
+    "hadoop ecosystem": "hadoop",
+    "hdfs": "hadoop",
+    "beam": "apache beam",
+    "dataflow": "google cloud dataflow",
+    "emr": "amazon emr",
+    "databricks platform": "databricks",
+    "snowflake sql": "snowflake",
+    "fivetran etl": "fivetran",
+    "stitch etl": "stitch",
+    "superset": "apache superset",
+    "looker studio": "looker",
+    "power-bi": "power bi",
+    "powerbi": "power bi",
+    "tableau bi": "tableau",
+    "qlik": "qlik sense",
+
+    # --- Mobile ---
+    "react native app": "react native",
+    "rn": "react native",
+    "flutter app": "flutter",
+    "xamarin app": "xamarin",
+    "ionic framework": "ionic",
+    "android studio": "android",
+    "ios dev": "ios",
+    "swift ui": "swiftui",
+    "jetpack compose": "jetpack compose",
+
+    # --- Testing & QA ---
+    "jest js": "jest",
+    "mocha js": "mocha",
+    "chai js": "chai",
+    "cypress e2e": "cypress",
+    "playwright e2e": "playwright",
+    "selenium webdriver": "selenium",
+    "webdriverio": "selenium",
+    "junit5": "junit",
+    "testng tests": "testng",
+    "pytests": "pytest",
+    "rspec tests": "rspec",
+    "gherkin": "cucumber",
+    "tdd": "test-driven development",
+    "bdd": "behaviour-driven development",
+
+    # --- Security ---
+    "infosec": "information security",
+    "pentest": "penetration testing",
+    "pen testing": "penetration testing",
+    "pentesting": "penetration testing",
+    "appsec": "application security",
+    "netsec": "network security",
+    "iam security": "identity and access management",
+    "soc2": "soc 2",
+    "soc 2 compliance": "soc 2",
+    "iso27001": "iso 27001",
+    "nist csf": "nist cybersecurity framework",
+    "owasp top 10": "owasp",
+    "mfa": "multi-factor authentication",
+    "2fa": "multi-factor authentication",
+    "sso": "single sign-on",
+    "vpn": "virtual private network",
+    "siem": "security information and event management",
+    "soar": "security orchestration automation and response",
+
+    # --- Medical / NHS ---
+    "cpr": "cardiopulmonary resuscitation",
+    "als": "advanced life support",
+    "bls": "basic life support",
+    "ecg": "electrocardiogram",
+    "ekg": "electrocardiogram",
+    "eeg": "electroencephalogram",
+    "mri": "magnetic resonance imaging",
+    "ct scan": "computed tomography",
+    "ct-scan": "computed tomography",
+    "pet scan": "positron emission tomography",
+    "a&e": "accident and emergency",
+    "a and e": "accident and emergency",
+    "gp": "general practitioner",
+    "nhs": "national health service",
+    "mdt": "multidisciplinary team",
+    "mh": "mental health",
+    "cbt": "cognitive behavioural therapy",
+    "ocd": "obsessive-compulsive disorder",
+    "ptsd": "post-traumatic stress disorder",
+    "adhd": "attention-deficit/hyperactivity disorder",
+    "icu": "intensive care unit",
+    "ccu": "coronary care unit",
+    "hdu": "high dependency unit",
+    "nicu": "neonatal intensive care unit",
+    "gcp medical": "good clinical practice",
+    "mhra": "medicines and healthcare products regulatory agency",
+
+    # --- Finance ---
+    "p&l": "profit and loss",
+    "p and l": "profit and loss",
+    "pnl": "profit and loss",
+    "roi": "return on investment",
+    "roic": "return on invested capital",
+    "roe": "return on equity",
+    "roa": "return on assets",
+    "irr": "internal rate of return",
+    "npv": "net present value",
+    "ebitda": "earnings before interest taxes depreciation and amortization",
+    "ebit": "earnings before interest and taxes",
+    "kpi": "key performance indicator",
+    "kpis": "key performance indicator",
+    "m&a": "mergers and acquisitions",
+    "ipo": "initial public offering",
+    "aum": "assets under management",
+    "ftse": "financial times stock exchange",
+    "fca": "financial conduct authority",
+    "pra": "prudential regulation authority",
+    "aml": "anti-money laundering",
+    "kyc": "know your customer",
+    "cdd": "customer due diligence",
+    "vat": "value added tax",
+    "paye": "pay as you earn",
+    "hmrc": "her majesty's revenue and customs",
+
+    # --- Legal ---
+    "gdpr compliance": "gdpr",
+    "uk gdpr": "gdpr",
+    "dpa": "data protection act",
+    "nda": "non-disclosure agreement",
+    "sla": "service level agreement",
+    "tos": "terms of service",
+    "t&c": "terms and conditions",
+    "ip": "intellectual property",
+    "eula": "end-user license agreement",
+
+    # --- HR / Ops / PM ---
+    "hr": "human resources",
+    "hrbp": "human resources business partner",
+    "l&d": "learning and development",
+    "t&d": "training and development",
+    "oc": "organisational change",
+    "od": "organisational development",
+    "ems": "employee management system",
+    "ats": "applicant tracking system",
+    "d&i": "diversity and inclusion",
+    "dei": "diversity equity and inclusion",
+    "erg": "employee resource group",
+    "ooo": "out of office",
+    "pto": "paid time off",
+    "pip": "performance improvement plan",
+    "pm": "project management",
+    "pmp": "project management professional",
+    "prince2": "prince2",
+    "pmo": "project management office",
+    "agile methodology": "agile",
+    "scrum methodology": "scrum",
+    "safe framework": "scaled agile framework",
+    "kanban method": "kanban",
+
+    # --- Marketing ---
+    "seo optimization": "search engine optimization",
+    "search engine optimisation": "search engine optimization",
+    "sem": "search engine marketing",
+    "ppc": "pay-per-click",
+    "pay per click": "pay-per-click",
+    "cpc": "cost per click",
+    "cpm": "cost per mille",
+    "cpa": "cost per acquisition",
+    "cro": "conversion rate optimization",
+    "conversion rate optimisation": "conversion rate optimization",
+    "sms marketing": "sms marketing",
+    "crm": "customer relationship management",
+    "cms": "content management system",
+    "ux": "user experience",
+    "ui": "user interface",
+    "ux/ui": "user experience",
+    "ui/ux": "user experience",
+    "a/b testing": "a/b testing",
+    "ab testing": "a/b testing",
+    "mql": "marketing qualified lead",
+    "sql-lead": "sales qualified lead",
+    "b2b marketing": "business-to-business",
+    "b2c marketing": "business-to-consumer",
+
+    # --- General tech abbreviations ---
+    "oop": "object-oriented programming",
+    "fp": "functional programming",
+    "dsa": "data structures and algorithms",
+    "dsp": "digital signal processing",
+    "api": "application programming interface",
+    "apis": "application programming interface",
+    "cli": "command-line interface",
+    "gui": "graphical user interface",
+    "sdk": "software development kit",
+    "ide": "integrated development environment",
+    "pr": "pull request",
+    "prs": "pull request",
+    "mr": "merge request",
+    "ci": "continuous integration",
+    "cd": "continuous deployment",
+    "ci/cd": "continuous integration and delivery",
+    "cicd": "continuous integration and delivery",
+    "saas": "software as a service",
+    "paas": "platform as a service",
+    "iaas": "infrastructure as a service",
+    "iac": "infrastructure as code",
+    "sre": "site reliability engineering",
+    "ops": "operations",
+    "devops tools": "devops",
+    "devsecops tools": "devsecops",
+    "mlops tools": "mlops",
+    "dataops tools": "dataops",
+    "etl": "extract transform load",
+    "elt": "extract load transform",
+    "olap": "online analytical processing",
+    "oltp": "online transactional processing",
+    "dbms": "database management system",
+    "rdbms": "relational database management system",
+    "nosql": "non-relational database",
+
+    # --- Business / soft skills (short forms seen in UK CVs) ---
+    "comms": "communication",
+    "stakeholder mgmt": "stakeholder management",
+    "stakeholder-management": "stakeholder management",
+    "people mgmt": "people management",
+    "line mgmt": "line management",
+    "vendor mgmt": "vendor management",
+    "budget mgmt": "budget management",
+    "risk mgmt": "risk management",
+    "change mgmt": "change management",
+    "incident mgmt": "incident management",
+    "knowledge mgmt": "knowledge management",
+    "prod mgmt": "product management",
+    "product mgr": "product management",
+    "product manager": "product management",
+}
+
+
+# Reverse map for alias-lookup inside the scorer: given a canonical form, what
+# surface strings should we also search for in the job text?
+_CANONICAL_TO_ALIASES: dict[str, set[str]] = {}
+for _alias, _canonical in _ALIASES_TO_CANONICAL.items():
+    _CANONICAL_TO_ALIASES.setdefault(_canonical, set()).add(_alias)
+
+
+def _normalize(raw: str) -> str:
+    """Collapse whitespace and lower-case — the lookup key format."""
+    return " ".join(raw.strip().lower().split())
+
+
+@lru_cache(maxsize=2048)
+def canonicalize_skill(raw: str) -> str:
+    """Return the canonical form of a skill name.
+
+    - Case-insensitive, whitespace-normalised.
+    - Known aliases resolve to their canonical form.
+    - Unknown terms pass through with whitespace + case normalisation only.
+    - Idempotent: ``canonicalize_skill(canonicalize_skill(x)) == canonicalize_skill(x)``.
+
+    Examples::
+
+        canonicalize_skill("JS")      == "javascript"
+        canonicalize_skill("k8s")     == "kubernetes"
+        canonicalize_skill("Rust")    == "rust"      # unknown, pass-through
+        canonicalize_skill("  AWS  ") == "amazon web services"
+    """
+    key = _normalize(raw)
+    return _ALIASES_TO_CANONICAL.get(key, key)
+
+
+@lru_cache(maxsize=2048)
+def aliases_for(skill: str) -> tuple[str, ...]:
+    """Return the canonical form + every known alias pointing to it.
+
+    The returned tuple is the full surface-string search set for a single
+    skill. Callers use this to decide what to grep for in a job description.
+    Tuple for hashability (the function is LRU-cached)."""
+    canonical = canonicalize_skill(skill)
+    alias_set = set(_CANONICAL_TO_ALIASES.get(canonical, set()))
+    alias_set.add(canonical)
+    return tuple(sorted(alias_set))
+
+
+def total_entries() -> int:
+    """Size of the alias table — useful for tests that want to assert the
+    curated dictionary hasn't silently shrunk."""
+    return len(_ALIASES_TO_CANONICAL)

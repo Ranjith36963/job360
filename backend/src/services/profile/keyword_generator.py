@@ -4,11 +4,27 @@ from __future__ import annotations
 
 import re
 from src.core.keywords import VISA_KEYWORDS, LOCATIONS
+from src.core.skill_synonyms import canonicalize_skill
 from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.skill_tiering import (
     collect_evidence_from_profile,
     tier_skills_by_evidence,
 )
+
+
+def _canonicalize_skill_list(skills: list[str]) -> list[str]:
+    """Pillar 2 Batch 2.3 — collapse a skill list to canonical forms while
+    preserving order and dedup. E.g. ['JS', 'JavaScript'] → ['javascript'],
+    ['K8S'] → ['kubernetes']. Unknown entries pass through with case/whitespace
+    normalisation only, so domain-specific CV terms aren't discarded."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in skills:
+        canonical = canonicalize_skill(s)
+        if canonical and canonical not in seen:
+            out.append(canonical)
+            seen.add(canonical)
+    return out
 
 
 # Words to ignore when building relevance keywords
@@ -111,9 +127,9 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
 
     return SearchConfig(
         job_titles=titles,
-        primary_skills=primary,
-        secondary_skills=secondary,
-        tertiary_skills=tertiary,
+        primary_skills=_canonicalize_skill_list(primary),
+        secondary_skills=_canonicalize_skill_list(secondary),
+        tertiary_skills=_canonicalize_skill_list(tertiary),
         relevance_keywords=relevance_keywords,
         negative_title_keywords=negatives,
         locations=locations,

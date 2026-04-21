@@ -157,32 +157,37 @@ def test_collect_evidence_ignores_empty_strings():
 
 
 def test_keyword_generator_user_declared_lands_in_primary():
+    # Batch 2.3 — skill lists exit the SearchConfig in canonical (lower-case) form.
     prefs = UserPreferences(additional_skills=["Product Strategy"])
     cv = CVData()
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
-    assert "Product Strategy" in cfg.primary_skills
-    assert "Product Strategy" not in cfg.secondary_skills
-    assert "Product Strategy" not in cfg.tertiary_skills
+    assert "product strategy" in cfg.primary_skills
+    assert "product strategy" not in cfg.secondary_skills
+    assert "product strategy" not in cfg.tertiary_skills
 
 
 def test_keyword_generator_lone_github_lang_lands_in_tertiary():
+    # Batch 2.3 — canonical (lower-case) skill assertion.
     prefs = UserPreferences()
     cv = CVData(github_skills_inferred=["Haskell"])
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
-    assert "Haskell" in cfg.tertiary_skills
-    assert "Haskell" not in cfg.primary_skills
+    assert "haskell" in cfg.tertiary_skills
+    assert "haskell" not in cfg.primary_skills
 
 
 def test_keyword_generator_multi_source_skill_lands_in_primary():
-    """CV + LinkedIn = 4.0 → primary, beating lone user_declared of a different skill."""
+    """CV + LinkedIn = 4.0 → primary, beating lone user_declared of a different skill.
+
+    Batch 2.3 — canonical (lower-case) skill assertion.
+    """
     prefs = UserPreferences(additional_skills=["Marketing"])
     cv = CVData(skills=["Kubernetes"], linkedin_skills=["Kubernetes"])
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
     # Kubernetes (4.0) should be ordered before Marketing (3.0) within primary
-    assert cfg.primary_skills.index("Kubernetes") < cfg.primary_skills.index("Marketing")
+    assert cfg.primary_skills.index("kubernetes") < cfg.primary_skills.index("marketing")
 
 
 def test_keyword_generator_no_skills_yields_empty_tiers():
@@ -194,10 +199,13 @@ def test_keyword_generator_no_skills_yields_empty_tiers():
 
 
 def test_keyword_generator_includes_github_frameworks_in_relevance():
-    """Frameworks from Batch 1.2 should flow through tiering just like other skills."""
+    """Frameworks from Batch 1.2 should flow through tiering just like other skills.
+
+    Batch 2.3 — canonical (lower-case) skill assertion.
+    """
     prefs = UserPreferences()
     cv = CVData(github_frameworks=["Django", "React"])
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
     # github_dep alone = 1.5 → secondary
-    assert set(cfg.secondary_skills) >= {"Django", "React"}
+    assert set(cfg.secondary_skills) >= {"django", "react"}

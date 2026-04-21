@@ -18,6 +18,7 @@ from src.core.settings import (
     MIN_TITLE_GATE,
     MIN_SKILL_GATE,
 )
+from src.core.skill_synonyms import aliases_for
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -115,6 +116,21 @@ def _text_contains(text: str, term: str) -> bool:
     return bool(_word_boundary_pattern(term).search(text))
 
 
+def _text_contains_skill(text: str, skill: str) -> bool:
+    """Pillar 2 Batch 2.3 — skill-aware text search.
+
+    Expands the search to the skill's canonical form plus every known alias
+    (see src.core.skill_synonyms). Still uses word-boundary matching so
+    "ai" in "sustain" does not false-match. Unknown skills pass through
+    unchanged (aliases_for returns just the lower-cased canonical), so
+    this path is a superset of the legacy `_text_contains` behaviour.
+    """
+    for alias in aliases_for(skill):
+        if _word_boundary_pattern(alias).search(text):
+            return True
+    return False
+
+
 def _title_score(job_title: str) -> int:
     """Score a job title against the default JOB_TITLES list.
 
@@ -136,13 +152,13 @@ def _title_score(job_title: str) -> int:
 def _skill_score(text: str) -> int:
     points = 0
     for skill in PRIMARY_SKILLS:
-        if _text_contains(text, skill):
+        if _text_contains_skill(text, skill):
             points += PRIMARY_POINTS
     for skill in SECONDARY_SKILLS:
-        if _text_contains(text, skill):
+        if _text_contains_skill(text, skill):
             points += SECONDARY_POINTS
     for skill in TERTIARY_SKILLS:
-        if _text_contains(text, skill):
+        if _text_contains_skill(text, skill):
             points += TERTIARY_POINTS
     return min(points, SKILL_CAP)
 
@@ -325,13 +341,13 @@ class JobScorer:
     def _skill_score(self, text: str) -> int:
         points = 0
         for skill in self._config.primary_skills:
-            if _text_contains(text, skill):
+            if _text_contains_skill(text, skill):
                 points += PRIMARY_POINTS
         for skill in self._config.secondary_skills:
-            if _text_contains(text, skill):
+            if _text_contains_skill(text, skill):
                 points += SECONDARY_POINTS
         for skill in self._config.tertiary_skills:
-            if _text_contains(text, skill):
+            if _text_contains_skill(text, skill):
                 points += TERTIARY_POINTS
         return min(points, SKILL_CAP)
 

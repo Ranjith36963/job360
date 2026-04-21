@@ -162,3 +162,82 @@ leak in JobSpy against Indeed/Glassdoor).
   so the timestamp itself doesn't leak into scoring — the fabricated flag
   short-circuits to 0. Dropping the `date_found` column entirely is a
   later cleanup (see "Deferred").
+
+---
+
+## Batch 2.3 — Static skill synonym table — MERGED
+
+**Merged:** <pending commit> on 2026-04-21
+
+**Plan coverage:**
+- Plan §4 Batch 2.3
+- Report item(s): #3 (skill synonym table) + partial-#16 (ESCO activation
+  deferred to Batch 2.6)
+
+**Touches:**
+- **New file** `backend/src/core/skill_synonyms.py`: +493-entry canonical-form
+  dictionary covering tech (languages, frameworks, cloud, DevOps, AI/ML,
+  data engineering, mobile, testing, security) and UK-professional domains
+  (medical/NHS, finance, legal, HR/PM, marketing) plus general acronyms.
+  Exposes `canonicalize_skill(raw) -> str` (LRU-cached),
+  `aliases_for(skill) -> tuple[str, ...]` (reverse lookup for the scorer),
+  and `total_entries() -> int` (test guard against silent shrinkage).
+- `backend/src/services/skill_matcher.py`: +15 lines
+  - imports `aliases_for`,
+  - adds `_text_contains_skill(text, skill)` which searches the canonical
+    form and every known alias, still word-boundary aware,
+  - swaps `_text_contains` → `_text_contains_skill` in the 3 skill-matching
+    loops (module-level `_skill_score` + `JobScorer._skill_score`).
+- `backend/src/services/profile/keyword_generator.py`: +16 lines
+  - imports `canonicalize_skill`,
+  - adds `_canonicalize_skill_list(skills)` preserving first-occurrence order
+    and deduplicating under canonical forms,
+  - wraps the primary/secondary/tertiary skill lists in the final
+    `SearchConfig(...)` constructor so skills exit the profile pipeline in
+    canonical form.
+
+**Tests added:**
+- **New file** `backend/tests/test_skill_synonyms.py` (+64 tests):
+  - 47 parametrized canonicalization tests (29 tech + 18 UK professional),
+  - 6 normalisation-semantics tests (whitespace, empty, unknown,
+    idempotence),
+  - 3 `aliases_for()` reverse-lookup tests,
+  - 4 skill_matcher integration tests (alias text search, word boundary,
+    scoring invariance across alias vs canonical job text, profile-side
+    alias),
+  - 3 keyword_generator integration tests (alias dedup, unknown preservation,
+    order),
+  - 1 table-size floor guard.
+
+**Tests updated:** 3 in `test_profile.py`, 4 in `test_skill_tiering.py`, and
+5 in `test_linkedin_github.py` — all adjusted their string assertions from
+case-preserved (`"Python"`) to canonical (`"python"`), reflecting the plan's
+intent that skills exit the profile pipeline in canonical form. One
+assertion also tracks an alias collapse (`"Spark"` → `"apache spark"`).
+
+**Test delta (broad, minus `test_main` + `test_sources`):** 690p/3s → 754p/3s (+64).
+
+**Deferred from this batch:**
+- ESCO embedding scaffold activation — correctly held for Batch 2.6 per
+  plan's "Out of scope".
+- Embedding-based skill similarity for the long tail — Batch 2.6.
+- Auto-growth of the table from usage telemetry — out of scope (no
+  telemetry infrastructure yet).
+
+**Post-merge notes:**
+- Table size: 493 entries, within the plan's ~500 target. A
+  `total_entries() >= 400` floor-guard test catches any future shrinkage.
+- Why lower-case canonical forms and not preserve case? Because word-boundary
+  regex matching is already case-insensitive via `re.IGNORECASE`; the
+  canonical-form string only needs to be consistent for the dedup logic in
+  `_canonicalize_skill_list` to work. Lower-case is the most forgiving
+  choice for string comparison.
+- The `_text_contains_skill` helper is a pure superset of `_text_contains`:
+  when called with a skill that has no aliases, `aliases_for(skill)` returns
+  just `(canonical_form,)` which is one regex search — identical perf to
+  the legacy path. Skills WITH aliases pay O(n_aliases) regex searches per
+  skill, bounded by the max alias count on any single canonical form (about
+  4 for the current table).
+- Behavioural visibility: a user with `"k8s"` in their CV now matches jobs
+  describing `"kubernetes"` and vice versa. This is the primary user-facing
+  win — more real hits per search.

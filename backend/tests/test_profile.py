@@ -227,9 +227,11 @@ class TestKeywordGenerator:
             ),
         )
         cfg = generate_search_config(profile)
-        assert cfg.primary_skills == ["Product Strategy"]
-        assert set(cfg.secondary_skills) == {"Django", "Flask"}
-        assert cfg.tertiary_skills == ["Haskell"]
+        # Batch 2.3 — skill lists are now canonicalised (lower-cased,
+        # alias-resolved) before they enter the SearchConfig.
+        assert cfg.primary_skills == ["product strategy"]
+        assert set(cfg.secondary_skills) == {"django", "flask"}
+        assert cfg.tertiary_skills == ["haskell"]
         total = len(cfg.primary_skills) + len(cfg.secondary_skills) + len(cfg.tertiary_skills)
         assert total == 4
 
@@ -240,15 +242,19 @@ class TestKeywordGenerator:
         """
         profile = self._make_profile(skills=["Python"])
         config = generate_search_config(profile)
+        # Batch 2.3 — canonicalisation lower-cases skills on SearchConfig exit.
         assert config.primary_skills == []
-        assert config.secondary_skills == ["Python"]
+        assert config.secondary_skills == ["python"]
         assert config.tertiary_skills == []
 
     def test_single_user_declared_skill_becomes_primary(self):
-        """Batch 1.3a — an explicit user-declared skill remains primary."""
+        """Batch 1.3a — an explicit user-declared skill remains primary.
+
+        Batch 2.3 — canonicalisation lower-cases skills on SearchConfig exit.
+        """
         profile = self._make_profile(declared=["Python"])
         config = generate_search_config(profile)
-        assert config.primary_skills == ["Python"]
+        assert config.primary_skills == ["python"]
         assert config.secondary_skills == []
         assert config.tertiary_skills == []
 
