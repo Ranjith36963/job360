@@ -128,3 +128,87 @@ def is_hybrid_available(vector_index_count: int) -> bool:
     or whether to fall back to ``?mode=keyword`` when Chroma is empty.
     """
     return vector_index_count > 0
+
+
+# ---------------------------------------------------------------------------
+# Pillar 2 Batch 2.8 — cross-encoder rerank
+# ---------------------------------------------------------------------------
+
+
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# Plan §4 Batch 2.8 — rerank the top-50 survivors from RRF.
+_DEFAULT_RERANK_TOP_N = 50
+
+# Module-level cached CrossEncoder instance (like embeddings._ENCODER).
+_CROSS_ENCODER: Optional[object] = None
+
+
+def _load_cross_encoder() -> object:
+    """Lazy import (CLAUDE.md rule #11 spirit)."""
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is not None:
+        return _CROSS_ENCODER
+    try:
+        from sentence_transformers import CrossEncoder  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "sentence-transformers is not installed — run "
+            "`pip install '.[semantic]'` and retry."
+        ) from e
+    _CROSS_ENCODER = CrossEncoder(CROSS_ENCODER_MODEL)
+    return _CROSS_ENCODER
+
+
+def reset_cross_encoder_for_testing() -> None:
+    """Discard the cached cross-encoder — tests call this between swaps."""
+    global _CROSS_ENCODER
+    _CROSS_ENCODER = None
+
+
+def cross_encoder_rerank(
+    query: str,
+    candidates: list[tuple[Any, str]],
+    *,
+    top_n: int = _DEFAULT_RERANK_TOP_N,
+    encoder_factory: Optional[Callable[[], object]] = None,
+) -> list[tuple[Any, float]]:
+    """Rerank `candidates` by cross-encoder relevance to `query`.
+
+    Args:
+        query: the user's query text (profile summary / target role).
+        candidates: a list of ``(item_id, candidate_text)`` pairs, ordered
+            by the upstream RRF fusion (best first). Only the first
+            ``top_n`` are rescored — the research report's standard
+            rerank-on-top-K pattern.
+        top_n: rerank budget (default 50 per plan).
+        encoder_factory: test-only override returning a CrossEncoder-
+            compatible object with ``.predict(list[tuple[str, str]]) ->
+            list[float]``.
+
+    Returns:
+        ``[(item_id, rerank_score)]`` sorted descending by the new score.
+        Items beyond ``top_n`` keep their original order at the tail with
+        a sentinel score of -inf (so they always sit below the rescored
+        ones).
+    """
+    if not candidates:
+        return []
+
+    head = candidates[:top_n]
+    tail = candidates[top_n:]
+
+    encoder = encoder_factory() if encoder_factory else _load_cross_encoder()
+    pairs = [(query, text) for _id, text in head]
+    scores = encoder.predict(pairs)
+    # Normalise to a plain Python list[float] in case a numpy array comes back.
+    try:
+        scores = [float(s) for s in scores]
+    except TypeError:
+        scores = [float(scores)]
+
+    reranked_head = sorted(
+        ((item_id, score) for (item_id, _text), score in zip(head, scores)),
+        key=lambda kv: -kv[1],
+    )
+    reranked_tail = [(item_id, float("-inf")) for item_id, _text in tail]
+    return reranked_head + reranked_tail

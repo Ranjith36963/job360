@@ -171,3 +171,109 @@ def test_is_hybrid_available_false_when_empty():
 def test_is_hybrid_available_handles_negative_defensively():
     """A negative count is nonsense but shouldn't crash — degrade to False."""
     assert is_hybrid_available(-1) is False
+
+
+# ---------------------------------------------------------------------------
+# Batch 2.8 — cross-encoder rerank
+# ---------------------------------------------------------------------------
+
+
+from src.services.retrieval import (
+    CROSS_ENCODER_MODEL,
+    cross_encoder_rerank,
+    reset_cross_encoder_for_testing,
+)
+
+
+class _FakeCrossEncoder:
+    """Returns a deterministic score per (query, text) pair — scores are
+    the *negative* length of the text so shorter texts score higher. This
+    lets tests reason about ordering without a real model."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str]] = []
+
+    def predict(self, pairs):
+        self.calls.extend(pairs)
+        # Shorter text → higher score. Deterministic, no randomness.
+        return [-float(len(t)) for (_q, t) in pairs]
+
+
+def test_cross_encoder_rerank_reorders_by_fake_score():
+    reset_cross_encoder_for_testing()
+    # Longest text first; fake scorer prefers shortest, so should reverse.
+    candidates = [
+        (1, "this is a very long candidate text"),
+        (2, "short"),
+        (3, "mid length"),
+    ]
+    enc = _FakeCrossEncoder()
+    result = cross_encoder_rerank(
+        "query", candidates, top_n=10, encoder_factory=lambda: enc,
+    )
+    ids = [r[0] for r in result]
+    assert ids == [2, 3, 1]
+
+
+def test_cross_encoder_rerank_only_touches_top_n():
+    """Items past `top_n` must keep their original order at the tail."""
+    candidates = [(i, "t") for i in range(100)]
+    enc = _FakeCrossEncoder()
+    result = cross_encoder_rerank(
+        "query", candidates, top_n=5, encoder_factory=lambda: enc,
+    )
+    # Only 5 pairs sent to .predict().
+    assert len(enc.calls) == 5
+    # Tail items (rank 5..99) preserve original order at the bottom with
+    # -inf scores.
+    tail_ids = [r[0] for r in result[5:]]
+    assert tail_ids == list(range(5, 100))
+
+
+def test_cross_encoder_rerank_empty_candidates():
+    assert cross_encoder_rerank("query", []) == []
+
+
+def test_cross_encoder_rerank_preserves_candidate_ids():
+    """Item IDs (first tuple element) must be returned verbatim — no
+    implicit int conversion, no reordering by id."""
+    candidates = [("a", "text"), ("b", "xx"), ("c", "y")]
+    enc = _FakeCrossEncoder()
+    result = cross_encoder_rerank("q", candidates, encoder_factory=lambda: enc)
+    result_ids = {r[0] for r in result}
+    assert result_ids == {"a", "b", "c"}
+
+
+def test_cross_encoder_rerank_is_deterministic_on_ties():
+    """Same input → same output — stable sort when scores tie."""
+    candidates = [(i, "same") for i in range(10)]
+    enc = _FakeCrossEncoder()
+    r1 = cross_encoder_rerank("q", candidates, encoder_factory=lambda: enc)
+    enc2 = _FakeCrossEncoder()
+    r2 = cross_encoder_rerank("q", candidates, encoder_factory=lambda: enc2)
+    assert [x[0] for x in r1] == [x[0] for x in r2]
+
+
+def test_cross_encoder_model_constant_is_ms_marco_mini():
+    """Plan §4 Batch 2.8 pins the model — guard against drift."""
+    assert CROSS_ENCODER_MODEL == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+def test_cross_encoder_rerank_with_exact_top_n_candidates():
+    """Exactly top_n candidates → no tail, every item rescored."""
+    candidates = [(i, "a" * (10 - i)) for i in range(5)]
+    enc = _FakeCrossEncoder()
+    result = cross_encoder_rerank(
+        "q", candidates, top_n=5, encoder_factory=lambda: enc,
+    )
+    # Fake scores prefer shorter → the longest (item 0, len 10) ends up last.
+    assert result[0][0] == 4   # len 6 (shortest)
+    assert result[-1][0] == 0  # len 10 (longest)
+
+
+def test_cross_encoder_rerank_scores_are_float():
+    candidates = [(1, "a"), (2, "bb")]
+    enc = _FakeCrossEncoder()
+    result = cross_encoder_rerank("q", candidates, encoder_factory=lambda: enc)
+    for _id, score in result:
+        assert isinstance(score, float)

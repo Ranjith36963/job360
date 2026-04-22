@@ -653,3 +653,63 @@ Rollout steps for the operator:
   lifetimes, and testing both async-orchestrating paths without proxies
   is painful. Real callers (FastAPI route / ARQ worker) do the async
   glue and hand the orchestrator plain lists.
+
+---
+
+## Batch 2.8 — Cross-encoder rerank — MERGED
+
+**Merged:** <pending commit> on 2026-04-21
+
+**Plan coverage:**
+- Plan §4 Batch 2.8
+- Report item(s): #12 (cross-encoder rescoring on top-K)
+
+**Touches:**
+- `backend/src/services/retrieval.py`: +80 lines —
+  - `CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"`
+    (plan-pinned constant).
+  - `_load_cross_encoder()` lazy-import helper (CLAUDE.md rule #11 spirit
+    — the `sentence_transformers` CrossEncoder import lives inside the
+    function body, not at module top).
+  - `cross_encoder_rerank(query, candidates, top_n=50, encoder_factory=...)`
+    rescores the top-N survivors of RRF fusion. Items past `top_n` keep
+    their original order at the tail with a sentinel `-inf` score so they
+    never outrank rescored items.
+  - `reset_cross_encoder_for_testing()` helper so tests can swap models.
+- `backend/pyproject.toml`: **no change** — the `[semantic]` extra from
+  Batch 2.6 already installs `sentence-transformers`, which ships
+  `CrossEncoder` in the same package.
+
+**Tests added:** `backend/tests/test_retrieval.py` (+8 new tests in the same
+file that already covered RRF / retrieve_for_user):
+- fake-cross-encoder reorder by shortest-text-wins,
+- top_n budget respected (predict called only top_n times),
+- empty candidate list,
+- item ids preserved regardless of type (str or int),
+- deterministic ordering under ties,
+- constant guard (`CROSS_ENCODER_MODEL == "cross-encoder/ms-marco-MiniLM-L-6-v2"`),
+- exactly-top_n candidate edge case,
+- scores returned as `float`.
+
+**Test delta (broad, minus `test_main` + `test_sources`):** 912p/3s → 920p/3s (+8).
+
+**Deferred from this batch:**
+- Fine-tuning the cross-encoder on domain data — correctly held per plan
+  (needs engagement data).
+- Batch reranking with `predict_proba` for calibrated scores — the
+  current path uses raw cross-encoder logits, which are fine for ranking
+  but not for thresholding. No threshold use case yet.
+- Integration with `retrieve_for_user` — the orchestrator could post-process
+  its return with a reranker call, but the plan describes this as a
+  separate stage the caller decides whether to run (latency cost).
+  `retrieve_for_user` stays fast-path; callers that want reranking call
+  `cross_encoder_rerank` on its output.
+
+**Post-merge notes:**
+- Tail sentinel value `-inf` is deliberate: it keeps rescored head items
+  strictly above unrescored tail items even if the cross-encoder returns
+  negative scores (plausible — raw logits can be negative).
+- `.predict()` on sentence-transformers' CrossEncoder accepts a list of
+  `(query, candidate)` tuples and returns a 1-D array. Our fake encoder
+  respects the same shape so the wiring can be trusted once the real
+  model is loaded on production.
