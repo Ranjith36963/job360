@@ -254,13 +254,13 @@ assertion also tracks an alias collapse (`"Spark"` → `"apache spark"`).
 
 **Touches:**
 - `backend/src/sources/base.py`: +10 lines — class-level `DOMAINS: set[str] = {"general"}` default on `BaseJobSource`, with a comment explaining the filter semantics. Additive per CLAUDE.md rule #2.
-- **17 source files** (one-line `DOMAINS = {...}` override each):
-  - tech: `apis_free/{devitjobs,landingjobs,aijobs,hn_jobs}.py`, `other/{hackernews,nofluffjobs}.py`, `scrapers/{bcs_jobs,aijobs_global,aijobs_ai,jobtensor}.py`
-  - healthcare: `feeds/{nhs_jobs,nhs_jobs_xml,biospace}.py`
-  - academia: `feeds/{jobs_ac_uk,uni_jobs}.py`
-  - education: `apis_free/teaching_vacancies.py`
-  - education + general (apprenticeships span all trades): `apis_free/gov_apprenticeships.py`
-  - climate: `scrapers/climatebase.py`
+- **18 source files** (one-line `DOMAINS = {...}` override each):
+  - tech (10): `apis_free/{devitjobs,landingjobs,aijobs,hn_jobs}.py`, `other/{hackernews,nofluffjobs}.py`, `scrapers/{bcs_jobs,aijobs_global,aijobs_ai,jobtensor}.py`
+  - healthcare (3): `feeds/{nhs_jobs,nhs_jobs_xml,biospace}.py`
+  - academia (2): `feeds/{jobs_ac_uk,uni_jobs}.py`
+  - education (1): `apis_free/teaching_vacancies.py`
+  - education + general (1 — apprenticeships span all trades): `apis_free/gov_apprenticeships.py`
+  - climate (1): `scrapers/climatebase.py`
 - **New file** `backend/src/services/domain_classifier.py`: +130 lines —
   `classify_user_domain(profile) -> set[str]` mapping profile titles + skills
   + LinkedIn positions + industry to the 5-domain taxonomy, plus
@@ -278,8 +278,11 @@ assertion also tracks an alias collapse (`"Spark"` → `"apache spark"`).
   general-not-emitted + word-boundary false-match + LinkedIn positions.
 - 6 `source_matches_user_domains` gate tests (empty user, general short-circuit,
   healthcare/tech exclusivity, multi-tag overlap).
-- 18 source-attribute assertions via `parametrize` (base default + 17
-  specifically-tagged sources) + one gov_apprenticeships multi-tag test.
+- 19 source-attribute assertions (base default + 17 single-domain
+  parametrized cases covering the tech/healthcare/academia/education/climate
+  taxonomy + one `gov_apprenticeships` multi-tag `{"education", "general"}`
+  test). The 18th overridden source is `gov_apprenticeships`, covered by its
+  own dedicated test rather than the parametrize list.
 - 4 end-to-end `_build_sources` tests (healthcare skips tech; tech skips
   healthcare; zero-profile → all 49; `--source` filter still works).
 
@@ -293,7 +296,9 @@ assertion also tracks an alias collapse (`"Spark"` → `"apache spark"`).
 
 **Post-merge notes:**
 - Minimal-touch pattern: `DOMAINS` defaults to `{"general"}` on the base
-  class, so only the 17 non-general sources carry an override. General
+  class, so only the 18 non-general sources carry an override (10 tech +
+  3 healthcare + 2 academia + 1 education + 1 education∪general + 1
+  climate). General
   sources (Reed, Adzuna, JSearch, Jooble, Google Jobs, Careerjet, Findwork,
   Arbeitnow, Indeed/Glassdoor, TheMuse, LinkedIn, all 11 ATS boards,
   remote-focused RSS feeds, 80000Hours) inherit silently — the filter
@@ -803,7 +808,7 @@ file that already covered RRF / retrieve_for_user):
 1. `71e4be1` — Batch 2.2 gate-pass scoring
 2. `be874b2` — Batch 2.1 date-confidence fix for signal-less sources
 3. `b15355d` — Batch 2.3 static skill synonym table (~493 entries)
-4. `32ad853` — Batch 2.4 source routing by domain (17 sources tagged)
+4. `32ad853` — Batch 2.4 source routing by domain (18 sources tagged)
 5. `cf3c0bd` — Batch 2.5 LLM job enrichment pipeline (+ migration 0008)
 6. `cf8e8bd` — Batch 2.9 multi-dimensional scoring (salary + seniority + visa + workplace)
 7. `46f7c62` — Batch 2.6 embeddings + ChromaDB + ESCO activation (+ migration 0009)

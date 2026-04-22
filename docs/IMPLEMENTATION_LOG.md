@@ -814,7 +814,7 @@ IOCP hang) → **936p/3s, 0f** (+303 new tests). Plan target of ≥700p met 1.3�
 | 1 | 2.2 Gate-pass scoring | `71e4be1` | #2 | +12 |
 | 2 | 2.1 Date-confidence fix (linkedin/workable/personio/pinpoint → `"fabricated"`) | `be874b2` | #1 (label-only) | +8 |
 | 3 | 2.3 Static skill synonym table (~493 entries) | `b15355d` | #3 + partial-#16 | +64 |
-| 4 | 2.4 Source routing by domain (17 sources tagged, 5-domain taxonomy) | `32ad853` | #4 | +47 |
+| 4 | 2.4 Source routing by domain (18 sources tagged, 5-domain taxonomy) | `32ad853` | #4 | +47 |
 | 5 | 2.5 LLM job enrichment pipeline (+ migration 0008) | `cf3c0bd` | #5 | +24 |
 | 6 | 2.9 Multi-dimensional scoring (salary + seniority + visa + workplace) | `cf8e8bd` | #10, #13 | +49 |
 | 7 | 2.6 Embeddings + ChromaDB + ESCO activation (+ migration 0009) | `46f7c62` | #8, #16 | +21 |

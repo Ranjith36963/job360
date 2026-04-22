@@ -208,7 +208,10 @@ def test_base_source_has_general_default():
     ("src.sources.scrapers.aijobs_ai", "AIJobsAISource", {"tech"}),
 ])
 def test_domain_tagged_sources_have_correct_domains(import_path, class_name, expected):
-    """The 17 specifically-domain-tagged sources must advertise the right set."""
+    """The 17 single-domain sources in this parametrize list must advertise
+    the right set. (The 18th overridden source, gov_apprenticeships with
+    multi-tag {"education", "general"}, has its own dedicated test below —
+    total count of `DOMAINS`-overridden sources is 18.)"""
     import importlib
     mod = importlib.import_module(import_path)
     cls = getattr(mod, class_name)
