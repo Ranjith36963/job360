@@ -27,6 +27,12 @@ dependencies = [
     "apprise>=1.7.0",               # multi-channel notification sending
     "email-validator>=2.1.0",       # pydantic EmailStr (via pydantic[email])
     "cryptography>=42.0.0",         # Fernet for user_channels credential storage
+    # Pillar 2 Batch 2.10 — four-layer dedup. Both are small + C-backed;
+    # imported lazily so they only activate when the RapidFuzz / TF-IDF
+    # layers are actually invoked (tests that only touch Layer 1 still run
+    # without these installed).
+    "rapidfuzz>=3.0",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]

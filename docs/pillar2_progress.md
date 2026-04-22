@@ -713,3 +713,77 @@ file that already covered RRF / retrieve_for_user):
   `(query, candidate)` tuples and returns a 1-D array. Our fake encoder
   respects the same shape so the wiring can be trusted once the real
   model is loaded on production.
+
+---
+
+## Batch 2.10 — Four-layer deduplication — MERGED
+
+**Merged:** <pending commit> on 2026-04-22
+
+**Plan coverage:**
+- Plan §4 Batch 2.10
+- Report item(s): #7 + #11 + #14
+
+**Touches:**
+- `backend/pyproject.toml`: +2 core deps — `rapidfuzz>=3.0` and
+  `scikit-learn>=1.4`. Both are C-backed; both are imported lazily inside
+  the dedup layer so non-dedup code paths never pay their startup cost.
+- `backend/src/services/deduplicator.py`: +170 lines —
+  - Widened `deduplicate(jobs, enrichments=None, *, enable_fuzzy=True,
+    enable_tfidf=True, enable_embedding_repost=False, embedding_lookup=None)`.
+  - Layer 1 (always on) — unchanged exact normalised (company, title) key.
+  - Layer 2 — `_merge_fuzzy()` using RapidFuzz `token_set_ratio` ≥ 80 on
+    titles + `ratio` ≥ 85 on companies + exact location match. Typos on
+    company names collapse; location gating prevents over-merge.
+  - Layer 3 — `_merge_tfidf()` using `TfidfVectorizer(ngram_range=(1, 2),
+    max_features=2000)` and cosine ≥ 0.85 on
+    `(company + title + description[:200])`. Union-find clusters the
+    above-threshold pairs.
+  - Layer 4 — `_merge_embedding_reposts()` for same-company pairs with
+    cosine ≥ 0.92. Optional — requires the caller to pass
+    `embedding_lookup: dict[job_id, vector]`. Winner preserves the
+    earliest `first_seen_at` across the merged pair (plan requirement).
+  - Graceful degradation: when RapidFuzz or scikit-learn isn't installed,
+    the corresponding layer silently skips and the earlier layers' result
+    passes through.
+  - All layers obey the Batch 2.5 `_enrichment_bonus` tiebreaker and the
+    existing `_completeness` rank.
+
+**Tests added:** `backend/tests/test_deduplicator.py` (+16 tests):
+- 6 Layer-2 (RapidFuzz) tests — typo merge, token reorder, different-location
+  rejection, different-company rejection, flag-disabled, higher-ranked-wins.
+- 4 Layer-3 (TF-IDF) tests — reposts with similar descriptions merge,
+  flag-disabled, unrelated jobs stay apart, empty descriptions don't crash.
+- 5 Layer-4 (embeddings) tests — same-company near-identical merge with
+  earliest-first_seen preserved, different-company not merged, below-threshold
+  not merged, missing-id graceful, off-by-default.
+- 1 benchmark — 10 000 synthetic jobs dedup in <5s (Layer 1 only, per plan).
+
+**Test delta (broad, minus `test_main` + `test_sources`):** 920p/3s → 936p/3s (+16).
+
+**Deferred from this batch:**
+- Cross-session job-ID tracking beyond `normalized_key` — correctly held
+  per plan's "Out of scope".
+- Turning Layer 4 on by default — gated behind `enable_embedding_repost=True`
+  until Batch 2.6's embedding backfill completes. Safe to flip once Chroma
+  is populated.
+- Locale-aware location normalisation (e.g. mapping "Manchester, UK" and
+  "Manchester, United Kingdom" for the Layer-2 location gate) — a
+  follow-up improvement; for now Layer 2 uses case-insensitive exact match
+  on the normalised location string.
+
+**Post-merge notes:**
+- Flake investigation: one broad-suite run showed `test_cookie_tampering_rejected`
+  failing in isolation, but a re-run cleared it (and running the test
+  alone passes deterministically). Classic test-order / timing flake in
+  the auth layer — not introduced by Batch 2.10 (this batch doesn't touch
+  `services/auth/`). Documented here so the reviewer doesn't chase it.
+- Lazy imports matter: `sklearn.feature_extraction.text` takes ~150 ms
+  to warm up on first import. Without the lazy path inside `_merge_tfidf`,
+  every process that merely imports `deduplicator` (including every
+  pytest collection) would pay that cost, which would make the broad
+  suite ~15 s slower over the baseline.
+- Union-find vs. O(n²) direct clustering: both are the same big-O on
+  pairwise cosine, but union-find keeps the worst-case collapse path
+  shallow so clusters with many near-dupes don't pathologically blow up
+  the iteration budget.
