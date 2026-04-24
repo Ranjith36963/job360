@@ -142,7 +142,8 @@
       "Bash(break)",
       "Bash(PYTHONUNBUFFERED=1 python -u -m pytest tests/test_database.py tests/test_api.py tests/test_models.py tests/test_scorer.py tests/test_deduplicator.py -p no:randomly --tb=short)",
       "Read(//tmp/**)",
-      "Bash(make verify-step-0 *)"
+      "Bash(make verify-step-0 *)",
+      "Bash(awk '{print $2}')"
     ]
   },
   "disabledMcpjsonServers": [
