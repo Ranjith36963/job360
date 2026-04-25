@@ -16,9 +16,10 @@ from typing import Any, Callable, Optional
 
 import aiosqlite
 
+from src.core.settings import ENRICHMENT_THRESHOLD
 from src.models import Job
 from src.services.feed import FeedService
-from src.services.job_enrichment import _build_enrichment_lookup
+from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import JobScorer
@@ -83,6 +84,10 @@ async def score_and_ingest(
     feed = FeedService(db)
     ingested = 0
     queued = 0
+    # B10 — track whether we've fanned out an enrich_job_task for this job.
+    # Enrichment is shared catalog (CLAUDE.md rule #17): one enqueue per job,
+    # not one per user. We fire once the FIRST user crosses ENRICHMENT_THRESHOLD.
+    enrichment_enqueued = False
 
     if users_override is not None:
         targets = users_override
@@ -138,6 +143,18 @@ async def score_and_ingest(
                 if hasattr(result, "__await__"):
                     await result
             queued += 1
+
+        # B10 — fan out enrichment for catalog-quality jobs. Mirror the
+        # CLI path's threshold-gated enrich_batch invocation (Agent-Enrichment),
+        # but as ARQ enqueue (one task per job, not blocking the worker tick).
+        # Default-off via ENRICHMENT_ENABLED (CLAUDE.md rule #18).
+        if ENRICHMENT_ENABLED and not enrichment_enqueued and score >= ENRICHMENT_THRESHOLD:
+            enqueue = ctx.get("enqueue")
+            if enqueue is not None:
+                result = enqueue("enrich_job_task", job_id)
+                if hasattr(result, "__await__"):
+                    await result
+            enrichment_enqueued = True
 
     return {"ingested": ingested, "notifications_queued": queued}
 

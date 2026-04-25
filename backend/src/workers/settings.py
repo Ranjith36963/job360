@@ -21,6 +21,7 @@ To run the worker in production::
 Environment:
   REDIS_URL  — redis://host:port[/db] (default: redis://localhost:6379)
 """
+
 from __future__ import annotations
 
 import os
@@ -29,6 +30,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from src.workers.tasks import (
+    enrich_job_task,
     mark_ledger_failed_task,
     mark_ledger_sent_task,
     score_and_ingest,
@@ -45,6 +47,7 @@ class _RedisSettings:
     field names, so this shim can even be used directly at runtime when the
     user wants a minimal dep.
     """
+
     host: str = "localhost"
     port: int = 6379
     database: int = 0
@@ -89,6 +92,7 @@ class WorkerSettings:
         send_notification,
         mark_ledger_sent_task,
         mark_ledger_failed_task,
+        enrich_job_task,
     ]
 
     # At test time this is the stand-in shim. At runtime ARQ reads the

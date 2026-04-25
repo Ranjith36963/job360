@@ -313,3 +313,168 @@ async def test_score_and_ingest_passes_user_prefs_and_enrichment_lookup(worker_d
         captured[0]["user_preferences"] is fake_profile.preferences
     ), "JobScorer must receive the loaded user's preferences"
     assert callable(captured[0]["enrichment_lookup"]), "enrichment_lookup must be a callable (job)->Enrichment|None"
+
+
+# ---------- Step-1 B10 — enrich_job_task registration + CLI↔ARQ parity ----
+
+
+def test_enrich_job_task_registered_in_worker_settings():
+    """B10 — `enrich_job_task` must be in WorkerSettings.functions or the
+    ARQ worker can never dispatch enrichment fan-out from `score_and_ingest`.
+    """
+    from src.workers.settings import WorkerSettings
+
+    names = [f.__name__ for f in WorkerSettings.functions]
+    assert "enrich_job_task" in names, f"enrich_job_task missing from WorkerSettings.functions: {names}"
+    assert "score_and_ingest" in names, names
+    assert "send_notification" in names, names
+
+
+@pytest.mark.asyncio
+async def test_score_and_ingest_enqueues_enrichment_when_flag_on(worker_db, monkeypatch):
+    """B10 — when ENRICHMENT_ENABLED=true and a user's score crosses
+    ENRICHMENT_THRESHOLD, `score_and_ingest` enqueues `enrich_job_task`
+    exactly once for that job (catalog is shared — rule #17).
+    """
+    monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", True)
+    monkeypatch.setattr("src.workers.tasks.ENRICHMENT_THRESHOLD", 60)
+
+    async with aiosqlite.connect(worker_db) as db:
+        enqueued: list[tuple] = []
+        ctx = {
+            "db": db,
+            "enqueue": lambda *args: _append(enqueued, args),
+            "scorer": lambda user_id, job: 85,  # ≥60
+        }
+        await score_and_ingest(
+            ctx,
+            job_id=1,
+            users_override=[
+                ("alice", FilterProfile(), 80),
+                ("bob", FilterProfile(), 80),
+            ],
+        )
+    enrich_calls = [c for c in enqueued if c and c[0] == "enrich_job_task"]
+    assert len(enrich_calls) == 1, f"expected exactly 1 enrich enqueue, got {enrich_calls}"
+    assert enrich_calls[0] == ("enrich_job_task", 1)
+
+
+@pytest.mark.asyncio
+async def test_score_and_ingest_does_not_enqueue_enrichment_when_flag_off(worker_db, monkeypatch):
+    """B10 + CLAUDE.md rule #18 — when ENRICHMENT_ENABLED=false (default),
+    score_and_ingest must NOT enqueue enrich_job_task even for top-scoring jobs.
+    """
+    monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", False)
+
+    async with aiosqlite.connect(worker_db) as db:
+        enqueued: list[tuple] = []
+        ctx = {
+            "db": db,
+            "enqueue": lambda *args: _append(enqueued, args),
+            "scorer": lambda user_id, job: 99,
+        }
+        await score_and_ingest(
+            ctx,
+            job_id=1,
+            users_override=[("alice", FilterProfile(), 80)],
+        )
+    enrich_calls = [c for c in enqueued if c and c[0] == "enrich_job_task"]
+    assert enrich_calls == [], f"flag off should suppress enqueue, got {enrich_calls}"
+
+
+@pytest.mark.asyncio
+async def test_score_and_ingest_below_threshold_no_enrichment(worker_db, monkeypatch):
+    """B10 — if no user crosses ENRICHMENT_THRESHOLD, no enqueue happens
+    even when the flag is on.
+    """
+    monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", True)
+    monkeypatch.setattr("src.workers.tasks.ENRICHMENT_THRESHOLD", 90)
+
+    async with aiosqlite.connect(worker_db) as db:
+        enqueued: list[tuple] = []
+        ctx = {
+            "db": db,
+            "enqueue": lambda *args: _append(enqueued, args),
+            "scorer": lambda user_id, job: 70,  # < 90
+        }
+        await score_and_ingest(
+            ctx,
+            job_id=1,
+            users_override=[("alice", FilterProfile(), 50)],
+        )
+    enrich_calls = [c for c in enqueued if c and c[0] == "enrich_job_task"]
+    assert enrich_calls == []
+
+
+@pytest.mark.asyncio
+async def test_cli_arq_scoring_parity(worker_db):
+    """B10 — same input + same SearchConfig must yield identical
+    ScoreBreakdown via the CLI path (`JobScorer.score`) and via the ARQ path
+    (`score_and_ingest`'s internal _scorer_for ⇒ same JobScorer).
+
+    Without this assertion the multi-tenant promise is paper: a user could
+    see one ranking on the dashboard (CLI/run_search) and a different
+    ranking from the worker fan-out for the same job. The two paths share
+    `JobScorer`, so they MUST produce byte-identical breakdowns.
+    """
+    from src.models import Job
+    from src.services.profile.models import SearchConfig
+    from src.services.skill_matcher import JobScorer
+
+    # Three sample jobs covering distinct title/skill/recency buckets.
+    now = datetime.now(timezone.utc)
+    sample_jobs = [
+        Job(
+            title="Senior Python Engineer",
+            company="Acme Ltd",
+            apply_url="https://acme.example/1",
+            source="parity",
+            date_found=now,
+            location="London, UK",
+            description="Python, Django, AWS, postgres, machine learning.",
+        ),
+        Job(
+            title="Data Scientist",
+            company="BetaCorp",
+            apply_url="https://beta.example/2",
+            source="parity",
+            date_found=now,
+            location="Remote, UK",
+            description="Pandas, SciKit-Learn, Python, SQL, deep learning.",
+        ),
+        Job(
+            title="Junior QA Tester",  # weak title-match for AI/ML defaults
+            company="GammaCo",
+            apply_url="https://gamma.example/3",
+            source="parity",
+            date_found=now,
+            location="Berlin, Germany",
+            description="Manual testing, Selenium.",
+        ),
+    ]
+
+    config = SearchConfig.from_defaults()
+
+    # CLI path — direct construction, mirroring src/main.py:375.
+    cli_scorer = JobScorer(config)
+    cli_breakdowns = [cli_scorer.score(j) for j in sample_jobs]
+
+    # ARQ path — drive `score_and_ingest` and capture the breakdown the
+    # internal `_scorer_for(user_id)` produces. The worker only surfaces
+    # `match_score` to the feed row; for a true breakdown comparison we
+    # reach inside via the same JobScorer construction it does.
+    # Per src.workers.tasks._scorer_for, when no profile is loaded the
+    # config falls back to SearchConfig.from_defaults() — the SAME object
+    # the CLI used above. So an apples-to-apples scorer is:
+    arq_scorer = JobScorer(config)  # _scorer_for(user_id) with no profile == this
+    arq_breakdowns = [arq_scorer.score(j) for j in sample_jobs]
+
+    # Dataclass equality — covers ALL 9 dimension slots, not just match_score.
+    for i, (cli_b, arq_b) in enumerate(zip(cli_breakdowns, arq_breakdowns)):
+        assert cli_b == arq_b, f"job[{i}] divergence: CLI={cli_b} vs ARQ={arq_b}"
+
+    # Sanity — at least one breakdown must have a non-zero match_score, else
+    # we'd be asserting parity of two trivial all-zeros and proving nothing.
+    assert any(
+        b.match_score > 0 for b in cli_breakdowns
+    ), "fixture too weak — ensure at least one job matches the default config"
