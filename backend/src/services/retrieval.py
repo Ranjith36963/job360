@@ -11,10 +11,12 @@ per-source rankings without needing score calibration between the two.
 When embeddings are unavailable (Chroma empty or ``sentence_transformers``
 not installed), the retrieval gracefully falls back to keyword-only.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger("job360.services.retrieval")
 
@@ -97,26 +99,48 @@ def retrieve_for_user(
     if keyword_fn is None:
         raise ValueError("keyword_fn is required")
 
+    # Step-1 S3 — telemetry. Local import + flag check so the counter stays
+    # inert when SEMANTIC_ENABLED is false (CLAUDE.md rule #18).
+    import os  # noqa: PLC0415 — local for env-var read at call time
+
+    from src.utils.telemetry import hybrid_telemetry  # noqa: PLC0415
+
+    semantic_on = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    tel = hybrid_telemetry() if semantic_on else None
+
     # Stage A — keyword top 500.
     keyword_ids = keyword_fn(profile, 500)
     if not keyword_ids:
         # Nothing to fuse. Bail early — semantic results alone would
         # produce rankings with no keyword corroboration.
+        if tel is not None:
+            tel.keyword_calls += 1
+            tel.fallback_reason = "empty_index"
         return []
 
     # Stage B — semantic top 500 (when available).
     semantic_ids: list[int] = []
-    if semantic_fn is not None:
+    fallback_reason: str | None = None
+    if semantic_fn is None:
+        fallback_reason = "stack_unavailable"
+    else:
         try:
             semantic_ids = semantic_fn(profile, 500)
         except Exception as e:
             logger.warning("Semantic retrieval failed — falling back to keyword: %s", e)
             semantic_ids = []
+            fallback_reason = "exception"
 
     if not semantic_ids:
+        if tel is not None:
+            tel.keyword_calls += 1
+            tel.fallback_reason = fallback_reason or "empty_index"
         return keyword_ids[:k]
 
     # Stage C — RRF fusion.
+    if tel is not None:
+        tel.hybrid_calls += 1
+        tel.fallback_reason = None
     fused = reciprocal_rank_fusion([keyword_ids, semantic_ids], k=rrf_k)
     return [item for item, _score in fused[:k]]
 
@@ -152,8 +176,7 @@ def _load_cross_encoder() -> object:
         from sentence_transformers import CrossEncoder  # type: ignore
     except ImportError as e:
         raise RuntimeError(
-            "sentence-transformers is not installed — run "
-            "`pip install '.[semantic]'` and retry."
+            "sentence-transformers is not installed — run " "`pip install '.[semantic]'` and retry."
         ) from e
     _CROSS_ENCODER = CrossEncoder(CROSS_ENCODER_MODEL)
     return _CROSS_ENCODER

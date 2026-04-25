@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 import logging
+import time
+import uuid
 from datetime import datetime, timezone
 
 import aiohttp
@@ -95,7 +97,8 @@ from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
 from src.sources.scrapers.jobtensor import JobTensorSource
 from src.sources.scrapers.linkedin import LinkedInSource
-from src.utils.logger import setup_logging
+from src.utils.logger import set_run_uuid, setup_logging
+from src.utils.telemetry import source_timer
 
 logger = logging.getLogger("job360.main")
 
@@ -323,6 +326,11 @@ async def run_search(
     no_notify: bool = False,
 ) -> dict:
     setup_logging(log_level)
+    # Step-1 S1 — set the per-run correlation id BEFORE the first log line so
+    # every subsequent record carries it via the contextvar formatter.
+    run_uuid = str(uuid.uuid4())
+    set_run_uuid(run_uuid)
+    run_started_at = time.perf_counter()
     logger.info("=" * 60)
     logger.info("Job360 - Starting job search run")
     if source_filter:
@@ -420,6 +428,33 @@ async def run_search(
 
             registry = default_breaker_registry()
             pre_states = {s.name: registry.get(s.name).state for s in sources}
+
+            # Step-1 S2 — wrap each source's fetch_jobs in a per-source timer.
+            # `source_timer` populates `t.duration_ms` after the call returns;
+            # we record the wall-clock duration AND any raised exception into
+            # two dicts that we persist to run_log at end-of-run.
+            per_source_duration: dict[str, int] = {}
+            per_source_errors: dict[str, int] = {}
+
+            def _instrument(src):
+                original_fetch = src.fetch_jobs
+
+                async def _timed_fetch():
+                    started_ns = time.perf_counter_ns()
+                    try:
+                        with source_timer(src.name):
+                            return await original_fetch()
+                    except BaseException:
+                        per_source_errors[src.name] = per_source_errors.get(src.name, 0) + 1
+                        raise
+                    finally:
+                        elapsed_ms = max(0, (time.perf_counter_ns() - started_ns) // 1_000_000)
+                        per_source_duration[src.name] = int(elapsed_ms)
+
+                src.fetch_jobs = _timed_fetch  # type: ignore[method-assign]
+
+            for s in sources:
+                _instrument(s)
 
             scheduler = TieredScheduler(sources, registry)
             paired = await scheduler.tick(force=True)
@@ -627,8 +662,16 @@ async def run_search(
                 logger.info("No new jobs to report")
                 logger.info("Job360: No new jobs found this run.")
 
-            # Log run
-            await db.log_run(stats)
+            # Log run — Step-1 S1+S2: persist run_uuid + per-source timing/errors
+            # + total wall-clock duration into the run_log row.
+            total_duration = time.perf_counter() - run_started_at
+            await db.log_run(
+                stats,
+                run_uuid=run_uuid,
+                per_source_errors=per_source_errors,
+                per_source_duration=per_source_duration,
+                total_duration=total_duration,
+            )
 
         logger.info("Job360 run complete")
     finally:

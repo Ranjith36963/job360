@@ -124,6 +124,14 @@ async def enrich_batch(
     if not jobs:
         return []
 
+    # Step-1 S3 — telemetry counter increments. Stays inert when
+    # ENRICHMENT_ENABLED is false (CLAUDE.md rule #18) — callers gate the
+    # entry into ``enrich_batch`` itself on the flag, so reaching this
+    # point already implies the flag is ON.
+    from src.utils.telemetry import enrichment_telemetry  # local import — keeps the dep cheap
+
+    tel = enrichment_telemetry()
+
     sem = asyncio.Semaphore(semaphore_limit)
 
     async def _one(job: Job) -> Optional[JobEnrichment]:
@@ -133,6 +141,7 @@ async def enrich_batch(
                 if job_id is not None:
                     try:
                         if await has_enrichment(conn, job_id):
+                            tel.cache_hits += 1
                             return None
                     except Exception as e:  # noqa: BLE001 — never block the batch on a DB hiccup
                         logger.warning(
@@ -141,11 +150,20 @@ async def enrich_batch(
                             e,
                         )
             try:
+                tel.llm_calls += 1
                 return await enrich_job(
                     job,
                     llm_extract_validated_fn=llm_extract_validated_fn,
                 )
+            except asyncio.TimeoutError:
+                tel.timeouts += 1
+                logger.warning(
+                    "enrich_batch: enrich_job timed out for %s",
+                    getattr(job, "id", job.title),
+                )
+                return None
             except Exception as e:  # noqa: BLE001 — one bad job must not kill the batch
+                tel.validation_failures += 1
                 logger.warning(
                     "enrich_batch: enrich_job failed for %s: %s",
                     getattr(job, "id", job.title),

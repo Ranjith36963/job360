@@ -12,12 +12,22 @@ lazily inside the functions that use it. Tests inject an
 `encoder_factory` that returns a fake encoder so no real 80 MB model
 is downloaded during pytest.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Callable, Iterable, Optional
+import os
+import time
+from collections.abc import Iterable
+from typing import Callable, Optional
 
 logger = logging.getLogger("job360.services.embeddings")
+
+
+def _semantic_enabled() -> bool:
+    """Read ``SEMANTIC_ENABLED`` at call time so tests can monkey-patch the env."""
+
+    return os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -44,8 +54,7 @@ def _load_encoder() -> object:
         from sentence_transformers import SentenceTransformer  # type: ignore
     except ImportError as e:
         raise RuntimeError(
-            "sentence-transformers is not installed — run "
-            "`pip install '.[semantic]'` and retry."
+            "sentence-transformers is not installed — run " "`pip install '.[semantic]'` and retry."
         ) from e
     _ENCODER = SentenceTransformer(MODEL_NAME)
     return _ENCODER
@@ -73,7 +82,7 @@ def _chunk_words(text: str, size: int, overlap: int) -> list[str]:
     if step <= 0:
         step = size
     for start in range(0, len(words), step):
-        window = words[start:start + size]
+        window = words[start : start + size]
         if not window:
             break
         chunks.append(" ".join(window))
@@ -127,40 +136,47 @@ def encode_job(
         A `list[float]` of length 384 (plain Python to keep the DB write
         path JSON-safe).
     """
-    encoder = encoder_factory() if encoder_factory else _load_encoder()
+    started_ns = time.perf_counter_ns()
+    try:
+        encoder = encoder_factory() if encoder_factory else _load_encoder()
 
-    title = (getattr(job, "title", None) or "").strip()
-    description = (getattr(job, "description", "") or "").strip()
+        title = (getattr(job, "title", None) or "").strip()
+        description = (getattr(job, "description", "") or "").strip()
 
-    if enrichment is None:
-        # Degraded mode: title + description (chunked if long), no enriched
-        # fields to round things out.
-        if not description or len(description.split()) <= _CHUNK_SIZE_WORDS:
-            return _encode_text((f"{title} | {description}").strip(" |") or "job",
-                                encoder)
+        if enrichment is None:
+            # Degraded mode: title + description (chunked if long), no enriched
+            # fields to round things out.
+            if not description or len(description.split()) <= _CHUNK_SIZE_WORDS:
+                return _encode_text(
+                    (f"{title} | {description}").strip(" |") or "job",
+                    encoder,
+                )
+            chunks = _chunk_words(description, _CHUNK_SIZE_WORDS, _CHUNK_OVERLAP_WORDS)
+            return _pool_chunk_vectors([_encode_text(f"{title} | {c}", encoder) for c in chunks])
+
+        summary = (getattr(enrichment, "requirements_summary", "") or "").strip()
+        required = getattr(enrichment, "required_skills", []) or []
+        required_joined = " ".join(required)
+
+        base_text = f"{title} | {summary} | {required_joined}".strip(" |")
+
+        # Chunk the long description (unbounded) rather than the 250-char summary.
+        desc_words = description.split()
+        if not description or len(desc_words) <= _CHUNK_SIZE_WORDS:
+            return _encode_text(base_text or title or "job", encoder)
+
         chunks = _chunk_words(description, _CHUNK_SIZE_WORDS, _CHUNK_OVERLAP_WORDS)
-        return _pool_chunk_vectors(
-            [_encode_text(f"{title} | {c}", encoder) for c in chunks]
-        )
+        chunk_texts = [f"{title} | {summary} | {required_joined} | {c}".strip(" |") for c in chunks]
+        chunk_vecs = [_encode_text(t, encoder) for t in chunk_texts]
+        return _pool_chunk_vectors(chunk_vecs)
+    finally:
+        # Step-1 S3 — record encode duration. Stays inert when SEMANTIC_ENABLED
+        # is false (CLAUDE.md rule #18). Local import keeps the path cheap.
+        if _semantic_enabled():
+            from src.utils.telemetry import embeddings_telemetry
 
-    summary = (getattr(enrichment, "requirements_summary", "") or "").strip()
-    required = getattr(enrichment, "required_skills", []) or []
-    required_joined = " ".join(required)
-
-    base_text = f"{title} | {summary} | {required_joined}".strip(" |")
-
-    # Chunk the long description (unbounded) rather than the 250-char summary.
-    desc_words = description.split()
-    if not description or len(desc_words) <= _CHUNK_SIZE_WORDS:
-        return _encode_text(base_text or title or "job", encoder)
-
-    chunks = _chunk_words(description, _CHUNK_SIZE_WORDS, _CHUNK_OVERLAP_WORDS)
-    chunk_texts = [
-        f"{title} | {summary} | {required_joined} | {c}".strip(" |")
-        for c in chunks
-    ]
-    chunk_vecs = [_encode_text(t, encoder) for t in chunk_texts]
-    return _pool_chunk_vectors(chunk_vecs)
+            tel = embeddings_telemetry()
+            tel.encode_duration_ms += int(max(0, (time.perf_counter_ns() - started_ns) // 1_000_000))
 
 
 def reset_cache_for_testing() -> None:
