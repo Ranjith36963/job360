@@ -10,6 +10,7 @@ from src.core.settings import (
     ADZUNA_APP_KEY,
     CAREERJET_AFFID,
     DB_PATH,
+    ENRICHMENT_THRESHOLD,
     EXPORTS_DIR,
     FINDWORK_API_KEY,
     JOOBLE_API_KEY,
@@ -31,7 +32,11 @@ from src.services.domain_classifier import (
     classify_user_domain,
     source_matches_user_domains,
 )
-from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
+from src.services.job_enrichment import (
+    ENRICHMENT_ENABLED,
+    _build_enrichment_lookup,
+    enrich_batch,
+)
 from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
@@ -497,6 +502,22 @@ async def run_search(
             # Filter by minimum score
             unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
             logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
+
+            # Step-1 B7 — gate LLM enrichment by score. No-op when the flag
+            # is OFF (CLAUDE.md rule #18). Only high-scored jobs go to the
+            # LLM, and the call fans out via a bounded semaphore so a slow
+            # provider can't block the pipeline.
+            if ENRICHMENT_ENABLED:
+                high_scored = [
+                    j for j in unique_jobs if j.match_score is not None and j.match_score >= ENRICHMENT_THRESHOLD
+                ]
+                if high_scored:
+                    logger.info(
+                        "Enriching %s jobs with match_score >= %s",
+                        len(high_scored),
+                        ENRICHMENT_THRESHOLD,
+                    )
+                    await enrich_batch(high_scored, semaphore_limit=10, conn=db._conn)
 
             if dry_run:
                 # Dry run: show results without DB writes or notifications

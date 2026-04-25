@@ -14,6 +14,7 @@ CLAUDE.md compliance:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -83,6 +84,76 @@ async def enrich_job(
     prompt = _build_prompt(job)
     enrichment = await fn(prompt, JobEnrichment, _SYSTEM_PROMPT)
     return enrichment
+
+
+async def enrich_batch(
+    jobs: list[Job],
+    *,
+    semaphore_limit: int = 10,
+    skip_existing: bool = True,
+    conn: Optional[aiosqlite.Connection] = None,
+    llm_extract_validated_fn: Optional[LLMExtractFn] = None,
+) -> list[Optional[JobEnrichment]]:
+    """Enrich a batch of jobs concurrently, bounded by a semaphore.
+
+    Step-1 B7. Sequential ``enrich_job()`` calls would block ``run_search``
+    on a 200-call cascade against the LLM provider chain. ``enrich_batch``
+    parallelises with an ``asyncio.Semaphore`` (default ``semaphore_limit=10``)
+    so one slow provider response doesn't head-of-line-block the rest.
+
+    Per-job errors are caught and logged — one bad LLM response cannot kill
+    the batch. The corresponding slot in the returned list is ``None``.
+
+    Args:
+        jobs: jobs to enrich. Order preserved in the result.
+        semaphore_limit: max concurrent in-flight ``enrich_job`` calls.
+        skip_existing: when True (default), call ``has_enrichment(conn, job.id)``
+            before invoking the LLM and short-circuit to ``None`` if a row
+            already exists. Requires ``conn``; if ``conn`` is ``None`` the
+            skip check is bypassed (caller may dedupe upstream).
+        conn: optional aiosqlite connection used by the ``skip_existing``
+            check. ``None`` is fine for tests / one-shot batches.
+        llm_extract_validated_fn: forwarded to each ``enrich_job`` call —
+            tests inject a mock here to avoid live HTTP (rule #4).
+
+    Returns:
+        List of the same length as ``jobs``. ``None`` entries indicate
+        enrichment was skipped (already enriched, validation failed, or
+        the per-job LLM error was swallowed). Order matches input.
+    """
+    if not jobs:
+        return []
+
+    sem = asyncio.Semaphore(semaphore_limit)
+
+    async def _one(job: Job) -> Optional[JobEnrichment]:
+        async with sem:
+            if skip_existing and conn is not None:
+                job_id = getattr(job, "id", None)
+                if job_id is not None:
+                    try:
+                        if await has_enrichment(conn, job_id):
+                            return None
+                    except Exception as e:  # noqa: BLE001 — never block the batch on a DB hiccup
+                        logger.warning(
+                            "enrich_batch: has_enrichment check failed for job %s: %s",
+                            job_id,
+                            e,
+                        )
+            try:
+                return await enrich_job(
+                    job,
+                    llm_extract_validated_fn=llm_extract_validated_fn,
+                )
+            except Exception as e:  # noqa: BLE001 — one bad job must not kill the batch
+                logger.warning(
+                    "enrich_batch: enrich_job failed for %s: %s",
+                    getattr(job, "id", job.title),
+                    e,
+                )
+                return None
+
+    return await asyncio.gather(*[_one(j) for j in jobs])
 
 
 # ---------------------------------------------------------------------------

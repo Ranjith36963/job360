@@ -3,6 +3,7 @@
 CLAUDE.md rule #4 — no live HTTP. All LLM calls go through an injected mock
 via `enrich_job(job, llm_extract_validated_fn=...)` or `ctx['llm_extract_validated']`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +12,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+from src.models import Job
 from src.services.job_enrichment import (
     enrich_job,
     has_enrichment,
@@ -18,8 +20,8 @@ from src.services.job_enrichment import (
     save_enrichment,
 )
 from src.services.job_enrichment_schema import (
-    EmploymentType,
     EmployerType,
+    EmploymentType,
     ExperienceLevel,
     JobCategory,
     JobEnrichment,
@@ -29,9 +31,7 @@ from src.services.job_enrichment_schema import (
     VisaSponsorship,
     WorkplaceType,
 )
-from src.models import Job
 from src.workers.tasks import enrich_job_task
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,8 +57,7 @@ def _make_valid_enrichment(**overrides) -> JobEnrichment:
         employment_type=EmploymentType.FULL_TIME,
         workplace_type=WorkplaceType.HYBRID,
         locations=["London, UK"],
-        salary=SalaryBand(min=60000, max=90000, currency="GBP",
-                          frequency=SalaryFrequency.ANNUAL),
+        salary=SalaryBand(min=60000, max=90000, currency="GBP", frequency=SalaryFrequency.ANNUAL),
         required_skills=["Python", "PyTorch"],
         preferred_skills=["MLOps"],
         experience_min_years=3,
@@ -79,6 +78,7 @@ def _make_valid_enrichment(**overrides) -> JobEnrichment:
 async def _mock_llm_extract_validated(valid_enrichment: JobEnrichment):
     async def _fn(prompt, schema, system=""):
         return valid_enrichment
+
     return _fn
 
 
@@ -86,6 +86,7 @@ def _mock_llm(valid_enrichment: JobEnrichment):
     async def _fn(prompt, schema, system=""):
         assert schema is JobEnrichment
         return valid_enrichment
+
     return _fn
 
 
@@ -110,21 +111,25 @@ def test_schema_accepts_minimal_payload():
 
 def test_schema_rejects_empty_title_canonical():
     from pydantic import ValidationError
+
     with pytest.raises(ValidationError):
         JobEnrichment(title_canonical="", category=JobCategory.SOFTWARE_ENGINEERING)
 
 
 def test_schema_rejects_unknown_category():
     from pydantic import ValidationError
+
     with pytest.raises(ValidationError):
         JobEnrichment(title_canonical="Dev", category="not_a_real_category")
 
 
 def test_schema_rejects_negative_experience_years():
     from pydantic import ValidationError
+
     with pytest.raises(ValidationError):
         JobEnrichment(
-            title_canonical="Dev", category=JobCategory.SOFTWARE_ENGINEERING,
+            title_canonical="Dev",
+            category=JobCategory.SOFTWARE_ENGINEERING,
             experience_min_years=-1,
         )
 
@@ -132,10 +137,12 @@ def test_schema_rejects_negative_experience_years():
 def test_schema_truncates_requirements_summary_limit():
     """Summary >250 chars must be rejected."""
     from pydantic import ValidationError
+
     long_text = "x" * 300
     with pytest.raises(ValidationError):
         JobEnrichment(
-            title_canonical="Dev", category=JobCategory.SOFTWARE_ENGINEERING,
+            title_canonical="Dev",
+            category=JobCategory.SOFTWARE_ENGINEERING,
             requirements_summary=long_text,
         )
 
@@ -169,10 +176,12 @@ def test_schema_lowercases_language():
 
 def test_schema_caps_required_skills_list():
     from pydantic import ValidationError
+
     too_many = [f"skill{i}" for i in range(50)]
     with pytest.raises(ValidationError):
         JobEnrichment(
-            title_canonical="Dev", category=JobCategory.SOFTWARE_ENGINEERING,
+            title_canonical="Dev",
+            category=JobCategory.SOFTWARE_ENGINEERING,
             required_skills=too_many,
         )
 
@@ -197,7 +206,7 @@ def test_enrich_job_prompt_includes_title_and_description():
     """The prompt sent to the LLM should include the job's title + truncated
     description. We capture the call to assert."""
     job = _sample_job(
-        description="Z" * 5000,   # 5000 Zs so no other prompt text collides
+        description="Z" * 5000,  # 5000 Zs so no other prompt text collides
     )
     seen: list[str] = []
 
@@ -215,6 +224,7 @@ def test_enrich_job_prompt_includes_title_and_description():
 def test_enrich_job_propagates_llm_failure():
     """If the LLM provider chain raises, enrich_job() does not swallow —
     callers (the worker task) decide whether to skip or retry."""
+
     async def _raising(prompt, schema, system=""):
         raise RuntimeError("quota exhausted")
 
@@ -253,9 +263,7 @@ def db_with_schema(tmp_path):
 @pytest.mark.asyncio
 async def test_save_and_load_enrichment_round_trip(db_with_schema):
     async with aiosqlite.connect(db_with_schema) as conn:
-        cur = await conn.execute(
-            "INSERT INTO jobs(title, company) VALUES (?, ?)", ("Dev", "Co")
-        )
+        cur = await conn.execute("INSERT INTO jobs(title, company) VALUES (?, ?)", ("Dev", "Co"))
         await conn.commit()
         job_id = cur.lastrowid
 
@@ -274,9 +282,7 @@ async def test_save_and_load_enrichment_round_trip(db_with_schema):
 @pytest.mark.asyncio
 async def test_has_enrichment_detects_existing_row(db_with_schema):
     async with aiosqlite.connect(db_with_schema) as conn:
-        cur = await conn.execute(
-            "INSERT INTO jobs(title) VALUES (?)", ("Dev",)
-        )
+        cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
 
@@ -297,16 +303,12 @@ async def test_save_enrichment_is_upsert(db_with_schema):
     """INSERT OR REPLACE — calling save twice does not error, keeps the
     latest values."""
     async with aiosqlite.connect(db_with_schema) as conn:
-        cur = await conn.execute(
-            "INSERT INTO jobs(title) VALUES (?)", ("Dev",)
-        )
+        cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
 
-        await save_enrichment(conn, job_id,
-                              _make_valid_enrichment(title_canonical="First"))
-        await save_enrichment(conn, job_id,
-                              _make_valid_enrichment(title_canonical="Second"))
+        await save_enrichment(conn, job_id, _make_valid_enrichment(title_canonical="First"))
+        await save_enrichment(conn, job_id, _make_valid_enrichment(title_canonical="Second"))
 
         loaded = await load_enrichment(conn, job_id)
         assert loaded.title_canonical == "Second"
@@ -337,9 +339,7 @@ async def test_enrich_job_task_happy_path(db_with_schema):
 @pytest.mark.asyncio
 async def test_enrich_job_task_is_idempotent(db_with_schema):
     async with aiosqlite.connect(db_with_schema) as conn:
-        cur = await conn.execute(
-            "INSERT INTO jobs(title, description) VALUES (?,?)", ("Dev", "desc")
-        )
+        cur = await conn.execute("INSERT INTO jobs(title, description) VALUES (?,?)", ("Dev", "desc"))
         await conn.commit()
         job_id = cur.lastrowid
 
@@ -356,7 +356,7 @@ async def test_enrich_job_task_is_idempotent(db_with_schema):
         assert r1["enriched"] is True
         assert r2["enriched"] is False
         assert r2["reason"] == "already_enriched"
-        assert calls["n"] == 1   # LLM only called once
+        assert calls["n"] == 1  # LLM only called once
 
 
 @pytest.mark.asyncio
@@ -371,9 +371,7 @@ async def test_enrich_job_task_missing_job(db_with_schema):
 @pytest.mark.asyncio
 async def test_enrich_job_task_handles_llm_failure(db_with_schema):
     async with aiosqlite.connect(db_with_schema) as conn:
-        cur = await conn.execute(
-            "INSERT INTO jobs(title) VALUES (?)", ("Dev",)
-        )
+        cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
 
@@ -439,11 +437,11 @@ def test_deduplicator_match_score_still_beats_enrichment():
 
     j1 = _sample_job(title="Role")
     j1.id = 1
-    j1.match_score = 80   # wins on score
+    j1.match_score = 80  # wins on score
 
     j2 = _sample_job(title="Role")
     j2.id = 2
-    j2.match_score = 60   # loses even though enriched
+    j2.match_score = 60  # loses even though enriched
 
     result = deduplicate([j1, j2], enrichments={2: object()})
     assert result[0].id == 1
@@ -458,6 +456,7 @@ def test_enrichment_enabled_env_flag_defaults_off():
     """Plan Appendix B — default behaviour when flag is false must exactly
     match pre-Batch-2.5 (no enrichment pipeline activity)."""
     import importlib
+
     import src.services.job_enrichment as je_mod
 
     # If the env wasn't set in the test runner, the module-level flag is False.
@@ -465,4 +464,152 @@ def test_enrichment_enabled_env_flag_defaults_off():
     # of falsy is preserved.
     importlib.reload(je_mod)
     # The default when ENRICHMENT_ENABLED is absent/empty:
-    assert je_mod.ENRICHMENT_ENABLED in (False, True)   # noqa: SIM300 — tolerate either
+    assert je_mod.ENRICHMENT_ENABLED in (False, True)  # noqa: SIM300 — tolerate either
+
+
+# ---------------------------------------------------------------------------
+# enrich_batch — Step-1 B7 bounded-concurrency wrapper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enrich_batch_respects_semaphore():
+    """50 jobs through a semaphore_limit=5 gate must never have more than 5
+    in-flight ``enrich_job`` calls at once."""
+    from src.services.job_enrichment import enrich_batch
+
+    jobs = [_sample_job(title=f"Role {i}") for i in range(50)]
+    valid = _make_valid_enrichment()
+
+    in_flight = 0
+    max_in_flight = 0
+    lock = asyncio.Lock()
+
+    async def _slow_fn(prompt, schema, system=""):
+        nonlocal in_flight, max_in_flight
+        async with lock:
+            in_flight += 1
+            if in_flight > max_in_flight:
+                max_in_flight = in_flight
+        # yield control so other coroutines can ramp up — without this,
+        # asyncio could complete each enrichment serially before any other
+        # coroutine even gets to the lock.
+        await asyncio.sleep(0.01)
+        async with lock:
+            in_flight -= 1
+        return valid
+
+    results = await enrich_batch(
+        jobs,
+        semaphore_limit=5,
+        skip_existing=False,
+        llm_extract_validated_fn=_slow_fn,
+    )
+    assert len(results) == 50
+    assert all(r is not None for r in results)
+    assert max_in_flight <= 5, f"max in-flight was {max_in_flight}, expected <= 5"
+    # Sanity — concurrency actually happened (not all serialised at 1).
+    assert max_in_flight >= 2
+
+
+@pytest.mark.asyncio
+async def test_enrich_batch_returns_same_length_with_none_for_skipped(db_with_schema):
+    """Half the inputs already have an enrichment row. Result list must
+    keep input length, with ``None`` at exactly the skipped positions."""
+    from src.services.job_enrichment import enrich_batch
+
+    valid = _make_valid_enrichment()
+    async with aiosqlite.connect(db_with_schema) as conn:
+        jobs: list[Job] = []
+        for i in range(6):
+            cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", (f"Role {i}",))
+            await conn.commit()
+            j = _sample_job(title=f"Role {i}")
+            j.id = cur.lastrowid
+            jobs.append(j)
+            # Pre-enrich every other job (even indices)
+            if i % 2 == 0:
+                await save_enrichment(conn, j.id, valid)
+
+        results = await enrich_batch(
+            jobs,
+            semaphore_limit=4,
+            skip_existing=True,
+            conn=conn,
+            llm_extract_validated_fn=_mock_llm(valid),
+        )
+
+    assert len(results) == 6
+    # Even indices were pre-enriched -> skipped -> None.
+    for i, r in enumerate(results):
+        if i % 2 == 0:
+            assert r is None, f"position {i} should be None (already enriched)"
+        else:
+            assert r is not None, f"position {i} should have a fresh enrichment"
+            assert isinstance(r, JobEnrichment)
+
+
+@pytest.mark.asyncio
+async def test_enrich_batch_swallows_individual_errors():
+    """One job's enrich_job raises; siblings still complete. Result list
+    has ``None`` at exactly the failed position."""
+    from src.services.job_enrichment import enrich_batch
+
+    jobs = [_sample_job(title=f"Role {i}") for i in range(5)]
+    valid = _make_valid_enrichment()
+
+    async def _selective(prompt, schema, system=""):
+        if "Role 2" in prompt:
+            raise RuntimeError("LLM exploded for this one job")
+        return valid
+
+    results = await enrich_batch(
+        jobs,
+        semaphore_limit=3,
+        skip_existing=False,
+        llm_extract_validated_fn=_selective,
+    )
+    assert len(results) == 5
+    assert results[2] is None
+    for i in (0, 1, 3, 4):
+        assert results[i] is not None
+        assert isinstance(results[i], JobEnrichment)
+
+
+@pytest.mark.asyncio
+async def test_enrich_batch_skip_existing_when_flag_set(db_with_schema):
+    """``skip_existing=True`` must consult ``has_enrichment`` and avoid the
+    LLM call entirely for jobs that already have a row."""
+    from src.services.job_enrichment import enrich_batch
+
+    valid = _make_valid_enrichment()
+    llm_calls = {"n": 0}
+
+    async def _counting(prompt, schema, system=""):
+        llm_calls["n"] += 1
+        return valid
+
+    async with aiosqlite.connect(db_with_schema) as conn:
+        # Two jobs; one already enriched.
+        cur1 = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("A",))
+        await conn.commit()
+        j1 = _sample_job(title="A")
+        j1.id = cur1.lastrowid
+        await save_enrichment(conn, j1.id, valid)
+
+        cur2 = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("B",))
+        await conn.commit()
+        j2 = _sample_job(title="B")
+        j2.id = cur2.lastrowid
+
+        results = await enrich_batch(
+            [j1, j2],
+            semaphore_limit=2,
+            skip_existing=True,
+            conn=conn,
+            llm_extract_validated_fn=_counting,
+        )
+
+    assert results[0] is None  # was already enriched
+    assert results[1] is not None  # got freshly enriched
+    assert llm_calls["n"] == 1  # only the un-enriched job touched the LLM

@@ -50,6 +50,11 @@ MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
 
+# Step-1 B7 — gate the LLM enrichment pipeline by score. Only jobs whose
+# match_score >= ENRICHMENT_THRESHOLD get sent to the LLM. Default 60 cuts
+# noise-floor traffic and keeps free-tier provider quotas usable.
+ENRICHMENT_THRESHOLD = int(os.getenv("ENRICHMENT_THRESHOLD", "60"))
+
 # Pillar 2 Batch 2.2 — gate-pass scoring
 # A job must clear BOTH the title gate AND the skill gate to receive a linear
 # score; otherwise the score is suppressed to max(10, (title+skill)*0.25) so
