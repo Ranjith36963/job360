@@ -74,6 +74,10 @@ test, codified into CLAUDE.md rule #21.
   the 13 skip-marked tests with: a `load_profile`-mocking autouse fixture, a
   `JobSpySource.fetch_jobs` stub, and either a complete URL coverage of all 50
   sources OR a `BaseJobSource._get_*`-level fallback that aioresponses can override.
+  **Reviewer lint:** when building the URL catalog, generate it FROM the
+  `companies.py` slug lists at fixture-setup time rather than hard-coding the
+  ~268-slug count anywhere — otherwise the next ATS expansion (Batch 3 grew
+  104→268 slugs in one commit) silently rots the mock.
 - Dedup-group writer batch — `JobResponse.dedup_group_ids` ships as the
   field shape only; population requires `deduplicator.deduplicate()`
   return-type change + `job_dedup_groups` table.
