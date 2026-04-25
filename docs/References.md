@@ -1,8 +1,8 @@
 # Job360 — References
 
 > External repos, APIs, tools, patterns, and competitive intelligence for building and improving Job360.
-> Every entry verified from research conducted 2026-04-11.
-> All Job360 file paths cross-referenced against `CurrentStatus.md` (same date) to ensure accuracy.
+> Every entry verified from research conducted 2026-04-11; competitive landscape extended 2026-04-25 (Dex, Sprout).
+> All Job360 file paths cross-referenced against `CurrentStatus.md` to ensure accuracy.
 
 ---
 
@@ -87,6 +87,101 @@
 ### 1.3 Simplify — https://simplify.jobs
 
 NOT a competitor. Solves application speed, not discovery. Relevant only for GitHub Actions cron pattern (44K-star repo runs 22,958 workflows). Job360 has no CI (CurrentStatus.md §15).
+
+---
+
+### 1.6 Dex — https://app.meetdex.ai
+
+**What it is:** Boutique recruiter-mediated marketplace for engineers. Curated, gated, intro-driven. Tagline: "Fewer roles, fewer candidates. Only the best opportunities." LinkedIn-OAuth onboarding → preference setting → hand-curated intros to hiring managers. Confidentiality is the headline promise (current employer not notified).
+
+**Architecture (deduced — public marketing surface only):**
+- **Onboarding:** LinkedIn OAuth (verify profile → set preferences → review opportunities)
+- **Inventory:** Curated by recruiters; not aggregated. Gated behind auth.
+- **Match model:** Two-way (candidate-of-interest + role-of-interest); manual matchmaker bottleneck
+- **Revenue:** Placement fees from hiring companies (recruiter model). Free for seekers.
+- **Tech:** Public-marketing-page only; production app gated behind auth — not inspected.
+
+**Audience overlap with Job360:** Low. Dex targets the top 1% of senior engineers willing to wait for hand-curated intros. Job360 targets the broad professional (any domain) who wants 50-source coverage. Different value chains.
+
+**Threat level:** Low. Complementary distribution channel rather than competition. A serious seeker would use Dex for the 3 hand-picked intros + Job360 for the 200 they should also be tracking.
+
+**Borrow from them:**
+- LinkedIn OAuth onboarding flow — faster than Job360's CV+LinkedIn-PDF+GitHub triple-upload
+- Confidentiality positioning copy ("your current employer won't be notified") for any seekers worried about employer detection on the dashboard
+
+**Don't copy:**
+- "Fewer / better" exclusivity positioning — Job360's wedge is the opposite (broad coverage + intelligent ranking)
+
+**Key sources:**
+- Marketing landing: https://app.meetdex.ai/handoff?cid=… (per-user UUID handoff token; public marketing surface)
+
+---
+
+### 1.7 Sprout — https://app.usesprout.com
+
+**What it is:** AI job-application automation tool for individual seekers. Tagline: "**Swipe right, it's handled.**" Tinder-style discovery feed → AI auto-tailors CV/cover letter per role → one-click apply → recruiter-response tracking. Direct overlap with Job360's seeker-side value chain, but operates one layer downstream (the *apply* step rather than the *discover* step).
+
+**Architecture (deduced from public surface):**
+- **Frontend:** Next.js + React (same as Job360), hosted on Vercel (`dpl_…` deployment ID is a Vercel signature)
+- **Inventory:** Gated behind login (`/jobs` redirects to auth) — implies curated or scraped-but-monetised
+- **Match model:** Swipe-feed UX, profile → AI infers fit
+- **AI usage:** Per-application generation (CV + cover letter tailored to JD)
+- **Revenue:** Likely freemium (no public pricing); paywall implied by gated `/jobs`
+- **Tracking:** Recruiter-response tracking, in-app
+
+**Audience overlap with Job360:** **High.** Same target (individual seekers), same channel (web), similar tech stack.
+
+**Threat level:** Medium-direct. Their wedge is auto-tailored CV + one-click apply — the highest-leverage feature Job360 doesn't yet have on the roadmap.
+
+**What they do that Job360 doesn't:**
+
+| Gap | Sprout | Job360 current state |
+|---|---|---|
+| Auto-tailored CV per JD | ✅ AI-generated | ❌ Not on roadmap |
+| Auto-tailored cover letter | ✅ AI-generated | ❌ Not on roadmap |
+| One-click apply | ✅ Core flow | ❌ Manual via apply_url |
+| Swipe-feed UX | ✅ Discovery interface | Browse-and-rank UX |
+
+**What Job360 does that Sprout doesn't:**
+
+| Advantage | Job360 | Sprout |
+|---|---|---|
+| Multi-source aggregation | 50 UK sources | Single curated inventory |
+| Push notifications (Email/Slack/Discord) | ✅ Shipped | ❌ Pull-only |
+| 7-dim scoring transparency | ✅ Pillar 2.9 | ❌ Black-box AI |
+| Local-first / data-sovereign option | ✅ Self-host capable | ❌ Cloud-only |
+| Multi-domain (any profession) | ✅ Vision | ❌ Tech-only |
+
+**Strategic implication for Job360:** Auto-apply is a clean v2 feature. Consider adding to Step 5 (launch readiness) or splitting into Step 6. The CV-tailoring already has scaffolding (`backend/src/services/profile/llm_provider.py`) — same provider chain (Gemini→Groq→Cerebras) could generate per-JD CVs/cover letters.
+
+**Borrow from them:**
+- Tagline format: 4 words, agent-doing-work-for-you promise. Job360's current "we aggregate 50 UK sources" is verbose by comparison.
+- Swipe UX as an *optional* feed mode alongside the radar/list view (frontend layer)
+
+**Key sources:**
+- App: https://app.usesprout.com/jobs (gated)
+- Public marketing: https://usesprout.com (assumed root)
+
+---
+
+### 1.8 Strategic positioning summary (post-2026-04-25 audit)
+
+| Player | Owns wedge | Threat to Job360 |
+|---|---|---|
+| HiringCafe (1.1) | Clean US aggregator, no spam, free forever | **Highest direct overlap** but US-focused + no alerts |
+| Jack & Jill (1.2) | Conversational AI agent, $20M funded | Adjacent — different UX paradigm |
+| Sprout (1.7) | Auto-tailored CV + one-click apply | Different layer (apply step) — adjacent |
+| Dex (1.6) | Boutique recruiter-curated | Different audience — top-1% engineers only |
+| Indeed/LinkedIn | Scale + brand | Not the same product class |
+
+**Job360's open wedges (none of the above hold):**
+1. **UK-first + multi-domain** — neither HiringCafe (US) nor Sprout/Dex (tech-only) ship this combo
+2. **Score transparency** — every competitor is black-box; Job360 shows 7-dim breakdown
+3. **Push-mode notifications** — HiringCafe explicitly admits no alerts; Job360 has Email/Slack/Discord shipped
+4. **Self-host / data-sovereign** — no cloud-locked competitor offers this; Job360's architecture supports it
+5. **Open inventory** — HiringCafe blocks scrapers (403 confirmed 2026-04-25); a Job360 public API would invert that posture
+
+**Suggested elevator pitch (replaces current README opener):** "*HiringCafe scores you for UK roles and tells you when to apply — works while you sleep, across 50 sources, every domain.*"
 
 ### 1.4 career-ops — https://github.com/santifer/career-ops
 
@@ -468,5 +563,6 @@ No competitor has this granularity. HiringCafe: no scoring. Jack & Jill: proprie
 ---
 
 ## Document History
+- **2026-04-25 v3:** Extended §1 Competitive Landscape with Dex (1.6 — boutique recruiter-curated) and Sprout (1.7 — AI auto-apply). Added §1.8 strategic positioning summary mapping each competitor's wedge against Job360's open wedges (UK-first + multi-domain, score transparency, push-mode notifications, self-host, open inventory). Confirmed HiringCafe blocks server-side scrapers (403 against WebFetch).
 - **2026-04-11 v2:** Cross-referenced against CurrentStatus.md. Corrected paths (repositories/database.py, services/skill_matcher.py, class JobDatabase). Added line numbers, slug counts, CurrentStatus section refs, complete source date accuracy table.
 - **2026-04-11 v1:** Initial version from competitive research.
