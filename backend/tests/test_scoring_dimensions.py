@@ -1,7 +1,6 @@
 """Pillar 2 Batch 2.9 — tests for the four new dimension scorers."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from src.core.settings import (
     SALARY_WEIGHT,
@@ -10,9 +9,6 @@ from src.core.settings import (
     WORKPLACE_WEIGHT,
 )
 from src.services.job_enrichment_schema import (
-    EmploymentType,
-    EmployerType,
-    ExperienceLevel,
     JobCategory,
     JobEnrichment,
     SalaryBand,
@@ -86,15 +82,13 @@ def test_seniority_empty_user_experience_neutral():
 
 def test_salary_full_overlap_full_weight():
     """Job band fully contained in user band → max score."""
-    e = _enrichment(salary=SalaryBand(min=70_000, max=80_000, currency="GBP",
-                                       frequency=SalaryFrequency.ANNUAL))
+    e = _enrichment(salary=SalaryBand(min=70_000, max=80_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
     assert salary_score(e, 60_000, 100_000) == SALARY_WEIGHT
 
 
 def test_salary_partial_overlap_proportional():
     """Job band overlaps a portion of user range, scored against smaller span."""
-    e = _enrichment(salary=SalaryBand(min=50_000, max=75_000, currency="GBP",
-                                       frequency=SalaryFrequency.ANNUAL))
+    e = _enrichment(salary=SalaryBand(min=50_000, max=75_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
     # user 60-100k (40k), job 50-75k (25k) → overlap 60-75k (15k).
     # Denominator is the smaller span (25k) so ratio = 15/25 = 0.6.
     expected = int(round(SALARY_WEIGHT * 0.6))
@@ -102,8 +96,7 @@ def test_salary_partial_overlap_proportional():
 
 
 def test_salary_no_overlap_returns_zero():
-    e = _enrichment(salary=SalaryBand(min=30_000, max=40_000, currency="GBP",
-                                       frequency=SalaryFrequency.ANNUAL))
+    e = _enrichment(salary=SalaryBand(min=30_000, max=40_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
     assert salary_score(e, 80_000, 120_000) == 0
 
 
@@ -112,8 +105,7 @@ def test_salary_missing_enrichment_neutral():
 
 
 def test_salary_missing_user_range_neutral():
-    e = _enrichment(salary=SalaryBand(min=60_000, max=80_000, currency="GBP",
-                                       frequency=SalaryFrequency.ANNUAL))
+    e = _enrichment(salary=SalaryBand(min=60_000, max=80_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
     assert salary_score(e, None, None) == SALARY_WEIGHT // 2
 
 
@@ -207,6 +199,7 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
     """End-to-end: a job with a great enrichment should outscore one without,
     given the same title/skill/location/recency base."""
     from datetime import datetime, timezone
+
     from src.models import Job
     from src.services.profile.models import SearchConfig, UserPreferences
     from src.services.skill_matcher import JobScorer
@@ -229,7 +222,8 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
         primary_skills=["python", "pytorch"],
     )
     prefs = UserPreferences(
-        salary_min=70000, salary_max=90000,
+        salary_min=70000,
+        salary_max=90000,
         experience_level="senior",
         preferred_workplace="remote",
         needs_visa=True,
@@ -240,23 +234,19 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
         seniority=SeniorityLevel.SENIOR,
         workplace_type=WorkplaceType.REMOTE,
         visa_sponsorship=VisaSponsorship.YES,
-        salary=SalaryBand(min=75000, max=85000, currency="GBP",
-                          frequency=SalaryFrequency.ANNUAL),
+        salary=SalaryBand(min=75000, max=85000, currency="GBP", frequency=SalaryFrequency.ANNUAL),
     )
-    enrichments = {"great": great_enrichment}
-    lookup = lambda job: enrichments.get(job.company.lower())  # noqa: E731
-
     # Build two scorers with the same base config but different enrichment data.
     scorer_enriched = JobScorer(
         config,
         user_preferences=prefs,
         enrichment_lookup=lambda job: great_enrichment,
     )
-    scorer_base = JobScorer(config)   # no enrichment path
+    scorer_base = JobScorer(config)  # no enrichment path
 
     job = _job("ML Engineer", "Python PyTorch role.")
-    enriched_score = scorer_enriched.score(job)
-    base_score = scorer_base.score(job)
+    enriched_score = scorer_enriched.score(job).match_score
+    base_score = scorer_base.score(job).match_score
     assert enriched_score > base_score
     # 100 cap still holds.
     assert enriched_score <= 100
@@ -266,15 +256,20 @@ def test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base():
     """A scorer with user_preferences but an empty enrichment_lookup scores
     the same as a plain-config scorer (no double counting of dimensions)."""
     from datetime import datetime, timezone
+
     from src.models import Job
     from src.services.profile.models import SearchConfig, UserPreferences
     from src.services.skill_matcher import JobScorer
 
     today = datetime.now(timezone.utc).isoformat()
     job = Job(
-        title="ML Engineer", company="Acme", apply_url="https://example.com",
-        source="reed", location="London, UK",
-        description="Python PyTorch role.", date_found=today,
+        title="ML Engineer",
+        company="Acme",
+        apply_url="https://example.com",
+        source="reed",
+        location="London, UK",
+        description="Python PyTorch role.",
+        date_found=today,
     )
     config = SearchConfig(job_titles=["ML Engineer"], primary_skills=["python", "pytorch"])
     prefs = UserPreferences(preferred_workplace="remote", needs_visa=False)
@@ -291,6 +286,7 @@ def test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base():
 def test_jobscorer_dim_bonus_caps_at_100():
     """Even a 'perfect' job can't exceed the 100-point ceiling."""
     from datetime import datetime, timezone
+
     from src.models import Job
     from src.services.profile.models import SearchConfig, UserPreferences
     from src.services.skill_matcher import JobScorer
@@ -298,11 +294,27 @@ def test_jobscorer_dim_bonus_caps_at_100():
     today = datetime.now(timezone.utc).isoformat()
     # Give every dimension maximum signal.
     job = Job(
-        title="ML Engineer", company="Acme", apply_url="https://example.com",
-        source="reed", location="London, UK",
-        description=" ".join(["python", "pytorch", "tensorflow", "langchain",
-                              "rag", "llm", "nlp", "deep learning", "aws",
-                              "docker", "kubernetes"] * 3),
+        title="ML Engineer",
+        company="Acme",
+        apply_url="https://example.com",
+        source="reed",
+        location="London, UK",
+        description=" ".join(
+            [
+                "python",
+                "pytorch",
+                "tensorflow",
+                "langchain",
+                "rag",
+                "llm",
+                "nlp",
+                "deep learning",
+                "aws",
+                "docker",
+                "kubernetes",
+            ]
+            * 3
+        ),
         date_found=today,
     )
     config = SearchConfig(
@@ -312,17 +324,17 @@ def test_jobscorer_dim_bonus_caps_at_100():
         tertiary_skills=["aws", "docker", "kubernetes"],
     )
     prefs = UserPreferences(
-        salary_min=70000, salary_max=90000,
-        experience_level="senior", preferred_workplace="remote",
+        salary_min=70000,
+        salary_max=90000,
+        experience_level="senior",
+        preferred_workplace="remote",
         needs_visa=True,
     )
     perfect = _enrichment(
         seniority=SeniorityLevel.SENIOR,
         workplace_type=WorkplaceType.REMOTE,
         visa_sponsorship=VisaSponsorship.YES,
-        salary=SalaryBand(min=75000, max=85000, currency="GBP",
-                          frequency=SalaryFrequency.ANNUAL),
+        salary=SalaryBand(min=75000, max=85000, currency="GBP", frequency=SalaryFrequency.ANNUAL),
     )
-    scorer = JobScorer(config, user_preferences=prefs,
-                       enrichment_lookup=lambda job: perfect)
-    assert scorer.score(job) == 100
+    scorer = JobScorer(config, user_preferences=prefs, enrichment_lookup=lambda job: perfect)
+    assert scorer.score(job).match_score == 100
