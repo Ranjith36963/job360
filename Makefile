@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 clean
+.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-batch clean
 
 help:
 	@echo "Job360 targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  verify-step-0    run the Step-0 pre-flight gate (aggregate of below)"
 	@echo "  verify-step-1    run the Step-1 engine→API seam gate"
 	@echo "  verify-step-1-5  run the Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP)"
+	@echo "  verify-batch     enforce the Step-1.6 generator/reviewer contract"
 	@echo "  clean            wipe __pycache__ + *.pyc"
 
 install:
@@ -130,6 +131,27 @@ verify-step-1-5:
 	@mkdir -p .claude
 	@git rev-parse HEAD > .claude/step-1-5-verified.txt
 	@echo "STEP-1.5 GREEN: $$(cat .claude/step-1-5-verified.txt)"
+
+# ---------------------------------------------------------------------------
+# Step-1.6 generator/reviewer contract gate.
+#
+# Reads .claude/reviewer-verdict.md (produced by scripts/review_batch.sh +
+# the reviewer agent) and refuses to merge unless:
+#   1. The file exists.
+#   2. verdict: APPROVED  (not PENDING / CHANGES_REQUESTED / BLOCKED).
+#   3. verification_commands_run is non-empty (proves the wrapper ran).
+#
+# Background: Step-1.5 shipped a stale sentinel (1086p/0f/4s claimed,
+# 1087p/0f/17s observed by reviewer) because scope drift was undetected
+# until post-merge. This target makes that drift impossible.
+# ---------------------------------------------------------------------------
+
+verify-batch:
+	@test -f .claude/reviewer-verdict.md || { echo "FAIL: .claude/reviewer-verdict.md missing — run scripts/review_batch.sh <branch>"; exit 1; }
+	@grep -E '^verdict:[[:space:]]+APPROVED([[:space:]]|$$)' .claude/reviewer-verdict.md > /dev/null || { echo "FAIL: verdict is not APPROVED in .claude/reviewer-verdict.md"; grep -E '^verdict:' .claude/reviewer-verdict.md || true; exit 1; }
+	@if grep -E '^verification_commands_run:[[:space:]]*\[\][[:space:]]*$$' .claude/reviewer-verdict.md > /dev/null; then echo "FAIL: verification_commands_run is empty — run scripts/review_batch.sh first"; exit 1; fi
+	@grep -E '^verification_commands_run:' .claude/reviewer-verdict.md > /dev/null || { echo "FAIL: verification_commands_run YAML key missing"; exit 1; }
+	@echo "PASS: reviewer verdict APPROVED with non-empty verification_commands_run."
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
