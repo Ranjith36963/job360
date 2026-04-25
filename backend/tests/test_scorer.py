@@ -6,6 +6,7 @@ from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import (
     JobScorer,
+    ScoreBreakdown,
     _foreign_location_penalty,
     _location_score,
     _negative_penalty,
@@ -51,7 +52,7 @@ def test_high_match_scores_above_70():
             "AWS SageMaker, Docker, Kubernetes, FastAPI, ChromaDB."
         ),
     )
-    score = scorer.score(job)
+    score = scorer.score(job).match_score
     assert score >= 70, f"Expected >= 70, got {score}"
 
 
@@ -81,7 +82,7 @@ def test_title_match_contributes_points():
     scorer = JobScorer(config)
     job_match = _make_job(title="ML Engineer", description="Python Docker role")
     job_no_match = _make_job(title="Chef", description="Python Docker role")
-    assert scorer.score(job_match) > scorer.score(job_no_match)
+    assert scorer.score(job_match).match_score > scorer.score(job_no_match).match_score
 
 
 def test_location_match_contributes_points():
@@ -96,7 +97,7 @@ def test_location_match_contributes_points():
     scorer = JobScorer(config)
     uk_job = _make_job(title="Developer", location="London, UK", description="Python Docker developer")
     us_job = _make_job(title="Developer", location="San Francisco, US", description="Python Docker developer")
-    assert scorer.score(uk_job) > scorer.score(us_job)
+    assert scorer.score(uk_job).match_score > scorer.score(us_job).match_score
 
 
 def test_remote_location_gets_points():
@@ -108,7 +109,7 @@ def test_remote_location_gets_points():
     scorer = JobScorer(config)
     remote_job = _make_job(title="Developer", location="Remote", description="Python Docker developer")
     us_job = _make_job(title="Developer", location="San Francisco, US", description="Python Docker developer")
-    assert scorer.score(remote_job) > scorer.score(us_job)
+    assert scorer.score(remote_job).match_score > scorer.score(us_job).match_score
 
 
 def test_visa_flag_detected():
@@ -154,7 +155,7 @@ def test_more_skills_higher_score():
         title="AI Engineer",
         description="Python PyTorch TensorFlow LangChain RAG LLM NLP Deep Learning AWS Docker",
     )
-    assert scorer.score(job_many) > scorer.score(job_few)
+    assert scorer.score(job_many).match_score > scorer.score(job_few).match_score
 
 
 # ---- Recency scoring tests ----
@@ -185,7 +186,7 @@ def test_recency_today_gets_full_points():
         date_found=old,
         description="Python PyTorch role",
     )
-    assert scorer.score(job_today) > scorer.score(job_old)
+    assert scorer.score(job_today).match_score > scorer.score(job_old).match_score
 
 
 def test_recency_old_job_gets_zero():
@@ -249,7 +250,7 @@ def test_score_can_reach_100():
             "AWS SageMaker, Docker, Kubernetes, FastAPI, ChromaDB."
         ),
     )
-    score = scorer.score(job)
+    score = scorer.score(job).match_score
     assert score == 100, f"Expected 100, got {score}"
 
 
@@ -292,7 +293,7 @@ def test_score_with_explicit_java_profile():
         location="London, UK",
         description="Python PyTorch TensorFlow LangChain RAG",
     )
-    assert scorer.score(java_job) > scorer.score(ai_job)
+    assert scorer.score(java_job).match_score > scorer.score(ai_job).match_score
 
 
 def test_same_job_different_profiles_different_scores():
@@ -320,8 +321,8 @@ def test_same_job_different_profiles_different_scores():
         core_domain_words={"python"},
         supporting_role_words={"developer"},
     )
-    java_score = JobScorer(java_config).score(job)
-    python_score = JobScorer(python_config).score(job)
+    java_score = JobScorer(java_config).score(job).match_score
+    python_score = JobScorer(python_config).score(job).match_score
     # Both should score > 0 since the job has both Java and Python
     assert java_score > 0
     assert python_score > 0
@@ -522,8 +523,8 @@ def test_us_ai_job_scores_lower_than_uk():
     scorer = JobScorer(config)
     uk_job = _make_job(title="AI Engineer", location="London, UK", description="Python PyTorch LLM RAG")
     us_job = _make_job(title="AI Engineer", location="San Francisco, CA", description="Python PyTorch LLM RAG")
-    uk_score = scorer.score(uk_job)
-    us_score = scorer.score(us_job)
+    uk_score = scorer.score(uk_job).match_score
+    us_score = scorer.score(us_job).match_score
     assert uk_score - us_score >= 15, f"UK={uk_score}, US={us_score}"
 
 
@@ -709,7 +710,7 @@ def test_score_job_uses_recency_for_job_helper():
     )
     # Both have the same non-recency components — the ONLY difference
     # must come from the recency band.
-    assert scorer.score(job_honest) - scorer.score(job_fabricated) == 10
+    assert scorer.score(job_honest).match_score - scorer.score(job_fabricated).match_score == 10
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +743,7 @@ class TestGatePass:
             date_found=datetime.now(timezone.utc).isoformat(),
         )
         # title_pts=0 → title gate fails → suppress
-        assert scorer.score(job) <= 25
+        assert scorer.score(job).match_score <= 25
 
     def test_jobscorer_zero_skills_good_title_suppressed(self):
         """Exact title match but zero skill match → suppressed to ≤25."""
@@ -758,7 +759,7 @@ class TestGatePass:
             date_found=datetime.now(timezone.utc).isoformat(),
         )
         # skill_pts=0 → skill gate fails → suppress
-        assert scorer.score(job) <= 25
+        assert scorer.score(job).match_score <= 25
 
     def test_jobscorer_both_zero_location_recency_dont_rescue(self):
         """Both zero + strong location + full recency → suppressed; location/recency
@@ -775,8 +776,8 @@ class TestGatePass:
             date_found=datetime.now(timezone.utc).isoformat(),
         )
         # Without the gate: ~0+0+10+10-0-0 = 20. With the gate: max(10, 0) = 10.
-        assert scorer.score(job) <= 25
-        assert scorer.score(job) == 10  # floor
+        assert scorer.score(job).match_score <= 25
+        assert scorer.score(job).match_score == 10  # floor
 
     def test_jobscorer_both_above_gate_no_suppression(self):
         """Both gates cleared → full linear score (> gate floor)."""
@@ -792,8 +793,8 @@ class TestGatePass:
             date_found=datetime.now(timezone.utc).isoformat(),
         )
         # title_pts=40, skill_pts=6, location=10, recency=10 → 66
-        assert scorer.score(job) > 25
-        assert scorer.score(job) >= 60
+        assert scorer.score(job).match_score > 25
+        assert scorer.score(job).match_score >= 60
 
     def test_jobscorer_title_exactly_at_gate_passes(self):
         """title_pts exactly at the gate (6) must clear (>= semantics)."""
@@ -816,7 +817,7 @@ class TestGatePass:
         )
         # Skill gate: 3+3=6 → exactly at gate. Title gate: 8 → above.
         # Both ≥ gate → no suppression. Score should be > 10 floor.
-        assert scorer.score(job) > 10
+        assert scorer.score(job).match_score > 10
 
     def test_jobscorer_title_just_below_gate_suppressed(self):
         """title_pts just below gate → suppressed even with strong skills."""
@@ -836,7 +837,7 @@ class TestGatePass:
         )
         # title_pts=5 (below gate), skill_pts=9 (above). Gate fails on title.
         # Suppressed = max(10, (5+9)*0.25) = max(10, 3) = 10.
-        assert scorer.score(job) == 10
+        assert scorer.score(job).match_score == 10
 
     def test_jobscorer_skill_just_below_gate_suppressed(self):
         """skill_pts just below gate → suppressed even with exact title match."""
@@ -853,8 +854,8 @@ class TestGatePass:
         )
         # title_pts=40, skill_pts=3 (< gate 6). Gate fails on skill.
         # Suppressed = max(10, (40+3)*0.25) = max(10, 10) = 10.
-        assert scorer.score(job) <= 25
-        assert scorer.score(job) == 10
+        assert scorer.score(job).match_score <= 25
+        assert scorer.score(job).match_score == 10
 
     def test_jobscorer_suppressed_returns_floor_10_when_gate_fails_fully(self):
         """All components zero + gate-fail → exactly the floor of 10."""
@@ -869,7 +870,7 @@ class TestGatePass:
             description="Generic role.",
             date_found="",  # 0 recency
         )
-        assert scorer.score(job) == 10
+        assert scorer.score(job).match_score == 10
 
     # ---- Module-level score_job() (legacy path with empty defaults) ----
 
@@ -920,3 +921,112 @@ class TestGatePass:
 
         assert MIN_TITLE_GATE == 0.15
         assert MIN_SKILL_GATE == 0.15
+
+
+# ---------------------------------------------------------------------------
+# Step-1 B3 — ScoreBreakdown return type
+#
+# JobScorer.score() now returns a per-dimension ScoreBreakdown dataclass
+# instead of a single int. Legacy callers (passing only `config`, no
+# user_preferences/enrichment_lookup) must see the four legacy components
+# populated and the four new dimension slots defaulted to 0 — so
+# match_score matches the pre-Step-1 int return byte-for-byte.
+# ---------------------------------------------------------------------------
+
+
+class TestScoreBreakdown:
+    """B3 RED tests — JobScorer.score() returns a ScoreBreakdown dataclass."""
+
+    def _job(self):
+        return _make_job(
+            title="ML Engineer",
+            location="London, UK",
+            description="Python PyTorch role.",
+            date_found=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _config(self):
+        return SearchConfig(
+            job_titles=["ML Engineer"],
+            primary_skills=["Python", "PyTorch"],
+        )
+
+    def test_score_returns_scorebreakdown_instance(self):
+        scorer = JobScorer(self._config())
+        result = scorer.score(self._job())
+        assert isinstance(result, ScoreBreakdown)
+
+    def test_scorebreakdown_has_all_eight_dimension_fields(self):
+        scorer = JobScorer(self._config())
+        breakdown = scorer.score(self._job())
+        for field in (
+            "title_score",
+            "skill_score",
+            "location_score",
+            "recency_score",
+            "seniority_score",
+            "salary_score",
+            "visa_score",
+            "workplace_score",
+            "match_score",
+        ):
+            assert hasattr(breakdown, field), f"Missing field: {field}"
+            assert isinstance(
+                getattr(breakdown, field), int
+            ), f"{field} must be int, got {type(getattr(breakdown, field))}"
+
+    def test_legacy_path_match_score_equals_sum_of_four_legacy_components(self):
+        """When only `config` is passed (no prefs/enrichment), match_score must
+        equal title + skill + location + recency — byte-identical to the
+        pre-Step-1 int formula (no penalties on this job, gate passes)."""
+        scorer = JobScorer(self._config())
+        breakdown = scorer.score(self._job())
+        # This ML job clears the gate and has no negative/foreign penalties,
+        # so the linear sum matches match_score exactly.
+        legacy_sum = breakdown.title_score + breakdown.skill_score + breakdown.location_score + breakdown.recency_score
+        assert breakdown.match_score == legacy_sum
+
+    def test_legacy_path_four_new_dimension_fields_all_zero(self):
+        """No user_preferences + no enrichment_lookup → dim slots stay at 0
+        (CLAUDE.md rule #19: legacy callers get identical behaviour)."""
+        scorer = JobScorer(self._config())
+        breakdown = scorer.score(self._job())
+        assert breakdown.seniority_score == 0
+        assert breakdown.salary_score == 0
+        assert breakdown.visa_score == 0
+        assert breakdown.workplace_score == 0
+
+    def test_legacy_path_with_prefs_only_still_zero_dims(self):
+        """user_preferences alone (no enrichment_lookup) → dims still 0."""
+        from src.services.profile.models import UserPreferences
+
+        prefs = UserPreferences(
+            salary_min=50000,
+            salary_max=80000,
+            experience_level="senior",
+            needs_visa=True,
+            preferred_workplace="remote",
+        )
+        scorer = JobScorer(self._config(), user_preferences=prefs)
+        breakdown = scorer.score(self._job())
+        assert breakdown.seniority_score == 0
+        assert breakdown.salary_score == 0
+        assert breakdown.visa_score == 0
+        assert breakdown.workplace_score == 0
+
+    def test_gate_suppressed_path_still_returns_scorebreakdown(self):
+        """Gate-suppressed jobs must also return a ScoreBreakdown (not int)."""
+        config = SearchConfig(
+            job_titles=["Something Else"],
+            primary_skills=["Nothing Here"],
+        )
+        scorer = JobScorer(config)
+        job = _make_job(
+            title="Marketing Manager",
+            location="Moon",
+            description="Generic role.",
+            date_found="",
+        )
+        breakdown = scorer.score(job)
+        assert isinstance(breakdown, ScoreBreakdown)
+        assert breakdown.match_score == 10  # floor

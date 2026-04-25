@@ -2,23 +2,24 @@ import re
 from datetime import datetime, timezone
 from functools import lru_cache
 
-from src.models import Job
 from src.core.keywords import (
     JOB_TITLES,
     LOCATIONS,
+    NEGATIVE_TITLE_KEYWORDS,
     PRIMARY_SKILLS,
     SECONDARY_SKILLS,
     TERTIARY_SKILLS,
     VISA_KEYWORDS,
-    NEGATIVE_TITLE_KEYWORDS,
 )
 from src.core.settings import (
-    TARGET_SALARY_MIN,
-    TARGET_SALARY_MAX,
-    MIN_TITLE_GATE,
     MIN_SKILL_GATE,
+    MIN_TITLE_GATE,
+    TARGET_SALARY_MAX,
+    TARGET_SALARY_MIN,
 )
 from src.core.skill_synonyms import aliases_for
+from src.models import Job
+from src.services.scoring_dimensions import ScoreBreakdown
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -49,51 +50,147 @@ REMOTE_TERMS = {"remote", "anywhere", "work from home", "wfh"}
 # Countries, major non-UK cities, and US state abbreviations that indicate non-UK jobs
 FOREIGN_INDICATORS = {
     # Countries
-    "united states", "usa", "canada", "australia", "india", "germany", "france",
-    "spain", "italy", "netherlands", "sweden", "norway", "denmark", "finland",
-    "switzerland", "austria", "belgium", "ireland", "singapore", "japan",
-    "china", "brazil", "mexico", "south korea", "israel", "poland", "portugal",
-    "czech", "romania", "turkey", "south africa", "new zealand", "philippines",
+    "united states",
+    "usa",
+    "canada",
+    "australia",
+    "india",
+    "germany",
+    "france",
+    "spain",
+    "italy",
+    "netherlands",
+    "sweden",
+    "norway",
+    "denmark",
+    "finland",
+    "switzerland",
+    "austria",
+    "belgium",
+    "ireland",
+    "singapore",
+    "japan",
+    "china",
+    "brazil",
+    "mexico",
+    "south korea",
+    "israel",
+    "poland",
+    "portugal",
+    "czech",
+    "romania",
+    "turkey",
+    "south africa",
+    "new zealand",
+    "philippines",
     # Major non-UK cities
-    "new york", "san francisco", "los angeles", "chicago", "seattle", "austin",
-    "boston", "denver", "toronto", "vancouver", "montreal", "sydney", "melbourne",
-    "berlin", "munich", "paris", "amsterdam", "stockholm", "copenhagen", "oslo",
-    "helsinki", "zurich", "dubai", "bangalore", "hyderabad", "mumbai", "pune",
-    "tokyo", "tel aviv",
+    "new york",
+    "san francisco",
+    "los angeles",
+    "chicago",
+    "seattle",
+    "austin",
+    "boston",
+    "denver",
+    "toronto",
+    "vancouver",
+    "montreal",
+    "sydney",
+    "melbourne",
+    "berlin",
+    "munich",
+    "paris",
+    "amsterdam",
+    "stockholm",
+    "copenhagen",
+    "oslo",
+    "helsinki",
+    "zurich",
+    "dubai",
+    "bangalore",
+    "hyderabad",
+    "mumbai",
+    "pune",
+    "tokyo",
+    "tel aviv",
     # Canadian provinces that overlap with UK city names
-    "ontario", "quebec",
+    "ontario",
+    "quebec",
     # US state abbreviations (with comma prefix to avoid false matches)
-    ", ca", ", ny", ", tx", ", wa", ", ma", ", co", ", il", ", ga", ", nc", ", va",
-    ", fl", ", pa", ", oh", ", nj", ", or", ", az", ", mn", ", ct", ", md",
+    ", ca",
+    ", ny",
+    ", tx",
+    ", wa",
+    ", ma",
+    ", co",
+    ", il",
+    ", ga",
+    ", nc",
+    ", va",
+    ", fl",
+    ", pa",
+    ", oh",
+    ", nj",
+    ", or",
+    ", az",
+    ", mn",
+    ", ct",
+    ", md",
 }
 
 # Terms that confirm UK / remote (checked before foreign indicators)
 UK_TERMS = {
-    "uk", "united kingdom", "london", "manchester", "birmingham", "bristol",
-    "cambridge", "oxford", "edinburgh", "glasgow", "belfast", "leeds",
-    "liverpool", "nottingham", "sheffield", "southampton", "reading",
-    "hatfield", "hertfordshire", "england", "scotland", "wales",
-    "greater london", "city of london", "gb", "great britain",
+    "uk",
+    "united kingdom",
+    "london",
+    "manchester",
+    "birmingham",
+    "bristol",
+    "cambridge",
+    "oxford",
+    "edinburgh",
+    "glasgow",
+    "belfast",
+    "leeds",
+    "liverpool",
+    "nottingham",
+    "sheffield",
+    "southampton",
+    "reading",
+    "hatfield",
+    "hertfordshire",
+    "england",
+    "scotland",
+    "wales",
+    "greater london",
+    "city of london",
+    "gb",
+    "great britain",
 }
 
 # Experience level patterns
 _EXPERIENCE_PATTERNS = {
-    "intern": re.compile(r'\b(intern|internship)\b', re.IGNORECASE),
-    "junior": re.compile(r'\b(junior|jr|graduate|entry[\s-]?level)\b', re.IGNORECASE),
-    "mid": re.compile(r'\b(mid[\s-]?level|intermediate)\b', re.IGNORECASE),
-    "senior": re.compile(r'\b(senior|sr)\b', re.IGNORECASE),
-    "lead": re.compile(r'\b(lead|team\s*lead)\b', re.IGNORECASE),
-    "staff": re.compile(r'\bstaff\b', re.IGNORECASE),
-    "principal": re.compile(r'\bprincipal\b', re.IGNORECASE),
-    "head": re.compile(r'\b(head\s+of|director|vp)\b', re.IGNORECASE),
+    "intern": re.compile(r"\b(intern|internship)\b", re.IGNORECASE),
+    "junior": re.compile(r"\b(junior|jr|graduate|entry[\s-]?level)\b", re.IGNORECASE),
+    "mid": re.compile(r"\b(mid[\s-]?level|intermediate)\b", re.IGNORECASE),
+    "senior": re.compile(r"\b(senior|sr)\b", re.IGNORECASE),
+    "lead": re.compile(r"\b(lead|team\s*lead)\b", re.IGNORECASE),
+    "staff": re.compile(r"\bstaff\b", re.IGNORECASE),
+    "principal": re.compile(r"\bprincipal\b", re.IGNORECASE),
+    "head": re.compile(r"\b(head\s+of|director|vp)\b", re.IGNORECASE),
 }
 
 
 _VISA_NEGATIONS = (
-    "no sponsorship", "not sponsor", "cannot sponsor",
-    "unable to sponsor", "don't sponsor", "do not sponsor",
+    "no sponsorship",
+    "not sponsor",
+    "cannot sponsor",
+    "unable to sponsor",
+    "don't sponsor",
+    "do not sponsor",
     "without sponsorship",
-    "company-sponsored", "employer-sponsored",
+    "company-sponsored",
+    "employer-sponsored",
 )
 
 
@@ -108,7 +205,7 @@ def _has_visa_keyword(text: str, keywords: list) -> bool:
 @lru_cache(maxsize=512)
 def _word_boundary_pattern(term: str) -> re.Pattern:
     """Build a compiled word-boundary regex for a skill term."""
-    return re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
+    return re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
 
 
 def _text_contains(text: str, term: str) -> bool:
@@ -351,7 +448,7 @@ class JobScorer:
             if target.lower() in title_lower or title_lower in target.lower():
                 return TITLE_WEIGHT // 2
         # Partial keyword overlap using dynamic domain words
-        title_words = set(re.findall(r'\w+', title_lower))
+        title_words = set(re.findall(r"\w+", title_lower))
         core_overlap = title_words & self._config.core_domain_words
         if not core_overlap:
             return 0
@@ -377,41 +474,67 @@ class JobScorer:
                 return 30
         return 0
 
-    def score(self, job: Job) -> int:
+    def score(self, job: Job) -> ScoreBreakdown:
+        """Score a job and return a per-dimension `ScoreBreakdown`.
+
+        Step-1 B3 — return type widened from ``int`` to ``ScoreBreakdown``.
+        Legacy callers reading ``breakdown.match_score`` get the byte-identical
+        legacy combined score; the four new dimension slots stay at 0 unless
+        ``user_preferences`` + ``enrichment_lookup`` are both supplied.
+        """
         text = f"{job.title} {job.description}"
         title_pts = self._title_score(job.title)
         skill_pts = self._skill_score(text)
         suppressed = _gate_suppressed_score(title_pts, skill_pts)
         if suppressed is not None:
-            return suppressed
+            # Gate-suppressed path: title/skill are the raw (sub-gate) ints,
+            # location/recency are not computed, match_score = suppressed floor.
+            return ScoreBreakdown(
+                title_score=title_pts,
+                skill_score=skill_pts,
+                match_score=suppressed,
+            )
         location_pts = _location_score(job.location)
         recency_pts = recency_score_for_job(job)
         penalty = self._negative_penalty(job.title)
         foreign_penalty = _foreign_location_penalty(job.location)
-        base = (
-            title_pts + skill_pts + location_pts + recency_pts
-            - penalty - foreign_penalty
-        )
+        base = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
 
         # Pillar 2 Batch 2.9 — additional enrichment-driven dimensions.
-        dim_bonus = 0
+        seniority_pts = 0
+        salary_pts = 0
+        visa_pts = 0
+        workplace_pts = 0
         if self._user_preferences is not None:
             enrichment = self._enrichment_lookup(job)
             if enrichment is not None:
                 # Lazy import to avoid import cycles during first test collection.
                 from src.services.scoring_dimensions import (
-                    salary_score, seniority_score, visa_score, workplace_score,
+                    salary_score,
+                    seniority_score,
+                    visa_score,
+                    workplace_score,
                 )
-                prefs = self._user_preferences
-                dim_bonus += salary_score(
-                    enrichment, prefs.salary_min, prefs.salary_max
-                )
-                dim_bonus += seniority_score(enrichment, prefs.experience_level)
-                dim_bonus += visa_score(enrichment, prefs.needs_visa)
-                dim_bonus += workplace_score(enrichment, prefs.preferred_workplace)
 
-        total = base + dim_bonus
-        return min(max(total, 0), 100)
+                prefs = self._user_preferences
+                salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
+                seniority_pts = seniority_score(enrichment, prefs.experience_level)
+                visa_pts = visa_score(enrichment, prefs.needs_visa)
+                workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
+
+        total = base + seniority_pts + salary_pts + visa_pts + workplace_pts
+        match = min(max(total, 0), 100)
+        return ScoreBreakdown(
+            title_score=title_pts,
+            skill_score=skill_pts,
+            location_score=location_pts,
+            recency_score=recency_pts,
+            seniority_score=seniority_pts,
+            salary_score=salary_pts,
+            visa_score=visa_pts,
+            workplace_score=workplace_pts,
+            match_score=match,
+        )
 
     def check_visa_flag(self, job: Job) -> bool:
         text = f"{job.title} {job.description}"

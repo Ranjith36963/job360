@@ -7,26 +7,26 @@ These are plain ``async def`` — they can be called directly from tests
   * ``ctx['enqueue']`` — async callable(function_name, *args) used for fan-out
     (in tests, a ``list.append``-style stub; in prod, ``ctx['redis'].enqueue_job``)
 """
+
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 
 import aiosqlite
 
 from src.models import Job
 from src.services.feed import FeedService
 from src.services.prefilter import FilterProfile, passes_prefilter
-from src.services.skill_matcher import JobScorer
 from src.services.profile.models import SearchConfig
+from src.services.skill_matcher import JobScorer
 
 
 def idempotency_key(user_id: str, job_id: int, channel: str) -> str:
     """Stable hash for (user, job, channel) — blueprint §1 dedup key."""
-    raw = f"{user_id}:{job_id}:{channel}".encode("utf-8")
-    return hashlib.sha1(raw).hexdigest()
+    raw = f"{user_id}:{job_id}:{channel}".encode()
+    return hashlib.sha1(raw, usedforsecurity=False).hexdigest()
 
 
 async def _load_users(db: aiosqlite.Connection) -> list[dict[str, Any]]:
@@ -37,9 +37,7 @@ async def _load_users(db: aiosqlite.Connection) -> list[dict[str, Any]]:
     ``ctx['users_loader']`` in tests.
     """
     db.row_factory = aiosqlite.Row
-    cur = await db.execute(
-        "SELECT id FROM users WHERE deleted_at IS NULL"
-    )
+    cur = await db.execute("SELECT id FROM users WHERE deleted_at IS NULL")
     return [dict(r) for r in await cur.fetchall()]
 
 
@@ -110,17 +108,15 @@ async def score_and_ingest(
         if scorer_fn is not None:
             score = int(scorer_fn(user_id, job))
         else:
-            score = int(_scorer_for(user_id).score(job))
+            # Step-1 B4: JobScorer.score() now returns a ScoreBreakdown —
+            # unpack match_score before comparing against the threshold.
+            score = int(_scorer_for(user_id).score(job).match_score)
         bucket = _bucket_for_row(job_row)
-        await feed.upsert_feed_row(
-            user_id=user_id, job_id=job_id, score=score, bucket=bucket
-        )
+        await feed.upsert_feed_row(user_id=user_id, job_id=job_id, score=score, bucket=bucket)
         ingested += 1
 
         if score >= threshold:
-            await _record_ledger_if_new(
-                db, user_id=user_id, job_id=job_id, channel="instant"
-            )
+            await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel="instant")
             enqueue = ctx.get("enqueue")
             if enqueue is not None:
                 result = enqueue("send_notification", user_id, job_id, "instant")
@@ -132,9 +128,7 @@ async def score_and_ingest(
     return {"ingested": ingested, "notifications_queued": queued}
 
 
-async def _record_ledger_if_new(
-    db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str
-) -> bool:
+async def _record_ledger_if_new(db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str) -> bool:
     """Insert a ledger row in ``queued`` state. Idempotent per (user, job, channel).
 
     Returns True if a new row was created, False if it already existed.
@@ -154,9 +148,7 @@ async def _record_ledger_if_new(
         return False
 
 
-async def mark_ledger_sent(
-    db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str
-) -> None:
+async def mark_ledger_sent(db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
         """
@@ -236,9 +228,7 @@ async def send_notification(
     db.row_factory = aiosqlite.Row
 
     # Fetch job context for the notification body
-    cur = await db.execute(
-        "SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,)
-    )
+    cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
     job_row = await cur.fetchone()
     if job_row is None:
         return {"sent": 0, "failed": 0}
@@ -252,6 +242,7 @@ async def send_notification(
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
         from src.services.channels.dispatcher import dispatch as real_dispatch
+
         dispatcher_fn = real_dispatch
 
     results = await dispatcher_fn(db, user_id=user_id, title=title, body=body)
@@ -261,13 +252,9 @@ async def send_notification(
     for result in results:
         channel_key = result.channel_type or f"channel:{result.channel_id}"
         # Ensure a ledger row exists (idempotent per UNIQUE constraint).
-        await _record_ledger_if_new(
-            db, user_id=user_id, job_id=job_id, channel=channel_key
-        )
+        await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel=channel_key)
         if result.ok:
-            await mark_ledger_sent(
-                db, user_id=user_id, job_id=job_id, channel=channel_key
-            )
+            await mark_ledger_sent(db, user_id=user_id, job_id=job_id, channel=channel_key)
             sent += 1
         else:
             await mark_ledger_failed(
@@ -282,18 +269,12 @@ async def send_notification(
     return {"sent": sent, "failed": failed}
 
 
-async def mark_ledger_sent_task(
-    ctx: dict, user_id: str, job_id: int, channel: str
-) -> None:
+async def mark_ledger_sent_task(ctx: dict, user_id: str, job_id: int, channel: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_sent`."""
-    await mark_ledger_sent(
-        ctx["db"], user_id=user_id, job_id=job_id, channel=channel
-    )
+    await mark_ledger_sent(ctx["db"], user_id=user_id, job_id=job_id, channel=channel)
 
 
-async def mark_ledger_failed_task(
-    ctx: dict, user_id: str, job_id: int, channel: str, error: str
-) -> None:
+async def mark_ledger_failed_task(ctx: dict, user_id: str, job_id: int, channel: str, error: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_failed`."""
     await mark_ledger_failed(
         ctx["db"],
@@ -305,6 +286,7 @@ async def mark_ledger_failed_task(
 
 
 # ---------- helpers ----------------------------------------------------
+
 
 def _search_config_for(user_id: str) -> SearchConfig:
     """Build the user's SearchConfig from their stored profile, else defaults.
@@ -321,7 +303,7 @@ def _search_config_for(user_id: str) -> SearchConfig:
         profile = load_profile(user_id)
         if profile and profile.is_complete:
             return generate_search_config(profile)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110 — fall back silently to defaults if profile load fails
         pass
     return SearchConfig.from_defaults()
 
@@ -335,8 +317,8 @@ def _default_search_config() -> SearchConfig:
     CLI perspective.
     """
     from src.core.tenancy import DEFAULT_TENANT_ID
-    return _search_config_for(DEFAULT_TENANT_ID)
 
+    return _search_config_for(DEFAULT_TENANT_ID)
 
 
 def _parse_dt(value) -> datetime:

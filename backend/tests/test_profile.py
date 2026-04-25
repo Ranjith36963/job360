@@ -1,26 +1,20 @@
 """Tests for the src/profile/ package — models, cv_parser, preferences, storage, keyword_generator."""
 
-import json
-import os
-import tempfile
-from pathlib import Path
 from datetime import datetime, timezone
-from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from src.models import Job
-from src.services.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
-from src.services.profile.preferences import validate_preferences, merge_cv_and_preferences
-from src.services.profile.keyword_generator import generate_search_config
-from src.services.profile.storage import save_profile, load_profile, profile_exists
-from src.services.skill_matcher import JobScorer
 from src.core.keywords import VISA_KEYWORDS
-
+from src.models import Job
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.profile.models import CVData, SearchConfig, UserPreferences, UserProfile
+from src.services.profile.preferences import merge_cv_and_preferences, validate_preferences
+from src.services.skill_matcher import JobScorer
 
 # -----------------------------------------------------------------------
 # SearchConfig.from_defaults() — no domain assumptions; empty skill lists
 # -----------------------------------------------------------------------
+
 
 class TestSearchConfigDefaults:
     def test_from_defaults_job_titles_empty(self):
@@ -64,6 +58,7 @@ class TestSearchConfigDefaults:
 # UserProfile
 # -----------------------------------------------------------------------
 
+
 class TestUserProfile:
     def test_empty_profile_not_complete(self):
         profile = UserProfile()
@@ -91,6 +86,7 @@ class TestUserProfile:
 # -----------------------------------------------------------------------
 # Preferences validation
 # -----------------------------------------------------------------------
+
 
 class TestPreferences:
     def test_validate_from_dict(self):
@@ -169,9 +165,9 @@ class TestPreferences:
 # Keyword generator
 # -----------------------------------------------------------------------
 
+
 class TestKeywordGenerator:
-    def _make_profile(self, titles=None, skills=None, locations=None,
-                      arrangement="", negatives=None, declared=None):
+    def _make_profile(self, titles=None, skills=None, locations=None, arrangement="", negatives=None, declared=None):
         """Build a profile. ``skills`` land in ``cv.skills`` (cv_explicit source);
         ``declared`` lands in ``preferences.additional_skills`` (user_declared source).
         The distinction matters under Batch 1.3a's evidence-based tiering —
@@ -219,8 +215,8 @@ class TestKeywordGenerator:
         profile = UserProfile(
             cv_data=CVData(
                 raw_text="t",
-                skills=["Django", "Flask"],             # cv_explicit → secondary
-                github_skills_inferred=["Haskell"],      # github_lang  → tertiary
+                skills=["Django", "Flask"],  # cv_explicit → secondary
+                github_skills_inferred=["Haskell"],  # github_lang  → tertiary
             ),
             preferences=UserPreferences(
                 additional_skills=["Product Strategy"],  # user_declared → primary
@@ -315,6 +311,7 @@ class TestKeywordGenerator:
 # JobScorer — dynamic scoring with SearchConfig
 # -----------------------------------------------------------------------
 
+
 class TestJobScorer:
     @pytest.fixture
     def default_scorer(self):
@@ -323,27 +320,30 @@ class TestJobScorer:
     @pytest.fixture
     def custom_scorer(self):
         """A scorer for a sales/marketing domain."""
-        return JobScorer(SearchConfig(
-            job_titles=["Sales Manager", "Account Executive", "Business Developer"],
-            primary_skills=["Salesforce", "CRM", "Negotiation"],
-            secondary_skills=["Excel", "HubSpot", "Cold Calling"],
-            tertiary_skills=["PowerPoint", "LinkedIn"],
-            relevance_keywords=["sales", "crm", "b2b", "pipeline", "revenue"],
-            negative_title_keywords=["intern", "warehouse"],
-            locations=["London", "UK", "Remote"],
-            visa_keywords=["visa sponsorship", "sponsorship"],
-            core_domain_words={"sales", "business", "account", "revenue", "crm"},
-            supporting_role_words={"manager", "executive", "developer", "lead"},
-            search_queries=["Sales Manager UK", "Account Executive London"],
-        ))
+        return JobScorer(
+            SearchConfig(
+                job_titles=["Sales Manager", "Account Executive", "Business Developer"],
+                primary_skills=["Salesforce", "CRM", "Negotiation"],
+                secondary_skills=["Excel", "HubSpot", "Cold Calling"],
+                tertiary_skills=["PowerPoint", "LinkedIn"],
+                relevance_keywords=["sales", "crm", "b2b", "pipeline", "revenue"],
+                negative_title_keywords=["intern", "warehouse"],
+                locations=["London", "UK", "Remote"],
+                visa_keywords=["visa sponsorship", "sponsorship"],
+                core_domain_words={"sales", "business", "account", "revenue", "crm"},
+                supporting_role_words={"manager", "executive", "developer", "lead"},
+                search_queries=["Sales Manager UK", "Account Executive London"],
+            )
+        )
 
     def test_default_scorer_returns_valid_score(self, default_scorer, sample_ai_job):
         """Default scorer (empty config) returns a score in valid 0-100 range."""
-        score = default_scorer.score(sample_ai_job)
+        score = default_scorer.score(sample_ai_job).match_score
         assert 0 <= score <= 100
 
     def test_default_scorer_visa_matches(self, default_scorer, sample_visa_job):
         from src.services.skill_matcher import check_visa_flag
+
         assert default_scorer.check_visa_flag(sample_visa_job) == check_visa_flag(sample_visa_job)
 
     def test_custom_scorer_sales_job_scores_high(self, custom_scorer):
@@ -356,7 +356,7 @@ class TestJobScorer:
             source="test",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        score = custom_scorer.score(job)
+        score = custom_scorer.score(job).match_score
         assert score >= 50  # Good title match + skill match + location
 
     def test_custom_scorer_ai_job_scores_low(self, custom_scorer):
@@ -370,7 +370,7 @@ class TestJobScorer:
             source="test",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        score = custom_scorer.score(job)
+        score = custom_scorer.score(job).match_score
         assert score < 30  # No title or skill match
 
     def test_custom_scorer_negative_penalty(self, custom_scorer):
@@ -383,7 +383,7 @@ class TestJobScorer:
             source="test",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        score = custom_scorer.score(job)
+        score = custom_scorer.score(job).match_score
         assert score < 20  # Negative keywords should penalize
 
     def test_custom_scorer_visa_flag(self, custom_scorer):
@@ -409,7 +409,7 @@ class TestJobScorer:
             source="test",
             date_found="2020-01-01",
         )
-        score = default_scorer.score(job)
+        score = default_scorer.score(job).match_score
         assert 0 <= score <= 100
 
     def test_scorer_empty_config_no_crash(self):
@@ -424,7 +424,7 @@ class TestJobScorer:
             source="test",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        score = scorer.score(job)
+        score = scorer.score(job).match_score
         assert 0 <= score <= 100
 
 
@@ -435,6 +435,7 @@ class TestJobScorer:
 # -----------------------------------------------------------------------
 # LLM CV Parser
 # -----------------------------------------------------------------------
+
 
 class TestLLMCVParser:
     """Tests for the LLM-based CV parser."""
@@ -450,12 +451,21 @@ class TestLLMCVParser:
             "summary": "AI/ML Engineer with 1.5 years of experience.",
             "skills": ["Python", "PyTorch", "TensorFlow", "AWS Bedrock", "Docker"],
             "experience": [
-                {"company": "Calnex", "title": "AI Solutions Engineer", "dates": "June 2025",
-                 "location": "UK", "bullets": ["Built RAG pipeline"]}
+                {
+                    "company": "Calnex",
+                    "title": "AI Solutions Engineer",
+                    "dates": "June 2025",
+                    "location": "UK",
+                    "bullets": ["Built RAG pipeline"],
+                }
             ],
             "education": [
-                {"degree": "MSc AI and Robotics", "institution": "Univ of Hertfordshire",
-                 "dates": "2022-2024", "details": ["Neural Networks", "Machine Learning"]}
+                {
+                    "degree": "MSc AI and Robotics",
+                    "institution": "Univ of Hertfordshire",
+                    "dates": "2022-2024",
+                    "details": ["Neural Networks", "Machine Learning"],
+                }
             ],
             "certifications": ["AWS Certified AI Practitioner (2025)"],
             "achievements": ["achieving 95% response accuracy"],
@@ -498,16 +508,31 @@ class TestLLMCVParser:
             "headline": "Cardiology Consultant",
             "location": "London, UK",
             "summary": "Experienced cardiologist with 10 years of clinical practice.",
-            "skills": ["Echocardiography", "Cardiac Catheterization", "HIPAA", "Patient Triage",
-                       "EHR Systems", "Clinical Trials", "Medical Research"],
+            "skills": [
+                "Echocardiography",
+                "Cardiac Catheterization",
+                "HIPAA",
+                "Patient Triage",
+                "EHR Systems",
+                "Clinical Trials",
+                "Medical Research",
+            ],
             "experience": [
-                {"company": "NHS Royal Free", "title": "Cardiology Consultant",
-                 "dates": "2018-Present", "location": "London",
-                 "bullets": ["Led cardiac unit with 40% reduced wait times"]}
+                {
+                    "company": "NHS Royal Free",
+                    "title": "Cardiology Consultant",
+                    "dates": "2018-Present",
+                    "location": "London",
+                    "bullets": ["Led cardiac unit with 40% reduced wait times"],
+                }
             ],
             "education": [
-                {"degree": "MBBS Medicine", "institution": "University of Oxford",
-                 "dates": "2004-2010", "details": ["Honours in Cardiology"]}
+                {
+                    "degree": "MBBS Medicine",
+                    "institution": "University of Oxford",
+                    "dates": "2004-2010",
+                    "details": ["Honours in Cardiology"],
+                }
             ],
             "certifications": ["MRCP Cardiology — Royal College of Physicians (2012)"],
             "achievements": ["reduced patient wait times by 40%"],
@@ -566,9 +591,7 @@ class TestLLMCVParser:
         """LLM returning list of dicts instead of strings — extract name field."""
         from src.services.profile.cv_parser import _llm_result_to_cvdata
 
-        result = {
-            "skills": [{"name": "Python"}, {"name": "Docker"}, {"skill": "AWS"}]
-        }
+        result = {"skills": [{"name": "Python"}, {"name": "Docker"}, {"skill": "AWS"}]}
         cv = _llm_result_to_cvdata("text", result)
         assert "Python" in cv.skills
         assert "Docker" in cv.skills
@@ -599,8 +622,10 @@ class TestCVParserFailures:
     @pytest.mark.asyncio
     async def test_parse_cv_async_raises_on_empty_text(self):
         """If text extraction yields empty string, raise RuntimeError."""
-        import pytest
         from unittest.mock import patch
+
+        import pytest
+
         from src.services.profile.cv_parser import parse_cv_async
 
         with patch("src.services.profile.cv_parser.extract_text", return_value=""):
@@ -612,5 +637,6 @@ class TestCVParserEdgeCases:
     def test_doc_format_rejected(self):
         """Legacy .doc files should return empty string with warning."""
         from src.services.profile.cv_parser import extract_text
+
         result = extract_text("resume.doc")
         assert result == ""

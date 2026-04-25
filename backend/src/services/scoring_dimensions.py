@@ -12,8 +12,10 @@ plan §4 Batch 2.9 (weights configurable via `core/settings.py`):
 Each scorer gracefully returns a neutral midpoint when its signal is missing
 (enrichment row absent, enum is "unknown", profile preference None).
 """
+
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 from src.core.settings import (
@@ -29,6 +31,38 @@ from src.services.job_enrichment_schema import (
     WorkplaceType,
 )
 from src.services.salary import normalize_salary
+
+# ---------------------------------------------------------------------------
+# ScoreBreakdown — Step-1 B3 per-dimension score container
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ScoreBreakdown:
+    """Per-dimension scoring breakdown returned by `JobScorer.score()`.
+
+    Step-1 B3 — downstream consumers (API serialisation, frontend radar chart)
+    need each dimension separately instead of the legacy single int.
+
+    Legacy callers passing only ``config`` see the four legacy components
+    populated (title/skill/location/recency) with the four Pillar 2 Batch 2.9
+    dimension slots (seniority/salary/visa/workplace) defaulted to 0 — which
+    makes ``match_score`` byte-identical to the pre-Step-1 int return.
+
+    Activation of the multi-dim path (seniority/salary/visa/workplace
+    populated to non-zero) happens only when BOTH ``user_preferences`` and
+    ``enrichment_lookup`` are passed to ``JobScorer(...)``.
+    """
+
+    title_score: int = 0
+    skill_score: int = 0
+    location_score: int = 0
+    recency_score: int = 0
+    seniority_score: int = 0
+    salary_score: int = 0
+    visa_score: int = 0
+    workplace_score: int = 0
+    match_score: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -49,13 +83,21 @@ _SENIORITY_RANK = {
 
 # Map UserPreferences.experience_level strings to the same rank scale.
 _USER_EXPERIENCE_RANK = {
-    "intern": 0, "internship": 0,
-    "junior": 1, "entry": 1, "graduate": 1,
-    "mid": 2, "intermediate": 2,
-    "senior": 3, "sr": 3,
-    "staff": 4, "lead": 4,
+    "intern": 0,
+    "internship": 0,
+    "junior": 1,
+    "entry": 1,
+    "graduate": 1,
+    "mid": 2,
+    "intermediate": 2,
+    "senior": 3,
+    "sr": 3,
+    "staff": 4,
+    "lead": 4,
     "principal": 5,
-    "director": 6, "head": 6, "vp": 6,
+    "director": 6,
+    "head": 6,
+    "vp": 6,
 }
 
 

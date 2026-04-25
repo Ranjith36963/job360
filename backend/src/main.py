@@ -2,84 +2,93 @@ import argparse
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 import aiohttp
 
 from src.core.settings import (
-    REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, JSEARCH_API_KEY,
-    JOOBLE_API_KEY, SERPAPI_KEY, CAREERJET_AFFID, FINDWORK_API_KEY,
-    DB_PATH, EXPORTS_DIR, REPORTS_DIR, REQUEST_TIMEOUT, MIN_MATCH_SCORE,
+    ADZUNA_APP_ID,
+    ADZUNA_APP_KEY,
+    CAREERJET_AFFID,
+    DB_PATH,
+    EXPORTS_DIR,
+    FINDWORK_API_KEY,
+    JOOBLE_API_KEY,
+    JSEARCH_API_KEY,
+    MIN_MATCH_SCORE,
+    REED_API_KEY,
+    REPORTS_DIR,
+    REQUEST_TIMEOUT,
+    SERPAPI_KEY,
 )
-from src.utils.logger import setup_logging
-from src.models import Job
-from src.repositories.database import JobDatabase
-from src.repositories.csv_export import export_to_csv
-from src.services.skill_matcher import check_visa_flag, detect_experience_level, salary_in_range, JobScorer
-from src.services.deduplicator import deduplicate
 from src.core.tenancy import DEFAULT_TENANT_ID
-from src.services.profile.storage import load_profile
-from src.services.profile.keyword_generator import generate_search_config
-from src.services.notifications.report_generator import generate_markdown_report
-from src.services.notifications.base import get_configured_channels
-from src.services.circuit_breaker import default_registry as default_breaker_registry
+from src.models import Job
+from src.repositories.csv_export import export_to_csv
+from src.repositories.database import JobDatabase
 from src.services.circuit_breaker import BreakerState
-from src.services.scheduler import TieredScheduler
+from src.services.circuit_breaker import default_registry as default_breaker_registry
+from src.services.deduplicator import deduplicate
 from src.services.domain_classifier import (
     classify_user_domain,
     source_matches_user_domains,
 )
-
-from src.sources.apis_keyed.reed import ReedSource
-from src.sources.apis_keyed.adzuna import AdzunaSource
-from src.sources.apis_keyed.jsearch import JSearchSource
-from src.sources.apis_free.arbeitnow import ArbeitnowSource
-from src.sources.apis_free.remoteok import RemoteOKSource
-from src.sources.apis_free.jobicy import JobicySource
-from src.sources.apis_free.himalayas import HimalayasSource
-from src.sources.ats.greenhouse import GreenhouseSource
-from src.sources.ats.lever import LeverSource
-from src.sources.ats.workable import WorkableSource
-from src.sources.ats.ashby import AshbySource
-from src.sources.apis_free.remotive import RemotiveSource
-from src.sources.apis_keyed.jooble import JoobleSource
-from src.sources.scrapers.linkedin import LinkedInSource
-from src.sources.ats.smartrecruiters import SmartRecruitersSource
-from src.sources.ats.pinpoint import PinpointSource
-from src.sources.ats.recruitee import RecruiteeSource
-from src.sources.other.indeed import JobSpySource
-from src.sources.ats.workday import WorkdaySource
-from src.sources.apis_keyed.google_jobs import GoogleJobsSource
-from src.sources.apis_free.devitjobs import DevITJobsSource
-from src.sources.apis_free.landingjobs import LandingJobsSource
+from src.services.notifications.base import get_configured_channels
+from src.services.notifications.report_generator import generate_markdown_report
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.profile.storage import load_profile
+from src.services.scheduler import TieredScheduler
+from src.services.skill_matcher import JobScorer, detect_experience_level, salary_in_range
 from src.sources.apis_free.aijobs import AIJobsSource
-from src.sources.other.themuse import TheMuseSource
-from src.sources.other.hackernews import HackerNewsSource
-from src.sources.apis_keyed.careerjet import CareerjetSource
-from src.sources.apis_keyed.findwork import FindworkSource
-from src.sources.other.nofluffjobs import NoFluffJobsSource
+from src.sources.apis_free.arbeitnow import ArbeitnowSource
+from src.sources.apis_free.devitjobs import DevITJobsSource
+from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
+from src.sources.apis_free.himalayas import HimalayasSource
 from src.sources.apis_free.hn_jobs import HNJobsSource
-from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
-from src.sources.feeds.nhs_jobs import NHSJobsSource
-from src.sources.ats.personio import PersonioSource
-from src.sources.feeds.workanywhere import WorkAnywhereSource
-from src.sources.feeds.weworkremotely import WeWorkRemotelySource
-from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
-from src.sources.feeds.biospace import BioSpaceSource
-from src.sources.scrapers.jobtensor import JobTensorSource
-from src.sources.scrapers.climatebase import ClimatebaseSource
-from src.sources.scrapers.eightykhours import EightyKHoursSource
-from src.sources.scrapers.bcs_jobs import BCSJobsSource
-from src.sources.feeds.uni_jobs import UniJobsSource
-from src.sources.ats.successfactors import SuccessFactorsSource
-from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
-from src.sources.scrapers.aijobs_ai import AIJobsAISource
+from src.sources.apis_free.jobicy import JobicySource
+from src.sources.apis_free.landingjobs import LandingJobsSource
+from src.sources.apis_free.remoteok import RemoteOKSource
+from src.sources.apis_free.remotive import RemotiveSource
+
 # Batch 3 additions
 from src.sources.apis_free.teaching_vacancies import TeachingVacanciesSource
-from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
-from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
-from src.sources.ats.rippling import RipplingSource
+from src.sources.apis_keyed.adzuna import AdzunaSource
+from src.sources.apis_keyed.careerjet import CareerjetSource
+from src.sources.apis_keyed.findwork import FindworkSource
+from src.sources.apis_keyed.google_jobs import GoogleJobsSource
+from src.sources.apis_keyed.jooble import JoobleSource
+from src.sources.apis_keyed.jsearch import JSearchSource
+from src.sources.apis_keyed.reed import ReedSource
+from src.sources.ats.ashby import AshbySource
 from src.sources.ats.comeet import ComeetSource
+from src.sources.ats.greenhouse import GreenhouseSource
+from src.sources.ats.lever import LeverSource
+from src.sources.ats.personio import PersonioSource
+from src.sources.ats.pinpoint import PinpointSource
+from src.sources.ats.recruitee import RecruiteeSource
+from src.sources.ats.rippling import RipplingSource
+from src.sources.ats.smartrecruiters import SmartRecruitersSource
+from src.sources.ats.successfactors import SuccessFactorsSource
+from src.sources.ats.workable import WorkableSource
+from src.sources.ats.workday import WorkdaySource
+from src.sources.feeds.biospace import BioSpaceSource
+from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
+from src.sources.feeds.nhs_jobs import NHSJobsSource
+from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
+from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
+from src.sources.feeds.uni_jobs import UniJobsSource
+from src.sources.feeds.weworkremotely import WeWorkRemotelySource
+from src.sources.feeds.workanywhere import WorkAnywhereSource
+from src.sources.other.hackernews import HackerNewsSource
+from src.sources.other.indeed import JobSpySource
+from src.sources.other.nofluffjobs import NoFluffJobsSource
+from src.sources.other.themuse import TheMuseSource
+from src.sources.scrapers.aijobs_ai import AIJobsAISource
+from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
+from src.sources.scrapers.bcs_jobs import BCSJobsSource
+from src.sources.scrapers.climatebase import ClimatebaseSource
+from src.sources.scrapers.eightykhours import EightyKHoursSource
+from src.sources.scrapers.jobtensor import JobTensorSource
+from src.sources.scrapers.linkedin import LinkedInSource
+from src.utils.logger import setup_logging
 
 logger = logging.getLogger("job360.main")
 
@@ -173,10 +182,11 @@ async def _ghost_detection_pass(
         rolling_avg = (sum(past) / len(past)) if past else 0.0
         if rolling_avg > 0 and len(result) < completeness_threshold * rolling_avg:
             logger.warning(
-                "  %s: result count (%s) below %.0f%% of 7-day avg (%.1f) — "
-                "skipping absence sweep",
-                source.name, len(result),
-                completeness_threshold * 100, rolling_avg,
+                "  %s: result count (%s) below %.0f%% of 7-day avg (%.1f) — " "skipping absence sweep",
+                source.name,
+                len(result),
+                completeness_threshold * 100,
+                rolling_avg,
             )
             continue
         seen: set[tuple[str, str]] = {job.normalized_key() for job in result}
@@ -187,15 +197,15 @@ async def _ghost_detection_pass(
         if missed:
             logger.info(
                 "  %s: marked %s existing job(s) as missed this cycle",
-                source.name, missed,
+                source.name,
+                missed,
             )
     return missed_by_source
 
 
 def _format_date(date_str: str) -> str:
     """Parse date_found into a short 'Posted: 28 Feb 2026' format."""
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
-                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
             return f"Posted: {dt.strftime('%d %b %Y')}"
@@ -207,8 +217,9 @@ def _format_date(date_str: str) -> str:
     return "Posted: N/A"
 
 
-def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = None,
-                    search_config=None, user_profile=None) -> list:
+def _build_sources(
+    session: aiohttp.ClientSession, source_filter: str | None = None, search_config=None, user_profile=None
+) -> list:
     """Build source instances, optionally filtered to a single source or by
     the user's classified professional domain(s).
 
@@ -294,8 +305,7 @@ def _build_sources(session: aiohttp.ClientSession, source_filter: str | None = N
     user_domains = classify_user_domain(user_profile)
     if not user_domains:
         return all_sources
-    return [s for s in all_sources
-            if source_matches_user_domains(s.DOMAINS, user_domains)]
+    return [s for s in all_sources if source_matches_user_domains(s.DOMAINS, user_domains)]
 
 
 async def run_search(
@@ -408,9 +418,7 @@ async def run_search(
                     per_source[source.name] = 0
                     breaker_state = registry.get(source.name).state
                     if breaker_state == BreakerState.OPEN:
-                        logger.info(
-                            "  %s: skipped (breaker OPEN)", source.name
-                        )
+                        logger.info("  %s: skipped (breaker OPEN)", source.name)
                     else:
                         failed_sources.append(source.name)
                         logger.warning("  %s: FAILED", source.name)
@@ -427,9 +435,9 @@ async def run_search(
 
             # Surface newly-opened breakers (post-scheduler state diff)
             newly_opened = [
-                s.name for s in sources
-                if pre_states.get(s.name) != BreakerState.OPEN
-                and registry.get(s.name).state == BreakerState.OPEN
+                s.name
+                for s in sources
+                if pre_states.get(s.name) != BreakerState.OPEN and registry.get(s.name).state == BreakerState.OPEN
             ]
             if newly_opened:
                 logger.warning(
@@ -457,9 +465,12 @@ async def run_search(
 
             logger.info("Total raw jobs: %s", len(all_jobs))
 
-            # Score all jobs using the user's profile (scorer always exists — guarded at start)
+            # Score all jobs using the user's profile (scorer always exists — guarded at start).
+            # Step-1 B4: JobScorer.score() now returns a ScoreBreakdown — surface
+            # the scalar match_score on the Job so the MIN_MATCH_SCORE filter still works.
             for job in all_jobs:
-                job.match_score = scorer.score(job)
+                breakdown = scorer.score(job)
+                job.match_score = breakdown.match_score
                 job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
 
@@ -544,13 +555,20 @@ async def run_search(
 
 def _print_bucketed_summary(jobs: list, label: str = "Results"):
     """Print a time-bucketed summary of jobs to the console."""
-    from src.utils.time_buckets import bucket_jobs, bucket_summary_counts, BUCKETS
+    from src.utils.time_buckets import BUCKETS, bucket_jobs, bucket_summary_counts
+
     job_dicts = [
         {
-            "title": j.title, "company": j.company, "location": j.location,
-            "match_score": j.match_score, "visa_flag": j.visa_flag,
-            "salary_min": j.salary_min, "salary_max": j.salary_max,
-            "date_found": j.date_found, "apply_url": j.apply_url, "source": j.source,
+            "title": j.title,
+            "company": j.company,
+            "location": j.location,
+            "match_score": j.match_score,
+            "visa_flag": j.visa_flag,
+            "salary_min": j.salary_min,
+            "salary_max": j.salary_max,
+            "date_found": j.date_found,
+            "apply_url": j.apply_url,
+            "source": j.source,
         }
         for j in jobs
     ]
@@ -558,8 +576,13 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
     counts = bucket_summary_counts(bucketed)
     logger.info("=" * 60)
     logger.info("Job360 %s: %s jobs found", label, len(jobs))
-    logger.info("  24h: %s | 24-48h: %s | 48-72h: %s | 3-7d: %s",
-                counts['last_24h'], counts['24_48h'], counts['48_72h'], counts['3_7d'])
+    logger.info(
+        "  24h: %s | 24-48h: %s | 48-72h: %s | 3-7d: %s",
+        counts["last_24h"],
+        counts["24_48h"],
+        counts["48_72h"],
+        counts["3_7d"],
+    )
     logger.info("=" * 60)
     for idx in range(4):
         bucket_list = bucketed.get(idx, [])
@@ -570,12 +593,20 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
                 visa = " [VISA]" if j.get("visa_flag") else ""
                 salary = ""
                 if j.get("salary_min") and j.get("salary_max"):
-                    salary = " | %s-%s" % (f"{int(j['salary_min']):,}", f"{int(j['salary_max']):,}")
-                posted = " | %s" % _format_date(j.get('date_found', ''))
-                src = " [%s]" % j.get('source', '')
-                logger.info("    %s. [%s] %s @ %s%s%s%s%s",
-                            i, j['match_score'], j['title'], j['company'],
-                            salary, visa, posted, src)
+                    salary = f" | {int(j['salary_min']):,}-{int(j['salary_max']):,}"
+                posted = f" | {_format_date(j.get('date_found', ''))}"
+                src = " [%s]" % j.get("source", "")
+                logger.info(
+                    "    %s. [%s] %s @ %s%s%s%s%s",
+                    i,
+                    j["match_score"],
+                    j["title"],
+                    j["company"],
+                    salary,
+                    visa,
+                    posted,
+                    src,
+                )
     logger.info("=" * 60)
 
 
