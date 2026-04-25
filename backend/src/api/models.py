@@ -89,6 +89,11 @@ class JobResponse(BaseModel):
     nice_to_have_skills: Optional[list[str]] = None
     industry: Optional[str] = None
     years_experience_min: Optional[int] = None
+    # Step-1.5 S3-F — surface the "also posted on Indeed + Reed" badge
+    # ID list. Optional because the dedup-group writer is deferred to a
+    # follow-up batch (see plan §non-scope). Defaults to None today; the
+    # frontend renders a fallback "no group info" badge until populated.
+    dedup_group_ids: Optional[list[int]] = None
 
 
 class JobListResponse(BaseModel):
@@ -157,6 +162,91 @@ class ProfileResponse(BaseModel):
     # esco_uri). Mirrors `CVData.cv_skills_esco`. Empty when SEMANTIC is
     # off or the index is missing — gracefully degrades.
     skill_esco: dict[str, str] = {}
+    # Step-1.5 S3-E — provenance map: skill name → list of source labels
+    # (``cv_explicit`` / ``linkedin`` / ``github_dep`` / ``github_lang`` /
+    # ``user_declared``). Computed from the SkillEntry merge — empty
+    # when the profile has no skills.
+    skill_provenance: dict[str, list[str]] = {}
+    # Step-1.5 S3-E — LinkedIn sub-sections for the profile detail UI.
+    # Each value is the raw list of dicts as parsed by
+    # ``services.profile.linkedin_parser`` — see CVData fields with the
+    # same names. UI flattens for display; backend keeps the raw shape
+    # so callers can format independently.
+    linkedin_subsections: dict[str, list[dict]] = {}
+    # Step-1.5 S3-E — GitHub temporal data: per-language byte counts
+    # (top-K by volume) + topic frequencies. Pure metric surface — UI
+    # renders trend graphs without backend re-shaping.
+    github_temporal: dict[str, dict] = {}
+    # Step-1.5 S3-E — newest snapshot id from ``user_profile_versions``;
+    # surfaces "current version" alongside the history list. None when
+    # the version table is empty / unavailable.
+    current_version_id: Optional[int] = None
+
+
+# ── Step-1.5 S3-G — six new Pydantic models for Cohort Z endpoints. ──
+
+
+class ProfileVersionSummary(BaseModel):
+    """One row in ``GET /profile/versions``. Mirrors the dict shape that
+    ``services.profile.storage.list_profile_versions`` returns; CVData +
+    preferences blobs are passed through unmodified so the frontend can
+    diff snapshot-to-snapshot without an extra round-trip."""
+
+    id: int
+    created_at: str
+    source_action: str
+    cv_data: dict
+    preferences: dict
+
+
+class ProfileVersionsListResponse(BaseModel):
+    """``GET /profile/versions`` body wrapper."""
+
+    versions: list[ProfileVersionSummary]
+    total: int
+
+
+class JsonResumeResponse(BaseModel):
+    """``GET /profile/json-resume`` body. Wraps the canonical JSON Resume
+    dict (https://jsonresume.org/schema/) under a ``resume`` key so the
+    response is a JSON object, not a bare list."""
+
+    resume: dict
+
+
+class NotificationLedgerEntry(BaseModel):
+    """One row of ``notification_ledger`` exposed via the API. ``body`` is
+    intentionally absent — Step-1.5 plan §non-scope defers the schema
+    column for notification message bodies to a follow-up batch."""
+
+    id: int
+    job_id: int
+    channel: str
+    status: str
+    sent_at: Optional[str] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    created_at: str
+
+
+class NotificationLedgerListResponse(BaseModel):
+    """Paginated ``GET /notifications`` body."""
+
+    notifications: list[NotificationLedgerEntry]
+    total: int
+    limit: int
+    offset: int
+
+
+class DedupGroupSummary(BaseModel):
+    """``GET /jobs/{id}/dedup-group`` shape — placeholder for the upcoming
+    dedup-group writer batch. Not exposed by any route in Step 1.5; the
+    model is shipped now so the frontend agent can wire the type-safe
+    consumer in Step 2 without a Pydantic round-trip change later."""
+
+    group_id: int
+    job_ids: list[int]
+    canonical_job_id: int
 
 
 class LinkedInResponse(BaseModel):

@@ -14,6 +14,7 @@ from src.api.routes import (
     channels,
     health,
     jobs,
+    notifications,
     pipeline,
     profile,
     search,
@@ -57,3 +58,5 @@ app.include_router(pipeline.router, prefix="/api")
 # Batch 2 — auth + channel config
 app.include_router(auth.router, prefix="/api")
 app.include_router(channels.router, prefix="/api")
+# Step-1.5 S3-D — notification ledger reader
+app.include_router(notifications.router, prefix="/api")

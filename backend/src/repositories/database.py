@@ -689,6 +689,77 @@ class JobDatabase:
             return None
         return dict(row)
 
+    # ------------------------------------------------------------------
+    # Step-1.5 S3-D — notification_ledger reader.
+    #
+    # ``notification_ledger`` was created by migration 0004 as the per-
+    # channel idempotency + retry audit table; until Step 1.5 there was
+    # no SELECT-based reader for it. The new GET /notifications endpoint
+    # consumes the two helpers below. Both scope by user_id (CLAUDE.md
+    # rule #12). Optional ``channel`` / ``status`` filters short-circuit
+    # to the user-only WHERE when None.
+    # ------------------------------------------------------------------
+
+    async def get_notification_ledger(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        channel: str | None = None,
+        status: str | None = None,
+    ) -> list[dict]:
+        """Return a paginated slice of the user's notification ledger,
+        newest first. Empty list when the table is missing (legacy DB
+        without migration 0004) — matches the graceful-degrade pattern
+        already used in :meth:`get_recent_jobs_with_enrichment`.
+        """
+        sql = (
+            "SELECT id, job_id, channel, status, sent_at, error_message, "
+            "retry_count, created_at "
+            "FROM notification_ledger "
+            "WHERE user_id = ?"
+        )
+        params: list = [user_id]
+        if channel:
+            sql += " AND channel = ?"
+            params.append(channel)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        try:
+            cursor = await self._conn.execute(sql, tuple(params))
+        except aiosqlite.OperationalError:
+            return []
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def count_notification_ledger(
+        self,
+        user_id: str,
+        channel: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        """Return the total count for the same WHERE-clause as
+        :meth:`get_notification_ledger`. Used to compute pagination
+        ``total`` in NotificationLedgerListResponse.
+        """
+        sql = "SELECT COUNT(*) FROM notification_ledger WHERE user_id = ?"
+        params: list = [user_id]
+        if channel:
+            sql += " AND channel = ?"
+            params.append(channel)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        try:
+            cursor = await self._conn.execute(sql, tuple(params))
+        except aiosqlite.OperationalError:
+            return 0
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
     async def close(self):
         if self._conn:
             await self._conn.close()

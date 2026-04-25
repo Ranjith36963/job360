@@ -77,6 +77,12 @@ def authenticated_async_context(monkeypatch, tmp_path):
     assert r.status_code == 201, r.text
     session_cookie = sync_client.cookies.get("job360_session")
     assert session_cookie, "authenticated_async_context: failed to capture session cookie"
+    # Step-1.5 — capture the registered user's id BEFORE closing the
+    # sync client, so tests that insert per-user rows directly via
+    # aiosqlite (notification ledger, actions) scope their inserts to
+    # the same id the route queries under.
+    me = sync_client.get("/api/auth/me")
+    captured_user_id = me.json().get("id") if me.status_code == 200 else None
     sync_client.close()
 
     @asynccontextmanager
@@ -88,7 +94,18 @@ def authenticated_async_context(monkeypatch, tmp_path):
         ) as client:
             yield client
 
+    _make.fixture_user_id = captured_user_id  # type: ignore[attr-defined]
     return _make
+
+
+@pytest.fixture
+def fixture_user_id(authenticated_async_context):
+    """Step-1.5 — convenience fixture exposing the user id created by
+    ``authenticated_async_context``. Useful when a test needs to insert
+    rows directly via aiosqlite under the same user_id the route will
+    query under.
+    """
+    return getattr(authenticated_async_context, "fixture_user_id", None)
 
 
 def _bootstrap_async_db(db_path: str) -> None:
