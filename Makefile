@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 clean
+.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 clean
 
 help:
 	@echo "Job360 targets:"
@@ -16,6 +16,7 @@ help:
 	@echo "  bootstrap        run backend/scripts/bootstrap_dev.py against localhost:8000"
 	@echo "  verify-step-0    run the Step-0 pre-flight gate (aggregate of below)"
 	@echo "  verify-step-1    run the Step-1 engine→API seam gate"
+	@echo "  verify-step-1-5  run the Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP)"
 	@echo "  clean            wipe __pycache__ + *.pyc"
 
 install:
@@ -102,6 +103,33 @@ verify-step-1:
 	@mkdir -p .claude
 	@git rev-parse HEAD > .claude/step-1-verified.txt
 	@echo "STEP-1 GREEN: $$(cat .claude/step-1-verified.txt)"
+
+# ---------------------------------------------------------------------------
+# Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP).
+#
+# Aggregates the verification checks from docs/step_1_5_plan.md §Verification.
+# Ralph Loop halts once this exits 0 and the sentinel is written.
+# ---------------------------------------------------------------------------
+
+verify-step-1-5:
+	@echo "==> Step-1.5 gate: pytest regression"
+	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	@echo "==> Step-1.5 gate: dim-column round-trip"
+	cd backend && python -m pytest tests/test_database.py::test_dim_columns_round_trip -v -p no:randomly
+	@echo "==> Step-1.5 gate: bombshell value-presence"
+	cd backend && python -m pytest tests/test_api.py::test_jobs_response_includes_score_dim_breakdown -v -p no:randomly
+	@echo "==> Step-1.5 gate: ghost-detection state machine"
+	cd backend && python -m pytest tests/test_ghost_detection_integration.py -v -p no:randomly
+	@echo "==> Step-1.5 gate: ESCO normaliser smoke"
+	cd backend && python -m pytest tests/test_cv_parser_esco.py -v -p no:randomly
+	@echo "==> Step-1.5 gate: profile version + JSON Resume endpoints"
+	cd backend && python -m pytest tests/test_profile_versions_endpoint.py -v -p no:randomly
+	@echo "==> Step-1.5 gate: notification ledger endpoint"
+	cd backend && python -m pytest tests/test_notifications_endpoint.py -v -p no:randomly
+	@echo "==> Step-1.5 gate: PASS"
+	@mkdir -p .claude
+	@git rev-parse HEAD > .claude/step-1-5-verified.txt
+	@echo "STEP-1.5 GREEN: $$(cat .claude/step-1-5-verified.txt)"
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
