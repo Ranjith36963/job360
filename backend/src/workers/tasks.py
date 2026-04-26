@@ -408,6 +408,96 @@ def _bucket_for_row(row: aiosqlite.Row) -> str:
 # the LLM provider chain is never touched during pytest (CLAUDE.md rule #4).
 
 
+async def send_daily_digest(ctx: dict, user_id: str, channel: str) -> dict[str, int]:
+    """ARQ periodic task: send queued digest notifications for (user_id, channel).
+
+    Step-3 B-04 — daily digest sender.
+
+    Workflow:
+      1. Fetch all pending rows from ``user_notification_digests`` for the
+         (user_id, channel) pair.
+      2. Load job details for every queued job_id.
+      3. Format a combined digest message and send via the channel's Apprise
+         credentials (through ``send_notification`` test hook if present in ctx).
+      4. Mark all pending rows as sent via the DB helper.
+
+    This task is registered in ``WorkerSettings.cron_jobs`` and is designed
+    to be enqueued once per user per channel per day by a scheduler — the
+    caller controls frequency; the task is idempotent (no-op if no pending rows).
+
+    Returns ``{'sent': 0|1, 'jobs_count': N}``.
+    """
+    db: aiosqlite.Connection = ctx["db"]
+    db.row_factory = aiosqlite.Row
+
+    # 1. Get pending digest rows
+    try:
+        cur = await db.execute(
+            "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
+            (user_id, channel),
+        )
+        digest_rows = [dict(r) for r in await cur.fetchall()]
+    except Exception:  # noqa: BLE001
+        return {"sent": 0, "jobs_count": 0}
+
+    if not digest_rows:
+        return {"sent": 0, "jobs_count": 0}
+
+    # 2. Fetch job details
+    job_ids = list({r["job_id"] for r in digest_rows})
+    job_details: list[dict] = []
+    for jid in job_ids:
+        cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if row:
+            job_details.append(
+                {"job_id": jid, "title": row["title"], "company": row["company"], "apply_url": row["apply_url"]}
+            )
+
+    # 3. Build digest message and dispatch
+    jobs_count = len(job_details)
+    if jobs_count == 0:
+        # Jobs may have been purged — mark digests sent to avoid re-processing.
+        await _mark_digest_rows_sent(db, user_id, channel)
+        return {"sent": 0, "jobs_count": 0}
+
+    digest_title = f"Job360 Daily Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
+    lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details]
+    digest_body = "\n".join(lines)
+
+    # Re-use the send_notification dispatcher hook when available (for tests).
+    dispatcher_fn = ctx.get("dispatcher")
+    if dispatcher_fn is None:
+        from src.services.channels.dispatcher import dispatch as real_dispatch
+
+        dispatcher_fn = real_dispatch
+
+    results = await dispatcher_fn(db, user_id=user_id, title=digest_title, body=digest_body)
+    any_sent = any(r.ok and not r.skipped and not r.queued_digest for r in results)
+
+    # 4. Mark rows as sent regardless of dispatch outcome (avoid infinite retry floods).
+    await _mark_digest_rows_sent(db, user_id, channel)
+
+    return {"sent": int(any_sent), "jobs_count": jobs_count}
+
+
+async def _mark_digest_rows_sent(db: aiosqlite.Connection, user_id: str, channel: str) -> None:
+    """Helper: flip sent=1 on all pending digest rows for (user_id, channel)."""
+    import logging
+    from datetime import datetime, timezone
+
+    _log = logging.getLogger(__name__)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        await db.execute(
+            "UPDATE user_notification_digests SET sent=1, sent_at=? " "WHERE user_id=? AND channel=? AND sent=0",
+            (now, user_id, channel),
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("Could not mark digests sent for user %s channel %s: %s", user_id, channel, exc)
+
+
 async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:
     """Produce a :class:`JobEnrichment` row for ``job_id``.
 

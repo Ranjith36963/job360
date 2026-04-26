@@ -755,11 +755,16 @@ class JobDatabase:
         offset: int = 0,
         channel: str | None = None,
         status: str | None = None,
+        job_id: int | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
     ) -> list[dict]:
         """Return a paginated slice of the user's notification ledger,
         newest first. Empty list when the table is missing (legacy DB
         without migration 0004) — matches the graceful-degrade pattern
         already used in :meth:`get_recent_jobs_with_enrichment`.
+
+        Step-3 O-01: added ``job_id``, ``start_time``, ``end_time`` filters.
         """
         sql = (
             "SELECT id, job_id, channel, status, sent_at, error_message, "
@@ -774,6 +779,15 @@ class JobDatabase:
         if status:
             sql += " AND status = ?"
             params.append(status)
+        if job_id is not None:
+            sql += " AND job_id = ?"
+            params.append(job_id)
+        if start_time:
+            sql += " AND created_at >= ?"
+            params.append(start_time)
+        if end_time:
+            sql += " AND created_at <= ?"
+            params.append(end_time)
         sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
@@ -788,10 +802,15 @@ class JobDatabase:
         user_id: str,
         channel: str | None = None,
         status: str | None = None,
+        job_id: int | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
     ) -> int:
         """Return the total count for the same WHERE-clause as
         :meth:`get_notification_ledger`. Used to compute pagination
         ``total`` in NotificationLedgerListResponse.
+
+        Step-3 O-01: added ``job_id``, ``start_time``, ``end_time`` filters.
         """
         sql = "SELECT COUNT(*) FROM notification_ledger WHERE user_id = ?"
         params: list = [user_id]
@@ -801,6 +820,15 @@ class JobDatabase:
         if status:
             sql += " AND status = ?"
             params.append(status)
+        if job_id is not None:
+            sql += " AND job_id = ?"
+            params.append(job_id)
+        if start_time:
+            sql += " AND created_at >= ?"
+            params.append(start_time)
+        if end_time:
+            sql += " AND created_at <= ?"
+            params.append(end_time)
         try:
             cursor = await self._conn.execute(sql, tuple(params))
         except aiosqlite.OperationalError:
@@ -878,6 +906,219 @@ class JobDatabase:
         )
         updated = await cursor.fetchone()
         return dict(updated) if updated else None
+
+    # ── Notification rules ───────────────────────────────────────────────────────
+
+    async def get_notification_rules(self, user_id: str) -> list[dict]:
+        """Return all notification rules for a user, ordered by channel."""
+        try:
+            cursor = await self._conn.execute(
+                "SELECT * FROM notification_rules WHERE user_id = ? ORDER BY channel",
+                (user_id,),
+            )
+        except aiosqlite.OperationalError:
+            return []
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def get_notification_rule(self, rule_id: int, user_id: str) -> dict | None:
+        """Return a single rule by id, scoped by user_id (IDOR guard)."""
+        try:
+            cursor = await self._conn.execute(
+                "SELECT * FROM notification_rules WHERE id = ? AND user_id = ?",
+                (rule_id, user_id),
+            )
+        except aiosqlite.OperationalError:
+            return None
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def upsert_notification_rule(self, user_id: str, data: dict) -> dict:
+        """INSERT OR REPLACE a notification rule for (user_id, channel).
+
+        Returns the full row including auto-assigned id, created_at, updated_at.
+        The UNIQUE(user_id, channel) constraint means a second POST for the same
+        channel replaces the existing rule (upsert semantics).
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        channel = data["channel"]
+        score_threshold = data.get("score_threshold", 60)
+        notify_mode = data.get("notify_mode", "instant")
+        quiet_hours_start = data.get("quiet_hours_start")
+        quiet_hours_end = data.get("quiet_hours_end")
+        digest_send_time = data.get("digest_send_time", "08:00")
+        enabled = int(data.get("enabled", True))
+
+        await self._conn.execute(
+            """
+            INSERT INTO notification_rules
+                (user_id, channel, score_threshold, notify_mode,
+                 quiet_hours_start, quiet_hours_end, digest_send_time, enabled,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, channel) DO UPDATE SET
+                score_threshold  = excluded.score_threshold,
+                notify_mode      = excluded.notify_mode,
+                quiet_hours_start = excluded.quiet_hours_start,
+                quiet_hours_end  = excluded.quiet_hours_end,
+                digest_send_time = excluded.digest_send_time,
+                enabled          = excluded.enabled,
+                updated_at       = excluded.updated_at
+            """,
+            (
+                user_id,
+                channel,
+                score_threshold,
+                notify_mode,
+                quiet_hours_start,
+                quiet_hours_end,
+                digest_send_time,
+                enabled,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        cursor = await self._conn.execute(
+            "SELECT * FROM notification_rules WHERE user_id = ? AND channel = ?",
+            (user_id, channel),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else {}
+
+    async def update_notification_rule(self, rule_id: int, user_id: str, data: dict) -> dict | None:
+        """Partial UPDATE a notification rule. Only updates fields present in data.
+
+        Scoped by (id, user_id) — 404 semantics when not found or not owned.
+        Returns the updated row, or None if the rule was not found/owned.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        allowed_fields = {
+            "score_threshold",
+            "notify_mode",
+            "quiet_hours_start",
+            "quiet_hours_end",
+            "digest_send_time",
+            "enabled",
+        }
+        updates = {k: v for k, v in data.items() if k in allowed_fields and v is not None}
+        if "enabled" in data and data["enabled"] is not None:
+            updates["enabled"] = int(data["enabled"])
+        if not updates:
+            # Nothing to change — just return the current row.
+            return await self.get_notification_rule(rule_id, user_id)
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        params = list(updates.values()) + [now, rule_id, user_id]
+        try:
+            cursor = await self._conn.execute(
+                f"UPDATE notification_rules SET {set_clause}, updated_at = ? "  # noqa: S608
+                "WHERE id = ? AND user_id = ?",
+                params,
+            )
+        except aiosqlite.OperationalError:
+            return None
+        await self._conn.commit()
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_notification_rule(rule_id, user_id)
+
+    async def delete_notification_rule(self, rule_id: int, user_id: str) -> bool:
+        """DELETE a notification rule scoped by (id, user_id). Returns True if deleted."""
+        try:
+            cursor = await self._conn.execute(
+                "DELETE FROM notification_rules WHERE id = ? AND user_id = ?",
+                (rule_id, user_id),
+            )
+        except aiosqlite.OperationalError:
+            return False
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def get_notification_rule_for_channel(self, user_id: str, channel: str) -> dict | None:
+        """Return the rule row for a specific (user_id, channel) pair, or None."""
+        try:
+            cursor = await self._conn.execute(
+                "SELECT * FROM notification_rules WHERE user_id = ? AND channel = ?",
+                (user_id, channel),
+            )
+        except aiosqlite.OperationalError:
+            return None
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def queue_digest_notification(self, user_id: str, channel: str, job_id: int) -> None:
+        """Enqueue a job for the user's digest on the given channel.
+
+        Idempotent — duplicate (user_id, channel, job_id) rows are allowed
+        because digests may be queued multiple times before send; dedup happens
+        in the digest sender via the sent=0 filter.
+        """
+        try:
+            await self._conn.execute(
+                "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?, ?, ?)",
+                (user_id, channel, job_id),
+            )
+            await self._conn.commit()
+        except aiosqlite.OperationalError:
+            pass  # Table missing on legacy DB — graceful no-op.
+
+    async def get_pending_digests(self, user_id: str, channel: str) -> list[dict]:
+        """Return all un-sent digest rows for (user_id, channel)."""
+        try:
+            cursor = await self._conn.execute(
+                "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
+                (user_id, channel),
+            )
+        except aiosqlite.OperationalError:
+            return []
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def mark_digests_sent(self, user_id: str, channel: str) -> int:
+        """Flip sent=1 on all pending digest rows for (user_id, channel).
+
+        Returns the count of rows updated.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            cursor = await self._conn.execute(
+                "UPDATE user_notification_digests "
+                "SET sent = 1, sent_at = ? "
+                "WHERE user_id = ? AND channel = ? AND sent = 0",
+                (now, user_id, channel),
+            )
+        except aiosqlite.OperationalError:
+            return 0
+        await self._conn.commit()
+        return cursor.rowcount
+
+    # ── Notification ledger stats ────────────────────────────────────────────
+
+    async def get_notification_ledger_stats(self, user_id: str) -> dict[str, dict[str, int]]:
+        """Aggregate notification_ledger by channel + status for the caller.
+
+        Returns ``{channel: {sent: N, failed: M, queued: P, ...}}``.
+        Missing table on legacy DB returns an empty dict — same graceful-degrade
+        pattern as the rest of the notification_ledger surface.
+        """
+        try:
+            cursor = await self._conn.execute(
+                "SELECT channel, status, COUNT(*) as cnt "
+                "FROM notification_ledger "
+                "WHERE user_id = ? "
+                "GROUP BY channel, status",
+                (user_id,),
+            )
+        except aiosqlite.OperationalError:
+            return {}
+        rows = await cursor.fetchall()
+        result: dict[str, dict[str, int]] = {}
+        for row in rows:
+            channel = row[0]
+            status = row[1]
+            count = int(row[2])
+            result.setdefault(channel, {})[status] = count
+        return result
 
     async def close(self):
         if self._conn:
