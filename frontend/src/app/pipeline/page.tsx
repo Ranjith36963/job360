@@ -290,6 +290,7 @@ export default function PipelinePage() {
           <KanbanBoard
             applications={applications}
             onAdvance={handleAdvance}
+            onRefresh={fetchData}
           />
         </div>
       )}

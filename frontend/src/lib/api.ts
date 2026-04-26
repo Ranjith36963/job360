@@ -6,6 +6,7 @@ import { ApiError } from "./api-error";
 import type {
   ActionRequest,
   ActionResponse,
+  ApplicationTimelineResponse,
   HealthResponse,
   JobFilters,
   JobListResponse,
@@ -278,6 +279,23 @@ export async function getPipelineReminders(): Promise<{
 
 export async function getPipelineCounts(): Promise<Record<string, number>> {
   return request<Record<string, number>>("/api/pipeline/counts");
+}
+
+export async function updateApplicationNotes(
+  jobId: number,
+  notes: string
+): Promise<PipelineApplication> {
+  return request<PipelineApplication>(`/api/pipeline/${jobId}/notes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  });
+}
+
+export async function getApplicationTimeline(
+  jobId: number
+): Promise<ApplicationTimelineResponse> {
+  return request<ApplicationTimelineResponse>(`/api/pipeline/${jobId}/timeline`);
 }
 
 // ---------------------------------------------------------------------------
