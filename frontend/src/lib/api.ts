@@ -11,6 +11,9 @@ import type {
   JobListResponse,
   JobResponse,
   JsonResumeResponse,
+  NotificationRule,
+  NotificationRuleCreate,
+  NotificationRuleUpdate,
   PipelineAdvanceRequest,
   PipelineApplication,
   PreferencesRequest,
@@ -347,5 +350,40 @@ export async function deleteChannel(id: number): Promise<void> {
 export async function testChannel(id: number): Promise<ChannelTestResult> {
   return request<ChannelTestResult>(`/api/settings/channels/${id}/test`, {
     method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Notification rules (Step-3 C-02)
+// ---------------------------------------------------------------------------
+
+export async function getNotificationRules(): Promise<{ rules: NotificationRule[] }> {
+  return request<{ rules: NotificationRule[] }>("/api/settings/notification-rules");
+}
+
+export async function createNotificationRule(
+  body: NotificationRuleCreate
+): Promise<NotificationRule> {
+  return request<NotificationRule>("/api/settings/notification-rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateNotificationRule(
+  id: number,
+  body: NotificationRuleUpdate
+): Promise<NotificationRule> {
+  return request<NotificationRule>(`/api/settings/notification-rules/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteNotificationRule(id: number): Promise<void> {
+  await request<void>(`/api/settings/notification-rules/${id}`, {
+    method: "DELETE",
   });
 }
