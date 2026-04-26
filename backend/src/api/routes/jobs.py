@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import CurrentUser, optional_user, require_user
 from src.api.dependencies import get_db
 from src.api.models import JobListResponse, JobResponse
 from src.repositories.database import JobDatabase
@@ -335,7 +335,7 @@ async def list_jobs(
     limit: int = Query(100),
     offset: int = Query(0),
     db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
-    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; sitemap + unfurl bots read unauthenticated
 ):
     # Step-1 B8 — wire ?mode=hybrid through services.retrieval. Falls back
     # to the keyword path silently when SEMANTIC_ENABLED is off, the vector
@@ -375,12 +375,14 @@ async def list_jobs(
     if bucket:
         all_rows = [r for r in all_rows if _compute_bucket(r.get("date_found", "")) == bucket]
 
-    # C-2 + C-3 fix: pre-fetch the user's full action map ONCE so we can
-    # filter by action BEFORE pagination (so `total` is honest and `page`
-    # has the requested size) AND avoid the N+1 round-trip the previous
-    # in-loop get_action_for_job() generated.
-    action_rows = await db.get_actions(user.id)
-    action_map: dict[int, str] = {row["job_id"]: row["action"] for row in action_rows}
+    # Pre-fetch the user's action map once (avoids N+1 round-trips).
+    # Unauthenticated callers (sitemap, unfurl bots) get an empty map —
+    # per-user fields (action) are simply null in the response.
+    if user is not None:
+        action_rows = await db.get_actions(user.id)
+        action_map: dict[int, str] = {row["job_id"]: row["action"] for row in action_rows}
+    else:
+        action_map = {}
 
     if action is not None:
         all_rows = [r for r in all_rows if action_map.get(r["id"]) == action]
@@ -411,11 +413,11 @@ async def list_jobs(
 async def get_job(
     job_id: int,
     db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
-    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; generateMetadata reads unauthenticated
 ):
     # Step-1 B6: single LEFT JOIN — JobResponse surfaces enrichment fields.
     row = await db.get_job_by_id_with_enrichment(job_id)
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    job_action = await db.get_action_for_job(job_id, user.id)
+    job_action = await db.get_action_for_job(job_id, user.id) if user is not None else None
     return _row_to_job_response(row, job_action)

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { JobResponse } from "@/lib/types";
+import { safeUrl } from "@/lib/utils";
 import { JobDetailClient } from "./JobDetailClient";
 
 // ---------------------------------------------------------------------------
@@ -98,7 +99,7 @@ export default async function JobDetailPage({
         },
         datePosted: job.posted_at ?? job.date_found,
         employmentType: job.employment_type ?? "FULL_TIME",
-        url: job.apply_url,
+        url: safeUrl(job.apply_url),
       }
     : null;
 
@@ -107,7 +108,10 @@ export default async function JobDetailPage({
       {jsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{
+            // R-1: escape < to prevent </script> breakout from scraper-derived strings
+            __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+          }}
         />
       )}
       <JobDetailClient jobId={jobId} />

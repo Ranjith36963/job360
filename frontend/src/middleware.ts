@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+// /jobs is intentionally public — job listings are shared catalog (CLAUDE.md rule #10).
+// Unfurl bots (Twitter/LinkedIn/Discord) must reach /jobs/[id] to read OG tags + JSON-LD.
+// Per-user fields (action, liked_at) are gated at the API layer via optional_user.
 const PROTECTED_PATHS = [
   "/dashboard",
   "/profile",
   "/pipeline",
   "/settings",
-  "/jobs",
 ];
 
 export function middleware(request: NextRequest) {
