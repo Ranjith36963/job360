@@ -236,6 +236,22 @@ export interface PipelineApplication {
   company?: string;
 }
 
+// ---- Application Timeline ----
+
+export interface TimelineEntry {
+  id: number;
+  job_id: number;
+  from_stage: string | null;
+  to_stage: string;
+  notes: string | null;
+  transitioned_at: string;
+}
+
+export interface ApplicationTimelineResponse {
+  job_id: number;
+  entries: TimelineEntry[];
+}
+
 // ---- Status / Health / Sources ----
 
 export interface StatusResponse {
