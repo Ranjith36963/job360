@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { User, CheckCircle, AlertCircle, History } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -110,10 +111,11 @@ export default function ProfilePage() {
       try {
         const data = await uploadProfile(file);
         setProfile(data);
+        toast.success("CV uploaded and parsed");
       } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Failed to upload CV"
-        );
+        const msg = err instanceof Error ? err.message : "Failed to upload CV";
+        setError(msg);
+        toast.error(msg);
       }
     },
     []
@@ -125,10 +127,11 @@ export default function ProfilePage() {
       try {
         await uploadLinkedin(file);
         await fetchProfile();
+        toast.success("LinkedIn profile enriched");
       } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Failed to upload LinkedIn data"
-        );
+        const msg = err instanceof Error ? err.message : "Failed to upload LinkedIn data";
+        setError(msg);
+        toast.error(msg);
       }
     },
     [fetchProfile]
@@ -140,10 +143,11 @@ export default function ProfilePage() {
       try {
         await uploadGithub(username);
         await fetchProfile();
+        toast.success("GitHub profile enriched");
       } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Failed to enrich GitHub"
-        );
+        const msg = err instanceof Error ? err.message : "Failed to enrich GitHub";
+        setError(msg);
+        toast.error(msg);
       }
     },
     [fetchProfile]
@@ -155,10 +159,11 @@ export default function ProfilePage() {
       try {
         const data = await uploadProfile(null, prefs);
         setProfile(data);
+        toast.success("Preferences saved");
       } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Failed to save preferences"
-        );
+        const msg = err instanceof Error ? err.message : "Failed to save preferences";
+        setError(msg);
+        toast.error(msg);
       }
     },
     []

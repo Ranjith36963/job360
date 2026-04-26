@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import {
   Channel,
@@ -72,8 +73,11 @@ export default function ChannelsSettingsPage() {
       setDisplayName("");
       setCredential("");
       await refresh();
+      toast.success("Channel added successfully");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to add channel");
+      const msg = err instanceof Error ? err.message : "failed to add channel";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -83,8 +87,11 @@ export default function ChannelsSettingsPage() {
     try {
       await deleteChannel(id);
       await refresh();
+      toast.success("Channel removed");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to delete channel");
+      const msg = err instanceof Error ? err.message : "failed to delete channel";
+      setError(msg);
+      toast.error(msg);
     }
   }
 
@@ -93,11 +100,18 @@ export default function ChannelsSettingsPage() {
     try {
       const result = await testChannel(id);
       setLastTest((prev) => ({ ...prev, [id]: result }));
+      if (result.ok) {
+        toast.success("Test message delivered");
+      } else {
+        toast.error(result.error ?? "Test failed");
+      }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "test failed";
       setLastTest((prev) => ({
         ...prev,
-        [id]: { ok: false, error: err instanceof Error ? err.message : "test failed" },
+        [id]: { ok: false, error: errMsg },
       }));
+      toast.error(errMsg);
     } finally {
       setTesting(null);
     }

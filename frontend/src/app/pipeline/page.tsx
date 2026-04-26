@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "sonner";
 import {
   Kanban,
   Send,
@@ -121,10 +122,12 @@ export default function PipelinePage() {
       // Refresh counts
       const newCounts = await getPipelineCounts();
       setCounts(newCounts);
+      const label = stage.charAt(0).toUpperCase() + stage.slice(1);
+      toast.success(`Moved to ${label}`);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to advance stage"
-      );
+      const msg = err instanceof Error ? err.message : "Failed to advance stage";
+      setError(msg);
+      toast.error(msg);
     }
   }
 
