@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { History, RotateCcw } from "lucide-react";
+import { GitCompare, History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,6 +13,7 @@ import {
 import { getProfileVersions, restoreProfileVersion } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import type { ProfileVersionSummary } from "@/lib/types";
+import { VersionDiffDrawer } from "./VersionDiffDrawer";
 
 interface VersionHistoryDrawerProps {
   open: boolean;
@@ -49,6 +50,8 @@ export function VersionHistoryDrawer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [compareIds, setCompareIds] = useState<[number, number] | null>(null);
+  const [diffOpen, setDiffOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -95,6 +98,7 @@ export function VersionHistoryDrawer({
   }
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-80 sm:w-96 p-0 flex flex-col">
         <SheetHeader className="p-4 pb-3 border-b border-border">
@@ -161,22 +165,38 @@ export function VersionHistoryDrawer({
                       </span>
                     )}
                   </div>
-                  {idx !== 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0 gap-1.5"
-                      disabled={restoringId === version.id}
-                      onClick={() => handleRestore(version)}
-                    >
-                      {restoringId === version.id ? (
-                        <span className="animate-spin inline-block h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-                      ) : (
-                        <RotateCcw className="h-3 w-3" />
-                      )}
-                      Restore
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 flex-col gap-1.5">
+                    {idx !== 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={restoringId === version.id}
+                        onClick={() => handleRestore(version)}
+                      >
+                        {restoringId === version.id ? (
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        ) : (
+                          <RotateCcw className="h-3 w-3" />
+                        )}
+                        Restore
+                      </Button>
+                    )}
+                    {idx < versions.length - 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => {
+                          setCompareIds([versions[idx].id, versions[idx + 1].id]);
+                          setDiffOpen(true);
+                        }}
+                      >
+                        <GitCompare className="h-3 w-3" />
+                        Compare
+                      </Button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -184,5 +204,17 @@ export function VersionHistoryDrawer({
         </div>
       </SheetContent>
     </Sheet>
+
+    {compareIds && (
+      <VersionDiffDrawer
+        open={diffOpen}
+        onOpenChange={setDiffOpen}
+        v1={compareIds[0]}
+        v2={compareIds[1]}
+        v1Label={`Version ${versions.length - versions.findIndex((v) => v.id === compareIds[0])} (${formatDate(versions.find((v) => v.id === compareIds[0])?.created_at ?? "")})`}
+        v2Label={`Version ${versions.length - versions.findIndex((v) => v.id === compareIds[1])} (${formatDate(versions.find((v) => v.id === compareIds[1])?.created_at ?? "")})`}
+      />
+    )}
+    </>
   );
 }
