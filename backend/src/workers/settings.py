@@ -34,6 +34,7 @@ from src.workers.tasks import (
     mark_ledger_failed_task,
     mark_ledger_sent_task,
     score_and_ingest,
+    send_daily_digest,
     send_notification,
 )
 
@@ -93,7 +94,19 @@ class WorkerSettings:
         mark_ledger_sent_task,
         mark_ledger_failed_task,
         enrich_job_task,
+        # Step-3 B-04 — daily digest sender
+        send_daily_digest,
     ]
+
+    # ARQ cron_jobs: ARQ will call send_daily_digest for each user+channel pair.
+    # The cron expression here is a daily sweep at 08:00 UTC.
+    # Fine-grained per-user scheduling (digest_send_time from notification_rules)
+    # would require a per-user enqueueing loop — deferred to a follow-up batch.
+    # Until then: the cron enqueues a no-op sweep; callers must pass user_id+channel.
+    # To enable: uncomment and install arq[cron].
+    # cron_jobs = [
+    #     cron(send_daily_digest, hour=8, minute=0),
+    # ]
 
     # At test time this is the stand-in shim. At runtime ARQ reads the
     # attribute via `getattr(WorkerSettings, 'redis_settings', None)`;
