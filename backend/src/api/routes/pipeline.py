@@ -3,19 +3,23 @@
 User-scoped per CLAUDE.md rule #12 — every endpoint requires a
 valid session and queries are filtered by user.id.
 """
+
 from __future__ import annotations
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
 from src.api.models import (
+    ApplicationTimelineResponse,
     PipelineAdvanceRequest,
     PipelineApplication,
     PipelineListResponse,
     PipelineRemindersResponse,
+    TimelineEntry,
 )
 from src.repositories.database import JobDatabase
 
@@ -44,9 +48,7 @@ async def list_pipeline(
 ):
     """List caller's tracked job applications, optionally filtered by stage."""
     rows = await db.get_applications(user.id, stage)
-    return PipelineListResponse(
-        applications=[_to_pipeline_application(r) for r in rows]
-    )
+    return PipelineListResponse(applications=[_to_pipeline_application(r) for r in rows])
 
 
 @router.get("/pipeline/counts")
@@ -68,9 +70,7 @@ async def pipeline_reminders(
 ):
     """Return the caller's stale applications (no update in 7+ days)."""
     rows = await db.get_stale_applications(user.id, days=7)
-    return PipelineRemindersResponse(
-        reminders=[_to_pipeline_application(r) for r in rows]
-    )
+    return PipelineRemindersResponse(reminders=[_to_pipeline_application(r) for r in rows])
 
 
 @router.post("/pipeline/{job_id}", response_model=PipelineApplication)
@@ -101,6 +101,40 @@ async def advance_application(
             detail=f"Invalid stage '{body.stage}'. Must be one of: {sorted(_VALID_STAGES)}",
         )
     row = await db.advance_application(job_id, body.stage, user.id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Application for job {job_id} not found")
+    return _to_pipeline_application(row)
+
+
+@router.get("/pipeline/{job_id}/timeline", response_model=ApplicationTimelineResponse)
+async def get_pipeline_timeline(
+    job_id: int,
+    db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_user),
+):
+    """Return the stage history for this application, scoped to caller."""
+    rows = await db.get_application_timeline(job_id, user.id)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No timeline for job {job_id}")
+    return ApplicationTimelineResponse(
+        job_id=job_id,
+        timeline=[TimelineEntry(**r) for r in rows],
+    )
+
+
+class NotesUpdateRequest(BaseModel):
+    notes: str = Field(max_length=2000)
+
+
+@router.patch("/pipeline/{job_id}/notes", response_model=PipelineApplication)
+async def update_notes(
+    job_id: int,
+    body: NotesUpdateRequest,
+    db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_user),
+):
+    """Update the latest notes for an application, archiving the previous value."""
+    row = await db.update_application_notes(job_id, user.id, body.notes)
     if not row:
         raise HTTPException(status_code=404, detail=f"Application for job {job_id} not found")
     return _to_pipeline_application(row)

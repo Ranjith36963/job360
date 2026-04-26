@@ -291,3 +291,21 @@ class PipelineAdvanceRequest(BaseModel):
 
 class PipelineRemindersResponse(BaseModel):
     reminders: list[PipelineApplication]
+
+
+# ── Step-3 B-07 — Application timeline models ──────────────────────────────
+
+
+class TimelineEntry(BaseModel):
+    id: int
+    job_id: int
+    user_id: str
+    from_stage: Optional[str]
+    to_stage: str
+    transitioned_at: str
+    notes: Optional[str]
+
+
+class ApplicationTimelineResponse(BaseModel):
+    job_id: int
+    timeline: list[TimelineEntry]
