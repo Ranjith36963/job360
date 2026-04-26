@@ -73,6 +73,42 @@ print('\n'.join(rows))
 PYEOF
 }
 
+# ── Step 0: init_db() to create baseline tables ──────────────────────────────
+# migration 0000 is a no-op (SELECT 1); the base tables (jobs, user_actions,
+# applications, run_log) are created by JobDatabase.init_db(), not a migration.
+# The runner must see those tables before applying 0001+ (which ALTER/rebuild them).
+#
+# After init_db(), _migrate() has already created notification_rules,
+# user_notification_digests, and application_stage_history with its inline SQL.
+# We drop those three tables so the migration runner creates them with the
+# authoritative SQL from the migration files — making the before/after schema
+# comparison valid (both sides use the migration file SQL, not the inline SQL).
+echo "  [0/6] Seeding baseline schema via init_db() and resetting Step-3 tables..."
+(cd "$BACKEND_DIR" && "$PYTHON_CMD" - "$TMPDB" <<'PYEOF'
+import asyncio, sys, aiosqlite
+sys.path.insert(0, ".")
+from src.repositories.database import JobDatabase
+
+async def main():
+    db = JobDatabase(sys.argv[1])
+    await db.init_db()
+    # Drop Step-3 tables so migration runner creates them with authoritative SQL
+    conn = db._conn
+    await conn.executescript("""
+        DROP TABLE IF EXISTS application_stage_history;
+        DROP TABLE IF EXISTS idx_stage_history_job_user;
+        DROP INDEX IF EXISTS idx_stage_history_job_user;
+        DROP TABLE IF EXISTS user_notification_digests;
+        DROP INDEX IF EXISTS idx_digests_user_channel_pending;
+        DROP TABLE IF EXISTS notification_rules;
+    """)
+    await conn.commit()
+    await db.close()
+
+asyncio.run(main())
+PYEOF
+)
+
 # ── Step 1: full up ──────────────────────────────────────────────────────────
 echo "  [1/6] Applying all migrations up..."
 (cd "$BACKEND_DIR" && python -m migrations.runner up "$TMPDB" 2>&1)

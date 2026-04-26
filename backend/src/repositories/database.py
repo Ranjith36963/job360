@@ -156,6 +156,44 @@ class JobDatabase:
                 ON application_stage_history(job_id, user_id);
         """)
 
+        # Ensure notification_rules + user_notification_digests exist (migration 0012 / 0013).
+        # Mirrors the forward direction of the SQL migration files so tests that
+        # call init_db() directly (without the external runner) see the full schema.
+        await self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS notification_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                score_threshold INTEGER NOT NULL DEFAULT 60,
+                notify_mode TEXT NOT NULL DEFAULT 'instant',
+                quiet_hours_start TEXT,
+                quiet_hours_end TEXT,
+                digest_send_time TEXT DEFAULT '08:00',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                UNIQUE(user_id, channel)
+            );
+            CREATE TABLE IF NOT EXISTS user_notification_digests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                queued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                sent INTEGER NOT NULL DEFAULT 0,
+                sent_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_digests_user_channel_pending
+                ON user_notification_digests(user_id, channel, sent);
+        """)
+
+        # Add timezone column to users table if it was created before migration 0012.
+        # users table may not exist in all test DB instances (auth tests create it;
+        # non-auth tests skip it).  Guard with table existence check.
+        cursor = await self._conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        if await cursor.fetchone():
+            await self._add_missing_columns("users", [("timezone", "TEXT NOT NULL DEFAULT 'UTC'")])
+
         await self._conn.commit()
 
     async def _add_missing_columns(self, table: str, migrations: list[tuple[str, str]]) -> None:
