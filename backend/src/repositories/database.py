@@ -760,6 +760,34 @@ class JobDatabase:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
+    # ── Account management (Step-3 B-11..13) ─────────────────────────────────────
+
+    async def soft_delete_user(self, user_id: str) -> None:
+        """Set deleted_at to now — auth middleware rejects soft-deleted users."""
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        await self._conn.execute(
+            "UPDATE users SET deleted_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), user_id),
+        )
+        await self._conn.commit()
+
+    async def update_user_password(self, user_id: str, new_hash: str) -> None:
+        """Replace the stored password hash for the given user."""
+        await self._conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (new_hash, user_id),
+        )
+        await self._conn.commit()
+
+    async def update_user_email(self, user_id: str, new_email: str) -> None:
+        """Replace the email address for the given user."""
+        await self._conn.execute(
+            "UPDATE users SET email = ? WHERE id = ?",
+            (new_email, user_id),
+        )
+        await self._conn.commit()
+
     async def close(self):
         if self._conn:
             await self._conn.close()
