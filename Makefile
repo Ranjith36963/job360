@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-batch clean
+.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-batch clean
 
 help:
 	@echo "Job360 targets:"
@@ -152,6 +152,29 @@ verify-batch:
 	@if grep -E '^verification_commands_run:[[:space:]]*\[\][[:space:]]*$$' .claude/reviewer-verdict.md > /dev/null; then echo "FAIL: verification_commands_run is empty — run scripts/review_batch.sh first"; exit 1; fi
 	@grep -E '^verification_commands_run:' .claude/reviewer-verdict.md > /dev/null || { echo "FAIL: verification_commands_run YAML key missing"; exit 1; }
 	@echo "PASS: reviewer verdict APPROVED with non-empty verification_commands_run."
+
+# ---------------------------------------------------------------------------
+# Step-2 API→UI seam gate.
+#
+# Aggregates the verification checks from docs/step_2_plan.md §Verification.
+# Ralph Loop halts once this exits 0 and the sentinel is written.
+# ---------------------------------------------------------------------------
+
+verify-step-2:
+	@echo "==> Step-2 gate: backend regression (>=1,056p/0f/3s)"
+	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	@echo "==> Step-2 gate: frontend type-check"
+	cd frontend && npm run type-check
+	@echo "==> Step-2 gate: frontend lint"
+	cd frontend && npm run lint
+	@echo "==> Step-2 gate: frontend unit tests"
+	cd frontend && npm run test:unit -- --run
+	@echo "==> Step-2 gate: frontend build"
+	cd frontend && npm run build
+	@echo "==> Step-2 gate: PASS"
+	@mkdir -p .claude
+	@git rev-parse HEAD > .claude/step-2-verified.txt
+	@echo "STEP-2 GREEN: $$(cat .claude/step-2-verified.txt)"
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

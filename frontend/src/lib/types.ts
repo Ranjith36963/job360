@@ -54,6 +54,8 @@ export interface JobResponse {
   nice_to_have_skills?: string[] | null;
   industry?: string | null;
   years_experience_min?: number | null;
+  // Step-2 T1 — dedup group ids (populated by dedup-group writer batch).
+  dedup_group_ids?: number[] | null;
 }
 
 export interface JobListResponse {
@@ -62,6 +64,7 @@ export interface JobListResponse {
   filters_applied: Record<string, unknown>;
 }
 
+// T4: 10 new filter fields added
 export interface JobFilters {
   hours?: number;
   min_score?: number;
@@ -69,9 +72,23 @@ export interface JobFilters {
   bucket?: string;
   action?: string;
   visa_only?: boolean;
+  visa_sponsorship?: boolean;
   limit?: number;
   offset?: number;
   mode?: string;
+  // Step-2 T4 — new filter fields
+  seniority?: string;
+  employment_type?: string;
+  workplace_type?: string;
+  salary_min?: number;
+  salary_max?: number;
+  required_skills?: string[];
+  title_canonical?: string;
+  industry?: string;
+  posted_after?: string;
+  posted_before?: string;
+  staleness_state?: string;
+  sort_by?: "score" | "date" | "salary" | "staleness";
 }
 
 // ---- Profile ----
@@ -87,6 +104,7 @@ export interface ProfileSummary {
   experience_level: string;
 }
 
+// T3: 6 new CVDetail fields
 export interface CVDetail {
   raw_text: string;
   skills: string[];
@@ -95,12 +113,40 @@ export interface CVDetail {
   certifications: string[];
   summary_text: string;
   experience_text: string;
+  // Step-2 T3 — new fields
+  name?: string | null;
+  headline?: string | null;
+  location?: string | null;
+  achievements?: string[] | null;
+  highlights?: string[] | null;
+  companies?: string[] | null;
+}
+
+// T2: 7 new ProfileResponse fields + skill tier / esco types
+export interface SkillTiers {
+  primary: string[];
+  secondary: string[];
+  tertiary: string[];
+}
+
+export interface SkillProvenance {
+  cv: string[];
+  linkedin: string[];
+  github: string[];
+  inferred: string[];
 }
 
 export interface ProfileResponse {
   summary: ProfileSummary;
   preferences: Record<string, unknown>;
   cv_detail?: CVDetail | null;
+  // Step-2 T2 — new fields
+  skill_tiers?: SkillTiers | null;
+  skill_esco?: Record<string, string> | null;
+  skill_provenance?: SkillProvenance | null;
+  linkedin_subsections?: Record<string, unknown> | null;
+  github_temporal?: Record<string, unknown> | null;
+  current_version_id?: number | null;
 }
 
 export interface PreferencesRequest {
@@ -118,6 +164,31 @@ export interface PreferencesRequest {
   excluded_companies?: string[];
 }
 
+// ---- Profile versions (Step-2 A1, from S3-MVP endpoints) ----
+
+export interface ProfileVersionSummary {
+  id: number;
+  created_at: string;
+  source_action: string;
+  cv_data: Record<string, unknown> | null;
+  preferences: Record<string, unknown> | null;
+}
+
+export interface ProfileVersionsListResponse {
+  versions: ProfileVersionSummary[];
+  total: number;
+}
+
+export interface JsonResumeResponse {
+  resume: {
+    basics: Record<string, unknown>;
+    work: unknown[];
+    education: unknown[];
+    skills: unknown[];
+    [key: string]: unknown;
+  };
+}
+
 // ---- Search ----
 
 export interface SearchStartResponse {
@@ -125,11 +196,15 @@ export interface SearchStartResponse {
   status: string;
 }
 
+// T5: per_source_duration + per_source_errors
 export interface SearchStatusResponse {
   run_id: string;
   status: string;
   progress: string;
   result: Record<string, unknown> | null;
+  // Step-2 T5 — telemetry fields
+  per_source_duration?: Record<string, number> | null;
+  per_source_errors?: Record<string, string> | null;
 }
 
 // ---- Actions ----

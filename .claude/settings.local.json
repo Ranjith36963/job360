@@ -150,7 +150,9 @@
       "WebFetch(domain:app.usesprout.com)",
       "WebFetch(domain:hiring.cafe)",
       "Skill(ralph-loop:ralph-loop)",
-      "Bash(ruff format *)"
+      "Bash(ruff format *)",
+      "Bash(mkdir -p /c/Users/Ranjith/OneDrive/Documents/job360/.claude/worktrees/generator/frontend/src/test)",
+      "Bash(mkdir -p /c/Users/Ranjith/OneDrive/Documents/job360/.claude/worktrees/generator/frontend/tests/e2e)"
     ]
   },
   "disabledMcpjsonServers": [

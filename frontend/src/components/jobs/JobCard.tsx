@@ -11,6 +11,8 @@ import {
   PoundSterling,
   Shield,
   Check,
+  AlertTriangle,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +21,8 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
+import { createPipelineApplication } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import type { JobResponse } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +48,26 @@ function timeAgo(dateStr: string): string {
   return weeks === 1 ? "1w ago" : `${weeks}w ago`;
 }
 
+function formatSalaryRange(min?: number | null, max?: number | null): string | null {
+  if (!min && !max) return null;
+  const fmt = (n: number) =>
+    n >= 1000 ? `£${Math.round(n / 1000)}k` : `£${n}`;
+  if (min && max) return `${fmt(min)}–${fmt(max)}`;
+  if (min) return `${fmt(min)}+`;
+  if (max) return `up to ${fmt(max)}`;
+  return null;
+}
+
+function stalenessColor(state?: string | null): string {
+  switch (state) {
+    case "ACTIVE": return "text-green-400 border-green-400/30";
+    case "STALE": return "text-yellow-400 border-yellow-400/30";
+    case "GHOST": return "text-orange-400 border-orange-400/30";
+    case "CONFIRMED_EXPIRED": return "text-red-400 border-red-400/30";
+    default: return "text-muted-foreground border-border";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -59,6 +83,26 @@ export function JobCard({ job, onAction }: JobCardProps) {
   const isLiked = job.action === "liked";
   const isSkipped = job.action === "not_interested";
 
+  const salaryRange = formatSalaryRange(job.salary_min_gbp, job.salary_max_gbp);
+  const displayTime = job.last_seen_at ?? job.first_seen_at ?? job.date_found;
+  const hasStalenessBadge =
+    job.staleness_state &&
+    job.staleness_state !== "ACTIVE" &&
+    job.staleness_state !== "UNKNOWN";
+
+  async function handleApply(e: React.MouseEvent) {
+    e.stopPropagation();
+    // Open apply URL and track in pipeline
+    window.open(job.apply_url, "_blank", "noopener,noreferrer");
+    try {
+      await createPipelineApplication(job.id);
+      toast.success("Added to pipeline — Applied");
+    } catch (err) {
+      // Not a blocking error — job still opened
+      toast.apiError(err, "Added to pipeline tracking failed");
+    }
+  }
+
   function handleCardClick(e: React.MouseEvent) {
     // Don't navigate when clicking buttons or links
     const target = e.target as HTMLElement;
@@ -70,12 +114,15 @@ export function JobCard({ job, onAction }: JobCardProps) {
     <div
       onClick={handleCardClick}
       className="glass-card rounded-xl p-4 cursor-pointer flex flex-col gap-3"
+      role="article"
+      aria-label={`Job: ${job.title} at ${job.company}`}
     >
       {/* ---- Top row: Score + Title ---- */}
       <div className="flex items-start gap-3">
         {/* Score badge */}
         <div
           className={`score-badge ${scoreClass(job.match_score)} flex-shrink-0 flex items-center justify-center rounded-lg w-11 h-11 text-lg font-bold`}
+          aria-label={`Match score: ${job.match_score}`}
         >
           {job.match_score}
         </div>
@@ -86,80 +133,138 @@ export function JobCard({ job, onAction }: JobCardProps) {
           </h3>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
-              <Briefcase className="h-3 w-3 flex-shrink-0" />
+              <Briefcase className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
               <span className="truncate max-w-[120px]">{job.company}</span>
             </span>
-            <span className="hidden sm:inline text-border">|</span>
+            <span className="hidden sm:inline text-border" aria-hidden="true">|</span>
             <span className="flex items-center gap-1">
-              <MapPin className="h-3 w-3 flex-shrink-0" />
+              <MapPin className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
               <span className="truncate max-w-[120px]">{job.location || "Remote"}</span>
             </span>
-            <span className="hidden sm:inline text-border">|</span>
+            <span className="hidden sm:inline text-border" aria-hidden="true">|</span>
             <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3 flex-shrink-0" />
-              {timeAgo(job.date_found)}
+              <Clock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+              {timeAgo(displayTime)}
             </span>
           </div>
         </div>
+
+        {/* Staleness badge */}
+        {hasStalenessBadge && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge
+                  variant="outline"
+                  className={`flex-shrink-0 text-xs gap-1 ${stalenessColor(job.staleness_state)}`}
+                />
+              }
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              {job.staleness_state === "CONFIRMED_EXPIRED" ? "Expired" : job.staleness_state}
+            </TooltipTrigger>
+            <TooltipContent>
+              {job.staleness_state === "CONFIRMED_EXPIRED"
+                ? "This listing has been confirmed expired"
+                : job.staleness_state === "GHOST"
+                ? "Job listing appears to be gone"
+                : "Listing may be stale — check before applying"}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
-      {/* ---- Salary + type + visa ---- */}
+      {/* ---- Salary + type + seniority + workplace + visa ---- */}
       <div className="flex flex-wrap items-center gap-2">
-        {job.salary && (
+        {/* Structured salary range (preferred) */}
+        {salaryRange && (
           <span className="flex items-center gap-1 text-sm text-foreground/80">
-            <PoundSterling className="h-3 w-3" />
+            <PoundSterling className="h-3 w-3" aria-hidden="true" />
+            {salaryRange}
+          </span>
+        )}
+        {/* Fallback: legacy salary string */}
+        {!salaryRange && job.salary && (
+          <span className="flex items-center gap-1 text-sm text-foreground/80">
+            <PoundSterling className="h-3 w-3" aria-hidden="true" />
             {job.salary}
           </span>
         )}
-        {job.job_type && (
+
+        {/* Seniority pill */}
+        {job.seniority && (
+          <Badge variant="secondary" className="text-xs capitalize">
+            {job.seniority.replace(/_/g, " ")}
+          </Badge>
+        )}
+
+        {/* Workplace type pill */}
+        {job.workplace_type && (
+          <Badge variant="outline" className="text-xs capitalize">
+            {job.workplace_type.replace(/_/g, " ")}
+          </Badge>
+        )}
+
+        {/* Legacy job_type */}
+        {job.job_type && !job.workplace_type && (
           <Badge variant="secondary" className="text-xs">
             {job.job_type}
           </Badge>
         )}
-        {job.visa_flag && (
+
+        {/* Visa sponsorship */}
+        {(job.visa_sponsorship === true || job.visa_flag) && (
           <Tooltip>
             <TooltipTrigger
               render={
-                <Badge variant="outline" className="text-xs gap-1 border-primary/30 text-primary" />
+                <Badge
+                  variant="outline"
+                  className="text-xs gap-1 border-primary/30 text-primary"
+                />
               }
             >
-              <Shield className="h-3 w-3" />
+              <Shield className="h-3 w-3" aria-hidden="true" />
               Visa
             </TooltipTrigger>
-            <TooltipContent>Visa sponsorship mentioned</TooltipContent>
+            <TooltipContent>Visa sponsorship available</TooltipContent>
           </Tooltip>
         )}
-        {job.experience_level && (
-          <Badge variant="secondary" className="text-xs">
-            {job.experience_level}
+
+        {/* Industry */}
+        {job.industry && (
+          <Badge variant="secondary" className="text-xs text-muted-foreground">
+            {job.industry}
           </Badge>
         )}
       </div>
 
       {/* ---- Skills ---- */}
-      <div className="flex flex-wrap gap-1.5">
-        {job.matched_skills.slice(0, 6).map((skill) => (
+      <div className="flex flex-wrap gap-1.5" role="list" aria-label="Skills">
+        {(job.matched_skills ?? []).slice(0, 6).map((skill) => (
           <span
             key={skill}
             className="skill-matched inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs"
+            role="listitem"
           >
-            <Check className="h-3 w-3" />
+            <Check className="h-3 w-3" aria-hidden="true" />
             {skill}
           </span>
         ))}
-        {job.missing_required.slice(0, 3).map((skill) => (
+        {(job.missing_required ?? []).slice(0, 3).map((skill) => (
           <span
             key={skill}
             className="skill-missing inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs"
+            role="listitem"
           >
-            <X className="h-3 w-3" />
+            <X className="h-3 w-3" aria-hidden="true" />
             {skill}
           </span>
         ))}
-        {job.transferable_skills.slice(0, 2).map((skill) => (
+        {(job.transferable_skills ?? []).slice(0, 2).map((skill) => (
           <span
             key={skill}
             className="skill-transferable inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs"
+            role="listitem"
           >
             ~{skill}
           </span>
@@ -168,20 +273,15 @@ export function JobCard({ job, onAction }: JobCardProps) {
 
       {/* ---- Actions ---- */}
       <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-        <a
-          href={job.apply_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
+        <Button
+          size="sm"
+          className="gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+          onClick={handleApply}
+          aria-label={`Apply for ${job.title} at ${job.company}`}
         >
-          <Button
-            size="sm"
-            className="gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Apply
-          </Button>
-        </a>
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          Apply
+        </Button>
 
         <Button
           size="sm"
@@ -195,8 +295,10 @@ export function JobCard({ job, onAction }: JobCardProps) {
             e.stopPropagation();
             onAction(job.id, isLiked ? "remove" : "liked");
           }}
+          aria-label={isLiked ? "Unlike this job" : "Like this job"}
+          aria-pressed={isLiked}
         >
-          <Heart className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} />
+          <Heart className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} aria-hidden="true" />
           {isLiked ? "Liked" : "Like"}
         </Button>
 
@@ -212,13 +314,30 @@ export function JobCard({ job, onAction }: JobCardProps) {
             e.stopPropagation();
             onAction(job.id, isSkipped ? "remove" : "not_interested");
           }}
+          aria-label={isSkipped ? "Undo skip" : "Skip this job"}
+          aria-pressed={isSkipped}
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
           {isSkipped ? "Skipped" : "Skip"}
         </Button>
 
-        {/* Source tag pushed to the right */}
-        <span className="ml-auto text-xs text-muted-foreground/60 font-mono">
+        {/* View job detail */}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-1.5 text-muted-foreground hover:text-foreground ml-auto"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/jobs/${job.id}`);
+          }}
+          aria-label={`View details for ${job.title}`}
+        >
+          <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="hidden sm:inline">Details</span>
+        </Button>
+
+        {/* Source tag */}
+        <span className="text-xs text-muted-foreground/60 font-mono">
           {job.source}
         </span>
       </div>

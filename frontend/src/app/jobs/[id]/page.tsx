@@ -27,6 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRadar } from "@/components/jobs/ScoreRadar";
 import { ScoreCounter } from "@/components/jobs/ScoreCounter";
+import { ApplyButton } from "@/components/jobs/ApplyButton";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -225,33 +226,102 @@ export default function JobDetailPage() {
                 </span>
               </div>
 
-              {job.salary && (
+              {/* Structured salary (preferred) or legacy salary string */}
+              {(job.salary_min_gbp || job.salary_max_gbp) ? (
+                <p className="text-sm font-medium text-foreground">
+                  {job.salary_min_gbp && job.salary_max_gbp
+                    ? `£${Math.round(job.salary_min_gbp / 1000)}k – £${Math.round(job.salary_max_gbp / 1000)}k`
+                    : job.salary_min_gbp
+                    ? `£${Math.round(job.salary_min_gbp / 1000)}k+`
+                    : `up to £${Math.round((job.salary_max_gbp ?? 0) / 1000)}k`}
+                  {job.salary_period && job.salary_period !== "annual" && (
+                    <span className="text-muted-foreground ml-1">/ {job.salary_period}</span>
+                  )}
+                </p>
+              ) : job.salary ? (
                 <p className="text-sm font-medium text-foreground">{job.salary}</p>
-              )}
+              ) : null}
 
               {/* Badges row */}
               <div className="flex flex-wrap gap-2">
-                {job.job_type && (
-                  <Badge variant="secondary" className="gap-1">
-                    <Briefcase className="h-3 w-3" />
-                    {job.job_type}
+                {/* Enrichment-based seniority (preferred) */}
+                {job.seniority ? (
+                  <Badge variant="secondary" className="gap-1 capitalize">
+                    <Star className="h-3 w-3" />
+                    {job.seniority.replace(/_/g, " ")}
                   </Badge>
-                )}
-                {job.experience_level && (
+                ) : job.experience_level ? (
                   <Badge variant="secondary" className="gap-1">
                     <Star className="h-3 w-3" />
                     {job.experience_level}
                   </Badge>
+                ) : null}
+
+                {/* Workplace type */}
+                {job.workplace_type && (
+                  <Badge variant="secondary" className="gap-1 capitalize">
+                    <MapPin className="h-3 w-3" />
+                    {job.workplace_type.replace(/_/g, " ")}
+                  </Badge>
                 )}
-                {job.visa_flag && (
+
+                {/* Employment type */}
+                {job.employment_type && (
+                  <Badge variant="secondary" className="gap-1 capitalize">
+                    <Briefcase className="h-3 w-3" />
+                    {job.employment_type.replace(/_/g, " ")}
+                  </Badge>
+                )}
+
+                {/* Visa sponsorship */}
+                {(job.visa_sponsorship === true || job.visa_flag) && (
                   <Badge variant="outline" className="gap-1 border-primary/30 text-primary">
                     <Shield className="h-3 w-3" />
                     Visa Sponsorship
                   </Badge>
                 )}
+
+                {/* Industry */}
+                {job.industry && (
+                  <Badge variant="outline" className="capitalize">
+                    {job.industry}
+                  </Badge>
+                )}
+
                 <Badge variant="outline" className="capitalize">
                   {job.source.replace(/_/g, " ")}
                 </Badge>
+              </div>
+
+              {/* Date model display */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                {job.posted_at && (
+                  <span className="flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    Posted {relativeDate(job.posted_at)}
+                  </span>
+                )}
+                {job.last_seen_at && (
+                  <span className="flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    Last seen {relativeDate(job.last_seen_at)}
+                  </span>
+                )}
+                {job.staleness_state && job.staleness_state !== "ACTIVE" && (
+                  <Badge
+                    variant="outline"
+                    className={`text-xs gap-1 ${
+                      job.staleness_state === "CONFIRMED_EXPIRED"
+                        ? "border-red-400/30 text-red-400"
+                        : job.staleness_state === "GHOST"
+                        ? "border-orange-400/30 text-orange-400"
+                        : "border-yellow-400/30 text-yellow-400"
+                    }`}
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                    {job.staleness_state === "CONFIRMED_EXPIRED" ? "Expired" : job.staleness_state}
+                  </Badge>
+                )}
               </div>
             </div>
 
@@ -273,6 +343,38 @@ export default function JobDetailPage() {
             </div>
 
             <Separator />
+
+            {/* Enrichment fields */}
+            {(job.required_skills?.length || job.years_experience_min || job.title_canonical) && (
+              <div className="space-y-3">
+                <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
+                  Role Details
+                </h2>
+                {job.title_canonical && job.title_canonical !== job.title && (
+                  <p className="text-xs text-muted-foreground">
+                    Canonical title: <span className="text-foreground font-medium">{job.title_canonical}</span>
+                  </p>
+                )}
+                {job.years_experience_min != null && (
+                  <p className="text-sm text-muted-foreground">
+                    Experience required:{" "}
+                    <span className="font-medium text-foreground">{job.years_experience_min}+ years</span>
+                  </p>
+                )}
+                {job.required_skills && job.required_skills.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">Required Skills</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {job.required_skills.map((s) => (
+                        <Badge key={s} variant="secondary" className="text-xs">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* About this role */}
             <div className="space-y-3">
@@ -309,10 +411,10 @@ export default function JobDetailPage() {
                 scores={{
                   role: job.role,
                   skill: job.skill,
-                  seniority: job.seniority_score,
+                  seniority_score: job.seniority_score,
                   experience: job.experience,
                   credentials: job.credentials,
-                  location: job.location_score,
+                  location_score: job.location_score,
                   recency: job.recency,
                   semantic: job.semantic,
                 }}
@@ -416,18 +518,8 @@ export default function JobDetailPage() {
 
             {/* Action buttons */}
             <div className="glass-card flex flex-col gap-3 rounded-2xl p-6 animate-fade-in-up stagger-4">
-              {/* Apply Now */}
-              <a
-                href={job.apply_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full"
-              >
-                <Button className="w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                  <ExternalLink className="h-4 w-4" />
-                  Apply Now
-                </Button>
-              </a>
+              {/* Apply Now — opens URL + tracks in pipeline */}
+              <ApplyButton job={job} fullWidth />
 
               <div className="flex gap-3">
                 {/* Like toggle */}

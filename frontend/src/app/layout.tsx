@@ -4,6 +4,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { FloatingIcons } from "@/components/layout/FloatingIcons";
+import { AuthProvider } from "@/components/layout/AuthProvider";
+import { ThemeProvider } from "@/components/layout/ThemeProvider";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 const sora = Sora({
@@ -41,12 +44,17 @@ export default function RootLayout({
       className={`dark ${sora.variable} ${plusJakarta.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider>
-          <FloatingIcons />
-          <Navbar />
-          <main className="flex-1">{children}</main>
-          <Footer />
-        </TooltipProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <TooltipProvider>
+              <FloatingIcons />
+              <Navbar />
+              <main className="flex-1">{children}</main>
+              <Footer />
+            </TooltipProvider>
+            <Toaster position="bottom-right" richColors />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

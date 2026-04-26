@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { User, CheckCircle, AlertCircle } from "lucide-react";
+import { User, CheckCircle, AlertCircle, History } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { CVUpload } from "@/components/profile/CVUpload";
 import { PreferencesForm } from "@/components/profile/PreferencesForm";
+import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer";
+import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import {
   getProfile,
   uploadProfile,
@@ -74,6 +77,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Fetch profile on mount
   const fetchProfile = useCallback(async () => {
@@ -194,6 +198,20 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            {/* Actions row */}
+            <div className="flex flex-wrap items-center gap-2">
+              <JsonResumeExportButton />
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setHistoryOpen(true)}
+              >
+                <History className="h-3.5 w-3.5" />
+                History
+              </Button>
+            </div>
+
             {/* Completeness badge */}
             <div className="flex items-center gap-3">
               {percent >= 100 ? (
@@ -267,28 +285,145 @@ export default function ProfilePage() {
             </div>
           </div>
         ) : (
-          /* ── Two-column layout ─────────────────────── */
-          <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-            {/* Left column: CV + Enrichment */}
-            <CVUpload
-              onUpload={handleCVUpload}
-              onLinkedinUpload={handleLinkedinUpload}
-              onGithubEnrich={handleGithubEnrich}
-              profile={profile?.summary ?? null}
-              cvDetail={profile?.cv_detail ?? null}
-              loading={loadingProfile}
-            />
+          /* ── Main content ──────────────────────────── */
+          <div className="space-y-6">
+            {/* Two-column layout */}
+            <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+              {/* Left column: CV + Enrichment */}
+              <CVUpload
+                onUpload={handleCVUpload}
+                onLinkedinUpload={handleLinkedinUpload}
+                onGithubEnrich={handleGithubEnrich}
+                profile={profile?.summary ?? null}
+                cvDetail={profile?.cv_detail ?? null}
+                loading={loadingProfile}
+              />
 
-            {/* Right column: Preferences */}
-            <PreferencesForm
-              preferences={profile?.preferences ?? {}}
-              onSave={handleSavePreferences}
-              loading={loadingProfile}
-            />
+              {/* Right column: Preferences */}
+              <PreferencesForm
+                preferences={profile?.preferences ?? {}}
+                onSave={handleSavePreferences}
+                loading={loadingProfile}
+              />
+            </div>
+
+            {/* ── Skill Tiers ──────────────────────────── */}
+            {profile?.skill_tiers && (
+              <div className="animate-fade-in-up glass-card rounded-xl p-6">
+                <h2 className="font-heading text-base font-semibold mb-4 text-foreground">
+                  Skill Tiers
+                </h2>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {/* Primary */}
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-score-high">
+                      Primary
+                    </p>
+                    {profile.skill_tiers.primary.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">None</p>
+                    ) : (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {profile.skill_tiers.primary.map((skill) => (
+                          <li
+                            key={skill}
+                            className="rounded-full bg-score-high/10 px-2.5 py-0.5 text-xs font-medium text-score-high"
+                          >
+                            {skill}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Secondary */}
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-yellow-500">
+                      Secondary
+                    </p>
+                    {profile.skill_tiers.secondary.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">None</p>
+                    ) : (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {profile.skill_tiers.secondary.map((skill) => (
+                          <li
+                            key={skill}
+                            className="rounded-full bg-yellow-500/10 px-2.5 py-0.5 text-xs font-medium text-yellow-500"
+                          >
+                            {skill}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Tertiary */}
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Tertiary
+                    </p>
+                    {profile.skill_tiers.tertiary.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">None</p>
+                    ) : (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {profile.skill_tiers.tertiary.map((skill) => (
+                          <li
+                            key={skill}
+                            className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
+                          >
+                            {skill}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Skill ESCO Mappings ───────────────────── */}
+            {profile?.skill_esco &&
+              Object.keys(profile.skill_esco).length > 0 && (
+                <div className="animate-fade-in-up glass-card rounded-xl p-6">
+                  <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
+                    Skill Mappings
+                  </h2>
+                  <p className="mb-4 text-xs text-muted-foreground">
+                    Raw skills extracted from your CV mapped to canonical ESCO
+                    identifiers.
+                  </p>
+                  <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                    {Object.entries(profile.skill_esco).map(
+                      ([raw, canonical]) => (
+                        <li
+                          key={raw}
+                          className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                            {raw}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground/50">
+                            →
+                          </span>
+                          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                            {canonical}
+                          </span>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                </div>
+              )}
           </div>
         )}
 
       </div>
+
+      {/* ── Version History Drawer ────────────────────── */}
+      <VersionHistoryDrawer
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onRestore={fetchProfile}
+      />
     </div>
   );
 }

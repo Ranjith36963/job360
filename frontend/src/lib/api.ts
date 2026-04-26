@@ -2,6 +2,7 @@
 // Job360 Frontend — API client (fetch-based, typed)
 // ---------------------------------------------------------------------------
 
+import { ApiError } from "./api-error";
 import type {
   ActionRequest,
   ActionResponse,
@@ -9,10 +10,12 @@ import type {
   JobFilters,
   JobListResponse,
   JobResponse,
+  JsonResumeResponse,
   PipelineAdvanceRequest,
   PipelineApplication,
   PreferencesRequest,
   ProfileResponse,
+  ProfileVersionsListResponse,
   SearchStartResponse,
   SearchStatusResponse,
   SourceInfo,
@@ -31,12 +34,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "include",
     ...init,
   });
+
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `API ${init?.method ?? "GET"} ${path} failed (${res.status}): ${body}`
-    );
+    let detail = "";
+    let code = "api_error";
+    let retryAfter: number | null = null;
+
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? JSON.stringify(body);
+      code = body?.code ?? code;
+    } catch {
+      detail = await res.text().catch(() => "");
+    }
+
+    if (res.status === 429) {
+      const ra = res.headers.get("Retry-After");
+      retryAfter = ra ? parseInt(ra, 10) : 60;
+    }
+
+    throw new ApiError(res.status, detail, code, retryAfter);
   }
+
   // 204 No Content — logout returns empty body
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -46,7 +65,11 @@ function qs(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") {
-      sp.set(k, String(v));
+      if (Array.isArray(v)) {
+        for (const item of v) sp.append(k, String(item));
+      } else {
+        sp.set(k, String(v));
+      }
     }
   }
   const s = sp.toString();
@@ -85,7 +108,7 @@ export async function getJob(id: number): Promise<JobResponse> {
 export async function exportJobsCsv(): Promise<void> {
   const res = await fetch(`${API}/api/jobs/export`);
   if (!res.ok) {
-    throw new Error(`CSV export failed (${res.status})`);
+    throw new ApiError(res.status, `CSV export failed`);
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -170,6 +193,24 @@ export async function uploadGithub(
     method: "POST",
     body: form,
   });
+}
+
+// ---- Profile version management (Step-2 A1, S3-MVP endpoints) ----
+
+export async function getProfileVersions(): Promise<ProfileVersionsListResponse> {
+  return request<ProfileVersionsListResponse>("/api/profile/versions");
+}
+
+export async function restoreProfileVersion(
+  versionId: number
+): Promise<ProfileResponse> {
+  return request<ProfileResponse>(`/api/profile/versions/${versionId}/restore`, {
+    method: "POST",
+  });
+}
+
+export async function getJsonResume(): Promise<JsonResumeResponse> {
+  return request<JsonResumeResponse>("/api/profile/json-resume");
 }
 
 // ---------------------------------------------------------------------------
