@@ -11,6 +11,7 @@ import type {
   JobListResponse,
   JobResponse,
   JsonResumeResponse,
+  NotificationLedgerListResponse,
   PipelineAdvanceRequest,
   PipelineApplication,
   PreferencesRequest,
@@ -348,4 +349,17 @@ export async function testChannel(id: number): Promise<ChannelTestResult> {
   return request<ChannelTestResult>(`/api/settings/channels/${id}/test`, {
     method: "POST",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Notification Ledger (Step-3 C-04)
+// ---------------------------------------------------------------------------
+
+export async function getNotificationLedger(
+  limit = 20,
+  offset = 0
+): Promise<NotificationLedgerListResponse> {
+  return request<NotificationLedgerListResponse>(
+    `/api/notifications/ledger${qs({ limit, offset })}`
+  );
 }

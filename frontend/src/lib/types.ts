@@ -236,6 +236,26 @@ export interface PipelineApplication {
   company?: string;
 }
 
+// ---- Notification Ledger ----
+
+export interface NotificationLedgerEntry {
+  id: number;
+  job_id: number;
+  channel: string;
+  status: string; // "sent" | "failed" | "pending"
+  sent_at: string | null;
+  error_message: string | null;
+  retry_count: number;
+  created_at: string;
+}
+
+export interface NotificationLedgerListResponse {
+  notifications: NotificationLedgerEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 // ---- Status / Health / Sources ----
 
 export interface StatusResponse {
