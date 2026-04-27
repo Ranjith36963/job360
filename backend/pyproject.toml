@@ -108,11 +108,12 @@ line-length = 120
 select = ["E", "F", "W", "I", "N", "UP", "S", "B", "G"]
 # UP007 (Optional → X | None) requires py3.10+ at runtime; project supports
 # py3.9 so keep the explicit Optional[] form in source.
-ignore = [
-    "S101",   # pytest: assert is fine in tests
-    "UP007",  # Optional[X] required for py3.9 runtime compat
-    "B008",   # FastAPI Depends() in default args is the intended pattern
-]
+# B008: FastAPI's `Depends()` in argument defaults is the canonical DI
+#       pattern — every route function uses it. Suppressing globally so we
+#       don't litter every signature with `# noqa: B008`.
+# B904: FastAPI uses HTTPException as a response (not an error); raising it
+#       inside `except` clauses without `from err` is intentional.
+ignore = ["S101", "UP007", "B008", "B904"]
 
 [tool.ruff.lint.per-file-ignores]
 # Dev CLI helpers: subprocess + SQL-string concat are expected; input comes
@@ -121,6 +122,9 @@ ignore = [
 # `backend/scripts/*.py` at the repo level.
 "scripts/*" = ["S603", "S607", "S608"]
 "scripts/bootstrap_dev.py" = ["S105", "S603", "S607"]
+# Test files use hardcoded fixture passwords (S105/S107) and import-at-
+# bottom patterns (E402). These are expected and benign in test context.
+"tests/*" = ["S105", "S107"]
 "migrations/runner.py" = ["S603", "S607"]
 # cv_parser.py contains the multi-line LLM prompt — single-string lines
 # inside the system / user prompt cannot be split without breaking the

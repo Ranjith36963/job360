@@ -2,10 +2,6 @@
 
 import { cn } from "@/lib/utils";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface TimeBucketsProps {
   activeBucket: string;
   onBucketChange: (bucket: string) => void;
@@ -21,17 +17,17 @@ const BUCKETS = [
   { key: "7d", label: "7d" },
 ] as const;
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function TimeBuckets({
   activeBucket,
   onBucketChange,
   counts,
 }: TimeBucketsProps) {
   return (
-    <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+    <div
+      className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none"
+      role="group"
+      aria-label="Filter jobs by time range"
+    >
       {BUCKETS.map(({ key, label }) => {
         const isActive = activeBucket === key;
         const count = counts[key] ?? 0;
@@ -40,6 +36,8 @@ export function TimeBuckets({
           <button
             key={key}
             onClick={() => onBucketChange(key)}
+            aria-pressed={isActive}
+            aria-label={`${label} — ${count} job${count !== 1 ? "s" : ""}`}
             className={cn(
               "relative flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all whitespace-nowrap select-none",
               isActive
@@ -49,6 +47,7 @@ export function TimeBuckets({
           >
             {label}
             <span
+              aria-hidden="true"
               className={cn(
                 "inline-flex items-center justify-center rounded-full px-1.5 min-w-[20px] h-5 text-xs font-mono tabular-nums",
                 isActive

@@ -155,7 +155,11 @@
       "Bash(mkdir -p /c/Users/Ranjith/OneDrive/Documents/job360/.claude/worktrees/generator/frontend/tests/e2e)",
       "Bash(node *)",
       "Bash(npx vitest *)",
-      "Bash(make verify-step-2 *)"
+      "Bash(make verify-step-2 *)",
+      "Bash(mkdir -p /c/Users/Ranjith/OneDrive/Documents/job360/.claude/worktrees/generator/.claude)",
+      "Bash(git rev-parse *)",
+      "Bash(make test *)",
+      "Bash(bash scripts/migration_roundtrip.sh)"
     ]
   },
   "disabledMcpjsonServers": [

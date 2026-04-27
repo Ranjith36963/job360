@@ -256,3 +256,121 @@ export interface HealthResponse {
   status: string;
   version: string;
 }
+
+// ---- Step-3: Notification rules (C-02) ----
+
+export interface NotificationRule {
+  id: number;
+  user_id: string;
+  channel: string;
+  score_threshold: number;
+  notify_mode: "instant" | "digest";
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  digest_send_time: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationRuleCreate {
+  channel: string;
+  score_threshold?: number;
+  notify_mode?: "instant" | "digest";
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  digest_send_time?: string | null;
+  enabled?: boolean;
+}
+
+export interface NotificationRuleUpdate {
+  score_threshold?: number;
+  notify_mode?: "instant" | "digest";
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  digest_send_time?: string | null;
+  enabled?: boolean;
+}
+
+export interface NotificationRuleListResponse {
+  rules: NotificationRule[];
+}
+
+// ---- Step-3: Notification ledger (C-04) ----
+
+export interface NotificationLedgerEntry {
+  id: number;
+  job_id: number;
+  channel: string;
+  status: string;
+  sent_at: string | null;
+  error_message: string | null;
+  retry_count: number;
+  created_at: string;
+}
+
+export interface NotificationLedgerListResponse {
+  notifications: NotificationLedgerEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ---- Step-3: Duplicate jobs (C-05) ----
+
+export interface DuplicateJobSummary {
+  id: number;
+  title: string;
+  company: string;
+  source: string;
+  match_score: number;
+  apply_url: string;
+}
+
+export interface DuplicateJobsResponse {
+  job_id: number;
+  duplicates: DuplicateJobSummary[];
+  total: number;
+}
+
+// ---- Step-3: Profile version diff (C-06) ----
+
+export interface ProfileVersionDiff {
+  version_id1: number;
+  version_id2: number;
+  changes: Record<string, { from: unknown; to: unknown }>;
+  changed_fields: string[];
+}
+
+// ---- Step-3: Application timeline (C-11) ----
+
+export interface TimelineEntry {
+  id: number;
+  job_id: number;
+  user_id: string;
+  from_stage: string | null;
+  to_stage: string;
+  transitioned_at: string;
+  notes: string | null;
+}
+
+export interface ApplicationTimelineResponse {
+  job_id: number;
+  timeline: TimelineEntry[];
+}
+
+// ---- Step-3: Recent runs (C-04 / sidebar) ----
+
+export interface RunEntry {
+  id: number;
+  timestamp: string;
+  total_found: number;
+  new_jobs: number;
+  sources_queried: number;
+  total_duration: number | null;
+}
+
+export interface RecentRunsResponse {
+  runs: RunEntry[];
+  total: number;
+}

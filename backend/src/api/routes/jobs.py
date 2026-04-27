@@ -409,6 +409,30 @@ async def list_jobs(
     return JobListResponse(jobs=jobs, total=total, filters_applied=filters_applied)
 
 
+@router.get("/jobs/{job_id}/duplicates")
+async def get_job_duplicates(
+    job_id: int,
+    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — public: shared catalog
+):
+    """Return alternate listings for the same job across sources (Option A: query-time grouping).
+
+    Uses normalized_key() grouping: jobs with same normalized company + normalized title
+    are considered duplicates. Public endpoint — same auth policy as GET /jobs/{id}.
+    """
+    # 1. Fetch the target job (use plain get_job_by_id — no enrichment needed here)
+    row = await db.get_job_by_id(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    # 2. Get all jobs with same normalized_company + normalized_title (exclude self)
+    duplicates = await db.get_duplicate_jobs(
+        job_id,
+        row["normalized_company"],
+        row["normalized_title"],
+    )
+    return {"job_id": job_id, "duplicates": duplicates, "total": len(duplicates)}
+
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,

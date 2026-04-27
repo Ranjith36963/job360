@@ -38,7 +38,7 @@ export function Navbar() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 group">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/30 group-hover:ring-primary/50 transition-all">
-            <Activity className="h-4 w-4 text-primary" />
+            <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
           </div>
           <span className="font-heading text-lg font-semibold tracking-tight">
             Job<span className="text-primary">360</span>
@@ -46,20 +46,21 @@ export function Navbar() {
         </Link>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
           {NAV_LINKS.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(href + "/");
             return (
               <Link
                 key={href}
                 href={href}
+                aria-current={isActive ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                   isActive
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 }`}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4" aria-hidden="true" />
                 {label}
               </Link>
             );
@@ -73,7 +74,7 @@ export function Navbar() {
               size="sm"
               className="gap-2 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
             >
-              <Search className="h-3.5 w-3.5" />
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
               Search Latest Jobs
             </Button>
           </Link>
@@ -92,7 +93,7 @@ export function Navbar() {
                 aria-label="Log out"
                 className="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/50"
               >
-                <LogOut className="h-4 w-4" />
+                <LogOut className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
           )}
@@ -100,15 +101,19 @@ export function Navbar() {
 
         {/* Mobile hamburger */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-            <Menu className="h-5 w-5" />
+          <SheetTrigger
+            className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            aria-label="Open navigation menu"
+            aria-expanded={mobileOpen}
+          >
+            <Menu className="h-5 w-5" aria-hidden="true" />
             <span className="sr-only">Menu</span>
           </SheetTrigger>
           <SheetContent side="right" className="w-64 bg-background border-border">
             <SheetTitle className="font-heading text-lg font-semibold mb-6">
               Job<span className="text-primary">360</span>
             </SheetTitle>
-            <nav className="flex flex-col gap-1">
+            <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
               {NAV_LINKS.map(({ href, label, icon: Icon }) => {
                 const isActive = pathname === href;
                 return (
@@ -116,13 +121,14 @@ export function Navbar() {
                     key={href}
                     href={href}
                     onClick={() => setMobileOpen(false)}
+                    aria-current={isActive ? "page" : undefined}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                       isActive
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-4 w-4" aria-hidden="true" />
                     {label}
                   </Link>
                 );
@@ -137,7 +143,7 @@ export function Navbar() {
                   onClick={() => { setMobileOpen(false); void logout(); }}
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                 >
-                  <LogOut className="h-4 w-4" />
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
                   Log out
                 </button>
               </div>

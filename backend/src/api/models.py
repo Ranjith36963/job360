@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -309,3 +309,43 @@ class TimelineEntry(BaseModel):
 class ApplicationTimelineResponse(BaseModel):
     job_id: int
     timeline: list[TimelineEntry]
+
+
+# ── Step-3 B-02 — Notification rules (per-user per-channel preferences) ──
+
+
+class NotificationRule(BaseModel):
+    id: int
+    user_id: str
+    channel: str
+    score_threshold: int
+    notify_mode: str
+    quiet_hours_start: Optional[str]
+    quiet_hours_end: Optional[str]
+    digest_send_time: Optional[str]
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class NotificationRuleCreate(BaseModel):
+    channel: str
+    score_threshold: int = Field(default=60, ge=0, le=100)
+    notify_mode: str = Field(default="instant", pattern="^(instant|digest)$")
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    digest_send_time: Optional[str] = "08:00"
+    enabled: bool = True
+
+
+class NotificationRuleUpdate(BaseModel):
+    score_threshold: Optional[int] = Field(None, ge=0, le=100)
+    notify_mode: Optional[str] = Field(None, pattern="^(instant|digest)$")
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    digest_send_time: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class NotificationRuleListResponse(BaseModel):
+    rules: list[NotificationRule]

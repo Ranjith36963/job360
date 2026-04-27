@@ -301,6 +301,83 @@ async def restore_version(
     return _build_profile_response(restored)
 
 
+def _get_profile_version_for_user(version_id: int, user_id: str) -> dict | None:
+    """Fetch a single profile version row scoped to ``user_id``.
+
+    Returns None when the version does not exist or belongs to another user
+    (existence-hiding pattern per Batch 3.5.1 / rule #12).
+
+    Uses the same DB path as ``storage.save_profile`` by delegating to
+    ``list_profile_versions`` with a high limit and filtering by id. This
+    keeps both reads and writes on the same SQLite file even when tests
+    monkeypatch ``settings.DB_PATH`` after ``storage.py`` has already imported
+    its own ``DB_PATH`` reference.
+    """
+    # list_profile_versions is scoped to user_id and uses the same DB path as
+    # save_profile — safe against cross-tenant leaks.
+    rows = list_profile_versions(user_id, limit=100)
+    for row in rows:
+        if row["id"] == version_id:
+            return {
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "source_action": row["source_action"],
+                "profile_json": row.get("cv_data"),  # already parsed dict; serialise below
+                "preferences_json": row.get("preferences"),
+            }
+    return None
+
+
+@router.get("/profile/versions/{version_id1}/diff/{version_id2}")
+async def diff_profile_versions(
+    version_id1: int,
+    version_id2: int,
+    user: CurrentUser = Depends(require_user),  # noqa: B008 — rule #12
+):
+    """Return per-field differences between two profile versions, scoped to caller.
+
+    Step-3 B-10. Compares cv_data JSON blobs from both versions. Only fields
+    that differ are included in ``changes``. Returns 404 when either version is
+    missing or belongs to another user (existence-hiding).
+    """
+    import json  # noqa: PLC0415 — stdlib
+
+    v1 = _get_profile_version_for_user(version_id1, user.id)
+    v2 = _get_profile_version_for_user(version_id2, user.id)
+    if not v1:
+        raise HTTPException(status_code=404, detail=f"Version {version_id1} not found")
+    if not v2:
+        raise HTTPException(status_code=404, detail=f"Version {version_id2} not found")
+
+    # Diff cv_data (most interesting for users)
+    def _parse(raw: object) -> dict:
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
+
+    d1 = _parse(v1.get("profile_json"))
+    d2 = _parse(v2.get("profile_json"))
+
+    changes: dict[str, dict] = {}
+    for k in set(d1.keys()) | set(d2.keys()):
+        old_val = d1.get(k)
+        new_val = d2.get(k)
+        if old_val != new_val:
+            changes[k] = {"from": old_val, "to": new_val}
+
+    return {
+        "version_id1": version_id1,
+        "version_id2": version_id2,
+        "changes": changes,
+        "changed_fields": list(changes.keys()),
+    }
+
+
 @router.get("/profile/json-resume", response_model=JsonResumeResponse)
 async def get_json_resume(
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom

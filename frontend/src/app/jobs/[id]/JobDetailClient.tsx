@@ -18,6 +18,7 @@ import {
   Star,
   AlertTriangle,
 } from "lucide-react";
+import { DedupGroupViewer } from "@/components/jobs/DedupGroupViewer";
 
 import { getJob, setJobAction, removeJobAction } from "@/lib/api";
 import { safeUrl } from "@/lib/utils";
@@ -397,6 +398,9 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
                 </Button>
               </a>
             </div>
+
+            {/* Cross-source duplicates */}
+            <DedupGroupViewer jobId={job.id} />
           </div>
 
           {/* ============================================================

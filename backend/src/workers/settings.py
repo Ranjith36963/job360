@@ -33,7 +33,9 @@ from src.workers.tasks import (
     enrich_job_task,
     mark_ledger_failed_task,
     mark_ledger_sent_task,
+    nightly_ghost_sweep,
     score_and_ingest,
+    send_daily_digest,
     send_notification,
 )
 
@@ -93,7 +95,37 @@ class WorkerSettings:
         mark_ledger_sent_task,
         mark_ledger_failed_task,
         enrich_job_task,
+        # Step-3 B-04 — daily digest sender
+        send_daily_digest,
+        # Step-3 B-14 — nightly ghost-detection sweep
+        nightly_ghost_sweep,
     ]
+
+    # Periodic / cron jobs — Step-3 B-14.
+    # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``
+    # Daily at 02:00 UTC is a safe time window (low activity, fresh staleness data).
+    # The list is consumed by ARQ at boot; tests never hit this path.
+    @staticmethod
+    def get_cron_jobs():  # noqa: D401
+        """Return cron_jobs list lazily so arq import stays deferred (rule #11)."""
+        from arq.cron import cron  # noqa: PLC0415 — lazy import per CLAUDE.md rule #11
+
+        return [
+            cron(nightly_ghost_sweep, hour=2, minute=0),
+        ]
+
+    # ARQ reads WorkerSettings.cron_jobs as an attribute (list[CronJob]).
+    # We can't call get_cron_jobs() at class-definition time because arq
+    # may not be installed in the test environment. Instead, expose a
+    # property-compatible descriptor that only resolves when ARQ accesses it.
+    class _CronJobsDescriptor:
+        def __get__(self, obj, objtype=None):  # noqa: D105
+            try:
+                return objtype.get_cron_jobs()
+            except Exception:  # noqa: BLE001 — arq not installed (test env)
+                return []
+
+    cron_jobs = _CronJobsDescriptor()
 
     # At test time this is the stand-in shim. At runtime ARQ reads the
     # attribute via `getattr(WorkerSettings, 'redis_settings', None)`;

@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-batch clean
+.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean
 
 help:
 	@echo "Job360 targets:"
@@ -17,6 +17,9 @@ help:
 	@echo "  verify-step-0    run the Step-0 pre-flight gate (aggregate of below)"
 	@echo "  verify-step-1    run the Step-1 engine→API seam gate"
 	@echo "  verify-step-1-5  run the Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP)"
+	@echo "  verify-step-2    run the Step-2 API→UI seam gate"
+	@echo "  verify-step-3    run the Step-3 new endpoints + Settings UI gate"
+	@echo "  migrate-roundtrip  test Step-3 migrations (0012-0014) down→up round-trip"
 	@echo "  verify-batch     enforce the Step-1.6 generator/reviewer contract"
 	@echo "  clean            wipe __pycache__ + *.pyc"
 
@@ -175,6 +178,36 @@ verify-step-2:
 	@mkdir -p .claude
 	@git rev-parse HEAD > .claude/step-2-verified.txt
 	@echo "STEP-2 GREEN: $$(cat .claude/step-2-verified.txt)"
+
+migrate-roundtrip:
+	bash scripts/migration_roundtrip.sh
+
+# ---------------------------------------------------------------------------
+# Step-3 gate — New endpoints + Settings UI.
+#
+# Aggregates the verification checks from docs/step_3_plan.md §Stop-criteria.
+# Ralph Loop halts once this exits 0 and the sentinel is written.
+# ---------------------------------------------------------------------------
+
+verify-step-3:
+	@echo "==> Step-3 gate: backend regression (>=1,081p/0f)"
+	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	@echo "==> Step-3 gate: migration round-trip (0012, 0013, 0014)"
+	bash scripts/migration_roundtrip.sh
+	@echo "==> Step-3 gate: backend lint"
+	cd backend && python -m ruff check src tests
+	@echo "==> Step-3 gate: frontend type-check"
+	cd frontend && npm run type-check
+	@echo "==> Step-3 gate: frontend lint"
+	cd frontend && npm run lint
+	@echo "==> Step-3 gate: frontend unit tests (>=50 passing)"
+	cd frontend && npm run test:unit -- --run
+	@echo "==> Step-3 gate: frontend build"
+	cd frontend && npm run build
+	@echo "==> Step-3 gate: PASS"
+	@mkdir -p .claude
+	@git rev-parse HEAD > .claude/step-3-verified.txt
+	@echo "STEP-3 GREEN: $$(cat .claude/step-3-verified.txt)"
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

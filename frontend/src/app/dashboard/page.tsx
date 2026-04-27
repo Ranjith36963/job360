@@ -17,6 +17,7 @@ import {
   setJobAction,
   removeJobAction,
 } from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "@/lib/toast";
 import type { JobFilters, JobListResponse, JobResponse, StatusResponse } from "@/lib/types";
 
@@ -97,7 +98,7 @@ export default function DashboardPage() {
     isFetching: loading,
     refetch: refetchJobs,
   } = useQuery<JobListResponse>({
-    queryKey: ["jobs", filters],
+    queryKey: queryKeys.jobList(filters),
     queryFn: () => getJobs(filters),
     staleTime: 30_000,
     placeholderData: (prev) => prev, // keep previous data while re-fetching
@@ -116,7 +117,7 @@ export default function DashboardPage() {
   );
 
   const { data: allJobsData } = useQuery<JobListResponse>({
-    queryKey: ["jobs", allJobsKey],
+    queryKey: queryKeys.jobList(allJobsKey),
     queryFn: () => getJobs(allJobsKey),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
@@ -129,7 +130,7 @@ export default function DashboardPage() {
   // ---------------------------------------------------------------------------
 
   const { data: statusData } = useQuery<StatusResponse>({
-    queryKey: ["status"],
+    queryKey: queryKeys.status(),
     queryFn: getStatus,
     staleTime: 60_000,
     // Best-effort — don't block the page if the backend is slow
@@ -175,7 +176,7 @@ export default function DashboardPage() {
     const nextAction = action === "remove" ? null : action;
 
     // Optimistic update: patch the cached job list in-place
-    queryClient.setQueryData<JobListResponse>(["jobs", filters], (old) => {
+    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(filters), (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -196,7 +197,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Action failed:", err);
       // Revert by invalidating so TanStack re-fetches the truth
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs() });
     }
   }
 
@@ -232,7 +233,7 @@ export default function DashboardPage() {
                 : "Search failed"
             );
             // Invalidate all job queries so both lists re-fetch with fresh data
-            void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.jobs() });
             // Clear message after a few seconds
             setTimeout(() => setSearchProgress(""), 4000);
           }

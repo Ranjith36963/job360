@@ -6,16 +6,25 @@ import { ApiError } from "./api-error";
 import type {
   ActionRequest,
   ActionResponse,
+  ApplicationTimelineResponse,
+  DuplicateJobsResponse,
   HealthResponse,
   JobFilters,
   JobListResponse,
   JobResponse,
   JsonResumeResponse,
+  NotificationLedgerListResponse,
+  NotificationRule,
+  NotificationRuleCreate,
+  NotificationRuleListResponse,
+  NotificationRuleUpdate,
   PipelineAdvanceRequest,
   PipelineApplication,
   PreferencesRequest,
   ProfileResponse,
+  ProfileVersionDiff,
   ProfileVersionsListResponse,
+  RecentRunsResponse,
   SearchStartResponse,
   SearchStatusResponse,
   SourceInfo,
@@ -348,4 +357,119 @@ export async function testChannel(id: number): Promise<ChannelTestResult> {
   return request<ChannelTestResult>(`/api/settings/channels/${id}/test`, {
     method: "POST",
   });
+}
+
+// ---- Step-3: Notification rules ----
+
+export async function getNotificationRules(): Promise<NotificationRuleListResponse> {
+  return request<NotificationRuleListResponse>("/api/settings/notification-rules");
+}
+
+export async function createNotificationRule(
+  body: NotificationRuleCreate
+): Promise<NotificationRule> {
+  return request<NotificationRule>("/api/settings/notification-rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateNotificationRule(
+  id: number,
+  body: NotificationRuleUpdate
+): Promise<NotificationRule> {
+  return request<NotificationRule>(`/api/settings/notification-rules/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteNotificationRule(id: number): Promise<void> {
+  await request<void>(`/api/settings/notification-rules/${id}`, {
+    method: "DELETE",
+  });
+}
+
+// ---- Step-3: Account management ----
+
+export async function changePassword(
+  current_password: string,
+  new_password: string
+): Promise<void> {
+  await request<void>("/api/auth/users/me/password", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password, new_password }),
+  });
+}
+
+export async function changeEmail(
+  current_password: string,
+  new_email: string
+): Promise<void> {
+  await request<void>("/api/auth/users/me/email", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password, new_email }),
+  });
+}
+
+export async function deleteAccount(): Promise<void> {
+  await request<void>("/api/auth/users/me", { method: "DELETE" });
+}
+
+// ---- Step-3: Notification ledger ----
+
+export async function getNotificationLedger(
+  limit = 20,
+  offset = 0
+): Promise<NotificationLedgerListResponse> {
+  return request<NotificationLedgerListResponse>(
+    `/api/notifications?limit=${limit}&offset=${offset}`
+  );
+}
+
+// ---- Step-3: Duplicate jobs ----
+
+export async function getJobDuplicates(id: number): Promise<DuplicateJobsResponse> {
+  return request<DuplicateJobsResponse>(`/api/jobs/${id}/duplicates`);
+}
+
+// ---- Step-3: Profile version diff ----
+
+export async function getProfileVersionDiff(
+  v1: number,
+  v2: number
+): Promise<ProfileVersionDiff> {
+  return request<ProfileVersionDiff>(`/api/profile/versions/${v1}/diff/${v2}`);
+}
+
+// ---- Step-3: Application timeline ----
+
+export async function getApplicationTimeline(
+  jobId: number
+): Promise<ApplicationTimelineResponse> {
+  return request<ApplicationTimelineResponse>(`/api/pipeline/${jobId}/timeline`);
+}
+
+export async function updateApplicationNotes(
+  jobId: number,
+  notes: string
+): Promise<void> {
+  await request<void>(`/api/pipeline/${jobId}/notes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  });
+}
+
+// ---- Step-3: Recent runs ----
+
+export async function getRecentRuns(
+  limit = 10,
+  offset = 0
+): Promise<RecentRunsResponse> {
+  return request<RecentRunsResponse>(`/api/runs/recent?limit=${limit}&offset=${offset}`);
 }

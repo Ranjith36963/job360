@@ -11,6 +11,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import {
   getPipelineApplications,
@@ -272,17 +273,12 @@ export default function PipelinePage() {
           EMPTY STATE
           ═══════════════════════════════════════════════════ */}
       {total === 0 && !loading && !error && (
-        <div className="animate-fade-in-up stagger-3 flex flex-col items-center justify-center py-20 text-center">
-          <div className="rounded-full border-2 border-dashed border-primary/20 p-6 animate-pulse-glow mb-4">
-            <Kanban className="h-12 w-12 text-primary/40" />
-          </div>
-          <h3 className="font-heading text-lg font-semibold text-foreground/80 mb-1">
-            No applications yet
-          </h3>
-          <p className="text-sm text-muted-foreground max-w-sm">
-            When you apply to jobs from the dashboard, they will appear here so
-            you can track your progress through each stage.
-          </p>
+        <div className="animate-fade-in-up stagger-3">
+          <EmptyState
+            icon={<Kanban className="h-12 w-12" />}
+            title="No applications yet"
+            description="When you apply to jobs from the dashboard, they will appear here so you can track your progress through each stage."
+          />
         </div>
       )}
 
@@ -294,6 +290,7 @@ export default function PipelinePage() {
           <KanbanBoard
             applications={applications}
             onAdvance={handleAdvance}
+            onRefresh={fetchData}
           />
         </div>
       )}

@@ -20,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const CHANNEL_TYPES: Array<{ value: Channel["channel_type"]; label: string; hint: string }> = [
   { value: "slack", label: "Slack", hint: "slack://TokenA/TokenB/TokenC" },
@@ -165,7 +166,7 @@ export default function ChannelsSettingsPage() {
                 Expected shape: <span className="font-mono">{hint}</span>
               </p>
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
             <Button type="submit" disabled={submitting}>
               {submitting ? "Adding..." : "Add channel"}
             </Button>
@@ -178,9 +179,10 @@ export default function ChannelsSettingsPage() {
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : channels.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No channels yet — add your first one above.
-          </p>
+          <EmptyState
+            title="No channels yet"
+            description="Add your first channel above to start receiving job notifications."
+          />
         ) : (
           <ul className="space-y-3">
             {channels.map((ch) => {
@@ -196,6 +198,7 @@ export default function ChannelsSettingsPage() {
                         </div>
                         {result && (
                           <div
+                            role="status"
                             className={`mt-1 text-xs ${
                               result.ok ? "text-emerald-400" : "text-red-400"
                             }`}
@@ -207,6 +210,7 @@ export default function ChannelsSettingsPage() {
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
+                          aria-label={`Send test notification to ${ch.display_name}`}
                           onClick={() => onTest(ch.id)}
                           disabled={testing === ch.id}
                         >
@@ -214,6 +218,7 @@ export default function ChannelsSettingsPage() {
                         </Button>
                         <Button
                           variant="destructive"
+                          aria-label={`Remove ${ch.display_name} channel`}
                           onClick={() => onDelete(ch.id)}
                         >
                           Remove

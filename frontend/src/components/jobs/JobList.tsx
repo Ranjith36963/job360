@@ -2,6 +2,7 @@
 
 import { SearchX } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { JobCard } from "@/components/jobs/JobCard";
 import type { JobResponse } from "@/lib/types";
 
@@ -62,18 +63,11 @@ export function JobList({ jobs, loading, onAction }: JobListProps) {
 
   if (jobs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted mb-4">
-          <SearchX className="h-8 w-8 text-muted-foreground" />
-        </div>
-        <h3 className="font-heading text-lg font-semibold text-foreground mb-1">
-          No jobs found
-        </h3>
-        <p className="text-sm text-muted-foreground max-w-sm">
-          Try adjusting your filters, expanding the time range, or lowering the
-          minimum score. You can also run a new search to fetch fresh listings.
-        </p>
-      </div>
+      <EmptyState
+        icon={<SearchX className="h-8 w-8" />}
+        title="No jobs found"
+        description="Try adjusting your filters, expanding the time range, or lowering the minimum score. You can also run a new search to fetch fresh listings."
+      />
     );
   }
 
