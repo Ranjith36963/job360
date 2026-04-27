@@ -142,7 +142,10 @@
       "Bash(break)",
       "Bash(PYTHONUNBUFFERED=1 python -u -m pytest tests/test_database.py tests/test_api.py tests/test_models.py tests/test_scorer.py tests/test_deduplicator.py -p no:randomly --tb=short)",
       "Read(//tmp/**)",
-      "Bash(make verify-step-0 *)"
+      "Bash(make verify-step-0 *)",
+      "Read(//c/Users/Ranjith/AppData/Local/Temp/claude/C--Users-Ranjith-OneDrive-Documents-job360--claude-worktrees-reviewer/f631df07-e4b6-4342-8b2f-1228cbaa3b4b/tasks/**)",
+      "Bash(rm -f /tmp/pytest_step15.log)",
+      "Bash(python -m pytest tests/ -p no:randomly --tb=line -q)"
     ]
   },
   "disabledMcpjsonServers": [
