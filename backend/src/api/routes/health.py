@@ -1,14 +1,15 @@
 """Health, status, and sources endpoints."""
+
 import json
 
 from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_db
-from src.api.models import HealthResponse, StatusResponse, SourceInfo, SourcesResponse
+from src.api.models import HealthResponse, SourceInfo, SourcesResponse, StatusResponse
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.main import SOURCE_REGISTRY
-from src.services.profile.storage import profile_exists
 from src.repositories.database import JobDatabase
+from src.services.profile.storage import profile_exists
 
 router = APIRouter(tags=["health"])
 
@@ -45,8 +46,5 @@ async def status(db: JobDatabase = Depends(get_db)):
 
 @router.get("/sources", response_model=SourcesResponse)
 async def sources():
-    source_list = [
-        SourceInfo(name=name, type="free", health={})
-        for name in sorted(SOURCE_REGISTRY.keys())
-    ]
+    source_list = [SourceInfo(name=name, type="free", health={}) for name in sorted(SOURCE_REGISTRY.keys())]
     return SourcesResponse(sources=source_list)
