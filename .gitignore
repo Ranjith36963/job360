@@ -27,3 +27,12 @@ data/
 # Playwright MCP cache + ad-hoc test screenshots
 .playwright-mcp/
 test-*.png
+
+# Claude Code embedded worktrees (gitlinks; tracked separately on their branches)
+.claude/worktrees/
+
+# Claude Code settings backups
+.claude/settings.local.json.backup-*
+
+# Python build artifacts
+*.egg-info/
