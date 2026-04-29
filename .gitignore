@@ -34,5 +34,8 @@ test-*.png
 # Claude Code settings backups
 .claude/settings.local.json.backup-*
 
+# Claude Code schedule skill runtime lock
+.claude/scheduled_tasks.lock
+
 # Python build artifacts
 *.egg-info/
