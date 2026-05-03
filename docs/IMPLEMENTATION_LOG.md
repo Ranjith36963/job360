@@ -1231,8 +1231,8 @@ column, per CLAUDE.md rule #10).
 **Operational follow-ups the reviewer must gate:**
 1. Batch 2.5 live-fire spike (100 jobs, ≥95 % schema-valid, ≥50 % quota
    headroom) before `ENRICHMENT_ENABLED=true` in prod.
-2. Batch 2.6 ESCO index build + embedding backfill (`scripts/build_esco_index.py`
-   → `scripts/build_job_embeddings.py`).
+2. Batch 2.6 ESCO index build + embedding backfill (`backend/scripts/build_esco_index.py`
+   → `backend/scripts/build_job_embeddings.py`).
 3. Batch 2.7 `?mode=hybrid` wiring into `/jobs` route body (the param is
    reserved but not yet acted on).
 4. Batch 2.10 Layer 4 activation (`enable_embedding_repost=True`) once

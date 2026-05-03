@@ -131,7 +131,7 @@
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `scripts/preflight_conditional_cache.py` for future candidates
+- Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
 - All 7 keyed APIs skip gracefully when keys are empty
 - All ATS boards iterate over ~268 company slugs (12 platforms including Rippling + Comeet from Batch 3)
 - All RSS/XML feeds parse correctly with mocked data

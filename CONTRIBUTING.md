@@ -82,6 +82,23 @@ Both create a venv, install backend deps, and validate `.env`. See
 [`frontend/README.md`](frontend/README.md) for service-specific run
 instructions.
 
+## Where scripts live
+
+Two `scripts/` directories exist by design:
+
+- **`scripts/`** at repo root — repo-wide shell helpers the Makefile shells
+  out to (currently `migration_roundtrip.sh`, `review_batch.sh`). Add new
+  shell or cross-service tooling here.
+- **`backend/scripts/`** — backend-only Python helpers, run via
+  `cd backend && python scripts/X.py`. Add ESCO-index builders, dev
+  bootstrappers, verification scripts, dump/inspection tools, and any
+  Python that imports from `src/` here. The ruff override
+  `scripts/* = [...]` in `backend/pyproject.toml` covers this folder.
+
+If a script is a one-shot phase migrator (touches the tree, run-once,
+then dead), drop it under `docs/_archive/one-shot-scripts/` instead of
+either live `scripts/` directory.
+
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
