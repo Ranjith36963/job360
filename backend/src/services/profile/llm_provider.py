@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time as _time
 from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -172,36 +173,72 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
     """Call Google Gemini API (free tier: 15 RPM, 1M tokens/day)."""
     import google.generativeai as genai
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        "gemini-2.0-flash",
-        system_instruction=system or None,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            temperature=0.1,
-        ),
-    )
-    response = await model.generate_content_async(prompt)
-    return json.loads(response.text)
+    _model = "gemini-2.0-flash"
+    t0 = _time.monotonic()
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            _model,
+            system_instruction=system or None,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
+        )
+        response = await model.generate_content_async(prompt)
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        total_tokens = getattr(getattr(response, "usage_metadata", None), "total_token_count", None)
+        logger.info(
+            "llm_call",
+            extra={"provider": "gemini", "model": _model, "latency_ms": latency_ms,
+                   "total_tokens": total_tokens, "outcome": "ok"},
+        )
+        return json.loads(response.text)
+    except Exception as exc:
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        logger.warning(
+            "llm_call_error",
+            extra={"provider": "gemini", "model": _model, "latency_ms": latency_ms,
+                   "outcome": "error", "error": str(exc)},
+        )
+        raise
 
 
 async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
     """Call Groq API (free tier: 30 RPM, 14.4K tokens/day on llama3)."""
     from groq import AsyncGroq
 
-    client = AsyncGroq(api_key=GROQ_API_KEY)
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    _model = "llama-3.3-70b-versatile"
+    t0 = _time.monotonic()
+    try:
+        client = AsyncGroq(api_key=GROQ_API_KEY)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-    response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        temperature=0.1,
-        response_format={"type": "json_object"},
-    )
-    return json.loads(response.choices[0].message.content)
+        response = await client.chat.completions.create(
+            model=_model,
+            messages=messages,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        total_tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
+        logger.info(
+            "llm_call",
+            extra={"provider": "groq", "model": _model, "latency_ms": latency_ms,
+                   "total_tokens": total_tokens, "outcome": "ok"},
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as exc:
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        logger.warning(
+            "llm_call_error",
+            extra={"provider": "groq", "model": _model, "latency_ms": latency_ms,
+                   "outcome": "error", "error": str(exc)},
+        )
+        raise
 
 
 async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
@@ -211,16 +248,34 @@ async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
     """
     from cerebras.cloud.sdk import AsyncCerebras
 
-    client = AsyncCerebras(api_key=CEREBRAS_API_KEY)
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    _model = "llama3.1-8b"
+    t0 = _time.monotonic()
+    try:
+        client = AsyncCerebras(api_key=CEREBRAS_API_KEY)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-    response = await client.chat.completions.create(
-        model="llama3.1-8b",
-        messages=messages,
-        temperature=0.1,
-        response_format={"type": "json_object"},
-    )
-    return json.loads(response.choices[0].message.content)
+        response = await client.chat.completions.create(
+            model=_model,
+            messages=messages,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        total_tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
+        logger.info(
+            "llm_call",
+            extra={"provider": "cerebras", "model": _model, "latency_ms": latency_ms,
+                   "total_tokens": total_tokens, "outcome": "ok"},
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as exc:
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        logger.warning(
+            "llm_call_error",
+            extra={"provider": "cerebras", "model": _model, "latency_ms": latency_ms,
+                   "outcome": "error", "error": str(exc)},
+        )
+        raise
