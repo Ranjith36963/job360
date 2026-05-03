@@ -189,7 +189,7 @@ relocation commits).
 
 ## Step 2 — API→UI Seam (MERGED 2026-04-25)
 
-Branch: `worktree-generator` off `main @ 9ac434f`. Plan: `docs/step_2_plan.md`.
+Branch: `worktree-generator` off `main @ 9ac434f`. Plan: `docs/_archive/step_2_plan.md`.
 
 ### What shipped
 
@@ -257,7 +257,7 @@ Backend: 1,087p / 0f / 17s — unchanged (no backend code touched)
 
 ### Plan reference
 
-`docs/step_2_plan.md`
+`docs/_archive/step_2_plan.md`
 
 ---
 
@@ -338,7 +338,7 @@ test, codified into CLAUDE.md rule #21.
 
 ### Plan reference
 
-`docs/step_1_5_plan.md` (executed-version — this log replaces the
+`docs/_archive/step_1_5_plan.md` (executed-version — this log replaces the
 in-flight progress notes).
 
 ---
@@ -392,7 +392,7 @@ Final: TBD (run `make verify-step-1` for the actual count)
 
 ### Plan reference
 
-`docs/step_1_plan.md` (executed-version annotations applied).
+`docs/_archive/step_1_plan.md` (executed-version annotations applied).
 
 ---
 
@@ -465,7 +465,7 @@ Before merging to `main`, each batch must:
 
 ## Baseline (pre-Batch-1)
 
-> Numbers below verified by 2026-04-18 fresh code-audit (see `docs/CurrentStatus.md`). Supersedes any earlier counts.
+> Numbers below verified by 2026-04-18 fresh code-audit (see `docs/_archive/CurrentStatus.md`). Supersedes any earlier counts.
 
 | Field | Value |
 |---|---|

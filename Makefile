@@ -76,7 +76,7 @@ verify-step-0:
 # ---------------------------------------------------------------------------
 # Step-1 engine→API seam gate.
 #
-# Aggregates the 13 verification checks from docs/step_1_plan.md §Verification.
+# Aggregates the 13 verification checks from docs/_archive/step_1_plan.md §Verification.
 # Ralph Loop halts once this exits 0 and the sentinel is written.
 # ---------------------------------------------------------------------------
 
@@ -111,7 +111,7 @@ verify-step-1:
 # ---------------------------------------------------------------------------
 # Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP).
 #
-# Aggregates the verification checks from docs/step_1_5_plan.md §Verification.
+# Aggregates the verification checks from docs/_archive/step_1_5_plan.md §Verification.
 # Ralph Loop halts once this exits 0 and the sentinel is written.
 # ---------------------------------------------------------------------------
 
@@ -159,7 +159,7 @@ verify-batch:
 # ---------------------------------------------------------------------------
 # Step-2 API→UI seam gate.
 #
-# Aggregates the verification checks from docs/step_2_plan.md §Verification.
+# Aggregates the verification checks from docs/_archive/step_2_plan.md §Verification.
 # Ralph Loop halts once this exits 0 and the sentinel is written.
 # ---------------------------------------------------------------------------
 

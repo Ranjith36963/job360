@@ -14,13 +14,10 @@ plan, a status snapshot, a reference, or an architectural decision.
 
 ## Current state
 
-- [`CurrentStatus.md`](CurrentStatus.md) — latest re-audit of source counts,
-  test counts, slug catalogs, known gaps. Updated ad-hoc after each stabilisation
-  batch.
+- [`../STATUS.md`](../STATUS.md) — project phase summary, what's done, what's
+  next, known issues. **This is the current ground truth.**
 - [`IMPLEMENTATION_LOG.md`](IMPLEMENTATION_LOG.md) — batch-by-batch completion
   log for Pillars 1–3. Read this first if you are picking up a thread.
-- [`../STATUS.md`](../STATUS.md) — project phase summary, what's done, what's
-  next, known issues.
 
 ## Product / strategy
 
@@ -40,12 +37,10 @@ plan, a status snapshot, a reference, or an architectural decision.
   source expansion.
 - `plans/batch-3.5*.md` — stabilisation sub-batches (IDOR fix,
   multi-user profile storage, conditional-cache pilot, test cleanup).
-- [`step_zero_plan.md`](step_zero_plan.md) — Step 0 pre-flight hardening (Tier A+B+C).
-- [`step_1_plan.md`](step_1_plan.md) — Step 1 engine→API seam.
-- [`step_1_5_plan.md`](step_1_5_plan.md) — Step 1.5 post-Step-1 stabilisation.
-- [`step_2_plan.md`](step_2_plan.md) — Step 2 API→UI seam.
-- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed).
+- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed). **Current step.**
 - [`evaluation_report.md`](evaluation_report.md) — production-readiness evaluation; updated post-Step-3.
+- Completed step plans (Step 0/1/1.5/2) and the historical `CurrentStatus.md`
+  re-audit live under [`_archive/`](_archive/).
 
 ## Architecture
 
