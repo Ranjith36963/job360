@@ -2,7 +2,7 @@ import json as json_mod
 import logging
 import sys
 import uuid
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from logging.handlers import RotatingFileHandler
 
 _RUN_ID = uuid.uuid4().hex[:8]
@@ -24,6 +24,23 @@ def current_run_uuid() -> str | None:
     """Read the per-run correlation id, or ``None`` outside a run."""
 
     return _run_uuid_var.get()
+
+
+# Step-2 — per-request correlation id set by RequestIdMiddleware on every HTTP
+# request. Defaults to ``None`` for non-HTTP contexts (CLI, background tasks).
+_request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+
+def set_request_id(rid: str) -> Token:
+    """Set the per-request id; returns the token needed to reset it."""
+
+    return _request_id_var.set(rid)
+
+
+def get_request_id() -> str | None:
+    """Return the current request id, or ``None`` outside an HTTP request."""
+
+    return _request_id_var.get()
 
 
 from src.core.settings import LOGS_DIR  # noqa: E402  — after the ContextVar so importers see helpers
@@ -61,6 +78,9 @@ class JSONFormatter(logging.Formatter):
         run_uuid = current_run_uuid()
         if run_uuid:
             entry["run_uuid"] = run_uuid
+        request_id = get_request_id()
+        if request_id:
+            entry["request_id"] = request_id
         # Capture any extra={...} fields passed at the call site.
         for k, v in record.__dict__.items():
             if k not in self._SKIP and not k.startswith("_") and k not in entry:

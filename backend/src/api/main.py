@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
+from src.api.middleware import RequestIdMiddleware
 from src.api.routes import (
     actions,
     auth,
@@ -47,6 +48,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# RequestIdMiddleware is added AFTER CORSMiddleware so it executes FIRST
+# (Starlette processes middleware in LIFO order).
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
