@@ -59,8 +59,13 @@ def test_setup_logging_registers_json_handler(tmp_path):
     parent.handlers.clear()
     with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
         result = log_mod.setup_logging()
-    formatter_types = [type(h.formatter).__name__ for h in result.handlers]
-    assert "JSONFormatter" in formatter_types
+    try:
+        formatter_types = [type(h.formatter).__name__ for h in result.handlers]
+        assert "JSONFormatter" in formatter_types
+    finally:
+        for h in list(result.handlers):
+            h.close()
+            result.removeHandler(h)
 
 
 def test_setup_logging_writes_jsonl(tmp_path):
@@ -69,12 +74,32 @@ def test_setup_logging_writes_jsonl(tmp_path):
     parent.handlers.clear()
     with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
         lg = log_mod.setup_logging()
-    lg.info("structured event")
-    for h in lg.handlers:
-        h.flush()
-    jsonl_path = tmp_path / "job360.jsonl"
-    assert jsonl_path.exists(), f"Expected {jsonl_path} to be created"
-    lines = [l for l in jsonl_path.read_text().strip().split("\n") if l]
-    entry = json.loads(lines[-1])
-    assert entry["message"] == "structured event"
-    assert entry["level"] == "INFO"
+    try:
+        lg.info("structured event")
+        for h in lg.handlers:
+            h.flush()
+        jsonl_path = tmp_path / "job360.jsonl"
+        assert jsonl_path.exists(), f"Expected {jsonl_path} to be created"
+        lines = [l for l in jsonl_path.read_text().strip().split("\n") if l]
+        entry = json.loads(lines[-1])
+        assert entry["message"] == "structured event"
+        assert entry["level"] == "INFO"
+    finally:
+        for h in list(lg.handlers):
+            h.close()
+            lg.removeHandler(h)
+
+
+def test_jsonformatter_includes_run_uuid_when_set():
+    from src.utils.logger import JSONFormatter, _run_uuid_var
+    token = _run_uuid_var.set("abc123")
+    try:
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            name="job360.test", level=logging.INFO, pathname="", lineno=0,
+            msg="correlated", args=(), exc_info=None,
+        )
+        entry = json.loads(formatter.format(record))
+        assert entry["run_uuid"] == "abc123"
+    finally:
+        _run_uuid_var.reset(token)

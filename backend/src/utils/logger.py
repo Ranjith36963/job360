@@ -40,34 +40,6 @@ class _RunUuidFormatter(logging.Formatter):
         return base
 
 
-def setup_logging(log_level: str | None = None) -> logging.Logger:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("job360")
-    if logger.handlers:
-        if log_level:
-            logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-        return logger
-    level = getattr(logging, log_level.upper(), logging.INFO) if log_level else logging.INFO
-    logger.setLevel(level)
-    fmt = _RunUuidFormatter(
-        f"%(asctime)s [%(levelname)s] %(name)s [run:{_RUN_ID}]: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(fmt)
-    logger.addHandler(console)
-    file_handler = RotatingFileHandler(LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3)
-    file_handler.setFormatter(fmt)
-    logger.addHandler(file_handler)
-    # Second handler — JSON lines for machine consumption.
-    json_handler = RotatingFileHandler(
-        LOGS_DIR / "job360.jsonl", maxBytes=5_000_000, backupCount=3
-    )
-    json_handler.setFormatter(JSONFormatter())
-    logger.addHandler(json_handler)
-    return logger
-
-
 class JSONFormatter(logging.Formatter):
     # Standard LogRecord attributes — never re-emit these as extra fields.
     _SKIP: frozenset = frozenset({
@@ -95,7 +67,35 @@ class JSONFormatter(logging.Formatter):
                 entry[k] = v
         if record.exc_info and record.exc_info[0]:
             entry["exception"] = self.formatException(record.exc_info)
-        return json_mod.dumps(entry)
+        return json_mod.dumps(entry, default=str)
+
+
+def setup_logging(log_level: str | None = None) -> logging.Logger:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("job360")
+    if logger.handlers:
+        if log_level:
+            logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+        return logger
+    level = getattr(logging, log_level.upper(), logging.INFO) if log_level else logging.INFO
+    logger.setLevel(level)
+    fmt = _RunUuidFormatter(
+        f"%(asctime)s [%(levelname)s] %(name)s [run:{_RUN_ID}]: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(fmt)
+    logger.addHandler(console)
+    file_handler = RotatingFileHandler(LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3)
+    file_handler.setFormatter(fmt)
+    logger.addHandler(file_handler)
+    # Second handler — JSON lines for machine consumption.
+    json_handler = RotatingFileHandler(
+        LOGS_DIR / "job360.jsonl", maxBytes=5_000_000, backupCount=3
+    )
+    json_handler.setFormatter(JSONFormatter())
+    logger.addHandler(json_handler)
+    return logger
 
 
 def get_logger(name: str) -> logging.Logger:
