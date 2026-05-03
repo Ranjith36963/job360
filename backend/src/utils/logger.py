@@ -59,12 +59,27 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
     file_handler = RotatingFileHandler(LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3)
     file_handler.setFormatter(fmt)
     logger.addHandler(file_handler)
+    # Second handler — JSON lines for machine consumption.
+    json_handler = RotatingFileHandler(
+        LOGS_DIR / "job360.jsonl", maxBytes=5_000_000, backupCount=3
+    )
+    json_handler.setFormatter(JSONFormatter())
+    logger.addHandler(json_handler)
     return logger
 
 
 class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        entry = {
+    # Standard LogRecord attributes — never re-emit these as extra fields.
+    _SKIP: frozenset = frozenset({
+        "name", "msg", "args", "created", "filename", "funcName",
+        "levelname", "levelno", "lineno", "module", "msecs", "message",
+        "pathname", "process", "processName", "relativeCreated",
+        "thread", "threadName", "exc_info", "exc_text", "stack_info",
+        "taskName", "asctime",
+    })
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict = {
             "timestamp": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,
@@ -74,6 +89,10 @@ class JSONFormatter(logging.Formatter):
         run_uuid = current_run_uuid()
         if run_uuid:
             entry["run_uuid"] = run_uuid
+        # Capture any extra={...} fields passed at the call site.
+        for k, v in record.__dict__.items():
+            if k not in self._SKIP and not k.startswith("_") and k not in entry:
+                entry[k] = v
         if record.exc_info and record.exc_info[0]:
             entry["exception"] = self.formatException(record.exc_info)
         return json_mod.dumps(entry)
