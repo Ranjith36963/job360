@@ -7,7 +7,7 @@ import uuid
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.auth_deps import (
@@ -21,6 +21,7 @@ from src.core.settings import DB_PATH
 from src.repositories.database import JobDatabase
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,6 +41,22 @@ class UserResponse(BaseModel):
     email: str
 
 
+def _client_meta(request: Request) -> dict:
+    """Extract safe client metadata for audit log extra fields.
+
+    X-Forwarded-For is only trusted when ``JOB360_TRUST_PROXY=1`` is set —
+    forwarding without this gate lets attackers spoof their source IP.
+    """
+    xff_ip = None
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        xff = request.headers.get("x-forwarded-for", "")
+        xff_ip = xff.split(",")[0].strip() or None
+    return {
+        "client_ip": xff_ip or (request.client.host if request.client else None),
+        "user_agent": request.headers.get("user-agent", "")[:200],
+    }
+
+
 def _set_session_cookie(response: Response, cookie: str) -> None:
     # Secure flag gates on JOB360_ENV so prod deploys don't serve bare cookies
     # by accident. Any value other than "prod" falls back to dev-friendly.
@@ -55,7 +72,7 @@ def _set_session_cookie(response: Response, cookie: str) -> None:
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest, response: Response) -> UserResponse:
+async def register(req: RegisterRequest, response: Response, request: Request) -> UserResponse:
     user_id = uuid.uuid4().hex
     pw_hash = hash_password(req.password)
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -72,11 +89,12 @@ async def register(req: RegisterRequest, response: Response) -> UserResponse:
             )
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=user_id, secret=_secret())
     _set_session_cookie(response, cookie)
+    get_audit_logger().info("auth", extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)})
     return UserResponse(id=user_id, email=req.email)
 
 
 @router.post("/login", response_model=UserResponse)
-async def login(req: LoginRequest, response: Response) -> UserResponse:
+async def login(req: LoginRequest, response: Response, request: Request) -> UserResponse:
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -85,22 +103,32 @@ async def login(req: LoginRequest, response: Response) -> UserResponse:
         )
         row = await cur.fetchone()
     if row is None or not verify_password(row["password_hash"], req.password):
+        get_audit_logger().warning(
+            "auth",
+            extra={"event": "login", "status": "fail", "email": req.email, **_client_meta(request)},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=row["id"], secret=_secret())
     _set_session_cookie(response, cookie)
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "login", "user_id": row["id"], "status": "ok", **_client_meta(request)},
+    )
     return UserResponse(id=row["id"], email=row["email"])
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     response: Response,
+    request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Response:
     if job360_session:
         await auth_sessions.revoke_session(str(DB_PATH), job360_session, secret=_secret())
+    get_audit_logger().info("auth", extra={"event": "logout", "status": "ok", **_client_meta(request)})
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
+from src.api.middleware import RequestIdMiddleware
 from src.api.routes import (
     actions,
     auth,
@@ -22,7 +23,7 @@ from src.api.routes import (
     search,
 )
 from src.core.settings import LOG_LEVEL
-from src.utils.logger import setup_logging
+from src.utils.logger import setup_audit_logger, setup_logging
 
 
 @asynccontextmanager
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     # logger so libraries (uvicorn, fastapi, httpx) inherit the same level
     # when they haven't been individually configured.
     setup_logging(LOG_LEVEL)
+    setup_audit_logger()
     logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
     await init_db()
     yield
@@ -49,7 +51,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-Id"],
 )
+# RequestIdMiddleware is added AFTER CORSMiddleware so it executes FIRST
+# (Starlette processes middleware in LIFO order).
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")

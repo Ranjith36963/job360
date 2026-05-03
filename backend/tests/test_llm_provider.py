@@ -1,4 +1,6 @@
 """Tests for LLM provider pool."""
+import json
+import logging
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -105,3 +107,79 @@ async def test_llm_extract_fast_all_keys_missing_raises():
         from src.services.profile.llm_provider import llm_extract_fast
         with pytest.raises(RuntimeError, match="No LLM API key configured"):
             await llm_extract_fast("test")
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — structured LLM call logging tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_call_gemini_logs_structured_info_on_success(caplog):
+    """_call_gemini emits a structured 'llm_call' INFO record with latency+outcome."""
+    import google.generativeai as genai
+
+    mock_response = MagicMock()
+    mock_response.text = '{"skills": ["Python"]}'
+    mock_response.usage_metadata = MagicMock(total_token_count=42)
+
+    mock_model = MagicMock()
+    mock_model.generate_content_async = AsyncMock(return_value=mock_response)
+
+    with patch("src.services.profile.llm_provider.GEMINI_API_KEY", "fake"), \
+         patch.object(genai, "configure"), \
+         patch.object(genai, "GenerativeModel", return_value=mock_model), \
+         caplog.at_level(logging.INFO, logger="job360.profile.llm_provider"):
+        from src.services.profile.llm_provider import _call_gemini
+        await _call_gemini("prompt", "")
+
+    records = [r for r in caplog.records if r.getMessage() == "llm_call"]
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.provider == "gemini"  # type: ignore[attr-defined]
+    assert rec.outcome == "ok"  # type: ignore[attr-defined]
+    assert isinstance(rec.latency_ms, int)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_call_groq_logs_structured_warning_on_error(caplog):
+    """_call_groq emits a structured 'llm_call_error' WARNING when the API raises."""
+    with patch("src.services.profile.llm_provider.GROQ_API_KEY", "fake"), \
+         caplog.at_level(logging.WARNING, logger="job360.profile.llm_provider"):
+        from groq import AsyncGroq
+        with patch.object(AsyncGroq, "__init__", return_value=None), \
+             patch.object(AsyncGroq, "chat", new_callable=MagicMock) as mock_chat:
+            mock_chat.completions = MagicMock()
+            mock_chat.completions.create = AsyncMock(side_effect=RuntimeError("quota"))
+            from src.services.profile.llm_provider import _call_groq
+            with pytest.raises(RuntimeError, match="quota"):
+                await _call_groq("prompt", "")
+
+    records = [r for r in caplog.records if r.getMessage() == "llm_call_error"]
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.provider == "groq"  # type: ignore[attr-defined]
+    assert rec.outcome == "error"  # type: ignore[attr-defined]
+    assert rec.error_type == "RuntimeError"  # type: ignore[attr-defined]
+    assert not hasattr(rec, "error"), "raw error string must not appear (key leak risk)"
+
+
+@pytest.mark.asyncio
+async def test_call_cerebras_logs_total_tokens_on_success(caplog):
+    """_call_cerebras log record includes total_tokens when API returns usage."""
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock(message=MagicMock(content='{"x": 1}'))]
+    mock_resp.usage = MagicMock(total_tokens=99)
+
+    with patch("src.services.profile.llm_provider.CEREBRAS_API_KEY", "fake"), \
+         caplog.at_level(logging.INFO, logger="job360.profile.llm_provider"):
+        from cerebras.cloud.sdk import AsyncCerebras
+        with patch.object(AsyncCerebras, "__init__", return_value=None), \
+             patch.object(AsyncCerebras, "chat", new_callable=MagicMock) as mock_chat:
+            mock_chat.completions = MagicMock()
+            mock_chat.completions.create = AsyncMock(return_value=mock_resp)
+            from src.services.profile.llm_provider import _call_cerebras
+            await _call_cerebras("prompt", "")
+
+    records = [r for r in caplog.records if r.getMessage() == "llm_call"]
+    assert len(records) == 1
+    assert records[0].total_tokens == 99  # type: ignore[attr-defined]
