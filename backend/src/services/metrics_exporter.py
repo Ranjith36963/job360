@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import aiosqlite
@@ -9,6 +11,28 @@ import aiosqlite
 from src.core.settings import METRICS_DIR
 
 _DEFAULT_METRICS_DIR = METRICS_DIR
+
+
+def _atomic_write(dest: Path, text: str) -> None:
+    """Write *text* to *dest* atomically via a unique temp file.
+
+    Uses a per-call unique name (via NamedTemporaryFile) so concurrent
+    pipeline runs writing to the same metrics directory never clobber
+    each other's in-flight tmp file.  ``os.replace`` is atomic on POSIX
+    and near-atomic on Windows NTFS.
+    """
+    fd, tmp_path = tempfile.mkstemp(dir=dest.parent, prefix=dest.stem + "_", suffix=".tmp")
+    try:
+        os.write(fd, text.encode())
+        os.close(fd)
+        os.replace(tmp_path, dest)
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 async def export_pipeline_metrics(
@@ -33,9 +57,7 @@ async def export_pipeline_metrics(
 
     records = [dict(row) for row in rows]
     out = metrics_dir / "pipeline.json"
-    tmp = out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"runs": records}, indent=2, default=str))
-    tmp.replace(out)
+    _atomic_write(out, json.dumps({"runs": records}, indent=2, default=str))
 
 
 async def export_notification_metrics(
@@ -61,6 +83,4 @@ async def export_notification_metrics(
 
     records = [dict(row) for row in rows]
     out = metrics_dir / "notifications.json"
-    tmp = out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"channels": records}, indent=2, default=str))
-    tmp.replace(out)
+    _atomic_write(out, json.dumps({"channels": records}, indent=2, default=str))

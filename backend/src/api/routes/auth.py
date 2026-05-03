@@ -39,9 +39,17 @@ class UserResponse(BaseModel):
 
 
 def _client_meta(request: Request) -> dict:
-    """Extract safe client metadata for audit log extra fields."""
+    """Extract safe client metadata for audit log extra fields.
+
+    X-Forwarded-For is only trusted when ``JOB360_TRUST_PROXY=1`` is set —
+    forwarding without this gate lets attackers spoof their source IP.
+    """
+    xff_ip = None
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        xff = request.headers.get("x-forwarded-for", "")
+        xff_ip = xff.split(",")[0].strip() or None
     return {
-        "client_ip": (request.client.host if request.client else None),
+        "client_ip": xff_ip or (request.client.host if request.client else None),
         "user_agent": request.headers.get("user-agent", "")[:200],
     }
 

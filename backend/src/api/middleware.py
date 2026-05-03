@@ -26,7 +26,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     _MAX_RID_LEN = 64
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        raw = request.headers.get("X-Request-Id", "")
+        raw = request.headers.get("X-Request-Id", "").strip()
         rid = raw[: self._MAX_RID_LEN] if raw else uuid.uuid4().hex[:16]
         token = set_request_id(rid)
         try:
