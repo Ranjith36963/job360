@@ -18,6 +18,7 @@ from src.api.auth_deps import (
 from src.core.settings import DB_PATH
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -71,6 +72,7 @@ async def register(req: RegisterRequest, response: Response) -> UserResponse:
         str(DB_PATH), user_id=user_id, secret=_secret()
     )
     _set_session_cookie(response, cookie)
+    get_audit_logger().info("auth", extra={"event": "register", "user_id": user_id, "status": "ok"})
     return UserResponse(id=user_id, email=req.email)
 
 
@@ -85,6 +87,7 @@ async def login(req: LoginRequest, response: Response) -> UserResponse:
         )
         row = await cur.fetchone()
     if row is None or not verify_password(row["password_hash"], req.password):
+        get_audit_logger().warning("auth", extra={"event": "login", "status": "fail"})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
@@ -93,6 +96,7 @@ async def login(req: LoginRequest, response: Response) -> UserResponse:
         str(DB_PATH), user_id=row["id"], secret=_secret()
     )
     _set_session_cookie(response, cookie)
+    get_audit_logger().info("auth", extra={"event": "login", "user_id": row["id"], "status": "ok"})
     return UserResponse(id=row["id"], email=row["email"])
 
 
@@ -105,6 +109,7 @@ async def logout(
         await auth_sessions.revoke_session(
             str(DB_PATH), job360_session, secret=_secret()
         )
+    get_audit_logger().info("auth", extra={"event": "logout", "status": "ok"})
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

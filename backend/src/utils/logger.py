@@ -120,3 +120,34 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"job360.{name}")
+
+
+# ---------------------------------------------------------------------------
+# Step-4 — dedicated audit logger
+# ---------------------------------------------------------------------------
+
+def setup_audit_logger() -> logging.Logger:
+    """Configure and return the audit logger (job360.audit).
+
+    Writes JSON lines to ``LOGS_DIR/audit.log`` with ``propagate=False``
+    so audit records never appear in the main job360 handlers.  Idempotent
+    — safe to call multiple times (e.g. from tests and from lifespan).
+    """
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    audit = logging.getLogger("job360.audit")
+    if audit.handlers:
+        return audit
+    audit.setLevel(logging.INFO)
+    audit.propagate = False
+    handler = RotatingFileHandler(
+        LOGS_DIR / "audit.log", maxBytes=5_000_000, backupCount=5
+    )
+    handler.setFormatter(JSONFormatter())
+    audit.addHandler(handler)
+    return audit
+
+
+def get_audit_logger() -> logging.Logger:
+    """Return the audit logger; assumes setup_audit_logger() was already called."""
+
+    return logging.getLogger("job360.audit")

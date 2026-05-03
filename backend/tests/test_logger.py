@@ -103,3 +103,62 @@ def test_jsonformatter_includes_run_uuid_when_set():
         assert entry["run_uuid"] == "abc123"
     finally:
         _run_uuid_var.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — audit logger tests
+# ---------------------------------------------------------------------------
+
+def test_setup_audit_logger_creates_handler(tmp_path):
+    import src.utils.logger as log_mod
+    audit = logging.getLogger("job360.audit")
+    audit.handlers.clear()
+    with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
+        result = log_mod.setup_audit_logger()
+    try:
+        assert result.name == "job360.audit"
+        assert not result.propagate
+        formatter_types = [type(h.formatter).__name__ for h in result.handlers]
+        assert "JSONFormatter" in formatter_types
+    finally:
+        for h in list(result.handlers):
+            h.close()
+            result.removeHandler(h)
+
+
+def test_setup_audit_logger_is_idempotent(tmp_path):
+    import src.utils.logger as log_mod
+    audit = logging.getLogger("job360.audit")
+    audit.handlers.clear()
+    with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
+        log_mod.setup_audit_logger()
+        log_mod.setup_audit_logger()  # second call must not add a second handler
+    try:
+        assert len(audit.handlers) == 1
+    finally:
+        for h in list(audit.handlers):
+            h.close()
+            audit.removeHandler(h)
+
+
+def test_audit_logger_writes_json_event(tmp_path):
+    import src.utils.logger as log_mod
+    audit = logging.getLogger("job360.audit")
+    audit.handlers.clear()
+    with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
+        lg = log_mod.setup_audit_logger()
+    try:
+        lg.info("auth", extra={"event": "register", "user_id": "abc", "status": "ok"})
+        for h in lg.handlers:
+            h.flush()
+        audit_path = tmp_path / "audit.log"
+        assert audit_path.exists()
+        line = [l for l in audit_path.read_text().strip().split("\n") if l][-1]
+        entry = json.loads(line)
+        assert entry["message"] == "auth"
+        assert entry["event"] == "register"
+        assert entry["status"] == "ok"
+    finally:
+        for h in list(lg.handlers):
+            h.close()
+            lg.removeHandler(h)
