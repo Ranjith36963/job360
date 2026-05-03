@@ -38,6 +38,19 @@ npm start             # serve the production build
 npm run lint          # eslint
 ```
 
+## Tests
+
+```bash
+npm run test:unit              # vitest unit tests (component + lib)
+npm run test:e2e               # Playwright E2E (@playwright/test)
+npm run test:coverage          # vitest with v8 coverage
+npm run type-check             # tsc --noEmit (no emit, type-only)
+```
+
+Unit tests live alongside their subject files (`*.test.tsx` next to
+`*.tsx`). E2E specs live in `tests/e2e/` and run against a started dev
+server. Step-3 close-out invariant: ≥44 unit tests, ≥5 E2E specs.
+
 ## Cross-wiring with the backend
 
 1. The backend must be running on the URL in `NEXT_PUBLIC_API_URL`

@@ -56,13 +56,14 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
 
 ## Test-before-merge gate
 
-**Invariant baseline: 600+ passing, 0 failing.**
+**Invariant baseline: 1,154+ passing, 0 failing.**
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= 600 passing**. (The suite expands with every new source / feature; the
-  floor only moves up.)
+  **>= 1,154 passing**. (The suite expands with every new source / feature;
+  the floor only moves up — Step-0 baseline was 600; Step-3 close-out at
+  1,154.)
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
 - At least one reviewer has approved (or owner self-approval on
@@ -84,8 +85,9 @@ instructions.
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
-It documents the 19 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
-imports, mandatory five-surface updates when adding sources, etc.) plus the
+It documents the 26 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
+imports, mandatory five-surface updates when adding sources, timezone-aware
+quiet-hours dispatch, account-mgmt session invalidation, etc.) plus the
 scoring algorithm and data-flow.
 
 For docs and plans, start at [`docs/README.md`](docs/README.md).

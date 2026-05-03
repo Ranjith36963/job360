@@ -2,9 +2,83 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Orientation
+
+If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
+
+- **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly --ignore=tests/test_main.py` (1,154 passing, 3 skipped on Windows). `test_main.py` is excluded because JobSpy hits live Indeed.
+- **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Local `main` carries 2 chore commits on top. Step 4 (ops hardening) is next. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
+- **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
+- **What surprises new sessions:** `SOURCE_REGISTRY` has 50 entries but only 49 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
+
+## Hard Rules (load-bearing, numbered, do not violate)
+
+Rules are reference material — keep them in one place. Long-form context for each lives in the phase sections at the bottom of this file.
+
+### Schema + data integrity
+
+1. **Never touch `normalized_key()` in `models.py`** without verifying the deduplicator and DB UNIQUE constraint still work. Wrong normalization = duplicate rows or missed dedup.
+3. **Never touch database purge logic** (`purge_old_jobs` in `database.py`) without explicit confirmation. Wrong threshold = data loss.
+10. **Never INSERT into `jobs` with `user_id` or `tenant_id`** — `jobs` is the shared catalog by design (blueprint §3). Per-user state lives in `user_feed`, `user_actions`, `applications`.
+17. **`job_enrichment` and `job_embeddings` must NOT gain `user_id`** — same rationale as #10. Per-user scoring against the enrichment happens at read time in `JobScorer(..., user_preferences=..., enrichment_lookup=...)`.
+
+### Sources
+
+2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking all 49 source files that inherit from it.
+8. **When adding/removing sources: update the FIVE load-bearing surfaces** — `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, `tests/test_cli.py` (`len == N` + expected set), AND `tests/test_api.py` (rule #13 below). Current count: **50**.
+13. **The fifth surface (`tests/test_api.py`) has hardcoded `== N` checks** inside `test_sources_returns_*` + `test_status_returns_counts` + `test_full_api_workflow`. Rotating the count requires all five to move together.
+14. **Conditional fetch is opt-in.** Sources whose upstream honours ETag/Last-Modified call `self._get_json_conditional(url)`; everyone else stays on `self._get_json(url)`. Don't pollute the cache with un-validatable entries.
+15. **New sources MUST set `.category`** to one of: `"ats"`, `"rss"`, `"keyed_api"`, `"free_json"`, `"scrapers"`, `"other"` — or add a `NAME_TIER[source.name]` override in `scheduler.py`. Untagged sources fall to the 60-min default.
+
+### Heavy imports
+
+11. **Never import `apprise` at module top level.** ~30 MB of deps. Lazy-import inside the function that uses it (see `dispatcher._get_apprise_cls`).
+16. **Same rule extends to `sentence_transformers`, `chromadb`, `rapidfuzz`, `sklearn`** — all lazy-imported inside functions. Top-level imports cost 150 ms – 2 s per pytest collection.
+
+### Auth + multi-tenant routes
+
+12. **Every per-user FastAPI route MUST `Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from URL/body — trivial IDOR.
+25. **Per-user mutating routes MUST scope by `user.id`** (extends #12). Step 3's reviewer R-1..R-3 caught 3 IDOR violations where `user_id` came from path/body. Pattern: derive from session cookie, never accept as parameter.
+26. **Account-mgmt routes (password/email/delete) MUST verify current password BEFORE the mutation, then invalidate the session cookie** (forces re-login). Pattern: `verify_password(...)` → mutation → `response.delete_cookie("job360_session")`.
+
+### Scoring + enrichment
+
+9. **Scoring changes require running `test_scorer.py` AND `test_profile.py`.** 53 + 55 tests cover edge cases.
+18. **Pillar 2 flags default off.** When `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` are false, behaviour must **exactly** match pre-Pillar-2 — no implicit semantic queries, no LLM calls. Test with both flags OFF.
+19. **`JobScorer` legacy default = 4-component formula.** New 7-dim scoring activates only when `JobScorer(config, user_preferences=..., enrichment_lookup=...)` gets all three kwargs. Don't flip defaults silently.
+20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup`** — pass both or neither. Passing only `user_preferences` produces silent zeros for the new dim scorers; the combined `match_score` looks legacy but the dim columns mislead.
+
+### Notifications
+
+23. **Notification dispatch consults `notification_rules` for (user_id, channel) AND converts UTC `now` to the user's `users.timezone` (IANA) via `zoneinfo.ZoneInfo`** before comparing against `quiet_hours_start/end` HH:MM strings. Skipping the timezone conversion silently leaks notifications during BST/DST transitions. Use stdlib `zoneinfo` — not `pytz`.
+24. **`notify_mode == "digest"` queues into `user_notification_digests`** instead of dispatching. `send_daily_digest` ARQ periodic drains the queue at the user's `digest_send_time`. Tests for new dispatch paths must cover both branches (instant + digest) AND both quiet-hours states.
+
+### Process + verification
+
+4. **Always mock HTTP in tests** with `aioresponses`. Never live HTTP. The suite must run offline.
+5. **Always run the relevant test suite** after a change.
+6. **Read a file fully before editing.** Understand existing logic, imports, dependents.
+7. **Check if something exists before creating it.**
+21. **Value-presence > schema-presence for new engine-side fields.** Schema-presence tests (`assert "field" in body`) pass against `field: int = 0` defaults and serializers that never read the column. Add a value-presence test that runs a real input through end-to-end and asserts the value is non-zero / non-default. Pattern: `tests/test_database.py::test_dim_columns_round_trip` + `tests/test_api.py::test_jobs_response_includes_score_dim_breakdown`.
+22. **Frontend code touching Next.js App Router patterns MUST consult Context7 docs first.** Training data for Next.js 14–15 is **not reliable** for 16. Breaking changes: `params` is `Promise<{...}>` and must be `await`ed; `"use client"` on `page.tsx` silently disables `generateMetadata`. Run `mcp__plugin_context7_context7__query-docs` for `next.js` and read `frontend/node_modules/next/dist/docs/` before any App Router work.
+
+### Branch hygiene
+
+- **Multi-commit batch preflight (saved-memory-driven):** verify branch + clean tree + `git fetch origin <branch>` HEAD alignment before any fix or implementation batch lands. Halt on divergence — do not silently rebase or merge.
+
+## Common Gotchas
+
+- **`test_main.py` hits live Indeed via JobSpy** (sync `requests`, can't be `aioresponses`-mocked). Exclude with `--ignore=tests/test_main.py` for fast runs. 13 tests in this file are skip-marked pending a rehab batch.
+- **`indeed` and `glassdoor` registry keys both → `JobSpySource`.** 50 registry entries, 49 unique classes. Test assertions treat 50 as authoritative.
+- **`teaching_vacancies` and `gov_apprenticeships` live in `apis_free/` but declare `category="rss"`** for the 15-min scheduler tier. Folder location ≠ scheduler tier.
+- **Pillar 2 toggles default off.** Don't assume embeddings or LLM enrichment runs by default — they don't.
+- **Heavy deps lazy-imported.** Don't add a top-level `import sentence_transformers` even "just for typing" — see rules #11 + #16.
+- **Migrations auto-apply on FastAPI boot** via `lifespan` in `src/api/dependencies.py`. The CLI `python -m migrations.runner up` is for non-API contexts.
+
 ## Project Overview
 
-Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 50 sources (via `SOURCE_REGISTRY` in `src/main.py` — post-Batch-3 rotation, see rule #13), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Next.js frontend (backed by FastAPI). Users can personalise searches by providing a CV (PDF/DOCX), a LinkedIn profile PDF (profile → More → Save to PDF), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, it defaults to the original AI/ML keywords.
+Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 50 sources (via `SOURCE_REGISTRY` in `src/main.py`), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Next.js frontend (backed by FastAPI). Users can personalise searches by providing a CV (PDF/DOCX), a LinkedIn profile PDF (profile → More → Save to PDF), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, it defaults to AI/ML keywords.
 
 ## Tech Stack
 
@@ -16,27 +90,25 @@ Job360 is an automated UK job search system supporting **any professional domain
 | jinja2 | >=3.1.0 | HTML report templates |
 | click | >=8.1.0 | CLI framework |
 | pandas | >=2.0.0 | DataFrame support for python-jobspy (Indeed/Glassdoor) |
-| pdfplumber | >=0.10.0 | PDF text extraction for CV parsing |
-| python-docx | >=1.1.0 | DOCX text extraction for CV parsing |
+| pdfplumber | >=0.10.0 | PDF text extraction (CV parsing) |
+| python-docx | >=1.1.0 | DOCX text extraction (CV parsing) |
 | rich | >=13.0.0 | Terminal table rendering |
 | humanize | >=4.9.0 | Relative time formatting |
 | fastapi | >=0.115.0 | API server for Next.js frontend |
 | uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
-| python-multipart | >=0.0.9 | File upload support for FastAPI |
+| python-multipart | >=0.0.9 | File upload support |
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| google-generativeai | >=0.8.0 | Gemini LLM provider for CV parsing |
-| groq | >=0.11.0 | Groq LLM provider for CV parsing |
-| cerebras-cloud-sdk | >=1.0.0 | Cerebras LLM provider for CV parsing |
+| google-generativeai / groq / cerebras-cloud-sdk | latest | Multi-provider LLM client for CV parsing |
+| argon2-cffi / itsdangerous / cryptography | latest | Auth + signed sessions + Fernet (Batch 2) |
+| apprise | >=1.9.9 | Multi-channel notification dispatch (Batch 2; lazy-imported) |
+| rapidfuzz / scikit-learn | latest | Pillar 2 dedup layers 2–3 (lazy-imported) |
+| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings + ChromaDB (lazy-imported, opt-in) |
 
-**Dev/test extras** (in `requirements-dev.txt`): pytest >=8.0.0, pytest-asyncio >=0.23.0, aioresponses >=0.7.0, fpdf2 >=2.7.0
-
-**Optional** (not in requirements.txt): `python-jobspy` — used by `src/sources/indeed.py` for Indeed/Glassdoor scraping. The source gracefully skips with a warning if not installed.
-
-**Python:** 3.9+ required.
+**Dev/test extras** (`[dev]`): pytest, pytest-asyncio, aioresponses, fpdf2, pytest-randomly, ruff, pre-commit. **Optional**: `python-jobspy` (Indeed/Glassdoor — gracefully skipped if not installed). **Python:** 3.9+ required.
 
 ## Commands
 
-**All backend commands run from `backend/`** (after the directory restructure — see Folder Structure below). Frontend commands run from `frontend/`.
+All backend commands run from `backend/`. Frontend commands run from `frontend/`.
 
 ```bash
 # Setup (from project root)
@@ -46,457 +118,184 @@ source venv/bin/activate       # Activate virtualenv (Linux/Mac)
 # Backend — all commands below run from backend/
 cd backend
 
-# API server (for Next.js frontend)
-python main.py                                      # Start FastAPI on localhost:8000
+# API server
+python main.py                                      # Start FastAPI on :8000
 uvicorn main:app --host 0.0.0.0 --port 8000         # Production-style
-python -m src.cli api                               # Alternative entry via CLI
 python -m src.cli api --port 3001 --host 0.0.0.0    # Custom host/port
 
-# Run the pipeline
-python -m src.cli run                               # Full pipeline (47 source instances)
+# Pipeline
+python -m src.cli run                               # Full pipeline (49 instances)
 python -m src.cli run --source arbeitnow            # Single source
 python -m src.cli run --dry-run --log-level DEBUG    # Dry run with debug
-python -m src.cli run --db-path /tmp/test.db         # Custom DB path
 python -m src.cli run --no-email                     # Skip notifications
 
-# Profile setup (personalise for any domain)
-python -m src.cli setup-profile --cv path/to/cv.pdf                    # CV only
-python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin.pdf    # CV + LinkedIn (profile PDF: More → Save to PDF)
-python -m src.cli setup-profile --cv cv.pdf --github username          # CV + GitHub
+# Profile
+python -m src.cli setup-profile --cv path/to/cv.pdf
+python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin.pdf
+python -m src.cli setup-profile --cv cv.pdf --github username
 
-# Other CLI commands
+# Other CLI
 python -m src.cli status       # Last run stats
 python -m src.cli sources      # List all 50 sources
-python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
-python -m src.cli view --visa-only                  # Filter by visa
+python -m src.cli view --hours 24 --min-score 50
+python -m src.cli view --visa-only
 
 # Tests (run from backend/ — pytest picks up pyproject.toml pythonpath=["."])
-python -m pytest tests/ -v                              # Run all 600 tests (post-3.5.4 baseline: 600p/0f/3s)
-python -m pytest tests/test_scorer.py -v                # Scoring tests
-python -m pytest tests/test_sources.py -v               # All sources (71)
-python -m pytest tests/test_profile.py -v               # Profile system (55)
-python -m pytest tests/test_api.py -v                   # FastAPI endpoints (9)
+python -m pytest tests/ -v                              # All tests
+python -m pytest -q -p no:randomly --ignore=tests/test_main.py   # Canonical fast run
 python -m pytest tests/test_scorer.py::test_name -v     # Single test
 
-# Frontend — all commands below run from frontend/
-cd ../frontend
-npm run dev                    # Next.js dev server (localhost:3000)
-npm run build                  # Production build
-npm run lint                   # ESLint
+# Migrations
+python -m migrations.runner up         # Apply pending
+python -m migrations.runner status     # Show applied/pending
+python -m migrations.runner down       # Reverse last
 ```
 
-## Folder Structure
+```bash
+# Frontend — all commands below run from frontend/
+cd ../frontend
 
-The repo is split into two top-level deployables: **`backend/`** (Python + FastAPI) and **`frontend/`** (Next.js 16). Runtime data lives inside `backend/data/` so each side is self-contained.
+# ⚠️ Next.js 16 — see rule #22. Training data for 14–15 is unreliable here.
+# Before any App Router pattern, read frontend/node_modules/next/dist/docs/.
+
+npm run dev                    # localhost:3000
+npm run build                  # Production build
+npm run lint                   # ESLint
+npm run type-check             # tsc --noEmit
+npm run test:unit              # Vitest
+npm run test:e2e               # Playwright
+```
+
+## Architecture (high-level)
+
+The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **SQLite DB** → **Notifications + Reports + CSV**.
+
+> **Full directory layout, data-flow diagrams, DB schema, and dependency tables: see `ARCHITECTURE.md`.** This file holds only the high-level picture + Claude-specific guidance.
+
+### Top-level layout
 
 ```
 job360/
 ├── backend/
-│   ├── main.py                 # FastAPI entrypoint (uvicorn target) — thin, imports src/api/main.py
-│   ├── pyproject.toml          # Deps + dev + indeed extras, ruff/mypy/pytest config, pythonpath=["."]
-│   ├── data/                   # Runtime data (gitignored): jobs.db, user_profile.json, exports/, reports/, logs/
+│   ├── main.py                # FastAPI uvicorn entry (thin)
+│   ├── pyproject.toml         # Deps + ruff/mypy/pytest config
+│   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
+│   ├── migrations/            # 15 forward+reverse SQL migration pairs (0000 → 0014) + runner.py
 │   ├── src/
-│   │   ├── main.py             # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (48), _build_sources()
-│   │   ├── cli.py              # Click CLI: run, api, status, sources, view, setup-profile
-│   │   ├── cli_view.py         # Rich terminal table viewer (time-bucketed)
-│   │   ├── models.py           # Job dataclass with normalized_key() for dedup
-│   │   │
-│   │   ├── api/                # Delivery layer (FastAPI)
-│   │   │   ├── main.py         # FastAPI app: CORS, lifespan, route registration
-│   │   │   ├── dependencies.py # Shared deps: get_db(), save_upload_to_temp()
-│   │   │   ├── models.py       # Pydantic request/response models (matches frontend types.ts)
-│   │   │   └── routes/         # 7 route modules: health, jobs, actions, profile, search, pipeline
-│   │   │
-│   │   ├── core/               # App config + constants (phase 4 rename from config/)
-│   │   │   ├── settings.py     # Env vars, paths, RATE_LIMITS, thresholds
-│   │   │   ├── keywords.py     # Default keywords (emptied in a01c1b3 — LLM-driven only)
-│   │   │   └── companies.py    # ATS company slugs (~104 companies across 10 platforms)
-│   │   │
-│   │   ├── services/           # Business logic (phase 4 merge of filters/ + notifications/ + profile/)
-│   │   │   ├── skill_matcher.py  # JobScorer: title/skill/location/recency scoring, visa detection
-│   │   │   ├── deduplicator.py   # Group by normalized_key, keep highest-scored
-│   │   │   ├── notifications/    # Email / Slack / Discord channels + report_generator
-│   │   │   │   ├── base.py       # NotificationChannel ABC + get_configured_channels()
-│   │   │   │   ├── email_notify.py
-│   │   │   │   ├── slack_notify.py
-│   │   │   │   ├── discord_notify.py
-│   │   │   │   └── report_generator.py
-│   │   │   └── profile/          # CV + LinkedIn + GitHub enrichment, LLM-driven
-│   │   │       ├── models.py     # CVData, UserPreferences, UserProfile, SearchConfig
-│   │   │       ├── cv_parser.py  # PDF/DOCX extraction; LLM-only skill/title extraction
-│   │   │       ├── llm_provider.py  # Multi-provider LLM client (Gemini/Groq/Cerebras)
-│   │   │       ├── preferences.py
-│   │   │       ├── storage.py
-│   │   │       ├── keyword_generator.py
-│   │   │       ├── linkedin_parser.py
-│   │   │       └── github_enricher.py
-│   │   │
-│   │   ├── repositories/       # Data access (phase 4 rename from storage/)
-│   │   │   ├── database.py     # Async SQLite (aiosqlite), WAL, auto-purge >30 days
-│   │   │   └── csv_export.py
-│   │   │
-│   │   ├── sources/            # 47 source files split by category (phase 2)
-│   │   │   ├── base.py         # BaseJobSource ABC + _is_uk_or_remote helper
-│   │   │   ├── apis_keyed/     # 7: adzuna, careerjet, findwork, google_jobs, jooble, jsearch, reed
-│   │   │   ├── apis_free/      # 10: aijobs, arbeitnow, devitjobs, himalayas, hn_jobs, jobicy, landingjobs, remoteok, remotive, yc_companies
-│   │   │   ├── ats/            # 10: ashby, greenhouse, lever, personio, pinpoint, recruitee, smartrecruiters, successfactors, workable, workday
-│   │   │   ├── feeds/          # 8 RSS/XML: biospace, findajob, jobs_ac_uk, nhs_jobs, realworkfromanywhere, uni_jobs, workanywhere, weworkremotely
-│   │   │   ├── scrapers/       # 7 HTML: aijobs_ai, aijobs_global, bcs_jobs, climatebase, eightykhours, jobtensor, linkedin
-│   │   │   └── other/          # 5: hackernews, indeed (jobspy), nofluffjobs, nomis, themuse
-│   │   │
-│   │   └── utils/              # Cross-cutting helpers
-│   │       ├── logger.py       # Rotating file + console logging
-│   │       ├── rate_limiter.py # Async semaphore + delay
-│   │       └── time_buckets.py
-│   └── tests/                  # 600 tests across 23+ files (pytest pythonpath=["."]) — post-3.5.4 baseline
-│       ├── conftest.py
-│       └── test_*.py           # Mirrors src/ layout
-│
-├── frontend/                   # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
-│   ├── next.config.ts
-│   ├── tsconfig.json           # "@/*" → "./src/*"
-│   ├── components.json         # shadcn config
-│   ├── package.json
-│   ├── public/
-│   └── src/
-│       ├── app/                # App Router: layout.tsx, page.tsx, dashboard/, jobs/[id]/, pipeline/, profile/
-│       ├── components/
-│       │   ├── ui/             # shadcn primitives: button, card, dialog, input, ...
-│       │   ├── jobs/           # JobCard, JobList, FilterPanel, ScoreRadar, TimeBuckets
-│       │   ├── profile/        # CVUpload, CVViewer, PreferencesForm
-│       │   ├── pipeline/       # KanbanBoard
-│       │   └── layout/         # Navbar, Footer, FloatingIcons
-│       └── lib/
-│           ├── api.ts          # fetch-based API client (typed against types.ts)
-│           ├── types.ts        # TypeScript types mirroring backend Pydantic models
-│           └── utils.ts        # cn() etc.
-│
-├── scripts/
-│   └── split_sources_by_category.py  # One-shot migration used during phase 2 restructure
-├── docs/                       # Architecture, ADRs (future)
-├── .env.example
-├── setup.sh
-├── cron_setup.sh
-├── CLAUDE.md
-├── README.md
-└── ARCHITECTURE.md
+│   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (50), _build_sources()
+│   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
+│   │   ├── models.py          # Job dataclass with normalized_key() for dedup
+│   │   ├── api/               # FastAPI app + 11 route modules (46 endpoints, all per-user routes gated)
+│   │   ├── core/              # settings, keywords, companies, skill_synonyms, fx, tenancy
+│   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
+│   │   ├── repositories/      # database, csv_export
+│   │   ├── sources/           # 49 source files in 6 category subfolders; 50 SOURCE_REGISTRY entries
+│   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep, send_daily_digest)
+│   │   └── utils/             # logger, rate_limiter, time_buckets
+│   └── tests/                 # 1,154 tests across 60+ files
+└── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
+    └── src/
+        ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, settings/{layout,channels,notifications,account}, notifications
+        ├── components/        # ui/ (shadcn), jobs/, profile/, pipeline/, layout/
+        └── lib/               # api.ts, types.ts, queryKeys.ts, api-error.ts, utils.ts
 ```
 
-**Restructure note (phases 1–4):** The codebase was previously flat at project root (`src/`, `tests/`, `pyproject.toml`). The clean-architecture layout was built up in four commits:
-- `0d3ef72` — phase 1: outer move (`src/` → `backend/src/`, `tests/` → `backend/tests/`, `pyproject.toml` → `backend/pyproject.toml`, `data/` → `backend/data/`, merged `requirements*.txt` into `[project.dependencies]`)
-- `bd8f952` — phase 2: sources split (47 sources → 6 category subfolders under `backend/src/sources/`)
-- `e4b7c07` — phase 3: `backend/main.py` uvicorn entry + `frontend/src/` wrapper
-- `a814ae8` — phase 4: internal rename — `filters/` → `services/`, `notifications/` + `profile/` → `services/{notifications,profile}/`, `storage/` → `repositories/`, `config/` → `core/`. 197 import rewrites across 51 files. Module paths are now `src.services.X`, `src.repositories.X`, `src.core.X`.
+### Key engine modules
 
-**Deferred:** `api/` → `api/v1/` routing upgrade (coordinates with frontend API client change). `models.py` split into `models/{domain,schemas}/` would collide with `repositories/database.py` naming and has been left as a single module at `backend/src/models.py`.
+- `src/main.py` — `run_search()` + `SOURCE_REGISTRY` (50 entries — `indeed` and `glassdoor` alias `JobSpySource`) + `_build_sources()`.
+- `src/services/skill_matcher.py` — Scoring. Two paths: legacy `score_job()` (module-level, hard-coded keywords) and `JobScorer(config, user_preferences=None, enrichment_lookup=None).score()` (instance, dynamic + optional 7-dim per rules #19/#20). 4-component default: Title 40 / Skill 40 / Location 10 / Recency 10. Penalties: −30 negative title / −15 foreign location.
+- `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
+- `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
+- `src/services/channels/dispatcher.py` — Apprise wrapper. Post-Step-3, consults `notification_rules` for (user, channel): score-threshold filter, timezone-aware quiet-hours skip, digest-queue routing (rules #23/#24).
+- `src/repositories/database.py` — Async SQLite (aiosqlite), WAL, 5s busy timeout. Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
 
-## Architecture
+### Sources
 
-The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **SQLite DB** → **Notifications + Reports + CSV**
+All extend `BaseJobSource` in `src/sources/base.py` (3-attempt retry with exp backoff 1s/2s/4s, rate limiting via `RATE_LIMITS`, `_is_uk_or_remote` helper). Each source uses `self.relevance_keywords` / `self.job_titles` / `self.search_queries` properties — these return `SearchConfig` values when a profile is loaded, hard-coded `keywords.py` defaults otherwise. Categories:
 
-### Key modules
+- **Keyed APIs** (7): Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully when API key empty.
+- **Free JSON APIs** (9 in `apis_free/` with `category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs.
+- **ATS boards** (12, ~268 slugs total): Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, Comeet.
+- **RSS/XML feeds** (10 with `category="rss"` — 8 in `feeds/` + 2 in `apis_free/`): jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, Teaching Vacancies (apis_free), GOV.UK Apprenticeships (apis_free).
+- **HTML scrapers** (7): LinkedIn, JobTensor, Climatebase, 80000Hours (Algolia), BCS Jobs, AIJobs Global, AIJobs AI.
+- **Other** (4 unique classes / 5 registry entries): JobSpy (`indeed` + `glassdoor` keys), HackerNews, TheMuse, NoFluffJobs.
 
-- `src/main.py` — Central orchestrator with `run_search()` and `SOURCE_REGISTRY` dict (50 entries) mapping source names to classes. `_build_sources()` instantiates all sources with their config. Both `"indeed"` and `"glassdoor"` map to `JobSpySource`.
-- `src/cli.py` — Click CLI with `run`, `api`, `status`, `sources`, `view`, `setup-profile` commands. `setup-profile` accepts `--cv`, `--linkedin`, and `--github` options.
-- `src/cli_view.py` — Rich terminal table viewer for browsing jobs from the DB
-- `src/models.py` — `Job` dataclass with `normalized_key()` for dedup (strips company suffixes like Ltd/Inc/PLC and region suffixes like UK/US/EMEA, lowercases)
-- `src/core/settings.py` — All env vars, paths, `RATE_LIMITS` dict (50 entries, per-source), thresholds. Constants: `MIN_MATCH_SCORE=30`, `MAX_RETRIES=3`, `RETRY_BACKOFF=[1,2,4]`, `REQUEST_TIMEOUT=30`. (Phase-4 rename from `src/config/settings.py`.)
-- `src/core/keywords.py` — Default AI/ML keywords: `JOB_TITLES` (25), skills in 3 tiers (`PRIMARY_SKILLS` 15 / `SECONDARY_SKILLS` 17 / `TERTIARY_SKILLS` 11), `LOCATIONS` (26: 24 UK + Remote + Hybrid), `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS` (60 entries across 12 categories). `KNOWN_SKILLS` and `KNOWN_TITLE_PATTERNS` were removed in commit 3ba1342 — CV parsing is now LLM-only via `src/services/profile/llm_provider.py`. Used as fallback when no user profile exists.
-- `src/core/companies.py` — ATS company slugs (~268 companies total post-Batch-3; starter counts pre-expansion were Greenhouse 25, Lever 12, Workable 8, Ashby 9, SmartRecruiters 6, Pinpoint 8, Recruitee 8, Workday 15 dict-format, Personio 10, SuccessFactors 3 dict-format). Batch 3 added Rippling (5) + Comeet (5) as new platforms.
-- `src/services/profile/` — Dynamic user profile system:
-  - `models.py` — `CVData` (includes linkedin_positions, linkedin_skills, github_languages, github_topics, github_skills_inferred fields), `UserPreferences` (includes github_username), `UserProfile`, `SearchConfig` dataclasses. `SearchConfig.from_defaults()` returns the hard-coded AI/ML keywords.
-  - `cv_parser.py` — PDF (pdfplumber) / DOCX (python-docx) text extraction, section detection. Skill/title extraction is LLM-only via `llm_provider.py` — the regex `KNOWN_SKILLS`/`KNOWN_TITLE_PATTERNS` approach was removed in commit 804725c (downstream wiring in commits 7bcd8e9, 8c4ed82, 40aa8a1, 3ba1342).
-  - `llm_provider.py` — Multi-provider LLM client (Gemini, Groq, Cerebras) with free-tier fallback chain for CV parsing
-  - `preferences.py` — Validates/normalises form data, merges CV data with user preferences
-  - `storage.py` — JSON persistence at `data/user_profile.json`
-  - `keyword_generator.py` — Converts `UserProfile` → `SearchConfig` (auto-tiers skills, builds relevance keywords, generates search queries)
-  - `linkedin_parser.py` — Parses a LinkedIn "Save to PDF" profile export. `parse_linkedin_pdf()` extracts structured data via pdfplumber section-splitting (deterministic) plus LLM structuring of Experience/Education/Certifications sections; returns the same dict schema the old ZIP parser produced. `is_linkedin_pdf()` detects LinkedIn PDFs vs regular CVs via a 2-of-3 heuristic (linkedin.com/in/ URL, ≥3 known section headings, "Page N of M" footer). `enrich_cv_from_linkedin()` merges into CVData — signature unchanged.
-  - `github_enricher.py` — Fetches public GitHub repos via API, infers skills from languages/topics/README. `fetch_github_profile()` is async, `enrich_cv_from_github()` merges into CVData. Uses optional `GITHUB_TOKEN` for higher rate limits.
-
-### Sources (`src/sources/`)
-
-All sources extend `BaseJobSource` in `src/sources/base.py` which provides `_get_json()`, `_post_json()`, `_get_text()` with built-in retry (3 attempts, exponential backoff 1s/2s/4s) and rate limiting. The `_is_uk_or_remote()` helper (also in `base.py`) checks location strings against `UK_TERMS`, `REMOTE_TERMS`, and `FOREIGN_INDICATORS` from `skill_matcher.py`. Sources are grouped in `_build_sources()`:
-
-- **Keyed APIs** (7): Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully when API key is empty
-- **Free JSON APIs** (10): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs (Firebase), YC Companies
-- **ATS boards** (10): Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors — iterate over company slugs in `companies.py`
-- **RSS/XML feeds** (8): jobs.ac.uk, NHS Jobs, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs (6 UK unis), FindAJob (UK GOV)
-- **HTML scrapers** (7): LinkedIn, JobTensor, Climatebase, 80000Hours (Algolia API), BCS Jobs, AIJobs Global, AIJobs AI
-- **Other** (4): Indeed/Glassdoor (python-jobspy, optional), HackerNews (Algolia "Who is Hiring"), TheMuse, NoFluffJobs
-- **Market intelligence** (1): Nomis (UK GOV vacancy statistics, not individual listings)
-
-Each source uses `self.relevance_keywords` (property on `BaseJobSource`) to filter irrelevant jobs. This returns dynamic keywords from `SearchConfig` when a profile exists, or falls back to the hard-coded `RELEVANCE_KEYWORDS` from `keywords.py`. Sources with custom queries (JSearch, LinkedIn, FindAJob, NHS Jobs) also check `self.search_queries` before using their hard-coded query lists.
-
-### Scoring (`src/services/skill_matcher.py`)
-
-Four components summing to 0-100: Title match (0-40), Skill match (0-40, primary=3pts/secondary=2pts/tertiary=1pt), Location (0-10), Recency (0-10). Penalties: Negative title keywords (-30), Foreign location (-15). Minimum threshold is `MIN_MATCH_SCORE=30` in settings. Also detects visa sponsorship (`check_visa_flag`) and experience level from title. Two scoring paths: `score_job()` (module-level, uses hard-coded keywords) and `JobScorer(config).score()` (instance-based, uses dynamic `SearchConfig`). The orchestrator selects based on whether a user profile exists.
-
-### Deduplication (`src/services/deduplicator.py`)
-
-Groups by `job.normalized_key()` = (normalized company, normalized title). Keeps the best per group by highest `match_score`, then by data completeness (salary, description, location).
-
-### Notifications (`src/services/notifications/`)
-
-`NotificationChannel` ABC in `base.py` with auto-discovery via `get_configured_channels()`. Channels: Email (Gmail SMTP), Slack (Block Kit webhook), Discord (embed webhook). Each channel activates only when its env vars are set.
-
-### Storage (`src/repositories/`)
-
-- `database.py` — Async SQLite (via aiosqlite) with `jobs` table (unique on normalized_company+normalized_title), `run_log` table (includes sources_queried column), and indexes on date_found, first_seen, match_score. Uses WAL journal mode and 5s busy timeout. Auto-purges jobs >30 days old via `purge_old_jobs()`.
-- `csv_export.py` — CSV export per run to `data/exports/`
-
-## Testing
-
-**600 tests** (post-3.5.4 green baseline: 600p / 0f / 3s on Windows) across 21+ test files (count is `pytest --collect-only` output; parametrized tests expand into multiple collected items). The per-file breakdown below is pre-Pillar-2/-3 historical — individual files have grown with later batches (migrations, auth, feed, channels, prefilter, embeddings, enrichment, etc.); the 600 total is the authoritative current number. Shared fixtures in `tests/conftest.py` (provides `sample_ai_job`, `sample_unrelated_job`, `sample_duplicate_jobs`, `sample_visa_job`, `sample_non_uk_job`, `sample_empty_description_job`). All HTTP calls mocked with `aioresponses`. Uses `pytest-asyncio` for async tests.
-
-Key test files:
-- `test_sources.py` — 71+ tests: all 50 sources with mocked HTTP responses (per-file count grew with Batch-3's 5 new sources)
-- `test_profile.py` — 55 tests: SearchConfig defaults, UserProfile, CV parser, preferences, storage, keyword generator, JobScorer (including cross-domain scoring)
-- `test_linkedin_github.py` — 58 tests: LinkedIn PDF parsing (detection, section split, deterministic + LLM extraction), GitHub API enrichment, CVData merging
-- `test_scorer.py` — 53 tests: scoring components, penalties, word boundaries, experience detection, visa negation, location ordering
-- `test_time_buckets.py` — 33 tests: time bucket grouping logic
-- `test_models.py` — 21 tests: Job dataclass, normalization, salary sanitization, normalization divergence documentation
-- `test_notifications.py` — 19 tests: Email, Slack, Discord sending
-- `test_deduplicator.py` — 13 tests: dedup logic, company suffix stripping
-- `test_main.py` — 12 tests: orchestrator with mocked sources
-- `test_cli.py` — 11 tests: CLI commands, `len(SOURCE_REGISTRY) == 50` assertion (update when adding/removing sources — also see rule #13 for `test_api.py`)
-- `test_database.py` — 9 tests: SQLite operations, migrations, source history
-- `test_api.py` — 9 tests: FastAPI endpoints (health, status, sources, jobs, actions, profile, pipeline, integration)
-- `test_llm_provider.py` — 8 tests: multi-provider LLM client for CV parsing
-- `test_notification_base.py` — 7 tests: ABC, format_salary, channel discovery
-- `test_setup.py` — 6 tests: setup.sh validation
-- `test_reports.py` — 6 tests: Markdown + HTML report generation
-- `test_rate_limiter.py` — 5 tests: async rate limiter (acquire/release, concurrency, delay)
-- `test_cron.py` — 5 tests: cron_setup.sh validation
-- `test_cli_view.py` — 5 tests: Rich terminal table viewer
-- `test_csv_export.py` — 4 tests: CSV export format
+Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Sources with custom queries (JSearch, LinkedIn, NHS Jobs) check `self.search_queries` before falling back to hard-coded query lists.
 
 ## Environment
 
-- Python 3.9+ required
-- Dependencies: `requirements.txt` (prod, 12 packages), `requirements-dev.txt` (test — includes prod via `-r`, adds pytest/aioresponses/fpdf2)
-- `.env` file for API keys and webhook URLs (see `.env.example`); free sources (43 of 50 post-Batch-3) work without any keys
-- Data outputs go to `data/` directory (gitignored): `data/exports/`, `data/reports/`, `data/logs/`, `data/jobs.db`, `data/user_profile.json`
+- Python 3.9+ required.
+- Dependencies installed via `pip install -e ".[dev]"` from `backend/`.
+- `.env` in repo root for API keys + webhooks (see `.env.example`); 43 of 50 sources work without any keys.
+- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `jobs.db`, `user_profile.json`, `chroma/`.
 
-### Environment Variables
+### Environment variables
 
 | Variable | Required | Used by |
 |----------|----------|---------|
-| `REED_API_KEY` | No | ReedSource |
-| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | No | AdzunaSource |
-| `JSEARCH_API_KEY` | No | JSearchSource |
-| `JOOBLE_API_KEY` | No | JoobleSource |
-| `SERPAPI_KEY` | No | GoogleJobsSource |
-| `CAREERJET_AFFID` | No | CareerjetSource |
-| `FINDWORK_API_KEY` | No | FindworkSource |
-| `GITHUB_TOKEN` | No | GitHub profile enrichment (higher rate limits) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` | No | Email notifications |
-| `SLACK_WEBHOOK_URL` | No | Slack notifications |
-| `DISCORD_WEBHOOK_URL` | No | Discord notifications |
-| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker sorting (default 40k-120k) |
+| `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` | No | Keyed API sources (skip on empty) |
+| `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
+| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
+| `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
+| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
+| `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
+| `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
+| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles |
+| `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No (default `0.15` / `0.15`) | Pillar 2.2 gate thresholds |
+| `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No (defaults 10/8/6/6) | Pillar 2.9 dimension weights |
 
 ## Important Patterns
 
-- **Adding a new job source:** Create class in `src/sources/`, extend `BaseJobSource`, implement `async fetch_jobs() -> list[Job]`. Use `self.relevance_keywords` and `self.job_titles` (not direct imports). If custom `__init__`, accept `search_config=None` and pass to `super().__init__(session, search_config=search_config)`. Register in both `SOURCE_REGISTRY` dict and `_build_sources()` list in `src/main.py` (passing `search_config=sc`). Add rate limit entry in `RATE_LIMITS` dict in `settings.py`. Add mocked tests in `tests/test_sources.py`. Update the registry count assertion in `tests/test_cli.py`. If keyed, add env var to `settings.py` and `.env.example`.
-- **Adding a new notification channel:** Implement `NotificationChannel` ABC, register in `get_all_channels()` in `src/services/notifications/base.py`
-- **Keyed source pattern:** Accept `api_key` in `__init__`, return `[]` early with an info log if key is empty. Pass `search_config` through to super.
-- **Free source pattern:** Filter results using `self.relevance_keywords` on title+description, use `_is_uk_or_remote()` on location, no auth needed
-- **ATS source pattern:** Accept `companies` list and `search_config=None` in `__init__` with default from `companies.py`, iterate over company slugs, fetch each company's board API
-- **RSS/XML source pattern:** Use `_get_text()` to fetch, parse with `xml.etree.ElementTree` (stdlib), extract `<item>` elements from `<channel>`
-- **HTML scraper pattern:** Use `_get_text()` to fetch, parse with `re` regex patterns to extract job cards, links, company names
-- **Dynamic keywords:** Sources access keywords via `self.relevance_keywords`, `self.job_titles`, `self.search_queries` (properties on `BaseJobSource`). These return `SearchConfig` values when a profile is loaded, or hard-coded defaults from `keywords.py` when `search_config=None`.
+- **Adding a new job source:** Class extends `BaseJobSource`, implements `async fetch_jobs() -> list[Job]`, sets `category` (rule #15). Use `self.relevance_keywords` / `self.job_titles` (not direct imports). If custom `__init__`, accept `search_config=None` and pass through to `super().__init__(session, search_config=search_config)`. Update **five surfaces** per rule #8/#13. Add mocked `aioresponses` tests.
+- **Adding a notification channel:** Implement `NotificationChannel` ABC, register in `get_all_channels()` in `src/services/notifications/base.py`. For multi-channel routing via Apprise, work in `src/services/channels/dispatcher.py` instead — and ensure rules #23 + #24 are respected.
+- **Keyed source pattern:** Accept `api_key`, return `[]` early with info-log if empty, pass `search_config` through.
+- **ATS source pattern:** Accept `companies` list and `search_config=None`; iterate slugs from `companies.py`.
+- **RSS/XML source pattern:** `_get_text()` → parse with stdlib `xml.etree.ElementTree`. Consider `_get_json_conditional` if upstream honours ETag (rule #14).
+- **HTML scraper pattern:** `_get_text()` → regex parse. Fragile by nature — tag scrapers in `STATUS.md`'s "fragile/risky" table.
 
+## Testing
 
-## Rules for Working on This Codebase
+**1,154 tests passing** (post-Step-3 close-out at origin/main `7194d0e`), 0 failing, 3 skipped on Windows (bash-only `setup.sh` / `cron_run.sh` tests). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
 
-1. **Never touch `normalized_key()` in `models.py`** without verifying the deduplicator and database UNIQUE constraint still work. Changing normalization logic can cause duplicate entries or missed dedup.
-2. **Never change `BaseJobSource`** (constructor, properties, retry logic, `_get_json`/`_post_json`/`_get_text`) without checking all 49 source files that inherit from it (post-Batch-3: 47 + 5 new − 3 dropped). Changes propagate to every source.
-3. **Never touch database purge logic** (`purge_old_jobs` in `database.py`) without explicit confirmation. Incorrect purge thresholds can delete valid data.
-4. **Always mock HTTP in tests** — never make live HTTP requests. Use `aioresponses` for all source and notification tests. The test suite must run offline.
-5. **Always run the relevant test suite** after any change: `python -m pytest tests/ -v` for broad changes, or the specific test file for targeted changes.
-6. **Read a file fully before editing it.** Understand the existing logic, imports, and how other modules depend on it.
-7. **Check if something exists before creating it.** Search for existing implementations before adding new files or functions.
-8. **When adding/removing sources:** Update `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, the test assertion `len(SOURCE_REGISTRY) == N` in `test_cli.py`, and the expected source set in the same file. **Also** update the hardcoded `== N` checks in `test_api.py` (rule #13). Current count: **50** (Batch 3).
-9. **Scoring changes require test verification.** The scoring algorithm is tested with 53 tests across edge cases. Run `test_scorer.py` and `test_profile.py` after any change to `skill_matcher.py`.
+`make test` (Makefile target) excludes `test_main.py` for the reason in Common Gotchas. The full suite including `test_main.py` is gated behind a future rehab batch.
 
-## Batch 2 additions (pillar 3 multi-user delivery layer)
+The per-test-file breakdown is in `STATUS.md` and grows with each batch — always defer to the runtime collected count, not the historical breakdown.
 
-Multi-user delivery landed in `pillar3/batch-2` (see `docs/plans/batch-2-plan.md`).
-Key surfaces a future session needs to know:
+## Phase summaries (current invariants only — full history in `docs/IMPLEMENTATION_LOG.md`)
 
-### New tables (managed by `backend/migrations/`)
+The codebase has accumulated 4 major phases of work. Each section here gives **only the invariants that future Claude needs to respect**. Long-form history (what shipped when, reviewer findings, deferred items, decision rationales) lives in `docs/IMPLEMENTATION_LOG.md` and the per-step plan files under `docs/`.
 
-| Table | Owner migration | Purpose |
-|---|---|---|
-| `users` | `0001_auth` | authenticated users |
-| `sessions` | `0001_auth` | signed-cookie session rows (FK → users) |
-| `user_feed` | `0003_user_feed` | SSOT per-user view — dashboard + notification worker both read |
-| `notification_ledger` | `0004_notification_ledger` | per-channel idempotency + retry audit |
-| `user_channels` | `0005_user_channels` | Fernet-encrypted Apprise credentials |
-| `_schema_migrations` | `runner.py` on first run | applied-migration registry |
+### Phase 1–2.5 (legacy, profile system + reliability)
 
-`user_actions` and `applications` were rebuilt in `0002_multi_tenant` to add
-`user_id` + widen `UNIQUE(job_id)` → `UNIQUE(user_id, job_id)`. Pre-Batch-2
-rows were backfilled to the placeholder user
-`00000000-0000-0000-0000-000000000001` (see `src/core/tenancy.DEFAULT_TENANT_ID`).
-The `jobs` table is **unchanged** — it remains a shared catalog (rule #1).
+Done in commits `0d3ef72` → `a814ae8`. Outcome: dynamic per-user profile (CV + LinkedIn PDF + GitHub) replaces hard-coded AI/ML keywords; clean-architecture restructure (`backend/src/`, `frontend/src/`, phase-4 rename of `filters/` → `services/`, `notifications/` + `profile/` → `services/{notifications,profile}/`, `storage/` → `repositories/`, `config/` → `core/`); LLM-only CV parsing via Gemini/Groq/Cerebras fallback chain.
 
-### New modules
+### Pillar 3 Batch 2 (multi-user delivery layer)
 
-- `backend/migrations/runner.py` — forward/reverse SQL migration runner (CLI: `python -m migrations.runner {up|down|status} [db_path]`)
-- `src/services/auth/{passwords,sessions}.py` — argon2id + itsdangerous-signed cookies (30-day expiry)
-- `src/services/feed.py` — `FeedService` with `list_for_user`, `list_pending_notifications`, `mark_notified`, `update_status`, `cascade_stale`, `upsert_feed_row`
-- `src/services/prefilter.py` — 3-stage cascade (location → experience → skill overlap) — blueprint §2 99% elimination rule
-- `src/services/channels/{crypto,dispatcher}.py` — Fernet encryption + Apprise wrapper (lazy import; tests monkeypatch `apprise.Apprise`)
-- `src/workers/tasks.py` — `score_and_ingest`, `mark_ledger_sent/failed`, `idempotency_key` — pure async (no `arq` import) so pytest never touches Redis
-- `src/api/auth_deps.py` — `require_user` / `optional_user` FastAPI dependencies reading the `job360_session` cookie
-- `src/api/routes/{auth,channels}.py` — `/api/auth/*`, `/api/settings/channels/*`
+Adds: auth (`users`, `sessions`), per-tenant isolation (`user_actions` / `applications` rebuilt with `user_id`), SSOT `user_feed`, `notification_ledger` (per-channel idempotency), Fernet-encrypted `user_channels`, ARQ worker, Apprise dispatcher (lazy-imported per rule #11), `_schema_migrations` registry. Pre-Batch-2 rows backfilled to `DEFAULT_TENANT_ID` (`00000000-0000-0000-0000-000000000001`). The `jobs` table remains shared catalog (rule #10). Rules added: #10 / #11 / #12.
 
-### New env vars
+### Pillar 3 Batch 3 (tiered polling + source expansion)
 
-| Var | Required | Default | Used by |
-|---|---|---|---|
-| `SESSION_SECRET` | Yes in prod | dev fallback | `itsdangerous` HMAC for session cookies |
-| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | dev fallback | Fernet encryption of channel credentials |
-| `FRONTEND_ORIGIN` | No | `http://localhost:3000` | CORS allow-list (comma-sep) |
-| `REDIS_URL` | Only when running ARQ worker | `redis://localhost:6379` | ARQ broker (runtime only, tests skip) |
+Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators, +5 sources (teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet), −3 drops (yc_companies, nomis, findajob), ATS slug catalog 104 → 268, source count 48 → 50. Rules added: #13 / #14 / #15.
 
-### New deps
+### Pillar 2 (search & match engine upgrade)
 
-- `argon2-cffi>=25.1.0` — argon2id password hashing
-- `itsdangerous>=2.2.0` — signed cookie HMAC
-- `apprise>=1.9.9` — multi-channel notification sending
-- `pydantic[email]` (via `email-validator>=2.3.0`) — `EmailStr` validation
-- `cryptography>=42.0.0` — Fernet (transitive already, now explicit)
+Adds: `skill_synonyms.py` (493-entry alias dict), `fx.py` (18-currency → GBP), `domain_classifier.py` (source routing), `salary.py` (cadence normalizer), 4 new dim scorers (`scoring_dimensions.py`), `JobEnrichment` Pydantic schema (18 fields, 8 enums), `embeddings.py` + `vector_index.py` (ChromaDB-backed), `retrieval.py` (RRF + cross-encoder rerank), 4-layer `deduplicator.py`. Tables: `job_enrichment` (migration 0008), `job_embeddings` (migration 0009) — both shared catalog. Toggles: `ENRICHMENT_ENABLED`, `SEMANTIC_ENABLED` (both default off, rule #18). Rules added: #16 / #17 / #18 / #19 / #20 / #21 / #22.
 
-### How to run
+### Step 3 (control-surface batch — closed at origin/main `7194d0e` PR #9)
 
-```bash
-# Apply Batch 2 migrations (idempotent — safe on every boot)
-cd backend && python -m migrations.runner up
+Adds: 8 new endpoints (account-mgmt × 3, notification-rules × 4, runs × 1, plus `/jobs/{id}/duplicates`, `/profile/versions/{a}/diff/{b}`, `/pipeline/{id}/{timeline,notes}`); migrations 0012 (`notification_rules` + `users.timezone`), 0013 (`user_notification_digests`), 0014 (`applications.{last_advanced_at,interview_dates,notes_history}` + `application_stage_history`); dispatcher rule consultation with timezone-aware quiet hours; ARQ periodic tasks `send_daily_digest` + `nightly_ghost_sweep`; 5 new frontend pages (`/settings/{layout,page,notifications,account}`, `/notifications`); KanbanBoard polish (timeline drawer, notes editor, filter panel, confirmation dialogs). Reviewer pass closed R-1..R-7. Rules added: #23 / #24 / #25 / #26.
 
-# FastAPI boot auto-runs the migration runner after legacy init_db()
-# — see src/api/dependencies.py
+**Step 3 carry-overs (not shipped, technical debt):** RHF + zod form validation library (V-01..V-03), CV upload size cap + MIME allowlist verification (V-04), OpenAPI → TS codegen (V-05), `@dnd-kit/*` keyboard a11y on KanbanBoard (C-07). All deferred to Step 3.5 stabilisation or Step 4.
 
-# ARQ worker (not required for CLI / read-only usage):
-#   arq src.workers.settings.WorkerSettings       # to be added in follow-up
-```
+## Related documentation
 
-### Additional CLAUDE rules
-
-10. **Never INSERT into `jobs` with a `user_id` or `tenant_id` column** — it does not have one, by design. `jobs` is the shared catalog (blueprint §3). Per-user state lives in `user_feed`, `user_actions`, `applications`.
-11. **Never import `apprise` at module top level** in library code — Apprise pulls ~30 MB of deps. Import lazily inside the function that uses it (see `dispatcher._get_apprise_cls`). Tests monkeypatch `apprise.Apprise`; real sends happen only under ARQ worker context.
-12. **Every new per-user FastAPI route MUST take `user: CurrentUser = Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from a URL parameter or body — that is a trivial IDOR vulnerability.
-
-## Batch 3 additions (pillar 3 tiered polling + source expansion)
-
-Batch 3 landed on `pillar3/batch-3` (see `docs/plans/batch-3-plan.md`).
-
-### New modules
-
-- `backend/src/services/scheduler.py` — `TieredScheduler` + `resolve_tier_seconds()` + `TIER_INTERVALS_SECONDS` map. Per-source interval tracker with async dispatch. Consults the breaker registry before each tick.
-- `backend/src/services/circuit_breaker.py` — `CircuitBreaker` state machine (CLOSED / HALF_OPEN / OPEN) + `BreakerRegistry.get(name)` lazy factory + module-level `default_registry()` singleton. 5-failure threshold + 300s cooldown defaults.
-- `backend/src/services/conditional_cache.py` — FIFO-bounded (256-entry) `ConditionalCache` for ETag / Last-Modified validators. Backed-in `BaseJobSource._get_json_conditional()` opt-in helper.
-
-### Source count: 48 → 50
-
-+5 new: `teaching_vacancies`, `gov_apprenticeships`, `nhs_jobs_xml`, `rippling`, `comeet`
-−3 dropped: `yc_companies`, `nomis`, `findajob`
-
-### ATS slug catalog: 104 → 268
-
-Expanded across all 10 platforms. Rippling + Comeet are new ATS platforms with 5-slug starter lists each.
-
-### New rate-limit entries in `backend/src/core/settings.py`
-
-All 5 new sources registered with per-source `{concurrent, delay}` pairs. Tier targets are in `scheduler.TIER_INTERVALS_SECONDS`, not `RATE_LIMITS` — `RATE_LIMITS` is still the in-request concurrency/backoff surface.
-
-### Additional CLAUDE rules
-
-13. **When adding or removing a source, update FIVE load-bearing surfaces — not four.** CLAUDE.md rule #8 originally named four (`SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, `tests/test_cli.py` assertion). A fifth surface exists: **`tests/test_api.py`** has hardcoded `== 48` checks inside `test_sources_returns_*` + `test_status_returns_counts` + `test_full_api_workflow`. Rotating the count requires all five to move together.
-14. **Sources opting into conditional fetch must call `self._get_json_conditional(url)` instead of `self._get_json(url)`.** The former goes through `ConditionalCache` + handles 304; the latter retains retry/429 handling but no caching. Not every source benefits — use the conditional path only for feeds whose upstream honours ETag or Last-Modified (ATS boards with CDN fronts, RSS feeds with honest headers). Sources that poll every 60s on endpoints without validators should stay on `_get_json()` to avoid filling the cache with un-validatable entries.
-15. **New sources MUST set `.category` to one of the scheduler's tier keys** (`"ats"`, `"rss"`, `"keyed_api"`, `"free_json"`, `"scrapers"`, `"other"`) or add a `NAME_TIER[source.name]` override in `scheduler.py`. An un-tiered source falls to the 60-min default — harmless but wastes the freshness upside of the tiered scheduler. Batch 3's new sources chose: teaching_vacancies/gov_apprenticeships/nhs_jobs_xml → `"rss"` (15-min tier); rippling/comeet → `"ats"` (60-sec tier).
-
-## Pillar 2 additions (search & match engine upgrade)
-
-Pillar 2 merged 2026-04-21 → 2026-04-22 across 10 batches. See
-`docs/pillar2_progress.md` for per-batch detail and `docs/IMPLEMENTATION_LOG.md`
-for the tagged release overview. Execution order: 2.2 → 2.1 → 2.3 → 2.4 →
-2.5 → 2.9 → 2.6 → 2.7 → 2.8 → 2.10. Final tag: `pillar2-generator-complete`.
-
-### New modules
-
-- `backend/src/core/skill_synonyms.py` — 493-entry alias → canonical dict
-  (`canonicalize_skill`, `aliases_for`). Used by
-  `skill_matcher._text_contains_skill` and `keyword_generator`.
-- `backend/src/core/fx.py` — 18-currency → GBP rates for salary scoring.
-- `backend/src/services/domain_classifier.py` — `classify_user_domain`,
-  `source_matches_user_domains`. Consumed by `_build_sources()` to filter
-  sources by the user's professional domain.
-- `backend/src/services/salary.py` — `normalize_salary()` rolls hourly /
-  daily / weekly / monthly bands to annual GBP integer tuples.
-- `backend/src/services/scoring_dimensions.py` — four new dimension scorers:
-  `seniority_score`, `salary_score`, `visa_score`, `workplace_score`.
-- `backend/src/services/job_enrichment_schema.py` — strict Pydantic
-  `JobEnrichment` (18 fields, 8 enums, nested `SalaryBand`).
-- `backend/src/services/job_enrichment.py` — async `enrich_job()` wrapping
-  `llm_extract_validated()` + `has_/save_/load_enrichment()` DB helpers.
-- `backend/src/services/embeddings.py` — `encode_job()` via
-  `sentence-transformers/all-MiniLM-L6-v2`. Lazy-imports `sentence_transformers`
-  (CLAUDE.md rule #11 spirit); chunks long descriptions 300/50.
-- `backend/src/services/vector_index.py` — thin `VectorIndex` over
-  ChromaDB persistent collection at `backend/data/chroma/`. Lazy `chromadb`
-  import.
-- `backend/src/services/retrieval.py` — `reciprocal_rank_fusion(k=60)`,
-  `retrieve_for_user()`, `cross_encoder_rerank()`,
-  `is_hybrid_available()`. Lazy CrossEncoder import.
-- `backend/src/services/deduplicator.py` — four layers (exact key →
-  RapidFuzz → TF-IDF → embedding repost). Lazy `rapidfuzz` / `sklearn`
-  imports.
-
-### New tables (migrations 0008 / 0009)
-
-| Table | Migration | Purpose |
-|---|---|---|
-| `job_enrichment` | `0008` | 18-field LLM enrichment per job_id. Shared catalog. |
-| `job_embeddings` | `0009` | Audit row (job_id, model_version, timestamp). Actual vectors live in ChromaDB. |
-
-Both tables are **shared catalog** — no `user_id` column (rule #10).
-
-### New env vars
-
-| Var | Required | Default | Purpose |
-|---|---|---|---|
-| `ENRICHMENT_ENABLED` | No | `false` | Toggles Batch 2.5's LLM enrichment pipeline. |
-| `SEMANTIC_ENABLED` | No | `false` | Toggles Batch 2.6's sentence-transformers + ChromaDB path. |
-| `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No | `0.15` / `0.15` | Batch 2.2 gate thresholds (fraction of component max). |
-| `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No | `10` / `8` / `6` / `6` | Batch 2.9 dimension weights. |
-
-### New deps
-
-**Core (no opt-in):**
-- `rapidfuzz>=3.0` — Batch 2.10 Layer 2 fuzzy merge (lazy-imported).
-- `scikit-learn>=1.4` — Batch 2.10 Layer 3 TF-IDF (lazy-imported).
-
-**Opt-in (`[semantic]` extra, ~300 MB):**
-- `sentence-transformers>=2.2` — Batch 2.6 embeddings + Batch 2.8 rerank.
-- `numpy>=1.24`
-- `chromadb>=0.5`
-
-### Additional CLAUDE rules
-
-16. **Heavy deps (`sentence_transformers`, `chromadb`, `rapidfuzz`, `sklearn`) must be imported lazily inside the functions that use them.** This extends rule #11 (originally about `apprise`) to the Pillar 2 additions. A top-level import would pay ~150 ms to 2 s of startup on every process that merely imports `deduplicator` / `embeddings` / `retrieval` — including every pytest collection. See the lazy-import pattern in `_merge_fuzzy` / `_merge_tfidf` / `_load_encoder` / `_load_cross_encoder`.
-17. **`job_enrichment` and `job_embeddings` must NOT gain a `user_id` column** — they are shared catalog per blueprint §3 / CLAUDE.md rule #10. The same enriched fields apply to every user; per-user scoring against the enrichment happens at read time in `JobScorer(..., user_preferences=..., enrichment_lookup=...)`.
-18. **Pillar 2 feature flags (`ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED`) default off.** Default behaviour when the flags are false must **exactly** match pre-Pillar-2 behaviour — no implicit semantic queries, no LLM calls. Test any new integration with both toggles explicitly OFF to confirm the no-op path.
-19. **JobScorer gained optional multi-dim kwargs** — `JobScorer(config, user_preferences=None, enrichment_lookup=None)`. Callers passing only `config` get the legacy 4-component formula; callers passing all three activate the 7-dim Batch-2.9 scoring. Do NOT flip defaults silently; legacy callers must keep getting legacy behaviour until the reviewer greenlights a coordinated rollout.
-20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup` kwargs — callers must pass both or neither.** When only `user_preferences` is set (and `enrichment_lookup` is empty/None), the new dimension scorers (seniority/salary/visa/workplace) cannot read the structured enrichment data they need, and they fall back to zero — silently. The combined `match_score` then includes only the legacy 4 components plus four zero contributions, which looks identical to the legacy formula but is misleading because the dim columns suggest active scoring. Pass both kwargs (Step-1 Cohort B precedent in `main.py::run_search` and `workers/tasks.py::score_and_ingest`), or pass neither and accept the legacy formula explicitly. Defaults still fall back to legacy 4-component scoring when both kwargs are None — see rule #19.
-21. **Value-presence > schema-presence for any new engine-side field.** Step 1 shipped 9 per-dim score fields on `JobResponse` and a green test suite — every test only asserted the *fields exist*, not that they were *non-zero*. The serializer hard-coded zeros, the migration was missing, and nobody noticed for two batches (the "bombshell" Step 1.5 fixed). When you add a new engine-computed field that flows to the API, write a test that uses a real (or fixture) input through the end-to-end path and asserts the value is non-zero / non-null / not-the-default. Schema-presence tests (`assert "field" in body`) are necessary but insufficient — they pass against `field: int = 0` defaults and against a serializer that never reads the column. The value-presence test is the only one that catches the "the wiring is missing" class of regression. Pattern: `tests/test_database.py::test_dim_columns_round_trip` (DB-layer round-trip) + `tests/test_api.py::test_jobs_response_includes_score_dim_breakdown` (HTTP value-presence).
-22. **Frontend code that touches Next.js App Router patterns MUST consult Context7 docs before writing.** `frontend/AGENTS.md` states: *"This is NOT the Next.js you know — APIs, conventions, and file structure may differ from your training data."* Training data for Next.js 14–15 is **not reliable** for Next.js 16 — breaking changes include: `params` in page/layout/generateMetadata is now `Promise<{ ... }>` and must be awaited; `"use client"` on `page.tsx` disables `generateMetadata` (it will silently not export); `searchParams` similarly async. Before introducing any App Router pattern (`generateMetadata`, server actions, route handlers, middleware, `params` destructuring, `useRouter`, `useSearchParams`, `usePathname`), run `mcp__plugin_context7_context7__query-docs` for `next.js` and read `frontend/node_modules/next/dist/docs/` for the current API. This is not optional — Step 2's server/client split caught this as a blocking issue mid-sprint.
-
-## Related Documentation
-
-- `STATUS.md` — Project phase status, what's complete, what's next, known issues, test coverage table
-- `ARCHITECTURE.md` — Deep technical reference: data flow diagrams, directory structure, scoring algorithm detail, source categories, database schema, config variables, dependency list
-- `docs/IMPLEMENTATION_LOG.md` — pillar 3 batch-by-batch completion log (read FIRST for current state)
-- `docs/plans/batch-2-decisions.md` — irreversible architectural decisions (ARQ, Apprise, polling, session cookies, SQLite-for-now)
-- `docs/plans/batch-2-plan.md` — Batch 2 TDD implementation plan with locked baseline
-- `docs/step_1_plan.md` — Step 1 (Engine→API Seam) execution plan + 12 blockers + 3 observability items
+- **`STATUS.md`** — Current phase, what's complete/next, known issues, fragile-source table.
+- **`ARCHITECTURE.md`** — Deep technical reference: full directory tree, data flow diagrams, scoring algorithm detail, DB schema, config variables.
+- **`docs/IMPLEMENTATION_LOG.md`** — Append-only batch-by-batch history (read FIRST when picking up unfamiliar work).
+- **`docs/README.md`** — Docs index + plan-file map.
+- **`docs/plans/batch-2-decisions.md`** — Irreversible architectural choices (ARQ, Apprise, polling, session cookies, SQLite-for-now).
+- **`docs/step_{1,1_5,2,3}_plan.md`** — Per-step execution plans + reviewer findings.
+- **`docs/evaluation_report.md`** — Production-readiness evaluation (post-Step-3).
+- **`CONTRIBUTING.md`** — Branch / commit / PR conventions, test-before-merge gate.
+- **`backend/README.md` / `frontend/README.md`** — Service-specific install + run instructions.

@@ -162,9 +162,32 @@
       "Bash(bash scripts/migration_roundtrip.sh)",
       "Bash(gh pr create --base main --head step-3-batch --title 'step-3: close-out \\(D-1/D-2/D-3\\) + reviewer R-1..R-7 fixes + main sync' --body ' *)",
       "Bash(git add *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(taskkill /F /PID 28504 /PID 14800)",
+      "Bash(taskkill //F //PID 28504 //PID 14800)",
+      "Bash(awk -F'::' '{print $1}')",
+      "Bash(mv jobs.db jobs.db.bak-stale-schema)",
+      "Bash(mv jobs.db-shm jobs.db-shm.bak)",
+      "Bash(mv jobs.db-wal jobs.db-wal.bak)",
+      "Bash(ls *.db*)",
+      "Bash(npx playwright *)",
+      "Bash(npm view *)",
+      "Bash(printenv)",
+      "Bash(reg query *)",
+      "Bash(gh auth *)",
+      "Bash(gh api *)",
+      "Bash(gh repo *)",
+      "Bash(gh pr *)",
+      "Bash(gh run *)",
+      "Read(//c/Users/Ranjith/.claude/plugins/cache/claude-plugins-official/**)",
+      "Read(//c/Users/Ranjith/.claude/plugins/**)"
     ]
   },
+  "enabledMcpjsonServers": [
+    "github",
+    "redis",
+    "sentry"
+  ],
   "disabledMcpjsonServers": [
     "context7",
     "sqlite"

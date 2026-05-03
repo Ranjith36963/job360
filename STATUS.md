@@ -1,12 +1,13 @@
 # Job360 Project Status
 
-## Current State: Pillar 2 merged; Pillar 3 Batches 1 – 3.5.4 merged; Step-0 pre-flight underway
+## Current State: Step 3 close-out merged; Step 4 (ops hardening) is next
 
-**Last updated:** 2026-04-23
-**Total tests:** 600 passing / 0 failing / 3 skipped (3.5.4 green baseline; Step-0 migration test to be added next)
-**Source files:** ~49 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 21+ test modules
+**Last updated:** 2026-04-29
+**Total tests:** 1,154 passing / 0 failing / 3 skipped (post-Step-3 close-out at origin/main `7194d0e`)
+**Source files:** 49 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 50 registered in `SOURCE_REGISTRY` post-Batch-3 rotation (added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet; dropped yc_companies, nomis, findajob). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `5fb3c07` on `main` (Pillar 2 post-review patch). Pillar-3 batches 1 / 2 / 3 / 3.5 / 3.5.1 / 3.5.2 / 3.5.3 / 3.5.4 merged on top.
+**Latest merged head:** `7194d0e Merge pull request #9 from Ranjith36963/step-3-batch` on `origin/main` (Step 3 close-out + reviewer R-1..R-7 fixes). Local `main` carries 2 additional relocation-cleanup commits on top (`dd772ff` + `160cbc3`). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 all merged.
+**Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
 
@@ -36,7 +37,7 @@
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
 - When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
-- `len(SOURCE_REGISTRY) == 48` test assertion unchanged
+- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 50, post-Batch-3)
 - All original tests pass without modification
 
 ---
@@ -102,33 +103,25 @@
 
 ---
 
-## What's Next (Step 0 → Step 1)
+## What's Next (Step 4 — Ops hardening / Batch 4 — Launch readiness)
 
-**Step 0 — Pre-flight hardening (in progress, 2026-04-23):** the plan in
-`docs/step_zero_prompt.md` is being executed on `worktree-generator`. Tier-A
-items complete; Tier-B items partially landed (inspection scripts, fresh-clone
-DB fix, pre-commit install, setup.bat, bootstrap_dev smoke, migration 0010
-observability columns, `LOG_LEVEL` threading, `.env.example` groupings,
-frontend/backend READMEs, `docs/README.md` index, `.gitattributes`,
-`_TEST_NOW` determinism, CONTRIBUTING.md, `frontend/.env.local.example`,
-setup.sh pyproject/backend-data fix, docs/troubleshooting.md). Tier-B
-remaining: Makefile + `verify-step-0` + `check_env_example.py`, pytest-xdist
-+ fast marker, migrations runner `status` enhancement, down() migration
-integration test, this STATUS refresh, CLAUDE.md staleness sweep. Tier-C:
-mypy strict gate, log-rotation helper, README API-docs callout.
+**Step 0..3 status:** all green and merged on origin/main.
+- Step 0 (pre-flight hardening) closed 2026-04-24 at `e31cac7` with 1,018 tests + Makefile + bootstrap_dev + migration 0010 + check_env_example + pytest-xdist.
+- Step 1 (engine→API seam) closed with multi-dim scoring + hybrid retrieval + per-dim score columns wired to `/api/jobs` (migration 0011).
+- Step 1.5 (post-Step-1 stabilisation) shipped reviewer fixes + dataclass round-trips + lazy-import startup safety.
+- Step 1.6 locked the generator/reviewer worktree contract (`.claude/generator-commit.md` + `.claude/reviewer-verdict.md` + `make verify-batch`).
+- Step 2 (API→UI seam) closed at `5cf60ea` with all 5 cohorts (foundations + components + page surfaces + SEO + TanStack Query + run-surface + E2E smokes) + reviewer R-1..R-4 fixes + sentinel.
+- **Step 3 (new endpoints + Settings UI) closed at origin/main `7194d0e` PR #9 merge** — 8 new backend endpoints, migrations 0012/0013/0014, dispatcher rule consultation with timezone-aware quiet hours, ARQ digest + ghost-sweep periodic tasks, 5 new frontend pages, KanbanBoard polish, Cohort D toasts/a11y/loading skeletons, reviewer R-1..R-7 closed, sentinel `337fbda`.
 
-**Step 1 — engine → API seam (next):** wire Pillar-2 multi-dim scoring
-(`JobScorer(config, user_preferences, enrichment_lookup)`) + hybrid
-retrieval (`retrieval.retrieve_for_user`) into the `/api/jobs` + `/api/search`
-HTTP routes, gated on the existing `SEMANTIC_ENABLED` / `ENRICHMENT_ENABLED`
-flags. Batch 2.7 hybrid mode currently exists only at module level; Step 1
-surfaces it to the dashboard. Target: one-flag flip in prod to activate the
-full Pillar-2 ranking stack for logged-in users.
+**Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
-**After Step 1:** Pillar-3 Batch 4 launch readiness (scope-down to top 10-15
-sources, freemium metering, ICO £40 registration, privacy notice + LIA,
-ASA-compliant copy, Amazon SES, prod-Redis smoke). See the MEMORY notes for
-the carried-forward P3 items from Batch 3.5.
+**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
+
+**Step 3 carry-overs (technical debt to close in Step 3.5 stabilisation or Step 4):**
+- V-01..V-03 form-validation library (RHF + zod) — never installed; new C-02/C-03 forms ship with bespoke `useState` validation.
+- V-04 CV upload size cap + MIME allowlist — verify or backfill.
+- V-05 OpenAPI → TS codegen — explicitly P2; deferred.
+- C-07 `@dnd-kit/core` + `@dnd-kit/sortable` — KanbanBoard ships without these libs; if keyboard a11y on cards is needed, reintroduce.
 
 ---
 
@@ -140,7 +133,7 @@ the carried-forward P3 items from Batch 3.5.
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
 - Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `scripts/preflight_conditional_cache.py` for future candidates
 - All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~268 company slugs (10 platforms including Rippling + Comeet from Batch 3)
+- All ATS boards iterate over ~268 company slugs (12 platforms including Rippling + Comeet from Batch 3)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
@@ -149,7 +142,7 @@ the carried-forward P3 items from Batch 3.5.
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- 600 tests pass (3 skip on Windows — bash-only `setup.sh` / `cron_run.sh` tests)
+- 1,154 tests pass (3 skip on Windows — bash-only `setup.sh` / `cron_run.sh` tests)
 
 ---
 
@@ -165,7 +158,6 @@ the carried-forward P3 items from Batch 3.5.
 | **LinkedIn guest API** | High | Unofficial, can break or get rate-limited at any time. |
 | **HackerNews sources** | Low | Algolia API is stable, but "Who is Hiring" thread format could change. |
 | **CV parser** | Medium | Regex-based section detection. Works for ~80% of CVs. Non-standard formats may miss skills. |
-| **Nomis** | Low | UK GOV stats API. Not individual listings. Useful for market intelligence only. |
 
 ---
 
@@ -174,7 +166,7 @@ the carried-forward P3 items from Batch 3.5.
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
-| `test_main.py` still hits live Indeed | Medium | JobSpy source lacks mock coverage; full suite run can take ~32 min. Documented in MEMORY notes; mocking tracked for a future batch. Rule #4 (mock all HTTP) is otherwise clean across the 600-test baseline. |
+| `test_main.py` still hits live Indeed | Medium | JobSpy source lacks mock coverage; full suite run can take ~32 min. Documented in MEMORY notes; mocking tracked for a future batch. Rule #4 (mock all HTTP) is otherwise clean across the 1,154-test baseline. The `make test` target uses `--ignore=tests/test_main.py` for this reason. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
 | Batch 2.7 hybrid mode flag not wired to HTTP routes | Medium | `retrieval.reciprocal_rank_fusion` / `is_hybrid_available()` exist but no `/api/jobs` route consults them yet — only CLI / worker consumers. Pillar-2 user-visible hybrid ranking still behind the flag and not surfaced in the dashboard. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |
@@ -190,7 +182,7 @@ the carried-forward P3 items from Batch 3.5.
 | Test file | Module tested | Tests |
 |-----------|--------------|-------|
 | `test_sources.py` | All 50 sources | 71+ |
-| `test_profile.py` | `backend/src/profile/*`, `JobScorer` | 55 |
+| `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
 | `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
 | `test_time_buckets.py` | `time_buckets.py` | 33 |
@@ -209,8 +201,8 @@ the carried-forward P3 items from Batch 3.5.
 | `test_cron.py` | cron_run.sh | 5 |
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
-| (Plus Pillar-2/-3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher, scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims | +~190 |
-| **Total (current green baseline)** | | **600** passing / 0 failing / 3 skipped on Windows (post-3.5.4) |
+| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
+| **Total (current green baseline)** | | **1,154** passing / 0 failing / 3 skipped on Windows (post-Step-3 close-out at origin/main `7194d0e`) |
 
 ### Not covered or lightly covered
 

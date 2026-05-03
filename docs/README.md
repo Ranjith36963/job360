@@ -40,12 +40,18 @@ plan, a status snapshot, a reference, or an architectural decision.
   source expansion.
 - `plans/batch-3.5*.md` — stabilisation sub-batches (IDOR fix,
   multi-user profile storage, conditional-cache pilot, test cleanup).
+- [`step_zero_plan.md`](step_zero_plan.md) — Step 0 pre-flight hardening (Tier A+B+C).
+- [`step_1_plan.md`](step_1_plan.md) — Step 1 engine→API seam.
+- [`step_1_5_plan.md`](step_1_5_plan.md) — Step 1.5 post-Step-1 stabilisation.
+- [`step_2_plan.md`](step_2_plan.md) — Step 2 API→UI seam.
+- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed).
+- [`evaluation_report.md`](evaluation_report.md) — production-readiness evaluation; updated post-Step-3.
 
 ## Architecture
 
 - [`../CLAUDE.md`](../CLAUDE.md) — the load-bearing architecture doc. Data
-  flow, module map, hard rules (19 of them), scoring algorithm, env vars,
-  Batch 2 + Batch 3 + Pillar 2 additions.
+  flow, module map, hard rules (26 of them), scoring algorithm, env vars,
+  Batch 2 + Batch 3 + Pillar 2 + Step 3 additions.
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — deeper technical reference with
   diagrams, DB schema, config variables, dependency list.
 

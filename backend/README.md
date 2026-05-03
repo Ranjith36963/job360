@@ -81,7 +81,8 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: 600+ passing, 0 failing. The `-p no:randomly` flag keeps the default
+Invariant: 1,154+ passing, 0 failing, 3 skipped (post-Step-3 close-out at
+origin/main `7194d0e`). The `-p no:randomly` flag keeps the default
 order deterministic (pytest-randomly is installed but opt-in).
 
 ## Database migrations

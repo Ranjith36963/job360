@@ -48,15 +48,17 @@ flowchart TD
             C9[Personio\n10 companies]
             C10[SuccessFactors\n3 companies]
         end
-        subgraph RSS["RSS/XML Feeds (8)"]
+        subgraph RSS["RSS/XML Feeds (10 — rss-tier)"]
             D1[jobs.ac.uk]
             D2[NHS Jobs]
-            D3[WorkAnywhere]
-            D4[WeWorkRemotely]
-            D5[RealWorkFromAnywhere]
-            D6[BioSpace]
-            D7[University Jobs\n6 UK unis]
-            D8[UK GOV FindAJob]
+            D3[NHS Jobs XML]
+            D4[WorkAnywhere]
+            D5[WeWorkRemotely]
+            D6[RealWorkFromAnywhere]
+            D7[BioSpace]
+            D8[University Jobs\n6 UK unis]
+            D9[Teaching Vacancies\nUK DfE]
+            D10[GOV.UK Apprenticeships]
         end
         subgraph Scrapers["HTML Scrapers (7)"]
             E1[LinkedIn\nguest API]
@@ -67,12 +69,11 @@ flowchart TD
             E6[AIJobs Global]
             E7[AIJobs AI]
         end
-        subgraph Other["Other (5 + 1 stats)"]
+        subgraph Other["Other (4)"]
             F1[Indeed / Glassdoor\npython-jobspy]
             F2[HackerNews\nAlgolia API]
             F3[TheMuse]
             F4[NoFluffJobs]
-            F5[Nomis\nUK GOV stats]
         end
     end
 
@@ -96,14 +97,13 @@ flowchart TD
 
 ## Features
 
-### Job Sources (48)
+### Job Sources (50, post-Batch-3 rotation)
 - **7 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully if no API key set
-- **10 free APIs**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, YC Companies — work without any configuration
-- **10 ATS boards**: Greenhouse (25), Lever (12), Workable (8), Ashby (9), SmartRecruiters (6), Pinpoint (8), Recruitee (8), Workday (15), Personio (10), SuccessFactors (3) — ~104 companies total
-- **8 RSS/XML feeds**: jobs.ac.uk, NHS Jobs, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs (6 UK unis), UK GOV FindAJob
-- **7 HTML scrapers**: LinkedIn (guest API), JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI
-- **5 other**: Indeed/Glassdoor (via python-jobspy, optional), HackerNews (Algolia), TheMuse, NoFluffJobs
-- **1 market intelligence**: Nomis (UK GOV vacancy statistics)
+- **9 free APIs**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — work without any configuration (YC Companies dropped in Batch 3 — covered by HN Jobs + Ashby)
+- **12 ATS boards**: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, Comeet — ~268 hand-curated company slugs across 12 platforms (Batch-3 expansion from 104 → 268)
+- **10 RSS/XML feeds (rss-tier)**: jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs (6 UK unis), Teaching Vacancies (UK DfE), GOV.UK Apprenticeships — Batch-3 added the last three; FindAJob dropped (Adzuna already wraps the same feed). Two of these (`teaching_vacancies`, `gov_apprenticeships`) live under `apis_free/` but declare `category = "rss"` for the 15-min scheduler tier.
+- **7 HTML scrapers**: LinkedIn (guest API), JobTensor, Climatebase, 80000Hours (Algolia API), BCS Jobs, AIJobs Global, AIJobs AI
+- **4 other**: Indeed/Glassdoor (via python-jobspy, optional), HackerNews (Algolia "Who is Hiring"), TheMuse, NoFluffJobs (Nomis UK-GOV stats source dropped — was macro statistics, not a jobs feed)
 
 ### Profile System (any domain)
 - **CV parsing**: Upload PDF or DOCX, extracts skills, job titles, education, certifications
@@ -142,11 +142,14 @@ flowchart TD
 - `sources` — list all 48 available sources
 
 ### Frontend (Next.js + FastAPI)
-- Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 25 routes (health, jobs, actions, profile, search, pipeline)
-- Job list with filters, score radar, time buckets
-- Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
-- Application pipeline Kanban board
+- Next.js 16 + React 19 + Tailwind 4 + shadcn 4 at `frontend/`
+- Talks to FastAPI (`backend/src/api/`) over HTTP — **46 routes across 11 modules** (health, auth, actions, jobs, profile, search, pipeline, channels, notifications, notification_rules, runs)
+- Job list with filters, score radar, time buckets, dedup-group viewer (Step 3)
+- Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form, version history + per-version diff drawer (Step 3)
+- Application pipeline Kanban board with timeline drawer + notes editor + filter panel + confirmation dialogs (Step 3)
+- `/settings` landing with Channels / Notifications / Account tabs (Step 3): per-channel rule editor (score thresholds, instant vs digest, quiet hours), password change, email change, soft-delete account
+- `/notifications` ledger viewer — paginated history with channel + status + time-range filters (Step 3)
+- Auth: register / login / logout cookie sessions, `?next=` post-login redirect with open-redirect guard
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
@@ -161,7 +164,7 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (600 passing (post-Step-0 pre-flight))
+### Testing (1,154 passing — post-Step-3 close-out at origin/main `7194d0e`)
 
 | Test file | Count | What it covers |
 |-----------|-------|----------------|
@@ -283,7 +286,7 @@ python -m src.cli sources
 | Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
 | Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
 
-**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, YC Companies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, jobs.ac.uk, NHS Jobs, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, FindAJob, JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Nomis — 41 sources work without any API keys.
+**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, Comeet, jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, Teaching Vacancies, GOV.UK Apprenticeships, JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs — 43 sources work without any API keys.
 
 ## Scoring Algorithm
 
@@ -302,7 +305,7 @@ When a user profile is loaded, the scorer uses dynamic keywords from the profile
 
 ## Notification Channels
 
-The notification system uses an abstract base class (`NotificationChannel` in `backend/src/notifications/base.py`) with auto-discovery:
+The notification system uses an abstract base class (`NotificationChannel` in `backend/src/services/notifications/base.py`) with auto-discovery:
 
 ```
 NotificationChannel (ABC)
@@ -318,7 +321,7 @@ for channel in get_configured_channels():
     await channel.send(new_jobs, stats)
 ```
 
-**Adding a new channel** (e.g. Telegram): create `backend/src/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
+**Adding a new channel** (e.g. Telegram): create `backend/src/services/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
 
 ## Adding a New Job Source
 
@@ -328,23 +331,23 @@ for channel in get_configured_channels():
 4. If custom `__init__`, accept `search_config=None` and pass to `super().__init__(session, search_config=search_config)`
 5. Register in `SOURCE_REGISTRY` dict in `backend/src/main.py`
 6. Add to `_build_sources()` list in `backend/src/main.py` (passing `search_config=sc`)
-7. Add rate limit entry in `RATE_LIMITS` dict in `backend/src/config/settings.py`
+7. Add rate limit entry in `RATE_LIMITS` dict in `backend/src/core/settings.py`
 8. Add mocked tests in `backend/tests/test_sources.py`
 9. Update the `len(SOURCE_REGISTRY) == N` assertion and expected source set in `backend/tests/test_cli.py`
-10. If keyed: add env var to `backend/src/config/settings.py` and `.env.example`
+10. If keyed: add env var to `backend/src/core/settings.py` and `.env.example`
 
 ## Configuration
 
-### Default Keywords (`backend/src/config/keywords.py`)
+### Default Keywords (`backend/src/core/keywords.py`)
 - **25 job titles**: AI Engineer, ML Engineer, Machine Learning Engineer, GenAI Engineer, Generative AI Engineer, LLM Engineer, NLP Engineer, Data Scientist, MLOps Engineer, AI/ML Engineer, Deep Learning Engineer, Computer Vision Engineer, RAG Engineer, AI Solutions Engineer, AI Research Engineer, Applied ML Engineer, Python AI Developer, AI Researcher, ML Scientist, Machine Learning Scientist, AI Platform Engineer, AI Infrastructure Engineer, Conversational AI Engineer, Applied Scientist, Research Scientist
 - **15 primary skills** (3pts each): Python, PyTorch, TensorFlow, LangChain, RAG, LLM, Generative AI, Hugging Face, Transformers, OpenAI, NLP, Deep Learning, Neural Networks, Computer Vision, Prompt Engineering
 - **17 secondary skills** (2pts each): Scikit-learn, Keras, AWS, SageMaker, Bedrock, Docker, Kubernetes, FastAPI, ChromaDB, FAISS, OpenSearch, Redis, pgvector, Gemini, Agentic AI, LLM fine-tuning, Fine-tuning
 - **11 tertiary skills** (1pt each): CI/CD, MLflow, Git, Linux, n8n, Data Pipelines, ETL, Feature Engineering, S3, CloudWatch, Machine Learning
 - **24 UK locations** + Remote/Hybrid
 - **60 negative title keywords** across 12 categories (sales, IT ops, healthcare, legal, finance, etc.)
-- **LLM-only CV parsing** via `backend/src/profile/llm_provider.py` (multi-provider: Gemini, Groq, Cerebras with free-tier fallback). The earlier 391-entry `KNOWN_SKILLS` regex set was removed in commit 3ba1342.
+- **LLM-only CV parsing** via `backend/src/services/profile/llm_provider.py` (multi-provider: Gemini, Groq, Cerebras with free-tier fallback). The earlier 391-entry `KNOWN_SKILLS` regex set was removed in commit 3ba1342.
 
-### ATS Companies (`backend/src/config/companies.py`)
+### ATS Companies (`backend/src/core/companies.py`)
 - **Greenhouse** (25): DeepMind, Monzo, Deliveroo, Darktrace, Stability AI, Anthropic, Graphcore, Wayve, PolyAI, Synthesia, Wise, Snyk, Stripe, Cloudflare, Databricks, Dataiku, Ocado Technology, Tractable, Paddle, Harness, Isomorphic Labs, Speechmatics, Onfido, Oxford Nanopore, Bloomberg
 - **Lever** (12): Mistral, Healx, Palantir, Spotify, ZOE, Tractable, Helsing, SecondMind, MosaicML, Faculty, Dyson, Five AI
 - **Workable** (8): BenevolentAI, Exscientia, Oxa, Cervest, Hugging Face, Labelbox, Runway, Adept
@@ -366,44 +369,59 @@ job360/
 │   ├── cli_view.py              # Rich terminal table viewer (time-bucketed)
 │   ├── models.py                # Job dataclass with company normalisation
 │   ├── api/                     # FastAPI backend consumed by the Next.js frontend
-│   ├── config/
+│   ├── core/                     # phase-4 rename of config/
 │   │   ├── settings.py          # Env vars, rate limits, timeouts, thresholds
-│   │   ├── keywords.py          # Default AI/ML keywords (KNOWN_SKILLS and KNOWN_TITLE_PATTERNS removed in commit 3ba1342)
-│   │   └── companies.py         # ATS company slugs (~104 companies across 10 platforms)
-│   ├── profile/
-│   │   ├── models.py            # CVData, UserPreferences, UserProfile, SearchConfig
-│   │   ├── cv_parser.py         # PDF/DOCX text extraction; LLM-only skill/title extraction
-│   │   ├── llm_provider.py      # Multi-provider LLM client (Gemini/Groq/Cerebras) for CV parsing
-│   │   ├── preferences.py       # Form validation, CV+preferences merge
-│   │   ├── storage.py           # JSON persistence (backend/data/user_profile.json)
-│   │   ├── keyword_generator.py # UserProfile -> SearchConfig conversion
-│   │   ├── linkedin_parser.py   # LinkedIn profile PDF parser (pdfplumber + LLM)
-│   │   └── github_enricher.py   # GitHub public API enricher
-│   ├── sources/
-│   │   ├── base.py              # Abstract base with retry logic + rate limiting
-│   │   └── *.py                 # 47 source files (48 registry entries)
-│   ├── filters/
-│   │   ├── skill_matcher.py     # Scoring engine (0-100, 4 components + 2 penalties)
-│   │   └── deduplicator.py      # Cross-source dedup by normalised key
-│   ├── notifications/
-│   │   ├── base.py              # NotificationChannel ABC + auto-discovery
-│   │   ├── email_notify.py      # Gmail SMTP (HTML + CSV attachment)
-│   │   ├── slack_notify.py      # Slack Block Kit via webhook
-│   │   ├── discord_notify.py    # Discord embeds via webhook
-│   │   └── report_generator.py  # Markdown + HTML report generation
-│   ├── storage/
-│   │   ├── database.py          # Async SQLite (jobs + run_log tables, auto-purge)
+│   │   ├── keywords.py          # Default AI/ML keywords (KNOWN_SKILLS regex removed in commit 3ba1342)
+│   │   ├── companies.py         # ATS company slugs (~268 across 12 platforms post-Batch-3)
+│   │   ├── skill_synonyms.py    # 493-entry alias → canonical skill dict (Pillar 2.3)
+│   │   ├── fx.py                # 18-currency → GBP rates (Pillar 2.9)
+│   │   └── tenancy.py           # DEFAULT_TENANT_ID for legacy rows
+│   ├── services/                 # phase-4 merge of filters/ + notifications/ + profile/
+│   │   ├── skill_matcher.py     # JobScorer (legacy 4-comp + Pillar-2 7-dim path)
+│   │   ├── scoring_dimensions.py # seniority / salary / visa / workplace
+│   │   ├── deduplicator.py      # 4-layer dedup (exact → RapidFuzz → TF-IDF → embedding)
+│   │   ├── domain_classifier.py # source routing by professional domain
+│   │   ├── salary.py            # cadence → annual GBP normalizer
+│   │   ├── prefilter.py         # 3-stage cascade (location → experience → skills)
+│   │   ├── feed.py              # FeedService SSOT for per-user feed rows
+│   │   ├── ghost_detection.py   # active → possibly_stale → likely_stale → confirmed_expired
+│   │   ├── circuit_breaker.py   # CLOSED/HALF_OPEN/OPEN per source + registry
+│   │   ├── conditional_cache.py # FIFO cache for ETag / Last-Modified validators
+│   │   ├── scheduler.py         # TieredScheduler — per-tier polling cadence
+│   │   ├── retrieval.py         # RRF + cross-encoder rerank + hybrid mode
+│   │   ├── embeddings.py        # all-MiniLM-L6-v2 encoder (lazy-imported)
+│   │   ├── vector_index.py      # ChromaDB persistent collection
+│   │   ├── job_enrichment.py    # async enrich_job() + DB cache
+│   │   ├── job_enrichment_schema.py # 18-field Pydantic schema for LLM output
+│   │   ├── auth/                # passwords.py (argon2id) + sessions.py (signed cookies)
+│   │   ├── channels/            # crypto.py (Fernet) + dispatcher.py (Step-3 rule consultation, timezone-aware quiet hours)
+│   │   ├── notifications/       # base ABC + email/slack/discord channels + report_generator
+│   │   └── profile/             # cv_parser, llm_provider, linkedin_parser, github_enricher, keyword_generator, models, preferences, storage (+ schemas, layout, dep_file_parser, skill_normalizer, skill_tiering, skill_entry, dependency_map)
+│   ├── repositories/             # phase-4 rename of storage/
+│   │   ├── database.py          # Async SQLite (15 migrations applied; jobs + run_log + users + sessions + user_feed + notification_ledger + user_channels + user_profiles + user_profile_versions + job_enrichment + job_embeddings + score_dimensions + notification_rules + user_notification_digests + application_history)
 │   │   └── csv_export.py        # CSV export per run
+│   ├── api/
+│   │   ├── main.py              # FastAPI app (CORS, lifespan, route registration)
+│   │   ├── auth_deps.py         # require_user / optional_user dependencies
+│   │   ├── dependencies.py      # get_db() + save_upload_to_temp()
+│   │   ├── models.py            # Pydantic request/response (mirrors frontend types.ts)
+│   │   └── routes/              # 11 modules: health, auth, actions, jobs, profile, search, pipeline, channels, notifications, notification_rules, runs (46 endpoints)
+│   ├── sources/
+│   │   ├── base.py              # Abstract base + retry + rate-limit + ETag conditional fetch (opt-in)
+│   │   └── apis_keyed/, apis_free/, ats/, feeds/, scrapers/, other/   # 49 source files split by category, 50 SOURCE_REGISTRY entries
+│   ├── workers/
+│   │   ├── tasks.py             # 7 ARQ tasks: score_and_ingest, send_notification, mark_ledger_sent_task, mark_ledger_failed_task, nightly_ghost_sweep, send_daily_digest, enrich_job_task
+│   │   └── settings.py          # WorkerSettings + cron_jobs registration
 │   └── utils/
 │       ├── logger.py            # Rotating file + console logging
 │       ├── rate_limiter.py      # Async semaphore + delay rate limiter
 │       └── time_buckets.py      # Time bucket grouping for CLI view
-├── backend/tests/                       # 600 passing (post-Step-0 pre-flight) across 20 files
+├── backend/tests/                       # 1,154 passing (post-Step-3 close-out) across 60+ files
 │   ├── conftest.py              # Shared fixtures (sample jobs)
-│   └── test_*.py                # 20 test modules
-├── backend/data/                        # Exports, reports, logs (gitignored)
-├── backend/pyproject.toml             # Production dependencies (17 packages)
-├── requirements-dev.txt         # Dev/test dependencies (pytest, aioresponses, fpdf2)
+│   └── test_*.py                # 60+ test modules
+├── backend/data/                        # Exports, reports, logs, jobs.db, ChromaDB (gitignored)
+├── backend/pyproject.toml             # Production dependencies + dev/semantic extras
+├── backend/migrations/                # 15 forward+reverse SQL migration pairs (0000 baseline → 0014 application_history) + runner.py
 ├── .env.example                 # Template for API keys and webhooks
 ├── setup.sh                     # Setup script (Python 3.9+ check, venv, deps)
 └── cron_setup.sh                # Cron scheduling (4AM/4PM Europe/London)
@@ -412,7 +430,7 @@ job360/
 ## Testing
 
 ```bash
-# Run all 600 passing (post-Step-0 pre-flight)
+# Run all 1,154 passing (post-Step-3 close-out)
 python -m pytest backend/tests/ -v
 
 # Run specific test file
@@ -422,7 +440,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-All 600 passing (post-Step-0 pre-flight) pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+All 1,154 passing (post-Step-3 close-out) pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
 
 ## Output
 
