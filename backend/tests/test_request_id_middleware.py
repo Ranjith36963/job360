@@ -64,3 +64,41 @@ def test_set_get_request_id_round_trip():
     assert get_request_id() == "test-rid-42"
     _request_id_var.reset(token)
     assert get_request_id() is None
+
+
+def test_oversized_incoming_header_is_trimmed():
+    # A 100-char incoming value must be truncated to 64 chars.
+    long_rid = "a" * 100
+    resp = _client.get("/ping", headers={"X-Request-Id": long_rid})
+    returned = resp.headers["X-Request-Id"]
+    assert len(returned) == 64
+    assert returned == "a" * 64
+
+
+def test_cors_exposes_x_request_id():
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.testclient import TestClient
+    from src.api.middleware import RequestIdMiddleware
+
+    app2 = FastAPI()
+    app2.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-Id"],
+    )
+    app2.add_middleware(RequestIdMiddleware)
+
+    @app2.get("/ping2")
+    async def ping2():
+        return {}
+
+    client2 = TestClient(app2)
+    # Access-Control-Expose-Headers is on the *actual* response, not the
+    # preflight (OPTIONS) — the preflight carries Allow-Headers/Methods only.
+    resp = client2.get("/ping2", headers={"Origin": "http://localhost:3000"})
+    expose = resp.headers.get("Access-Control-Expose-Headers", "")
+    assert "X-Request-Id" in expose, f"expose_headers missing; got: {expose!r}"

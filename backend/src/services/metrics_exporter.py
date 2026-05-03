@@ -33,7 +33,9 @@ async def export_pipeline_metrics(
 
     records = [dict(row) for row in rows]
     out = metrics_dir / "pipeline.json"
-    out.write_text(json.dumps({"runs": records}, indent=2, default=str))
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"runs": records}, indent=2, default=str))
+    tmp.replace(out)
 
 
 async def export_notification_metrics(
@@ -59,4 +61,6 @@ async def export_notification_metrics(
 
     records = [dict(row) for row in rows]
     out = metrics_dir / "notifications.json"
-    out.write_text(json.dumps({"channels": records}, indent=2, default=str))
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"channels": records}, indent=2, default=str))
+    tmp.replace(out)

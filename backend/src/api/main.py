@@ -48,6 +48,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-Id"],
 )
 # RequestIdMiddleware is added AFTER CORSMiddleware so it executes FIRST
 # (Starlette processes middleware in LIFO order).

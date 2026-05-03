@@ -159,6 +159,8 @@ async def test_call_groq_logs_structured_warning_on_error(caplog):
     rec = records[0]
     assert rec.provider == "groq"  # type: ignore[attr-defined]
     assert rec.outcome == "error"  # type: ignore[attr-defined]
+    assert rec.error_type == "RuntimeError"  # type: ignore[attr-defined]
+    assert not hasattr(rec, "error"), "raw error string must not appear (key leak risk)"
 
 
 @pytest.mark.asyncio

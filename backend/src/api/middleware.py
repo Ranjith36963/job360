@@ -22,8 +22,12 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     echoed back in the ``X-Request-Id`` response header.
     """
 
+    # Max id length — prevents oversized upstream values from bloating log lines.
+    _MAX_RID_LEN = 64
+
     async def dispatch(self, request: Request, call_next) -> Response:
-        rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:16]
+        raw = request.headers.get("X-Request-Id", "")
+        rid = raw[: self._MAX_RID_LEN] if raw else uuid.uuid4().hex[:16]
         token = set_request_id(rid)
         try:
             response = await call_next(request)

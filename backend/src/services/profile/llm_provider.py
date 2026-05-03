@@ -199,7 +199,7 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
         logger.warning(
             "llm_call_error",
             extra={"provider": "gemini", "model": _model, "latency_ms": latency_ms,
-                   "outcome": "error", "error": str(exc)},
+                   "outcome": "error", "error_type": type(exc).__name__},
         )
         raise
 
@@ -236,7 +236,7 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
         logger.warning(
             "llm_call_error",
             extra={"provider": "groq", "model": _model, "latency_ms": latency_ms,
-                   "outcome": "error", "error": str(exc)},
+                   "outcome": "error", "error_type": type(exc).__name__},
         )
         raise
 
@@ -276,6 +276,6 @@ async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
         logger.warning(
             "llm_call_error",
             extra={"provider": "cerebras", "model": _model, "latency_ms": latency_ms,
-                   "outcome": "error", "error": str(exc)},
+                   "outcome": "error", "error_type": type(exc).__name__},
         )
         raise
