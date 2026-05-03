@@ -40,6 +40,7 @@ from src.services.job_enrichment import (
     _build_enrichment_lookup,
     enrich_batch,
 )
+from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
 from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
@@ -672,6 +673,13 @@ async def run_search(
                 per_source_duration=per_source_duration,
                 total_duration=total_duration,
             )
+
+            # Step-5 — export metrics snapshots after every run (non-fatal).
+            try:
+                await export_pipeline_metrics(str(db_path))
+                await export_notification_metrics(str(db_path))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("metrics export failed: %s", exc)
 
         logger.info("Job360 run complete")
     finally:

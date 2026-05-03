@@ -15,6 +15,7 @@ DB_PATH = DATA_DIR / "jobs.db"
 EXPORTS_DIR = DATA_DIR / "exports"
 REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"
+METRICS_DIR = DATA_DIR / "metrics"
 
 # API Keys (Group A)
 REED_API_KEY = os.getenv("REED_API_KEY", "")
