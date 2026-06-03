@@ -33,6 +33,124 @@ The "shared catalog + per-user overlay" rule (CLAUDE.md rules #1, #10) is the ar
 
 ---
 
+## Walkthrough — A day in the life of a user (worked example)
+
+> One concrete trace through all four rings, following one user (call her Alice) from signup to her first notification. Every step names the route, the service, and the table touched. If you've never opened a code file in this repo, read this first.
+
+### T+0 — Register
+
+Alice visits `/register`. Frontend `POST /api/auth/register {email, password}`. The route (`routes/auth.py`):
+
+1. Validates email + password (min 8 chars).
+2. `passwords.hash_password(plaintext)` → argon2id hash.
+3. `INSERT INTO users(id=uuid4(), email, password_hash, created_at)`. `deleted_at` defaults NULL.
+4. `sessions.create_session(user_id, SESSION_SECRET, user_agent, ip_hash)` → cookie string `<sid>.<hmac>`.
+5. Response sets `Set-Cookie: job360_session=<sid>.<hmac>; HttpOnly; SameSite=lax`.
+
+Frontend redirects to `/profile`.
+
+### T+5 — Upload profile
+
+Alice uploads her CV PDF. Frontend `POST /api/profile` with multipart `cv=<file>` + JSON body of `UserPreferences`. Route (`routes/profile.py`):
+
+1. `require_user` resolves the cookie → `CurrentUser(id=<uuid>, email=...)`.
+2. Save uploaded file to a temp dir.
+3. `cv_parser.parse_cv_async(temp_path)`:
+   - `extract_text_from_pdf()` via `pdfplumber`.
+   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — Gemini first; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
+   - Returns `CVData` (skills, titles, companies, education, …).
+4. `preferences.merge_cv_and_preferences(cv_data, prefs)` → composite skills/titles list with user prefs taking priority.
+5. `UserProfile(cv_data, preferences)` saved via `storage.save_profile(profile, user_id, source_action="upload")` — UPSERTs `user_profiles` (tip) **and** INSERTs `user_profile_versions` (immutable snapshot, retention 10).
+
+Response: `ProfileResponse` with `skill_tiers`, completeness %, `current_version_id`.
+
+Optional: LinkedIn upload (`POST /api/profile/linkedin`) and GitHub (`POST /api/profile/github {username}`). LinkedIn detection uses the 2-of-3 heuristic; GitHub fetches up to 30 repos with 3× weighting on the last 365 days.
+
+### T+10 — Engine builds Alice's SearchConfig
+
+When the worker tick runs (or CLI `python -m src.cli run` is invoked) — Pillar 2's `run_search()`:
+
+1. Loads Alice's `UserProfile` via `storage.load_profile(alice.id)`.
+2. Generates `SearchConfig` from it (Pillar 2 §3.1) — the bridge from Pillar 1 to Pillar 2.
+3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)` — both kwargs, per rule #20.
+4. Domain-filters sources via `classify_user_domain(alice.profile)` → say `{"tech"}` → keeps tech + general sources, drops healthcare/academia/education/climate-only sources.
+5. Fetches → prefilters → scores → dedups → stores.
+
+For each job that survives the prefilter (Pillar 2 §2 stage 2) and scores ≥ `MIN_MATCH_SCORE` for Alice, the worker `score_and_ingest(job, users=[alice])` calls `FeedService.upsert_feed_row(alice.id, job.id, score, bucket)`.
+
+### T+10 — Dashboard shows Alice's ranked feed
+
+Alice opens `/dashboard`. Frontend `GET /api/jobs?bucket=24h&min_score=60` (TanStack Query caches by `queryKeys.jobList(filters)`). Backend (`routes/jobs.py`) scopes by `user.id`, JOINs `user_feed` + `jobs` + LEFT JOIN `job_enrichment`, pre-fetches `action_map` to avoid N+1, returns `JobListResponse` with the 9-dim `ScoreBreakdown`. Frontend renders `<JobList>` of `<JobCard>` with `<ScoreRadar>`.
+
+### T+12 — Alice likes Job#42
+
+Heart icon clicked. Frontend `POST /api/jobs/42/action {"action": "liked"}`. Route (`routes/actions.py`) UPSERTs `user_actions(user_id=alice.id, job_id=42, action='liked')`. UI optimistically marks the card liked.
+
+### T+15 — Alice applies
+
+Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "Mark Applied". Frontend `POST /api/pipeline/applications {"job_id": 42}`. Route (`routes/pipeline.py`):
+
+1. **410 Gone** if `jobs.staleness_state='confirmed_expired'` (ghost-detection guard).
+2. INSERT `applications(user_id, job_id=42, stage='applied')`.
+3. INSERT `application_stage_history(user_id, job_id=42, from_stage=NULL, to_stage='applied')` — the audit trail starts.
+4. UPDATE `user_feed SET status='applied' WHERE user_id=alice.id AND job_id=42`.
+
+### T+30 — Alice sets up email notifications
+
+On the channels page:
+
+- `POST /api/settings/channels {channel_type:"email", display_name:"primary", credential:"mailtos://alice@gmail.com:apppassword@smtp.gmail.com?to=alice@example.com"}`
+- `channels.crypto.encrypt(credential)` → Fernet ciphertext → INSERT `user_channels`.
+- Alice clicks "Test" → `POST /api/settings/channels/{id}/test` → dispatcher decrypts, calls Apprise, returns `{ok: true}`.
+
+Then a rule:
+
+- `POST /api/settings/notification-rules {channel:"email", score_threshold:80, notify_mode:"instant", quiet_hours_start:"22:00", quiet_hours_end:"07:00"}`
+- UPSERT by `UNIQUE(user_id, channel)`. Stored in `notification_rules`.
+
+### T+2h — A fresh job posts, Alice gets notified
+
+Worker fetches a new job, scores it 87 for Alice. `score_and_ingest`:
+
+1. `FeedService.upsert_feed_row(alice.id, job.id, 87, "24h")`.
+2. 87 ≥ 80 (Alice's email rule threshold) → enqueue `send_notification(alice.id, job.id, urgency="instant")`.
+
+`send_notification` worker task:
+
+1. Loads Alice's enabled channels → finds the email channel.
+2. Consults `notification_rules` for `(alice.id, 'email')`: enabled, threshold ≤ 87 ✓.
+3. Current time in Alice's `users.timezone` → outside quiet hours (22:00–07:00) ✓.
+4. Idempotency check on `notification_ledger UNIQUE(user_id, job_id, channel)` — no row → proceed.
+5. `crypto.decrypt()` the channel credential.
+6. `dispatcher.dispatch()` lazy-imports Apprise (rule #11), calls `notify()`.
+7. Success → INSERT `notification_ledger(status='sent', sent_at=now())`. Failure → INSERT with `status='failed'`, `retry_count=1`, `error_message`.
+
+Alice's inbox: one email with job title, score 87, deep link to `/jobs/<id>`.
+
+### T+5 days — Alice advances the application
+
+After an interview: `POST /api/pipeline/42/advance {"to_stage": "interview", "notes": "1st screen w/ recruiter"}`. Route updates `applications.stage='interview'`, sets `last_advanced_at=now()`, INSERTs an `application_stage_history` row with `from_stage='applied'`, appends to `notes_history` JSON.
+
+### Tables touched, in order
+
+| Step | Table | Pillar |
+| --- | --- | --- |
+| Register | `users`, `sessions` | 1 |
+| Upload CV | `user_profiles`, `user_profile_versions` | 1 |
+| (Engine runs) | `jobs`, `job_enrichment` (shared catalog — no `user_id`) | 2+3 |
+| Engine scores for Alice | `user_feed` (write) | 2 → 1 seam |
+| Dashboard view | `user_feed`, `jobs`, `job_enrichment` (read) | 1 |
+| Like | `user_actions` | 1 |
+| Apply | `applications`, `application_stage_history`, `user_feed` (status flip) | 1 |
+| Channel setup | `user_channels` (Fernet) | 1 |
+| Rule setup | `notification_rules` | 1 |
+| New job notification | `notification_ledger`, optionally `user_notification_digests` | 1 |
+| Stage advance | `applications`, `application_stage_history` | 1 |
+
+The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user fact lives in an overlay table joined by `job_id`. That's what makes Job360 multi-tenant without duplicating job rows.
+
+---
+
 ## 2. Ring 1 — Identity & Authentication
 
 ### 2.1 What the user experiences
@@ -334,6 +452,53 @@ frontend/src/components/
 ```
 
 State is cached with **TanStack Query** keyed by `queryKeys.jobList(filters)` etc., which is what enables the optimistic UI on the like/apply buttons.
+
+---
+
+## Environment variables — every var the User pillar reads
+
+Consolidated so you can `grep` once and see them all. Defaults come from `backend/src/core/settings.py` + `services/auth/sessions.py` + `services/channels/crypto.py`.
+
+| Var | Required | Default | What changes when you flip it |
+| --- | --- | --- | --- |
+| `SESSION_SECRET` | **yes** (prod) | dev fallback string | HMAC secret for session cookies. Rotating invalidates every active session. Fail-closed under `JOB360_ENV=prod` if unset. |
+| `CHANNEL_ENCRYPTION_KEY` | **yes** (prod) | dev fallback | Fernet key for `user_channels.credential_encrypted`. **Do not rotate without a re-encryption migration** — existing channels become undecryptable. |
+| `JOB360_ENV` | no | (unset) | Set to `prod` → session cookie gets `secure=True`; otherwise `secure=False` for localhost dev. |
+| `FRONTEND_ORIGIN` | no | `http://localhost:3000` | CORS allow-list (comma-separated for multiple). |
+| `REDIS_URL` | only for ARQ worker | `redis://localhost:6379` | Worker broker; not used by API or CLI. |
+| `GEMINI_API_KEY` | no | (unset) | First-choice LLM for CV parsing. Unset → falls through to Groq. |
+| `GROQ_API_KEY` | no | (unset) | Second-choice LLM. Unset → falls to Cerebras. |
+| `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All three unset** → CV parse raises `RuntimeError`. |
+| `GITHUB_TOKEN` | no | (unset) | Bumps GitHub API quota from 60 → 5000 req/hr. Anonymous still works for public repos. |
+| `LOG_LEVEL` | no | `INFO` | Python logging level. `DEBUG` exposes request bodies + profile parsing internals. |
+| `SMTP_EMAIL` / `SMTP_PASSWORD` / `NOTIFY_EMAIL` | no | — | **Legacy** notification system (CLI batch summaries only). Per-user emails go through `user_channels` instead. |
+| `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | no | — | Same — legacy CLI summaries only. |
+
+---
+
+## Failure modes — when things go wrong
+
+A non-exhaustive table of failures an operator or agent will actually see, where they surface, and what to do.
+
+| Symptom | Root cause | Where it surfaces | Fix |
+| --- | --- | --- | --- |
+| Server refuses to start: `RuntimeError: SESSION_SECRET unset` | Env var missing | API/CLI boot | Set the env var; fail-closed by design |
+| Server refuses to start: `RuntimeError` re Fernet key | `CHANNEL_ENCRYPTION_KEY` unset | API/CLI boot | Set the env var; fail-closed by design |
+| Login fails on a correct password | `password_hash` in DB corrupted (typically from direct SQL writes) | `passwords.verify_password()` returns False | Re-hash via `setup-profile` route or DB UPDATE |
+| 401 on every frontend `/api/*` call | Cookie missing or expired or domain mismatch | Browser devtools → Cookies | `credentials: 'include'` is required (already in `api.ts`); confirm cookie domain matches `FRONTEND_ORIGIN` |
+| CV upload returns 502; profile fields empty | All 3 LLM providers exhausted / returned malformed JSON twice | `parse_cv_async` raises `RuntimeError`, route surfaces 502 | Check provider env vars; tail logs filtered by `cv_parser`; try a smaller/cleaner PDF |
+| LinkedIn PDF treated as a regular CV | 2-of-3 detection heuristic failed | `is_linkedin_pdf` returns False → CV pipeline runs → fields land in wrong slots | Inspect PDF for: `linkedin.com/in/` URL, ≥3 known section headings, "Page N of M" footer |
+| GitHub enrichment slow / 403 errors | Anonymous rate limit (60 req/hr) hit | `github_enricher` logs 403 rate limited | Set `GITHUB_TOKEN` (no scopes needed for public repos) |
+| Notification rule fires, no email arrives | Apprise URL malformed, or Gmail "App Password" not used | `notification_ledger.status='failed'`, `error_message` populated | `GET /api/notifications?status=failed` to see the error; Gmail requires App Password not account password |
+| Digest queue fills, never drains | ARQ worker not running, or digest_send_time evaluated in wrong zone | `user_notification_digests.sent=0` count growing | Confirm `arq` process up; verify `users.timezone` value; quiet-hours and digest_send_time both read this column |
+| `POST /api/pipeline/applications` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
+| Pipeline UI shows wrong stage after advance | `applications.stage` ≠ latest `application_stage_history.to_stage` (only possible via direct SQL) | `/pipeline` shows stale stage | Re-derive: `SELECT to_stage FROM application_stage_history WHERE job_id=? AND user_id=? ORDER BY transitioned_at DESC LIMIT 1` and UPDATE applications |
+| Frontend page renders blank after deploy | Next.js 16 `params` not `await`ed (rule #22 — training-data trap) | Component renders without data | Convert to `params: Promise<{ id: string }>` and `await params` |
+| Profile completeness stuck at 0% after upload | Either no `user_profiles` row (silent save failure) or LLM returned empty schema | Inspect: `SELECT * FROM user_profiles WHERE user_id=?` | If no row: tail logs for the save error. If row exists with empty fields: LLM produced empty extraction — retry with a clearer CV or different provider |
+| Soft-deleted user reappears in some list | Query forgot `WHERE deleted_at IS NULL` | Any user-listing surface | Fix the offending query; auth path already excludes them in `_current_user_from_cookie` |
+| User changes email — still logged in | Expected: route invalidates session, but the active tab still holds the old cookie until next request | UI continues briefly | The next `/api/auth/me` will 401 and bounce to login — no fix needed |
+
+For operational queries (inspect a stuck queue, look up a session cookie, force-rebuild a profile), see [`runbook.md`](./runbook.md). For unfamiliar terminology, see [`glossary.md`](./glossary.md).
 
 ---
 
