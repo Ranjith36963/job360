@@ -53,7 +53,7 @@ python -m src.cli api                               # Alternative entry via CLI
 python -m src.cli api --port 3001 --host 0.0.0.0    # Custom host/port
 
 # Run the pipeline
-python -m src.cli run                               # Full pipeline (47 source instances)
+python -m src.cli run                               # Full pipeline (49 source instances — 50 registry keys, indeed+glassdoor share JobSpySource)
 python -m src.cli run --source arbeitnow            # Single source
 python -m src.cli run --dry-run --log-level DEBUG    # Dry run with debug
 python -m src.cli run --db-path /tmp/test.db         # Custom DB path
@@ -71,7 +71,7 @@ python -m src.cli view --hours 24 --min-score 50   # Rich terminal table
 python -m src.cli view --visa-only                  # Filter by visa
 
 # Tests (run from backend/ — pytest picks up pyproject.toml pythonpath=["."])
-python -m pytest tests/ -v                              # Run all 600 tests (post-3.5.4 baseline: 600p/0f/3s)
+python -m pytest tests/ -v                              # Run the full suite (1000+ test fns; run `pytest --collect-only -q | tail -1` for current count)
 python -m pytest tests/test_scorer.py -v                # Scoring tests
 python -m pytest tests/test_sources.py -v               # All sources (71)
 python -m pytest tests/test_profile.py -v               # Profile system (55)
@@ -105,7 +105,7 @@ job360/
 │   │   │   ├── main.py         # FastAPI app: CORS, lifespan, route registration
 │   │   │   ├── dependencies.py # Shared deps: get_db(), save_upload_to_temp()
 │   │   │   ├── models.py       # Pydantic request/response models (matches frontend types.ts)
-│   │   │   └── routes/         # 7 route modules: health, jobs, actions, profile, search, pipeline
+│   │   │   └── routes/         # 11 route modules: health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   │
 │   │   ├── core/               # App config + constants (phase 4 rename from config/)
 │   │   │   ├── settings.py     # Env vars, paths, RATE_LIMITS, thresholds
@@ -148,7 +148,7 @@ job360/
 │   │       ├── logger.py       # Rotating file + console logging
 │   │       ├── rate_limiter.py # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                  # 600 tests across 23+ files (pytest pythonpath=["."]) — post-3.5.4 baseline
+│   └── tests/                  # 1000+ test fns across 30+ files (pytest pythonpath=["."]) — run `pytest --collect-only -q | tail -1` for live count
 │       ├── conftest.py
 │       └── test_*.py           # Mirrors src/ layout
 │
@@ -201,7 +201,7 @@ The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **S
 - `src/cli_view.py` — Rich terminal table viewer for browsing jobs from the DB
 - `src/models.py` — `Job` dataclass with `normalized_key()` for dedup (strips company suffixes like Ltd/Inc/PLC and region suffixes like UK/US/EMEA, lowercases)
 - `src/core/settings.py` — All env vars, paths, `RATE_LIMITS` dict (50 entries, per-source), thresholds. Constants: `MIN_MATCH_SCORE=30`, `MAX_RETRIES=3`, `RETRY_BACKOFF=[1,2,4]`, `REQUEST_TIMEOUT=30`. (Phase-4 rename from `src/config/settings.py`.)
-- `src/core/keywords.py` — Default AI/ML keywords: `JOB_TITLES` (25), skills in 3 tiers (`PRIMARY_SKILLS` 15 / `SECONDARY_SKILLS` 17 / `TERTIARY_SKILLS` 11), `LOCATIONS` (26: 24 UK + Remote + Hybrid), `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS` (60 entries across 12 categories). `KNOWN_SKILLS` and `KNOWN_TITLE_PATTERNS` were removed in commit 3ba1342 — CV parsing is now LLM-only via `src/services/profile/llm_provider.py`. Used as fallback when no user profile exists.
+- `src/core/keywords.py` — **All AI/ML default lists were emptied on 2026-04-09 (commit `3ba1342`).** `JOB_TITLES`, `PRIMARY_SKILLS`, `SECONDARY_SKILLS`, `TERTIARY_SKILLS`, `RELEVANCE_KEYWORDS`, and `NEGATIVE_TITLE_KEYWORDS` are now all `[]` (the names are kept only for back-compat with existing imports). Only `LOCATIONS` (25 UK places + Remote + Hybrid) and `VISA_KEYWORDS` (8) remain, because they are domain-agnostic. **Consequence:** the system now *requires* a user profile — without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. CV parsing is LLM-only via `src/services/profile/llm_provider.py` (`KNOWN_SKILLS`/`KNOWN_TITLE_PATTERNS` also removed in 3ba1342).
 - `src/core/companies.py` — ATS company slugs (~268 companies total post-Batch-3; starter counts pre-expansion were Greenhouse 25, Lever 12, Workable 8, Ashby 9, SmartRecruiters 6, Pinpoint 8, Recruitee 8, Workday 15 dict-format, Personio 10, SuccessFactors 3 dict-format). Batch 3 added Rippling (5) + Comeet (5) as new platforms.
 - `src/services/profile/` — Dynamic user profile system:
   - `models.py` — `CVData` (includes linkedin_positions, linkedin_skills, github_languages, github_topics, github_skills_inferred fields), `UserPreferences` (includes github_username), `UserProfile`, `SearchConfig` dataclasses. `SearchConfig.from_defaults()` returns the hard-coded AI/ML keywords.
@@ -491,6 +491,37 @@ Both tables are **shared catalog** — no `user_id` column (rule #10).
 20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup` kwargs — callers must pass both or neither.** When only `user_preferences` is set (and `enrichment_lookup` is empty/None), the new dimension scorers (seniority/salary/visa/workplace) cannot read the structured enrichment data they need, and they fall back to zero — silently. The combined `match_score` then includes only the legacy 4 components plus four zero contributions, which looks identical to the legacy formula but is misleading because the dim columns suggest active scoring. Pass both kwargs (Step-1 Cohort B precedent in `main.py::run_search` and `workers/tasks.py::score_and_ingest`), or pass neither and accept the legacy formula explicitly. Defaults still fall back to legacy 4-component scoring when both kwargs are None — see rule #19.
 21. **Value-presence > schema-presence for any new engine-side field.** Step 1 shipped 9 per-dim score fields on `JobResponse` and a green test suite — every test only asserted the *fields exist*, not that they were *non-zero*. The serializer hard-coded zeros, the migration was missing, and nobody noticed for two batches (the "bombshell" Step 1.5 fixed). When you add a new engine-computed field that flows to the API, write a test that uses a real (or fixture) input through the end-to-end path and asserts the value is non-zero / non-null / not-the-default. Schema-presence tests (`assert "field" in body`) are necessary but insufficient — they pass against `field: int = 0` defaults and against a serializer that never reads the column. The value-presence test is the only one that catches the "the wiring is missing" class of regression. Pattern: `tests/test_database.py::test_dim_columns_round_trip` (DB-layer round-trip) + `tests/test_api.py::test_jobs_response_includes_score_dim_breakdown` (HTTP value-presence).
 22. **Frontend code that touches Next.js App Router patterns MUST consult Context7 docs before writing.** `frontend/AGENTS.md` states: *"This is NOT the Next.js you know — APIs, conventions, and file structure may differ from your training data."* Training data for Next.js 14–15 is **not reliable** for Next.js 16 — breaking changes include: `params` in page/layout/generateMetadata is now `Promise<{ ... }>` and must be awaited; `"use client"` on `page.tsx` disables `generateMetadata` (it will silently not export); `searchParams` similarly async. Before introducing any App Router pattern (`generateMetadata`, server actions, route handlers, middleware, `params` destructuring, `useRouter`, `useSearchParams`, `usePathname`), run `mcp__plugin_context7_context7__query-docs` for `next.js` and read `frontend/node_modules/next/dist/docs/` for the current API. This is not optional — Step 2's server/client split caught this as a blocking issue mid-sprint.
+
+## Step-1 → Step-3 additions (engine→API seam + observability + notification UX)
+
+Work after Pillar 2 added five migrations and four API route modules not covered above. Migrations are managed by `backend/migrations/` and applied by `runner.py` (FastAPI boot auto-runs them).
+
+### New migrations (0010–0014)
+
+| Migration | Adds | Notes |
+|---|---|---|
+| `0010_run_log_observability` | `run_uuid`, `per_source_errors`, `per_source_duration`, `total_duration`, `user_id` on `run_log` | Per-run correlation + per-source timing/error telemetry. Surfaced via `/api/runs`. |
+| `0011_score_dimensions` | 9 per-dimension score columns on `jobs` (`role`, `skill`, `seniority_score`, `experience`, `credentials`, `location_score`, `recency`, `semantic`, `penalty`) | The Step-1.5 "bombshell" fix — columns the serializer + migration were missing (see rule #21). Shared catalog (no `user_id`). |
+| `0012_notification_rules` | `notification_rules` table (per-user per-channel: `score_threshold`, `notify_mode` instant/digest, quiet hours, `digest_send_time`) + `users.timezone` | Quiet-hours/digest are evaluated against `users.timezone` via stdlib `zoneinfo`. |
+| `0013_user_notification_digests` | `user_notification_digests` queue table | Holds per-(user,channel,job) rows until the digest send-time worker drains them. |
+| `0014_application_history` | `application_stage_history` table + `last_advanced_at`, `interview_dates` (JSON), `notes_history` (JSON) on `applications` | Full pipeline stage-transition audit + interview-date tracking. |
+
+### New API route modules
+
+- `src/api/routes/auth.py` — `/api/auth/*` (register, login, logout, me, change password/email, soft-delete). Argon2id + signed-cookie sessions (Batch 2).
+- `src/api/routes/channels.py` — `/api/settings/channels/*` (Fernet-encrypted Apprise channel CRUD + test-send).
+- `src/api/routes/notifications.py` — `GET /api/notifications` (paginated ledger, filterable) + `GET /api/notifications/stats` (per-channel aggregation).
+- `src/api/routes/notification_rules.py` — `/api/settings/notification-rules` CRUD (upsert by user+channel; IDOR-safe).
+- `src/api/routes/runs.py` — `GET /api/runs` recent-run history backed by the `0010` observability columns.
+
+### Pillar architecture reference
+
+A code-verified deep-dive on the three architectural pillars (User / Search-Match Engine / Job Providers) lives in `docs/pillars/` — `README.md` (cross-pillar index + status snapshot), `01-user-pillar.md`, `02-search-and-match-engine.md`, `03-job-providers.md`. Read these for the big-picture data flow; read this CLAUDE.md for the rules.
+
+### Additional CLAUDE rules
+
+23. **Multi-dim weights total 30 on top of the legacy 100.** `SALARY_WEIGHT` (10) + `SENIORITY_WEIGHT` (8) + `VISA_WEIGHT` (6) + `WORKPLACE_WEIGHT` (6) are added to the legacy 4-component sum, then the whole thing is clamped to [0, 100]. The raw max is 130 — the clamp is load-bearing, never remove it.
+24. **Notification quiet-hours/digest logic reads `users.timezone`.** When adding notification-timing features, evaluate windows in the user's zone (stdlib `zoneinfo`), not UTC or server-local. The default is `'UTC'` (migration `0012`).
 
 ## Related Documentation
 
