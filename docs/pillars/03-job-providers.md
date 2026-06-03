@@ -24,6 +24,143 @@ So: **49 classes → 50 registry keys → 49 instances.** The single fork is Ind
 
 ---
 
+## Walkthrough — One source's fetch cycle (worked example)
+
+> Trace exactly what happens from the scheduler deciding it's time to poll `greenhouse` to a `Job` row landing back in the orchestrator. Uses Greenhouse because it's the cleanest of the ATS sources, but the same shape applies to all 49.
+
+### T+0 — Scheduler decides
+
+Inside `TieredScheduler.tick()`:
+
+1. `now = 2026-05-28T14:30:00Z`. The scheduler iterates its sources.
+2. For `greenhouse`: `category="ats"` → `TIER_INTERVALS_SECONDS["ats"] = 60` seconds.
+3. `last_tick_at = 14:29:00` (one minute ago). `now - last_tick_at = 60 s` ≥ 60 s → **due**.
+4. `default_registry().get("greenhouse").can_proceed()` — breaker state is `CLOSED` → ✅ proceed.
+5. The source is added to the `asyncio.gather()` batch.
+
+### T+0 — Source `__init__`
+
+The instance was built earlier in `_build_sources()` with:
+
+```python
+GreenhouseSource(session=shared_aiohttp_session, search_config=alice_search_config)
+```
+
+In `BaseJobSource.__init__`:
+- `self._session = shared_aiohttp_session`
+- `self._search_config = alice_search_config` (so `self.relevance_keywords` returns Alice's dynamic keywords)
+- `RATE_LIMITS["greenhouse"] = {"concurrent": 2, "delay": 1.5}` → `RateLimiter(concurrent=2, delay=1.5)`
+- `ConditionalCache()` instantiated (unused by Greenhouse today — only `nhs_jobs_xml` opts in)
+
+### T+0 — `fetch_jobs()` runs
+
+```python
+async def fetch_jobs(self) -> list[Job]:
+    jobs = []
+    for slug in GREENHOUSE_COMPANIES:        # ~80 slugs
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        data = await self._get_json(url)     # all retry/rate-limit machinery
+        if not data:
+            continue
+        for posting in data.get("jobs", []):
+            ...                              # build Job(...)
+            jobs.append(job)
+    return jobs
+```
+
+Each `_get_json(url)` call goes through `_request()`:
+
+1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 80 companies; 1.5 s minimum delay between acquisitions.
+2. `aiohttp.GET(url, timeout=30)`.
+3. Response handling:
+   - `200` → `response.json()`, return.
+   - `429` → read `Retry-After` (capped 60 s), sleep, retry. Up to 3 attempts.
+   - `401/403/404/422` → `return None` immediately (no retries — auth/not-found won't fix on retry).
+   - Other 4xx/5xx → sleep `RETRY_BACKOFF[attempt]` (1/2/4 s), retry up to 3×.
+   - `aiohttp.ClientError` / `TimeoutError` / `JSONDecodeError` → same backoff retry.
+4. `self._rate_limiter.release()` in `finally`.
+
+For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like:
+
+```json
+{
+  "jobs": [
+    {"id": 12345, "title": "Senior Python Engineer",
+     "location": {"name": "London, UK"},
+     "absolute_url": "https://boards.greenhouse.io/acme-corp/jobs/12345",
+     "content": "&lt;p&gt;We're hiring...&lt;/p&gt;",
+     "updated_at": "2026-05-28T09:00:00Z"},
+    ...
+  ]
+}
+```
+
+### T+0 — Per-posting transformation
+
+For each upstream posting, the source builds a canonical `Job`:
+
+```python
+job = Job(
+    title=posting["title"],
+    company="acme-corp",  # or via COMPANY_NAME_OVERRIDES → "Acme Corp"
+    apply_url=posting["absolute_url"],
+    source="greenhouse",
+    location=posting.get("location", {}).get("name", ""),
+    description=_strip_html(posting["content"]),  # raw HTML → text
+    date_found=now_iso(),
+    posted_at=posting.get("updated_at"),           # high-confidence date
+    date_confidence="high",
+)
+```
+
+Two things the `Job.__post_init__` does automatically:
+- HTML-unescapes title + company (`&amp;` → `&`).
+- Sanitises salary fields (none here, but if present: `<10k → None`, `>500k → None`).
+
+### T+0 — Return + scheduler post-processing
+
+`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 80 companies.
+
+Back in `TieredScheduler.tick()`:
+
+```python
+results = await asyncio.gather(*coros, return_exceptions=True)
+for source, result in zip(sources, results):
+    if isinstance(result, Exception):
+        registry.get(source.name).record_failure()
+        log.warning(f"source={source.name} failed: {result}")
+    else:
+        registry.get(source.name).record_success()
+```
+
+`record_success()` resets `consecutive_failures = 0`, state stays `CLOSED`. If five `record_failure()`s in a row had happened: `state = OPEN`, `opened_at = now()`. After 300 s `can_proceed()` would promote to `HALF_OPEN` for a probe call.
+
+### T+0 — Hand-off to orchestrator
+
+`run_search()` collects all sources' returns into `all_jobs: list[Job]` and proceeds to Pillar 2 stages 2–6 (prefilter → score → dedup → enrich → store). See Pillar 2 §2 for that side.
+
+### What ran in parallel
+
+For one tick of the scheduler:
+
+- ~10 ATS sources (each with 5–80 slugs) firing in parallel batches limited by their per-source `concurrent` rate-limiter.
+- A mix of keyed/free APIs/RSS feeds also dispatched if their tier intervals elapsed.
+- Each source's HTTP calls are serialised at the source level by the semaphore but parallel across sources.
+- Total wall-clock: typically 30–120 s depending on the slowest source.
+
+### A more interesting variant — a misbehaving source
+
+If LinkedIn's HTML regex breaks because they changed markup:
+
+1. `linkedin.fetch_jobs()` raises an exception inside one of its regex parses.
+2. The exception propagates out (not caught by `_request()` — that handles HTTP layer only).
+3. `asyncio.gather(return_exceptions=True)` captures it.
+4. `breaker.record_failure()` → `consecutive_failures = 1`. After 5 ticks of this it'd flip to OPEN.
+5. The orchestrator's run log shows `per_source_errors["linkedin"] = 1`, `per_source_duration["linkedin"] = 0.2`.
+6. Engineer's first stop: `grep "source=linkedin" data/logs/job360.log | tail -50` and the linkedin.py regex.
+
+---
+
 ## 2. The base class — `backend/src/sources/base.py`
 
 Every source extends `BaseJobSource`. **Never change this class without checking all 49 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
@@ -316,6 +453,50 @@ All five are currently aligned at **50**.
 - **`test_api.py`** — the three hardcoded `== 50` assertions.
 
 There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source tests live inline in `test_sources.py`.
+
+---
+
+## Environment variables — every var the Providers pillar reads
+
+Almost all are the keyed-source API credentials. The 43 free sources need no env at all.
+
+| Var | Required by | Default | What changes when you flip it |
+| --- | --- | --- | --- |
+| `REED_API_KEY` | `ReedSource` | (unset) | Reed `return []` silently when unset; logged at INFO |
+| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
+| `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
+| `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
+| `SERPAPI_KEY` (also accepted as `GOOGLE_JOBS_API_KEY`) | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP |
+| `CAREERJET_AFFID` | `CareerjetSource` | (unset) | Affiliate ID |
+| `FINDWORK_API_KEY` | `FindworkSource` | (unset) | Token auth |
+| `GITHUB_TOKEN` | (none directly, but used by `github_enricher` in Pillar 1) | (unset) | Anonymous GitHub API has 60 req/hr; token raises to 5000 |
+| `EIGHTYKHOURS_ALGOLIA_APP_ID` / `EIGHTYKHOURS_ALGOLIA_API_KEY` | `EightyKHoursSource` | hard-coded public keys | Allow override of the (public) Algolia search keys 80,000 Hours embeds in their site |
+| (per-source rate-limit knobs) | All sources | from `RATE_LIMITS` dict in `settings.py` | Not env-configurable; edit code |
+
+> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with an `INFO` log line. The pipeline never errors — sources just don't contribute.
+
+---
+
+## Failure modes — when things go wrong
+
+| Symptom | Most likely cause | Where it surfaces | Fix |
+| --- | --- | --- | --- |
+| One source returns 0 jobs every run | (1) Env var unset for keyed source; (2) HTML markup change for scraper; (3) breaker stuck OPEN within the process | Source's `INFO` log + missing entries in `run_log.per_source` | Decision tree: check env, then `grep "source=X" data/logs/job360.log` for exceptions, then restart process to reset breaker |
+| LinkedIn returns 0 jobs / 403 | Anti-scrape throttle hit, or markup changed | `linkedin.py` regex returns no matches | Inspect a fresh response by hand; adjust regex; the source pattern is brittle by design (rule #8 acknowledges this) |
+| Workday job count drops by 80%+ | One tenant's URL config (in `WORKDAY_COMPANIES` dict) became wrong | Per-tenant fetch fails | `WORKDAY_COMPANIES` slugs are dicts (`{tenant, wd, site, name}`) — the dict shape needs all four right; companies sometimes change tenant subdomains silently |
+| `jobspy` import errors at startup | `python-jobspy` not installed (it's an *optional* dep) | Indeed/Glassdoor source skipped at warning level | Either `pip install python-jobspy` to enable, or leave it — source skips cleanly |
+| ATS source skipping companies | One company slug deleted their board upstream → 404 → `_request()` returns None → that slug is silently skipped | Run log shows lower count than expected | Audit `companies.py` slugs against the live ATS — periodically expected, no fix needed unless it's a key company |
+| Source returns mostly non-UK jobs that get filtered | `_is_uk_or_remote()` doing its job — source is intrinsically global (Arbeitnow, RemoteOK) | Most fetched jobs dropped between `fetch_jobs()` return and dedup | Working as intended; this is the cost of including global remote boards |
+| Rate-limit 429 spirals | Source's `delay` too aggressive vs upstream quota | Repeated `429` retries with `Retry-After` headers | Increase the source's `RATE_LIMITS[name]["delay"]` and reduce `concurrent` |
+| Source returns duplicate jobs across runs | Upstream pagination returning the same page; or the source isn't honouring date cursor | DB UNIQUE on `(normalized_company, normalized_title)` quietly dedups | Working as intended at the storage layer, but it wastes fetch budget — fix the source's pagination |
+| Conditional-fetch cache never hits for a source | The upstream doesn't return `ETag` or `Last-Modified` headers (most don't) | `cache.get_metrics()` shows misses but no hits for this source | This is expected — rule #14 says conditional fetch only helps for upstreams that honour validators. Don't opt in unless they do |
+| New source added but pipeline doesn't pick it up | Forgot one of the FIVE load-bearing surfaces (rule #13) | `test_cli.py` or `test_api.py` assertion failure | Update: `SOURCE_REGISTRY` + `_build_sources()` + `RATE_LIMITS` + `test_cli` + `test_api` — all five |
+| Domain-filtered source still appearing | Source's `.DOMAINS = {"general"}` (default) — it's included for every user | Pillar 2 domain filter only excludes sources whose DOMAINS are strictly outside the user's | Set `.DOMAINS = {"healthcare"}` etc. on the source class if it shouldn't be general |
+| Posting has `date_confidence="low"` | Source doesn't expose a real `posted_at`, only `date_found` (when *we* saw it) | Recency score capped at 60% of band | Working as intended (anti-fabrication signal); upgrade by parsing the upstream's actual post-date field if it exists |
+| Source fetch hangs for >30 s | One upstream is dragging; `REQUEST_TIMEOUT=30` should kick in | Eventually `TimeoutError` → retry → after 3 attempts source returns partial result | Working as intended; if persistent, lower `REQUEST_TIMEOUT` for that source via per-source override or accept the latency |
+| `JobSpy` (Indeed/Glassdoor) returns weird results | Upstream Indeed/Glassdoor changed; `python-jobspy` library lagging | Both `indeed` and `glassdoor` registry keys affected (they share the class) | Upgrade `python-jobspy`; this is a third-party dependency we don't control |
+
+For operational queries (test one source in isolation, inspect breaker state, reset rate limits), see [`runbook.md`](./runbook.md). For unfamiliar terminology (ATS, RSS, Algolia, JobSpy, normalized_key), see [`glossary.md`](./glossary.md).
 
 ---
 

@@ -2,11 +2,18 @@
 
 Job360 is built as three architectural pillars. This folder documents each one from the code up — what it does, how it works, and where it stands today.
 
-| # | Pillar | What it owns | Doc |
+| # | Pillar / Doc | What it owns | Doc |
 | --- | --- | --- | --- |
 | 1 | **User Side** | Identity, profile (CV/LinkedIn/GitHub), per-user delivery (feed, channels, notifications, pipeline), the Next.js dashboard | [`01-user-pillar.md`](./01-user-pillar.md) |
 | 2 | **Search & Match Engine** | The 6-stage pipeline: fetch → prefilter → score → dedup → enrich → store. Scoring, embeddings, retrieval, scheduler, breakers | [`02-search-and-match-engine.md`](./02-search-and-match-engine.md) |
 | 3 | **Job Providers** | The 49 source classes, the shared `BaseJobSource`, the ATS company catalog, the Batch-3 roster | [`03-job-providers.md`](./03-job-providers.md) |
+| — | **Glossary** | Plain-English definition of every domain term used across the three pillar docs | [`glossary.md`](./glossary.md) |
+| — | **Runbook** | "I see a problem, what do I do?" — operational answers across all three pillars (DB queries, debug commands, error→fix table) | [`runbook.md`](./runbook.md) |
+
+Each pillar doc also has three "manual" sections inside it:
+- A **walkthrough** (worked example) early — Pillar 1 traces one user (Alice) from signup to notification; Pillar 2 traces one posting through all 6 engine stages with a final score of 93; Pillar 3 traces one source's fetch cycle with breaker + retry behaviour.
+- **Environment variables** — every env var that pillar reads with default + effect.
+- **Failure modes** — symptom → cause → fix table for the most common breakages.
 
 ## How the pillars connect
 
