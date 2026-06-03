@@ -43,6 +43,150 @@ What survives in `keywords.py`: only `LOCATIONS` (25 UK places) and `VISA_KEYWOR
 
 ---
 
+## Walkthrough — Trace one posting through the engine (worked example)
+
+> A concrete trace through all six stages with one made-up but realistic posting and one made-up user profile. Every step shows the numeric output you'd see in the DB, so you can sanity-check the formula on the way through.
+
+### The inputs
+
+**Posting (returned by `GreenhouseSource.fetch_jobs()` from company `acme-corp`):**
+
+```python
+Job(
+    title="Senior Python Engineer",
+    company="Acme Corp Ltd",
+    apply_url="https://boards.greenhouse.io/acme-corp/jobs/12345",
+    source="greenhouse",
+    location="London, UK (Hybrid)",
+    description="We're hiring a senior backend engineer. Required: Python, AWS, "
+                "Docker. Bonus: Kubernetes, PostgreSQL. 5+ years experience. "
+                "£70k–£90k. We sponsor visas.",
+    date_found="2026-05-28T14:30:00Z",
+    posted_at="2026-05-28T09:00:00Z",
+    date_confidence="high",
+)
+```
+
+**User profile (Alice):**
+
+```python
+UserPreferences(
+    target_job_titles=["Senior Python Engineer", "Staff Engineer"],
+    additional_skills=["python", "aws", "docker", "postgres"],
+    preferred_locations=["London", "Remote"],
+    salary_min=60000, salary_max=100000,
+    work_arrangement="remote",  # she prefers fully remote
+    experience_level="senior",
+    needs_visa=False,
+    preferred_workplace="remote",
+)
+```
+
+`generate_search_config(profile)` produces a `SearchConfig` with `job_titles=["Senior Python Engineer", "Staff Engineer"]`, primary skills `["python", "aws", "docker"]`, locations `["London", "Remote", ...]`, etc.
+
+### Stage 1 — Fetch
+
+`TieredScheduler.tick()` saw `greenhouse.category="ats"` (60s tier) was due. Breaker `CLOSED` → dispatched. `GreenhouseSource.fetch_jobs()` iterated 80 company slugs, found this one among ~500 results, returned the `Job` above. `breaker.record_success()`.
+
+### Stage 2 — Prefilter (3 gates)
+
+`prefilter.passes_prefilter(alice_profile, job)`:
+
+| Gate | Logic | Outcome |
+| --- | --- | --- |
+| Location | `"london"` substring matches Alice's `preferred_locations[0]` | ✅ pass |
+| Experience | Job title contains `"senior"` → seniority `senior`; Alice is `senior` → diff 0 (≤ ±1) | ✅ pass |
+| Skill overlap | `"python"` and `"aws"` and `"docker"` in title+description match Alice's `additional_skills` | ✅ pass |
+
+Survives. Goes to scoring. (Per blueprint §2, ~99% of jobs are eliminated *before* this point.)
+
+### Stage 3 — Score (9-dim `ScoreBreakdown`)
+
+`scorer.score(job)` — `scorer` was instantiated as `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)`, so all 9 dims activate (rule #20).
+
+**Classic 4 components:**
+
+| Component | Calculation | Score |
+| --- | --- | --- |
+| Title | Exact match against `search_config.job_titles[0]` ("Senior Python Engineer") | **40** / 40 |
+| Skill | title+desc grep with `aliases_for()` expansion: `python` (primary +3), `aws` (primary +3), `docker` (primary +3), `kubernetes` aka `k8s` (secondary +2), `postgres`→`postgresql` (tertiary +1) | **12** / 40 |
+| Location | "London, UK" matches `UK_TERMS` after alias normalisation | **10** / 10 |
+| Recency | `date_confidence="high"` + `posted_at` is today → full band | **10** / 10 |
+
+**Batch-2.9 multi-dim** (only fires because `user_preferences` + `enrichment_lookup` are both passed):
+
+Assume LLM enrichment ran and produced:
+
+```python
+JobEnrichment(
+    seniority="senior",
+    salary=SalaryBand(min=70000, max=90000, currency="GBP", frequency="annual"),
+    visa_sponsorship="yes",
+    workplace_type="hybrid",
+    employment_type="full_time",
+    ...
+)
+```
+
+| Dim | Calculation | Score |
+| --- | --- | --- |
+| seniority_score | Both ranked `senior` → diff 0 → full weight | **8** / 8 |
+| salary_score | Job £70–90k overlaps Alice's £60–100k entirely (band overlap ratio = 1.0) | **10** / 10 |
+| visa_score | Alice `needs_visa=False` → irrelevant → 0 (not a penalty, just absent) | **0** / 6 |
+| workplace_score | Job `hybrid` vs Alice `remote` → 50% compromise | **3** / 6 |
+
+**Penalties / gates:**
+
+- Title-gate check: 40 ≥ 6 (MIN_TITLE_GATE × 40) ✓
+- Skill-gate check: 12 ≥ 6 (MIN_SKILL_GATE × 40) ✓
+- Negative title keywords: none present → no –30
+- Foreign location: "London, UK" doesn't match `FOREIGN_INDICATORS` → no –15
+
+**Sum:** 40 + 12 + 10 + 10 + 8 + 10 + 0 + 3 = **93**, clamped to [0, 100] → **`match_score = 93`**.
+
+The 9 dim columns on the `jobs` row look like: `role=40, skill=12, location_score=10, recency=10, seniority_score=8, salary_score=10 [stored to salary column in actuality], visa_score=0, workplace_score=3, semantic=0, penalty=0, match_score=93`.
+
+### Stage 4 — Dedup (4 layers)
+
+For each layer the deduplicator asks: is there another job that should collapse into this one?
+
+| Layer | Behaviour for this posting |
+| --- | --- |
+| 1. Exact `normalized_key` | `(_normalize_title("Senior Python Engineer"), normalize("Acme Corp Ltd"))` → `("python engineer", "acme")` (after stripping "senior" prefix and "Ltd" suffix). No other job has the same key → no merge |
+| 2. RapidFuzz (≥80/85) | No similar-titled jobs at the same company in this run → no merge |
+| 3. TF-IDF cosine (≥0.85) | Document `"acme | senior python engineer | we're hiring a senior backend ..."`. No 0.85+ neighbour → no merge |
+| 4. Embedding repost (opt-in, requires `SEMANTIC_ENABLED=true` + `enable_embedding_repost=True`) | Skipped by default |
+
+Survives unchanged.
+
+### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
+
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=60` → eligible. The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+
+### Stage 6 — Store
+
+`db.insert_job(job)` does `INSERT OR IGNORE` on `UNIQUE(normalized_company, normalized_title)`:
+- New row → returns `True`; the 9 dim columns and `staleness_state='active'` and `first_seen_at=now()` are persisted.
+- Cross-run duplicate → returns `False`; `last_seen_at` is bumped instead.
+
+If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), `VectorIndex.upsert(job_id, vector)` writes to ChromaDB at `data/chroma/`, audit row in `job_embeddings(job_id, model_version, embedding_updated_at)`.
+
+`db.log_run(stats, run_uuid, per_source_errors={...}, per_source_duration={greenhouse: 12.4}, total_duration=68.2)` writes the run row (migration `0010`).
+
+### What Alice's worker sees
+
+When `score_and_ingest(ctx, job_id=<this>, users=[alice])` runs (whether immediately under ARQ, or on next CLI pass):
+
+1. Re-scores **for Alice specifically** (same scorer, same 93).
+2. `FeedService.upsert_feed_row(alice.id, job.id, 93, bucket="24h")`.
+3. 93 ≥ Alice's email rule threshold of 80 → enqueues `send_notification(alice.id, job.id, "instant")`. (See Pillar 1 walkthrough for what happens next.)
+
+### Why this trace matters
+
+If you change anything in the engine — a weight, a threshold, an enum value — this same trace tells you what should still come out. Re-running it mentally is the fastest sanity check before opening tests.
+
+---
+
 ## 2. The Orchestrator — `backend/src/main.py::run_search()`
 
 The 6 stages live inside one async function (`main.py:321-690`). Walking it from top to bottom:
@@ -355,6 +499,54 @@ Heavy deps are *only* imported inside the functions that need them:
 - `sklearn` — in `deduplicator._merge_tfidf()`
 
 A top-level import would pay the cost on every pytest collection, every CLI invocation, every API process. The pattern is non-negotiable.
+
+---
+
+## Environment variables — every var the engine reads
+
+Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goes into the final clamp at 130-max-pre-clamp (rule #23).
+
+| Var | Default | What it controls | Effect of changing |
+| --- | --- | --- | --- |
+| `MIN_MATCH_SCORE` | `30` | Jobs below this score are omitted from the user's feed entirely | Raise to be stricter (fewer results), lower for permissive feed |
+| `MIN_TITLE_GATE` | `0.15` (= 6 pts of 40) | Title-component floor; below it the whole score collapses to suppression | Raise to require closer title matches; lower to admit weaker title alignments |
+| `MIN_SKILL_GATE` | `0.15` (= 6 pts of 40) | Skill-component floor; same collapse behaviour | Same as above for skill alignment |
+| `SALARY_WEIGHT` | `10` | Salary dimension max (Batch 2.9) | Raise to weight salary fit more heavily in final score |
+| `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
+| `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
+| `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
+| `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
+| `ENRICHMENT_ENABLED` | `false` | Master switch for LLM enrichment + multi-dim activation | Flip on after setting LLM keys — see rule #18 |
+| `SEMANTIC_ENABLED` | `false` | Master switch for embeddings + ChromaDB + hybrid retrieval + ESCO | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
+| `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
+| `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
+| `GROQ_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Cerebras |
+| `CEREBRAS_API_KEY` | (unset) | Third-choice LLM | All three unset → enrichment + LLM-CV-parse both raise `RuntimeError` |
+| Source-keyed APIs (`REED_API_KEY`, `ADZUNA_APP_ID`+`ADZUNA_APP_KEY`, `JSEARCH_API_KEY`, `JOOBLE_API_KEY`, `SERPAPI_KEY`, `CAREERJET_AFFID`, `FINDWORK_API_KEY`) | (unset) | The 7 keyed sources from Pillar 3 | Each unset source `return []` silently (logged at INFO) |
+
+> Tuning recipe — *"feed too noisy"*: raise `MIN_MATCH_SCORE` (e.g. 40), or raise `MIN_TITLE_GATE`/`MIN_SKILL_GATE` (e.g. 0.25). *"Feed too sparse"*: lower the same, or expand `additional_skills` on the user profile (cheaper than tuning). *"Want more weight on salary fit"*: bump `SALARY_WEIGHT` to 15, but watch the [0,100] clamp — rule #23.
+
+---
+
+## Failure modes — when things go wrong
+
+| Symptom | Root cause | Where it surfaces | Fix |
+| --- | --- | --- | --- |
+| All scores are 0 / suspiciously low | No user profile loaded → `score_job()` legacy path firing against empty `keywords.py` | `match_score` column near 0 for every row | Run `setup-profile`. The "empty keywords.py" inflection from 2026-04-09 means a profile is mandatory now |
+| 9-dim columns populated but all zero except classic 4 | Only `user_preferences` passed, not `enrichment_lookup` (rule #20 footgun) | DB inspection of `seniority_score`/`salary_score`/etc all zero despite enrichment rows existing | Confirm caller passes both kwargs; `main.py:389` and `workers/tasks.py::score_and_ingest` show the correct pattern |
+| Enrichment never runs | `ENRICHMENT_ENABLED=false` (default), or all 3 LLM providers unset, or score never crosses `ENRICHMENT_THRESHOLD` | `job_enrichment` table stays empty | Check the three preconditions in that order |
+| Enrichment runs but every row is `category="other"` etc | LLM returning generic enum values; the validation loop converged on weak output | `SELECT category, COUNT(*) FROM job_enrichment GROUP BY category` shows skewed dist | Prompt-engineering territory — see `job_enrichment.py` system prompt; try forcing Gemini-only by unsetting the others |
+| Cross-encoder rerank takes too long | First call on each process initialises the model (~2 s download + load) | API request latency spike | Pre-warm via a startup hook, or accept the cold-start cost once per worker process |
+| ChromaDB query returns 0 even with `SEMANTIC_ENABLED=true` | Collection empty (`VectorIndex.count() == 0`) — embeddings never built | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate. To force re-embed: `rm -rf data/chroma/` and re-run |
+| `nightly_ghost_sweep` marks healthy jobs as `confirmed_expired` | Source returned 0 results for N consecutive runs (e.g. credentials lapsed silently) | Users start getting 410s on real apply links | Check the source's run_log entries; if the source has been failing, the sweep is doing the right thing — fix the source first |
+| Circuit breaker stays OPEN forever | Per-source `failure_threshold` (5) hit; cooldown is per-process | Source skipped on every tick | Breakers are in-memory only — **restart the process** (CLI/API/worker) to reset |
+| Same job re-scored to a different value across two runs | Profile changed between runs (user updated prefs/CV) — expected behaviour | `match_score` differs in `jobs` row between runs | Not a bug. To audit which version of the profile produced a score, cross-reference `user_profile_versions.created_at` with `run_log.timestamp` |
+| Dedup is too aggressive — losing legit different roles | Layer-3 TF-IDF clustering too loose, or Layer-1 `_normalize_title` strips too much | Postings disappear that should appear separately | Inspect `_normalize_title()` regex; consider tightening the 0.85 cosine threshold via env override if exposed (currently hard-coded) |
+| LLM provider chain exhausts mid-batch | All 3 providers' free-tier quotas hit | `enrich_batch` logs per-job errors; `RuntimeError` raised per failing job (caught at batch level) | Wait for the daily quota reset; or top up a paid tier; the engine continues — only the enrichment column is null for those jobs |
+| Conditional fetch cache grows without bound | `ConditionalCache` is 256-entry FIFO; eviction is automatic | Memory stable around the bound | Not a failure — by design. To see hit/miss rates: `cache.get_metrics()` returns `{hits, misses, size}` |
+| `run_log.total_duration` >> sum of per_source_durations | Time is being spent in scoring/dedup/enrichment/store stages, not fetch | Run log row | Expected — sources run concurrently via `asyncio.gather`; serial post-stages dominate total |
+
+For operational queries (re-embed a specific job, inspect breaker state, drop the conditional cache), see [`runbook.md`](./runbook.md). For unfamiliar terminology, see [`glossary.md`](./glossary.md).
 
 ---
 
