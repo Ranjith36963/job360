@@ -1,0 +1,504 @@
+# Runbook — Operational Answers
+
+> **Audience.** Agents and operators answering "I see a problem — what do I do?" Each section below is a question phrased as a verb; the answer is a command, an SQL query, or a code pointer you can act on without first re-reading the pillar docs.
+>
+> Commands assume `cwd = backend/` and `source venv/bin/activate` unless noted. DB path defaults to `data/jobs.db`.
+
+---
+
+## 1. Daily check / "is everything healthy?"
+
+### See the last run
+
+```bash
+python -m src.cli status
+```
+
+### See the last 20 runs with per-source timing + errors
+
+```bash
+sqlite3 data/jobs.db \
+  "SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
+   FROM run_log ORDER BY timestamp DESC LIMIT 20;"
+```
+
+Same data is exposed at `GET /api/runs` (auth-gated).
+
+### List configured sources
+
+```bash
+python -m src.cli sources
+```
+
+### Browse recent jobs in the terminal
+
+```bash
+python -m src.cli view --hours 24 --min-score 50
+python -m src.cli view --visa-only
+```
+
+---
+
+## 2. Database — inspect, repair, migrate
+
+### Open the DB
+
+```bash
+sqlite3 data/jobs.db
+.headers on
+.mode column
+```
+
+### See what migrations have been applied
+
+```bash
+python -m migrations.runner status
+# or:
+sqlite3 data/jobs.db "SELECT * FROM _schema_migrations ORDER BY version;"
+```
+
+### Apply pending migrations (idempotent, safe to re-run)
+
+```bash
+python -m migrations.runner up
+```
+
+FastAPI boot auto-runs this — but the CLI doesn't. Run it manually before `python -m src.cli run` after pulling new code.
+
+### Roll a migration back (rare — destructive)
+
+```bash
+python -m migrations.runner down              # rolls back the latest only
+python -m migrations.runner down data/jobs.db # explicit DB path
+```
+
+### Show all tables
+
+```bash
+sqlite3 data/jobs.db ".tables"
+```
+
+### Inspect a specific table's schema
+
+```bash
+sqlite3 data/jobs.db ".schema user_feed"
+```
+
+---
+
+## 3. Users — inspect, fix, debug auth
+
+### See all users (use sparingly — PII)
+
+```sql
+SELECT id, email, created_at, deleted_at, timezone
+FROM users
+ORDER BY created_at DESC LIMIT 20;
+```
+
+### Find a user by email
+
+```sql
+SELECT * FROM users WHERE email = 'alice@example.com';
+```
+
+### Revoke all sessions for a user (force re-login)
+
+```sql
+DELETE FROM sessions WHERE user_id = '<uuid>';
+```
+
+### Soft-delete a user (preserves audit trail)
+
+```sql
+UPDATE users SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+WHERE email = 'alice@example.com';
+```
+
+The cookie-resolver excludes `deleted_at IS NOT NULL`, so the user is logged out immediately.
+
+### Look up a session cookie
+
+The cookie value is `<session_id>.<hmac>`. Strip the `.hmac` part and query:
+
+```sql
+SELECT user_id, expires_at, last_seen, ip_hash
+FROM sessions WHERE id = '<session_id_before_the_dot>';
+```
+
+---
+
+## 4. Profile — inspect, force-rebuild, restore
+
+### Where is a user's profile stored?
+
+Table `user_profiles` (current tip) + `user_profile_versions` (last-10 history).
+
+```sql
+SELECT user_id, version, source_action, created_at
+FROM user_profile_versions WHERE user_id = '<uuid>'
+ORDER BY version DESC;
+```
+
+### Dump a user's current profile
+
+```sql
+SELECT json_extract(profile_json, '$.cv_data.skills'),
+       json_extract(profile_json, '$.preferences.target_job_titles')
+FROM user_profiles WHERE user_id = '<uuid>';
+```
+
+### Restore an older profile version
+
+API: `POST /api/profile/versions/{version_id}/restore` (atomic; creates a new snapshot so history is preserved).
+
+### Force-rebuild from CLI for DEFAULT_TENANT_ID
+
+```bash
+python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin linkedin.pdf --github username
+```
+
+### Legacy JSON hydration
+
+If `data/user_profile.json` exists but no `user_profiles` row for `DEFAULT_TENANT_ID`, the first `load_profile()` call auto-imports it. Non-destructive — the JSON file stays.
+
+---
+
+## 5. Feed / user_feed — inspect & cascade
+
+### What's a user seeing today?
+
+```sql
+SELECT bucket, COUNT(*) AS n, MIN(score) AS min, AVG(score) AS avg, MAX(score) AS max
+FROM user_feed WHERE user_id = '<uuid>' AND status = 'active'
+GROUP BY bucket ORDER BY bucket;
+```
+
+### Why isn't a specific job in this user's feed?
+
+```sql
+-- Is it in the catalog at all?
+SELECT id, title, company, match_score, staleness_state FROM jobs WHERE id = <job_id>;
+
+-- Is it in this user's feed?
+SELECT score, bucket, status FROM user_feed WHERE user_id = '<uuid>' AND job_id = <job_id>;
+```
+
+If catalog-yes / feed-no, the prefilter dropped it for this user. Check user's `preferred_locations`, `experience_level`, `additional_skills` vs the job's location/seniority/skills.
+
+### Mark a job stale across every user (e.g. confirmed dead upstream)
+
+```python
+# from a python REPL with FeedService imported
+await feed_service.cascade_stale(job_id)
+```
+
+Or SQL:
+
+```sql
+UPDATE user_feed SET status = 'stale' WHERE job_id = <id> AND status = 'active';
+UPDATE jobs SET staleness_state = 'confirmed_expired' WHERE id = <id>;
+```
+
+---
+
+## 6. Channels & notifications
+
+### List a user's configured channels
+
+```sql
+SELECT id, channel_type, display_name, enabled FROM user_channels
+WHERE user_id = '<uuid>' ORDER BY id;
+```
+
+(Don't try to read `credential_encrypted` — Fernet ciphertext, needs `CHANNEL_ENCRYPTION_KEY` and `crypto.decrypt()`.)
+
+### Send a test notification
+
+`POST /api/settings/channels/{channel_id}/test` — the dispatcher decrypts, calls Apprise, returns `{ok, error}`.
+
+### See pending digest queue
+
+```sql
+SELECT user_id, channel, COUNT(*) AS queued
+FROM user_notification_digests WHERE sent = 0
+GROUP BY user_id, channel;
+```
+
+### Inspect notification history (with failure reasons)
+
+```sql
+SELECT created_at, channel, status, retry_count, error_message, job_id
+FROM notification_ledger WHERE user_id = '<uuid>'
+ORDER BY created_at DESC LIMIT 50;
+```
+
+Or via API: `GET /api/notifications?limit=50&status=failed`.
+
+### Reset a failed notification so the worker re-tries
+
+```sql
+DELETE FROM notification_ledger WHERE id = <ledger_id>;
+```
+
+The next worker pass will see no idempotency row and re-attempt.
+
+---
+
+## 7. Pipeline / applications
+
+### What stage is each application at?
+
+```sql
+SELECT stage, COUNT(*) FROM applications WHERE user_id = '<uuid>' GROUP BY stage;
+```
+
+### Stage transition history for one application
+
+```sql
+SELECT transitioned_at, from_stage, to_stage, notes
+FROM application_stage_history
+WHERE user_id = '<uuid>' AND job_id = <job_id>
+ORDER BY transitioned_at;
+```
+
+### Stalled applications (no movement in 7+ days)
+
+`GET /api/pipeline/reminders` — same query the dashboard uses.
+
+---
+
+## 8. Source debugging
+
+### Run *one* source in isolation
+
+```bash
+python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
+```
+
+`--dry-run` skips DB writes; `--source <name>` runs only that source.
+
+### A source returned 0 jobs — why?
+
+1. Confirm it ran: `grep "source=greenhouse" data/logs/job360.log | tail -20`
+2. Check the breaker state — if OPEN, the source was skipped:
+   ```python
+   # from a REPL
+   from src.services.circuit_breaker import default_registry
+   print(default_registry().snapshot())
+   ```
+3. If keyed (Reed/Adzuna/JSearch/Jooble/Google Jobs/Careerjet/Findwork), confirm the env var is set: `echo $REED_API_KEY`. Keyed sources `return []` silently when the key is empty.
+4. For an HTML scraper (LinkedIn/Workday/BCS/AIJobs/JobTensor), the upstream may have changed markup. Open the source file, find the regex, compare against a live response.
+
+### Force a circuit breaker back to CLOSED
+
+Breakers are in-memory only — restart the process (CLI or API) and the registry resets. No persistence layer.
+
+### A source returns the same jobs every run
+
+Likely the source's `posted_at` parsing is wrong → `date_confidence='low'` → recency score is low → not promoted. Inspect:
+
+```sql
+SELECT date_found, posted_at, date_confidence, date_posted_raw
+FROM jobs WHERE source = 'greenhouse' ORDER BY id DESC LIMIT 10;
+```
+
+---
+
+## 9. Scoring debugging
+
+### Why did Job#X score Y?
+
+The `jobs` table stores the per-dimension breakdown (migration `0011`):
+
+```sql
+SELECT title, company, match_score,
+       role, skill, location_score, recency,
+       seniority_score, experience, credentials, semantic, penalty
+FROM jobs WHERE id = <X>;
+```
+
+### Re-score everything against a new user profile
+
+CLI runs always re-score on each pass. The worker (`score_and_ingest`) re-scores when invoked per `(user, job)`. There's no "re-score all" admin command — re-run the full pipeline or call the worker function directly.
+
+### A user updated their profile — when does it take effect?
+
+- **Dashboard reads** use whatever's in `user_feed` *now* — old scores until the next score run.
+- **Worker re-scoring** happens for each new job ingested; existing feed rows aren't recomputed automatically.
+- To force a refresh: `await db.purge_user_feed(user_id)` (if you add such a helper) or run a CLI pass with the new profile.
+
+---
+
+## 10. Enrichment & embeddings (opt-in surfaces)
+
+### Is enrichment on?
+
+```bash
+echo "ENRICHMENT_ENABLED=$ENRICHMENT_ENABLED"
+echo "SEMANTIC_ENABLED=$SEMANTIC_ENABLED"
+```
+
+Both default `false`. Enabling either changes the code path materially — see Pillar 2 §5.
+
+### How many jobs have enrichment rows?
+
+```sql
+SELECT COUNT(*) FROM job_enrichment;
+SELECT COUNT(*) FROM jobs;   -- total catalog
+```
+
+### Manually enrich one job
+
+```python
+# from a REPL
+from src.services.job_enrichment import enrich_job
+enrichment = await enrich_job(job)  # raises RuntimeError on all-providers-fail
+```
+
+### ChromaDB persistent dir is corrupt — rebuild
+
+```bash
+rm -rf data/chroma/
+# next SEMANTIC_ENABLED run will recreate the collection and re-embed
+```
+
+Embeddings audit rows survive in `job_embeddings`; you'll need to clear that too if you want truly fresh:
+
+```sql
+DELETE FROM job_embeddings;
+```
+
+---
+
+## 11. Logs
+
+### Where are logs?
+
+`data/logs/job360.log` (rotating file handler) + console (formatted).
+
+### Bump log level for a single run
+
+```bash
+python -m src.cli run --log-level DEBUG
+```
+
+### Tail per-source activity
+
+```bash
+tail -f data/logs/job360.log | grep "source=greenhouse"
+```
+
+### Per-run correlation
+
+Every log line emitted during `run_search()` carries the run's `run_uuid` (set in a `contextvar`). Grep by uuid to see one run's entire timeline:
+
+```bash
+grep "run_uuid=abc123" data/logs/job360.log
+```
+
+---
+
+## 12. Tests
+
+### Run the full suite
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Live test count
+
+```bash
+python -m pytest --collect-only -q | tail -1
+```
+
+### Run one file or one test
+
+```bash
+python -m pytest tests/test_scorer.py -v
+python -m pytest tests/test_scorer.py::test_specific_function -v
+```
+
+### Run tests touching a specific source
+
+```bash
+python -m pytest tests/test_sources.py -v -k greenhouse
+```
+
+### Speed up local iteration
+
+```bash
+python -m pytest tests/test_X.py -x --ff   # stop at first fail, run failed first
+```
+
+---
+
+## 13. Frontend
+
+### Dev server
+
+```bash
+cd frontend && npm run dev    # localhost:3000
+```
+
+### Production build
+
+```bash
+cd frontend && npm run build && npm start
+```
+
+### Lint
+
+```bash
+cd frontend && npm run lint
+```
+
+### Where's the frontend's notion of "logged in"?
+
+It isn't — the session cookie is `HttpOnly`, so the JS never sees it. The frontend calls `GET /api/auth/me` on each protected page; a 401 redirects to `/(auth)/login?next=<current>`.
+
+---
+
+## 14. Production worker (ARQ + Redis)
+
+> Not required for CLI / read-only API usage. Only needed if you want background scoring and notification fan-out.
+
+### Start the worker
+
+```bash
+arq src.workers.settings.WorkerSettings
+```
+
+### Required env
+
+- `REDIS_URL` (default `redis://localhost:6379`)
+- All the LLM keys you want active (`GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`)
+- `CHANNEL_ENCRYPTION_KEY` (Fernet key) — fail-closed
+- `SESSION_SECRET` — fail-closed
+
+### Worker isn't picking up jobs
+
+1. Is Redis up? `redis-cli ping` → `PONG`.
+2. Is `REDIS_URL` set correctly in the worker's env? (Different from the API's env.)
+3. Check the worker's stdout — exceptions are logged there.
+
+---
+
+## 15. Common error → cause table
+
+| Error / symptom | Most likely cause | Fix |
+| --- | --- | --- |
+| `RuntimeError: SESSION_SECRET unset` on API boot | Env var missing | Set it in `.env` or shell; fail-closed by design |
+| `RuntimeError: CHANNEL_ENCRYPTION_KEY unset` | Same | Set it. Once set, **don't rotate** without a re-encryption migration |
+| `argon2.exceptions.InvalidHash` on login | DB password_hash got corrupted | Re-register the user; old hash is unrecoverable |
+| All 0-score jobs in `user_feed` | No user profile / empty `SearchConfig` | `setup-profile` or check `keywords.py` (empty defaults since 3ba1342) |
+| One source always fails | Likely auth/markup change | See §8 above; in worst case mark `enabled=False` (no such flag yet — comment out of `SOURCE_REGISTRY`) |
+| `ModuleNotFoundError: aiosqlite` | Backend deps not installed in this env | `pip install -e backend/` or `pip install -r backend/requirements.txt` |
+| Notification rule fires but no message arrives | Channel credential decrypted wrong, or Apprise URL malformed | `POST /api/settings/channels/{id}/test` to surface the error |
+| Pipeline shows "stalled" too aggressively | Default is 7-day threshold | Hard-coded in `pipeline.py` reminder logic — adjust there |
+| Hybrid retrieval returns 0 results | ChromaDB empty or `SEMANTIC_ENABLED=false` | Check `VectorIndex.count()`; if zero, re-ingest with the flag on |
+
+---
+
+*Last updated 2026-05-28. HEAD `cb52eb7`. Commands tested against the layout on `claude/job-logistics-pillars-docs-H9zcw`.*
