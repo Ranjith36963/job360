@@ -1,12 +1,13 @@
 # Job360 Project Status
 
-## Current State: Pillar 2 merged; Pillar 3 Batches 1 – 3.5.4 merged; Step-0 pre-flight underway
+## Current State: Pillar 2 + Pillar 3 + Step 0 → Step 3 all merged
 
-**Last updated:** 2026-04-23
-**Total tests:** 600 passing / 0 failing / 3 skipped (3.5.4 green baseline; Step-0 migration test to be added next)
-**Source files:** ~49 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 21+ test modules
-**Job sources:** 50 registered in `SOURCE_REGISTRY` post-Batch-3 rotation (added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet; dropped yc_companies, nomis, findajob). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `5fb3c07` on `main` (Pillar 2 post-review patch). Pillar-3 batches 1 / 2 / 3 / 3.5 / 3.5.1 / 3.5.2 / 3.5.3 / 3.5.4 merged on top.
+**Last updated:** 2026-05-28
+**Test count:** **1000+ test functions** across 30+ test files. (The hard-coded "600" you'll see in some older sections of this doc was the post-3.5.4 green baseline; run `cd backend && python -m pytest --collect-only -q | tail -1` for the live current number.)
+**Source files:** 49 source classes in `backend/src/sources/` split across 6 category subfolders (`apis_keyed/`, `apis_free/`, `ats/`, `feeds/`, `scrapers/`, `other/`).
+**Job sources:** 50 keys registered in `SOURCE_REGISTRY` (Batch-3 roster: added `teaching_vacancies`, `gov_apprenticeships`, `nhs_jobs_xml`, `rippling`, `comeet`; dropped `yc_companies`, `nomis`, `findajob`). `SOURCE_INSTANCE_COUNT = 49` (indeed+glassdoor share `JobSpySource`). See CLAUDE.md rule #13 for the FIVE load-bearing surfaces that move together on a registry change.
+**Latest merged head:** `a7a2268` on `main` (Step-3 dashboard polish merge, 2026-04-30). All of Pillar 2, Pillar 3 (Batches 1 → 3.5.4), Step 0 (pre-flight), Step 1 (engine→API seam), Step 1.5 (the "bombshell" fix for missing dim columns + serializer), Step 2 (server/client split), Step 3 (observability + notification UX + dashboard polish) merged on top.
+**Authoritative architecture reference:** `docs/pillars/` — three pillar manuals (User / Search & Match Engine / Job Providers) plus `glossary.md` + `runbook.md`. The Phase 1 / Phase 2 / Phase 2.5 tables below are *historical* (pre-Phase-4 folder layout — paths like `backend/src/profile/` no longer exist; current paths are `backend/src/services/profile/`, etc.).
 
 ---
 
@@ -102,33 +103,25 @@
 
 ---
 
-## What's Next (Step 0 → Step 1)
+## What's Done (Steps 0 → 3 all MERGED)
 
-**Step 0 — Pre-flight hardening (in progress, 2026-04-23):** the plan in
-`docs/step_zero_prompt.md` is being executed on `worktree-generator`. Tier-A
-items complete; Tier-B items partially landed (inspection scripts, fresh-clone
-DB fix, pre-commit install, setup.bat, bootstrap_dev smoke, migration 0010
-observability columns, `LOG_LEVEL` threading, `.env.example` groupings,
-frontend/backend READMEs, `docs/README.md` index, `.gitattributes`,
-`_TEST_NOW` determinism, CONTRIBUTING.md, `frontend/.env.local.example`,
-setup.sh pyproject/backend-data fix, docs/troubleshooting.md). Tier-B
-remaining: Makefile + `verify-step-0` + `check_env_example.py`, pytest-xdist
-+ fast marker, migrations runner `status` enhancement, down() migration
-integration test, this STATUS refresh, CLAUDE.md staleness sweep. Tier-C:
-mypy strict gate, log-rotation helper, README API-docs callout.
+**Step 0 — Pre-flight hardening — MERGED.** Tier A/B/C landed: inspection scripts, fresh-clone DB fix, pre-commit install, setup.bat, bootstrap_dev smoke, migration `0010_run_log_observability` (added `run_uuid` + per-source error/duration columns + `user_id`), `LOG_LEVEL` threading, `.env.example` groupings, frontend/backend READMEs, `docs/README.md` index, `.gitattributes`, `_TEST_NOW` determinism, CONTRIBUTING.md, `frontend/.env.local.example`, setup.sh pyproject/backend-data fix, docs/troubleshooting.md, Makefile + `verify-step-0` + `check_env_example.py`, pytest-xdist opt-in fast marker, migrations runner `status` command, down-migration integration test.
 
-**Step 1 — engine → API seam (next):** wire Pillar-2 multi-dim scoring
-(`JobScorer(config, user_preferences, enrichment_lookup)`) + hybrid
-retrieval (`retrieval.retrieve_for_user`) into the `/api/jobs` + `/api/search`
-HTTP routes, gated on the existing `SEMANTIC_ENABLED` / `ENRICHMENT_ENABLED`
-flags. Batch 2.7 hybrid mode currently exists only at module level; Step 1
-surfaces it to the dashboard. Target: one-flag flip in prod to activate the
-full Pillar-2 ranking stack for logged-in users.
+**Step 1 — engine → API seam — MERGED.** `JobScorer(config, user_preferences, enrichment_lookup)` wired into `run_search()` (`main.py:389`) and `score_and_ingest()` worker task; multi-dim scoring activates on both paths. `/api/jobs` + `/api/search` consult enrichment + dimension scores. Migration `0011_score_dimensions` added 9 per-dim columns to `jobs`.
 
-**After Step 1:** Pillar-3 Batch 4 launch readiness (scope-down to top 10-15
-sources, freemium metering, ICO £40 registration, privacy notice + LIA,
-ASA-compliant copy, Amazon SES, prod-Redis smoke). See the MEMORY notes for
-the carried-forward P3 items from Batch 3.5.
+**Step 1.5 — "bombshell" fix — MERGED.** The Step-1 ship had a bug: serializer hard-coded zeros for the new dim columns, the migration was missing, every test only asserted *fields exist* (not *values*). Step 1.5 added the migration, fixed the serializer, added round-trip tests at the DB layer + value-presence tests at the HTTP layer. Now codified as CLAUDE.md rule #21.
+
+**Step 2 — server/client split — MERGED.** Next.js 16 server pages (`generateMetadata` + JSON-LD SEO on `/jobs/[id]`) plus the client interactivity split. Caught the `params: Promise<...>` trap mid-sprint (now CLAUDE.md rule #22 and `frontend/AGENTS.md`).
+
+**Step 3 — observability + notification UX + dashboard polish — MERGED.** Migrations `0012` (per-channel notification rules + `users.timezone`), `0013` (digest queue), `0014` (application stage history + interview dates + notes versioning). New routes: `auth`, `channels`, `notifications`, `notification_rules`, `runs`. Three rounds of dashboard polish (B-1/2/3/6/7 + B-5/11 + B-4 + R-11 carry-forward). Notification ledger UI + per-channel stats + recent-runs view all live.
+
+## What's Next
+
+**Pillar-3 Batch 4 — launch readiness.** Scope-down to top 10–15 sources for first public release; freemium metering; ICO £40 registration; privacy notice + LIA; ASA-compliant copy; Amazon SES; prod-Redis smoke test. See MEMORY notes for carried-forward P3 items from Batch 3.5.
+
+**Pillar 2 advanced surfaces — production rollout decision.** `ENRICHMENT_ENABLED` and `SEMANTIC_ENABLED` are wired and tested but still default OFF (rule #18). Flipping them on in prod requires (a) LLM cost budgeting, (b) ChromaDB persistent-volume sizing, (c) re-embedding plan when the embedding model version changes. No engineering blocker; product/ops decision.
+
+**Doc maintenance — open.** The legacy "Phase 1 / Phase 2 / Phase 2.5" sections below this point use **pre-Phase-4 paths** (`backend/src/profile/`, `backend/src/filters/`, `backend/src/storage/`, `backend/src/notifications/`). They are preserved as a record of *what was built when*, not as current architecture. Read `docs/pillars/` for the current source-of-truth folder structure.
 
 ---
 
@@ -224,22 +217,27 @@ the carried-forward P3 items from Batch 3.5.
 ## Quick Verification
 
 ```bash
-# All tests pass
-python -m pytest backend/tests/ -v
+cd backend
 
-# Profile setup works (all enrichment sources)
-python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin export.zip --github username
+# Live test count
+python -m pytest --collect-only -q | tail -1
 
-# Pipeline with profile
+# Run the full suite
+python -m pytest tests/ -v -p no:randomly
+
+# Apply pending migrations (idempotent)
+python -m migrations.runner up
+python -m migrations.runner status
+
+# Profile setup (LinkedIn arg now takes a "Save to PDF" — not a Data Export ZIP)
+python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin linkedin-profile.pdf --github username
+
+# Pipeline with profile (the only meaningful mode post-2026-04-09)
 python -m src.cli run --dry-run --log-level DEBUG
-# Log: "Using dynamic keywords from user profile"
 
-# Pipeline without profile
-rm backend/data/user_profile.json
-python -m src.cli run --dry-run --log-level DEBUG
-# Log: "No user profile found, using default keywords"
-
-# Check source count
-python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"
-# Output: 50 (post-Batch-3 rotation)
+# Source count assertions
+python -c "from src.main import SOURCE_REGISTRY, SOURCE_INSTANCE_COUNT; print(f'registry keys: {len(SOURCE_REGISTRY)}, instances: {SOURCE_INSTANCE_COUNT}')"
+# Output: registry keys: 50, instances: 49
 ```
+
+**Note (post-3ba1342):** there is no longer a meaningful "pipeline without profile" path — `keywords.py` defaults are empty, so the legacy `score_job()` route scores against `[]` and returns near-zero scores for everything. Running the pipeline without first running `setup-profile` produces an empty `user_feed` for any logged-in user.
