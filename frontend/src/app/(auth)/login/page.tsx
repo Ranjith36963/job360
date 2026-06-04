@@ -77,6 +77,11 @@ function LoginForm() {
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "Signing in..." : "Sign in"}
       </Button>
+      <p className="text-center text-sm">
+        <Link href="/forgot-password" className="text-muted-foreground underline">
+          Forgot your password?
+        </Link>
+      </p>
     </form>
   );
 }

@@ -321,6 +321,34 @@ export async function me(): Promise<User | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Password reset (Phase −2 item A)
+// ---------------------------------------------------------------------------
+//
+// The request endpoint always returns 204 — no enumeration. Caller treats
+// "204" as "we'll email you if you have an account" regardless.
+//
+// The confirm endpoint returns 204 on success or 400 on any failure
+// (unknown / expired / used / soft-deleted-user). Backend deliberately
+// doesn't distinguish — would leak which tokens exist.
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await request<void>("/api/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<void> {
+  await request<void>("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Channel config (Batch 2)
 // ---------------------------------------------------------------------------
 

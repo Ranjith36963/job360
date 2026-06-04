@@ -19,6 +19,7 @@ from src.api.auth_deps import (
 from src.api.dependencies import get_db
 from src.core.settings import DB_PATH
 from src.repositories.database import JobDatabase
+from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
 
@@ -192,3 +193,68 @@ async def change_email(
     await db.update_user_email(user.id, str(req.new_email))
     response.delete_cookie(SESSION_COOKIE_NAME)
     return Response(status_code=204)
+
+
+# ── Phase −2-A: Password reset (forgot-password flow) ────────────────────────
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+def _frontend_origin() -> str:
+    """First entry from FRONTEND_ORIGIN (CORS allowlist) — used to build reset links."""
+    raw = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")
+    return raw.split(",")[0].strip()
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_request(req: PasswordResetRequest) -> Response:
+    """Initiate a password-reset email.
+
+    Always returns 204 regardless of whether the email is registered —
+    no-enumeration contract (per OWASP). The service layer logs the
+    distinction internally for ops.
+    """
+    await auth_password_reset.request_password_reset(
+        db_path=str(DB_PATH),
+        email=str(req.email),
+        frontend_origin=_frontend_origin(),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_confirm(
+    req: PasswordResetConfirmRequest,
+    response: Response,
+) -> Response:
+    """Validate the token and set the new password.
+
+    On success: 204, and every existing session for that user is revoked
+    (forces re-login on all devices — security best practice after reset).
+    The caller's session cookie is cleared too so the API response itself
+    can't accidentally land the caller into the just-reset account.
+
+    On failure: 400 with a generic message. We deliberately don't
+    distinguish unknown vs expired vs used vs deleted-user — that would
+    leak which tokens exist.
+    """
+    user_id = await auth_password_reset.confirm_password_reset(
+        db_path=str(DB_PATH),
+        raw_token=req.token,
+        new_password=req.new_password,
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired reset token",
+        )
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response

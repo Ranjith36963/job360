@@ -13,7 +13,9 @@
 ## At a glance
 
 ```
-Phase −1: Manual verification + bug-fix sprint        ← START HERE
+Phase −2: Build the verification-blocker set         ← INSERTED 2026-05-28
+      ↓ (1 week — must finish so Phase −1 verification can run end-to-end)
+Phase −1: Manual verification + bug-fix sprint
       ↓ (only after every user flow drives end-to-end and produces sensible output)
 Phase  0: ICO + privacy lead-time + repo cleanup
 Phase  1: Email backbone (SES)
@@ -26,6 +28,44 @@ Phase  7: Growth features
 ```
 
 Each box assumes the previous one has cleared its exit criterion. Skipping a phase or starting two in parallel without explicit dependency analysis is how launches break.
+
+> **Phase −2 vs Phase 2 — what's the difference?** Phase −2 is a tight subset of *verification blockers* — features without which Phase −1 cannot succeed. Phase 2 is the full auth-loop closure including session rolling renewal, MFA, OAuth — the rest of the auth surface that ships later. Same domain, different urgency.
+
+---
+
+## Phase −2 — Build the verification-blocker set
+
+**What.** Build the four missing features without which Phase −1 manual verification can't succeed end-to-end. Identified via systematic audit of all three pillar docs' status matrices on 2026-05-28.
+
+**Why.** The 1000+-test suite verifies code correctness given mocked inputs. Phase −1 verification requires *the SaaS to actually work* for a real human driving real user flows. Four documented gaps gate that:
+
+1. **Password reset** — Verification Section D ("forgot-password recovery") cannot pass. Any verification user who locks themselves out has no recovery path.
+2. **ARQ + Redis worker running locally** — Verification Section D ("notification arrives") cannot pass — `score_and_ingest` enqueues vanish silently until a worker process consumes them.
+3. **Email verification on registration** — Best built alongside #1 (shares token-email infrastructure). Not strictly a verification blocker but essential for SaaS shipping.
+4. **Per-source health visibility** — Without it, you can't tell during verification whether bugs are in scoring or in a silent source failure.
+
+**Time.** ~1 week of focused work. The auth pair (#1 + #3) takes ~1.5 days because they share token infrastructure. Worker dev runner is ~half day. Per-source health page is ~1 day. Buffer for testing + integration.
+
+### Items
+
+| # | Item | Effort | Files touched |
+| --- | --- | --- | --- |
+| A | **Password reset flow** — migration + token service + 2 routes + frontend page + email template | ~1 day | `migrations/0015_password_resets.up.sql`, `services/auth/tokens.py`, `services/auth/password_reset.py`, `services/auth/email_sender.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/forgot-password/page.tsx`, `frontend/src/app/(auth)/reset-password/page.tsx`, `tests/test_password_reset.py` |
+| B | **Email verification on registration** — migration + verification service + 2 routes + register-time hook + frontend confirm page | ~1 day | `migrations/0016_email_verification.up.sql`, `services/auth/email_verification.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/verify-email/page.tsx`, `tests/test_email_verification.py` |
+| C | **ARQ worker local-dev runner + docs** — docker-compose for Redis, Makefile target, README updates so a developer can spin up the worker in one command | ~half day | `docker-compose.dev.yml` or equivalent, `Makefile`, `backend/README.md`, `docs/pillars/runbook.md` (worker section) |
+| D | **Per-source health admin page** — backend route reading existing `run_log.per_source_errors` + `per_source_duration` columns (from migration `0010`), frontend admin page | ~1 day | `api/routes/admin.py` or extend `runs.py`, `frontend/src/app/admin/sources/page.tsx`, `tests/test_admin_source_health.py` |
+
+### Optional bundle (cheap to add while in this code)
+
+| # | Item | Effort | Why bundle |
+| --- | --- | --- | --- |
+| E | Brute-force lockout on `/api/auth/login` | half day | You're already in auth code |
+| F | Rippling + Comeet slug expansion (5 → 25 each) | half day | Source breadth helps Phase −1 verification feel realistic |
+| G | Notification dry-run preview before save | half day | Helps Phase −1's Section D testing |
+
+### Exit criterion ✋
+
+All four items A–D shipped, tests passing, manually smoke-tested by registering a user → forgetting password → resetting → verifying email → configuring a channel → triggering a notification → confirming it arrives → opening admin/sources to see source health. **Then move to Phase −1.**
 
 ---
 
@@ -325,6 +365,7 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 
 > Mark items done as they ship. When all items in a phase are done, mark the phase ✅ and proceed to the next.
 
+- [ ] **Phase −2** — Build the verification-blocker set
 - [ ] **Phase −1** — Manual verification + bug-fix sprint
 - [ ] **Phase 0**  — ICO + privacy lead-time + repo cleanup
 - [ ] **Phase 1**  — Email backbone (SES)
@@ -340,6 +381,7 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 ## Changelog
 
 - *2026-05-28* — Initial plan drafted. Eight phases (−1 through 7). Phase −1 added as the explicit pre-launch manual verification sprint after recognising the test suite alone doesn't prove feature correctness.
+- *2026-05-28* — Phase −2 inserted after systematic audit of all three pillar status matrices identified four verification-blocker features (password reset, ARQ worker dev runner, email verification, per-source health page) that must ship before Phase −1 can succeed. ~1 week of work; same tight feedback loop as Phase −1.
 
 ---
 
