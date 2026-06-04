@@ -349,6 +349,29 @@ export async function confirmPasswordReset(
 }
 
 // ---------------------------------------------------------------------------
+// Email verification (Phase −2 item B)
+// ---------------------------------------------------------------------------
+//
+// Resend requires a session — there's no public "resend by email" because
+// that lets an attacker spam any address. The verify endpoint takes the
+// token directly from the email link.
+
+export async function resendVerificationEmail(): Promise<void> {
+  await request<void>("/api/auth/verify-email/request", { method: "POST" });
+}
+
+export async function confirmEmailVerification(token: string): Promise<void> {
+  await request<void>("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
+  return await request<{ email_verified: boolean }>("/api/auth/me/email-verified");
+}
+
+// ---------------------------------------------------------------------------
 // Channel config (Batch 2)
 // ---------------------------------------------------------------------------
 

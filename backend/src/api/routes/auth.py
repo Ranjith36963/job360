@@ -19,6 +19,7 @@ from src.api.auth_deps import (
 from src.api.dependencies import get_db
 from src.core.settings import DB_PATH
 from src.repositories.database import JobDatabase
+from src.services.auth import email_verification as auth_email_verification
 from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
@@ -73,6 +74,16 @@ async def register(req: RegisterRequest, response: Response) -> UserResponse:
             )
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=user_id, secret=_secret())
     _set_session_cookie(response, cookie)
+    # Phase −2 item B: fire-and-forget verification email. SMTP failure
+    # never blocks registration (send_system_email returns False on error
+    # and we ignore the bool); the user can request another via
+    # POST /api/auth/verify-email/request when they're ready.
+    await auth_email_verification.request_email_verification(
+        db_path=str(DB_PATH),
+        user_id=user_id,
+        email=str(req.email),
+        frontend_origin=_frontend_origin(),
+    )
     return UserResponse(id=user_id, email=req.email)
 
 
@@ -258,3 +269,62 @@ async def password_reset_confirm(
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+# ── Phase −2-B: Email verification ───────────────────────────────────────────
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/verify-email/request", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email_request(
+    user: CurrentUser = Depends(require_user),
+) -> Response:
+    """Resend the verification email for the current user.
+
+    Requires an active session — there's no public 'resend by email
+    address' endpoint because that would let an attacker spam any
+    address. Repeated requests issue independently-valid tokens (any of
+    the unused ones works until its own expiry), so the user can't lock
+    themselves out by hitting resend twice.
+    """
+    await auth_email_verification.request_email_verification(
+        db_path=str(DB_PATH),
+        user_id=user.id,
+        email=user.email,
+        frontend_origin=_frontend_origin(),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/verify-email/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response:
+    """Validate token and mark the user's email verified.
+
+    No session required — the link in the email is the authentication
+    artefact. Returns 204 on success, 400 on any failure (generic to
+    prevent token-existence enumeration).
+    """
+    user_id = await auth_email_verification.confirm_email_verification(
+        db_path=str(DB_PATH),
+        raw_token=req.token,
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired verification token",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/email-verified")
+async def get_email_verified(
+    user: CurrentUser = Depends(require_user),
+) -> dict:
+    """Cheap read for the dashboard to render a 'verify email' banner."""
+    verified = await auth_email_verification.is_email_verified(
+        db_path=str(DB_PATH), user_id=user.id
+    )
+    return {"email_verified": verified}
