@@ -1,6 +1,10 @@
 # Job360
 
-Automated UK job search system supporting any professional domain. Aggregates jobs from 50 sources, scores them 0-100 against your profile (CV, LinkedIn, GitHub, or manual preferences), deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, Rich terminal table, and a Next.js frontend (backed by FastAPI). Without a profile, defaults to AI/ML job search.
+Automated UK job search system supporting **any professional domain**. Aggregates jobs from **49 source instances** (50 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+
+> **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
+
+> **For current architecture detail**: see [`docs/pillars/`](./docs/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
 
 ### API docs (auto-generated)
 
@@ -96,14 +100,20 @@ flowchart TD
 
 ## Features
 
-### Job Sources (48)
+### Job Sources (49 classes / 50 registry keys / 49 instances)
+
+> The reconciliation: 49 *class files* on disk → 50 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 49 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 50`).
+
 - **7 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully if no API key set
-- **10 free APIs**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, YC Companies — work without any configuration
-- **10 ATS boards**: Greenhouse (25), Lever (12), Workable (8), Ashby (9), SmartRecruiters (6), Pinpoint (8), Recruitee (8), Workday (15), Personio (10), SuccessFactors (3) — ~104 companies total
-- **8 RSS/XML feeds**: jobs.ac.uk, NHS Jobs, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs (6 UK unis), UK GOV FindAJob
+- **11 free APIs**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, Teaching Vacancies *(Batch 3)*, Gov Apprenticeships *(Batch 3)* — no auth required
+- **12 ATS boards** over ~266 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)*, Comeet *(Batch 3)*
+- **8 RSS/XML feeds**: jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs
 - **7 HTML scrapers**: LinkedIn (guest API), JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI
-- **5 other**: Indeed/Glassdoor (via python-jobspy, optional), HackerNews (Algolia), TheMuse, NoFluffJobs
-- **1 market intelligence**: Nomis (UK GOV vacancy statistics)
+- **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
+
+**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings).
+
+**Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/pillars/03-job-providers.md` §4.7.
 
 ### Profile System (any domain)
 - **CV parsing**: Upload PDF or DOCX, extracts skills, job titles, education, certifications
@@ -111,7 +121,7 @@ flowchart TD
 - **GitHub enrichment**: Fetch public repos, infer skills from languages and topics
 - **Interactive preferences**: Target titles, skills, locations, salary range, work arrangement
 - **Dynamic keywords**: Profile generates personalised search queries, relevance keywords, and scoring criteria
-- **Backward compatible**: No profile = same AI/ML search as before
+- **Profile required**: As of 2026-04-09 the keyword fallback lists are empty — `setup-profile` must run before the engine can produce meaningful scores
 
 ### Scoring (0-100)
 - **Title match** (0-40 pts) — exact match = 40, partial = 20, keyword overlap = 5 each
@@ -161,7 +171,7 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (600 passing (post-Step-0 pre-flight))
+### Testing (1000+ test functions — run `pytest --collect-only -q | tail -1` for live count)
 
 | Test file | Count | What it covers |
 |-----------|-------|----------------|
@@ -298,7 +308,7 @@ python -m src.cli sources
 
 **Total: 0-100** — minimum score threshold is 30 (configurable in `settings.py`)
 
-When a user profile is loaded, the scorer uses dynamic keywords from the profile instead of the default AI/ML keywords.
+The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-coded default keyword lists in `core/keywords.py` are empty since 2026-04-09 — a profile is mandatory for the engine to produce meaningful scores. The 4-component formula above runs alongside the **Batch-2.9 multi-dimensional scoring** (seniority + salary + visa + workplace, each weighted via env vars `SENIORITY_WEIGHT`/`SALARY_WEIGHT`/`VISA_WEIGHT`/`WORKPLACE_WEIGHT`) when `ENRICHMENT_ENABLED=true` and the user has filled in preferences. Final 9-field `ScoreBreakdown` documented in `docs/pillars/02-search-and-match-engine.md`.
 
 ## Notification Channels
 
@@ -412,7 +422,7 @@ job360/
 ## Testing
 
 ```bash
-# Run all 600 passing (post-Step-0 pre-flight)
+# Run the full test suite
 python -m pytest backend/tests/ -v
 
 # Run specific test file
@@ -422,7 +432,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-All 600 passing (post-Step-0 pre-flight) pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+The full test suite pass. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
 
 ## Output
 
