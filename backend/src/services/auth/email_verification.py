@@ -27,9 +27,11 @@ caller resends).
 """
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote as urlquote
 
 import aiosqlite
 
@@ -51,7 +53,13 @@ def _now_iso() -> str:
 def _build_verification_email(
     *, to_email: str, raw_token: str, frontend_origin: str
 ) -> tuple[str, str, str]:
-    link = f"{frontend_origin}/verify-email?token={raw_token}"
+    """Return ``(subject, text_body, html_body)`` for the verification email.
+
+    Post-review fix #4 — defense-in-depth HTML escaping. See sibling
+    helper in ``password_reset.py`` for the same rationale.
+    """
+    safe_token = urlquote(raw_token, safe="")
+    link = f"{frontend_origin}/verify-email?token={safe_token}"
     subject = "Verify your Job360 email address"
     text = (
         f"Welcome to Job360!\n\n"
@@ -62,16 +70,18 @@ def _build_verification_email(
         f"account won't be activated without confirmation.\n\n"
         f"— Job360"
     )
-    html = (
+    safe_email = html.escape(to_email)
+    safe_link = html.escape(link, quote=True)
+    html_body = (
         f"<p>Welcome to Job360!</p>"
-        f"<p>Please confirm that <strong>{to_email}</strong> is your "
+        f"<p>Please confirm that <strong>{safe_email}</strong> is your "
         f"email address by opening this link in the next 24 hours:</p>"
-        f"<p><a href=\"{link}\">{link}</a></p>"
+        f"<p><a href=\"{safe_link}\">{safe_link}</a></p>"
         f"<p>If you didn't sign up for Job360, ignore this email — the "
         f"account won't be activated without confirmation.</p>"
         f"<p>— Job360</p>"
     )
-    return subject, text, html
+    return subject, text, html_body
 
 
 async def request_email_verification(

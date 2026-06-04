@@ -20,13 +20,23 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
-from src.services.auth import email_verification, tokens
+from src.services.auth import email_verification, rate_limit, tokens
 from src.services.channels import crypto
 
 
 @asynccontextmanager
 async def _noop_lifespan(app):
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Rate-limit buckets are module-level — reset between tests to
+    prevent the second resend in one test from polluting the first
+    resend in the next test."""
+    rate_limit.reset_for_tests()
+    yield
+    rate_limit.reset_for_tests()
 
 
 @pytest.fixture

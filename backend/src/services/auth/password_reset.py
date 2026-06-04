@@ -18,9 +18,11 @@ Used-once enforced by the ``used_at`` column + the SQL guard in confirm.
 """
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote as urlquote
 
 import aiosqlite
 
@@ -44,9 +46,19 @@ def _build_reset_email(*, to_email: str, raw_token: str, frontend_origin: str) -
 
     Frontend URL composes ``raw_token`` as a query string parameter so the
     landing page can pre-fill the form.
+
+    Post-review fix #4 — defense-in-depth HTML escaping. EmailStr already
+    blocks angle brackets in the email local part, but ``frontend_origin``
+    comes from an env var and ``to_email`` from upstream pydantic. Escaping
+    here removes any possibility of HTML/JS injection in the HTML body
+    rendered by the recipient's mail client.
     """
-    link = f"{frontend_origin}/reset-password?token={raw_token}"
+    # URL-encode the token so e.g. a `&` mid-token doesn't break the
+    # query string. ``raw_token`` is base64url today, but be defensive.
+    safe_token = urlquote(raw_token, safe="")
+    link = f"{frontend_origin}/reset-password?token={safe_token}"
     subject = "Reset your Job360 password"
+    # Plain-text body — no escaping needed.
     text = (
         f"Hi,\n\n"
         f"We received a request to reset the password for the Job360 account "
@@ -57,17 +69,20 @@ def _build_reset_email(*, to_email: str, raw_token: str, frontend_origin: str) -
         f"your password will not change.\n\n"
         f"— Job360"
     )
-    html = (
+    # HTML body — escape all interpolated values.
+    safe_email = html.escape(to_email)
+    safe_link = html.escape(link, quote=True)  # also escapes " for href
+    html_body = (
         f"<p>Hi,</p>"
         f"<p>We received a request to reset the password for the Job360 "
-        f"account associated with <strong>{to_email}</strong>.</p>"
+        f"account associated with <strong>{safe_email}</strong>.</p>"
         f"<p>To reset your password, open this link within the next hour:</p>"
-        f"<p><a href=\"{link}\">{link}</a></p>"
+        f"<p><a href=\"{safe_link}\">{safe_link}</a></p>"
         f"<p>If you didn't request this, you can safely ignore the email — "
         f"your password will not change.</p>"
         f"<p>— Job360</p>"
     )
-    return subject, text, html
+    return subject, text, html_body
 
 
 async def request_password_reset(

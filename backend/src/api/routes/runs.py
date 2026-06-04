@@ -120,11 +120,23 @@ def _parse_json_dict(raw: Any) -> dict[str, Any]:
 def _classify(zero_streak: int, total: int, errored: int) -> str:
     """Map raw stats to a traffic-light.
 
-    Thresholds chosen for the verification-blocker use case: any source
-    that's been silent for 3+ consecutive runs is `critical`; any source
-    with an error rate >50% or a single very recent error is `warning`;
-    everything else is `ok`. Tunable later — for now this surfaces what
-    a human would notice anyway.
+    Three buckets, evaluated in order — the first match wins:
+
+    1. ``critical`` — at least 3 consecutive zero-job runs at the head
+       (most-recent first). Strong signal the source has stopped working.
+    2. ``warning`` — either of:
+         a. errored-run ratio > 50% across the window (source is failing
+            outright most of the time), OR
+         b. zero-job ratio ≥ 33% AND at least one zero-run streak at the
+            head (source is intermittently silent).
+    3. ``ok`` — anything else.
+
+    Note that a *single* errored run that isn't part of a wider pattern
+    won't trigger warning by itself — the >50% threshold is a sustained
+    failure signal, not a one-off blip. Phase −2 docstring was previously
+    misleading on this point; this is the post-review accurate spec.
+    Thresholds tunable later (rule #18-style env override is the natural
+    extension once we have multiple consumers).
     """
     if zero_streak >= 3:
         return "critical"
