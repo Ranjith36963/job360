@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean
+.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean redis-up redis-down worker
 
 help:
 	@echo "Job360 targets:"
@@ -21,6 +21,9 @@ help:
 	@echo "  verify-step-3    run the Step-3 new endpoints + Settings UI gate"
 	@echo "  migrate-roundtrip  test Step-3 migrations (0012-0014) down→up round-trip"
 	@echo "  verify-batch     enforce the Step-1.6 generator/reviewer contract"
+	@echo "  redis-up         start local Redis container (Phase −2 item C)"
+	@echo "  redis-down       stop the local Redis container"
+	@echo "  worker           run the ARQ worker against local Redis"
 	@echo "  clean            wipe __pycache__ + *.pyc"
 
 install:
@@ -212,3 +215,34 @@ verify-step-3:
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+# ---------------------------------------------------------------------------
+# Phase −2 item C — ARQ worker dev runner.
+#
+# The worker code lives in backend/src/workers/. Until this section landed,
+# spinning it up locally was a manual multi-step affair (install Redis,
+# remember the right env vars, find the WorkerSettings import path). These
+# three targets make Phase −1 manual verification's notification scenarios
+# actually exercise the worker — without them, send_notification enqueues
+# vanish into the void and the verification reports "no email arrived".
+#
+# Production deployment (Phase 3) replaces docker-compose with managed
+# Redis + a real process supervisor. Same WorkerSettings entry point.
+# ---------------------------------------------------------------------------
+
+redis-up:
+	docker compose -f docker-compose.dev.yml up -d redis
+	@echo ""
+	@echo "Redis is running on redis://localhost:6379"
+	@echo "Next: `make worker` (in a separate terminal — it blocks)."
+
+redis-down:
+	docker compose -f docker-compose.dev.yml down
+
+worker:
+	@if ! command -v arq >/dev/null 2>&1; then \
+		echo "FAIL: 'arq' CLI not on PATH. Did you `pip install -e backend/` recently?"; \
+		exit 1; \
+	fi
+	@echo "Starting ARQ worker against REDIS_URL=$${REDIS_URL:-redis://localhost:6379}"
+	cd backend && arq src.workers.settings.WorkerSettings

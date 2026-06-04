@@ -524,3 +524,25 @@ export async function getRecentRuns(
 ): Promise<RecentRunsResponse> {
   return request<RecentRunsResponse>(`/api/runs/recent?limit=${limit}&offset=${offset}`);
 }
+
+// ---- Phase −2 item D: per-source health ----
+
+export type SourceHealthEntry = {
+  source: string;
+  runs_observed: number;
+  runs_zero_jobs: number;
+  runs_errored: number;
+  avg_duration_seconds: number | null;
+  last_job_count: number | null;
+  last_error: string | null;
+  health: "ok" | "warning" | "critical";
+};
+
+export type SourceHealthResponse = {
+  sources: SourceHealthEntry[];
+  runs_considered: number;
+};
+
+export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {
+  return request<SourceHealthResponse>(`/api/runs/source-health?runs=${runs}`);
+}

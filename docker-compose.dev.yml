@@ -1,0 +1,32 @@
+# Local dev infrastructure for Phase −2 manual verification.
+#
+# Spins up only what the test suite + frontend dev server can't fake:
+#   - Redis 7 for the ARQ worker (Phase −2 item C).
+#
+# Not for production. SES, persistent volumes, healthchecks etc are added
+# when the deployment story exists.
+#
+# Usage::
+#
+#   docker compose -f docker-compose.dev.yml up -d   # start in background
+#   docker compose -f docker-compose.dev.yml down    # stop + clean
+#   make worker                                       # then run the worker
+#
+# Or via Makefile shortcuts: `make redis-up` / `make redis-down`.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: job360-dev-redis
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only — never accept external traffic in dev.
+      - "127.0.0.1:6379:6379"
+    command: >
+      redis-server
+      --appendonly no
+      --save ""
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    # In-memory only is fine for dev — restart wipes queued jobs, which is
+    # what we usually want anyway.

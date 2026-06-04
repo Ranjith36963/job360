@@ -100,16 +100,37 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
-## ARQ worker (optional)
+## ARQ worker (required for notifications)
 
-Required only when you want asynchronous notification dispatch. Needs a running
-Redis on `REDIS_URL` (default `redis://localhost:6379`):
+The worker fires per-user notifications. Without it, `score_and_ingest`
+enqueues vanish silently and "configure email channel → wait for new job →
+verify email arrives" cannot be tested end-to-end. **Phase −1 manual
+verification requires this to be running.**
+
+### Local dev — three commands
+
+From the repo root:
 
 ```bash
-arq src.workers.settings.WorkerSettings
+make redis-up   # start Redis on localhost:6379 via docker-compose.dev.yml
+make worker     # run the ARQ worker (blocks — open in a separate terminal)
+make redis-down # stop Redis when done
 ```
 
-Tests never touch Redis — they monkeypatch the Apprise dispatcher.
+`make worker` resolves to `cd backend && arq src.workers.settings.WorkerSettings`
+with `REDIS_URL` defaulting to `redis://localhost:6379`. Override with
+`REDIS_URL=redis://other-host:6379 make worker` if you've provisioned Redis
+elsewhere.
+
+### Production
+
+Same entry point — `arq src.workers.settings.WorkerSettings`. Replace
+docker-compose with managed Redis (Upstash, ElastiCache, Render add-on)
+and a real process supervisor (systemd, supervisord, container
+orchestrator). Phase 3 of `LAUNCH_PLAN.md` covers this.
+
+Tests never touch Redis — they monkeypatch the Apprise dispatcher and call
+worker tasks as pure async functions.
 
 ## Cross-wiring with the frontend
 
