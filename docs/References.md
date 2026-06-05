@@ -1,7 +1,7 @@
 # Job360 — References
 
 > External repos, APIs, tools, patterns, and competitive intelligence for building and improving Job360.
-> Every entry verified from research conducted 2026-04-11; competitive landscape extended 2026-04-25 (Dex, Sprout).
+> Every entry verified from research conducted 2026-04-11; competitive landscape extended 2026-04-25 (Dex, Sprout) and 2026-06-04 (free-forever / UK sweep §1.9–1.12).
 > All Job360 file paths cross-referenced against `CurrentStatus.md` to ensure accuracy.
 
 ---
@@ -190,6 +190,325 @@ NOT a competitor. CLI evaluation tool, 8.2K stars. Complementary — evaluates i
 ### 1.5 TheirStack — https://theirstack.com
 
 Dismissed. Resells free ATS data. Free tier useless (200 jobs/mo). Starter $59/mo.
+
+---
+
+> **2026-06-04 — Free-forever / UK-relevant landscape sweep (§1.9–1.12).**
+> Web sweep targeting *free-forever for seekers + UK-relevant + discovery/ranking layer*
+> (deliberately excluding the apply-automation layer already covered by Sprout §1.7).
+> **Confidence note:** unlike the 2026-04-11/04-25 entries (verified against primary
+> sources), several pricing claims below originate from competitor-owned SEO blogs
+> (e.g. scoutify.com reviewing its own rivals). Items marked ⚠️ are **unverified** —
+> confirm before citing in strategy decisions.
+>
+> **Correction to §1.8:** open-wedge #3 ("push-mode notifications — no competitor holds
+> it") is **partially disproven**. **Scoutify (§1.9) is free-forever AND push-first.**
+> The defensible position is no longer *push* alone but the **five-way bundle**
+> (UK-first + multi-domain + push + score-transparency + self-host) — each facet is
+> individually held by *someone*, but no single player holds all five.
+
+### 1.9 Scoutify — https://scoutify.com
+
+**What it is:** Career-page monitor with push alerts. Tracks 8,800–10,000+ company
+career pages directly and pushes notifications "within minutes" of a new posting.
+Free-forever core; paid "Sniper" tier (~$5/week) adds auto-apply at Greenhouse /
+Workday / SmartRecruiters employers.
+
+**Architecture (deduced — marketing surface + own blog):**
+- **Inventory:** direct career-page crawl (same posture as HiringCafe §1.1), not board aggregation
+- **Delivery:** push-first (the opposite of HiringCafe's pull-only search) — this is the standout
+- **Revenue:** freemium funnel — free alerts as the loss-leader for the Sniper auto-apply upsell
+
+**Audience overlap with Job360:** **High on mechanism** (push + career-page coverage),
+lower on geography — US-leaning inventory, no UK-first or multi-domain framing.
+
+**Threat level:** Medium-direct. **The first free-forever player to occupy the
+push-notification wedge** Job360 claimed as open (§1.8 #3). Job360 still differentiates on
+UK-first + multi-domain + 7-dim score transparency + self-host.
+
+**Borrow from them:** "within minutes" latency as a headline promise; the clean
+free-core / paid-auto-apply tier split as a monetisation template.
+**Don't copy:** US-centric career-page list; opaque match logic (no score breakdown).
+
+**Key sources:**
+- HiringCafe-alternatives writeup: https://scoutify.com/blog/best-hiringcafe-alternatives
+- Own HiringCafe review (2x/day refresh critique): https://scoutify.com/blog/hiringcafe-review
+
+---
+
+### 1.10 Welcome to the Jungle (formerly Otta) — https://uk.welcometothejungle.com
+
+**What it is:** AI-matching job platform, **strong native UK presence**. Otta merged into
+Welcome to the Jungle in **Jan 2024**; 2M+ candidates, ~7,000 vetted companies. Free for
+seekers; employers pay £199+/post.
+
+**Architecture (deduced — public marketing + Capterra):**
+- **Match model:** analyses 20M+ historic interactions to predict save/apply likelihood
+  per candidate — the funded, at-scale analogue of Job360's `JobScorer`
+- **Inventory:** curated/vetted company set (quality-gated), not raw aggregation
+- **Revenue:** employer-paid job posts (£199+/mo) + employer content profiles
+- **Distribution:** native iOS/Android apps + web
+
+**Audience overlap with Job360:** **High** — UK seekers, personalised matching, professional
+(non-tech-exclusive) reach. The closest *funded UK* competitor to Job360's scoring thesis.
+
+**Threat level:** Medium-high. Owns the **funded UK AI-matching** wedge. Job360's
+counter-wedges: score *transparency* (WTTJ match % is black-box), push notifications,
+multi-source open inventory (vs. WTTJ's curated-only set), and self-host.
+
+**Borrow from them:** vetted-company quality signal as a ranking input; native-app
+delivery as a channel beyond Email/Slack/Discord.
+**Don't copy:** curation bottleneck (caps inventory breadth — Job360's wedge is the opposite).
+
+**Key sources:**
+- UK site: https://uk.welcometothejungle.com/
+- Pricing/merger detail: https://www.capterra.co.uk/software/1036497/otta
+
+---
+
+### 1.11 Jobwise.ai — https://www.jobwise.ai ⚠️ pricing unverified
+
+**What it is:** Self-described "**UK's smart AI-powered job matching platform**" —
+personalised recommendations against skills/goals/experience. UK-native framing makes it
+a direct positioning rival to Job360, but no public pricing or free-tier terms were
+locatable (⚠️ verify before citing).
+
+**Threat level:** Unknown-to-medium. Same elevator pitch as Job360 (UK + personalised
+matching). Needs a hands-on audit: inventory size, source strategy, whether matching is
+LLM or rules, and whether there's a free tier at all.
+
+**Action:** Flag for a dedicated deep-dive next intel pass.
+**Key source:** https://www.jobwise.ai/
+
+---
+
+### 1.12 JobSync — https://github.com/Gsync/jobsync
+
+**What it is:** The closest **open-source, self-hosted analogue to Job360**. Free + OSS,
+**Next.js + Shadcn UI** (Job360's exact frontend stack), Docker-deployable, with AI resume
+review, job matching, task logging, and application analytics — data stays on the user's
+own server.
+
+**Relevance:** Not a commercial competitor but the **strategic reference for Job360's
+self-host wedge** (§1.8 #4). If a free OSS tool already offers self-hosted matching, Job360's
+self-host claim must be backed by *superior* matching + 50-source breadth + push, not by
+self-host alone. (Sibling: **CareerSync**, careersync.cloud — free/OSS, Gmail-OAuth ML
+classification of job emails; different ingestion angle.)
+
+**Threat level:** Low commercially, **high as a credibility benchmark** for the OSS wedge.
+
+**Borrow from them:** Docker-first self-host packaging; "your data never leaves your
+server" positioning copy.
+
+**Key sources:**
+- Repo: https://github.com/Gsync/jobsync
+- CareerSync (sibling OSS): https://careersync.cloud
+
+> **Also noted, lower priority:**
+> - **Jobright** (jobright.ai) — AI Job Match + employer-site scraping; architecturally a
+>   Job360 twin, but **US-only inventory** neutralises it for UK. Free tier is a throttled
+>   funnel ($29/$59 paid).
+> - **Adzuna / Google for Jobs / Jora UK / JobLeads** — free-to-seeker UK aggregators;
+>   black-box, no personalised ranking. *Adzuna is already a Job360 keyed source* — both
+>   supplier and competitor.
+> - **Reed / Indeed / TotalJobs / CV-Library** — free-to-seeker incumbents (scale + brand,
+>   zero ranking transparency).
+> - **WorkInStartups / Escape the City / Wellfound** — niche UK/startup boards (narrow inventory).
+> - **ApplyArc** (applyarc.com) — free-forever *tracker* tier, UK-hosted (Azure, ICO-registered);
+>   apply/tracking layer, not discovery.
+
+---
+
+> **2026-06-04 round 2 — deeper sweep (§1.13–1.16 + funding refresh).**
+> A second pass on the career-page-monitor niche, funded UK startups, and OSS analogues.
+
+### 1.13 FirstPost — https://firstpost.io ⚠️ pricing partly unverified
+
+**What it is:** Career-page alert service with the **largest inventory found this sweep** —
+monitors **150,000+ companies / 1M+ live roles indexed** (vs. HiringCafe's 30K and Scoutify's
+~10K). Free to start + optional Pro. Delivers a curated **morning email** of new roles filtered
+to keywords/preferences.
+
+**Architecture (deduced — marketing surface):**
+- **Inventory:** direct career-page indexing at 5× HiringCafe's company count — breadth is the wedge
+- **Delivery:** daily digest email (not instant push) — slower than Scoutify, broader than both
+- **Revenue:** freemium (free core + Pro upgrade)
+
+**Threat level:** Medium. **Out-covers your two headline rivals on raw company breadth.** Job360
+counters on UK-first focus, multi-source (not career-page-only), 7-dim transparency, self-host.
+**Borrow from them:** the "curated morning digest" cadence — maps cleanly onto Job360's existing
+digest path (`send_daily_digest` ARQ periodic).
+
+**Key source:** https://firstpost.io/
+
+---
+
+### 1.14 UrFuture — Manchester, UK ⚠️ pricing unverified
+
+**What it is:** **UK-native (Manchester)** Gen-Z hiring marketplace for **entry-level,
+apprenticeship, graduate, and no-experience roles**. Replaces the CV with a behavioural-science +
+ML **career-match score across 18 careers**, then serves jobs in a personalised content-feed (TikTok-style).
+
+**Audience overlap with Job360:** **Partial but pointed** — same UK geography and the same
+*scored-match* mechanic, but aimed squarely at the **early-career** segment Job360 treats generically.
+A credible wedge-taker if Job360 ever targets graduates/apprenticeships.
+
+**Threat level:** Low-medium (niche), but the **only UK player besides WTTJ pairing a match-score
+with a feed UX**. Worth watching if they broaden beyond entry-level.
+**Borrow from them:** content-feed discovery UX as an alternative to list/radar views; explicit
+career-match scoring as a consumer-facing number (validates Job360's 0–100 transparency bet).
+
+**Key source:** EU-Startups UK early-stage roundup 2026 — https://www.eu-startups.com/2026/02/britains-truly-got-talent-10-of-the-most-promising-early-stage-startups-to-keep-an-eye-on-in-2026/
+
+---
+
+### 1.15 Repurposed web-change monitors (category note — NOT job products)
+
+Generic page-change watchers job-seekers point at career pages. **Not competitors per se**, but
+they prove the "alert me the instant a role appears" job-to-be-done is currently solved with
+duct-tape — the exact gap a purpose-built tool fills:
+- **Visualping** (visualping.io) — free plan: 5 pages, once/day
+- **UptimeRobot Job Alert** (uptimerobot.com/free-tools) — repurposed uptime monitor, free, email on change
+- **ChangeNotifier** (changenotifier.com) — generic page-monitor guides for job postings
+- **OpenJobRadar** (openjobradar.com) — company-specific job alerts (closest to a real product of the four)
+
+**Takeaway:** demand for instant career-page alerts is being met by non-job tooling → validates the
+Scoutify/FirstPost category and, by extension, Job360's push channels.
+
+---
+
+### 1.16 OSS / self-host analogues (extends §1.12 — architectural peers, not commercial threats)
+
+Open-source projects sharing Job360's "scrape many sources → score against a profile → local-first"
+thesis. Reference points for the **self-host wedge**, not market competitors:
+- **JobFunnel** (github.com/PaulMcInnis/JobFunnel) — popular Python scraper → dedup'd spreadsheet
+- **BjornMelin/ai-job-scraper** — privacy-focused, **local storage**, ScrapeGraph-AI + LangGraph + Streamlit, AI/ML roles, application tracking — **closest thesis match** (but Streamlit, not a product)
+- **anandanair/job-scraper** — GitHub-Actions suite: scrape → resume-parse → **job-to-resume scoring** → tracking (LinkedIn + CareersFuture, Supabase)
+- **OctoJobs** — keyword/location job-board webscraper aggregator
+- (**JobSpy**, already a Job360 *dependency* for Indeed/Glassdoor, originates from this OSS ecosystem)
+
+**Takeaway:** the self-host wedge (§1.8 #4) is occupied by several free OSS tools. Job360's claim must
+rest on **superior matching + 50-source breadth + push + a real frontend**, not self-host alone.
+
+---
+
+> **Funding refresh (2026-06-04):**
+> - **Jack & Jill (§1.2):** Newcastle HQ; seed now reported at **€5.6M**, with **€16.8M total** raised
+>   to expand network + platform (up from the $20M figure in the §1.2 TechCrunch cite — reconcile on next pass).
+> - **Dex (§1.6):** **$5.3M seed led by Notion Capital** (a16z Speedrun, Concept Ventures, OpenAI angels),
+>   **15,000+ engineers / 50+ companies** signed up (Fortune, 2026-04-28). Confirms the boutique-recruiter
+>   model is funded and scaling — but still top-1%-engineer-only, so threat level stays Low (§1.6).
+
+---
+
+### 1.17 Data-sourcing comparison — where the free-forever cohort gets its jobs (2026-06-04)
+
+**Core finding:** Job360 and the leading free-forever competitors use **opposite sourcing
+philosophies**, so source overlap is small. Job360 = **board + ATS-API aggregation** (pull from
+boards/APIs that already aggregate). HiringCafe / Scoutify / FirstPost = **mass career-page crawl**
+(discover 10K–150K company URLs, crawl their ATS-hosted career pages directly — *upstream* of the
+boards Job360 reads, which is why they claim "alerts before it hits Indeed"). WTTJ = **closed
+employer-posted** inventory (not aggregation). Jack & Jill = free ATS APIs (deduced).
+
+**Confidence:** Job360 column = code-verified (`SOURCE_REGISTRY`, 50 entries). Scoutify ATS list =
+its own `/integrations` page. HiringCafe = founder posts (§1.1). FirstPost/WTTJ/J&J = vendor marketing
+(deduced). Treat competitor cells as directional.
+
+| Source / channel (Job360's providers) | Job360 | HiringCafe | Scoutify | FirstPost | WTTJ | J&J |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| UK keyed boards (Reed, Adzuna, Careerjet, Findwork, Jooble, JSearch, Google Jobs) | ✅ | ❌ | ❌ | ~ | ❌ | ❌ |
+| Free remote JSON boards (RemoteOK, Remotive, Arbeitnow, Jobicy, Himalayas, DevITjobs, Landing.jobs, AIJobs.net) | ✅ | ❌ | ❌ | ~ | ❌ | ❌ |
+| Indeed + Glassdoor (JobSpy) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| LinkedIn listings (scraper) | ✅ | ❌ | ❌ | ❌ | ❌ | ~ |
+| UK public-sector RSS (NHS Jobs, jobs.ac.uk, GOV.UK Apprenticeships, Teaching Vacancies, University Jobs) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Niche/sector boards (Climatebase, 80000Hours, BioSpace, BCS, NoFluffJobs, TheMuse, HN Jobs) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Common ATS (Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Recruitee, Workday, Personio) | ✅ ~268 slugs | ✅ 30K | ✅ 10K | ✅ 150K | ❌ | ✅ |
+| Long-tail ATS (Rippling, Comeet, Pinpoint, SuccessFactors) | ✅ | ~ | ~ | ~ | ❌ | ~ |
+| Big-tech proprietary careers (Amazon/Apple/Microsoft/Google custom) | ❌ | ✅ | ✅ adapters | ✅ | ❌ | ❌ |
+| Mass career-page discovery/crawl (Apollo + Common Crawl + Google-dorking) | ❌ | ✅ | ✅ | ✅ | ❌ | ~ |
+| Schema.org JobPosting JSON-LD harvest | ❌ | ✅ | ✅ | ✅ | ❌ | ~ |
+| Employer-direct posts (paid posting product) | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+**🚩 Job360 has, they don't (sourcing moat):** UK keyed boards + UK public-sector RSS (no free-forever
+rival touches UK public sector — strongest defensible edge); Indeed/Glassdoor (they bypass these by
+design); free remote-JSON + multi-domain niche boards; long-tail ATS.
+
+**🚩 They have, Job360 doesn't (sourcing gap):** mass career-page crawl at scale (30K–150K companies
+vs. ~268 ATS slugs — *the* gap); big-tech proprietary career-system adapters; generic JSON-LD harvesting;
+employer-direct posts (WTTJ/J&J — different business model).
+
+**⚠️ Shared layer = the real lever:** Greenhouse/Lever/Workday/Ashby/SmartRecruiters/Recruitee. Job360
+already calls the *same ATS APIs* — it just points them at ~268 hand-curated slugs. Closing the coverage
+gap is **scaling the `core/companies.py` slug catalog + adding ATS auto-discovery**, not a new
+integration or architecture change. Inventory-by-source-count is now a losing axis (FirstPost = 150K
+companies); Job360's edge must be **match quality + UK depth + multi-domain**, not raw job count.
+
+**Sources:** Scoutify integrations https://scoutify.com/integrations · FirstPost https://firstpost.io/ ·
+WTTJ employers https://employers.welcometothejungle.com/how-it-works · aggregator sourcing methods
+(ATS public APIs vs career-page crawl, Schema.org JSON-LD) https://cavuno.com/blog/ats-platforms-public-job-posting-apis
+
+#### 1.17.1 Freshness / "live data" reality
+
+**No public aggregator gets true real-time** — ATS webhooks are employer-only, so *everyone polls*.
+"Real-time" = poll frequency, and there's a hard **breadth ↔ freshness trade-off** (cost ≈ companies ÷
+interval). Cadences (Job360 = code-verified `scheduler.py` `TIER_INTERVALS_SECONDS`; competitors = vendor claims):
+
+| Player | Refresh cadence | Live? |
+|---|---|:--:|
+| **Job360 — ATS tier** | **60 sec** (`ats=60`) | 🟢 near-real-time |
+| Job360 — Reed | 5 min (`reed=300`) | 🟢 |
+| Job360 — Workday / RSS | 15 min (`900`) | 🟡 |
+| Job360 — keyed API / free JSON / scrapers | 60 min (`3600`) | 🟠 hourly |
+| **Scoutify** | "within minutes" / every few min | 🟢 near-real-time |
+| **HiringCafe** | **2–3×/day (~8h)** | 🔴 batch — not live |
+| **FirstPost** | **1×/day (digest)** | 🔴 batch — not live |
+| **Welcome to the Jungle** | instant on employer post | 🟢 but closed/tiny inventory |
+| **Jack & Jill** | unknown (batch ATS) | 🔴 likely batch |
+
+**Takeaway:** freshness is **not a Job360 gap** — on the shared ATS layer Job360's 60s polling already
+*beats* HiringCafe (8h) and FirstPost (24h) and matches freshness-leader Scoutify. But the 60s cadence is
+affordable *only* because Job360 watches ~268 companies; scaling toward FirstPost's 150K would force a
+slower batch cadence. Strategic sweet spot = **narrow-and-fresh** (keep 60s polling on a curated
+high-value UK company set where being 8–24h faster than the crawlers is marketable), not match-their-breadth.
+**Action:** surface per-source freshness in the UI — an honest per-source "last checked" beats competitors'
+single unqualified "real-time!" claim (ties to `pillar_3_batch_1.md` date-confidence thesis).
+
+#### 1.17.2 Full taxonomy of web job-data acquisition methods (Job360 vs competitors)
+
+Two-step structure: **discovery** (which companies/URLs exist?) precedes **extraction** (pull jobs from each).
+Job360 has fully solved extraction but barely touched discovery (manual `companies.py`) — competitors' scale
+advantage is *automated discovery* (Family C), not better extraction.
+
+**A — Structured API pulls (clean, no scraping):** A1 keyed board APIs (Reed/Adzuna/JSearch/Jooble/Careerjet/
+Findwork/Google Jobs) — **Job360 ✅ 7**, competitors ❌. A2 free board JSON APIs — **✅ 9**, comp ~. A3 ATS
+public JSON APIs (Greenhouse/Lever/Ashby/Workable/SmartRecruiters/Recruitee/Personio/Comeet) — **✅ ~268
+slugs**, comp ✅ at 10K–150K scale. A4 RSS/XML/Atom feeds — **✅ 10**, comp ❌. A5 unified ATS API
+(Merge.dev/Unified.to) — ❌, build option.
+
+**B — Scraping/extraction:** B1 static HTML (regex/CSS) — **✅ 7 scrapers**, comp ✅. B2 headless browser
+(Puppeteer/Playwright for JS SPAs) — ❌, comp ✅ (HiringCafe). B3 Schema.org JobPosting JSON-LD harvest — ❌,
+comp ✅. B4 custom proprietary-system adapters (Amazon/Apple/Google) — ❌, comp ✅ (Scoutify). B5 meta-scraping
+aggregators (Indeed/Glassdoor/LinkedIn) — **✅ JobSpy + LinkedIn**, comp ❌ (avoid by design). B6 3rd-party
+scraping platforms (Apify/ScraperAPI/Bright Data + Oxylabs proxies) — ❌ self-built, comp ✅ (HiringCafe/Oxylabs).
+
+**C — Company/URL discovery (the precursor — Job360's biggest gap):** C1 manual curated list — **✅ ~268
+slugs**. C2 Apollo.io company DB — ❌, comp ✅. C3 Common Crawl mining — ❌, comp ✅. C4 Google dorking
+(`inurl:greenhouse.io`) — ❌, comp ✅. C5 ATS-tech detection (BuiltWith/Wappalyzer → who uses Greenhouse) — ❌,
+comp ✅. C6 sitemap parsing — ❌, comp ~.
+
+**D — Push/submitted/partnered:** D1 employer-direct posting — ❌, comp ✅ (WTTJ, J&J). D2 email ingestion
+(inbox OAuth) — ❌, comp ✅ (CareerSync). D3 official data licensing/feed deals — ❌, rare (boards resist,
+`pillar_3_batch_4.md`). D4 ATS webhooks (true real-time) — ❌ employer-only, **nobody** (unavailable to
+aggregators). D5 community sources (HN/Reddit/Slack) — **✅ HN Jobs**, comp ~.
+
+**E — Buy:** E1 job-data resellers/datasets (TheirStack/Crustdata/JobsPikr) — ❌, comp ❌ (TheirStack dismissed §1.5).
+
+**Job360 uses ~8 of ~20 methods** (A1–A4, B1, B5, C1, D5) → a structured-aggregation shop with a thin scraping
+layer. **Gap = entire discovery family (C2–C5)** + B2/B3/B4 extraction tech. **Moat = A1 keyed UK boards + A4
+UK public-sector RSS + B5 Indeed/Glassdoor meta-scrape** (competitors have none of these). **Highest-leverage
+upgrade:** C5 ATS-tech detection → feeds A3 (ATS APIs Job360 already parses) → auto-append slugs to
+`companies.py`. Converts the #1 gap into reuse of shipped code; no new extraction needed. Deliberately skip
+B2/B4 (highest-maintenance — let competitors carry that burden while Job360 stays on clean APIs).
 
 ---
 
@@ -558,11 +877,15 @@ No competitor has this granularity. HiringCafe: no scoring. Jack & Jill: proprie
 | Promoted listings | HiringCafe |
 | Talent Network | HiringCafe |
 | Subscription ($39.99/mo) | Simplify |
-| Free for candidates | HiringCafe, Jack & Jill, Job360 |
+| Employer-paid posts (£199+) | Welcome to the Jungle (§1.10) |
+| Freemium funnel (free alerts → paid auto-apply) | Scoutify (§1.9), Jobright |
+| Open-source / self-host (no monetisation) | JobSync (§1.12), CareerSync |
+| Free for candidates | HiringCafe, Jack & Jill, Welcome to the Jungle, Scoutify, Job360 |
 
 ---
 
 ## Document History
+- **2026-06-04 v4:** Free-forever / UK-relevant sweep (two rounds). Round 1 added §1.9 Scoutify (free-forever, push-first career-page monitor), §1.10 Welcome to the Jungle / ex-Otta (funded UK AI matching), §1.11 Jobwise.ai (⚠️ UK-native, pricing unverified), §1.12 JobSync (OSS self-host analogue). **Corrected §1.8 open-wedge #3:** push-mode notifications partially disproven by Scoutify — defensible position is now the five-way bundle, not push alone. Round 2 added §1.13 FirstPost (150K-company career-page indexer, largest inventory found), §1.14 UrFuture (UK Manchester, Gen-Z early-career match-score feed), §1.15 repurposed web-change monitors (Visualping/UptimeRobot/ChangeNotifier/OpenJobRadar — category note, not products), §1.16 OSS/self-host analogues (JobFunnel, BjornMelin/ai-job-scraper, anandanair, OctoJobs), plus a funding refresh for Jack & Jill (€16.8M total) and Dex ($5.3M Notion Capital seed). Added §1.17 **data-sourcing comparison matrix** — Job360's 50 board/ATS-API providers vs. where each free-forever competitor actually sources jobs (career-page crawl at scale); flags Job360's UK + public-sector + Indeed/Glassdoor moat vs. the career-page-crawl coverage gap (~268 ATS slugs vs. 30K–150K companies). Lower-priority free-to-seeker aggregators/incumbents/niche boards noted inline. Confidence caveat flagged: several pricing claims sourced from competitor SEO blogs, not primary verification.
 - **2026-04-25 v3:** Extended §1 Competitive Landscape with Dex (1.6 — boutique recruiter-curated) and Sprout (1.7 — AI auto-apply). Added §1.8 strategic positioning summary mapping each competitor's wedge against Job360's open wedges (UK-first + multi-domain, score transparency, push-mode notifications, self-host, open inventory). Confirmed HiringCafe blocks server-side scrapers (403 against WebFetch).
 - **2026-04-11 v2:** Cross-referenced against CurrentStatus.md. Corrected paths (repositories/database.py, services/skill_matcher.py, class JobDatabase). Added line numbers, slug counts, CurrentStatus section refs, complete source date accuracy table.
 - **2026-04-11 v1:** Initial version from competitive research.
