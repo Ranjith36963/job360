@@ -11,6 +11,26 @@ from migrations import runner
 from src.models import Job
 from src.services.channels import crypto
 
+
+@pytest.fixture(autouse=True)
+def _instant_asyncio_sleep(monkeypatch):
+    """Make ``asyncio.sleep`` instant for the whole suite.
+
+    Source retry backoff (``BaseJobSource`` 1s/2s/4s) and scraper pacing sleeps
+    (e.g. LinkedIn 3s/query) otherwise sum to ~37 minutes of real wall-clock
+    across the suite — the long-documented "suite hangs" symptom (it never
+    deadlocked; it was just agonizingly slow). Mocking sleep is safe: tests
+    assert on results, not timing. ``delay=0`` is preserved so any test that
+    deliberately yields control still does.
+    """
+    real_sleep = asyncio.sleep
+
+    async def _instant(delay, *args, **kwargs):
+        return await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _instant)
+
+
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking
 # into fixture-built Job objects. Tier-A #7.
 _TEST_NOW = datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc)
