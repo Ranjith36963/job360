@@ -110,3 +110,33 @@ async def test_concurrent_up_is_race_safe(tmp_db_path, tmp_migrations_dir):
     assert dup_rows == [], f"duplicate migration rows: {dup_rows!r}"
     applied_ids = {r[0] for r in rows}
     assert applied_ids == {"0001_create_alpha", "0002_create_beta"}
+
+
+def test_split_sql_statements_ignores_semicolon_in_inline_comment():
+    """Regression: an inline ``--`` comment containing ``;`` must NOT split the
+    statement it trails. 0015's ``-- NULL = not yet used; set on consume`` did,
+    producing ``sqlite3.OperationalError: incomplete input`` and breaking every
+    migration-applying test fixture.
+    """
+    import sqlite3
+
+    sql = (
+        "CREATE TABLE t (\n"
+        "    id INTEGER PRIMARY KEY,\n"
+        "    used_at TEXT  -- NULL = not yet used; set on consume\n"
+        ");\n"
+        "CREATE INDEX idx_t ON t(id);\n"
+    )
+    stmts = runner._split_sql_statements(sql)
+    assert len(stmts) == 2, f"expected 2 statements, got {len(stmts)}: {stmts!r}"
+    assert stmts[0].startswith("CREATE TABLE t")
+    assert "used_at TEXT" in stmts[0]
+    assert "set on consume" not in stmts[0]  # inline comment stripped
+    assert stmts[1].startswith("CREATE INDEX")
+    # The real bug only surfaced at execute time — prove the split is runnable.
+    db = sqlite3.connect(":memory:")
+    try:
+        for s in stmts:
+            db.execute(s)
+    finally:
+        db.close()

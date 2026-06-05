@@ -94,12 +94,25 @@ def _discover_pairs(migrations_dir: Path) -> list[str]:
 def _split_sql_statements(sql: str) -> list[str]:
     """Split a SQL script into statements on naive ``;`` boundaries.
 
-    Good enough for the repo's migrations (no embedded semicolons inside
-    string literals). Strips comment-only lines so pure-comment statements
-    don't reach the executor.
+    Strips both full-line AND inline ``--`` comments before splitting, so a
+    ``;`` inside a trailing comment doesn't sever a statement mid-way. (0015's
+    ``-- NULL = not yet used; set on successful consume`` did exactly that,
+    producing ``sqlite3.OperationalError: incomplete input``.)
+
+    Still naive about ``;`` inside string literals — but no repo migration has
+    one, and none has ``--`` inside a string literal either (verified against
+    ``migrations/*.sql``), so line-wise comment stripping is safe here. If a
+    future migration needs either, route it through ``executescript`` instead.
     """
-    lines = [line for line in sql.splitlines() if not line.lstrip().startswith("--")]
-    cleaned = "\n".join(lines)
+    stripped: list[str] = []
+    for line in sql.splitlines():
+        # Drop everything from the first ``--`` to end of line (full-line and
+        # inline comments alike). Safe given no string literal contains ``--``.
+        comment = line.find("--")
+        if comment != -1:
+            line = line[:comment]
+        stripped.append(line)
+    cleaned = "\n".join(stripped)
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
