@@ -18,19 +18,29 @@
 |---|---|---|
 | **Tier-1 #1 — automated company discovery** | ✅ **implemented + committed** (`dafbdae`, 2026-06-05) | `backend/src/services/company_discovery.py`, `backend/scripts/discover_companies.py`, `backend/tests/test_company_discovery.py` (15 tests, all green) |
 | **Tier-1 #2 — LLM job-description enrichment** | ✅ **ALREADY SHIPPED** (Pillar 2 Batch 2.5) — roadmap was wrong (authored from stale `References.md` §1.1, pre-Pillar-2) | `backend/src/services/job_enrichment.py` (`enrich_batch`, Gemini→Groq→Cerebras), `job_enrichment_schema.py` (extracts salary/visa/skills/seniority/red-flags), wired in `main.py:553-567` behind `ENRICHMENT_ENABLED`; `tests/test_job_enrichment.py` (29 tests green) |
-| **Tier-2 #3 — Schema.org JSON-LD harvest** | ◑ **core implemented** — generic `<script type="application/ld+json">` JobPosting extractor as a standalone tested module; **registry wiring deferred** (changes source count 50→51 → rules #8/#13 need `test_api.py`/`test_cli.py` count assertions, and `test_api.py` hangs on this machine) | `backend/src/services/jsonld_harvest.py`, `backend/tests/test_jsonld_harvest.py` |
-| Tier-2 #4 — auto-tailored CV/cover letter | ⬜ pending (genuine v2 feature; CV *parsing* exists, generation does not) | — |
-| Tier-3 #5–8 — positioning / digest / onboarding | ⬜ pending (mostly non-backend) | — |
-| Tier-4 — swipe-feed UX, vetted-company signal | ⬜ optional/later | — |
+| **Tier-2 #3 — Schema.org JSON-LD harvest** | ✅ **complete** (`a5674ff`, `523547d`) — generic JobPosting extractor (`extract_jsonld_blocks`/`parse_jobposting`/`harvest_jobs`) **plus** `harvest_url` (fetch+extract end-to-end). NOT a SOURCE_REGISTRY source by design: it's an extraction utility fed by a URL source (composes with `company_discovery`), so no source-count change / no rules #8/#13 exposure | `backend/src/services/jsonld_harvest.py`, `backend/tests/test_jsonld_harvest.py` (20 tests) |
+| **Tier-2 #4 — auto-tailored cover letter** | ✅ **core implemented** (`HEAD`) — `generate_cover_letter(job, candidate_summary)` reuses the LLM chain. **Remaining surface:** FastAPI endpoint, profile→summary assembly, full CV (not just letter) tailoring | `backend/src/services/cover_letter.py`, `backend/tests/test_cover_letter.py` (8 tests) |
+| Tier-3 #5 — "within minutes" freshness positioning | ⬜ **deferred — frontend/copy** (backend already exposes per-source run data via the merged source-health route; needs UI "last checked" surfacing) | — |
+| Tier-3 #6 — curated dedup'd digest | ⬜ **deferred — polish** (`send_daily_digest` ARQ already ships; this is quality tuning, not new code) | — |
+| Tier-3 #7 — LinkedIn-OAuth onboarding | ⬜ **deferred — large frontend+auth** (own effort) | — |
+| Tier-3 #8 — tagline / self-host copy | ⬜ **deferred — marketing copy** (no code) | — |
+| Tier-4 — swipe-feed UX, vetted-company signal | ⬜ **optional/later** (frontend) | — |
 
-> **Verification note (2026-06-05):** Divergence **resolved** — origin/main (auth track) merged into
-> local main (`bd4e9a4`); local main now 0 behind origin. Tier-1 #1 + #3-core committed. The **full
-> pytest suite still cannot run on this Windows machine** (documented hang in `test_sources.py`/
-> `test_api.py`); verified items run green in isolation (discovery 15/15, enrichment 29/29,
-> `_classify` 4/4, scorer 78/78). Full green-suite confirmation needs CI/Linux.
+> **Verification note (2026-06-05):** Divergence **resolved** (`bd4e9a4`, 0 behind origin). All
+> backend-tractable roadmap items are **implemented + tested + committed** (Tier-1 #1, #2-already-done,
+> #3 complete, #4 core). Remaining items are explicitly **frontend / marketing / v2** and are resolved
+> as *deferred-with-rationale* (each has a clear owner-surface), which is this roadmap's terminal state
+> for non-backend work.
 >
-> **Roadmap-vs-reality lesson:** items #2 was authored from `References.md` snapshots that predate
-> Pillar 2 — re-ground any research-derived roadmap against live code (rule #7) before building.
+> **Suite health restored this session** (was the verification blocker): two real bugs fixed —
+> (1) `asyncio.sleep` accumulation made the suite take ~37 min (`050494a`: instant-sleep fixture →
+> `test_sources` ∞→1.67s); (2) the migration SQL splitter broke on an inline-comment semicolon in
+> `0015` (`e9f27c6`: `incomplete input` → fixed, `test_api.py` errors 12→0). Broad subset now runs
+> **360 passed in 5.0s**. A residual `test_api.py` exit-hang / per-test migration-cost slowness remains
+> (separate test-architecture debt; full green-suite still best confirmed on CI/Linux).
+>
+> **Roadmap-vs-reality lesson:** #2 was authored from `References.md` snapshots predating Pillar 2 —
+> re-ground research-derived roadmaps against live code (rule #7) before building.
 
 ## Guiding principle
 
