@@ -321,6 +321,57 @@ export async function me(): Promise<User | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Password reset (Phase −2 item A)
+// ---------------------------------------------------------------------------
+//
+// The request endpoint always returns 204 — no enumeration. Caller treats
+// "204" as "we'll email you if you have an account" regardless.
+//
+// The confirm endpoint returns 204 on success or 400 on any failure
+// (unknown / expired / used / soft-deleted-user). Backend deliberately
+// doesn't distinguish — would leak which tokens exist.
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await request<void>("/api/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<void> {
+  await request<void>("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Email verification (Phase −2 item B)
+// ---------------------------------------------------------------------------
+//
+// Resend requires a session — there's no public "resend by email" because
+// that lets an attacker spam any address. The verify endpoint takes the
+// token directly from the email link.
+
+export async function resendVerificationEmail(): Promise<void> {
+  await request<void>("/api/auth/verify-email/request", { method: "POST" });
+}
+
+export async function confirmEmailVerification(token: string): Promise<void> {
+  await request<void>("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
+  return await request<{ email_verified: boolean }>("/api/auth/me/email-verified");
+}
+
+// ---------------------------------------------------------------------------
 // Channel config (Batch 2)
 // ---------------------------------------------------------------------------
 
@@ -472,4 +523,26 @@ export async function getRecentRuns(
   offset = 0
 ): Promise<RecentRunsResponse> {
   return request<RecentRunsResponse>(`/api/runs/recent?limit=${limit}&offset=${offset}`);
+}
+
+// ---- Phase −2 item D: per-source health ----
+
+export type SourceHealthEntry = {
+  source: string;
+  runs_observed: number;
+  runs_zero_jobs: number;
+  runs_errored: number;
+  avg_duration_seconds: number | null;
+  last_job_count: number | null;
+  last_error: string | null;
+  health: "ok" | "warning" | "critical";
+};
+
+export type SourceHealthResponse = {
+  sources: SourceHealthEntry[];
+  runs_considered: number;
+};
+
+export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {
+  return request<SourceHealthResponse>(`/api/runs/source-health?runs=${runs}`);
 }

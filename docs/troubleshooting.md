@@ -1,6 +1,8 @@
 # Job360 Troubleshooting
 
-Common developer issues and fixes. Each entry: **Symptom → Cause → Fix**.
+Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
+
+> **For operational / runtime issues** (digest queue stuck, channel decryption failures, scoring debug via 9-dim columns, breaker reset, source returning 0 jobs, profile force-rebuild), see [`docs/pillars/runbook.md`](./pillars/runbook.md) — 15-section operational reference with the SQL queries and CLI commands you actually need at 2am. For unfamiliar terminology, see [`docs/pillars/glossary.md`](./pillars/glossary.md).
 
 ---
 

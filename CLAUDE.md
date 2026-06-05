@@ -48,6 +48,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 18. **Pillar 2 flags default off.** When `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` are false, behaviour must **exactly** match pre-Pillar-2 — no implicit semantic queries, no LLM calls. Test with both flags OFF.
 19. **`JobScorer` legacy default = 4-component formula.** New 7-dim scoring activates only when `JobScorer(config, user_preferences=..., enrichment_lookup=...)` gets all three kwargs. Don't flip defaults silently.
 20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup`** — pass both or neither. Passing only `user_preferences` produces silent zeros for the new dim scorers; the combined `match_score` looks legacy but the dim columns mislead.
+27. **Multi-dim weights total 30 on top of the legacy 100; the clamp to [0, 100] is load-bearing.** `SALARY_WEIGHT` (10) + `SENIORITY_WEIGHT` (8) + `VISA_WEIGHT` (6) + `WORKPLACE_WEIGHT` (6) are added to the legacy 4-component sum, so the raw max is **130**. The final `match_score` is clamped to `[0, 100]` — never remove the clamp.
 
 ### Notifications
 

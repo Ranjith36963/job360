@@ -81,9 +81,12 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: 1,154+ passing, 0 failing, 3 skipped (post-Step-3 close-out at
-origin/main `7194d0e`). The `-p no:randomly` flag keeps the default
-order deterministic (pytest-randomly is installed but opt-in).
+Invariant: full suite passes, 0 failing. (Live count is **1000+ test functions**
+across 30+ files — run `python -m pytest --collect-only -q | tail -1` for the
+exact number; the 600 baseline you'll see referenced in older docs was the
+post-3.5.4 figure before Step 1 → Step 3 added their tests.) The
+`-p no:randomly` flag keeps the default order deterministic (pytest-randomly is
+installed but opt-in).
 
 ## Database migrations
 
@@ -97,16 +100,37 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
-## ARQ worker (optional)
+## ARQ worker (required for notifications)
 
-Required only when you want asynchronous notification dispatch. Needs a running
-Redis on `REDIS_URL` (default `redis://localhost:6379`):
+The worker fires per-user notifications. Without it, `score_and_ingest`
+enqueues vanish silently and "configure email channel → wait for new job →
+verify email arrives" cannot be tested end-to-end. **Phase −1 manual
+verification requires this to be running.**
+
+### Local dev — three commands
+
+From the repo root:
 
 ```bash
-arq src.workers.settings.WorkerSettings
+make redis-up   # start Redis on localhost:6379 via docker-compose.dev.yml
+make worker     # run the ARQ worker (blocks — open in a separate terminal)
+make redis-down # stop Redis when done
 ```
 
-Tests never touch Redis — they monkeypatch the Apprise dispatcher.
+`make worker` resolves to `cd backend && arq src.workers.settings.WorkerSettings`
+with `REDIS_URL` defaulting to `redis://localhost:6379`. Override with
+`REDIS_URL=redis://other-host:6379 make worker` if you've provisioned Redis
+elsewhere.
+
+### Production
+
+Same entry point — `arq src.workers.settings.WorkerSettings`. Replace
+docker-compose with managed Redis (Upstash, ElastiCache, Render add-on)
+and a real process supervisor (systemd, supervisord, container
+orchestrator). Phase 3 of `LAUNCH_PLAN.md` covers this.
+
+Tests never touch Redis — they monkeypatch the Apprise dispatcher and call
+worker tasks as pure async functions.
 
 ## Cross-wiring with the frontend
 

@@ -1,0 +1,77 @@
+"""In-memory sliding-window rate limiter for auth surfaces.
+
+Phase −2 post-review fix #3. Provides a soft rate limit on the two SMTP-
+amplifying endpoints (``POST /api/auth/verify-email/request`` and
+``POST /api/auth/password-reset/request``) so an authenticated attacker
+or impatient user can't burn through the daily SMTP quota by spamming
+resend.
+
+**Scope.** In-memory only — not race-safe across processes. Acceptable
+for Phase −2 (single dev worker). Production deployment (Phase 3 of
+LAUNCH_PLAN.md) replaces this with a Redis-backed implementation that
+the ARQ worker can share state with. The public API
+(``check_and_record``) is stable so the swap is a one-import change.
+
+**Trade-off.** A restart wipes the buckets. That's fine — the attack
+this defends against is a runaway client in a tight loop, not a long-
+running distributed brute-force. Restart-driven reset is acceptable.
+"""
+from __future__ import annotations
+
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from threading import Lock
+from typing import Deque, Dict
+
+
+_LOCK = Lock()
+_BUCKETS: Dict[str, Deque[datetime]] = {}
+
+
+def check_and_record(
+    key: str,
+    *,
+    max_in_window: int = 1,
+    window_seconds: int = 60,
+) -> bool:
+    """Return True if the request is allowed (and record it), False if limited.
+
+    Args:
+        key: A stable identifier for the rate-limit bucket. Examples:
+            ``"verify-email:<user_id>"``, ``"password-reset:<ip_hash>"``.
+            Distinct keys are independent buckets.
+        max_in_window: Cap on requests within ``window_seconds``. Default 1.
+        window_seconds: Window size in seconds. Default 60.
+
+    Returns:
+        True if under the limit (request was recorded). False if at or
+        above the limit (request was NOT recorded — caller should treat
+        as denied).
+
+    Note:
+        The bucket auto-prunes expired entries on each call. Memory is
+        bounded by the number of distinct keys observed in the last
+        ``window_seconds`` — for our two endpoints with per-user keys
+        that's O(active users).
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=window_seconds)
+    with _LOCK:
+        bucket = _BUCKETS.setdefault(key, deque())
+        # Drop entries that have fallen out of the window.
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= max_in_window:
+            return False
+        bucket.append(now)
+        return True
+
+
+def reset_for_tests() -> None:
+    """Clear all buckets — call between tests to prevent cross-pollination.
+
+    Production code MUST NOT call this. Tests should call it in setup or
+    use the fixture pattern that wraps it in monkeypatch.
+    """
+    with _LOCK:
+        _BUCKETS.clear()

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import uuid
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.auth_deps import (
@@ -19,11 +21,53 @@ from src.api.auth_deps import (
 from src.api.dependencies import get_db
 from src.core.settings import DB_PATH
 from src.repositories.database import JobDatabase
+from src.services.auth import email_verification as auth_email_verification
+from src.services.auth import password_reset as auth_password_reset
+from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
 from src.utils.logger import get_audit_logger
 
+logger = logging.getLogger("job360.api.auth")
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+async def _safe_request_email_verification(
+    *,
+    db_path: str,
+    user_id: str,
+    email: str,
+    frontend_origin: str,
+) -> None:
+    """Background-task wrapper around request_email_verification.
+
+    Phase −2 review fix #1 + #2 — `register` previously awaited the
+    verification call inline. That meant:
+      (a) the HTTP response was blocked on the synchronous SMTP send
+          (300ms–30s — review finding #1);
+      (b) any DB exception in the verification call (e.g. fresh DB
+          before migration 0016 applied) propagated as HTTP 500 *after*
+          the user row had already been committed, orphaning the account
+          (review finding #2).
+
+    Scheduled via FastAPI BackgroundTasks (runs after the response
+    headers/body have been sent), this wrapper decouples the email work
+    from the register response. Any exception is logged but swallowed —
+    the user already got their 201, and the worst case is they request
+    a resend manually.
+    """
+    try:
+        await auth_email_verification.request_email_verification(
+            db_path=db_path,
+            user_id=user_id,
+            email=email,
+            frontend_origin=frontend_origin,
+        )
+    except Exception as exc:  # noqa: BLE001 — intentionally broad
+        logger.warning(
+            "background verification email failed: user=%s err=%s", user_id, exc
+        )
 
 
 class RegisterRequest(BaseModel):
@@ -72,7 +116,12 @@ def _set_session_cookie(response: Response, cookie: str) -> None:
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest, response: Response, request: Request) -> UserResponse:
+async def register(
+    req: RegisterRequest,
+    response: Response,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> UserResponse:
     user_id = uuid.uuid4().hex
     pw_hash = hash_password(req.password)
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -90,6 +139,19 @@ async def register(req: RegisterRequest, response: Response, request: Request) -
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=user_id, secret=_secret())
     _set_session_cookie(response, cookie)
     get_audit_logger().info("auth", extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)})
+    # Phase −2 item B + post-review fix #1 + #2: schedule the verification
+    # email as a FastAPI BackgroundTask. The task runs AFTER the response
+    # is queued so register isn't blocked on SMTP I/O (300ms–30s), and the
+    # _safe_ wrapper guarantees a DB error in the verification path can't
+    # propagate as HTTP 500 after the user row was already committed
+    # (orphan-account avoidance).
+    background_tasks.add_task(
+        _safe_request_email_verification,
+        db_path=str(DB_PATH),
+        user_id=user_id,
+        email=str(req.email),
+        frontend_origin=_frontend_origin(),
+    )
     return UserResponse(id=user_id, email=req.email)
 
 
@@ -220,3 +282,157 @@ async def change_email(
     await db.update_user_email(user.id, str(req.new_email))
     response.delete_cookie(SESSION_COOKIE_NAME)
     return Response(status_code=204)
+
+
+# ── Phase −2-A: Password reset (forgot-password flow) ────────────────────────
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+def _frontend_origin() -> str:
+    """First entry from FRONTEND_ORIGIN (CORS allowlist) — used to build reset links."""
+    raw = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")
+    return raw.split(",")[0].strip()
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_request(
+    req: PasswordResetRequest,
+    request: Request,
+) -> Response:
+    """Initiate a password-reset email.
+
+    Always returns 204 regardless of whether the email is registered —
+    no-enumeration contract (per OWASP). The service layer logs the
+    distinction internally for ops.
+
+    **Rate-limited** (Phase −2 review fix #3): 1 request per minute per
+    IP. When limited, returns 204 *without* issuing a token or sending
+    an email — preserves the no-enumeration contract by being
+    indistinguishable from "unknown email" responses. Logged so an
+    operator can see the suppression pattern.
+    """
+    # Hash the IP rather than use it directly — bucket key is opaque
+    # in any future log dump or telemetry export.
+    client_ip = request.client.host if request.client else "unknown"
+    ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+    key = f"password-reset:{ip_hash}"
+    if not auth_rate_limit.check_and_record(key, max_in_window=1, window_seconds=60):
+        logger.info("password-reset rate-limited ip_hash=%s", ip_hash)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await auth_password_reset.request_password_reset(
+        db_path=str(DB_PATH),
+        email=str(req.email),
+        frontend_origin=_frontend_origin(),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_confirm(
+    req: PasswordResetConfirmRequest,
+    response: Response,
+) -> Response:
+    """Validate the token and set the new password.
+
+    On success: 204, and every existing session for that user is revoked
+    (forces re-login on all devices — security best practice after reset).
+    The caller's session cookie is cleared too so the API response itself
+    can't accidentally land the caller into the just-reset account.
+
+    On failure: 400 with a generic message. We deliberately don't
+    distinguish unknown vs expired vs used vs deleted-user — that would
+    leak which tokens exist.
+    """
+    user_id = await auth_password_reset.confirm_password_reset(
+        db_path=str(DB_PATH),
+        raw_token=req.token,
+        new_password=req.new_password,
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired reset token",
+        )
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+# ── Phase −2-B: Email verification ───────────────────────────────────────────
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/verify-email/request", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email_request(
+    user: CurrentUser = Depends(require_user),
+) -> Response:
+    """Resend the verification email for the current user.
+
+    Requires an active session — there's no public 'resend by email
+    address' endpoint because that would let an attacker spam any
+    address. Repeated requests issue independently-valid tokens (any of
+    the unused ones works until its own expiry), so the user can't lock
+    themselves out by hitting resend twice.
+
+    **Rate-limited** (Phase −2 review fix #3): 1 request per minute per
+    user. The session-gate already bounds the threat (only authenticated
+    users can call), but a frustrated user clicking resend rapidly would
+    burn through SMTP quota. Returns HTTP 429 when limited; UX should
+    surface the cooldown.
+    """
+    key = f"verify-email:{user.id}"
+    if not auth_rate_limit.check_and_record(key, max_in_window=1, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many resend requests; try again in a minute",
+        )
+    await auth_email_verification.request_email_verification(
+        db_path=str(DB_PATH),
+        user_id=user.id,
+        email=user.email,
+        frontend_origin=_frontend_origin(),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/verify-email/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response:
+    """Validate token and mark the user's email verified.
+
+    No session required — the link in the email is the authentication
+    artefact. Returns 204 on success, 400 on any failure (generic to
+    prevent token-existence enumeration).
+    """
+    user_id = await auth_email_verification.confirm_email_verification(
+        db_path=str(DB_PATH),
+        raw_token=req.token,
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired verification token",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/email-verified")
+async def get_email_verified(
+    user: CurrentUser = Depends(require_user),
+) -> dict:
+    """Cheap read for the dashboard to render a 'verify email' banner."""
+    verified = await auth_email_verification.is_email_verified(
+        db_path=str(DB_PATH), user_id=user.id
+    )
+    return {"email_verified": verified}
