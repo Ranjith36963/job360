@@ -7,14 +7,24 @@ it to Job objects. Pure / offline — no HTTP, no live network (CLAUDE.md rule #
 This is the unblocked *extraction* core; wiring it into SOURCE_REGISTRY as a
 BaseJobSource is deferred (changes the source count → rules #8/#13).
 """
+import asyncio
+
+import aiohttp
+from aioresponses import aioresponses
+
 from src.models import Job
 from src.services.jsonld_harvest import (
     extract_jsonld_blocks,
     harvest_jobs,
+    harvest_url,
     parse_jobposting,
 )
 
 _DATE = "2026-06-05T00:00:00+00:00"
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 def _wrap(json_text: str) -> str:
@@ -162,3 +172,48 @@ def test_harvest_default_date_found_is_set():
     jobs = harvest_jobs(html)  # date_found defaults to now
     assert len(jobs) == 1
     assert jobs[0].date_found  # non-empty ISO string
+
+
+# ----------------------------- harvest_url (fetch + extract) ---------------
+
+def test_harvest_url_fetches_and_extracts():
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    "https://acme.example/careers",
+                    body=_wrap('{"@type": "JobPosting", "title": "Remote Dev", "url": "https://acme.example/j/1"}'),
+                    content_type="text/html",
+                )
+                jobs = await harvest_url(session, "https://acme.example/careers", source="acme")
+                assert len(jobs) == 1
+                assert jobs[0].title == "Remote Dev"
+                assert jobs[0].source == "acme"
+        finally:
+            await session.close()
+    _run(_t())
+
+
+def test_harvest_url_404_returns_empty():
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://acme.example/careers", status=404)
+                assert await harvest_url(session, "https://acme.example/careers") == []
+        finally:
+            await session.close()
+    _run(_t())
+
+
+def test_harvest_url_network_error_returns_empty():
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://acme.example/careers", exception=aiohttp.ClientError("boom"))
+                assert await harvest_url(session, "https://acme.example/careers") == []
+        finally:
+            await session.close()
+    _run(_t())

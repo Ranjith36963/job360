@@ -15,13 +15,16 @@ mapping already used by ``sources/apis_free/teaching_vacancies.py``.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
 
+import aiohttp
+
 from src.models import Job
 
-__all__ = ["extract_jsonld_blocks", "parse_jobposting", "harvest_jobs"]
+__all__ = ["extract_jsonld_blocks", "parse_jobposting", "harvest_jobs", "harvest_url"]
 
 _SCRIPT_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -164,3 +167,29 @@ def harvest_jobs(
             if job is not None:
                 jobs.append(job)
     return jobs
+
+
+async def harvest_url(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    source: str = "jsonld",
+    timeout: float = 15.0,
+) -> list[Job]:
+    """Fetch one career page and harvest its JobPosting JSON-LD.
+
+    The end-to-end long-tail extraction path: pair with ``company_discovery`` (or
+    any career-page URL source) to cover companies that aren't on a supported
+    ATS. Returns ``[]`` on any HTTP/network error — harvesting one dead page must
+    never sink a batch (mirrors ``BaseJobSource``'s graceful no-op contract).
+    """
+    try:
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            if resp.status != 200:
+                return []
+            html = await resp.text()
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return []
+    return harvest_jobs(html, source=source)
