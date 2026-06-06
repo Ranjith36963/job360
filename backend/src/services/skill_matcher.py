@@ -375,14 +375,25 @@ def salary_in_range(job: Job) -> bool:
 
 
 def _gate_suppressed_score(title_pts: int, skill_pts: int) -> int | None:
-    """Pillar 2 Batch 2.2 gate: if either title or skill component fails the
-    gate (fraction-of-max ≥ MIN_TITLE_GATE / MIN_SKILL_GATE), return the
-    suppressed score `max(10, (title+skill)*0.25)`. Otherwise return None to
-    signal the caller to compute the full linear score.
+    """Pillar 2 Batch 2.2 relevance gate.
+
+    Suppress a job to `max(10, (title+skill)*0.25)` only when it shows NEITHER
+    a meaningful title signal NOR a meaningful skill signal (each gauged as a
+    fraction of its max via MIN_TITLE_GATE / MIN_SKILL_GATE). A strong title
+    alone — or strong skills alone — is enough relevance to score fully, so
+    return None and let the caller compute the full linear score.
+
+    History: this originally required BOTH signals (suppress if *either* was
+    weak). That floored real "ML Engineer"-style jobs to 10 whenever a
+    list-based source returned a thin description with no skill text, so a
+    logged-in user saw zero matches (E2E_TEST_REPORT #2). Relaxing to
+    "suppress only if both are weak" preserves the anti-inflation purpose — a
+    job matching neither title nor skill still cannot be rescued by
+    location/recency — while letting strong-title jobs through.
     """
     title_threshold = MIN_TITLE_GATE * TITLE_WEIGHT
     skill_threshold = MIN_SKILL_GATE * SKILL_WEIGHT
-    if title_pts < title_threshold or skill_pts < skill_threshold:
+    if title_pts < title_threshold and skill_pts < skill_threshold:
         suppressed_linear = (title_pts + skill_pts) * 0.25
         return max(10, int(suppressed_linear))
     return None

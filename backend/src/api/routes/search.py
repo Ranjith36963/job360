@@ -69,7 +69,9 @@ async def start_search(
     async def _run():
         try:
             _runs[run_id]["progress"] = "Fetching from sources..."
-            result = await run_search(source_filter=source, no_notify=True)
+            # Pass the logged-in user so the pipeline scores against THEIR
+            # profile, not the default tenant's (E2E_TEST_REPORT #1).
+            result = await run_search(source_filter=source, no_notify=True, user_id=user.id)
             _runs[run_id].update(status="completed", progress="Done", result=result)
         except Exception as e:
             _runs[run_id].update(status="failed", progress=str(e))

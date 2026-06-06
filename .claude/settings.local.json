@@ -180,7 +180,11 @@
       "Bash(gh pr *)",
       "Bash(gh run *)",
       "Read(//c/Users/Ranjith/.claude/plugins/cache/claude-plugins-official/**)",
-      "Read(//c/Users/Ranjith/.claude/plugins/**)"
+      "Read(//c/Users/Ranjith/.claude/plugins/**)",
+      "Bash(make -n verify-step-1)",
+      "Bash(make -n verify-step-1-5)",
+      "Bash(make -n verify-step-2)",
+      "Bash(yt-dlp --version)"
     ]
   },
   "enabledMcpjsonServers": [
@@ -193,5 +197,19 @@
     "sqlite"
   ],
   "outputStyle": "Explanatory",
-  "prefersReducedMotion": true
+  "prefersReducedMotion": true,
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /d/dev/job360/.claude/hooks/verify-reminder.sh",
+            "shell": "bash",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
 }
