@@ -107,6 +107,21 @@ def authenticated_async_context(monkeypatch, tmp_path):
 
     from src.api.main import app
 
+    # Redirect DB_PATH on EVERY module that captured it at import time. A
+    # ``from src.core.settings import DB_PATH`` binds the *value*, so patching
+    # ``settings`` alone leaves importers (e.g. ``services/profile/storage.py``)
+    # pinned to the production DB — the root cause of cross-test
+    # ``no such table: user_profiles`` / ``no such column`` failures (they pass
+    # alone but fail in full-suite ordering, depending on which DB an importer
+    # bound to first). Done AFTER the app import so all route/service modules
+    # are loaded and patchable.
+    import sys as _sys
+
+    for _mod in list(_sys.modules.values()):
+        _name = getattr(_mod, "__name__", "")
+        if _name.startswith(("src.", "migrations")) and getattr(_mod, "DB_PATH", None) is not None:
+            monkeypatch.setattr(_mod, "DB_PATH", db_path, raising=False)
+
     app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
 
     # Register a user synchronously to capture the session cookie, then

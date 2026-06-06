@@ -12,6 +12,23 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_storage_db_path_redirected_to_test_db(authenticated_async_context):
+    """Regression guard for the import-time DB_PATH binding bug.
+
+    ``services/profile/storage.py`` does ``from src.core.settings import
+    DB_PATH``, binding the value at import. The fixture must redirect that
+    module's ``DB_PATH`` to the per-test migrated DB; otherwise profile queries
+    hit the production DB and fail in full-suite ordering with
+    ``no such table: user_profiles``. Asserting equality with the patched
+    ``settings.DB_PATH`` proves the redirect reached the storage module.
+    """
+    from src.core import settings
+    from src.services.profile import storage
+
+    assert storage.DB_PATH == settings.DB_PATH
+
+
+@pytest.mark.asyncio
 async def test_list_versions_returns_empty_for_new_user(authenticated_async_context):
     """A fresh user with no profile yet must get a 200 + empty list, not 404."""
     async with authenticated_async_context() as client:
