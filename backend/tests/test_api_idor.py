@@ -104,6 +104,19 @@ def api(monkeypatch, tmp_path):
     job_ids = asyncio.run(_seed_job_rows(db_path))
 
     from src.api.main import app
+
+    # Redirect DB_PATH on every module that captured it at import time. See
+    # conftest.authenticated_async_context for the full rationale: a
+    # ``from src.core.settings import DB_PATH`` binds the value, so patching
+    # settings alone misses importers like services/profile/storage.py and
+    # profile queries hit the production DB.
+    import sys as _sys
+
+    for _mod in list(_sys.modules.values()):
+        _name = getattr(_mod, "__name__", "")
+        if _name.startswith(("src.", "migrations")) and getattr(_mod, "DB_PATH", None) is not None:
+            monkeypatch.setattr(_mod, "DB_PATH", patched, raising=False)
+
     app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
     client = TestClient(app)
     client.__job_ids__ = job_ids  # type: ignore[attr-defined]
