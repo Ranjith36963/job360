@@ -192,6 +192,23 @@ def test_change_password_success(client):
     assert _login(client, "pw_ok@example.com", "newpassword1") == 200
 
 
+def test_change_password_invalidates_session(client):
+    """Rule #26: a successful password change MUST invalidate the session
+    cookie (force re-login), like email change already does."""
+    _register(client, "pw_session@example.com", "oldpassword1")
+    # Authenticated before the change.
+    assert client.get("/api/auth/me").status_code == 200
+    r = client.patch(
+        "/api/auth/users/me/password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+    )
+    assert r.status_code == 204
+    # The response must clear the session cookie.
+    assert "job360_session=" in r.headers.get("set-cookie", "")
+    # And the same client can no longer reach a protected route.
+    assert client.get("/api/auth/me").status_code == 401
+
+
 def test_change_password_short_new_password(client):
     """new_password shorter than 8 chars is rejected by Pydantic (422)."""
     _register(client, "pw_short@example.com")
@@ -247,8 +264,10 @@ def test_change_email_success(client):
     )
     assert r.status_code == 204
 
-    # Session cookie must be cleared → /me is 401
-    client.cookies.clear()
+    # The response itself must clear the session cookie (rule #26) — don't
+    # manually clear, or the test can't tell whether the server did it.
+    assert "job360_session=" in r.headers.get("set-cookie", "")
+    # The same client (cookie now cleared by the response) is logged out.
     assert client.get("/api/auth/me").status_code == 401
 
     # Login with old email fails
