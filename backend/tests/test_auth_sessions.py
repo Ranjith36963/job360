@@ -64,8 +64,15 @@ async def test_cookie_tampering_rejected(session_db):
     cookie = await auth_sessions.create_session(
         session_db, user_id="user-1", secret=SESSION_SECRET
     )
-    # Flip last char of signature
-    tampered = cookie[:-1] + ("a" if cookie[-1] != "a" else "b")
+    # Tamper the signature deterministically by flipping its FIRST base64 char.
+    # Flipping the LAST char is flaky: unpadded base64 discards the final char's
+    # low bits, so a flip can decode to the same HMAC (~5% of runs) and the
+    # tampered cookie still verifies. The first signature char's 6 bits are all
+    # meaningful, so flipping it always changes the decoded HMAC → guaranteed reject.
+    last_dot = cookie.rfind(".")
+    sig = cookie[last_dot + 1 :]
+    flipped_sig = ("a" if sig[0] != "a" else "b") + sig[1:]
+    tampered = cookie[: last_dot + 1] + flipped_sig
     assert await auth_sessions.resolve_session(
         session_db, tampered, secret=SESSION_SECRET
     ) is None
