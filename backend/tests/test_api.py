@@ -29,9 +29,13 @@ async def test_health_returns_ok():
 
 
 @pytest.mark.asyncio
-async def test_status_returns_counts():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+async def test_status_returns_counts(authenticated_async_context):
+    # Use the fixture's isolated, fully-migrated DB rather than the ambient
+    # data/jobs.db: the bare AsyncClient hit whatever DB_PATH resolved to (a
+    # stale local data/jobs.db lacking staleness_state -> 500), and writing to
+    # the real dev DB is a data-pollution risk. /api/status is public, so the
+    # authenticated client's cookie is simply unused.
+    async with authenticated_async_context() as client:
         resp = await client.get("/api/status")
     assert resp.status_code == 200
     data = resp.json()
@@ -159,7 +163,12 @@ async def _insert_job_row(db: JobDatabase, **overrides) -> int:
     """Insert a row directly via the active aiosqlite connection — bypasses
     `insert_job` so tests can pin date-model fields and id deterministically.
     Returns the inserted job id."""
-    now = datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc).isoformat()
+    # Use *current* time, not a pinned past date: the list route filters by
+    # `first_seen >= now() - days` against the REAL clock, so a hardcoded
+    # 2026-04-23 made these rows fall outside the recency window once real time
+    # advanced (a time-bomb — passed in Apr/May, failed after). Tests that need
+    # a fixed date pass explicit overrides.
+    now = datetime.now(timezone.utc).isoformat()
     payload = dict(
         title="ML Engineer",
         company="Acme AI",

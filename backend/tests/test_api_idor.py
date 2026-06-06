@@ -136,7 +136,10 @@ def _register(client, email, password="s3cretpassword"):
 
 
 @pytest.mark.parametrize("method,path", [
-    ("GET",  "/api/jobs"),
+    # NB: GET /api/jobs is intentionally PUBLIC (shared catalog read via
+    # optional_user — sitemap + unfurl bots read it unauthenticated; see
+    # routes/jobs.py::list_jobs), so it is NOT a per-user-auth endpoint and is
+    # excluded here. The per-user MUTATIONS below still require auth.
     ("POST", "/api/jobs/1/action"),
     ("DELETE", "/api/jobs/1/action"),
     ("GET",  "/api/actions"),

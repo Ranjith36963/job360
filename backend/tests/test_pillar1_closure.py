@@ -295,7 +295,9 @@ def test_esco_attribution_in_build_script():
     script MUST carry the attribution so anyone running it (or
     auditing the release pipeline) sees it."""
     from pathlib import Path
-    script = (Path(__file__).resolve().parents[2]
+    # build_esco_index.py was consolidated from repo-root scripts/ into
+    # backend/scripts/ — parents[1] is backend/, not parents[2] (repo root).
+    script = (Path(__file__).resolve().parents[1]
               / "scripts" / "build_esco_index.py")
     content = script.read_text(encoding="utf-8")
     assert "ESCO" in content
