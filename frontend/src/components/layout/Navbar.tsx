@@ -17,7 +17,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
-import { ThemeToggle } from "@/components/layout/ThemeProvider";
 
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
@@ -78,8 +77,6 @@ export function Navbar() {
               Search Latest Jobs
             </Button>
           </Link>
-
-          <ThemeToggle />
 
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
@@ -148,10 +145,6 @@ export function Navbar() {
                 </button>
               </div>
             )}
-
-            <div className="mt-4 px-3">
-              <ThemeToggle />
-            </div>
           </SheetContent>
         </Sheet>
       </div>
