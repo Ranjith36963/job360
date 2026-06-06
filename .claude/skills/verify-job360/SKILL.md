@@ -156,6 +156,19 @@ These cost real time the first time. Reading them here saves the next run.
 - **Playwright screenshots save to the repo root** by default. Read them from there, and
   tidy them into `test-artifacts/` afterward so they don't clutter the tree.
 - **`test_main.py` hits live Indeed** via JobSpy — exclude it from fast test runs.
+- **Frontend uses Base UI (`@base-ui/react`), NOT Radix/shadcn.** Compose via the
+  `render` prop (`<Button render={<Link href=.. />}>text</Button>`), never `asChild`
+  (that's a Radix-ism and fails `tsc`). After frontend edits, run BOTH gates:
+  `npm run type-check` AND `npm run lint` — they're CI gates and catch pre-existing
+  breakage (e.g. `react-hooks/set-state-in-effect`: derive state from the initial
+  `useState` value instead of calling setState synchronously in an effect).
+- **The app is dark-only by design** (`globals.css`: `:root` == `.dark`, comment
+  "the neon lime theme IS dark"). The navbar "Toggle theme" button flips the class but
+  there's no light palette, so light mode looks identical to dark — don't chase it as a
+  styling bug; it's a product decision (remove the toggle, or build a real light theme).
+- **`Apply` on a job card opens the external apply URL in a NEW TAB** (and adds an
+  `applications` row). The new tab can swallow the *next* Playwright click — close it or
+  re-navigate before asserting the following interaction, or you'll get a false negative.
 
 ## Tools this skill uses
 
