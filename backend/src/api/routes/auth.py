@@ -248,8 +248,10 @@ async def change_password(
         raise HTTPException(status_code=401, detail="current password is incorrect")
     new_hash = hash_password(req.new_password)
     await db.update_user_password(user.id, new_hash)
-    # Invalidate the session so the cookie clear actually reaches the client:
-    # mutate + return the injected response (returning a fresh Response would
+    # Terminate ALL of the user's sessions server-side (other devices / stolen
+    # cookies), not just clear this browser's cookie — full intent of rule #26.
+    await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
+    # Mutate + return the injected response (returning a fresh Response would
     # drop the Set-Cookie, the latent bug this fix also corrects for email/delete).
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -291,6 +293,9 @@ async def change_email(
         if await cursor.fetchone():
             raise HTTPException(status_code=409, detail="email already in use")
     await db.update_user_email(user.id, str(req.new_email))
+    # Terminate all of the user's sessions server-side (rule #26 — same as
+    # password change), not just clear this browser's cookie.
+    await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)

@@ -209,6 +209,35 @@ def test_change_password_invalidates_session(client):
     assert client.get("/api/auth/me").status_code == 401
 
 
+def test_change_password_revokes_all_user_sessions(client):
+    """Rule #26 (full intent): a password change must terminate ALL of the
+    user's sessions server-side, not just the current browser cookie — so a
+    session left open on another device / a stolen cookie cannot survive it.
+    """
+    _register(client, "multi_sess@example.com", "oldpassword1")
+    cookie_a = client.cookies.get("job360_session")
+    # A second login → a second, independent server-side session for the user.
+    client.cookies.clear()
+    assert _login(client, "multi_sess@example.com", "oldpassword1") == 200
+    cookie_b = client.cookies.get("job360_session")
+    assert cookie_a and cookie_b and cookie_a != cookie_b
+
+    # Change the password while authenticated with session B.
+    r = client.patch(
+        "/api/auth/users/me/password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+    )
+    assert r.status_code == 204
+
+    # BOTH sessions must now be dead server-side (use each cookie explicitly).
+    client.cookies.clear()
+    client.cookies.set("job360_session", cookie_a)
+    assert client.get("/api/auth/me").status_code == 401, "old device session A survived"
+    client.cookies.clear()
+    client.cookies.set("job360_session", cookie_b)
+    assert client.get("/api/auth/me").status_code == 401, "session B survived"
+
+
 def test_change_password_short_new_password(client):
     """new_password shorter than 8 chars is rejected by Pydantic (422)."""
     _register(client, "pw_short@example.com")
