@@ -10,7 +10,6 @@ import {
   Search,
   Menu,
   Activity,
-  Briefcase,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -21,7 +20,6 @@ import { useAuth } from "@/components/layout/AuthProvider";
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/settings/channels", label: "Channels", icon: Settings },
 ] as const;
