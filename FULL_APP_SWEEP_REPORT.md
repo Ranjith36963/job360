@@ -42,7 +42,19 @@ Leaked the HTTP status to users. **Fix:** added `friendlyAuthError()` (`lib/api-
 
 ---
 
-## Decisions to make (surfaced, not unilaterally changed) 🟡
+## Decisions — made by the user, now FIXED ✅
+
+- **#2 — Light-mode toggle:** decision = **remove the toggle**. Done — removed from
+  navbar (desktop + mobile) + unused import; app stays dark. type-check + lint green.
+- **#4 — Password-change session:** decision = **enforce rule #26**. Done — password
+  change now invalidates the session (forces re-login). **Bonus:** while fixing it I
+  found `change_email` and `delete_account` had a latent bug — they set `delete_cookie`
+  on the injected response but returned a *fresh* `Response(204)`, dropping the
+  `Set-Cookie`, so they never actually cleared the cookie (their tests false-passed by
+  manually clearing). All three fixed to mutate+return the injected response; added a
+  real regression test. Backend suite: 1260 passed.
+
+<details><summary>Original decision write-ups (for the record)</summary>
 
 ### #2 (medium) — Light-mode toggle is a no-op
 The navbar "Toggle theme" button flips `html` to `light`, but `globals.css` defines `:root` identical to `.dark` with the comment `/* Always dark — the neon lime theme IS dark */`. So **the app is intentionally dark-only** and "light mode" does nothing visible.
@@ -51,6 +63,8 @@ The navbar "Toggle theme" button flips `html` to `light`, but `globals.css` defi
 ### #4 (medium, security policy) — Password change doesn't invalidate the session
 Hard rule #26 says account-mgmt routes (password/email/delete) MUST invalidate the session after the change. **Email change does** log out; **password change does NOT** (UI even says "you will remain logged in"). Current password IS required, so it's not insecure per se — but it deviates from the documented policy.
 **Decision needed:** enforce rule #26 for password change (force re-login), or update rule #26 to allow staying logged in after a self-service password change.
+
+</details>
 
 ---
 
