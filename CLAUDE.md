@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## How to talk to me (STRICT — always follow)
+
+**Explain everything in simple, plain English.** This is a strict rule, never skip it.
+
+- Use short sentences and easy words. Imagine explaining to a smart friend who is not a coding expert.
+- Avoid jargon. If a technical word is needed, say what it means in plain words right after it (one short line).
+- No long walls of text. Get to the point: what happened, what I did, what's next.
+- When I ask for something, show me the result in plain words first, then the details if needed.
+
 ## Quick Orientation
 
 If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
