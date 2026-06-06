@@ -52,6 +52,7 @@ def test_concurrent_limit():
     _run(_test())
 
 
+@pytest.mark.real_sleep
 def test_delay_enforced():
     """RateLimiter should enforce delay between acquires."""
     async def _test():

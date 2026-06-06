@@ -98,6 +98,7 @@ addopts = "-p no:randomly"
 # PytestUnknownMarkWarning and poison CI logs.
 markers = [
     "fast: smoke subset runnable in < 5s",
+    "real_sleep: opt out of the instant-asyncio-sleep fixture (tests asserting on real elapsed time)",
 ]
 
 [tool.ruff]

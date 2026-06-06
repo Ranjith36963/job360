@@ -13,7 +13,7 @@ from src.services.channels import crypto
 
 
 @pytest.fixture(autouse=True)
-def _instant_asyncio_sleep(monkeypatch):
+def _instant_asyncio_sleep(monkeypatch, request):
     """Make ``asyncio.sleep`` instant for the whole suite.
 
     Source retry backoff (``BaseJobSource`` 1s/2s/4s) and scraper pacing sleeps
@@ -23,12 +23,35 @@ def _instant_asyncio_sleep(monkeypatch):
     assert on results, not timing. ``delay=0`` is preserved so any test that
     deliberately yields control still does.
     """
+    # Opt-out for the few tests that assert on real elapsed time (e.g. the
+    # rate-limiter delay). Mark them ``@pytest.mark.real_sleep``.
+    if request.node.get_closest_marker("real_sleep"):
+        return
+
     real_sleep = asyncio.sleep
 
     async def _instant(delay, *args, **kwargs):
         return await real_sleep(0)
 
     monkeypatch.setattr(asyncio, "sleep", _instant)
+
+
+@pytest.fixture(autouse=True)
+def _close_leaked_app_db():
+    """Backstop: close any app DB singleton a test leaves open.
+
+    Complements ``authenticated_async_context``'s own teardown — covers tests
+    that lazily create ``dependencies._db`` without that fixture. aiosqlite's
+    non-daemon worker thread otherwise lingers and blocks interpreter exit.
+    """
+    yield
+    from src.api import dependencies
+
+    if getattr(dependencies, "_db", None) is not None:
+        try:
+            asyncio.run(dependencies.close_db())
+        except Exception:
+            dependencies._db = None
 
 
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking
@@ -115,7 +138,20 @@ def authenticated_async_context(monkeypatch, tmp_path):
             yield client
 
     _make.fixture_user_id = captured_user_id  # type: ignore[attr-defined]
-    return _make
+    yield _make
+
+    # Teardown: close the lazily-created app DB singleton. aiosqlite leaves a
+    # non-daemon `_connection_worker_thread` per open connection; not closing
+    # them accumulates threads that block interpreter shutdown (the long-
+    # observed test_api.py "exit-hang"). This runs while `monkeypatch` is still
+    # active — i.e. BEFORE it restores `_db` and discards this test's
+    # connection reference — so `dependencies._db` still points at it. Cross-
+    # loop close is safe even though the request loop is already gone.
+    if dependencies._db is not None:
+        try:
+            asyncio.run(dependencies.close_db())
+        except Exception:
+            dependencies._db = None
 
 
 @pytest.fixture
