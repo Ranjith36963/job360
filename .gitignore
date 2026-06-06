@@ -39,3 +39,6 @@ test-*.png
 
 # Python build artifacts
 *.egg-info/
+# E2E verification artifacts (keep sample_cv.pdf, ignore screenshots/reports)
+test-artifacts/*.png
+frontend/playwright-report/
