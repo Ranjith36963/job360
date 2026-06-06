@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from src.services.profile import cv_parser, skill_entry, skill_normalizer
 from src.services.profile.models import CVData, UserPreferences, UserProfile
-
 
 # ── 1.3c: ESCO normaliser integration ─────────────────────────────
 
@@ -312,7 +311,9 @@ def test_esco_attribution_in_build_script():
 def versioned_storage_for_restore(tmp_path: Path, monkeypatch):
     """Reuse the test_profile_versions bootstrap pattern for rollback tests."""
     import asyncio
+
     import aiosqlite
+
     from migrations import runner
     from src.core import settings as core_settings
     from src.services.profile import storage

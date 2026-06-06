@@ -82,6 +82,7 @@ def api(monkeypatch, tmp_path):
     asyncio.run(_bootstrap())
 
     from pathlib import Path
+
     from src.api import auth_deps, dependencies
     from src.api.routes import auth as auth_route
     from src.api.routes import channels as channels_route
@@ -103,14 +104,14 @@ def api(monkeypatch, tmp_path):
     # Seed two shared-catalog jobs we can reference by id.
     job_ids = asyncio.run(_seed_job_rows(db_path))
 
-    from src.api.main import app
-
     # Redirect DB_PATH on every module that captured it at import time. See
     # conftest.authenticated_async_context for the full rationale: a
     # ``from src.core.settings import DB_PATH`` binds the value, so patching
     # settings alone misses importers like services/profile/storage.py and
     # profile queries hit the production DB.
     import sys as _sys
+
+    from src.api.main import app
 
     for _mod in list(_sys.modules.values()):
         _name = getattr(_mod, "__name__", "")
