@@ -714,23 +714,31 @@ def test_score_job_uses_recency_for_job_helper():
 
 
 # ---------------------------------------------------------------------------
-# Pillar 2 Batch 2.2 — Gate-pass scoring
+# Pillar 2 Batch 2.2 — Gate-pass scoring (require-either)
 #
-# A job must clear BOTH a title gate and a skill gate (default 15 % of their
-# respective max — 6 points each) before the full linear scoring kicks in.
-# Below the gate the score is suppressed to `max(10, (title+skill) * 0.25)` so
-# that location/recency alone cannot inflate a non-matching job to look like a
-# real one. Covers report item #2.
+# A job is suppressed to `max(10, (title+skill) * 0.25)` ONLY when it clears
+# NEITHER the title gate NOR the skill gate (each default 15 % of its max — 6
+# points). A strong title alone, or strong skills alone, is enough relevance to
+# score fully. This keeps location/recency from inflating a job that matches
+# nothing, while not flooring real "ML Engineer"-style jobs whose list-source
+# descriptions are too thin to score skills (E2E_TEST_REPORT #2).
+#
+# (Originally required BOTH gates — see _gate_suppressed_score history.)
 # ---------------------------------------------------------------------------
 
 
 class TestGatePass:
-    """Gate-pass scoring suppresses jobs that don't clear both title + skill gates."""
+    """Require-either gate: suppress only jobs that clear neither title nor skill."""
 
     # ---- JobScorer.score() (dynamic path) ----
 
-    def test_jobscorer_zero_title_good_skills_suppressed(self):
-        """Zero title + strong skills + good location + recency → suppressed to ≤25."""
+    def test_jobscorer_zero_title_strong_skills_carries(self):
+        """Zero title but strong skill match → NOT suppressed; skills carry it.
+
+        Require-either gate (E2E_TEST_REPORT #2): a strong skill signal is
+        enough relevance on its own, even when the title doesn't match the
+        configured target. Only a job matching NEITHER is suppressed.
+        """
         config = SearchConfig(
             job_titles=["Cardiology Consultant"],  # deliberately no title match
             primary_skills=["Python", "Django", "FastAPI", "Postgres"],
@@ -742,11 +750,17 @@ class TestGatePass:
             description="Python Django FastAPI Postgres expert",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        # title_pts=0 → title gate fails → suppress
-        assert scorer.score(job).match_score <= 25
+        # title_pts=0 but skill_pts=12 (≥ gate) → not both weak → full score.
+        assert scorer.score(job).match_score > 25
 
-    def test_jobscorer_zero_skills_good_title_suppressed(self):
-        """Exact title match but zero skill match → suppressed to ≤25."""
+    def test_jobscorer_zero_skills_strong_title_carries(self):
+        """Exact title match but zero skill text → NOT suppressed; title carries it.
+
+        Require-either gate (E2E_TEST_REPORT #2): this is the real-world case
+        that broke search — list-based sources return thin descriptions with no
+        skill keywords, so skill_pts=0 even for a perfect title. The strong
+        title alone must keep the job alive.
+        """
         config = SearchConfig(
             job_titles=["AI Engineer"],
             primary_skills=["Rust", "Embedded C"],  # none will match the description
@@ -758,8 +772,8 @@ class TestGatePass:
             description="Looking for a strong generalist.",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        # skill_pts=0 → skill gate fails → suppress
-        assert scorer.score(job).match_score <= 25
+        # title_pts=40 (≥ gate), skill_pts=0 → not both weak → full score.
+        assert scorer.score(job).match_score > 25
 
     def test_jobscorer_both_zero_location_recency_dont_rescue(self):
         """Both zero + strong location + full recency → suppressed; location/recency
@@ -796,6 +810,34 @@ class TestGatePass:
         assert scorer.score(job).match_score > 25
         assert scorer.score(job).match_score >= 60
 
+    def test_jobscorer_strong_title_thin_description_not_suppressed(self):
+        """A strong title match must NOT be gate-floored just because the
+        (often truncated) description lists no skills.
+
+        Regression for E2E_TEST_REPORT #2: real "ML Engineer"-style jobs from
+        list-based sources (Reed/RemoteOK return short snippets) scored exactly
+        10 and were filtered out because skill_pts=0. The gate suppresses only
+        jobs with NEITHER a title NOR a skill signal — a strong title alone is
+        enough relevance to score fully.
+        """
+        config = SearchConfig(
+            job_titles=["ML Engineer"],
+            primary_skills=["Python", "PyTorch"],
+        )
+        scorer = JobScorer(config)
+        job = _make_job(
+            title="ML Engineer",  # exact title → title_pts=40 (strong)
+            location="London, UK",
+            description="Day-rate contract, immediate start.",  # no skills listed
+            date_found=datetime.now(timezone.utc).isoformat(),
+        )
+        bd = scorer.score(job)
+        # title=40, skill=0. Old gate floored to 10; new gate keeps it.
+        assert bd.match_score > 10, (
+            f"strong-title job should not be gate-floored; got {bd.match_score}"
+        )
+        assert bd.match_score >= 30  # clears MIN_MATCH_SCORE → reaches the user
+
     def test_jobscorer_title_exactly_at_gate_passes(self):
         """title_pts exactly at the gate (6) must clear (>= semantics)."""
         config = SearchConfig(
@@ -819,8 +861,12 @@ class TestGatePass:
         # Both ≥ gate → no suppression. Score should be > 10 floor.
         assert scorer.score(job).match_score > 10
 
-    def test_jobscorer_title_just_below_gate_suppressed(self):
-        """title_pts just below gate → suppressed even with strong skills."""
+    def test_jobscorer_weak_title_strong_skills_carries(self):
+        """title just below its gate but skills above theirs → skills carry it.
+
+        Require-either gate (E2E_TEST_REPORT #2): only NEITHER-signal jobs are
+        suppressed, so a weak title with a strong skill match scores fully.
+        """
         config = SearchConfig(
             job_titles=["Cardiology Consultant"],
             primary_skills=["Python", "Docker", "Postgres"],
@@ -835,12 +881,15 @@ class TestGatePass:
             description="Python Docker Postgres role.",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        # title_pts=5 (below gate), skill_pts=9 (above). Gate fails on title.
-        # Suppressed = max(10, (5+9)*0.25) = max(10, 3) = 10.
-        assert scorer.score(job).match_score == 10
+        # title_pts=5 (< gate) but skill_pts=9 (≥ gate) → not both weak → full score.
+        assert scorer.score(job).match_score > 10
 
-    def test_jobscorer_skill_just_below_gate_suppressed(self):
-        """skill_pts just below gate → suppressed even with exact title match."""
+    def test_jobscorer_weak_skill_strong_title_carries(self):
+        """skill just below its gate but exact title → title carries it.
+
+        Require-either gate (E2E_TEST_REPORT #2): a perfect title is enough
+        relevance even when only one skill keyword appears in the text.
+        """
         config = SearchConfig(
             job_titles=["ML Engineer"],
             primary_skills=["Python"],  # only one primary → max 3 points (< gate 6)
@@ -852,10 +901,8 @@ class TestGatePass:
             description="Python-only role.",
             date_found=datetime.now(timezone.utc).isoformat(),
         )
-        # title_pts=40, skill_pts=3 (< gate 6). Gate fails on skill.
-        # Suppressed = max(10, (40+3)*0.25) = max(10, 10) = 10.
-        assert scorer.score(job).match_score <= 25
-        assert scorer.score(job).match_score == 10
+        # title_pts=40 (≥ gate), skill_pts=3 (< gate) → not both weak → full score.
+        assert scorer.score(job).match_score > 25
 
     def test_jobscorer_suppressed_returns_floor_10_when_gate_fails_fully(self):
         """All components zero + gate-fail → exactly the floor of 10."""
