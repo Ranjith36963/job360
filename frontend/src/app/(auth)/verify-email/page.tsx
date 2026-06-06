@@ -21,15 +21,15 @@ type State = "pending" | "ok" | "error";
 function VerifyBody() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
-  const [state, setState] = useState<State>("pending");
-  const [error, setError] = useState<string | null>(null);
+  // Derive the missing-token error from initial state instead of calling
+  // setState synchronously inside the effect (react-hooks/set-state-in-effect).
+  const [state, setState] = useState<State>(token ? "pending" : "error");
+  const [error, setError] = useState<string | null>(
+    token ? null : "Verification token missing from URL. Use the link from your email."
+  );
 
   useEffect(() => {
-    if (!token) {
-      setState("error");
-      setError("Verification token missing from URL. Use the link from your email.");
-      return;
-    }
+    if (!token) return; // missing-token case already reflected in initial state
     let cancelled = false;
     (async () => {
       try {
@@ -64,8 +64,8 @@ function VerifyBody() {
     return (
       <div className="space-y-4">
         <p className="text-sm">Your email is verified. You&apos;re all set.</p>
-        <Button asChild className="w-full">
-          <Link href="/dashboard">Go to dashboard</Link>
+        <Button render={<Link href="/dashboard" />} className="w-full">
+          Go to dashboard
         </Button>
       </div>
     );
@@ -74,8 +74,8 @@ function VerifyBody() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-red-400">{error}</p>
-      <Button asChild className="w-full" variant="secondary">
-        <Link href="/dashboard">Back to dashboard</Link>
+      <Button render={<Link href="/dashboard" />} className="w-full" variant="secondary">
+        Back to dashboard
       </Button>
       <p className="text-center text-sm text-muted-foreground">
         Need a fresh link? Open your account settings to resend.
