@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { register } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,7 +43,7 @@ function RegisterForm() {
       await register(email, password);
       router.push(safeNext(next));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "registration failed");
+      setError(friendlyAuthError(err, "Sign-up failed. Please try again."));
     } finally {
       setPending(false);
     }
