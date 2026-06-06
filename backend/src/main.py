@@ -325,6 +325,7 @@ async def run_search(
     dry_run: bool = False,
     log_level: str | None = None,
     no_notify: bool = False,
+    user_id: str | None = None,
 ) -> dict:
     setup_logging(log_level)
     # Step-1 S1 — set the per-run correlation id BEFORE the first log line so
@@ -339,10 +340,12 @@ async def run_search(
     if dry_run:
         logger.info("  Mode: DRY RUN (no DB writes, no notifications)")
 
-    # Load user profile for dynamic keywords
-    # CLI run path — single-tenant by design. See docs/plans/batch-3.5.2-plan.md
-    # Deliverable E. Per-user profiles are the HTTP API's job.
-    profile = load_profile(DEFAULT_TENANT_ID)
+    # Load user profile for dynamic keywords.
+    # When the HTTP API passes a logged-in `user_id`, score against THAT user's
+    # profile; otherwise fall back to the single-tenant CLI path
+    # (DEFAULT_TENANT_ID). See docs/plans/batch-3.5.2-plan.md Deliverable E.
+    # Without this, the web "New Search" ran profile-less (E2E_TEST_REPORT #1).
+    profile = load_profile(user_id or DEFAULT_TENANT_ID)
     if not profile or not profile.is_complete:
         logger.error("=" * 60)
         logger.error("No user profile found. Job360 requires a CV or preferences.")

@@ -119,6 +119,76 @@ def fake_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_search_loads_profile_for_given_user(tmp_db_path, monkeypatch):
+    """run_search(user_id=X) must load X's profile, not the default tenant's.
+
+    Regression for the per-user search bug (E2E_TEST_REPORT #1): the web
+    "New Search" ran profile-less because run_search ignored the logged-in
+    user and always loaded DEFAULT_TENANT_ID's (usually empty) profile, so
+    a logged-in user could never get personalised results.
+    """
+    from src import main as main_mod
+    from src.services.profile.models import (
+        CVData, SearchConfig, UserPreferences, UserProfile,
+    )
+
+    captured: dict[str, str] = {}
+    stub = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(
+            target_job_titles=["Engineer"], additional_skills=["python"],
+        ),
+    )
+
+    def fake_load_profile(uid):
+        captured["uid"] = uid
+        return stub
+
+    monkeypatch.setattr(main_mod, "load_profile", fake_load_profile)
+    monkeypatch.setattr(
+        main_mod, "generate_search_config",
+        lambda p: SearchConfig(job_titles=["Engineer"], relevance_keywords=["engineer"]),
+    )
+    monkeypatch.setattr(main_mod, "_build_sources", lambda *a, **kw: [])
+
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True, user_id="user-123")
+
+    assert captured["uid"] == "user-123", (
+        f"run_search should load the given user's profile; loaded {captured.get('uid')!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_search_defaults_to_tenant_when_no_user(tmp_db_path, monkeypatch):
+    """run_search() with no user_id keeps loading DEFAULT_TENANT_ID (CLI path)."""
+    from src import main as main_mod
+    from src.services.profile.models import (
+        CVData, SearchConfig, UserPreferences, UserProfile,
+    )
+
+    captured: dict[str, str] = {}
+    stub = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(
+            target_job_titles=["Engineer"], additional_skills=["python"],
+        ),
+    )
+    monkeypatch.setattr(
+        main_mod, "load_profile",
+        lambda uid: captured.update(uid=uid) or stub,
+    )
+    monkeypatch.setattr(
+        main_mod, "generate_search_config",
+        lambda p: SearchConfig(job_titles=["Engineer"], relevance_keywords=["engineer"]),
+    )
+    monkeypatch.setattr(main_mod, "_build_sources", lambda *a, **kw: [])
+
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True)
+
+    assert captured["uid"] == main_mod.DEFAULT_TENANT_ID
+
+
+@pytest.mark.asyncio
 async def test_run_search_uses_tiered_scheduler(tmp_db_path, fake_profile, monkeypatch):
     """Assert run_search calls TieredScheduler.tick exactly once with force=True."""
     from src.services import scheduler as scheduler_mod
