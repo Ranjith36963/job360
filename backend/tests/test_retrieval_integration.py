@@ -28,6 +28,21 @@ _SEMANTIC_STACK = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_chroma(monkeypatch, tmp_path):
+    """Give every test its own EMPTY chroma store.
+
+    These tests otherwise share the real ``data/chroma/`` persist dir, so one
+    test's upserts leak into another's "empty index" assertion. (This stayed
+    hidden while VectorIndex.upsert was silently failing on newer chromadb;
+    once upsert works, the leak surfaces.) Point the default persist dir at a
+    per-test tmp path so isolation is guaranteed.
+    """
+    monkeypatch.setattr(
+        "src.services.vector_index._DEFAULT_PATH", tmp_path / "chroma", raising=False
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Empty-index fallback — no semantic stack needed.
 # ---------------------------------------------------------------------------
