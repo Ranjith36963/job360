@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { User, CheckCircle, AlertCircle, History } from "lucide-react";
+import { User, CheckCircle, AlertCircle, History, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { CVUpload } from "@/components/profile/CVUpload";
@@ -75,6 +76,7 @@ function calcCompleteness(profile: ProfileResponse | null): {
 // ── Page component ──────────────────────────────────────────
 
 export default function ProfilePage() {
+  const router = useRouter();
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +170,15 @@ export default function ProfilePage() {
     },
     []
   );
+
+  // "Search Latest Jobs": set a one-shot flag the dashboard reads on mount,
+  // then navigate there. The dashboard runs the actual search (so its progress
+  // UI shows the run) — the SAME per-user POST /api/search the dashboard
+  // Refresh button calls. One search path, not two.
+  const handleSearchLatest = useCallback(() => {
+    sessionStorage.setItem("job360_run_search", "1");
+    router.push("/dashboard");
+  }, [router]);
 
   const { percent, label } = calcCompleteness(profile);
 
@@ -418,6 +429,32 @@ export default function ProfilePage() {
                   </ul>
                 </div>
               )}
+
+            {/* ── Search Latest Jobs ──────────────────────
+                Final step: with the profile + preferences set, kick off a
+                real job search and jump to the dashboard to watch results
+                land. Disabled until there's something to search with, so a
+                profile-less search (which returns 0 jobs) can't happen. */}
+            <div className="animate-fade-in-up glass-card rounded-xl p-6 flex flex-col items-center gap-3 text-center">
+              <h2 className="font-heading text-base font-semibold text-foreground">
+                Ready to find jobs?
+              </h2>
+              <p className="max-w-md text-xs text-muted-foreground">
+                {percent > 0
+                  ? "Search the latest jobs using your profile and preferences. We'll take you to your dashboard while the results load."
+                  : "Add your CV or save your preferences above first — then you can search."}
+              </p>
+              <Button
+                size="lg"
+                className="gap-2"
+                onClick={handleSearchLatest}
+                disabled={percent === 0}
+                title={percent === 0 ? "Add a CV or preferences first" : "Search the latest jobs"}
+              >
+                <Search className="h-4 w-4" aria-hidden="true" />
+                Search Latest Jobs
+              </Button>
+            </div>
           </div>
         )}
 

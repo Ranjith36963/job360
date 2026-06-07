@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   User,
   Kanban,
-  Search,
   Menu,
   Activity,
   Settings,
@@ -64,18 +63,10 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Right side — Search + Auth + Theme */}
+        {/* Right side — Auth + Theme. The search action lives on the Profile
+            page ("Search Latest Jobs") — a nav link here only navigated and
+            misled users into thinking it searched. */}
         <div className="hidden md:flex items-center gap-2">
-          <Link href="/dashboard">
-            <Button
-              size="sm"
-              className="gap-2 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-            >
-              <Search className="h-3.5 w-3.5" aria-hidden="true" />
-              Search Latest Jobs
-            </Button>
-          </Link>
-
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
               <span className="text-xs text-muted-foreground max-w-[140px] truncate">
