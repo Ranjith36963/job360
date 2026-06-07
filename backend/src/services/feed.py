@@ -79,6 +79,23 @@ class FeedService:
         cur = await self._db.execute(query, params)
         return [_row(r) for r in await cur.fetchall()]
 
+    async def get_score(self, user_id: str, job_id: int) -> Optional[int]:
+        """Return the active feed score for one (user, job), or None if the
+        user has no active feed row for that job.
+
+        Used by the job-detail route: the overall ``match_score`` shown on the
+        detail page must equal the dashboard card the user clicked — i.e. the
+        stored ``user_feed.score`` — not a fresh recompute that could drift if
+        the user edited their profile after the search ran.
+        """
+        cur = await self._db.execute(
+            "SELECT score FROM user_feed "
+            "WHERE user_id = ? AND job_id = ? AND status = 'active'",
+            (user_id, job_id),
+        )
+        row = await cur.fetchone()
+        return row["score"] if row else None
+
     async def list_pending_notifications(
         self,
         user_id: str,
