@@ -105,7 +105,18 @@ export default function DashboardPage() {
     placeholderData: (prev) => prev, // keep previous data while re-fetching
   });
 
-  const jobs = jobsData?.jobs ?? [];
+  // Always show highest-score first, in every time-bucket tab. The backend
+  // feed query already orders by score, but we re-sort on the client so the
+  // guarantee holds regardless of which path served the data (the shared
+  // catalog orders by recency) or any future change. Array#sort is stable, so
+  // equal scores keep the server's secondary (recency) order.
+  const jobs = useMemo(
+    () =>
+      [...(jobsData?.jobs ?? [])].sort(
+        (a, b) => (b.match_score ?? 0) - (a.match_score ?? 0)
+      ),
+    [jobsData?.jobs]
+  );
   const total = jobsData?.total ?? 0;
 
   // ---------------------------------------------------------------------------
