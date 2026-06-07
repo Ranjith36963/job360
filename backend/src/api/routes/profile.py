@@ -41,7 +41,11 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         job_titles=profile.cv_data.job_titles,
         skills_count=len(profile.cv_data.skills),
         cv_length=len(profile.cv_data.raw_text),
-        has_linkedin=bool(profile.cv_data.linkedin_skills),
+        # Any merged LinkedIn signal counts — skills OR positions. Mirrors the
+        # upload route's own `merged = skills or positions`; checking only
+        # linkedin_skills left has_linkedin=False after a successful upload that
+        # yielded positions but no detected skills.
+        has_linkedin=bool(profile.cv_data.linkedin_skills or profile.cv_data.linkedin_positions),
         has_github=bool(profile.cv_data.github_languages),
         education=profile.cv_data.education,
         experience_level=profile.preferences.experience_level,
