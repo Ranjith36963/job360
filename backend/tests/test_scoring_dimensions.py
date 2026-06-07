@@ -56,9 +56,19 @@ def test_seniority_two_ranks_off_gets_quarter_weight():
     assert seniority_score(e, "mid") == expected
 
 
-def test_seniority_three_ranks_off_gets_zero():
+def test_seniority_three_ranks_off_is_penalized():
+    # intern job (rank 0) vs senior candidate (rank 3) — a real mismatch, not
+    # merely "no reward". 3 ranks apart → negative half-weight penalty.
+    e = _enrichment(seniority=SeniorityLevel.INTERN)
+    assert seniority_score(e, "senior") == -int(round(SENIORITY_WEIGHT * 0.5))
+
+
+def test_seniority_large_gap_strong_penalty():
+    # director job (rank 6) vs junior candidate (rank 1) = 5 ranks apart → full
+    # negative weight. (Previously this returned 0 — interns/directors floated
+    # up on the other dimensions despite being a poor seniority fit.)
     e = _enrichment(seniority=SeniorityLevel.DIRECTOR)
-    assert seniority_score(e, "junior") == 0
+    assert seniority_score(e, "junior") == -SENIORITY_WEIGHT
 
 
 def test_seniority_unknown_enrichment_neutral():
