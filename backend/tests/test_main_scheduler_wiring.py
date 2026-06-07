@@ -189,6 +189,66 @@ async def test_run_search_defaults_to_tenant_when_no_user(tmp_db_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_dashboard_feed_isolated_between_two_users(tmp_db_path, monkeypatch):
+    """John and Paul each run a real search; each user's dashboard feed contains
+    ONLY their own jobs. Proves the per-user write path (run_search -> user_feed)
+    AND the per-user read path (get_user_feed_jobs) — the core multi-tenant ask.
+    """
+    from migrations import runner
+    from src import main as main_mod
+    from src.repositories.database import JobDatabase
+    from src.services.profile.models import (
+        CVData, SearchConfig, UserPreferences, UserProfile,
+    )
+
+    # Mirror production init order (dependencies.init_db): base tables, then
+    # migrations — the per-user `user_feed` table lives in a Batch-2 migration.
+    _setup = JobDatabase(tmp_db_path)
+    await _setup.init_db()
+    await runner.up(tmp_db_path)
+    await _setup.close()
+
+    stub = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(
+            target_job_titles=["Engineer"], additional_skills=["python"],
+        ),
+    )
+    monkeypatch.setattr(main_mod, "load_profile", lambda uid: stub)
+    monkeypatch.setattr(
+        main_mod, "generate_search_config",
+        lambda p: SearchConfig(job_titles=["Engineer"], relevance_keywords=["engineer"]),
+    )
+
+    # John's search finds a job at "JohnCo"; the "Engineer" title clears the gate.
+    monkeypatch.setattr(
+        main_mod, "_build_sources",
+        lambda *a, **kw: [_FakeSource("s", "ats", result=[_make_job("Engineer", "JohnCo")])],
+    )
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True, user_id="john")
+
+    # Paul's search finds a different job at "PaulCo".
+    monkeypatch.setattr(
+        main_mod, "_build_sources",
+        lambda *a, **kw: [_FakeSource("s", "ats", result=[_make_job("Engineer", "PaulCo")])],
+    )
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True, user_id="paul")
+
+    # Each user's feed must contain ONLY their own job.
+    db = JobDatabase(tmp_db_path)
+    await db.init_db()
+    try:
+        john = await db.get_user_feed_jobs("john", days=7, min_score=0)
+        paul = await db.get_user_feed_jobs("paul", days=7, min_score=0)
+    finally:
+        await db.close()
+
+    assert {j["company"] for j in john} == {"JohnCo"}, f"John saw: {[j['company'] for j in john]}"
+    assert {j["company"] for j in paul} == {"PaulCo"}, f"Paul saw: {[j['company'] for j in paul]}"
+    assert len(john) == 1 and len(paul) == 1
+
+
+@pytest.mark.asyncio
 async def test_run_search_uses_tiered_scheduler(tmp_db_path, fake_profile, monkeypatch):
     """Assert run_search calls TieredScheduler.tick exactly once with force=True."""
     from src.services import scheduler as scheduler_mod

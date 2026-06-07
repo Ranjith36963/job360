@@ -341,8 +341,15 @@ async def list_jobs(
     # to the keyword path silently when SEMANTIC_ENABLED is off, the vector
     # index is empty, or the semantic stack isn't installed.
     days = (hours // 24) + 1 if hours else 7
+    # Multi-tenant: an authenticated user sees ONLY their own user_feed (the
+    # isolated per-user view — John never sees Paul's jobs). Unauthenticated
+    # callers (sitemap / unfurl bots) get the shared catalog. No fallback: an
+    # empty feed shows the empty dashboard, never another user's jobs.
     # Step-1 B6: single LEFT JOIN avoids per-job enrichment lookups (N+1).
-    all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
+    if user is not None:
+        all_rows = await db.get_user_feed_jobs(user.id, days=days, min_score=min_score or 0)
+    else:
+        all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
 
     if mode == "hybrid":
         all_rows = _maybe_apply_hybrid_reorder(all_rows, profile=None)
