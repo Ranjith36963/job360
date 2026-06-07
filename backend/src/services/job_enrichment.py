@@ -49,11 +49,36 @@ _SYSTEM_PROMPT = (
 
 def _build_prompt(job: Job) -> str:
     """Render a concise prompt for the LLM. Truncation keeps token budget
-    bounded for weak providers (Cerebras 8K context)."""
+    bounded for weak providers (Cerebras 8K context).
+
+    The exact JSON keys + allowed enum values are spelled out here on purpose:
+    weak free-tier models cannot infer the field names from a schema *name*
+    alone (they emit ``job_title`` instead of the required ``title_canonical``,
+    failing validation every time). Listing the contract inline fixes that.
+    """
     desc = (job.description or "")[:4000]
     return (
-        "Extract structured fields from the following job posting and return "
-        "JSON matching the JobEnrichment schema.\n\n"
+        "Extract structured fields from the job posting below and return ONE JSON "
+        "object using EXACTLY these keys and allowed values (use \"unknown\" for "
+        "unknown enums, null for unknown numbers; return ONLY the JSON, no prose):\n"
+        "{\n"
+        '  "title_canonical": "<normalized job title, required, non-empty>",\n'
+        '  "category": one of [software_engineering, data_science, machine_learning, '
+        "devops_infrastructure, product_management, design, marketing, sales, finance, "
+        "legal, hr_people, operations, healthcare, education, academia_research, other],\n"
+        '  "employment_type": one of [full_time, part_time, contract, internship, '
+        "temporary, apprenticeship, freelance, unknown],\n"
+        '  "workplace_type": one of [remote, onsite, hybrid, unknown],\n'
+        '  "seniority": one of [intern, junior, mid, senior, staff, principal, director, unknown],\n'
+        '  "experience_level": one of [entry, mid, senior, unknown],\n'
+        '  "experience_min_years": <integer 0-40 or null>,\n'
+        '  "visa_sponsorship": one of [yes, no, unknown],\n'
+        '  "salary": {"min": <number or null>, "max": <number or null>, '
+        '"currency": "<e.g. GBP or null>", "frequency": one of [hourly, daily, monthly, annual, unknown]},\n'
+        '  "required_skills": ["..."],\n'
+        '  "preferred_skills": ["..."],\n'
+        '  "requirements_summary": "<=250 chars"\n'
+        "}\n\n"
         f"Title: {job.title}\n"
         f"Company: {job.company}\n"
         f"Location: {job.location}\n"

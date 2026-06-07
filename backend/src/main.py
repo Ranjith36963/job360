@@ -567,22 +567,6 @@ async def run_search(
             unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
             logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
 
-            # Step-1 B7 — gate LLM enrichment by score. No-op when the flag
-            # is OFF (CLAUDE.md rule #18). Only high-scored jobs go to the
-            # LLM, and the call fans out via a bounded semaphore so a slow
-            # provider can't block the pipeline.
-            if ENRICHMENT_ENABLED:
-                high_scored = [
-                    j for j in unique_jobs if j.match_score is not None and j.match_score >= ENRICHMENT_THRESHOLD
-                ]
-                if high_scored:
-                    logger.info(
-                        "Enriching %s jobs with match_score >= %s",
-                        len(high_scored),
-                        ENRICHMENT_THRESHOLD,
-                    )
-                    await enrich_batch(high_scored, semaphore_limit=10, conn=db._conn)
-
             if dry_run:
                 # Dry run: show results without DB writes or notifications
                 unique_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
@@ -605,6 +589,45 @@ async def run_search(
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info("New jobs: %s", len(new_jobs))
+
+            # Attach each job's DB id (the PK assigned by INSERT, resolved via
+            # normalized key). The Job dataclass carries no id until now, and
+            # enrich_batch persists keyed on ``job.id`` — so this MUST happen
+            # before enrichment or every result is silently dropped.
+            for job in unique_jobs:
+                cur = await db._conn.execute(
+                    "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
+                    job.normalized_key(),
+                )
+                r = await cur.fetchone()
+                job.id = r[0] if r is not None else None
+
+            # Step-1 B7 — gate LLM enrichment by score. No-op when the flag is
+            # OFF (CLAUDE.md rule #18). B7-2 fix: this runs AFTER insert so the
+            # jobs carry their DB id; enrich_batch persists to job_enrichment,
+            # which the scorer's enrichment_lookup applies on subsequent runs.
+            # Only high-scored jobs go to the LLM, fanned out via a bounded
+            # semaphore so a slow provider can't block the pipeline.
+            if ENRICHMENT_ENABLED:
+                high_scored = [
+                    j
+                    for j in unique_jobs
+                    if getattr(j, "id", None) is not None
+                    and j.match_score is not None
+                    and j.match_score >= ENRICHMENT_THRESHOLD
+                ]
+                if high_scored:
+                    logger.info(
+                        "Enriching %s jobs with match_score >= %s",
+                        len(high_scored),
+                        ENRICHMENT_THRESHOLD,
+                    )
+                    # Concurrency 3 (not 10): free-tier LLMs cap at ~30 requests/min
+                    # (Cerebras) and small token/min budgets (Groq). A burst of 10
+                    # concurrent × retries 429s every provider at once. 3 keeps the
+                    # batch under the per-minute limits while still parallelising.
+                    await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
+                    await db.commit()
 
             # Per-user feed: write THIS user's matched jobs into user_feed so the
             # dashboard shows only their jobs. The shared `jobs` table is the
