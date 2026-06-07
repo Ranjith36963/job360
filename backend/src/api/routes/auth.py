@@ -212,8 +212,11 @@ async def delete_account(
 ) -> Response:
     """Soft-delete the caller's account (GDPR Article 17). Sets deleted_at. Clears session cookie."""
     await db.soft_delete_user(user.id)
+    # Mutate + return the injected response so the cookie clear reaches the client
+    # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
-    return Response(status_code=204)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 # ── B-12: Password change ─────────────────────────────────────────────────────
@@ -227,10 +230,13 @@ class PasswordChangeRequest(BaseModel):
 @router.patch("/users/me/password", status_code=204)
 async def change_password(
     req: PasswordChangeRequest,
+    response: Response,
     db: JobDatabase = Depends(get_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
-    """Authenticated password change. Requires current password verification."""
+    """Authenticated password change. Requires current password verification,
+    then invalidates the session cookie to force re-login (hard rule #26 —
+    matches the email-change path)."""
     async with aiosqlite.connect(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
@@ -242,7 +248,14 @@ async def change_password(
         raise HTTPException(status_code=401, detail="current password is incorrect")
     new_hash = hash_password(req.new_password)
     await db.update_user_password(user.id, new_hash)
-    return Response(status_code=204)
+    # Terminate ALL of the user's sessions server-side (other devices / stolen
+    # cookies), not just clear this browser's cookie — full intent of rule #26.
+    await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
+    # Mutate + return the injected response (returning a fresh Response would
+    # drop the Set-Cookie, the latent bug this fix also corrects for email/delete).
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 # ── B-13: Email change ────────────────────────────────────────────────────────
@@ -280,8 +293,14 @@ async def change_email(
         if await cursor.fetchone():
             raise HTTPException(status_code=409, detail="email already in use")
     await db.update_user_email(user.id, str(req.new_email))
+    # Terminate all of the user's sessions server-side (rule #26 — same as
+    # password change), not just clear this browser's cookie.
+    await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
+    # Mutate + return the injected response so the cookie clear reaches the client
+    # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
-    return Response(status_code=204)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 # ── Phase −2-A: Password reset (forgot-password flow) ────────────────────────

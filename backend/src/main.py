@@ -319,6 +319,20 @@ def _build_sources(
     return [s for s in all_sources if source_matches_user_domains(s.DOMAINS, user_domains)]
 
 
+def _recency_bucket(date_found: str | None) -> str:
+    """Coarse recency bucket for a user_feed row (mirrors the dashboard's buckets)."""
+    from src.utils.time_buckets import parse_date_safe
+
+    dt = parse_date_safe(date_found or "")
+    if dt is None:
+        return "older"
+    hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+    for label, limit in (("24h", 24), ("48h", 48), ("3d", 72), ("5d", 120), ("7d", 168)):
+        if hours <= limit:
+            return label
+    return "older"
+
+
 async def run_search(
     db_path: str | None = None,
     source_filter: str | None = None,
@@ -591,6 +605,37 @@ async def run_search(
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info("New jobs: %s", len(new_jobs))
+
+            # Per-user feed: write THIS user's matched jobs into user_feed so the
+            # dashboard shows only their jobs. The shared `jobs` table is the
+            # universal catalog/cache; user_feed is the isolated per-user view
+            # (blueprint §3). Write ALL `unique_jobs` (not just new inserts) — a
+            # job already in the catalog from another user's search still belongs
+            # in THIS user's feed. Only runs on the per-user HTTP path (user_id set).
+            if user_id is not None and unique_jobs:
+                from src.services.feed import FeedService  # noqa: PLC0415 — avoid import cycle at module load
+
+                feed = FeedService(db._conn)
+                feed_written = 0
+                for job in unique_jobs:
+                    try:
+                        cur = await db._conn.execute(
+                            "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
+                            job.normalized_key(),
+                        )
+                        r = await cur.fetchone()
+                        if r is None:
+                            continue
+                        await feed.upsert_feed_row(
+                            user_id=user_id,
+                            job_id=r[0],
+                            score=int(job.match_score or 0),
+                            bucket=_recency_bucket(job.date_found),
+                        )
+                        feed_written += 1
+                    except Exception as e:  # never let a feed write fail the whole run
+                        logger.warning("user_feed write failed for %r: %s", job.title, e)
+                logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)
 
             # Step-1 B8 — vector index upsert for newly-inserted jobs.
             # Gated on SEMANTIC_ENABLED (CLAUDE.md rule #18 — opt-in default OFF).

@@ -740,6 +740,44 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+    async def get_user_feed_jobs(self, user_id: str, days: int = 7, min_score: int = 0) -> list[dict]:
+        """Per-user dashboard read: the user's OWN ``user_feed`` rows joined to
+        the shared ``jobs`` catalog (+ enrichment).
+
+        This is what makes the dashboard multi-tenant: John sees only the jobs
+        in John's feed, Paul only Paul's. The shared ``jobs`` table is the
+        universal pool/cache; ``user_feed`` is the isolated per-user view
+        (blueprint §3). Each row's ``match_score`` is the user's feed score
+        (not the shared, last-writer-wins ``jobs.match_score``).
+
+        Returns ``[]`` if ``user_feed`` is absent (fresh DB without the Batch-2
+        migration) — the caller treats that as "no personalised feed yet".
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 false positive.
+        sql = (
+            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS}, f.score AS feed_score "  # noqa: S608
+            "FROM user_feed f "
+            "JOIN jobs j ON j.id = f.job_id "
+            "LEFT JOIN job_enrichment je ON je.job_id = j.id "
+            "WHERE f.user_id = ? AND f.status = 'active' "
+            "AND j.first_seen >= ? AND f.score >= ? "
+            "AND (j.staleness_state IS NULL OR j.staleness_state = 'active') "
+            "ORDER BY f.score DESC, j.date_found DESC"
+        )
+        try:
+            cursor = await self._conn.execute(sql, (user_id, cutoff, min_score))
+        except aiosqlite.OperationalError:
+            return []
+        rows = await cursor.fetchall()
+        out: list[dict] = []
+        for row in rows:
+            d = dict(row)
+            # Surface the per-user feed score as the job's match_score.
+            d["match_score"] = d.get("feed_score", d.get("match_score"))
+            out.append(d)
+        return out
+
     async def get_job_by_id_with_enrichment(self, job_id: int) -> dict | None:
         """Same as :meth:`get_job_by_id` plus a LEFT JOIN to job_enrichment.
 

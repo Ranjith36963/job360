@@ -40,3 +40,33 @@ export class ApiError extends Error {
     return this.status >= 500;
   }
 }
+
+/**
+ * Map an error to a user-friendly message for auth forms (login / register /
+ * password reset). Without this, forms rendered the raw `API error 401:
+ * invalid credentials` string, leaking the HTTP status to the user.
+ */
+export function friendlyAuthError(
+  err: unknown,
+  fallback = "Something went wrong. Please try again."
+): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) {
+      return "Incorrect email or password.";
+    }
+    if (err.status === 409) {
+      return "That email is already registered — try signing in instead.";
+    }
+    if (err.status === 422) {
+      return "Please enter a valid email and a password with at least 8 characters.";
+    }
+    if (err.status === 429) {
+      return "Too many attempts. Please wait a moment and try again.";
+    }
+    if (err.status >= 500) {
+      return "The server had a problem. Please try again shortly.";
+    }
+    return err.detail || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}

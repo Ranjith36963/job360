@@ -7,22 +7,18 @@ import {
   LayoutDashboard,
   User,
   Kanban,
-  Search,
   Menu,
   Activity,
-  Briefcase,
   Settings,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
-import { ThemeToggle } from "@/components/layout/ThemeProvider";
 
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/settings/channels", label: "Channels", icon: Settings },
 ] as const;
@@ -67,20 +63,10 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Right side — Search + Auth + Theme */}
+        {/* Right side — Auth + Theme. The search action lives on the Profile
+            page ("Search Latest Jobs") — a nav link here only navigated and
+            misled users into thinking it searched. */}
         <div className="hidden md:flex items-center gap-2">
-          <Link href="/dashboard">
-            <Button
-              size="sm"
-              className="gap-2 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-            >
-              <Search className="h-3.5 w-3.5" aria-hidden="true" />
-              Search Latest Jobs
-            </Button>
-          </Link>
-
-          <ThemeToggle />
-
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
               <span className="text-xs text-muted-foreground max-w-[140px] truncate">
@@ -148,10 +134,6 @@ export function Navbar() {
                 </button>
               </div>
             )}
-
-            <div className="mt-4 px-3">
-              <ThemeToggle />
-            </div>
           </SheetContent>
         </Sheet>
       </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Clock, Globe, Loader2, Play, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import { Briefcase, Clock, Globe, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -98,7 +98,6 @@ export default function DashboardPage() {
   const {
     data: jobsData,
     isFetching: loading,
-    refetch: refetchJobs,
   } = useQuery<JobListResponse>({
     queryKey: queryKeys.jobList(filters),
     queryFn: () => getJobs(filters),
@@ -259,6 +258,24 @@ export default function DashboardPage() {
   }
 
   // ---------------------------------------------------------------------------
+  // Auto-search on arrival from the Profile page
+  // ---------------------------------------------------------------------------
+
+  // The Profile page's "Search Latest Jobs" button sets a one-shot
+  // sessionStorage flag, then navigates here. We read it on mount and kick off
+  // a search so the user lands on the dashboard with results already loading.
+  // We clear the flag FIRST (synchronously) so Next 16 dev StrictMode's
+  // double-effect can't fire two searches; handleSearch's own `if (searching)
+  // return` is a second guard.
+  useEffect(() => {
+    if (sessionStorage.getItem("job360_run_search") === "1") {
+      sessionStorage.removeItem("job360_run_search");
+      void handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // Bucket counts (client-side from unfiltered data)
   // ---------------------------------------------------------------------------
 
@@ -326,34 +343,23 @@ export default function DashboardPage() {
               </Badge>
             )}
 
-            {/* Search button — disabled while searching or rate-limited (O2) */}
-            <Button
-              size="sm"
-              className="gap-2"
-              onClick={handleSearch}
-              disabled={searching || searchRateLimited}
-              title={searchRateLimited ? "Rate limited — please wait" : undefined}
-            >
-              {searching ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
-              )}
-              {searching ? "Searching..." : "New Search"}
-            </Button>
-
-            {/* Refresh */}
+            {/* Refresh — now runs a real search: fetches new jobs from the
+                internet (the per-user POST /api/search pipeline), so the list
+                picks up anything that appeared since the last run. The full
+                "Search Latest Jobs" entry point lives on the Profile page.
+                Disabled while a search runs or when rate-limited (O2). */}
             <Button
               variant="outline"
               size="sm"
               className="gap-2"
-              onClick={() => void refetchJobs()}
-              disabled={loading}
+              onClick={handleSearch}
+              disabled={searching || searchRateLimited}
+              title={searchRateLimited ? "Rate limited — please wait" : "Fetch the latest jobs"}
             >
               <RefreshCw
-                className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+                className={`h-3.5 w-3.5 ${searching ? "animate-spin" : ""}`}
               />
-              <span className="hidden sm:inline">Refresh</span>
+              <span className="hidden sm:inline">{searching ? "Refreshing..." : "Refresh"}</span>
             </Button>
 
             {/* Filters */}

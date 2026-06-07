@@ -341,8 +341,15 @@ async def list_jobs(
     # to the keyword path silently when SEMANTIC_ENABLED is off, the vector
     # index is empty, or the semantic stack isn't installed.
     days = (hours // 24) + 1 if hours else 7
+    # Multi-tenant: an authenticated user sees ONLY their own user_feed (the
+    # isolated per-user view — John never sees Paul's jobs). Unauthenticated
+    # callers (sitemap / unfurl bots) get the shared catalog. No fallback: an
+    # empty feed shows the empty dashboard, never another user's jobs.
     # Step-1 B6: single LEFT JOIN avoids per-job enrichment lookups (N+1).
-    all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
+    if user is not None:
+        all_rows = await db.get_user_feed_jobs(user.id, days=days, min_score=min_score or 0)
+    else:
+        all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
 
     if mode == "hybrid":
         all_rows = _maybe_apply_hybrid_reorder(all_rows, profile=None)
@@ -433,6 +440,84 @@ async def get_job_duplicates(
     return {"job_id": job_id, "duplicates": duplicates, "total": len(duplicates)}
 
 
+async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> dict:
+    """Rewrite the per-dimension breakdown on ``row`` to reflect ``user``'s
+    own profile, returning a shallow copy with the dim columns overridden.
+
+    Why this exists: the shared ``jobs`` row stores ONE dim breakdown per job
+    (last-writer-wins across every user who matched it), but the detail-page
+    8-D radar is inherently per-user. We re-score the job against the viewing
+    user's profile — faithful because the exact ``description`` the scorer saw
+    at search time is what got stored.
+
+    The overall ``match_score`` is sourced from the user's stored
+    ``user_feed.score`` (the dashboard card they clicked), falling back to the
+    fresh recompute only when there is no feed row — i.e. a job the user never
+    matched but reached by direct URL or the duplicates link. That fallback is
+    exactly why we recompute instead of storing dims in the feed.
+
+    Degrades to ``row`` unchanged when the user has no complete profile (so
+    there is nothing to personalise against). Heavy scoring imports are kept
+    local per CLAUDE.md rule #16 — they only load on an authenticated detail GET.
+    """
+    from src.models import Job  # noqa: PLC0415 — lazy (rule #16)
+    from src.services.feed import FeedService  # noqa: PLC0415
+    from src.services.job_enrichment import (  # noqa: PLC0415
+        ENRICHMENT_ENABLED,
+        _build_enrichment_lookup,
+    )
+    from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+    from src.services.skill_matcher import JobScorer, detect_experience_level  # noqa: PLC0415
+
+    profile = load_profile(user.id)
+    if not profile or not profile.is_complete:
+        return row  # nothing to personalise against — keep the shared row
+
+    search_config = generate_search_config(profile)
+    # Mirror run_search's scorer wiring exactly so a recompute against an
+    # unchanged profile reproduces the stored feed score (CLAUDE.md rule #19).
+    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if ENRICHMENT_ENABLED else {}
+    scorer = JobScorer(
+        search_config,
+        user_preferences=profile.preferences,
+        enrichment_lookup=lambda j: enrichment_lookup_dict.get(getattr(j, "id", None)),
+    )
+
+    # Reconstruct just enough of the Job for scoring: score() reads title,
+    # description, location, salary, and the date fields (recency).
+    job = Job(
+        title=row.get("title", "") or "",
+        company=row.get("company", "") or "",
+        apply_url=row.get("apply_url", "") or "",
+        source=row.get("source", "") or "",
+        date_found=row.get("date_found", "") or "",
+        location=row.get("location", "") or "",
+        description=row.get("description", "") or "",
+        salary_min=row.get("salary_min"),
+        salary_max=row.get("salary_max"),
+        posted_at=row.get("posted_at"),
+        date_confidence=row.get("date_confidence") or "low",
+    )
+    breakdown = scorer.score(job)
+
+    feed_score = await FeedService(db._conn).get_score(user.id, row["id"])
+
+    out = dict(row)
+    # Dim columns map ScoreBreakdown -> JobResponse exactly as run_search does
+    # (main.py: title_score -> role, recency_score -> recency, *_score kept).
+    out["role"] = breakdown.title_score
+    out["skill"] = breakdown.skill_score
+    out["location_score"] = breakdown.location_score
+    out["recency"] = breakdown.recency_score
+    out["seniority_score"] = breakdown.seniority_score
+    out["visa_flag"] = int(scorer.check_visa_flag(job))
+    out["experience_level"] = detect_experience_level(job.title)
+    # Overall: the stored feed score the user saw; recompute only as fallback.
+    out["match_score"] = feed_score if feed_score is not None else breakdown.match_score
+    return out
+
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
@@ -444,4 +529,8 @@ async def get_job(
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
     job_action = await db.get_action_for_job(job_id, user.id) if user is not None else None
+    # Per-user radar: re-score the job against the logged-in user's profile so
+    # the 8-D breakdown is theirs, not the shared last-writer-wins jobs row.
+    if user is not None:
+        row = await _personalize_dims(dict(row), db, user)
     return _row_to_job_response(row, job_action)

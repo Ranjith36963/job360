@@ -192,6 +192,7 @@ async def _insert_job_row(db: JobDatabase, **overrides) -> int:
         date_posted_raw=now,
         staleness_state="active",
     )
+    feed_for_user = overrides.pop("feed_for_user", None)
     payload.update(overrides)
     cols = ", ".join(payload.keys())
     placeholders = ", ".join(["?"] * len(payload))
@@ -200,7 +201,29 @@ async def _insert_job_row(db: JobDatabase, **overrides) -> int:
         tuple(payload.values()),
     )
     await db._conn.commit()
-    return cur.lastrowid
+    job_id = cur.lastrowid
+
+    # The dashboard now reads each user's user_feed (multi-tenant isolation), so
+    # attach this job to the authenticated test user's feed — otherwise an
+    # authenticated GET /api/jobs returns nothing. Defaults to the single
+    # non-system user the auth fixture created.
+    uid = feed_for_user
+    if uid is None:
+        from src.core.tenancy import DEFAULT_TENANT_ID
+
+        u = await db._conn.execute(
+            "SELECT id FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY rowid DESC LIMIT 1",
+            (DEFAULT_TENANT_ID,),
+        )
+        urow = await u.fetchone()
+        uid = urow[0] if urow else None
+    if uid is not None:
+        from src.services.feed import FeedService
+
+        await FeedService(db._conn).upsert_feed_row(
+            user_id=uid, job_id=job_id, score=int(payload.get("match_score", 0) or 0), bucket="7d"
+        )
+    return job_id
 
 
 async def _insert_enrichment_row(db: JobDatabase, job_id: int, **overrides) -> None:

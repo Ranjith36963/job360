@@ -192,6 +192,52 @@ def test_change_password_success(client):
     assert _login(client, "pw_ok@example.com", "newpassword1") == 200
 
 
+def test_change_password_invalidates_session(client):
+    """Rule #26: a successful password change MUST invalidate the session
+    cookie (force re-login), like email change already does."""
+    _register(client, "pw_session@example.com", "oldpassword1")
+    # Authenticated before the change.
+    assert client.get("/api/auth/me").status_code == 200
+    r = client.patch(
+        "/api/auth/users/me/password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+    )
+    assert r.status_code == 204
+    # The response must clear the session cookie.
+    assert "job360_session=" in r.headers.get("set-cookie", "")
+    # And the same client can no longer reach a protected route.
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_change_password_revokes_all_user_sessions(client):
+    """Rule #26 (full intent): a password change must terminate ALL of the
+    user's sessions server-side, not just the current browser cookie — so a
+    session left open on another device / a stolen cookie cannot survive it.
+    """
+    _register(client, "multi_sess@example.com", "oldpassword1")
+    cookie_a = client.cookies.get("job360_session")
+    # A second login → a second, independent server-side session for the user.
+    client.cookies.clear()
+    assert _login(client, "multi_sess@example.com", "oldpassword1") == 200
+    cookie_b = client.cookies.get("job360_session")
+    assert cookie_a and cookie_b and cookie_a != cookie_b
+
+    # Change the password while authenticated with session B.
+    r = client.patch(
+        "/api/auth/users/me/password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+    )
+    assert r.status_code == 204
+
+    # BOTH sessions must now be dead server-side (use each cookie explicitly).
+    client.cookies.clear()
+    client.cookies.set("job360_session", cookie_a)
+    assert client.get("/api/auth/me").status_code == 401, "old device session A survived"
+    client.cookies.clear()
+    client.cookies.set("job360_session", cookie_b)
+    assert client.get("/api/auth/me").status_code == 401, "session B survived"
+
+
 def test_change_password_short_new_password(client):
     """new_password shorter than 8 chars is rejected by Pydantic (422)."""
     _register(client, "pw_short@example.com")
@@ -247,8 +293,10 @@ def test_change_email_success(client):
     )
     assert r.status_code == 204
 
-    # Session cookie must be cleared → /me is 401
-    client.cookies.clear()
+    # The response itself must clear the session cookie (rule #26) — don't
+    # manually clear, or the test can't tell whether the server did it.
+    assert "job360_session=" in r.headers.get("set-cookie", "")
+    # The same client (cookie now cleared by the response) is logged out.
     assert client.get("/api/auth/me").status_code == 401
 
     # Login with old email fails

@@ -42,3 +42,6 @@ test-*.png
 # E2E verification artifacts (keep sample_cv.pdf, ignore screenshots/reports)
 test-artifacts/*.png
 frontend/playwright-report/
+# Personal/local Claude Code config — machine-specific (permissions, hooks).
+# Stays on disk; should not be version-controlled (W2 review fix).
+.claude/settings.local.json

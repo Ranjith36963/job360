@@ -96,3 +96,15 @@ async def revoke_session(db_path: str, cookie: str, *, secret: str) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.execute("DELETE FROM sessions WHERE id = ?", (sid,))
         await db.commit()
+
+
+async def revoke_all_for_user(db_path: str, user_id: str) -> int:
+    """Delete every session row for a user — terminating all their sessions
+    across devices. Used on password/email change (rule #26) so a session held
+    elsewhere (other device, stolen cookie) cannot survive a credential change.
+    Returns the number of sessions removed.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        await db.commit()
+        return cur.rowcount
