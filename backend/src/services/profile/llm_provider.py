@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time as _time
 from typing import Any, Type, TypeVar
 
@@ -244,11 +245,14 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
 async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
     """Call Cerebras API (free tier: 30 RPM, fastest inference ~2000 tokens/sec).
 
-    Uses llama3.1-8b — Cerebras's reliable free-tier model with JSON support.
+    Model is env-overridable via ``CEREBRAS_MODEL`` because available model IDs
+    are account-specific — the old hardcoded ``llama3.1-8b`` 404s on accounts
+    that don't have it (list yours with ``client.models.list()``). Default is
+    ``gpt-oss-120b``, a capable JSON-emitting model on current free accounts.
     """
     from cerebras.cloud.sdk import AsyncCerebras
 
-    _model = "llama3.1-8b"
+    _model = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
     t0 = _time.monotonic()
     try:
         client = AsyncCerebras(api_key=CEREBRAS_API_KEY)
