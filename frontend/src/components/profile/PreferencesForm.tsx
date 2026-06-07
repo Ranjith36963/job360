@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Save,
+  Check,
   X,
   Plus,
   Briefcase,
@@ -134,6 +134,58 @@ function TagInput({
   );
 }
 
+// ── Normalization helpers ──────────────────────────────────
+// One source of truth for turning either the raw `preferences` prop OR the
+// live form state into a canonical PreferencesRequest. Auto-save compares a
+// serialization of the two to decide whether anything actually changed — so
+// both paths MUST normalize identically (e.g. salary "" → null), or hydration
+// would look like an edit and fire a spurious save.
+
+const asArr = (val: unknown): string[] =>
+  Array.isArray(val) ? val.map(String) : [];
+
+function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
+  return {
+    target_job_titles: asArr(raw.target_job_titles),
+    additional_skills: asArr(raw.additional_skills),
+    excluded_skills: asArr(raw.excluded_skills),
+    preferred_locations: asArr(raw.preferred_locations),
+    industries: asArr(raw.industries),
+    salary_min: raw.salary_min != null ? Number(raw.salary_min) : null,
+    salary_max: raw.salary_max != null ? Number(raw.salary_max) : null,
+    work_arrangement:
+      typeof raw.work_arrangement === "string" ? raw.work_arrangement : "any",
+    experience_level:
+      typeof raw.experience_level === "string" ? raw.experience_level : "mid",
+    negative_keywords: asArr(raw.negative_keywords),
+    about_me: typeof raw.about_me === "string" ? raw.about_me : "",
+    excluded_companies: asArr(raw.excluded_companies),
+  };
+}
+
+// Order-stable serialization (array, not object) so key order can't cause a
+// false "changed" verdict.
+function serializePrefs(p: PreferencesRequest): string {
+  return JSON.stringify([
+    p.target_job_titles,
+    p.additional_skills,
+    p.excluded_skills,
+    p.preferred_locations,
+    p.industries,
+    p.salary_min,
+    p.salary_max,
+    p.work_arrangement,
+    p.experience_level,
+    p.negative_keywords,
+    p.about_me,
+    p.excluded_companies,
+  ]);
+}
+
+// Debounce window for auto-save: long enough to batch fast typing, short
+// enough to feel instant.
+const AUTOSAVE_DELAY_MS = 800;
+
 // ── Preferences Form ───────────────────────────────────────
 
 export function PreferencesForm({
@@ -155,68 +207,49 @@ export function PreferencesForm({
   const [excludedCompanies, setExcludedCompanies] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Hydrate form from preferences prop
+  // Serialized snapshot of the last-saved (or just-hydrated) preferences.
+  // Auto-save compares against this so hydration and no-op renders don't save.
+  // null = not hydrated yet.
+  const baselineRef = useRef<string | null>(null);
+
+  // Hydrate form from the preferences prop, and set the auto-save baseline to
+  // the same values so loading the form never looks like an edit.
   useEffect(() => {
     if (!preferences) return;
-
-    const asArr = (val: unknown): string[] => {
-      if (Array.isArray(val)) return val.map(String);
-      return [];
-    };
-
-    setTargetTitles(asArr(preferences.target_job_titles));
-    setAdditionalSkills(asArr(preferences.additional_skills));
-    setExcludedSkills(asArr(preferences.excluded_skills));
-    setPreferredLocations(asArr(preferences.preferred_locations));
-    setIndustries(asArr(preferences.industries));
-    setSalaryMin(
-      preferences.salary_min != null ? String(preferences.salary_min) : ""
-    );
-    setSalaryMax(
-      preferences.salary_max != null ? String(preferences.salary_max) : ""
-    );
-    setWorkArrangement(
-      typeof preferences.work_arrangement === "string"
-        ? preferences.work_arrangement
-        : "any"
-    );
-    setExperienceLevel(
-      typeof preferences.experience_level === "string"
-        ? preferences.experience_level
-        : "mid"
-    );
-    setNegativeKeywords(asArr(preferences.negative_keywords));
-    setAboutMe(
-      typeof preferences.about_me === "string" ? preferences.about_me : ""
-    );
-    setExcludedCompanies(asArr(preferences.excluded_companies));
+    const p = prefsFromRaw(preferences);
+    setTargetTitles(p.target_job_titles ?? []);
+    setAdditionalSkills(p.additional_skills ?? []);
+    setExcludedSkills(p.excluded_skills ?? []);
+    setPreferredLocations(p.preferred_locations ?? []);
+    setIndustries(p.industries ?? []);
+    setSalaryMin(p.salary_min != null ? String(p.salary_min) : "");
+    setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
+    setWorkArrangement(p.work_arrangement ?? "any");
+    setExperienceLevel(p.experience_level ?? "mid");
+    setNegativeKeywords(p.negative_keywords ?? []);
+    setAboutMe(p.about_me ?? "");
+    setExcludedCompanies(p.excluded_companies ?? []);
+    baselineRef.current = serializePrefs(p);
   }, [preferences]);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setSaving(true);
-      try {
-        await onSave({
-          target_job_titles: targetTitles,
-          additional_skills: additionalSkills,
-          excluded_skills: excludedSkills,
-          preferred_locations: preferredLocations,
-          industries: industries,
-          salary_min: salaryMin ? Number(salaryMin) : null,
-          salary_max: salaryMax ? Number(salaryMax) : null,
-          work_arrangement: workArrangement,
-          experience_level: experienceLevel,
-          negative_keywords: negativeKeywords,
-          about_me: aboutMe,
-          excluded_companies: excludedCompanies,
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
+  // Build a PreferencesRequest from the current form state. Memoized on every
+  // field so the auto-save effect re-runs (and re-debounces) on each edit.
+  const buildPrefs = useCallback(
+    (): PreferencesRequest => ({
+      target_job_titles: targetTitles,
+      additional_skills: additionalSkills,
+      excluded_skills: excludedSkills,
+      preferred_locations: preferredLocations,
+      industries: industries,
+      salary_min: salaryMin ? Number(salaryMin) : null,
+      salary_max: salaryMax ? Number(salaryMax) : null,
+      work_arrangement: workArrangement,
+      experience_level: experienceLevel,
+      negative_keywords: negativeKeywords,
+      about_me: aboutMe,
+      excluded_companies: excludedCompanies,
+    }),
     [
-      onSave,
       targetTitles,
       additionalSkills,
       excludedSkills,
@@ -232,6 +265,32 @@ export function PreferencesForm({
     ]
   );
 
+  // Auto-save: whenever the form differs from the last-saved baseline, save it
+  // after a short debounce. No "Save" button — preferences persist the moment
+  // you stop editing, the same way the CV/LinkedIn/GitHub inputs do. The
+  // debounce timer is cancelled on every change (and on unmount) so only the
+  // final state of a burst of edits is sent.
+  useEffect(() => {
+    if (baselineRef.current === null) return; // not hydrated yet
+    const snapshot = serializePrefs(buildPrefs());
+    if (snapshot === baselineRef.current) return; // nothing actually changed
+
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await onSave(buildPrefs());
+        baselineRef.current = snapshot; // commit baseline only on success
+      } catch {
+        // Parent surfaces the error via toast; leave the baseline unchanged so
+        // the next edit retries the save.
+      } finally {
+        setSaving(false);
+      }
+    }, AUTOSAVE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [buildPrefs, onSave]);
+
   return (
     <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-3">
       <div className="flex items-center gap-3 mb-6">
@@ -246,7 +305,7 @@ export function PreferencesForm({
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="space-y-6">
         {/* ── Target Job Titles ──────────────────── */}
         <TagInput
           label="Target Job Titles"
@@ -410,20 +469,29 @@ export function PreferencesForm({
           variant="destructive"
         />
 
-        {/* ── Save Button ────────────────────────── */}
-        <Button
-          type="submit"
-          disabled={saving || loading}
-          className="w-full h-10 gap-2 bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:brightness-110 transition-all"
-        >
-          {saving ? (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          {saving ? "Saving..." : "Save Preferences"}
-        </Button>
-      </form>
+        {/* ── Auto-save status ───────────────────────
+            No "Save" button — preferences save automatically a moment after
+            you stop editing (like the CV/LinkedIn/GitHub inputs). This line
+            just tells you the state. Hidden until the form has loaded. */}
+        {!loading && (
+          <div
+            className="flex items-center justify-end gap-1.5 pt-1 text-xs text-muted-foreground"
+            aria-live="polite"
+          >
+            {saving ? (
+              <>
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+                <span>Saving…</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-3.5 w-3.5 text-score-high" />
+                <span>Changes save automatically</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
