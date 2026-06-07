@@ -11,7 +11,6 @@ import {
   Zap,
   Clock,
   Shield,
-  ChevronRight,
   Sparkles,
 } from "lucide-react";
 
@@ -171,13 +170,6 @@ export default function Home() {
               <Upload className="h-4 w-4" />
               Get Started
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <Link
-              href="/dashboard"
-              className="inline-flex h-12 items-center gap-2 rounded-xl border border-border bg-card/50 px-8 text-sm font-semibold text-foreground backdrop-blur-sm transition-all hover:border-primary/30 hover:bg-primary/[0.06]"
-            >
-              View Dashboard
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
           </div>
         </div>
