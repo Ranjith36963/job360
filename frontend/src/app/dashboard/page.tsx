@@ -64,9 +64,16 @@ export default function DashboardPage() {
 
   // -- Filter / bucket state --
   const [activeBucket, setActiveBucket] = useState("7d");
+  // mode:"hybrid" makes the server fuse the keyword score with the semantic
+  // re-rank against the user's profile (engine #3). Combined with the stable
+  // score-sort below, the result is: highest score first (keyword + enrichment
+  // dims), and among equal scores semantic decides the order. All three engines
+  // participate. Falls back to keyword order automatically when SEMANTIC_ENABLED
+  // is off or the vector index is empty — so this is always safe to request.
   const [filters, setFilters] = useState<JobFilters>({
     hours: 168,
     min_score: 30,
+    mode: "hybrid",
   });
 
   // Keep a ref so the search-complete callback always sees the latest filters
