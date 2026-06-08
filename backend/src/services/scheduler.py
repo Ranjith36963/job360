@@ -27,6 +27,7 @@ import logging
 import time
 from typing import Callable, Iterable
 
+from src.core.settings import SOURCE_FETCH_TIMEOUT
 from src.services.circuit_breaker import BreakerRegistry
 
 logger = logging.getLogger("job360.scheduler")
@@ -88,11 +89,16 @@ class TieredScheduler:
         sources: Iterable,
         breaker_registry: BreakerRegistry,
         clock: Callable[[], float] | None = None,
+        fetch_timeout: float | None = None,
     ) -> None:
         self._sources = list(sources)
         self._breakers = breaker_registry
         self._clock = clock or time.monotonic
         self._last_run: dict[str, float] = {}
+        # Per-source wall-clock ceiling (see settings.SOURCE_FETCH_TIMEOUT).
+        # None ⇒ use the configured default; <=0 disables the bound (kept for
+        # the few tests that want unbounded fetches).
+        self._fetch_timeout = SOURCE_FETCH_TIMEOUT if fetch_timeout is None else fetch_timeout
 
     def due_sources(self, now: float | None = None) -> list:
         now_val = now if now is not None else self._clock()
@@ -127,7 +133,17 @@ class TieredScheduler:
 
         async def _safe_fetch(src):
             try:
+                if self._fetch_timeout and self._fetch_timeout > 0:
+                    # Bound each source so one hang can't freeze the gather.
+                    # wait_for cancels the coroutine on timeout; for JobSpy's
+                    # asyncio.to_thread the OS thread keeps running but is
+                    # detached — the pipeline no longer waits on it.
+                    return await asyncio.wait_for(src.fetch_jobs(), timeout=self._fetch_timeout)
                 return await src.fetch_jobs()
+            except asyncio.TimeoutError as e:
+                logger.warning("[%s] fetch timed out after %ss — treating as failure",
+                               src.name, self._fetch_timeout)
+                return e
             except BaseException as e:  # noqa: BLE001 — we want circuit trips on any failure
                 logger.warning("[%s] fetch raised %s", src.name, type(e).__name__)
                 return e

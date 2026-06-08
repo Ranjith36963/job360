@@ -166,3 +166,38 @@ def test_scheduler_honors_manual_source_filter():
     _run(sched.tick(force=True))
     # Back-to-back forced ticks both dispatch
     assert src.fetch_calls == 2
+
+
+# ---------------------------------------------------------------------------
+# Per-source fetch timeout — a hanging source must not freeze the whole batch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.real_sleep
+def test_slow_source_times_out_without_blocking_batch():
+    """One source that hangs forever must not freeze the whole tick.
+
+    This is the full-search-hang fix: ``tick()`` gathers all due sources, so
+    before this guard a single unbounded ``fetch_jobs`` (a blocked host, a
+    JobSpy scrape, a stuck ATS slug loop) held up every other source
+    indefinitely. With a per-source timeout the slow one surfaces as a
+    TimeoutError (treated as a fetch failure) and every fast source's result
+    still comes through.
+    """
+
+    class _HangSource:
+        name = "hang"
+        category = "other"
+
+        async def fetch_jobs(self):
+            await asyncio.Event().wait()  # never resolves
+
+    fast = _FakeSource("fast", "free_json", payload=[object(), object()])
+    sched = TieredScheduler([_HangSource(), fast], BreakerRegistry(), fetch_timeout=0.05)
+
+    paired = _run(sched.tick(force=True))
+    by_name = {s.name: r for s, r in paired}
+
+    assert isinstance(by_name["hang"], asyncio.TimeoutError), by_name["hang"]
+    assert by_name["fast"] == fast._payload  # fast source result preserved
+    assert len(by_name["fast"]) == 2
