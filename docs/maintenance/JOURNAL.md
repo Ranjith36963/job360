@@ -8,3 +8,11 @@
 - Gemini free tier is quota-dead (429); provider chain degrades to Groq/Cerebras — expected, not a bug.
 - Live verify finding (added as backlog P1 #0): dashboard client sort uses match_score and overrides the server's judge ranking; badge itself renders correctly (red "AI: Poor fit · 20" on intern cards). Screenshot: test-artifacts/matcher-badge-demo-user.png.
 - Measured cost of one judged search: 18 LLM calls, 89.8s wall (concurrency 3, Groq/Cerebras), zero failures.
+
+## 2026-06-11 ~00:55 — iteration 1 (manual /maintain fire)
+
+- Item #0 DONE (6974bb6): dashboard client sort now `(llm_fit_score ?? match_score)`. TDD red→green (judge-ranking-sort.test.tsx); gates: 65 unit / type-check / lint all clean; live screenshot proves fit-92 card first.
+- Dirty-tree note: tree carries ANOTHER session's WIP (main.py `user_id=` kwarg into the notify call, dispatcher friendlier error string + matching test edit) + a 0-byte `backend/None` junk file. Left strictly untouched; item #0 was frontend-only so no conflict. Future iterations: if that WIP is still uncommitted AND the picked item touches backend, skip to the next non-conflicting item instead of exiting outright — or exit if everything conflicts.
+- Backend canonical gate NOT run this iteration (frontend-only change; backend tree had foreign WIP that would muddy attribution).
+- loop.md (user note, repo root): the user's statement of the agentic-loop philosophy this skill implements; suggests adding a fresh-context adversarial audit pass — consider as a P4 backlog item.
+- Next hint: item #1 (jobicy HTTP 400) is the top TODO; it's backend — check whether the foreign WIP is committed first.
