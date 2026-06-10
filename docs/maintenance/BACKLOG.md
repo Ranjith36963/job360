@@ -5,6 +5,8 @@ Statuses: TODO / DOING / DONE (sha) / BLOCKED(reason). Keep newest discoveries a
 
 ## P1 — bugs and broken behavior (live evidence)
 
+0. **TODO — dashboard client sort defeats the judge's ranking.** Live screenshot (test-artifacts/matcher-badge-demo-user.png, 2026-06-10): server returns jobs ordered by COALESCE(llm_fit_score, score) — fit 92 first — but the dashboard page re-sorts client-side by match_score, putting keyword-43 "Poor fit · 20" interns above the 92-fit job. Fix: in the dashboard's sort (frontend/src/app/dashboard/page.tsx or wherever rows are sorted), use `(job.llm_fit_score ?? job.match_score)` as the primary key, keyword score as tiebreak. TDD vitest like __tests__/uses-hybrid.test.tsx. ALSO check: navbar email showed the previous user after re-login (stale auth/me react-query cache) — verify and fix invalidation on login if real.
+
 1. **TODO — jobicy source broken: HTTP 400** from `https://jobicy.com/api/v2/remote-jobs` on every call (seen in run 0656b8c0, 2026-06-10). Check the API's current contract (params likely changed), fix the source + its mocked tests, or mark it fragile in STATUS.md and skip gracefully.
 2. **TODO — jobtensor source broken: HTTP 400** from `https://jobtensor.com/ajax/search/` (same run). Scraper endpoint likely changed. Fix or downgrade to fragile.
 3. **TODO — comeet ATS slugs dead: HTTP 400** for `riskified` and `lightricks` company slugs. Verify slugs against comeet's careers API, prune/replace dead slugs in `core/companies.py`.
