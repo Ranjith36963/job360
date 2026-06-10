@@ -56,6 +56,10 @@ export interface JobResponse {
   years_experience_min?: number | null;
   // Step-2 T1 — dedup group ids (populated by dedup-group writer batch).
   dedup_group_ids?: number[] | null;
+  // LLM judge verdict (null when unjudged / disabled / unauthenticated).
+  llm_fit_score?: number | null;
+  llm_verdict?: string | null;
+  llm_reason?: string | null;
 }
 
 export interface JobListResponse {

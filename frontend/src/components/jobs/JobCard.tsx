@@ -252,6 +252,25 @@ export function JobCard({ job, onAction }: JobCardProps) {
         )}
       </div>
 
+      {/* ---- AI verdict badge ---- */}
+      {job.llm_verdict != null && job.llm_fit_score != null && (
+        <div className="flex flex-wrap gap-1.5">
+          <Badge
+            variant="outline"
+            title={job.llm_reason ?? undefined}
+            className={
+              job.llm_fit_score >= 70
+                ? "text-xs border-emerald-500 text-emerald-600"
+                : job.llm_fit_score >= 40
+                ? "text-xs border-amber-500 text-amber-600"
+                : "text-xs border-red-500 text-red-600"
+            }
+          >
+            AI: {job.llm_verdict} · {job.llm_fit_score}
+          </Badge>
+        </div>
+      )}
+
       {/* ---- Skills ---- */}
       <div className="flex flex-wrap gap-1.5" role="list" aria-label="Skills">
         {(job.matched_skills ?? []).slice(0, 6).map((skill) => (
