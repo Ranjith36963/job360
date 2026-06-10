@@ -12,6 +12,7 @@ import os
 # that needs a flag ON opts in via its own monkeypatch.
 os.environ.setdefault("SEMANTIC_ENABLED", "false")
 os.environ.setdefault("ENRICHMENT_ENABLED", "false")
+os.environ.setdefault("MATCHER_ENABLED", "false")
 
 import asyncio
 from contextlib import asynccontextmanager
