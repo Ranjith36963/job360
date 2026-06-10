@@ -168,6 +168,11 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
         nice_to_have_skills=_parse_json_list(row.get("enr_preferred_skills")),
         industry=row.get("enr_category"),
         years_experience_min=row.get("enr_experience_min_years"),
+        # Funnel->judge (LLM matcher) — per-user verdict from user_feed.
+        # None-safe: shared-catalog rows (unauthenticated path) lack these keys.
+        llm_fit_score=row.get("llm_fit_score"),
+        llm_verdict=row.get("llm_verdict"),
+        llm_reason=row.get("llm_reason"),
     )
 
 

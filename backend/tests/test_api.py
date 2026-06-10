@@ -471,3 +471,89 @@ async def test_jobs_action_filter_runs_before_pagination(authenticated_async_con
     assert len(body["jobs"]) == 2, f"page must equal filtered count, got {len(body['jobs'])}"
     for job in body["jobs"]:
         assert job["action"] == "liked"
+
+
+# ---------------------------------------------------------------------------
+# LLM matcher verdict — Task 5 (funnel→judge plan)
+# Rule #21 value-presence: assert real values round-trip, not just key presence.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_jobs_response_includes_llm_verdict_values(authenticated_async_context):
+    """Rule #21 value-presence: a seeded user_feed verdict comes back on
+    GET /jobs with its REAL values, and unjudged jobs return nulls.
+
+    Two jobs are inserted; job B gets an LLM verdict written directly into
+    user_feed.  The response must carry the exact values for job B and
+    null fields for the unjudged job A.  Because llm_fit_score=93 > job A's
+    keyword score (80), job B must sort first (COALESCE ranking).
+    """
+    from src.core.tenancy import DEFAULT_TENANT_ID
+
+    db = await api_deps.get_db()
+
+    # Job A — unjudged, keyword score 80 (id not needed; just needs to be in the feed)
+    await _insert_job_row(
+        db,
+        match_score=80,
+        apply_url="https://example.com/jobs/llm-a",
+        normalized_company="acme llm a",
+        normalized_title="ml engineer llm a",
+    )
+
+    # Job B — lower keyword score (60) but will be LLM-judged at 93
+    job_b_id = await _insert_job_row(
+        db,
+        match_score=60,
+        apply_url="https://example.com/jobs/llm-b",
+        normalized_company="acme llm b",
+        normalized_title="ml engineer llm b",
+    )
+
+    # Write the LLM verdict directly into user_feed for job B
+    u = await db._conn.execute(
+        "SELECT id FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY rowid DESC LIMIT 1",
+        (DEFAULT_TENANT_ID,),
+    )
+    urow = await u.fetchone()
+    uid = urow[0]
+
+    await db._conn.execute(
+        """UPDATE user_feed
+           SET llm_fit_score = 93,
+               llm_verdict    = 'strong fit',
+               llm_reason     = 'domain + seniority',
+               llm_matched_at = datetime('now')
+           WHERE user_id = ? AND job_id = ?""",
+        (uid, job_b_id),
+    )
+    await db._conn.commit()
+
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?limit=50")
+
+    assert resp.status_code == 200
+    body = resp.json()
+
+    judged = [j for j in body["jobs"] if j["llm_fit_score"] is not None]
+    unjudged = [j for j in body["jobs"] if j["llm_fit_score"] is None]
+
+    # Value-presence: the exact seeded values must appear
+    assert judged, "expected at least one judged job in response"
+    assert judged[0]["llm_fit_score"] == 93
+    assert judged[0]["llm_verdict"] == "strong fit"
+    assert judged[0]["llm_reason"] == "domain + seniority"
+
+    # Unjudged jobs must have null fields, not 0 or ""
+    assert unjudged, "expected at least one unjudged job in response"
+    assert unjudged[0]["llm_fit_score"] is None
+    assert unjudged[0]["llm_verdict"] is None
+    assert unjudged[0]["llm_reason"] is None
+
+    # Ranking bonus: job B (llm_fit_score=93) must outrank job A (score=80)
+    # because COALESCE(llm_fit_score, score) = 93 > 80.
+    assert body["jobs"][0]["id"] == job_b_id, (
+        f"expected judged job (id={job_b_id}) to rank first; "
+        f"got id={body['jobs'][0]['id']}"
+    )
