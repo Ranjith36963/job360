@@ -333,6 +333,69 @@ def _recency_bucket(date_found: str | None) -> str:
     return "older"
 
 
+async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
+    """Funnel -> judge: LLM-match the top shortlisted jobs for THIS user.
+
+    Gated on MATCHER_ENABLED (default off — rule #18 analog: OFF must be a
+    byte-identical no-op). Any failure is logged and swallowed: the judge
+    upgrades scores, it never blocks a run. Lazy imports keep the default
+    path import-free.
+    """
+    try:
+        from src.services.llm_matcher import (  # noqa: PLC0415 — lazy by design
+            MATCHER_ENABLED,
+            MATCHER_MAX_JOBS,
+            MATCHER_THRESHOLD,
+            match_batch,
+            profile_to_matcher_text,
+        )
+
+        if not MATCHER_ENABLED:
+            return
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        profile = load_profile(user_id)
+        if profile is None:
+            logger.info("matcher: no profile for user %s — skipping", user_id)
+            return
+        shortlist = sorted(
+            (
+                j
+                for j in jobs
+                if getattr(j, "id", None) is not None
+                and j.match_score is not None
+                and j.match_score >= MATCHER_THRESHOLD
+            ),
+            key=lambda j: j.match_score,
+            reverse=True,
+        )[:MATCHER_MAX_JOBS]
+        if not shortlist:
+            return
+        t0 = time.perf_counter()
+        logger.info(
+            "matcher: judging %s shortlisted jobs for user %s",
+            len(shortlist),
+            user_id,
+        )
+        results = await match_batch(
+            shortlist,
+            user_id=user_id,
+            profile_text=profile_to_matcher_text(profile),
+            conn=db._conn,
+            semaphore_limit=3,
+        )
+        judged = sum(1 for r in results if r is not None)
+        logger.info(
+            "matcher: judged %s/%s jobs in %.1fs for user %s",
+            judged,
+            len(shortlist),
+            time.perf_counter() - t0,
+            user_id,
+        )
+    except Exception as e:  # noqa: BLE001 — judge failure must never kill the run
+        logger.warning("matcher stage failed (run continues): %s", e)
+
+
 async def run_search(
     db_path: str | None = None,
     source_filter: str | None = None,
@@ -659,6 +722,11 @@ async def run_search(
                     except Exception as e:  # never let a feed write fail the whole run
                         logger.warning("user_feed write failed for %r: %s", job.title, e)
                 logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)
+
+            # Funnel -> judge (LLM matcher). Per-user, post-feed-write so the
+            # verdict UPDATE always finds its user_feed row. Default OFF.
+            if user_id is not None and unique_jobs:
+                await _run_matcher_stage(db, user_id=user_id, jobs=unique_jobs)
 
             # Step-1 B8 — vector index upsert for newly-inserted jobs.
             # Gated on SEMANTIC_ENABLED (CLAUDE.md rule #18 — opt-in default OFF).

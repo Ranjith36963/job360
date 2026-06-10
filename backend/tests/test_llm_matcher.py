@@ -247,3 +247,159 @@ def test_flag_defaults_off(monkeypatch):
 
     importlib.reload(m)
     assert m.MATCHER_ENABLED is False
+
+
+# ---------------------------------------------------------------------------
+# _run_matcher_stage integration tests (Task 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def stage_db():
+    """Minimal in-memory DB for _run_matcher_stage tests."""
+    conn = await aiosqlite.connect(":memory:")
+    conn.row_factory = aiosqlite.Row
+    await conn.executescript("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            location TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            apply_url TEXT NOT NULL,
+            source TEXT NOT NULL,
+            date_found TEXT NOT NULL,
+            match_score INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS user_feed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            job_id INTEGER NOT NULL,
+            score INTEGER NOT NULL DEFAULT 0,
+            bucket TEXT NOT NULL DEFAULT 'top',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            llm_fit_score INTEGER,
+            llm_verdict TEXT,
+            llm_reason TEXT,
+            llm_matched_at TEXT,
+            UNIQUE(user_id, job_id)
+        );
+        CREATE TABLE IF NOT EXISTS job_enrichment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL UNIQUE,
+            title_canonical TEXT,
+            seniority TEXT,
+            workplace_type TEXT,
+            visa_sponsorship TEXT
+        );
+    """)
+    await conn.commit()
+
+    # Minimal DB-wrapper stub so _run_matcher_stage can do db._conn
+    class _FakeDB:
+        def __init__(self, c):
+            self._conn = c
+
+    yield _FakeDB(conn)
+    await conn.close()
+
+
+_UID = "user-stage-001"
+
+
+async def _seed_job(conn, title: str, company: str, score: int, uid: str) -> Job:
+    """Insert a jobs row + user_feed row; return a Job with .id set."""
+    cur = await conn.execute(
+        "INSERT INTO jobs(title, company, apply_url, source, date_found, match_score) "
+        "VALUES (?,?,?,?,?,?)",
+        (title, company, f"https://x.com/{title}", "test", _NOW, score),
+    )
+    jid = cur.lastrowid
+    await conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+        (uid, jid, score, "top"),
+    )
+    await conn.commit()
+    j = _make_job(title=title, company=company, match_score=score)
+    j.id = jid  # type: ignore[attr-defined]
+    return j
+
+
+@pytest.mark.asyncio
+async def test_matcher_stage_judges_shortlist_and_respects_threshold(stage_db, monkeypatch):
+    """_run_matcher_stage: judges jobs >= MATCHER_THRESHOLD for the user,
+    skips those below, persists verdicts, and never raises."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    async def fake(prompt, schema, system):
+        return MatchVerdict(fit_score=77, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    job80 = await _seed_job(conn, "High Score Job", "Corp80", 80, _UID)
+    job10 = await _seed_job(conn, "Low Score Job", "Corp10", 10, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job80, job10])
+
+    # job80 should be judged (score >= 30 threshold)
+    cur = await conn.execute(
+        "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+        (_UID, job80.id),
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["llm_fit_score"] == 77
+
+    # job10 should be skipped (score < 30 threshold)
+    cur = await conn.execute(
+        "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+        (_UID, job10.id),
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["llm_fit_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_matcher_stage_is_noop_when_flag_off(stage_db, monkeypatch):
+    """Default OFF: no LLM call, no DB change, no exception (rule #18)."""
+    from src import main as main_mod
+
+    called = []
+
+    async def fake(prompt, schema, system):
+        called.append(1)
+        return MatchVerdict(fit_score=99)
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    job80 = await _seed_job(conn, "Flag Off Job", "CorpF", 80, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job80])
+    assert called == []  # flag is off (conftest forces false) -> zero LLM traffic
+
+
+@pytest.mark.asyncio
+async def test_matcher_stage_swallows_total_failure(stage_db, monkeypatch):
+    """Even if profile loading explodes, the stage logs and returns — a judge
+    failure must never kill the search run."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+
+    def boom(uid):
+        raise RuntimeError("storage corrupted")
+
+    monkeypatch.setattr("src.services.profile.storage.load_profile", boom)
+
+    conn = stage_db._conn
+    job80 = await _seed_job(conn, "Boom Profile Job", "CorpB", 80, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job80])  # must not raise
