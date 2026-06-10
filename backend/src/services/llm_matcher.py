@@ -48,9 +48,10 @@ class MatchVerdict(BaseModel):
     reason: str = ""
 
 
+# Union syntax in the *annotations* below is safe on 3.9 thanks to
+# `from __future__ import annotations`; a module-level `X | None` ALIAS would
+# evaluate at import time and TypeError on 3.9, so we don't define one.
 LLMExtractFn = Callable[[str, type, str], Awaitable[MatchVerdict]]
-# Type alias used in annotations below — avoids repeating Optional[LLMExtractFn]
-_OptLLMFn = LLMExtractFn | None
 
 _SYSTEM_PROMPT = (
     "You are a precise job-fit judge. Return ONLY valid JSON matching the "
@@ -131,7 +132,7 @@ async def match_job(
     job: Job,
     facts: dict | None,
     *,
-    llm_extract_validated_fn: _OptLLMFn = None,
+    llm_extract_validated_fn: LLMExtractFn | None = None,
 ) -> MatchVerdict:
     """One judge call. Raises on total provider failure — callers catch."""
     fn = llm_extract_validated_fn or llm_extract_validated
@@ -169,7 +170,7 @@ async def match_batch(
     conn: aiosqlite.Connection,
     semaphore_limit: int = 3,
     skip_existing: bool = True,
-    llm_extract_validated_fn: _OptLLMFn = None,
+    llm_extract_validated_fn: LLMExtractFn | None = None,
 ) -> list[MatchVerdict | None]:
     """Judge a shortlist concurrently (bounded — free tiers cap ~30 req/min).
     Per-job errors are swallowed; one bad LLM response can't kill the batch.
