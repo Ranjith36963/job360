@@ -177,3 +177,114 @@ def test_get_last_source_counts_with_data(db):
     assert "adzuna" in result
     assert 0 in result["reed"]
     assert 5 in result["reed"]
+
+
+async def _create_user_feed_table(db: JobDatabase) -> None:
+    """Create user_feed + job_enrichment with all columns needed for
+    get_user_feed_jobs (incl. migration 0017 llm columns).
+
+    The :memory: db fixture only runs init_db() which does not include
+    the external SQL migration files.  user_feed comes from migrations
+    0003 + 0017; job_enrichment from 0008.  get_user_feed_jobs does a
+    LEFT JOIN to job_enrichment, which raises OperationalError (caught
+    silently to []) if the table is missing, so both are created here.
+    """
+    await db._conn.executescript("""
+        CREATE TABLE IF NOT EXISTS user_feed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            job_id INTEGER NOT NULL,
+            score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+            bucket TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            notified_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            llm_fit_score INTEGER,
+            llm_verdict TEXT,
+            llm_reason TEXT,
+            llm_matched_at TEXT,
+            UNIQUE(user_id, job_id)
+        );
+        CREATE TABLE IF NOT EXISTS job_enrichment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL UNIQUE,
+            title_canonical TEXT,
+            category TEXT,
+            employment_type TEXT,
+            workplace_type TEXT,
+            salary TEXT,
+            required_skills TEXT,
+            preferred_skills TEXT,
+            experience_min_years INTEGER,
+            experience_level TEXT,
+            visa_sponsorship TEXT,
+            seniority TEXT
+        );
+    """)
+    await db._conn.commit()
+
+
+@pytest.mark.asyncio
+async def test_feed_jobs_surface_and_rank_by_llm_verdict(db):
+    """COALESCE(llm_fit_score, score) ranking: a judged job with a LOW keyword
+    score but HIGH LLM fit outranks an unjudged higher-keyword job, and the
+    llm_* columns round-trip with real values (CLAUDE.md rule #21).
+    """
+    await _create_user_feed_table(db)
+
+    uid = "test-user-llm"
+    # Insert two catalog jobs
+    job_a = _make_job(title="AI Engineer A", company="CompanyA", match_score=80)
+    job_b = _make_job(title="ML Engineer B", company="CompanyB", match_score=40)
+    inserted_a = await db.insert_job(job_a)
+    inserted_b = await db.insert_job(job_b)
+    assert inserted_a and inserted_b, "Both jobs must insert cleanly"
+
+    # Retrieve their IDs
+    cur = await db._conn.execute("SELECT id FROM jobs WHERE normalized_title = ?", ("ai engineer a",))
+    row = await cur.fetchone()
+    job_a_id = row[0]
+
+    cur = await db._conn.execute("SELECT id FROM jobs WHERE normalized_title = ?", ("ml engineer b",))
+    row = await cur.fetchone()
+    job_b_id = row[0]
+
+    # Insert user_feed rows: A has score=80 (unjudged), B has score=40
+    now = datetime.now(timezone.utc).isoformat()
+    await db._conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'top', 'active', ?, ?)",
+        (uid, job_a_id, 80, now, now),
+    )
+    await db._conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'top', 'active', ?, ?)",
+        (uid, job_b_id, 40, now, now),
+    )
+    await db._conn.commit()
+
+    # Set B's LLM verdict to 95 — should now outrank A's keyword score of 80
+    await db._conn.execute(
+        "UPDATE user_feed SET llm_fit_score=95, llm_verdict='strong fit', "
+        "llm_reason='domain match', llm_matched_at=datetime('now') "
+        "WHERE user_id=? AND job_id=?",
+        (uid, job_b_id),
+    )
+    await db._conn.commit()
+
+    rows = await db.get_user_feed_jobs(uid, days=9999, min_score=0)
+
+    assert len(rows) == 2, f"Expected 2 feed rows, got {len(rows)}"
+    assert rows[0]["id"] == job_b_id, (
+        f"Job B (llm_fit_score=95) should outrank Job A (score=80), "
+        f"but got id={rows[0]['id']} first"
+    )
+    # Value-presence checks (rule #21): real values, not schema defaults
+    assert rows[0]["llm_fit_score"] == 95, "llm_fit_score must round-trip"
+    assert rows[0]["llm_verdict"] == "strong fit", "llm_verdict must round-trip"
+    assert rows[0]["llm_reason"] == "domain match", "llm_reason must round-trip"
+    # Unjudged row -> NULL, not 0 (rule: schema default is NULL not 0)
+    assert rows[1]["llm_fit_score"] is None, (
+        f"Unjudged job A must have llm_fit_score=NULL, got {rows[1]['llm_fit_score']}"
+    )

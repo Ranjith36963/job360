@@ -756,14 +756,18 @@ class JobDatabase:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 false positive.
         sql = (
-            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS}, f.score AS feed_score "  # noqa: S608
+            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS}, f.score AS feed_score, "  # noqa: S608
+            "f.llm_fit_score AS llm_fit_score, f.llm_verdict AS llm_verdict, "
+            "f.llm_reason AS llm_reason "
             "FROM user_feed f "
             "JOIN jobs j ON j.id = f.job_id "
             "LEFT JOIN job_enrichment je ON je.job_id = j.id "
             "WHERE f.user_id = ? AND f.status = 'active' "
             "AND j.first_seen >= ? AND f.score >= ? "
             "AND (j.staleness_state IS NULL OR j.staleness_state = 'active') "
-            "ORDER BY f.score DESC, j.date_found DESC"
+            # Judge outranks funnel: matcher fit when present, else keyword score.
+            # All-NULL llm_fit_score (flag off) keeps this identical to the old order.
+            "ORDER BY COALESCE(f.llm_fit_score, f.score) DESC, j.date_found DESC"
         )
         try:
             cursor = await self._conn.execute(sql, (user_id, cutoff, min_score))
