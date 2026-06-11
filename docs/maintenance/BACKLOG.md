@@ -1,7 +1,8 @@
 # Job360 Maintenance Backlog
 
-Worked by the `/maintain` loop (one item per iteration, top TODO first).
-Statuses: TODO / DOING / DONE (sha) / BLOCKED(reason). Keep newest discoveries at the right priority, not at the bottom.
+Worked by the `/maintain` loop (one item per round, top TODO first).
+Statuses: TODO / DOING / DONE (sha) / BLOCKED(reason) / NEEDS-HUMAN / DEAD.
+Aging: every round increments `skipped: N` on items it passes over; at `skipped: 3` an item must be taken or escalated to NEEDS-HUMAN with justification. Keep newest discoveries at the right priority, not at the bottom.
 
 ## P1 — bugs and broken behavior (live evidence)
 
