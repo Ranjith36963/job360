@@ -2330,3 +2330,113 @@ def test_comeet_http_error():
         finally:
             await session.close()
     _run(_test())
+
+
+# ---- Comeet ATS quarantine (2026-06: upstream careers-api now token-gated) ----
+
+COMEET_TOKEN_GATE_BODY = '{"status":400,"message":"Token is missing","ignore_sentry":true}'
+
+
+def test_comeet_quarantine_single_probe_when_gated(caplog):
+    """Upstream now rejects every un-tokened request with HTTP 400
+    ("Token is missing"). The source must make exactly ONE canary request
+    (no per-slug loop, no retries) and log nothing at WARNING or above —
+    a single INFO line is the only acceptable noise."""
+    import logging
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    status=400, body=COMEET_TOKEN_GATE_BODY,
+                    content_type="application/json", repeat=True,
+                )
+                source = ComeetSource(
+                    session,
+                    companies=["fiverr", "riskified", "lightricks"],
+                )
+                with caplog.at_level(logging.DEBUG, logger="job360"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                total_requests = sum(len(v) for v in m.requests.values())
+                assert total_requests == 1, (
+                    f"Expected exactly 1 canary request, got {total_requests} "
+                    "(per-slug loop and/or retries must not run while the API is token-gated)"
+                )
+                noisy = [
+                    r for r in caplog.records
+                    if r.name.startswith("job360") and r.levelno >= logging.WARNING
+                ]
+                assert noisy == [], f"Expected no WARNING+ logs, got: {noisy}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_comeet_gate_lifted_resumes_full_parse():
+    """If Comeet ever drops the token gate (canary gets HTTP 200 + a list),
+    the source must resume the full per-slug fetch and parse positions."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    payload=COMEET_PAYLOAD, repeat=True,
+                )
+                source = ComeetSource(session, companies=["fiverr", "acme"])
+                jobs = await source.fetch_jobs()
+                # One UK job per slug (Tokyo role filtered)
+                assert len(jobs) == 2
+                assert all(j.source == "comeet" for j in jobs)
+                assert {j.title for j in jobs} == {"Data Engineer"}
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- GOV.UK Apprenticeships quarantine (2026-06: API retired, returns HTML 200) ----
+
+GOV_APPRENTICESHIPS_HTML_404 = """<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head><title>Page not found - Find an apprenticeship - GOV.UK</title></head>
+<body><h1>Page not found</h1></body></html>"""
+
+
+def test_gov_apprenticeships_quarantine_single_probe_on_html(caplog):
+    """The v1 vacancies API was retired upstream (2026-06): the URL now
+    redirects to an HTML "Page not found" page served with HTTP 200, so
+    json parsing raised "Expecting value" and burned 3 retries per query
+    at WARNING level. The source must probe once, log at most INFO, and
+    return [] without fanning out over the remaining queries."""
+    import logging
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
+                    body=GOV_APPRENTICESHIPS_HTML_404,
+                    content_type="text/html", repeat=True,
+                )
+                sc = _make_search_config(["apprentice", "software engineer"])
+                source = GovApprenticeshipsSource(session, search_config=sc)
+                with caplog.at_level(logging.DEBUG, logger="job360"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                total_requests = sum(len(v) for v in m.requests.values())
+                assert total_requests == 1, (
+                    f"Expected exactly 1 canary request, got {total_requests} "
+                    "(retries and multi-query fan-out must not run against the dead API)"
+                )
+                noisy = [
+                    r for r in caplog.records
+                    if r.name.startswith("job360") and r.levelno >= logging.WARNING
+                ]
+                assert noisy == [], f"Expected no WARNING+ logs, got: {noisy}"
+        finally:
+            await session.close()
+    _run(_test())
