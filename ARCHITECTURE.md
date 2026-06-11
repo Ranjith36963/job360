@@ -39,7 +39,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 15 forward/reverse SQL migrations + runner.py
+│   ├── migrations/                   # 18 forward/reverse SQL migrations (0000 → 0017) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (50 keys → 49 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
@@ -66,6 +66,7 @@ job360/
 │   │   │   ├── scheduler.py          # TieredScheduler (60s ATS / 15min RSS / 60min scrapers, ...)
 │   │   │   ├── circuit_breaker.py    # 5-fail/300s per-source state machine
 │   │   │   ├── conditional_cache.py  # 256-entry FIFO for ETag/Last-Modified
+│   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
 │   │   │   ├── job_enrichment_schema.py  # 18-field Pydantic JobEnrichment + 8 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
@@ -76,7 +77,7 @@ job360/
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 14-migration forward-compat schema
+│   │   │   ├── database.py           # Async SQLite + 18-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -92,7 +93,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 1000+ test fns across 30+ files (run `pytest --collect-only -q | tail -1` for live count)
+│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -253,6 +254,27 @@ In dry-run mode: scoring and dedup still happen, but no DB writes and no notific
 | Support words | Hard-coded role set | `config.supporting_role_words` from titles |
 | Negatives | `NEGATIVE_TITLE_KEYWORDS` | `config.negative_title_keywords` from prefs |
 | Location/Recency | Same | Same (always UK-focused) |
+
+Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords.py` are `[]`. The static `score_job()` path therefore produces near-zero scores without a profile — only `LOCATIONS` and `VISA_KEYWORDS` remain.
+
+### Matching Engine Stack (four engines, all default OFF except #1)
+
+| # | Engine | Service | Flag | Default |
+|---|--------|---------|------|---------|
+| 1 | Keyword funnel | `services/skill_matcher.py` (`JobScorer`) | always on | ON |
+| 2 | LLM enrichment | `services/job_enrichment.py` | `ENRICHMENT_ENABLED` | false |
+| 3 | Semantic retrieval | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
+
+**Engine 4 — LLM judge detail:**
+- Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
+- `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
+- Uses `llm_provider.llm_extract_validated` (Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
+- Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
+- `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
+- Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
+- API: `GET /api/jobs` exposes the four `llm_*` fields; dashboard renders an AI-verdict badge.
+- Measured: 18/18 judged in 89.8 s (concurrency 3); judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy.
 
 ---
 
@@ -506,6 +528,8 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
+> This section shows the baseline schema. The full schema is built by 18 forward-migrations (0000–0017). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -587,7 +611,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `DISCORD_WEBHOOK_URL` | No | Discord notifications |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range sorting (default 40k-120k) |
 
-All API keys are optional — free sources (41 of 48) work without any keys.
+All API keys are optional — 43 of 50 sources work without any keys.
 
 ### Constants (`settings.py`)
 

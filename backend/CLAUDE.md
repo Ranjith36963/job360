@@ -22,7 +22,7 @@ lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly --ignore=tests/test_main.py   # ~1,256 passing, 4 skipped (~2.5 min)
+python -m pytest -q -p no:randomly --ignore=tests/test_main.py   # ~1,285 passing, 3 skipped (~2 min)
 
 python -m pytest tests/test_scorer.py::test_name -v   # single test
 python -m ruff check .                                # lint (CI gate)
