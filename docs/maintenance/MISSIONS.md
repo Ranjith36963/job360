@@ -7,18 +7,27 @@
 Format per mission: id, pillar, owner-type, claimed-by (worktree/session or "-"), status (OPEN / CLAIMED / DONE-PENDING-INTEGRATION / DONE / NEEDS-HUMAN), files-owned (exclusive while claimed), definition of done (DoD — every line must be PROVEN with evidence before DONE).
 Rules: a worker may claim ONE mission. Files-owned lists are exclusive locks — never edit files owned by another CLAIMED mission. Serialized missions may only be claimed by the integrator. Backlog item numbers refer to docs/maintenance/BACKLOG.md.
 
+**CORE list (Upgrade 3 — two autonomy speeds).** Changes to ANY of these always get full adversarial review (Upgrade 1 waves) + integrator E2E-flavor live verify, and are never bundled with other changes in one commit:
+```
+backend/migrations/**      backend/src/repositories/database.py   backend/src/api/routes/auth.py
+backend/src/main.py        backend/src/api/models.py              backend/src/core/settings.py
+frontend/src/lib/types.ts
+```
+Everything else is EDGE: full speed, small frequent gated commits, cheap revert.
+
 ---
 
 ## M1 — Pillar 1: every enabled source is healthy  [worker-parallel]
-claimed-by: -   status: OPEN
+claimed-by: -   status: DONE (integrated 3315fb3, live-verified run b0250268211a @2026-06-11T21:10Z)
+closing-note (worker-a, 2026-06-11): commits 1f30608 + fc55fb8 on agent/m1-sources. All four sources probed live 2026-06-11; all four upstreams are gone/blocked, so the pattern everywhere is the b7b2c60 jobtensor quarantine (1 un-retried canary/run, single INFO, auto-resume if upstream revives) rather than repair. Integrator at merge: (1) run the live-pipeline log check for DoD line 4; (2) add STATUS.md fragile rows for comeet, gov_apprenticeships, aijobs_global + a note that glassdoor querying is off (STATUS.md not in M1 files-owned); (3) journal the DfE subscription-key NEEDS-HUMAN; (4) comeet/gov_apprenticeships/aijobs_global are now strong candidates to bundle into the M6 source rotation.
 Backlog: #3 comeet, #4 gov_apprenticeships, #5 aijobs_global, #6 glassdoor
 files-owned: src/sources/ats/comeet.py, core/companies.py, src/sources/apis_free/gov_apprenticeships.py, src/sources/scrapers/aijobs_global.py, src/sources/other/indeed.py, tests/test_sources.py (append-only)
 DoD:
-- [ ] comeet: dead slugs (riskified, lightricks) pruned or replaced with live ones; a direct probe returns jobs or the source is cleanly disabled with a journal note
-- [ ] gov_apprenticeships and aijobs_global: non-JSON diagnosed; each either parses real responses again (probe proof) or degrades gracefully (no error-level log lines)
-- [ ] glassdoor: location format fixed (probe returns jobs) OR glassdoor querying disabled with rationale
-- [ ] zero HTTP 400 and zero "Expecting value" log lines attributable to these four sources in one fresh pipeline run (integrator confirms at merge)
-- [ ] full backend suite green in the worktree; new/changed tests cover each fix
+- [x] comeet: ALL 5 slugs probed dead 2026-06-11 (3x "Token is missing" 400, 2x 404; API now needs a non-discoverable per-company token; riskified+lightricks moved to Greenhouse, zero UK locations there) → cleanly quarantined per jobtensor precedent: 1 un-retried canary/run, single INFO, auto-resume on 200+array; slugs pruned to canary (1f30608). Journal note: integrator please add STATUS.md fragile row (file not in M1 files-owned). NEEDS-HUMAN: none.
+- [x] gov_apprenticeships DONE in 1f30608 (v1 API retired upstream: 302 → HTML "Page not found" served as HTTP 200; quarantined same pattern, auto-resume on 200+dict; NEEDS-HUMAN: DfE "Display Adverts" replacement API needs a subscription key — register or leave quarantined). aijobs_global DONE in fc55fb8 (board abandoned: all listings status-expired, newest RSS item Oct 2023; suggest endpoint answers JSONP "([])" for every term → "Expecting value" + 3 retries/query. Quarantined: 1 un-retried canary, single INFO, auto-resume on non-empty array with paren-stripping).
+- [x] glassdoor: disabled with rationale (fc55fb8). Probed 2026-06-11: findPopularLocationAjax.htm answers anti-bot 403 "Security | Glassdoor" for EVERY term (London, UK / London / London, England) — block is term-independent, no format fixes it. JobSpySource default sites now ["indeed"]; explicit override kept. Registry keys untouched (M6 owns the 5-surface rotation).
+- [x] zero HTTP 400 and zero "Expecting value" log lines attributable to these four sources in one fresh pipeline run — integrator CONFIRMED at merge 3315fb3: run b0250268211a @21:10Z has zero such lines; the only matches in the log are pre-merge (run 9673808f @19:36)
+- [x] full backend suite green in the worktree (gate: 1291 passed, 3 skipped after fc55fb8); every fix has appended tests (single-probe/no-WARNING + revival/resume per source; site_name==["indeed"] for JobSpy)
 
 ## M2 — Pillar 2: the judge stays correct over time  [worker-parallel, one item NEEDS-HUMAN]
 claimed-by: -   status: OPEN
@@ -41,7 +50,7 @@ DoD:
 - [ ] vitest, type-check, lint all green in the worktree
 
 ## M4 — Docs and hygiene match reality  [worker-parallel, no code]
-claimed-by: -   status: OPEN
+claimed-by: worker-a (session 2026-06-11 19:18 UTC, claimed ~20:00 UTC after M1)   status: CLAIMED
 Backlog: #15, #16, #17 (NOT 16b — serialized)
 files-owned: CLAUDE.md, backend/CLAUDE.md, STATUS.md, IMPLEMENTATION_LOG.md, README.md, ARCHITECTURE.md, docs/**, test-artifacts/
 DoD:
@@ -51,11 +60,11 @@ DoD:
 - [ ] no claims in docs contradict CODEBASE_REPORT.md findings
 
 ## M5 — ATS sweeps survive the timeout  [SERIALIZED — integrator only]
-claimed-by: integrator (main checkout, round 1)   status: CLAIMED
+claimed-by: integrator   status: DONE (run 2/2 b0250268211a @21:10Z: greenhouse 1335, lever 175, workday 99, ashby 403, errors {} — two consecutive clean runs)
 Report problem #4. files-owned: core/settings.py, services/scheduler.py, sources/ats/**
 DoD:
 - [x] confirmed root cause (measured unbounded: greenhouse 138.2s/1331 jobs, ashby 46.1s/403, workable 41.2s/0 — 60s cap truncated sweeps; evidence in JOURNAL 2026-06-11 round 1)
-- [~] per-category timeout implemented (89fa0e0: SOURCE_FETCH_TIMEOUT_ATS=240 + resolve_fetch_timeout); live run 1/2 CLEAN (run c7345ff349d8: greenhouse 1331, lever 175, workday 101, ashby 403, errors {}). Needs run 2/2 next heartbeat to tick.
+- [x] per-category timeout implemented (89fa0e0: SOURCE_FETCH_TIMEOUT_ATS=240 + resolve_fetch_timeout); TWO consecutive clean live runs: c7345ff349d8 @18:40 (greenhouse 1331) and b0250268211a @21:10 (greenhouse 1335), both errors {}.
 - [x] full suite green (1285/3) + live verify (run c7345ff349d8, zero errors)
 
 ## M6 — Source rotation 50→49 + jobtensor removal  [SERIALIZED — integrator only]
@@ -74,7 +83,7 @@ DoD:
 
 ## NEEDS-HUMAN queue (answer in the morning)
 1. M2-3 migration approval (telemetry columns)
-2. M6 rotation approval
-3. M7 codegen decision
+2. DfE "Display Adverts" replacement API subscription key — register it to revive gov_apprenticeships, or leave the source quarantined (M1 closing note)
+3. M6 scope expansion proposal: bundle comeet + gov_apprenticeships + aijobs_global into the rotation alongside jobtensor (50→46 instead of 50→49)? All four are now proven-dead quarantines. Your approved scope is jobtensor-only; expanding needs your word.
 4. API keys: jsearch / jooble / careerjet / findwork — provide or mark permanently-skipped
 5. SMTP / channel credentials for real notification sends

@@ -14,12 +14,14 @@ You are a Job360 worker running in YOUR OWN worktree on YOUR OWN branch. You cla
 4. NEVER weaken/skip/delete a failing test to get green. NEVER commit without a fresh gate stamp (the hook enforces this — scripts/agent-gate.sh is the only way to get one).
 5. Migrations, credentials, paid APIs, irreversible operations → mark the task NEEDS-HUMAN in your mission entry and move on.
 6. Max 3 fix attempts per task; then `git checkout -- .` (your changes only), record the diagnosis in your mission entry, move to the next task.
+7. **MODEL ECONOMY (owner-mandated):** every subagent you dispatch — implementer, reviewer, review-wave, anything — MUST carry `model: "sonnet"` explicitly. NEVER omit the model field (omission inherits the session's strong model). Escalate a single dispatch to opus only after two BLOCKED reports on the same task.
+8. **MISSION DONE = STOP (owner-mandated):** when your claimed mission's DoD is complete, set status `DONE-PENDING-INTEGRATION`, journal "mission done, awaiting owner" in your mission entry, release your claim, and STOP. Do NOT auto-claim the next mission overnight — new mission claims happen only when the owner is awake to approve the spend.
 
 ## Per-task inner loop (repeat until DoD complete)
 1. Pick the next unchecked DoD line / smallest task toward it.
 2. Write the failing test FIRST; confirm it fails for the right reason.
 3. Implement minimally (delegate to a Sonnet subagent with a written spec when the change is mechanical; review its diff yourself). No drive-by refactors, no formatting churn.
-4. Self-audit the diff: scope creep? gamed tests? swallowed exceptions? hardcoded values? violations of CLAUDE.md's 27 rules (especially #11/#16 lazy imports, #18 default-off flags)?
+4. Review the diff (Upgrade 1 — two speeds): for a SINGLE-FILE mechanical change touching no CORE-list file (see MISSIONS.md header), a lone self-audit suffices: scope creep? gamed tests? swallowed exceptions? hardcoded values? CLAUDE.md 27-rule violations (especially #11/#16 lazy imports, #18 default-off flags)? For MULTI-FILE diffs or ANY CORE-list file: run adversarial waves — Wave 1: 3 parallel Sonnet subagents (`model:"sonnet"`), one lens each (R1 conventions/CLAUDE.md rules, R2 history — git log/journal of touched files for re-breaks or contradicted decisions, R3 bugs — edge cases, swallowed exceptions, gamed tests); Wave 2: 2 fresh Sonnet subagents attack Wave 1's findings, prove each wrong or confirm with file:line. Only findings that SURVIVE Wave 2 block the commit. Log raw/survived counts to TELEMETRY.jsonl.
 5. Gate: run `bash scripts/agent-gate.sh` — it runs the canonical suite (and frontend gates if frontend files changed) and writes the stamp only on green. Red → back to step 3.
 6. Commit on YOUR branch: `agent(<mission-id>): <task> — <what changed> [verified: tests]`
 7. Tick the DoD line in MISSIONS.md with the commit sha. Take the next task immediately.

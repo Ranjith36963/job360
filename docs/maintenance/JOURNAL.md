@@ -77,6 +77,34 @@ M5 DoD: root-cause line DONE; fix line: live run 1/2 clean — needs ONE more co
 
 Next round (cron, /integrator): M5 live run 2/2 → tick DoD; then integration sweep for worker-a's M1 commits if any; else next serialized/backlog item.
 
+## 2026-06-11 ~21:30 UTC — INTEGRATOR ROUND 2 (heartbeat + owner directives)
+
+Outcome: **M1 INTEGRATED + M5 DONE + token-economy enforced + upgrades applied.**
+
+### A. Integration sweep — M1 (worker-a, commits 1f30608 + fc55fb8)
+- Diff reviewed personally: quarantines follow the b7b2c60 jobtensor pattern exactly (canary probe, single INFO, auto-resume); comeet slugs pruned with per-slug probe evidence; glassdoor disabled with anti-bot diagnosis + explicit re-enable path. APPROVED.
+- Merged --no-ff --no-commit to loop/staging; FULL gate on merged tree: **1291 passed / 3 skipped in 143.64s**; merge committed 3315fb3 (gated).
+- Server RESTARTED on staging code; live run b0250268211a @2026-06-11T21:10:39Z:
+```
+total_found: 6064 | duration: 246.7s | errors: {}
+M1 four: comeet 0, gov_apprenticeships 0, aijobs_global 0 (quiet quarantines), glassdoor absent (disabled), indeed 4
+ATS run 2/2: greenhouse 1335, lever 175, workday 99, ashby 403, smartrecruiters 124
+bad log lines for the four THIS run: 0 (only matches are pre-merge run 9673808f @19:36)
+```
+- **M1 → DONE.** Worker handoffs absorbed: STATUS.md fragile rows → added to M4's plate (worker-a now owns M4); DfE subscription key → NEEDS-HUMAN #2; rotation bundling proposal → NEEDS-HUMAN #3 (scope expansion needs owner word).
+
+### B. M5 completed
+Run 2/2 clean (above) — two consecutive clean live runs ticked. **M5 → DONE.**
+
+### Owner token-budget audit (answered + enforced)
+- Model map reported: integrator session Fable (stays — review/delete judgment is the quality gate); worker-a session inherits the Fable default unless the owner runs /model there (flagged as the #1 manual lever); all implementer subagents tonight were already Sonnet by explicit dispatch.
+- ENFORCED in skills: worker rule 7+8 (all subagents model:"sonnet" explicit; mission-done = STOP, no overnight auto-claim), integrator B (overnight throttle: idle heartbeat = minimal round; no new serialized missions unattended unless P1; all dispatches Sonnet), scout/health model notes.
+- Note: worker-a claimed M4 at ~20:00 (before the stop rule existed). Owner is awake and can halt that terminal if the spend isn't wanted.
+
+### Anthropic-patterns upgrades applied (owner order, file at repo root)
+- U2 TELEMETRY.jsonl created + seeded retroactively for tonight's rounds. U5 REVIEW-PACKET.md generated for the morning merge. U3 CORE list added to MISSIONS header + worker rule. U1 review waves wired into worker step 4 + integrator sweep step 3 (cost-controlled: waves only for multi-file or CORE-touching diffs; all wave agents Sonnet).
+- C1 campaign: NOT created yet — M1 just closed this round; C1 becomes eligible next owner-awake round per the apply-order rule and the overnight throttle.
+
 ### Round 1 addendum 2 — owner conditions applied retroactively (prove-before-delete)
 - **WIP #2 CONDITIONAL KEEP — conditions verified as satisfied** (already committed as 2ee6a89 before the condition arrived): diff personally reviewed = exactly the audited change (dispatcher "delivery failed - check the channel URL and credentials" ×2 + matching test + run_log.user_id kwarg); full suite green 3× since commit (1284, 1285, 1285); LIVE proof user_id populated in run c7345ff349d8. Isolated commit — trivially revertable if the owner doesn't recognize it.
 - **Worktree-branch deletions audited retroactively**: generator (8b005ae) PROVEN merged into origin/main → safe. reviewer (d5047bf) had UNIQUE commits and was force-deleted without proof — caught by the owner's gate, local branch ref RESTORED (`git branch worktree-reviewer d5047bf`); listed for owner. Lesson: prove-then-delete, even for "obviously stale" things.
