@@ -15,31 +15,28 @@ _CONTEXT_RE = re.compile(r'var\s+context\s*=\s*(\{.*?\});\s*</script>', re.DOTAL
 
 
 class JobTensorSource(BaseJobSource):
-    """JobTensor — UK AI/Science/Tech jobs via AJAX API."""
+    """JobTensor — UK AI/Science/Tech jobs via HTML probe.
+
+    NOTE: The AJAX endpoint ``https://jobtensor.com/ajax/search/`` was removed
+    upstream circa 2026-06 (returns HTTP 400 for any request).  The site
+    pivoted to a JS-rendered German-market app — the UK listings page now
+    serves an empty JS shell with no embedded job data.  The AJAX call has
+    been dropped entirely to stop burning 3 retries per pipeline run.
+
+    The HTML probe is kept as a cheap canary: if UK listings ever return (e.g.
+    a server-side rendered page with ``var context = {...}`` or ``/uk/`` links),
+    ``_parse_html`` will pick them up without any further changes.  Until then
+    this source consistently returns [].  Candidate for full removal in the
+    next source-rotation batch.
+    """
     name = "jobtensor"
     category = "scraper"
     DOMAINS = {"tech"}
 
     async def fetch_jobs(self) -> list[Job]:
-        # Try the AJAX search API directly
-        data = await self._get_json(
-            "https://jobtensor.com/ajax/search/",
-            params={
-                "country": "uk",
-                "skills": "AI,Machine Learning,Deep Learning,NLP,Data Science",
-                "page": "1",
-            },
-        )
-
-        if data and isinstance(data, dict):
-            hits = data.get("hits", [])
-            if hits:
-                jobs = self._parse_api_results(hits)
-                jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
-                logger.info("JobTensor: found %s relevant jobs (API)", len(jobs))
-                return jobs
-
-        # Fallback: try HTML scraping with context extraction
+        # HTML probe only — the /ajax/search/ endpoint was removed upstream
+        # (HTTP 400 for any request since ~2026-06; site now a JS-rendered
+        # German app with zero UK listings).
         html = await self._get_text("https://jobtensor.com/United-Kingdom/Artificial-Intelligence-jobs")
         if not html:
             return []

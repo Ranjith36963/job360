@@ -1596,22 +1596,95 @@ JOBTENSOR_HTML = """<html><body>
 </div>
 </body></html>"""
 
+# HTML page that contains embedded var context JSON (exercises _parse_api_results via _parse_html)
+JOBTENSOR_CONTEXT_HTML = """<html><body>
+<script type="text/javascript">
+var context = {"results": {"hits": [
+  {"title": "ML Engineer", "company": "TensorCo", "location": "London, UK",
+   "slug": "ml-engineer-123"}
+]}};
+</script>
+</body></html>"""
 
-def test_jobtensor_parses_html():
+# JS-rendered shell returned by jobtensor.com since ~2026-06 (no jobs, no var context)
+JOBTENSOR_JS_SHELL = """<!DOCTYPE html>
+<html lang="de">
+<head><title>Schlauer und Schneller Suchen mit Jobtensor AI</title></head>
+<body><div id="app"></div><script src="/static/js/main.abc123.js"></script></body>
+</html>"""
+
+
+def test_jobtensor_does_not_call_dead_ajax_endpoint():
+    """Upstream removed /ajax/search/ (400 for any request since ~2026-06).
+    The source must go straight to the HTML probe without ever calling
+    _get_json (which was the AJAX path).  We spy on _get_json: if it is
+    called the test fails, because there is no legitimate JSON endpoint left
+    on jobtensor.com."""
+    from unittest.mock import AsyncMock, patch
+
     async def _test():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                # AJAX API returns empty, falls back to HTML
-                m.get(re.compile(r"https://jobtensor\.com/ajax/.*"),
-                      payload={"total": 0, "hits": []})
-                m.get("https://jobtensor.com/uk/AI-Machine-Learning-jobs",
-                      body=JOBTENSOR_HTML, content_type="text/html")
+                m.get(
+                    "https://jobtensor.com/United-Kingdom/Artificial-Intelligence-jobs",
+                    body=JOBTENSOR_JS_SHELL,
+                    content_type="text/html",
+                )
+                source = JobTensorSource(session)
+                with patch.object(source, "_get_json", new_callable=AsyncMock) as mock_get_json:
+                    jobs = await source.fetch_jobs()
+                    assert mock_get_json.call_count == 0, (
+                        f"_get_json was called {mock_get_json.call_count} time(s); "
+                        "the dead AJAX endpoint must not be called"
+                    )
+                assert jobs == [], f"Expected [] from JS shell, got {jobs}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_jobtensor_parses_html():
+    """HTML probe path: page with /uk/ links returns Job objects."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                # No AJAX mock — source now goes straight to the HTML probe
+                m.get(
+                    "https://jobtensor.com/United-Kingdom/Artificial-Intelligence-jobs",
+                    body=JOBTENSOR_HTML,
+                    content_type="text/html",
+                )
                 source = JobTensorSource(session)
                 jobs = await source.fetch_jobs()
                 assert isinstance(jobs, list)
                 if jobs:
                     assert all(j.source == "jobtensor" for j in jobs)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_jobtensor_parses_embedded_context_json():
+    """HTML probe path: page with embedded var context JSON calls
+    _parse_api_results and returns Job objects (keeps coverage of that method
+    via the HTML-fallback route)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    "https://jobtensor.com/United-Kingdom/Artificial-Intelligence-jobs",
+                    body=JOBTENSOR_CONTEXT_HTML,
+                    content_type="text/html",
+                )
+                source = JobTensorSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1, "Expected at least 1 job from embedded context JSON"
+                assert jobs[0].source == "jobtensor"
+                assert "ML Engineer" in jobs[0].title
+                assert jobs[0].company == "TensorCo"
         finally:
             await session.close()
     _run(_test())

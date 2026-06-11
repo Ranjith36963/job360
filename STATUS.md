@@ -151,6 +151,7 @@
 | Source/Component | Risk | Notes |
 |------------------|------|-------|
 | **HTML scrapers** (7) | High | LinkedIn, JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
+| **jobtensor** | Critical | Upstream pivoted to a JS-rendered German-market app (~2026-06). `/ajax/search/` returns HTTP 400 for any request (removed). UK listings page (`/United-Kingdom/Artificial-Intelligence-jobs`) is an empty JS shell — no `var context` JSON, no `/uk/` links, zero jobs returned every run. AJAX call dropped to stop burning 3 retries/run; source quarantined to HTML-probe-only (always returns []). Candidate for full 5-surface removal in the next source-rotation batch. |
 | **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
 | **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 15 companies = 15 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
