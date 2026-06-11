@@ -10,7 +10,9 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 
 1. **DONE (e054ec7) — jobicy source broken: HTTP 400.** Root cause: Jobicy added validation rejecting `tag` values under 3 chars; we sent `tag=ai`. Dropped the tag param (industry filter + downstream scorer cover relevance). Regression test asserts no tag param is sent. Live-proven: 6 jobs fetched post-fix.
 2. **DONE (b7b2c60) — jobtensor source broken: HTTP 400.** Upstream pivoted to a JS-rendered German app; /ajax/search/ removed (400 for any request), UK page is an empty shell. Quarantined: dead AJAX call dropped (saves 3 retries/run), HTML probe kept as canary, STATUS.md fragile row added. Live-proven: one request, one INFO line, 0 jobs, no warnings.
-3. **TODO — comeet ATS slugs dead: HTTP 400** for `riskified` and `lightricks` company slugs. Verify slugs against comeet's careers API, prune/replace dead slugs in `core/companies.py`.
+3a. **TODO — workable returns 0 jobs in 41s WITHOUT timing out** (measured 2026-06-11, M5 instrumentation). Not a timeout problem — suspect slug list or query params. Diagnose like jobicy: probe one slug's API directly. `skipped: 0`
+
+3. **TODO — comeet ATS slugs dead: HTTP 400** `skipped: 1` for `riskified` and `lightricks` company slugs. Verify slugs against comeet's careers API, prune/replace dead slugs in `core/companies.py`.
 4. **TODO — gov_apprenticeships returns non-JSON** ("Expecting value: line 1 column 1"). Endpoint may now need a key or returns HTML error page. Diagnose, fix or skip gracefully with one info log instead of 3 retry warnings.
 5. **TODO — aijobs_global returns non-JSON** (same signature as above). Diagnose, fix or downgrade.
 6. **TODO — JobSpy/Glassdoor 400 "location not parsed"** on every run. Either fix the location format passed to JobSpy for glassdoor or stop querying glassdoor (keep indeed) so each run stops logging 6 ERROR lines.

@@ -38,3 +38,41 @@
 - This entry is intentionally left uncommitted (docs/maintenance/** is exempt loop memory; the integrator's first round will sweep it).
 - Later cron fire, same session: state unchanged (WIP still uncommitted, Phase-3 approval still pending) → BLOCKED again, no action. The loop stays correctly parked until the owner moves.
 - After 6 consecutive identical BLOCKED fires, the orchestrator DELETED cron c96d6940 (owner's standing token-thrift rule; the loop was hard-deadlocked on owner decisions, so fires were pure cost). To resume: resolve the 3-file WIP, approve Phase 3, and re-arm — the new cron should point at /integrator per the installed plan (agentic-loop/README-SETUP.md step 4).
+
+## 2026-06-11 ~18:45 UTC — INTEGRATOR ROUND 1 (manual, owner-witnessed)
+
+Outcome: **DONE — M5 slices 1+2 (root cause + fix + live run 1/2)**, plus Phase-3 install housekeeping.
+
+Owner decisions executed first: hardening VERDICT PASS; WIP KEPT and committed (2ee6a89, gated 1284-pass); team installed (e9d435a: worker/integrator/scout/health skills + canonical MISSIONS.md, /maintain retired); worker-a worktree + own venv built on branch agent/m1-sources (M1 not yet claimed — owner launches that terminal).
+
+### A. Integration sweep
+No missions DONE-PENDING-INTEGRATION; agent/m1-sources has no new commits; loop/staging not yet needed. → Section B.
+
+### B. Maintenance: M5 (serialized, integrator-only) — ATS sweeps vs the 60s timeout
+
+Root cause MEASURED (unbounded direct sweeps, concurrent, 2026-06-11):
+```
+workable:   0 jobs   in  41.2s   (completes; its 0 is NOT timeout — new candidate below)
+ashby:      403 jobs in  46.1s   (fits alone; slips past 60s under pipeline contention)
+greenhouse: 1331 jobs in 138.2s  (the smoking gun — 60s cap discarded 1,331 jobs EVERY run)
+```
+
+Fix (commit 89fa0e0, gate: 1285 passed/3 skipped in 115.18s): `SOURCE_FETCH_TIMEOUT_ATS` (default 240s, env-tunable) in settings.py; `TieredScheduler.resolve_fetch_timeout(source)` — ats category → ATS ceiling, others → 60s, explicit ctor arg still wins (test contract). TDD: test_resolve_fetch_timeout_per_category red→green; scheduler+breaker slice 15/15; ruff clean.
+
+LIVE VERIFY (server restarted BOTH times — commits don't exist until restart; run c7345ff349d8, run_log @ 2026-06-11T18:40:04Z):
+```
+total_found: 6180 (prev run: 3994, +55%) | new: 2 | duration: 243.4s | errors: {}  <- ZERO
+ATS: greenhouse 1331 (was 0), lever 175 (was 0), workday 101 (was 0), ashby 403,
+     smartrecruiters 124, pinpoint 3 | workable/recruitee/personio/rippling/comeet 0 (see below)
+jobicy: 6 (e054ec7 confirmed live) | run_log.user_id populated (2ee6a89 confirmed live)
+```
+M5 DoD: root-cause line DONE; fix line: live run 1/2 clean — needs ONE more consecutive clean run (next heartbeat) to tick fully.
+
+### New facts / candidates for the backlog
+- workable returns 0 in 41s WITHOUT timing out → separate cause (query/slug config) — added as backlog candidate.
+- recruitee/personio/rippling/comeet still 0: comeet is backlog #3 (dead slugs); others unverified — scout material.
+- GOTCHA promoted: NEVER chain `agent-gate.sh && git commit` in one shell command — the PreToolUse hook evaluates the whole command BEFORE the gate inside it runs. Gate and commit must be separate tool calls.
+- Housekeeping: stale generator/reviewer worktrees + 11 worktree-agent remote-tracking refs pruned; stray root data/chroma removed; .claude/gate-stamp gitignored; backend/None + bash.exe.stackdump deleted.
+- BLOCKED-ON-OWNER: anthropic-patterns-upgrade.md (directive step 5) does not exist anywhere in the repo — cannot apply until the owner provides it.
+
+Next round (cron, /integrator): M5 live run 2/2 → tick DoD; then integration sweep for worker-a's M1 commits if any; else next serialized/backlog item.

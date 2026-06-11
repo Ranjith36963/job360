@@ -54,9 +54,9 @@ DoD:
 claimed-by: integrator (main checkout, round 1)   status: CLAIMED
 Report problem #4. files-owned: core/settings.py, services/scheduler.py, sources/ats/**
 DoD:
-- [ ] confirmed root cause (instrument one greenhouse/workday sweep)
-- [ ] per-category timeout or slug-batch chunking implemented; ashby/greenhouse/lever/workable/recruitee/workday return jobs or clean 0 (no error entries) across two consecutive live runs
-- [ ] full suite green + live verify
+- [x] confirmed root cause (measured unbounded: greenhouse 138.2s/1331 jobs, ashby 46.1s/403, workable 41.2s/0 — 60s cap truncated sweeps; evidence in JOURNAL 2026-06-11 round 1)
+- [~] per-category timeout implemented (89fa0e0: SOURCE_FETCH_TIMEOUT_ATS=240 + resolve_fetch_timeout); live run 1/2 CLEAN (run c7345ff349d8: greenhouse 1331, lever 175, workday 101, ashby 403, errors {}). Needs run 2/2 next heartbeat to tick.
+- [x] full suite green (1285/3) + live verify (run c7345ff349d8, zero errors)
 
 ## M6 — Source rotation 50→49 + jobtensor removal  [SERIALIZED — integrator only, after human approval]
 Backlog 16b. status: NEEDS-HUMAN (approve rotation first)
