@@ -16,7 +16,14 @@ class JobSpySource(BaseJobSource):
 
     def __init__(self, session: aiohttp.ClientSession, sites: list[str] | None = None, search_config=None):
         super().__init__(session, search_config=search_config)
-        self._sites = sites or ["indeed", "glassdoor"]
+        # Glassdoor disabled by default 2026-06-11: Glassdoor fronts the
+        # findPopularLocationAjax.htm location lookup with an anti-bot 403
+        # ("Security | Glassdoor") for every term, so jobspy logged
+        # "Glassdoor: location not parsed" at ERROR per query (6 lines/run)
+        # and produced zero glassdoor rows. The block is term-independent —
+        # no location format fixes it. Pass sites=["indeed", "glassdoor"]
+        # explicitly to retry if the lookup ever opens up again.
+        self._sites = sites or ["indeed"]
 
     async def fetch_jobs(self) -> list[Job]:
         try:

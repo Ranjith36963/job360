@@ -2330,3 +2330,217 @@ def test_comeet_http_error():
         finally:
             await session.close()
     _run(_test())
+
+
+# ---- Comeet ATS quarantine (2026-06: upstream careers-api now token-gated) ----
+
+COMEET_TOKEN_GATE_BODY = '{"status":400,"message":"Token is missing","ignore_sentry":true}'
+
+
+def test_comeet_quarantine_single_probe_when_gated(caplog):
+    """Upstream now rejects every un-tokened request with HTTP 400
+    ("Token is missing"). The source must make exactly ONE canary request
+    (no per-slug loop, no retries) and log nothing at WARNING or above —
+    a single INFO line is the only acceptable noise."""
+    import logging
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    status=400, body=COMEET_TOKEN_GATE_BODY,
+                    content_type="application/json", repeat=True,
+                )
+                source = ComeetSource(
+                    session,
+                    companies=["fiverr", "riskified", "lightricks"],
+                )
+                with caplog.at_level(logging.DEBUG, logger="job360"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                total_requests = sum(len(v) for v in m.requests.values())
+                assert total_requests == 1, (
+                    f"Expected exactly 1 canary request, got {total_requests} "
+                    "(per-slug loop and/or retries must not run while the API is token-gated)"
+                )
+                noisy = [
+                    r for r in caplog.records
+                    if r.name.startswith("job360") and r.levelno >= logging.WARNING
+                ]
+                assert noisy == [], f"Expected no WARNING+ logs, got: {noisy}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_comeet_gate_lifted_resumes_full_parse():
+    """If Comeet ever drops the token gate (canary gets HTTP 200 + a list),
+    the source must resume the full per-slug fetch and parse positions."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
+                    payload=COMEET_PAYLOAD, repeat=True,
+                )
+                source = ComeetSource(session, companies=["fiverr", "acme"])
+                jobs = await source.fetch_jobs()
+                # One UK job per slug (Tokyo role filtered)
+                assert len(jobs) == 2
+                assert all(j.source == "comeet" for j in jobs)
+                assert {j.title for j in jobs} == {"Data Engineer"}
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- GOV.UK Apprenticeships quarantine (2026-06: API retired, returns HTML 200) ----
+
+GOV_APPRENTICESHIPS_HTML_404 = """<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head><title>Page not found - Find an apprenticeship - GOV.UK</title></head>
+<body><h1>Page not found</h1></body></html>"""
+
+
+def test_gov_apprenticeships_quarantine_single_probe_on_html(caplog):
+    """The v1 vacancies API was retired upstream (2026-06): the URL now
+    redirects to an HTML "Page not found" page served with HTTP 200, so
+    json parsing raised "Expecting value" and burned 3 retries per query
+    at WARNING level. The source must probe once, log at most INFO, and
+    return [] without fanning out over the remaining queries."""
+    import logging
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
+                    body=GOV_APPRENTICESHIPS_HTML_404,
+                    content_type="text/html", repeat=True,
+                )
+                sc = _make_search_config(["apprentice", "software engineer"])
+                source = GovApprenticeshipsSource(session, search_config=sc)
+                with caplog.at_level(logging.DEBUG, logger="job360"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                total_requests = sum(len(v) for v in m.requests.values())
+                assert total_requests == 1, (
+                    f"Expected exactly 1 canary request, got {total_requests} "
+                    "(retries and multi-query fan-out must not run against the dead API)"
+                )
+                noisy = [
+                    r for r in caplog.records
+                    if r.name.startswith("job360") and r.levelno >= logging.WARNING
+                ]
+                assert noisy == [], f"Expected no WARNING+ logs, got: {noisy}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- AI Jobs Global quarantine (2026-06: board abandoned, JSONP empty suggest) ----
+
+def test_aijobs_global_quarantine_single_probe_on_empty_jsonp(caplog):
+    """The ai-jobs.global board is abandoned upstream: every listing is
+    status-expired (newest pubDate Oct 2023) and the WP suggest endpoint
+    answers "([])" — paren-wrapped JSONP that made json.loads raise
+    "Expecting value" and burn 3 retries per query, then 6 HTML fallback
+    fetches. The source must probe once, log at most INFO, and return []."""
+    import logging
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
+                    body="([])", content_type="text/html", repeat=True,
+                )
+                m.get(
+                    re.compile(r"https://ai-jobs\.global/\?.*"),
+                    body="<html><body>no jobs</body></html>",
+                    content_type="text/html", repeat=True,
+                )
+                sc = _make_search_config(["ML engineer", "data scientist"])
+                source = AIJobsGlobalSource(session, search_config=sc)
+                with caplog.at_level(logging.DEBUG, logger="job360"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                total_requests = sum(len(v) for v in m.requests.values())
+                assert total_requests == 1, (
+                    f"Expected exactly 1 canary request, got {total_requests} "
+                    "(retries, query fan-out and HTML fallback must not run "
+                    "against the abandoned board)"
+                )
+                noisy = [
+                    r for r in caplog.records
+                    if r.name.startswith("job360") and r.levelno >= logging.WARNING
+                ]
+                assert noisy == [], f"Expected no WARNING+ logs, got: {noisy}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_aijobs_global_revival_parses_jsonp_wrapped_suggest():
+    """If the board ever revives (suggest returns a non-empty JSONP array),
+    the canary must strip the parens, parse the items, and resume."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
+                    body='([{"label": "ML Engineer", "url": "https://ai-jobs.global/jobs/123", '
+                         '"company": "GlobalCo", "location": "London, UK"}])',
+                    content_type="text/html", repeat=True,
+                )
+                sc = _make_search_config(["ML engineer"])
+                source = AIJobsGlobalSource(session, search_config=sc)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].source == "aijobs_global"
+                assert jobs[0].title == "ML Engineer"
+                assert jobs[0].company == "GlobalCo"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# ---- JobSpy glassdoor disabled (2026-06: Glassdoor blocks the location lookup) ----
+
+def test_jobspy_default_sites_exclude_glassdoor():
+    """Glassdoor querying is disabled by default: Glassdoor fronts the
+    findPopularLocationAjax.htm lookup with an anti-bot 403 ("Security |
+    Glassdoor") for every term, so jobspy logged "Glassdoor: location not
+    parsed" at ERROR on every query (6 lines per run) and returned zero
+    glassdoor jobs. Probed 2026-06-11 — the block is term-independent, so
+    no location format fixes it. scrape_jobs must be called with
+    site_name=["indeed"] only; explicit sites=... overrides remain
+    possible for a future re-enable."""
+    import sys
+    from unittest.mock import MagicMock, patch
+    import pandas as pd
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            mock_module = MagicMock()
+            mock_module.scrape_jobs = MagicMock(return_value=pd.DataFrame())
+            with patch.dict(sys.modules, {"jobspy": mock_module}):
+                source = JobSpySource(session, search_config=_sc_ai_defaults())
+                await source.fetch_jobs()
+                assert mock_module.scrape_jobs.call_count > 0
+                for call in mock_module.scrape_jobs.call_args_list:
+                    site_name = call.kwargs.get("site_name")
+                    assert site_name == ["indeed"], (
+                        f"scrape_jobs called with site_name={site_name!r}; "
+                        "glassdoor must not be queried by default"
+                    )
+        finally:
+            await session.close()
+    _run(_test())
