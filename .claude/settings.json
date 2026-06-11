@@ -2,6 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "deny": [
+      "Bash(git push:*)",
+      "Bash(git push)",
       "mcp__plugin_github_github__*",
       "mcp__claude_ai_Apollo_io__*",
       "mcp__claude_ai_Vibe_Prospecting__*",
@@ -13,6 +15,20 @@
       "mcp__claude_ai_Google_Drive__*",
       "mcp__claude_ai_Slack__*",
       "mcp__claude_ai_Supabase__*"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/commit-gate.sh",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
