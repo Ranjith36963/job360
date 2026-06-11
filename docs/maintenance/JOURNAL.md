@@ -23,3 +23,9 @@
 - Canonical baseline ON THE DIRTY TREE (incl. foreign WIP): 1281 passed / 3 skipped — foreign WIP is self-consistent. Post-fix gate: targeted test_sources.py only (change isolated to one source's params; count untouched so the 5-surface rule doesn't trigger).
 - Gotcha for future iterations: `python -m src.cli run --source X --dry-run` EXITS(2) without `data/user_profile.json` (CLI loads the file profile, not the web user_profiles row). For a one-source live proof, call the source class directly with an aiohttp session instead.
 - Foreign WIP still uncommitted (same 3 files + backend/None). Next top TODO: item #2 jobtensor 400 (backend scraper, different files — workable the same way).
+
+## 2026-06-11 ~04:55 — iteration 3 (cron fire)
+
+- Item #2 DONE (b7b2c60): jobtensor diagnosed by live probes — upstream pivoted to a JS-rendered German app; /ajax/search/ 400s for ANY params, UK page is a 7.9KB shell (no var context, no /uk/ links). Decision: quarantine (drop dead AJAX call, keep HTML canary, STATUS.md fragile row) rather than 5-surface removal mid-loop. test_sources.py 84/84; live run: one request, one INFO, 0 jobs, zero warnings.
+- New backlog item 16b: full 5-surface jobtensor removal as a deliberate rotation batch.
+- Foreign WIP unchanged. Next top TODO: item #3 comeet dead slugs (riskified, lightricks).
