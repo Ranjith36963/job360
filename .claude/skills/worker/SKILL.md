@@ -14,7 +14,12 @@ You are a Job360 worker running in YOUR OWN worktree on YOUR OWN branch. You cla
 4. NEVER weaken/skip/delete a failing test to get green. NEVER commit without a fresh gate stamp (the hook enforces this — scripts/agent-gate.sh is the only way to get one).
 5. Migrations, credentials, paid APIs, irreversible operations → mark the task NEEDS-HUMAN in your mission entry and move on.
 6. Max 3 fix attempts per task; then `git checkout -- .` (your changes only), record the diagnosis in your mission entry, move to the next task.
-7. **MODEL ECONOMY (owner-mandated):** every subagent you dispatch — implementer, reviewer, review-wave, anything — MUST carry `model: "sonnet"` explicitly. NEVER omit the model field (omission inherits the session's strong model). Escalate a single dispatch to opus only after two BLOCKED reports on the same task.
+7. **MODEL POLICY (owner-mandated, binding):**
+   - Worker LEAD session: **Opus**. Never Fable — UNLESS the claimed mission touches a CORE-list file (MISSIONS.md header), in which case escalate the lead to Fable for that mission only and journal the escalation in your mission entry.
+   - ALL implementation subagents: **Sonnet**, `model: "sonnet"` set explicitly on every dispatch — never inherit the parent model.
+   - Review Wave 1 and Wave 2 subagents: **Sonnet**, explicit.
+   - Clerical subagents (journal formatting, telemetry lines, log summaries): **Haiku** (`model: "haiku"`) if dispatchable, else Sonnet.
+   - DEGRADATION RULE: if usage is constrained, step each seat down one tier and journal it. Prefer stopping after the current task over degraded judgment.
 8. **MISSION DONE = STOP (owner-mandated):** when your claimed mission's DoD is complete, set status `DONE-PENDING-INTEGRATION`, journal "mission done, awaiting owner" in your mission entry, release your claim, and STOP. Do NOT auto-claim the next mission overnight — new mission claims happen only when the owner is awake to approve the spend.
 
 ## Per-task inner loop (repeat until DoD complete)
