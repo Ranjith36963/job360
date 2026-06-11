@@ -247,6 +247,35 @@ def test_jobicy_parses_response():
     _run(_test())
 
 
+def test_jobicy_request_omits_short_tag_param():
+    """Jobicy's API 400s on 'tag' values under 3 chars; we must not send one.
+    Regression for the live HTTP 400 ('tag=ai') seen 2026-06-10."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://jobicy\.com/api/v2/remote-jobs.*"), payload={"jobs": []})
+                source = JobicySource(session)
+                await source.fetch_jobs()
+                # aioresponses records calls keyed by (method, URL); params are in kwargs
+                calls_list = list(m.requests.values())
+                assert len(calls_list) == 1, "Expected exactly one GET to Jobicy"
+                request_call = calls_list[0][0]
+                params_sent = request_call.kwargs.get("params") or {}
+                # Jobicy 400s on any tag shorter than 3 chars — must not send 'tag=ai'
+                assert "tag" not in params_sent, (
+                    f"'tag' key must not be in Jobicy request params; got {params_sent}"
+                )
+                # Fallback: if params were encoded into the URL key instead
+                url_key = str(list(m.requests.keys())[0])
+                assert "tag=" not in url_key, (
+                    f"'tag=' must not appear in the request URL; got {url_key}"
+                )
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_himalayas_parses_response():
     async def _test():
         session = aiohttp.ClientSession()

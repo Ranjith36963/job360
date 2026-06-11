@@ -1,8 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-import aiohttp
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -15,11 +13,12 @@ class JobicySource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        # No "tag" param: Jobicy 400s on values shorter than 3 chars (e.g. "ai").
+        # The industry filter is enough; relevance is filtered by the scorer downstream.
         params = {
             "count": "50",
             "geo": "uk",
             "industry": "data-science",
-            "tag": "ai",
         }
         data = await self._get_json(
             "https://jobicy.com/api/v2/remote-jobs", params=params
