@@ -29,3 +29,12 @@
 - Item #2 DONE (b7b2c60): jobtensor diagnosed by live probes — upstream pivoted to a JS-rendered German app; /ajax/search/ 400s for ANY params, UK page is a 7.9KB shell (no var context, no /uk/ links). Decision: quarantine (drop dead AJAX call, keep HTML canary, STATUS.md fragile row) rather than 5-surface removal mid-loop. test_sources.py 84/84; live run: one request, one INFO, 0 jobs, zero warnings.
 - New backlog item 16b: full 5-surface jobtensor removal as a deliberate rotation batch.
 - Foreign WIP unchanged. Next top TODO: item #3 comeet dead slugs (riskified, lightricks).
+
+## 2026-06-11 (cron fire, post-hardening) — round BLOCKED, by design
+
+- Outcome: BLOCKED — (a) rule 5: tree dirty with the 3-file human WIP (backend/src/main.py, services/channels/dispatcher.py, tests/test_channels_dispatcher.py — decision on the owner's desk); (b) the owner ordered a STOP after the hardening proof, pending Phase-3 approval (install team skills, retire /maintain, repoint this cron to /integrator).
+- No item taken, no code touched, no commit. Lock not held.
+- State for the next round: hardening is LIVE and proven (commit e5ca963) — gate-stamped commits enforced by PreToolUse hook, git push permission-denied. Any future round's commit requires `bash scripts/agent-gate.sh` first, staged-then-gated, no edits after.
+- This entry is intentionally left uncommitted (docs/maintenance/** is exempt loop memory; the integrator's first round will sweep it).
+- Later cron fire, same session: state unchanged (WIP still uncommitted, Phase-3 approval still pending) → BLOCKED again, no action. The loop stays correctly parked until the owner moves.
+- After 6 consecutive identical BLOCKED fires, the orchestrator DELETED cron c96d6940 (owner's standing token-thrift rule; the loop was hard-deadlocked on owner decisions, so fires were pure cost). To resume: resolve the 3-file WIP, approve Phase 3, and re-arm — the new cron should point at /integrator per the installed plan (agentic-loop/README-SETUP.md step 4).
