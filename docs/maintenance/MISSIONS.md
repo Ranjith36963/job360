@@ -58,11 +58,11 @@ DoD:
 - [~] per-category timeout implemented (89fa0e0: SOURCE_FETCH_TIMEOUT_ATS=240 + resolve_fetch_timeout); live run 1/2 CLEAN (run c7345ff349d8: greenhouse 1331, lever 175, workday 101, ashby 403, errors {}). Needs run 2/2 next heartbeat to tick.
 - [x] full suite green (1285/3) + live verify (run c7345ff349d8, zero errors)
 
-## M6 — Source rotation 50→49 + jobtensor removal  [SERIALIZED — integrator only, after human approval]
-Backlog 16b. status: NEEDS-HUMAN (approve rotation first)
+## M6 — Source rotation 50→49 + jobtensor removal  [SERIALIZED — integrator only]
+Backlog 16b. status: OPEN (owner GO 2026-06-11). Five surfaces per rules #8/#13 (SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli, test_api) + doc count refs (CLAUDE.md/STATUS/ARCHITECTURE). Proof bar: jobtensor upstream-dead evidence already journaled (iteration 3) — re-cite in the removal commit.
 
-## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only, after human approval]
-Backlog #14, report problem #7. status: NEEDS-HUMAN (architecture choice)
+## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only]
+Backlog #14, report problem #7. status: OPEN (owner APPROVED 2026-06-11, conditions binding): BEFORE implementing, compare openapi-typescript vs alternatives against FastAPI-schema → Next.js 16/TS on (a) zero runtime deps, (b) build-step fit, (c) maintenance burden; journal the choice + 3-line rationale. Then implement under CORE rules: integrator-serialized, adversarial review, full suite + live verify.
 
 ## M8 — End-to-end pipeline offline coverage  [worker-parallel, claim after M1 ships]
 Report problem #10. files-owned: backend/tests/test_main.py, tests/fixtures

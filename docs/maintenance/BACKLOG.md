@@ -18,6 +18,10 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 6. **TODO — JobSpy/Glassdoor 400 "location not parsed"** on every run. Either fix the location format passed to JobSpy for glassdoor or stop querying glassdoor (keep indeed) so each run stops logging 6 ERROR lines.
 7. **TODO — enrichment accuracy: L1 merge prefers a weak rules seniority over LLM "unknown"** (measured: costs L1 10 points, 80%→90% if fixed). Fix `merge_rules_llm` in `backend/scripts/compare_enrichment_levels.py` to prefer "unknown"-tolerant merge (LLM unknown → keep rules ONLY if rules confidence is word-boundary-exact; else unknown), re-run the scorer, journal the new numbers. If the merged logic ships anywhere in `src/`, port the same fix there.
 
+## P2 — engine correctness
+
+7b. **TODO — vector index lives at the WRONG path (near-data-loss found at integrator round 1).** `src/services/vector_index.py:19` computes `Path(__file__).parents[3]/data/chroma` = the REPO ROOT — but its own docstring, CLAUDE.md, and CODEBASE_REPORT all say `backend/data/chroma/`. Root `data/chroma` holds the ONLY live index (92 embeddings); `backend/data/chroma` is empty; a hygiene prune nearly deleted the live one. Fix: change to `parents[2]` (backend/data/chroma), MOVE the existing index dir while the backend is stopped, restart, live-verify hybrid mode still reorders (non-fallback log line), and ensure root `data/` stays deleted. One integrator round. `skipped: 0`
+
 ## P2 — matcher (funnel→judge) follow-ons
 
 8. **TODO — re-judge policy:** verdicts are judge-once (skip_existing). Decide + implement a cheap re-judge trigger when the user's profile version changes (profile upload bumps `user_profile_versions`): clear that user's `llm_matched_at` (set NULL) so the next search re-judges. Tests for the trigger.
