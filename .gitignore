@@ -47,3 +47,6 @@ frontend/playwright-report/
 .claude/settings.local.json
 User_info/
 backend/data/experiment/
+
+# Per-tree test-gate stamp (scripts/agent-gate.sh) - never committable
+.claude/gate-stamp

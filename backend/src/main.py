@@ -821,6 +821,7 @@ async def run_search(
                 per_source_errors=per_source_errors,
                 per_source_duration=per_source_duration,
                 total_duration=total_duration,
+                user_id=user_id,
             )
 
             # Step-5 — export metrics snapshots after every run (non-fatal).
