@@ -25,9 +25,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Callable, Iterable
+from collections.abc import Iterable
+from typing import Callable
 
-from src.core.settings import SOURCE_FETCH_TIMEOUT
+from src.core.settings import SOURCE_FETCH_TIMEOUT, SOURCE_FETCH_TIMEOUT_ATS
 from src.services.circuit_breaker import BreakerRegistry
 
 logger = logging.getLogger("job360.scheduler")
@@ -96,9 +97,26 @@ class TieredScheduler:
         self._clock = clock or time.monotonic
         self._last_run: dict[str, float] = {}
         # Per-source wall-clock ceiling (see settings.SOURCE_FETCH_TIMEOUT).
-        # None ⇒ use the configured default; <=0 disables the bound (kept for
-        # the few tests that want unbounded fetches).
-        self._fetch_timeout = SOURCE_FETCH_TIMEOUT if fetch_timeout is None else fetch_timeout
+        # None ⇒ per-category resolution via resolve_fetch_timeout(); an
+        # explicit value (used by tests) wins for ALL sources; <=0 disables
+        # the bound entirely (kept for tests that want unbounded fetches).
+        self._fetch_timeout_override = fetch_timeout
+
+    def resolve_fetch_timeout(self, source) -> float:
+        """Per-source fetch ceiling.
+
+        ATS slug-sweeps measured at 138s+ get their own budget
+        (SOURCE_FETCH_TIMEOUT_ATS, default 240s); everything else keeps the
+        generic ceiling (SOURCE_FETCH_TIMEOUT, default 60s).  An explicit
+        ``fetch_timeout`` passed to ``__init__`` overrides everything — this
+        is the test-isolation contract: tests pass a tiny value and it wins
+        for all sources regardless of category.
+        """
+        if self._fetch_timeout_override is not None:
+            return self._fetch_timeout_override
+        if getattr(source, "category", "") == "ats":
+            return SOURCE_FETCH_TIMEOUT_ATS
+        return SOURCE_FETCH_TIMEOUT
 
     def due_sources(self, now: float | None = None) -> list:
         now_val = now if now is not None else self._clock()
@@ -132,17 +150,18 @@ class TieredScheduler:
             return []
 
         async def _safe_fetch(src):
+            timeout = self.resolve_fetch_timeout(src)
             try:
-                if self._fetch_timeout and self._fetch_timeout > 0:
+                if timeout and timeout > 0:
                     # Bound each source so one hang can't freeze the gather.
                     # wait_for cancels the coroutine on timeout; for JobSpy's
                     # asyncio.to_thread the OS thread keeps running but is
                     # detached — the pipeline no longer waits on it.
-                    return await asyncio.wait_for(src.fetch_jobs(), timeout=self._fetch_timeout)
+                    return await asyncio.wait_for(src.fetch_jobs(), timeout=timeout)
                 return await src.fetch_jobs()
             except asyncio.TimeoutError as e:
                 logger.warning("[%s] fetch timed out after %ss — treating as failure",
-                               src.name, self._fetch_timeout)
+                               src.name, timeout)
                 return e
             except BaseException as e:  # noqa: BLE001 — we want circuit trips on any failure
                 logger.warning("[%s] fetch raised %s", src.name, type(e).__name__)

@@ -162,3 +162,9 @@ USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
 # Generous enough for legit multi-request sources (REQUEST_TIMEOUT is per
 # request); since sources run concurrently, total search ~= this value.
 SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))
+
+# ATS boards sweep hundreds of company slugs with per-request rate-limit
+# delays; measured unbounded: greenhouse 138.2s for 1,331 jobs (2026-06-11).
+# The generic 60s cap was cancelling those sweeps mid-flight and silently
+# discarding their results, so the "ats" category gets its own ceiling.
+SOURCE_FETCH_TIMEOUT_ATS = int(os.getenv("SOURCE_FETCH_TIMEOUT_ATS", "240"))

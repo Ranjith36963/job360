@@ -51,7 +51,7 @@ DoD:
 - [ ] no claims in docs contradict CODEBASE_REPORT.md findings
 
 ## M5 — ATS sweeps survive the timeout  [SERIALIZED — integrator only]
-claimed-by: -   status: OPEN
+claimed-by: integrator (main checkout, round 1)   status: CLAIMED
 Report problem #4. files-owned: core/settings.py, services/scheduler.py, sources/ats/**
 DoD:
 - [ ] confirmed root cause (instrument one greenhouse/workday sweep)

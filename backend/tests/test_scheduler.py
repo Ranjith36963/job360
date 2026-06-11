@@ -12,12 +12,13 @@ import asyncio
 
 import pytest
 
+from src.core.settings import SOURCE_FETCH_TIMEOUT, SOURCE_FETCH_TIMEOUT_ATS
+from src.services.circuit_breaker import BreakerRegistry
 from src.services.scheduler import (
+    TIER_INTERVALS_SECONDS,
     TieredScheduler,
     resolve_tier_seconds,
-    TIER_INTERVALS_SECONDS,
 )
-from src.services.circuit_breaker import BreakerRegistry
 
 
 class _FakeSource:
@@ -201,3 +202,32 @@ def test_slow_source_times_out_without_blocking_batch():
     assert isinstance(by_name["hang"], asyncio.TimeoutError), by_name["hang"]
     assert by_name["fast"] == fast._payload  # fast source result preserved
     assert len(by_name["fast"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Per-category fetch timeout resolution
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_fetch_timeout_per_category():
+    """ATS slug-sweeps get the bigger budget; others keep the default;
+    an explicit fetch_timeout (tests) overrides everything."""
+    ats_source = _FakeSource("greenhouse", "ats")
+    json_source = _FakeSource("arbeitnow", "free_json")
+
+    # No explicit fetch_timeout → per-category resolution
+    sched = TieredScheduler(
+        [ats_source, json_source],
+        breaker_registry=BreakerRegistry(),
+    )
+    assert sched.resolve_fetch_timeout(ats_source) == SOURCE_FETCH_TIMEOUT_ATS
+    assert sched.resolve_fetch_timeout(json_source) == SOURCE_FETCH_TIMEOUT
+
+    # Explicit fetch_timeout wins for ALL categories (test-isolation contract)
+    sched2 = TieredScheduler(
+        [ats_source, json_source],
+        breaker_registry=BreakerRegistry(),
+        fetch_timeout=0.05,
+    )
+    assert sched2.resolve_fetch_timeout(ats_source) == 0.05
+    assert sched2.resolve_fetch_timeout(json_source) == 0.05
