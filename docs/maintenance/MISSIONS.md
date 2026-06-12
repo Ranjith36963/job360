@@ -50,14 +50,15 @@ DoD:
 - [ ] vitest, type-check, lint all green in the worktree
 
 ## M4 — Docs and hygiene match reality  [worker-parallel, no code]
-claimed-by: worker-a (session 2026-06-11 19:18 UTC, claimed ~20:00 UTC after M1)   status: CLAIMED
+claimed-by: -   status: DONE (worker cb350db; integrated 83864b2 with 5 wave-survivor fixes incl. slug truth 264 — see JOURNAL round 3)
+closing-note (worker-a, 2026-06-11): commit cb350db on agent/m4-docs. All four DoD lines proven: (1) test counts 1154→1285/1288, migration count 15→18, env table adds MATCHER_*/SOURCE_FETCH_TIMEOUT_ATS, matcher batch phase summary added to CLAUDE.md; (2) four-engine table in STATUS.md, matcher batch entry in IMPLEMENTATION_LOG.md, engine-stack section + user_feed llm_* columns in ARCHITECTURE.md, matching-engines section + accurate source subgraphs in README.md; (3) no stray images found, test-artifacts/README.md index added; (4) source counts, dir layout, db schema all corrected against CODEBASE_REPORT — no remaining contradictions.
 Backlog: #15, #16, #17 (NOT 16b — serialized)
 files-owned: CLAUDE.md, backend/CLAUDE.md, STATUS.md, IMPLEMENTATION_LOG.md, README.md, ARCHITECTURE.md, docs/**, test-artifacts/
 DoD:
-- [ ] test counts, env-var tables, and phase history updated to audited reality (1287 collected / 1284 passing baseline)
-- [ ] matcher batch + four-engine architecture documented in STATUS, IMPLEMENTATION_LOG, ARCHITECTURE, README
-- [ ] stray screenshots/experiment outputs removed or moved under test-artifacts/ with an index
-- [ ] no claims in docs contradict CODEBASE_REPORT.md findings
+- [x] test counts, env-var tables, and phase history updated to audited reality (cb350db: 1154→1285/1288 collected, migration count 15→18, MATCHER_*/SOURCE_FETCH_TIMEOUT_ATS env vars added, state-of-play current)
+- [x] matcher batch + four-engine architecture documented: STATUS.md engine table, IMPLEMENTATION_LOG.md batch entry, ARCHITECTURE.md engine-stack + migration 0017 columns, README.md matching-engines section (cb350db)
+- [x] stray screenshots/experiment outputs: no stray images found; test-artifacts/README.md index created; .gitignore already covers *.png patterns (cb350db)
+- [x] no claims contradict CODEBASE_REPORT.md: source counts, dir layout, API-key count, db schema, engine flags all corrected (cb350db)
 
 ## M5 — ATS sweeps survive the timeout  [SERIALIZED — integrator only]
 claimed-by: integrator   status: DONE (run 2/2 b0250268211a @21:10Z: greenhouse 1335, lever 175, workday 99, ashby 403, errors {} — two consecutive clean runs)

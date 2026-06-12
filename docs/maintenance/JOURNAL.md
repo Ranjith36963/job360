@@ -77,6 +77,17 @@ M5 DoD: root-cause line DONE; fix line: live run 1/2 clean — needs ONE more co
 
 Next round (cron, /integrator): M5 live run 2/2 → tick DoD; then integration sweep for worker-a's M1 commits if any; else next serialized/backlog item.
 
+## 2026-06-12 ~02:55 UTC — INTEGRATOR ROUND 3 (heartbeat; first full adversarial-wave run)
+
+Outcome: **M4 INTEGRATED (83864b2)** — docs synced to reality, 5 review findings fixed at merge.
+
+- Heartbeat at ~23:11 found the lock held (40m, second /integrator invocation elsewhere) → exited per law. That round died WITHOUT releasing the lock or committing anything (stale 22:01 stamp, no commits) — likely the model-availability outage; lock replaced at 02:40 under the 3h staleness rule. Lesson holds: the advisory lock self-heals.
+- Integration sweep: worker-a's M4 (cb350db, 7 doc files, +276/−177) merged --no-ff --no-commit to staging.
+- **Adversarial waves (Upgrade 1, first real run): raw 11 → survived 5 → fixed 5.** Survivors, all confirmed with file:line by Wave 2: (1) STATUS.md still carried "hybrid not wired to HTTP routes" contradicting the same merge's README/ARCH (HIGH); (2) README bullet "8 RSS feeds" vs graph's 10; (3) slug-count: ground truth measured **264** — the old docs' 268 AND the merge's new 266 were both wrong; (4) STATUS.md:153 untouched 268; (5) ARCHITECTURE scheduler tree comment stale/incomplete. All five fixed at integration (mechanical), staged into the merge, gated, committed.
+- Wave 2 killed 6 false positives (numbered-rule-per-flag not a real convention; anchored "as of a4fe829" test counts are intentional snapshots; backend/CLAUDE.md count-embedding predates the merge). The find→refute pattern worked exactly as designed: half of Wave 1 was noise.
+- Gate: docs-only diff → stamp on the 1291-passing tree. No server restart needed (no code).
+- New fact: live slug ground truth = 264 (post comeet-pruning). Any doc claiming 266/268 is wrong.
+
 ## 2026-06-11 ~21:30 UTC — INTEGRATOR ROUND 2 (heartbeat + owner directives)
 
 Outcome: **M1 INTEGRATED + M5 DONE + token-economy enforced + upgrades applied.**

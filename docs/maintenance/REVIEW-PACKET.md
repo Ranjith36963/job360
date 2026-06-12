@@ -1,3 +1,9 @@
+# Staging review packet — 2026-06-12 (round 3)
+
+**New since round 2:** M4 docs-sync integrated (`83864b2`): all project docs (CLAUDE/STATUS/ARCHITECTURE/README/IMPLEMENTATION_LOG) now match audited reality — **risk: low** (docs only). First full adversarial-wave run: 11 raw findings → 5 survived → 5 fixed at merge (incl. an internal contradiction and the slug-count ground truth: **264**, not 268/266). Evidence: JOURNAL round 3.
+
+---
+
 # Staging review packet — 2026-06-11 (round 2)
 
 Since your last merge to main (origin/main 7194d0e — everything below is on `fix/per-user-search-and-scoring-gate` / `loop/staging`):
