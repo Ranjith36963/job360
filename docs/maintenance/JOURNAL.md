@@ -199,3 +199,10 @@ Sonnet executor un-skipped all 13 `_PRE_STEP_1_5_SCAFFOLDING_DEBT` tests in test
 - PROVEN OFFLINE: timed run 14 passed in 11.1s (a single live JobSpy call alone is 30s+). Canonical suite still 1277 green. No src/ changes, no real run_search bug masked.
 - FOLLOW-UP M8a: un-ignore test_main.py everywhere now that it's fast+offline, so the E2E tests are gated and can't rot.
 - New durable fact: test_main.py is now OFFLINE (JobSpy stubbed) — the old "hits live Indeed, ~32 min" warning in CLAUDE.md/STATUS is stale once M8a lands.
+
+## 2026-06-12 ~21:00 UTC — INTEGRATOR ROUND 13 (heartbeat) — MINIMAL (+ false-alarm correction)
+- Nothing to integrate (no worker commits; the "DONE-PENDING" count=1 is the header legend line, not a mission). No actionable non-Pillar-2 P1.
+- BRANCH CHECK: initially mis-read the local refs as a dangerous divergence (origin/main showed 2 merge-commits "ahead"). VERIFIED it's benign: `git log --no-merges HEAD..origin/main` = 0 (no content I'm missing); the 2 are pure PR merge-nodes of this same branch; and the local origin/main ref is STALE (last fetched 2026-06-08). My branch is strictly ahead in content (96 files). No halt, no rebase/merge needed. Lesson: check ref freshness + --no-merges before calling divergence.
+- Did NOT fetch (network; not needed — branch is source of truth, owner manages pushes/PRs). If the owner wants an accurate remote picture, a `git fetch` would refresh it.
+- Open work is all owner-gated or worker-frontend: M2 (Pillar-2 hands-off), 7b (vector-index move, needs owner OK), M3-rem/M7a/M8a (follow-ups), 8/9/10 (matcher; 9 needs a migration = NEEDS-HUMAN). No auto-pickup per throttle.
+- Minimal round. No code, no commit beyond this journal line. Lock released.
