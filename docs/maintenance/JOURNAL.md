@@ -171,3 +171,15 @@ No integration pending, no new worker commits. The "actionable P1" list was STAL
 - After cleanup the only open P1 is 7b (vector_index.py path bug). NOT auto-taken: (a) it's Pillar-2 semantic-search code → owner's hands-off rule; (b) the fix MOVES the only live copy of 92 embeddings — the exact data op that nearly caused loss at round 1. Needs explicit owner OK before an integrator round attempts it. Flagged to owner.
 - #7 enrichment-merge is also Pillar-2 + M2 worker territory — not integrator work.
 - Net: board is now honest (4 stale P1s closed); no actionable non-Pillar-2 P1 remains for the loop. Future heartbeats → minimal until a worker ships or owner directs.
+
+## 2026-06-12 ~17:00 UTC — INTEGRATOR ROUND 11 (owner-directed) — M7 DONE
+Owner approved openapi-typescript (types-only). Implemented under CORE rules (types.ts is CORE).
+- Integrator set up infra: installed openapi-typescript (devDep), wrote scripts/gen-api-types.sh (offline schema export via app.openapi() — no running server needed → CI-safe), npm gen:types + check:types-drift, and wired the drift check into agent-gate.sh (a backend API-model change OR frontend change that desyncs frontend/src/lib/api-types.ts now FAILS the gate).
+- Mapped 52 backend schemas vs 35 frontend types: 26 alias 1:1, 1 name-bridge (RecentRunsResponse→RunsListResponse), 7 genuinely frontend-only kept hand-written. Sonnet executor did the types.ts migration (net −249 lines) + got the frontend gate green.
+- ADVERSARIAL WAVES (CORE, 2 lenses R1+R3, Wave-2 verified directly): real findings, all resolved —
+  * 3 call-site drift fixes the swap surfaced: ActionRequest.notes is required (dashboard + JobDetailClient), NotificationLedgerEntry.sent_at/error_message nullable (notifications page). Real API/frontend disagreements the hand-mirror hid.
+  * skill_tiers LATENT CRASH (high): backend ProfileResponse.skill_tiers = dict[str,list[str]] defaulting to {}; profile page did skill_tiers.primary.length/.map unguarded — type-checked (index signature) but crashes at runtime for any user with no extracted tiers. M7's honest types exposed it. Fixed with (.. ?? []) defaults on all 3 tiers.
+  * REFUTED-as-fix / filed as M7a: api.ts hand-mirrors SourceHealthEntry/Response/Channel, but the frontend intentionally tightens backend `str` fields (health, channel_type) into literal unions — aliasing as-is would DOWNGRADE precision. Not pure drift; needs Omit-and-intersect or backend enums. Backlog M7a.
+- Gate: backend 1272 + drift check + frontend 65/type-check/lint, all green (commit 53e2020).
+- LIVE VERIFY: profile page renders (skill_tiers fix, no crash) + dashboard renders (JobResponse generated type + notes fix); only console error is the documented benign dark-mode hydration badge. Screenshots test-artifacts/m7-{profile,dashboard}-render.png.
+- New durable fact for CLAUDE.md candidates: frontend types are now GENERATED — never hand-edit frontend/src/lib/api-types.ts or types.ts aliases; after any backend API-model change run `npm run gen:types` (the gate enforces it). M7 DONE.

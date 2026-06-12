@@ -1,3 +1,9 @@
+# Staging review packet — 2026-06-12 (round 11)
+
+**New: M7 codegen (`53e2020`)** — frontend API types now GENERATED from FastAPI's schema (openapi-typescript); `types.ts` is a thin alias layer (−249 hand-written lines). Drift guard wired into the commit gate. **risk: med** (CORE file types.ts + touches several components, but full adversarial waves run + frontend gate + live render of profile/dashboard). **Notable: the waves surfaced + fixed a real latent crash** — the profile page would crash for any user with no skill tiers (`skill_tiers` defaults to `{}`); now guarded. One follow-up filed: **M7a** (api.ts still hand-mirrors 3 types with intentional tighter unions — aliasing would downgrade; needs care). CORE files touched: frontend/src/lib/types.ts (+ generated api-types.ts), scripts/agent-gate.sh. Evidence: JOURNAL round 11, test-artifacts/m7-*.png.
+
+---
+
 # Staging review packet — 2026-06-12 (round 8)
 
 **New: M6 source rotation 50→46 (`1e709f7`)** — removed 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global) across all 5 load-bearing surfaces + docs + 4 file deletions. **risk: low-med** (CORE files main.py/settings.py touched, but removals only; full adversarial waves run, 1 finding fixed; gate 1272 passed; live /api/sources=46 verified). Net −1,226 lines. Evidence: JOURNAL round 8. CORE files touched: backend/src/main.py, backend/src/core/settings.py.
