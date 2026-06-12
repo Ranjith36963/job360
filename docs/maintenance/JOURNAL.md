@@ -77,6 +77,16 @@ M5 DoD: root-cause line DONE; fix line: live run 1/2 clean — needs ONE more co
 
 Next round (cron, /integrator): M5 live run 2/2 → tick DoD; then integration sweep for worker-a's M1 commits if any; else next serialized/backlog item.
 
+## 2026-06-12 ~04:55 UTC — INTEGRATOR ROUND 4 (heartbeat; P1 backlog item)
+
+Outcome: **backlog 3a DONE (a7e6af1)** — workable mystery solved, 7 dead slugs pruned.
+
+- Nothing to integrate (no new worker commits; worker-a correctly stopped after M4). P1 item 3a existed → not a minimal round (throttle carve-out).
+- Diagnosis by live probes (all 25 slugs): the Workable API is healthy — huggingface 200 with 9 jobs; SEVEN account slugs return HTTP 404 (labelbox, adept, livinglens, legalandgeneral, vorboss, welcometothejungle, rateit) = accounts gone; the remainder are valid-but-empty boards or US-only listings the UK/remote filter correctly drops. Conclusion: 0 jobs was CORRECT behavior over a stale slug list, not a code bug.
+- Fix: pruned the 7 dead slugs (evidence comment in companies.py, comeet-pattern); kept empty-but-valid boards (can repopulate). Gate: 1291 passed/3 skipped in 100.8s. Live proof: `Workable: found 0 relevant jobs across 18 companies` — one clean line, no 404 churn.
+- Direct implementation by integrator (mechanical single-file list prune, "fix one-liners yourself" rule); no executor dispatch — cheaper than a Sonnet spec for a 12-line diff.
+- skipped: aging applied to passed-over P1 #7 (M2's files — worker mission, not started unattended per throttle).
+
 ## 2026-06-12 ~02:55 UTC — INTEGRATOR ROUND 3 (heartbeat; first full adversarial-wave run)
 
 Outcome: **M4 INTEGRATED (83864b2)** — docs synced to reality, 5 review findings fixed at merge.
