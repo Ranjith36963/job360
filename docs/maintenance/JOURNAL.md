@@ -183,3 +183,19 @@ Owner approved openapi-typescript (types-only). Implemented under CORE rules (ty
 - Gate: backend 1272 + drift check + frontend 65/type-check/lint, all green (commit 53e2020).
 - LIVE VERIFY: profile page renders (skill_tiers fix, no crash) + dashboard renders (JobResponse generated type + notes fix); only console error is the documented benign dark-mode hydration badge. Screenshots test-artifacts/m7-{profile,dashboard}-render.png.
 - New durable fact for CLAUDE.md candidates: frontend types are now GENERATED — never hand-edit frontend/src/lib/api-types.ts or types.ts aliases; after any backend API-model change run `npm run gen:types` (the gate enforces it). M7 DONE.
+
+## 2026-06-12 ~19:00 UTC — INTEGRATOR ROUND 12 (owner-directed) — M3 (slice) + M8 DONE
+Owner directed "do m3 and m8". Ran sequentially on the main checkout (disjoint files; parallel writes would collide).
+
+### M3 (slice) — commit 53e2020... see actual: committed separately as the M3 commit
+Installed zod@4 + react-hook-form@7 + @hookform/resolvers@5. Sonnet executor migrated the 4 auth forms with input fields (login/register/forgot-password/reset-password; verify-email has none) to RHF+zod, and added V-04 upload caps (10MB + PDF/DOCX) on both CV + LinkedIn routes with frontend pre-check + tests.
+- INTEGRATOR FIX (security): the executor read the whole file into memory before the size check — a memory-DoS hole on a security feature. Changed both endpoints to bounded `read(10MB+1)` so a malicious 1GB body can't be materialised before rejection. Upload tests still 12/12.
+- Gate green (backend 1277 + frontend 74/74 + drift). LIVE: login form blocks invalid input with a message (test-artifacts/m3-login-validation.png) — though it's the browser's NATIVE validation firing first (inputs kept required/type=email); zod is wired+vitest-tested but needs `noValidate` to be the visible layer. Filed M3-rem.
+- DEFERRED transparently (M3-rem backlog): 3 settings forms, kanban a11y (C-07), noValidate, stale "50 sources" footer.
+
+### M8 — DONE
+Sonnet executor un-skipped all 13 `_PRE_STEP_1_5_SCAFFOLDING_DEBT` tests in test_main.py and made them run OFFLINE. The documented blocker was JobSpySource's sync `requests` (live Indeed, ~32 min) — stubbed via autouse fixture patching JobSpySource.fetch_jobs→[]. Plus a profile-stub fixture (so jobs clear the score gate) and a circuit-breaker-registry reset (test isolation), and 10 missing URL mocks.
+- INTEGRATOR REVIEW verified the one judgment call: 2 tests wrap run_search in `patch(classify_user_domain→set())` to exercise the include-all-sources path (domain filtering legitimately narrows to 38 for a tech profile). Confirmed the patch wraps the run_search CALL (not just the assert) — legitimate, documented, NOT a weakened test.
+- PROVEN OFFLINE: timed run 14 passed in 11.1s (a single live JobSpy call alone is 30s+). Canonical suite still 1277 green. No src/ changes, no real run_search bug masked.
+- FOLLOW-UP M8a: un-ignore test_main.py everywhere now that it's fast+offline, so the E2E tests are gated and can't rot.
+- New durable fact: test_main.py is now OFFLINE (JobSpy stubbed) — the old "hits live Indeed, ~32 min" warning in CLAUDE.md/STATUS is stale once M8a lands.

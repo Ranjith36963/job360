@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from aioresponses import aioresponses
 
 from src.main import SOURCE_INSTANCE_COUNT, _build_sources, run_search
@@ -87,6 +88,20 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     m.get(re.compile(r"https://api\.workable\.com/.*"), payload={"results": []}, repeat=True)
     m.get(re.compile(r"https://www\.workday\.com/.*"), payload={"jobPostings": []}, repeat=True)
     m.get(re.compile(r"https://api\.lever\.co/v0/postings/.*"), payload=[], repeat=True)
+    # M8 rehab — additional sources whose URLs were absent from the catalog:
+    # nhs_jobs + nhs_jobs_xml use jobs.nhs.uk (not nhsbsa.nhs.uk), biospace
+    # uses biospace.com (RSS), climatebase uses climatebase.org/jobs (JSON/HTML),
+    # uni_jobs uses multiple RSS URLs, jobs_ac_uk has subject-area feed URLs.
+    m.get(re.compile(r"https://www\.jobs\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.biospace\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://climatebase\.org/.*"), body="<html></html>", repeat=True)
+    m.get(re.compile(r"http://.*\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://.*\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://.*\.lancs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://.*\.kent\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://.*\.royalholloway\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://.*\.surrey\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
+    m.get(re.compile(r"https://www\.uukjobs\.co\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     # Generic catch-alls. aioresponses dispatches the most-specific
     # match first, so the more granular patterns above always win.
     m.get(re.compile(r".*\.workable\.com/.*"), payload={"results": []}, repeat=True)
@@ -137,6 +152,78 @@ from src.services.profile.models import (  # noqa: E402
     UserProfile,
 )
 
+# ---------------------------------------------------------------------------
+# Autouse fixtures that make every test in this file OFFLINE and FAST
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker_registry():
+    """The default circuit-breaker registry is a module-level singleton.
+    Sources that fail in one test trip their breaker; a OPEN breaker in the
+    next test means the scheduler skips the source entirely — it's never
+    added to per_source, causing ``len(per_source) < SOURCE_INSTANCE_COUNT``.
+    Reset to a fresh registry before every test in this file.
+    """
+    import src.main as _main_mod
+    import src.services.circuit_breaker as _cb_mod
+
+    fresh = _cb_mod.BreakerRegistry()
+    original = _cb_mod._DEFAULT_REGISTRY
+    _cb_mod._DEFAULT_REGISTRY = fresh
+    # main.py imported default_registry as an alias — patch both
+    original_main_alias = getattr(_main_mod, "default_breaker_registry", None)
+    _main_mod.default_breaker_registry = lambda: fresh  # type: ignore[method-assign]
+    yield
+    _cb_mod._DEFAULT_REGISTRY = original
+    if original_main_alias is not None:
+        _main_mod.default_breaker_registry = original_main_alias
+
+
+@pytest.fixture(autouse=True)
+def _stub_jobspy():
+    """JobSpySource uses sync ``requests`` → un-mockable by aioresponses.
+    It hits live Indeed (~30 s/query × 8 queries). Stub fetch_jobs to []
+    so run_search() stays fully offline on every test in this file.
+    """
+
+    async def _empty(self) -> list:
+        return []
+
+    with patch("src.sources.other.indeed.JobSpySource.fetch_jobs", _empty):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_load_profile():
+    """run_search() returns early with {error: 'no_profile'} when
+    load_profile() yields None, so every test that calls run_search would
+    get 0 sources_queried and 0 jobs.  Inject a complete profile that
+    matches the MOCK_JOB_PAYLOAD (AI Engineer, Python, PyTorch, etc.) so
+    the scored job clears the MIN_MATCH_SCORE=30 gate.
+
+    Tests that need to control the profile themselves (e.g.
+    test_run_search_wires_user_preferences_and_enrichment_lookup) override
+    this via their own ``patch("src.main.load_profile", ...)`` context
+    manager — context-manager patches win over the autouse fixture because
+    they execute inside the test body and re-wrap the target.
+    """
+    from src.services.profile.models import CVData
+
+    _profile = UserProfile(
+        cv_data=CVData(
+            raw_text=(
+                "AI Engineer with expertise in Python, PyTorch, TensorFlow, "
+                "LangChain, RAG, LLM, Deep Learning. 5 years experience."
+            ),
+            skills=["Python", "PyTorch", "TensorFlow", "LangChain", "RAG", "LLM", "Deep Learning"],
+        ),
+        preferences=UserPreferences(target_job_titles=["AI Engineer", "ML Engineer", "Software Engineer"]),
+    )
+
+    with patch("src.main.load_profile", return_value=_profile):
+        yield
+
 # Step-1.5 reviewer follow-up: test_main.py has accumulated three layers
 # of fixture-debt that pre-date Step 1.5 but were exposed when the
 # reviewer ran the full sweep including this file:
@@ -175,7 +262,6 @@ _PRE_STEP_1_5_SCAFFOLDING_DEBT = _pytest.mark.skip(
 # ---- Existing tests ----
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_completes_without_keys():
     """With no API keys and mocked free sources, run_search should complete without error."""
 
@@ -190,7 +276,6 @@ def test_run_search_completes_without_keys():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_with_mock_jobs():
     """When sources return jobs, they should be scored, deduped, and stored."""
 
@@ -213,7 +298,6 @@ def test_run_search_with_mock_jobs():
 # ---- New integration tests ----
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_jobs_are_scored_with_recency():
     """Mock job posted today should have recency points included in score."""
 
@@ -233,7 +317,6 @@ def test_jobs_are_scored_with_recency():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_all_notification_channels_called():
     """When new jobs are found, all configured notification channels should be invoked."""
 
@@ -262,7 +345,6 @@ def test_all_notification_channels_called():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_scores_within_range():
     """Jobs returned from a run should have match_score between 0 and 100."""
 
@@ -282,23 +364,28 @@ def test_run_search_scores_within_range():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_stats_include_per_source():
-    """Stats dict must include per_source breakdown with source entries for all sources."""
+    """Stats dict must include per_source breakdown with source entries for all sources.
+
+    Domain filtering (_build_sources Batch 2.4) narrows the source list when a
+    profile has a classified domain.  Patch classify_user_domain to return an
+    empty set so _build_sources includes every source (the "no-profile" fallback
+    path) and the count assertion stays meaningful.
+    """
 
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
             with _patch_no_notifications():
-                stats = await run_search(db_path=":memory:")
-                assert "per_source" in stats
-                assert isinstance(stats["per_source"], dict)
-                assert len(stats["per_source"]) == SOURCE_INSTANCE_COUNT
+                with patch("src.main.classify_user_domain", return_value=set()):
+                    stats = await run_search(db_path=":memory:")
+                    assert "per_source" in stats
+                    assert isinstance(stats["per_source"], dict)
+                    assert len(stats["per_source"]) == SOURCE_INSTANCE_COUNT
 
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_second_run_finds_no_new_jobs():
     """Running twice with same jobs should find 0 new jobs on second run (DB dedup)."""
 
@@ -332,7 +419,6 @@ def test_second_run_finds_no_new_jobs():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_no_notify_skips_channels():
     """With no_notify=True, notification channels should not be called."""
 
@@ -360,7 +446,6 @@ def test_run_search_no_notify_skips_channels():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_auto_purge():
     """run_search should auto-purge jobs older than 30 days."""
 
@@ -446,26 +531,31 @@ def test_source_instance_count_matches_build_sources():
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_failed_source_tracked_as_none():
-    """A source that raises an exception should appear in per_source with count 0."""
+    """A source that raises an exception should appear in per_source with count 0.
+
+    Domain filtering (_build_sources Batch 2.4) narrows the source list when a
+    profile has a classified domain.  Patch classify_user_domain to return an
+    empty set so _build_sources includes every source (the "no-profile" fallback
+    path) and the count assertion stays meaningful.
+    """
 
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m)
             with _patch_no_notifications():
-                stats = await run_search(db_path=":memory:")
-                # All sources should be present in per_source
-                assert len(stats["per_source"]) == SOURCE_INSTANCE_COUNT
-                # Values should be non-negative integers
-                for _name, count in stats["per_source"].items():
-                    assert isinstance(count, int)
-                    assert count >= 0
+                with patch("src.main.classify_user_domain", return_value=set()):
+                    stats = await run_search(db_path=":memory:")
+                    # All sources should be present in per_source
+                    assert len(stats["per_source"]) == SOURCE_INSTANCE_COUNT
+                    # Values should be non-negative integers
+                    for _name, count in stats["per_source"].items():
+                        assert isinstance(count, int)
+                        assert count >= 0
 
     _run(_test())
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_dry_run_skips_db_writes():
     """Dry run should return stats without writing to DB."""
 
@@ -483,7 +573,6 @@ def test_dry_run_skips_db_writes():
 # Step-1 B5 — multi-dim wiring at the CLI JobScorer call site.
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_wires_user_preferences_and_enrichment_lookup():
     """When a profile + at least one job_enrichment row exist AND
     ENRICHMENT_ENABLED is true, run_search MUST construct JobScorer with
@@ -548,7 +637,6 @@ def test_run_search_wires_user_preferences_and_enrichment_lookup():
     assert captured["enrichment_lookup"](no_id_job) is None
 
 
-@_PRE_STEP_1_5_SCAFFOLDING_DEBT
 def test_run_search_inert_when_enrichment_disabled():
     """ENRICHMENT_ENABLED=false ⇒ enrichment_lookup is built from {} so the
     callable returns None for every job. This preserves the legacy

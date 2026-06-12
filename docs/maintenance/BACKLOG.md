@@ -18,6 +18,11 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 6. **DONE (fc55fb8, M1) — JobSpy/Glassdoor 400** resolved by disabling glassdoor querying (JobSpySource default sites = ["indeed"]); the anti-bot 403 was term-independent. Live-confirmed: no glassdoor error lines in run b0250268211a. Re-enable path documented in indeed.py.
 7. **TODO `skipped: 1` — enrichment accuracy: L1 merge prefers a weak rules seniority over LLM "unknown"** (measured: costs L1 10 points, 80%→90% if fixed). Fix `merge_rules_llm` in `backend/scripts/compare_enrichment_levels.py` to prefer "unknown"-tolerant merge (LLM unknown → keep rules ONLY if rules confidence is word-boundary-exact; else unknown), re-run the scorer, journal the new numbers. If the merged logic ships anywhere in `src/`, port the same fix there.
 
+## P3 — M3 / M8 follow-ons
+
+M3-rem. **TODO — M3 remaining: settings forms (account/channels/notifications) RHF+zod, kanban a11y (C-07), and add `noValidate` to the 4 migrated auth forms** so zod's custom messages show instead of the browser's native validation (currently native pre-empts zod in the browser; zod is wired + vitest-tested but not user-visible). Also: footer hardcodes "50 sources" — now 46 after M6. `skipped: 0`
+M8a. **TODO — un-ignore test_main.py** now that it's offline+fast (11s): drop `--ignore=tests/test_main.py` from the Makefile, agent-gate.sh, CLAUDE.md canonical-run docs, and pyproject if set — so the rehabbed E2E tests are gated and can't silently rot again. Verify the full `pytest tests/` stays green. `skipped: 0`
+
 ## P3 — frontend type hygiene (M7 follow-ons)
 
 M7a. **TODO — `lib/api.ts` still hand-mirrors 3 API types** (SourceHealthEntry, SourceHealthResponse, Channel). NOT pure drift: the frontend intentionally tightens backend `str` fields into literal unions (`health: "ok"|"warning"|"critical"`, `channel_type: "email"|"slack"|...`) that the backend schema declares as plain `string` — aliasing as-is would DOWNGRADE precision. Correct fix: either (a) `Omit<Schemas["SourceHealthResponse"], "..."> & {tightened fields}` to kill drift on the mirror fields while keeping the unions, OR (b) tighten the BACKEND to enums (channel_type, health) so the generated types are precise, then plain-alias. Found by M7 adversarial waves; judged out-of-M7-scope (api.ts, not types.ts). `skipped: 0`

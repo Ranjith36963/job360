@@ -74,11 +74,12 @@ Backlog 16b. status: DONE (1e709f7, round 8). 5 surfaces + SOURCE_INSTANCE_COUNT
 ## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only]
 Backlog #14, report problem #7. status: DONE (53e2020, owner-approved openapi-typescript). types.ts → thin alias layer over generated api-types.ts (net −249 lines); offline gen script + npm scripts + drift guard wired into agent-gate (backend API change OR frontend change that desyncs types now FAILS the commit). Adversarial waves caught + resolved: 3 call-site drift fixes, a real skill_tiers latent crash (dict defaults to {}, profile page accessed .primary unguarded), 1 follow-up filed (M7a — api.ts hand-mirrors 3 types with intentional tighter unions). Gate: backend 1272 + drift + frontend 65/type-check/lint green. Live-verified: profile + dashboard render with generated types, only the benign dark-mode hydration badge (test-artifacts/m7-{profile,dashboard}-render.png).
 
-## M8 — End-to-end pipeline offline coverage  [worker-parallel, claim after M1 ships]
-Report problem #10. files-owned: backend/tests/test_main.py, tests/fixtures
+## M8 — End-to-end pipeline offline coverage  [SERIALIZED — integrator did it]
+Report problem #10. files-owned: backend/tests/test_main.py
 DoD:
-- [ ] the 13 skip-marked scaffolding tests replaced with mocked offline E2E tests of run_search()
-- [ ] no live network calls in the canonical suite; suite green
+- [x] 13 skip-marked scaffolding tests un-skipped + rehabbed offline (JobSpy stub + profile stub + breaker-registry reset fixtures; missing URL mocks added). All 14 pass in 11s (was ~32 min live). Assertion fix on 2 tests bypasses domain filtering via classify_user_domain→set() to exercise the include-all-sources path (documented, not weakened).
+- [x] no live network: timed run 11.1s (a single live JobSpy call alone is 30s+). Canonical suite still 1277 green, no regressions.
+status: DONE (round 12). FOLLOW-UP M8a: test_main.py is now offline+fast but still --ignore'd everywhere (Makefile/CLAUDE.md/agent-gate/pyproject) — un-ignore it so the E2E tests are gated and can't rot. Small cross-cutting change, deliberate follow-up.
 
 ---
 
