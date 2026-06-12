@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,42 +31,68 @@ import {
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
+// Zod schemas
+// ---------------------------------------------------------------------------
+
+const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string().min(1, "Please confirm your new password"),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+const changeEmailSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newEmail: z.string().email("Enter a valid email address"),
+});
+
+type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
+type ChangeEmailValues = z.infer<typeof changeEmailSchema>;
+type DeleteConfirmValues = { confirmText: string };
+
+// ---------------------------------------------------------------------------
+// Shared field error helper
+// ---------------------------------------------------------------------------
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="text-xs text-red-400 mt-1" role="alert">
+      {message}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Change Password
 // ---------------------------------------------------------------------------
 
 function ChangePasswordCard() {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<ChangePasswordValues>({
+    resolver: zodResolver(changePasswordSchema),
+  });
+
+  async function onSubmit(data: ChangePasswordValues) {
+    setServerError(null);
     setSuccess(null);
-
-    if (newPassword.length < 8) {
-      setError("New password must be at least 8 characters.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError("New passwords do not match.");
-      return;
-    }
-
-    setLoading(true);
     try {
-      await changePassword(currentPassword, newPassword);
+      await changePassword(data.currentPassword, data.newPassword);
       setSuccess("Password updated successfully.");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to change password.");
-    } finally {
-      setLoading(false);
+      setServerError(err instanceof Error ? err.message : "Failed to change password.");
     }
   }
 
@@ -76,44 +105,44 @@ function ChangePasswordCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          <div className="space-y-1">
             <Label htmlFor="cp-current">Current password</Label>
             <Input
               id="cp-current"
               type="password"
-              required
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
               autoComplete="current-password"
+              aria-invalid={!!errors.currentPassword}
+              {...register("currentPassword")}
             />
+            <FieldError message={errors.currentPassword?.message} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1">
             <Label htmlFor="cp-new">New password</Label>
             <Input
               id="cp-new"
               type="password"
-              required
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
+              aria-invalid={!!errors.newPassword}
+              {...register("newPassword")}
             />
+            <FieldError message={errors.newPassword?.message} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1">
             <Label htmlFor="cp-confirm">Confirm new password</Label>
             <Input
               id="cp-confirm"
               type="password"
-              required
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
+              aria-invalid={!!errors.confirmPassword}
+              {...register("confirmPassword")}
             />
+            <FieldError message={errors.confirmPassword?.message} />
           </div>
-          {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
+          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
           {success && <p className="text-sm text-emerald-400" role="status">{success}</p>}
-          <Button type="submit" disabled={loading}>
-            {loading ? "Updating..." : "Update password"}
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Updating..." : "Update password"}
           </Button>
         </form>
       </CardContent>
@@ -127,26 +156,24 @@ function ChangePasswordCard() {
 
 function ChangeEmailCard() {
   const router = useRouter();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setLoading(true);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ChangeEmailValues>({
+    resolver: zodResolver(changeEmailSchema),
+  });
+
+  async function onSubmit(data: ChangeEmailValues) {
+    setServerError(null);
     try {
-      await changeEmail(currentPassword, newEmail);
-      setSuccess("Email updated. Logging you out…");
-      // Session is cleared server-side after email change; redirect to login.
+      await changeEmail(data.currentPassword, data.newEmail);
       await logout();
       router.push("/login");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to change email.");
-      setLoading(false);
+      setServerError(err instanceof Error ? err.message : "Failed to change email.");
     }
   }
 
@@ -160,33 +187,32 @@ function ChangeEmailCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          <div className="space-y-1">
             <Label htmlFor="ce-current">Current password</Label>
             <Input
               id="ce-current"
               type="password"
-              required
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
               autoComplete="current-password"
+              aria-invalid={!!errors.currentPassword}
+              {...register("currentPassword")}
             />
+            <FieldError message={errors.currentPassword?.message} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1">
             <Label htmlFor="ce-email">New email address</Label>
             <Input
               id="ce-email"
               type="email"
-              required
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
               autoComplete="email"
+              aria-invalid={!!errors.newEmail}
+              {...register("newEmail")}
             />
+            <FieldError message={errors.newEmail?.message} />
           </div>
-          {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
-          {success && <p className="text-sm text-emerald-400" role="status">{success}</p>}
-          <Button type="submit" disabled={loading}>
-            {loading ? "Updating..." : "Update email"}
+          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Updating..." : "Update email"}
           </Button>
         </form>
       </CardContent>
@@ -201,19 +227,28 @@ function ChangeEmailCard() {
 function DeleteAccountCard() {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  async function onConfirmDelete() {
-    setError(null);
-    setLoading(true);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<DeleteConfirmValues>();
+
+  function openDialog() {
+    reset();
+    setServerError(null);
+    setDialogOpen(true);
+  }
+
+  async function onConfirmDelete(_data: DeleteConfirmValues) {
+    setServerError(null);
     try {
       await deleteAccount();
       router.push("/login");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete account.");
-      setLoading(false);
+      setServerError(err instanceof Error ? err.message : "Failed to delete account.");
     }
   }
 
@@ -228,14 +263,7 @@ function DeleteAccountCard() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button
-            variant="destructive"
-            onClick={() => {
-              setConfirmText("");
-              setError(null);
-              setDialogOpen(true);
-            }}
-          >
+          <Button variant="destructive" onClick={openDialog}>
             Delete my account
           </Button>
         </CardContent>
@@ -251,35 +279,41 @@ function DeleteAccountCard() {
               confirm. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="del-confirm">Type DELETE to confirm</Label>
-            <Input
-              id="del-confirm"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="DELETE"
-              autoComplete="off"
-              aria-label="Type DELETE to confirm account deletion"
-              aria-describedby="delete-dialog-desc"
-            />
-            {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={onConfirmDelete}
-              disabled={confirmText !== "DELETE" || loading}
-            >
-              {loading ? "Deleting..." : "Delete my account"}
-            </Button>
-          </DialogFooter>
+          <form onSubmit={handleSubmit(onConfirmDelete)} noValidate>
+            <div className="space-y-1 py-2">
+              <Label htmlFor="del-confirm">Type DELETE to confirm</Label>
+              <Input
+                id="del-confirm"
+                placeholder="DELETE"
+                autoComplete="off"
+                aria-label="Type DELETE to confirm account deletion"
+                aria-describedby="delete-dialog-desc"
+                aria-invalid={!!errors.confirmText}
+                {...register("confirmText", {
+                  validate: (v) => v === "DELETE" || "Type DELETE to confirm",
+                })}
+              />
+              <FieldError message={errors.confirmText?.message} />
+              {serverError && <p className="text-sm text-red-400 mt-1" role="alert">{serverError}</p>}
+            </div>
+            <DialogFooter className="mt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Deleting..." : "Delete my account"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </>

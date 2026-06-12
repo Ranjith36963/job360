@@ -182,21 +182,14 @@ async def upsert_profile(
 
         # V-04 — size cap (10 MB)
         if len(content) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
+            raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
 
-        # V-04 — MIME / extension allowlist
-        _filename = (cv.filename or "").lower()
-        _ctype = (cv.content_type or "").lower()
-        _allowed_exts = {".pdf", ".docx"}
-        _allowed_ctypes = {
-            "application/pdf",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        }
-        _ext = os.path.splitext(_filename)[1]
-        if _ext not in _allowed_exts or _ctype not in _allowed_ctypes:
+        # V-04 — allowlist by filename extension. The client-supplied
+        # content_type is unreliable (browsers send application/octet-stream
+        # for PDFs), so the extension is the signal we trust.
+        suffix = os.path.splitext(cv.filename or "")[1].lower()
+        if suffix not in {".pdf", ".docx"}:
             raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
-
-        suffix = os.path.splitext(cv.filename or ".pdf")[1] or ".pdf"
         tmp_path = save_upload_to_temp(content, suffix)
         try:
             try:
@@ -253,7 +246,7 @@ async def upload_linkedin(
 
     # V-04 — size cap (10 MB)
     if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
+        raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
 
     # V-04 — MIME / extension allowlist (LinkedIn must be PDF only)
     suffix = os.path.splitext(file.filename or ".pdf")[1].lower() or ".pdf"
