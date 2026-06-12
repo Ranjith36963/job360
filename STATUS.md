@@ -1,12 +1,12 @@
 # Job360 Project Status
 
-## Current State: Step 3 close-out merged; Step 4 (ops hardening) is next
+## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
 
-**Last updated:** 2026-04-29
-**Total tests:** 1,154 passing / 0 failing / 3 skipped (post-Step-3 close-out at origin/main `7194d0e`)
+**Last updated:** 2026-06-11
+**Total tests:** 1,285 passing / 0 failing / 3 skipped (1,288 collected as of `a4fe829` — defer to the runtime collected count, not this figure)
 **Source files:** 49 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 50 registered in `SOURCE_REGISTRY` post-Batch-3 rotation (added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet; dropped yc_companies, nomis, findajob). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `7194d0e Merge pull request #9 from Ranjith36963/step-3-batch` on `origin/main` (Step 3 close-out + reviewer R-1..R-7 fixes). Local `main` carries 2 additional relocation-cleanup commits on top (`dd772ff` + `160cbc3`). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 all merged.
+**Latest merged head:** `a4fe829` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
@@ -103,6 +103,21 @@
 
 ---
 
+## Matching Engines
+
+Four engines are available, stacked funnel→judge. All default OFF except the keyword funnel:
+
+| Engine | Service | Flag | Default |
+|--------|---------|------|---------|
+| #1 Keyword funnel | `services/skill_matcher.py` (JobScorer) | always on | ON |
+| #2 Enrichment | `services/job_enrichment.py` | `ENRICHMENT_ENABLED` | false |
+| #3 Semantic | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
+| #4 LLM judge | `services/llm_matcher.py` (MatchVerdict) | `MATCHER_ENABLED` | false |
+
+Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
+
+---
+
 ## What's Next (Step 4 — Ops hardening / Batch 4 — Launch readiness)
 
 **Step 0..3 status:** all green and merged on origin/main.
@@ -112,6 +127,8 @@
 - Step 1.6 locked the generator/reviewer worktree contract (`.claude/generator-commit.md` + `.claude/reviewer-verdict.md` + `make verify-batch`).
 - Step 2 (API→UI seam) closed at `5cf60ea` with all 5 cohorts (foundations + components + page surfaces + SEO + TanStack Query + run-surface + E2E smokes) + reviewer R-1..R-4 fixes + sentinel.
 - **Step 3 (new endpoints + Settings UI) closed at origin/main `7194d0e` PR #9 merge** — 8 new backend endpoints, migrations 0012/0013/0014, dispatcher rule consultation with timezone-aware quiet hours, ARQ digest + ghost-sweep periodic tasks, 5 new frontend pages, KanbanBoard polish, Cohort D toasts/a11y/loading skeletons, reviewer R-1..R-7 closed, sentinel `337fbda`.
+- **Matcher batch (funnel→judge) merged post-Step-3** on `fix/per-user-search-and-scoring-gate` — `services/llm_matcher.py`, migration 0017 (`user_feed` llm_* columns), `_run_matcher_stage` in pipeline, API llm_* fields, dashboard AI-verdict badge + COALESCE sort, MATCHER_ENABLED/THRESHOLD/MAX_JOBS flags (all default off). Measured: 18/18 in 89.8 s, judge spread 20–92, 10/10 fit accuracy.
+- **Autonomous maintenance loop** running — worker/integrator/scout/health agents processing missions from `docs/maintenance/MISSIONS.md`.
 
 **Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
@@ -133,7 +150,7 @@
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
 - Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
 - All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~268 company slugs (12 platforms including Rippling + Comeet from Batch 3)
+- All ATS boards iterate over ~264 company slugs (12 platforms; comeet pruned to a canary slug 2026-06)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
@@ -142,7 +159,7 @@
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- 1,154 tests pass (3 skip on Windows — bash-only `setup.sh` / `cron_run.sh` tests)
+- 1,285 tests pass, 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests) — 1,288 collected as of `a4fe829`
 
 ---
 
@@ -167,9 +184,9 @@
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
-| `test_main.py` still hits live Indeed | Medium | JobSpy source lacks mock coverage; full suite run can take ~32 min. Documented in MEMORY notes; mocking tracked for a future batch. Rule #4 (mock all HTTP) is otherwise clean across the 1,154-test baseline. The `make test` target uses `--ignore=tests/test_main.py` for this reason. |
+| `test_main.py` still hits live Indeed | Medium | JobSpy source lacks mock coverage; full suite run can take ~32 min. Documented in MEMORY notes; mocking tracked for a future batch. Rule #4 (mock all HTTP) is otherwise clean across the 1,285-test baseline. The `make test` target uses `--ignore=tests/test_main.py` for this reason. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
-| Batch 2.7 hybrid mode flag not wired to HTTP routes | Medium | `retrieval.reciprocal_rank_fusion` / `is_hybrid_available()` exist but no `/api/jobs` route consults them yet — only CLI / worker consumers. Pillar-2 user-visible hybrid ranking still behind the flag and not surfaced in the dashboard. |
+| ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |
 | python-jobspy not in backend/pyproject.toml core deps | Low | Intentionally optional (heavy dependencies). Indeed/Glassdoor source skips with warning if not installed. |
 | GITHUB_TOKEN optional | Low | Without token, GitHub API rate limit is 60 req/hr. With token: 5000 req/hr. Profile enrichment may fail for users with many repos without a token. |
@@ -203,7 +220,7 @@
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | **1,154** passing / 0 failing / 3 skipped on Windows (post-Step-3 close-out at origin/main `7194d0e`) |
+| **Total (current green baseline)** | | **1,285** passing / 0 failing / 3 skipped on Windows (1,288 collected as of `a4fe829` — defer to runtime count) |
 
 ### Not covered or lightly covered
 

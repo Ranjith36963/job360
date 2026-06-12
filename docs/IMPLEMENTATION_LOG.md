@@ -13,6 +13,57 @@
 
 ---
 
+## Matcher batch — funnel → judge (post-Step-3, 2026-06)
+
+Branch: `fix/per-user-search-and-scoring-gate` off `main`. Core commits: a925f42..d801f78, plus 76f6ca7 (Python 3.9 compat: `from __future__ import annotations` + union syntax guard) and 6974bb6 (dashboard sort fix: frontend COALESCE ranking wiring).
+
+### What shipped
+
+**services/llm_matcher.py (new)**
+- `MatchVerdict` Pydantic model (`fit_score: int 0-100`, `verdict: str ≤8 words`, `reason: str ≤200 chars`).
+- `match_batch(jobs, user_id, profile_text, conn, semaphore_limit=3, skip_existing=True)` — concurrent judge calls bounded by an `asyncio.Semaphore(3)` to respect free-tier provider rate limits; skips jobs already holding a verdict; per-job errors swallowed so one bad LLM response never kills the run.
+- `profile_to_matcher_text(profile)` — assembles the permanent "left side" from cv_data (titles, skills, summary) + preferences (experience_level, work_arrangement, salary_min).
+- Uses `llm_provider.llm_extract_validated` (same Gemini→Groq→Cerebras fallback chain as CV parsing); injected via `llm_extract_validated_fn` kwarg for test isolation (CLAUDE.md rule #4).
+
+**Migration 0017 (`0017_user_feed_llm_verdict.up.sql`)**
+- `ALTER TABLE user_feed ADD COLUMN llm_fit_score INTEGER`
+- `ALTER TABLE user_feed ADD COLUMN llm_verdict TEXT`
+- `ALTER TABLE user_feed ADD COLUMN llm_reason TEXT`
+- `ALTER TABLE user_feed ADD COLUMN llm_matched_at TEXT`
+- All four columns added to the per-user `user_feed` table — rules #10/#17 keep shared catalog tables (`jobs`, `job_enrichment`) untouched.
+
+**Pipeline stage `_run_matcher_stage` (`src/main.py`)**
+- Runs after the per-user feed write; gated on `MATCHER_ENABLED` flag.
+- Filters to jobs with `match_score >= MATCHER_THRESHOLD` (default 30), caps at `MATCHER_MAX_JOBS` (default 30).
+- Calls `match_batch`; verdicts persisted onto each user's `user_feed` row.
+
+**API + read path**
+- `GET /api/jobs` response includes `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at` from `user_feed`.
+- Feed read query ranks by `COALESCE(llm_fit_score, score) DESC` so judged jobs surface above unjudged ones.
+
+**Frontend**
+- Dashboard job cards show an AI-verdict badge (verdict text + fit score) when `llm_verdict` is present.
+- Client-side sort respects the COALESCE logic: judged jobs rank above unjudged peers at equal keyword score.
+
+### Invariants (same spirit as CLAUDE.md rule #18)
+
+`MATCHER_ENABLED` defaults `false`. With the flag off, the pipeline is byte-identical to pre-batch — no extra LLM calls, no extra DB writes. With it on: only jobs with keyword `match_score >= MATCHER_THRESHOLD` are judged; at most `MATCHER_MAX_JOBS` per user per run; per-job errors never abort the run.
+
+### Measured performance
+
+- **Throughput:** 18/18 jobs judged in 89.8 s at concurrency 3 (Groq/Cerebras chain); zero provider failures.
+- **Discrimination:** judge spread 20–92 vs keyword engine 30–43 on the same 18-job corpus — the judge separates the field where the keyword engine clusters.
+- **Accuracy:** 10/10 fit-bucket verdicts on the labeled sample; correctly rejected every intern/junior role for a senior-level profile.
+- **Measured via:** `scripts/compare_enrichment_levels.py` and `scripts/score_enrichment_accuracy.py`.
+
+### Deferred follow-ons
+
+- **#8 (backlog)** — Re-judge policy: when a user's profile changes, existing verdicts are stale but not automatically invalidated. A re-judge sweep on profile update is deferred.
+- **#9 (backlog)** — Judge telemetry: no per-run LLM-call count / token cost / latency column yet.
+- **#10 (backlog)** — Level-6 single-call experiment: combine enrichment fact hints + judge rubric in one LLM call to halve provider round-trips.
+
+---
+
 ## Step 3 — Settings + Notifications + Pipeline UI + A11y (MERGED 2026-04-28)
 
 Branch: `step-3-batch` off `main @ 9868877` (Step 2 green tip). Plan: `docs/step_3_plan.md` (preserved on commit `df36c8f`).
