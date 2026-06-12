@@ -41,14 +41,14 @@ def test_sources_command():
         assert name in result.output
 
 
-def test_source_registry_has_50_sources():
-    """SOURCE_REGISTRY should have all 50 sources after Batch 3 (+5 -3 = 48 -> 50).
+def test_source_registry_has_46_sources():
+    """SOURCE_REGISTRY should have 46 sources after 2026-06 M6 rotation (-4 dead).
 
     Per CLAUDE.md rule #8: when adding/removing sources, update this
     assertion AND the expected set AND RATE_LIMITS entry AND
     _build_sources() list. All four must agree.
     """
-    assert len(SOURCE_REGISTRY) == 50
+    assert len(SOURCE_REGISTRY) == 46
     expected = {"reed", "adzuna", "jsearch", "arbeitnow", "remoteok",
                 "jobicy", "himalayas", "greenhouse", "lever", "workable",
                 "ashby", "remotive", "jooble", "linkedin",
@@ -59,12 +59,12 @@ def test_source_registry_has_50_sources():
                 # Phase 4 new sources (minus Batch 3 drops: yc_companies, nomis, findajob)
                 "hn_jobs", "jobs_ac_uk", "nhs_jobs",
                 "personio", "workanywhere", "weworkremotely", "realworkfromanywhere",
-                "biospace", "jobtensor", "climatebase", "eightykhours",
-                "bcs_jobs", "uni_jobs", "successfactors", "aijobs_global",
+                "biospace", "climatebase", "eightykhours",
+                "bcs_jobs", "uni_jobs", "successfactors",
                 "aijobs_ai",
-                # Batch 3 additions
-                "teaching_vacancies", "gov_apprenticeships", "nhs_jobs_xml",
-                "rippling", "comeet"}
+                # Batch 3 additions (jobtensor, gov_apprenticeships, comeet dropped 2026-06 M6)
+                "teaching_vacancies", "nhs_jobs_xml",
+                "rippling"}
     assert set(SOURCE_REGISTRY.keys()) == expected
 
 

@@ -249,16 +249,3 @@ RIPPLING_COMPANIES = [
     "scalepath",
     "linear",
 ]
-
-
-# Comeet ATS public board: https://www.comeet.co/careers-api/2.0/company/{slug}/positions
-# QUARANTINED 2026-06-11: the API now requires a per-company token (HTTP 400
-# "Token is missing" without one). Probe results for the original Batch 3 set:
-#   celonis-process-mining, placer-ai  -> HTTP 404 (slug gone)
-#   riskified, lightricks, fiverr      -> HTTP 400 token gate
-#   riskified + lightricks have moved to Greenhouse (zero UK locations there).
-# Only the canary slug remains — ComeetSource probes it once per run and
-# resumes full fetching automatically if the gate is ever lifted.
-COMEET_COMPANIES = [
-    "fiverr",
-]

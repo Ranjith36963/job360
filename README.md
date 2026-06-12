@@ -17,13 +17,13 @@ flowchart TD
     CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
     Cron["Cron 4AM/4PM\nEurope/London"]
 
-    subgraph Sources["50 Job Sources (49 live instances)"]
+    subgraph Sources["46 Job Sources (45 live instances)"]
         direction LR
         KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
         FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
-        ATSBoards["ATS Boards (12, ~264 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling, Comeet"]
-        RSSFeeds["RSS/XML Feeds (10)\njobs.ac.uk, NHS Jobs, NHS Jobs XML\nWorkAnywhere, WeWorkRemotely\nRealWorkFromAnywhere, BioSpace\nUniversity Jobs, Teaching Vacancies\nGov Apprenticeships"]
-        HTMLScrapers["HTML Scrapers (7)\nLinkedIn, JobTensor, Climatebase\n80000Hours, BCS Jobs\nAIJobs Global, AIJobs AI"]
+        ATSBoards["ATS Boards (11, ~264 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling"]
+        RSSFeeds["RSS/XML Feeds (9)\njobs.ac.uk, NHS Jobs, NHS Jobs XML\nWorkAnywhere, WeWorkRemotely\nRealWorkFromAnywhere, BioSpace\nUniversity Jobs, Teaching Vacancies"]
+        HTMLScrapers["HTML Scrapers (5)\nLinkedIn, Climatebase\n80000Hours, BCS Jobs, AIJobs AI"]
         OtherSources["Other (4 classes / 5 keys)\nIndeed+Glassdoor (JobSpySource)\nHackerNews, TheMuse, NoFluffJobs"]
     end
 
@@ -48,18 +48,18 @@ flowchart TD
 
 ## Features
 
-### Job Sources (49 classes / 50 registry keys / 49 instances)
+### Job Sources (45 classes / 46 registry keys / 45 instances)
 
-> The reconciliation: 49 *class files* on disk → 50 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 49 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 50`).
+> The reconciliation: 45 *class files* on disk → 46 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 45 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 46`).
 
 - **7 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully if no API key set
-- **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies and Gov Apprenticeships *(Batch 3)* are in `apis_free/` but run on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
-- **12 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)*, Comeet *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
-- **10 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies and GOV.UK Apprenticeships *(both live in `apis_free/` but run on the 15-min RSS tier)*
-- **7 HTML scrapers**: LinkedIn (guest API), JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI
+- **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
+- **11 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
+- **9 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
+- **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
 - **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
 
-**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings).
+**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings). **Dropped in M6 rotation (2026-06)**: `jobtensor` (pivoted to JS-only German app), `comeet` (token-gated API), `gov_apprenticeships` (v1 API retired), `aijobs_global` (board abandoned Oct 2023).
 
 **Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/pillars/03-job-providers.md` §4.7.
 
@@ -125,7 +125,7 @@ flowchart TD
 
 | Test file | Approx. count | What it covers |
 |-----------|-------|----------------|
-| `test_sources.py` | 71+ | All 50 sources with mocked HTTP |
+| `test_sources.py` | 55+ | All 46 sources with mocked HTTP |
 | `test_profile.py` | 55+ | CV parser, preferences, keyword generator, JobScorer |
 | `test_linkedin_github.py` | 58+ | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
 | `test_scorer.py` | 53+ | Scoring algorithm, penalties, recency tiers, edge cases |
@@ -184,7 +184,7 @@ bash cron_setup.sh
 ## CLI Usage
 
 ```bash
-# Full pipeline — fetch from all 50 sources, score, deduplicate, notify
+# Full pipeline — fetch from all 46 sources, score, deduplicate, notify
 python -m src.cli run
 
 # Single source only
@@ -348,7 +348,7 @@ job360/
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
 │   ├── migrations/              # 18 forward+reverse SQL migration pairs (0000 → 0017) + runner.py
 │   └── src/
-│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (50), _build_sources()
+│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (46), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │       ├── models.py            # Job dataclass + normalized_key()
 │       ├── api/                 # FastAPI app + 11 route modules (46+ endpoints)
@@ -356,7 +356,7 @@ job360/
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
-│       │   ├── companies.py     # ATS company slugs (~266 across 12 platforms)
+│       │   ├── companies.py     # ATS company slugs (~264 across 11 platforms)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py
 │       │   └── tenancy.py

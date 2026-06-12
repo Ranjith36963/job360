@@ -4,8 +4,8 @@
 
 **Last updated:** 2026-06-11
 **Total tests:** 1,285 passing / 0 failing / 3 skipped (1,288 collected as of `a4fe829` — defer to the runtime collected count, not this figure)
-**Source files:** 49 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
-**Job sources:** 50 registered in `SOURCE_REGISTRY` post-Batch-3 rotation (added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet; dropped yc_companies, nomis, findajob). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
+**Source files:** 45 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Job sources:** 46 registered in `SOURCE_REGISTRY` post-M6 rotation (Batch 3 added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet, dropped yc_companies/nomis/findajob; M6 2026-06 dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — all upstream-dead). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `a4fe829` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
@@ -37,7 +37,7 @@
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
 - When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
-- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 50, post-Batch-3)
+- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 46, post-M6-rotation)
 - All original tests pass without modification
 
 ---
@@ -144,13 +144,13 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## What Is Working Right Now
 
-- Full 50-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5)
+- Full 46-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed 4 dead sources)
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
 - Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
 - All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~264 company slugs (12 platforms; comeet pruned to a canary slug 2026-06)
+- All ATS boards iterate over ~264 company slugs (11 platforms; comeet removed in M6 rotation)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
@@ -167,8 +167,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Source/Component | Risk | Notes |
 |------------------|------|-------|
-| **HTML scrapers** (7) | High | LinkedIn, JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
-| **jobtensor** | Critical | Upstream pivoted to a JS-rendered German-market app (~2026-06). `/ajax/search/` returns HTTP 400 for any request (removed). UK listings page (`/United-Kingdom/Artificial-Intelligence-jobs`) is an empty JS shell — no `var context` JSON, no `/uk/` links, zero jobs returned every run. AJAX call dropped to stop burning 3 retries/run; source quarantined to HTML-probe-only (always returns []). Candidate for full 5-surface removal in the next source-rotation batch. |
+| **HTML scrapers** (5) | High | LinkedIn, Climatebase, 80000Hours, BCS Jobs, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
 | **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
 | **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 15 companies = 15 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
@@ -199,7 +198,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Test file | Module tested | Tests |
 |-----------|--------------|-------|
-| `test_sources.py` | All 50 sources | 71+ |
+| `test_sources.py` | All 46 sources | 55+ |
 | `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
 | `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
@@ -251,5 +250,5 @@ python -m src.cli run --dry-run --log-level DEBUG
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"
-# Output: 50 (post-Batch-3 rotation)
+# Output: 46 (post-M6 rotation; 4 upstream-dead sources removed 2026-06)
 ```

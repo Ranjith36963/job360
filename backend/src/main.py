@@ -50,7 +50,6 @@ from src.services.skill_matcher import JobScorer, detect_experience_level, salar
 from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
-from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.apis_free.himalayas import HimalayasSource
 from src.sources.apis_free.hn_jobs import HNJobsSource
 from src.sources.apis_free.jobicy import JobicySource
@@ -68,7 +67,6 @@ from src.sources.apis_keyed.jooble import JoobleSource
 from src.sources.apis_keyed.jsearch import JSearchSource
 from src.sources.apis_keyed.reed import ReedSource
 from src.sources.ats.ashby import AshbySource
-from src.sources.ats.comeet import ComeetSource
 from src.sources.ats.greenhouse import GreenhouseSource
 from src.sources.ats.lever import LeverSource
 from src.sources.ats.personio import PersonioSource
@@ -92,11 +90,9 @@ from src.sources.other.indeed import JobSpySource
 from src.sources.other.nofluffjobs import NoFluffJobsSource
 from src.sources.other.themuse import TheMuseSource
 from src.sources.scrapers.aijobs_ai import AIJobsAISource
-from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
 from src.sources.scrapers.bcs_jobs import BCSJobsSource
 from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
-from src.sources.scrapers.jobtensor import JobTensorSource
 from src.sources.scrapers.linkedin import LinkedInSource
 from src.utils.logger import set_run_uuid, setup_logging
 from src.utils.telemetry import source_timer
@@ -143,27 +139,25 @@ SOURCE_REGISTRY = {
     "weworkremotely": WeWorkRemotelySource,
     "realworkfromanywhere": RealWorkFromAnywhereSource,
     "biospace": BioSpaceSource,
-    "jobtensor": JobTensorSource,
     "climatebase": ClimatebaseSource,
     "eightykhours": EightyKHoursSource,
     "bcs_jobs": BCSJobsSource,
     "uni_jobs": UniJobsSource,
     "successfactors": SuccessFactorsSource,
-    "aijobs_global": AIJobsGlobalSource,
     "aijobs_ai": AIJobsAISource,
     # Batch 3 additions
     "teaching_vacancies": TeachingVacanciesSource,
-    "gov_apprenticeships": GovApprenticeshipsSource,
     "nhs_jobs_xml": NHSJobsXMLSource,
     "rippling": RipplingSource,
-    "comeet": ComeetSource,
 }
 
 # Number of unique source instances created by _build_sources().
-# 49 not 50 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 45 not 46 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 4 dead sources removed in the 2026-06 M6 rotation: jobtensor, comeet,
+# gov_apprenticeships, aijobs_global — all upstream-dead.
 # Used by test_main.py::test_source_instance_count_matches_build to catch drift.
 # Update this when adding/removing sources.
-SOURCE_INSTANCE_COUNT = 49
+SOURCE_INSTANCE_COUNT = 45
 
 
 async def _ghost_detection_pass(
@@ -290,20 +284,16 @@ def _build_sources(
         WeWorkRemotelySource(session, search_config=sc),
         RealWorkFromAnywhereSource(session, search_config=sc),
         BioSpaceSource(session, search_config=sc),
-        JobTensorSource(session, search_config=sc),
         ClimatebaseSource(session, search_config=sc),
         EightyKHoursSource(session, search_config=sc),
         BCSJobsSource(session, search_config=sc),
         UniJobsSource(session, search_config=sc),
         SuccessFactorsSource(session, search_config=sc),
-        AIJobsGlobalSource(session, search_config=sc),
         AIJobsAISource(session, search_config=sc),
         # Group L: Batch 3 additions
         TeachingVacanciesSource(session, search_config=sc),
-        GovApprenticeshipsSource(session, search_config=sc),
         NHSJobsXMLSource(session, search_config=sc),
         RipplingSource(session, search_config=sc),
-        ComeetSource(session, search_config=sc),
     ]
     if source_filter:
         # Special case: glassdoor shares JobSpySource with indeed

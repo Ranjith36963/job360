@@ -130,20 +130,16 @@ RATE_LIMITS = {
     "weworkremotely": {"concurrent": 1, "delay": 2.0},
     "realworkfromanywhere": {"concurrent": 1, "delay": 2.0},
     "biospace": {"concurrent": 1, "delay": 2.0},
-    "jobtensor": {"concurrent": 1, "delay": 3.0},
     "climatebase": {"concurrent": 1, "delay": 3.0},
     "eightykhours": {"concurrent": 1, "delay": 2.0},
     "bcs_jobs": {"concurrent": 1, "delay": 3.0},
     "uni_jobs": {"concurrent": 1, "delay": 2.0},
     "successfactors": {"concurrent": 1, "delay": 2.0},
-    "aijobs_global": {"concurrent": 2, "delay": 1.0},
     "aijobs_ai": {"concurrent": 1, "delay": 2.0},
     # Batch 3 additions — published rate-limits cited in each source's tests
     "teaching_vacancies": {"concurrent": 1, "delay": 2.0},  # no stated cap, polite
-    "gov_apprenticeships": {"concurrent": 1, "delay": 2.0},  # 150 req / 5 min
     "nhs_jobs_xml": {"concurrent": 1, "delay": 2.0},  # feed XML, 15-min tier
     "rippling": {"concurrent": 2, "delay": 1.5},  # ATS, 60s tier
-    "comeet": {"concurrent": 2, "delay": 1.5},  # ATS, 60s tier
 }
 
 # Retry

@@ -40,17 +40,18 @@ async def test_status_returns_counts(authenticated_async_context):
     assert resp.status_code == 200
     data = resp.json()
     assert "jobs_total" in data
-    assert data["sources_total"] == 50
+    assert data["sources_total"] == 46
 
 
 @pytest.mark.asyncio
-async def test_sources_returns_50():
-    """Batch 3 raised the source count from 48 to 50 (+5 new -3 dropped)."""
+async def test_sources_returns_46():
+    """2026-06 M6 rotation dropped 4 upstream-dead sources (jobtensor, comeet,
+    gov_apprenticeships, aijobs_global), reducing the count from 50 to 46."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/sources")
     assert resp.status_code == 200
-    assert len(resp.json()["sources"]) == 50
+    assert len(resp.json()["sources"]) == 46
 
 
 @pytest.mark.asyncio
@@ -109,12 +110,12 @@ async def test_full_api_workflow(authenticated_async_context):
         # Status (public)
         resp = await client.get("/api/status")
         assert resp.status_code == 200
-        assert resp.json()["sources_total"] == 50
+        assert resp.json()["sources_total"] == 46
 
         # Sources (public)
         resp = await client.get("/api/sources")
         assert resp.status_code == 200
-        assert len(resp.json()["sources"]) == 50
+        assert len(resp.json()["sources"]) == 46
 
         # Jobs (authed, empty DB)
         resp = await client.get("/api/jobs")

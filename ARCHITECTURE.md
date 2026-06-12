@@ -41,16 +41,16 @@ job360/
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
 │   ├── migrations/                   # 18 forward/reverse SQL migrations (0000 → 0017) + runner.py
 │   ├── src/
-│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (50 keys → 49 instances), _build_sources()
+│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (46 keys → 45 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 11 route modules
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
-│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (50 entries), thresholds, feature flags
+│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (46 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
-│   │   │   ├── companies.py          # ATS company slugs (~264 across 12 platforms)
+│   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
 │   │   │   ├── skill_synonyms.py     # 529-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 21-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
@@ -82,10 +82,10 @@ job360/
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
 │   │   │   ├── apis_keyed/   (7)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork
-│   │   │   ├── apis_free/    (11)    # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies, gov_apprenticeships
-│   │   │   ├── ats/          (12)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling, comeet
+│   │   │   ├── apis_free/    (10)    # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
+│   │   │   ├── ats/          (11)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling
 │   │   │   ├── feeds/        (8)     # jobs_ac_uk, nhs_jobs, nhs_jobs_xml, workanywhere, weworkremotely, realworkfromanywhere, biospace, uni_jobs
-│   │   │   ├── scrapers/     (7)     # linkedin, jobtensor, climatebase, eightykhours, bcs_jobs, aijobs_ai, aijobs_global
+│   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 │   │   │   └── other/        (4)     # indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)
 │   │   │   └── tasks.py              # score_and_ingest, send_notification, send_daily_digest, nightly_ghost_sweep, enrich_job_task
@@ -611,7 +611,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `DISCORD_WEBHOOK_URL` | No | Discord notifications |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range sorting (default 40k-120k) |
 
-All API keys are optional — 43 of 50 sources work without any keys.
+All API keys are optional — 39 of 46 sources work without any keys.
 
 ### Constants (`settings.py`)
 

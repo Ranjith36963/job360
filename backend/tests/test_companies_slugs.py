@@ -16,7 +16,6 @@ from src.core.companies import (
     WORKDAY_COMPANIES,
     SUCCESSFACTORS_COMPANIES,
     RIPPLING_COMPANIES,
-    COMEET_COMPANIES,
 )
 
 
@@ -34,7 +33,6 @@ def test_total_slug_count_exceeds_batch3_target():
         + len(WORKDAY_COMPANIES)
         + len(SUCCESSFACTORS_COMPANIES)
         + len(RIPPLING_COMPANIES)
-        + len(COMEET_COMPANIES)
     )
     assert total >= 250
 
@@ -51,7 +49,6 @@ def test_no_duplicate_slugs_within_platform():
         ("Recruitee", RECRUITEE_COMPANIES),
         ("Personio", PERSONIO_COMPANIES),
         ("Rippling", RIPPLING_COMPANIES),
-        ("Comeet", COMEET_COMPANIES),
     ]:
         assert len(lst) == len(set(lst)), f"{name} has duplicate slugs"
 

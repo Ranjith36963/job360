@@ -50,11 +50,9 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     m.get(re.compile(r".*\.thalesgroup\.com/.*"), body="<urlset></urlset>", repeat=True)
     # Group D: HTML scrapers
     m.get(re.compile(r"https://www\.linkedin\.com/.*"), body="<html></html>", repeat=True)
-    m.get(re.compile(r"https://jobtensor\.com/.*"), payload={"total": 0, "hits": []}, repeat=True)
     m.get(re.compile(r"https://climatebase\.org/.*"), body="<html></html>", repeat=True)
     m.get(re.compile(r"https://www\.bcs\.org/.*"), body="<html></html>", repeat=True)
     m.get(re.compile(r"https://aijobs\.ai/.*"), body="<html></html>", repeat=True)
-    m.get(re.compile(r"https://ai-jobs\.global/.*"), payload=[], repeat=True)
     # Group E: RSS/XML feeds
     m.get(re.compile(r"https://www\.jobs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://www\.nhsbsa\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
@@ -80,10 +78,8 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     # reproduced. Adding empty-shape responses keeps run_search progress
     # but doesn't add jobs.
     m.get(re.compile(r"https://teaching-vacancies\.service\.gov\.uk/.*"), payload={"vacancies": []}, repeat=True)
-    m.get(re.compile(r"https://findapprenticeship\.service\.gov\.uk/.*"), payload={"vacancies": []}, repeat=True)
     m.get(re.compile(r"https://www\.jobs\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://ats\.rippling\.com/.*"), payload={"jobs": []}, repeat=True)
-    m.get(re.compile(r"https://www\.comeet\.co/.*"), payload=[], repeat=True)
     # Step-1.5 fixture-debt closure — sources that hung the original
     # Step-1.5 broad sweep because the inline URL list missed them:
     m.get(re.compile(r"https://www\.aijobs\.net/.*"), payload=[], repeat=True)
