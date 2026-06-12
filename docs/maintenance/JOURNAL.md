@@ -165,3 +165,9 @@ Owner directed: research M7 codegen, recommend with 3-line rationale, do NOT imp
 - Researched openapi-typescript vs Hey API vs Orval (WebSearch + fetched the openapi-ts 2026 roadmap). DECISIVE FACT: openapi-fetch/openapi-react-query RUNTIME helpers go to maintenance mode in 2026, but the openapi-typescript TYPES generator does NOT (maintenance increasing, 8.0 roadmap) — and the maintenance caveat doesn't touch us since we don't use those runtime helpers.
 - RECOMMENDATION: openapi-typescript (types-only) — zero runtime deps, one-CLI-line build, minimal change (keep api.ts). Documented owner fork: Hey API only if they want a generated SDK+zod platform and will replace api.ts. Written to docs/maintenance/M7-codegen-research.md; M7 status = RESEARCH-DONE, AWAITING-OWNER-APPROVAL.
 - No code, no deps installed, nothing implemented (owner gate). Research+docs only.
+
+## 2026-06-12 ~16:00 UTC — INTEGRATOR ROUND 10 (heartbeat) — board hygiene
+No integration pending, no new worker commits. The "actionable P1" list was STALE: items 3/4/5/6 described sources that M1 disabled (glassdoor, fc55fb8) and M6 deleted (comeet, gov_apprenticeships, aijobs_global, 1e709f7). Marked all four DONE with their resolving commits so future rounds don't chase dead sources. No code touched.
+- After cleanup the only open P1 is 7b (vector_index.py path bug). NOT auto-taken: (a) it's Pillar-2 semantic-search code → owner's hands-off rule; (b) the fix MOVES the only live copy of 92 embeddings — the exact data op that nearly caused loss at round 1. Needs explicit owner OK before an integrator round attempts it. Flagged to owner.
+- #7 enrichment-merge is also Pillar-2 + M2 worker territory — not integrator work.
+- Net: board is now honest (4 stale P1s closed); no actionable non-Pillar-2 P1 remains for the loop. Future heartbeats → minimal until a worker ships or owner directs.
