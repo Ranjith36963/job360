@@ -1,3 +1,9 @@
+# Staging review packet — 2026-06-12 (round 8)
+
+**New: M6 source rotation 50→46 (`1e709f7`)** — removed 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global) across all 5 load-bearing surfaces + docs + 4 file deletions. **risk: low-med** (CORE files main.py/settings.py touched, but removals only; full adversarial waves run, 1 finding fixed; gate 1272 passed; live /api/sources=46 verified). Net −1,226 lines. Evidence: JOURNAL round 8. CORE files touched: backend/src/main.py, backend/src/core/settings.py.
+
+---
+
 # Staging review packet — 2026-06-12 (round 3)
 
 **New since round 2:** M4 docs-sync integrated (`83864b2`): all project docs (CLAUDE/STATUS/ARCHITECTURE/README/IMPLEMENTATION_LOG) now match audited reality — **risk: low** (docs only). First full adversarial-wave run: 11 raw findings → 5 survived → 5 fixed at merge (incl. an internal contradiction and the slug-count ground truth: **264**, not 268/266). Evidence: JOURNAL round 3.

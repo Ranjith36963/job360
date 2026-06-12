@@ -68,8 +68,8 @@ DoD:
 - [x] per-category timeout implemented (89fa0e0: SOURCE_FETCH_TIMEOUT_ATS=240 + resolve_fetch_timeout); TWO consecutive clean live runs: c7345ff349d8 @18:40 (greenhouse 1331) and b0250268211a @21:10 (greenhouse 1335), both errors {}.
 - [x] full suite green (1285/3) + live verify (run c7345ff349d8, zero errors)
 
-## M6 — Source rotation 50→49 + jobtensor removal  [SERIALIZED — integrator only]
-Backlog 16b. status: OPEN (owner GO 2026-06-11). Five surfaces per rules #8/#13 (SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli, test_api) + doc count refs (CLAUDE.md/STATUS/ARCHITECTURE). Proof bar: jobtensor upstream-dead evidence already journaled (iteration 3) — re-cite in the removal commit.
+## M6 — Source rotation 50→46 (bundled: jobtensor+comeet+gov_apprenticeships+aijobs_global)  [SERIALIZED — integrator only]
+Backlog 16b. status: DONE (1e709f7, round 8). 5 surfaces + SOURCE_INSTANCE_COUNT 49→45 + 4 files deleted + docs. Gate 1272 passed; live /api/sources = 46, 4 confirmed gone, lookalikes kept. Adversarial waves: 2 raw → 1 confirmed-fixed (discover_companies map) + 1 refuted (phase history). Five surfaces per rules #8/#13 (SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli, test_api) + doc count refs (CLAUDE.md/STATUS/ARCHITECTURE). Proof bar: jobtensor upstream-dead evidence already journaled (iteration 3) — re-cite in the removal commit.
 
 ## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only]
 Backlog #14, report problem #7. status: OPEN (owner APPROVED 2026-06-11, conditions binding): BEFORE implementing, compare openapi-typescript vs alternatives against FastAPI-schema → Next.js 16/TS on (a) zero runtime deps, (b) build-step fit, (c) maintenance burden; journal the choice + 3-line rationale. Then implement under CORE rules: integrator-serialized, adversarial review, full suite + live verify.

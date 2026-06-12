@@ -145,3 +145,16 @@ minimal round — board state: nothing to integrate (no worker commits since M4)
 
 ## 2026-06-12 ~09:11 UTC — INTEGRATOR ROUND 6 (heartbeat) — policy edit
 Was a minimal round (nothing to integrate, no actionable P1). Owner directive mid-round: move the integrator seat OFF Fable to **Opus 4.8** to cut burn (owner already set the session default). Encoded: integrator skill MODEL POLICY now Opus 4.8 (degradation floor unchanged — it starts at Opus); worker skill notes Fable is not used in the loop at all. No product code touched; docs/skills only. Board otherwise unchanged: M2/M3/M8 open for workers, M6/M7/C1 await owner-awake, NEEDS-HUMAN queue intact.
+
+## 2026-06-12 ~11:11 UTC — INTEGRATOR ROUND 7 (heartbeat) — MINIMAL
+minimal round — board state: no DONE-PENDING-INTEGRATION missions, no new worker commits since 3685677, no actionable P1 (backlog 3a closed last round; 7/7b are worker/P2). M2/M3/M8 OPEN for workers; M6/M7/C1 await owner-awake. No code, no commit (docs-exempt). Lock released. Loop now fully on Opus+Sonnet+Haiku — idle ticks are near-free.
+
+## 2026-06-12 ~14:00 UTC — INTEGRATOR ROUND 8 (owner-directed) — M6 DONE
+Owner awake, expanded scope + GO: bundled rotation 50→46, removing all 4 proven-dead quarantined sources (jobtensor, comeet, gov_apprenticeships, aijobs_global).
+- Surface map traced by integrator first (5 rule-#8/#13 surfaces + SOURCE_INSTANCE_COUNT + companies.py COMEET list + company_discovery ATSProbe + 4 doc files + per-source test funcs + 4 source files). Sonnet executor did the mechanical removal from a precise checklist; slice tests 105 green.
+- INTEGRATOR REVIEW caught a surface the executor's slice-set missed: test_domain_classifier.py imported 3 of the 4 deleted classes (would fail full gate) — fixed by integrator. This is exactly why the full-suite gate + review exist.
+- CORE files touched (main.py, settings.py) → adversarial waves run. Wave 1 (R1 conventions + R3 bugs): 2 raw findings. R3 clean. Verified directly (token-thrift vs spawning Wave 2 agents): R1-1 CONFIRMED — backend/scripts/discover_companies.py still mapped "comeet"→"COMEET_COMPANIES" (deleted); fixed. R1-2 REFUTED — the "104→268" line is Batch-3 phase HISTORY (records that phase's state) and already carries the executor's appended M6 current-state note.
+- Gate: 1272 passed / 3 skipped (down 19 from 1291 = the removed sources' tests, expected). Commit 1e709f7 (19 files, +65/−1226).
+- LIVE VERIFY: server restarted (commits don't exist until restart); GET /api/sources = 46 sources, the 4 dead confirmed absent, all 6 lookalikes (aijobs/aijobs_ai/nhs_jobs/nhs_jobs_xml/hackernews/hn_jobs) present.
+- New fact: source count is now 46 registry / 45 unique classes (indeed+glassdoor still alias JobSpySource). Any doc/test asserting 50/49 is stale.
+- Backlog 16b CLOSED by this. M6 DONE.

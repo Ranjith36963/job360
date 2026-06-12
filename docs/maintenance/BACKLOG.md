@@ -39,7 +39,9 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 
 15. **TODO — document the matcher batch:** STATUS.md (current phase + new flag), docs/IMPLEMENTATION_LOG.md (batch entry: migration 0017, llm_matcher service, pipeline stage, API fields, badge, measured 18/18 in 89.8s), CLAUDE.md phase summary + `MATCHER_ENABLED`/`MATCHER_THRESHOLD`/`MATCHER_MAX_JOBS` in the env-var table.
 16. **TODO — README/ARCHITECTURE sweep:** ensure the three-engine + judge picture (keyword funnel → enrichment facts → semantic → LLM judge) is described once, correctly, with the measured accuracy numbers; remove stale references.
-16b. **TODO — remove jobtensor for real (5-surface rotation).** Quarantined in b7b2c60; upstream is gone for good. Full removal per rules #8/#13: SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli count/set, test_api == N checks (50→49), plus CLAUDE.md/STATUS.md/ARCHITECTURE.md count references. Do as ONE deliberate iteration; consider bundling with any other dead-source removals found by then.
+16b. **DONE (1e709f7) — bundled source rotation 50→46.** Removed jobtensor + comeet + gov_apprenticeships + aijobs_global (owner expanded scope from jobtensor-only). 5 surfaces + docs + 4 file deletions; gate 1272; live /api/sources=46. Superseded the original jobtensor-only plan below.
+
+16b-orig. ~~remove jobtensor for real (5-surface rotation)~~ Quarantined in b7b2c60; upstream is gone for good. Full removal per rules #8/#13: SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli count/set, test_api == N checks (50→49), plus CLAUDE.md/STATUS.md/ARCHITECTURE.md count references. Do as ONE deliberate iteration; consider bundling with any other dead-source removals found by then.
 
 17. **TODO — repo tidy:** `test-artifacts/` screenshots accumulate at root; ensure gitignored and pruned. Check for stray experiment outputs outside `backend/data/`.
 
