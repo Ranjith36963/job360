@@ -1,3 +1,11 @@
+# Staging review packet — 2026-06-12 (round 15)
+
+**New: M3 fully integrated (`25c1b3c`)** — worker-a's settings/account RHF+zod forms + KanbanBoard keyboard a11y (@dnd-kit) + CV upload caps, merged with the integrator's earlier auth-form slice. **risk: low-med** (frontend + the auth-adjacent profile.py upload route; full gate green, account forms live-verified). The V-04 upload validation was reconciled to the best of both versions (memory-safe bounded read + robust extension-only MIME). Also fixed a real gap: the M3-slice's zod/react-hook-form deps weren't declared in package.json (a fresh install would have broken). M3 now fully DONE. Evidence: JOURNAL round 15.
+
+**ALL 8 MISSIONS NOW DONE** (M1–M8) except M2 (Pillar-2, owner hands-off). Remaining: small follow-ups (M3-rem noValidate, M7a api.ts types, M8a un-ignore test_main, 7b vector path) — none blocking.
+
+---
+
 # Staging review packet — 2026-06-12 (round 11)
 
 **New: M7 codegen (`53e2020`)** — frontend API types now GENERATED from FastAPI's schema (openapi-typescript); `types.ts` is a thin alias layer (−249 hand-written lines). Drift guard wired into the commit gate. **risk: med** (CORE file types.ts + touches several components, but full adversarial waves run + frontend gate + live render of profile/dashboard). **Notable: the waves surfaced + fixed a real latent crash** — the profile page would crash for any user with no skill tiers (`skill_tiers` defaults to `{}`); now guarded. One follow-up filed: **M7a** (api.ts still hand-mirrors 3 types with intentional tighter unions — aliasing would downgrade; needs care). CORE files touched: frontend/src/lib/types.ts (+ generated api-types.ts), scripts/agent-gate.sh. Evidence: JOURNAL round 11, test-artifacts/m7-*.png.

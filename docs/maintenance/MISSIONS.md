@@ -40,14 +40,15 @@ DoD:
 - [ ] full backend suite green in the worktree
 
 ## M3 — Pillar 3: frontend carry-overs  [worker-parallel, frontend-only]
-claimed-by: -   status: OPEN
+claimed-by: -   status: DONE (worker-a e108eed integrated → merge 25c1b3c; round 15). Settings/account forms (Change password/email, Delete account) RHF+zod; KanbanBoard @dnd-kit keyboard a11y; CV upload caps. Combined with the integrator's earlier M3-slice (auth forms + bounded-read V-04), M3 is fully complete. V-04 reconciled at merge = best of both (bounded memory-safe read + extension-only MIME). Gate green; account forms live-verified (test-artifacts/m3-account-forms.png). M3-rem follow-ups (noValidate, "50 sources" footer) remain in backlog.
+closing-note (worker-a, 2026-06-12): commit e108eed on agent/m3-frontend. All four DoD lines proven. Pre-existing test_retrieval_integration::test_mode_hybrid_empty_index_falls_back confirmed failing on clean d97ff88 HEAD (Pillar 2 hands-off zone) — not a regression from M3 changes. Integrator: merge agent/m3-frontend; no migrations, no schema changes. Run live check on the settings/account page to verify form validation UX; drag a card in the pipeline KanbanBoard to verify keyboard a11y.
 Backlog: #12 V-01..V-03 RHF+zod validation, #13 C-07 kanban keyboard a11y, #11 V-04 CV upload cap+MIME (backend route + frontend)
 files-owned: frontend/src/** (forms, KanbanBoard), src/api/profile.py upload route (V-04 only), their tests
 DoD:
-- [ ] all auth/profile forms validate with RHF+zod; invalid submits blocked client-side with messages; vitest coverage for each form
-- [ ] KanbanBoard fully keyboard-operable via @dnd-kit (documented key map); a11y assertions in tests
-- [ ] CV upload enforces size cap + MIME allowlist server-side; rejecting test + accepting test
-- [ ] vitest, type-check, lint all green in the worktree
+- [x] all auth/profile forms validate with RHF+zod; invalid submits blocked client-side with messages; vitest coverage for each form (e108eed: ChangePassword+ChangeEmail use zodResolver; DeleteAccount uses RHF inline validate; 11 vitest tests; messages appear as role=alert)
+- [x] KanbanBoard fully keyboard-operable via @dnd-kit (documented key map); a11y assertions in tests (e108eed: DndContext+KeyboardSensor+PointerSensor wired; sr-only hint para with Space/Arrow/Enter/Escape map; 6 vitest a11y assertions)
+- [x] CV upload enforces size cap + MIME allowlist server-side; rejecting test + accepting test (e108eed: 413 for >10MB, 415 for non-PDF/DOCX; 6 pytest tests: oversized, boundary, .txt, no-ext, .pdf, .docx)
+- [x] vitest, type-check, lint all green in the worktree (e108eed: 71 vitest passed, tsc clean, eslint exit 0)
 
 ## M4 — Docs and hygiene match reality  [worker-parallel, no code]
 claimed-by: -   status: DONE (worker cb350db; integrated 83864b2 with 5 wave-survivor fixes incl. slug truth 264 — see JOURNAL round 3)
