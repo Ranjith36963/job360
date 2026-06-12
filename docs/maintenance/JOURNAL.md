@@ -206,3 +206,10 @@ Sonnet executor un-skipped all 13 `_PRE_STEP_1_5_SCAFFOLDING_DEBT` tests in test
 - Did NOT fetch (network; not needed — branch is source of truth, owner manages pushes/PRs). If the owner wants an accurate remote picture, a `git fetch` would refresh it.
 - Open work is all owner-gated or worker-frontend: M2 (Pillar-2 hands-off), 7b (vector-index move, needs owner OK), M3-rem/M7a/M8a (follow-ups), 8/9/10 (matcher; 9 needs a migration = NEEDS-HUMAN). No auto-pickup per throttle.
 - Minimal round. No code, no commit beyond this journal line. Lock released.
+
+## 2026-06-12 ~23:00 UTC — INTEGRATOR ROUND 14 (heartbeat) — MINIMAL (branch state clarified)
+- Investigated apparent "other-branch work" (streamlit removal 5469beb, security fixes 0973f19, source filters): `git branch -a --contains` finds them on NO live branch — orphaned objects from old fetch/PR states. Not active work.
+- Loop branch fix/per-user-search-and-scoring-gate is the most advanced LOCAL line: merge-base with local `main` IS main's tip (7c7a461); branch is 76 ahead, main has 0 commits the branch lacks. No real divergence.
+- CAVEAT (genuine, unresolved): local origin/main ref is stale (last fetch 2026-06-08). Cannot confirm the TRUE current remote main without a read-only `git fetch`. The orphaned streamlit/security commits HINT a parallel line may exist on the real remote — or may be abandoned. Owner should confirm the loop branch is canonical, or authorize a fetch.
+- Calibration note for future rounds: round 13 + 14 both started to over-flag "divergence" off stale/orphaned refs. RULE: before claiming divergence, run `git branch -a --contains <sha>` (is it on a LIVE branch?) AND check `origin/*` ref freshness. Only a live branch with commits HEAD lacks is real divergence.
+- No integration, no P1, no owner-directed item → minimal. No code. Lock released.
