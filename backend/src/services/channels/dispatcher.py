@@ -284,7 +284,7 @@ async def dispatch(
                     channel_id=ch["id"],
                     channel_type=ch_type,
                     ok=bool(ok),
-                    error="" if ok else "apprise returned False",
+                    error="" if ok else "delivery failed - check the channel URL and credentials",
                 )
             )
         except Exception as e:  # noqa: BLE001 — caller gets the string
@@ -346,7 +346,7 @@ async def test_send(db: aiosqlite.Connection, channel_id: int, *, user_id: Optio
             channel_id=row["id"],
             channel_type=row["channel_type"],
             ok=bool(ok),
-            error="" if ok else "apprise returned False",
+            error="" if ok else "delivery failed - check the channel URL and credentials",
         )
     except Exception as e:  # noqa: BLE001
         return ChannelSendResult(

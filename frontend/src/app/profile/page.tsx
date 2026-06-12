@@ -335,11 +335,11 @@ export default function ProfilePage() {
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-score-high">
                       Primary
                     </p>
-                    {profile.skill_tiers.primary.length === 0 ? (
+                    {(profile.skill_tiers.primary ?? []).length === 0 ? (
                       <p className="text-xs text-muted-foreground">None</p>
                     ) : (
                       <ul className="flex flex-wrap gap-1.5">
-                        {profile.skill_tiers.primary.map((skill) => (
+                        {(profile.skill_tiers.primary ?? []).map((skill) => (
                           <li
                             key={skill}
                             className="rounded-full bg-score-high/10 px-2.5 py-0.5 text-xs font-medium text-score-high"
@@ -356,11 +356,11 @@ export default function ProfilePage() {
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-yellow-500">
                       Secondary
                     </p>
-                    {profile.skill_tiers.secondary.length === 0 ? (
+                    {(profile.skill_tiers.secondary ?? []).length === 0 ? (
                       <p className="text-xs text-muted-foreground">None</p>
                     ) : (
                       <ul className="flex flex-wrap gap-1.5">
-                        {profile.skill_tiers.secondary.map((skill) => (
+                        {(profile.skill_tiers.secondary ?? []).map((skill) => (
                           <li
                             key={skill}
                             className="rounded-full bg-yellow-500/10 px-2.5 py-0.5 text-xs font-medium text-yellow-500"
@@ -377,11 +377,11 @@ export default function ProfilePage() {
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Tertiary
                     </p>
-                    {profile.skill_tiers.tertiary.length === 0 ? (
+                    {(profile.skill_tiers.tertiary ?? []).length === 0 ? (
                       <p className="text-xs text-muted-foreground">None</p>
                     ) : (
                       <ul className="flex flex-wrap gap-1.5">
-                        {profile.skill_tiers.tertiary.map((skill) => (
+                        {(profile.skill_tiers.tertiary ?? []).map((skill) => (
                           <li
                             key={skill}
                             className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"

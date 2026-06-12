@@ -50,7 +50,6 @@ from src.services.skill_matcher import JobScorer, detect_experience_level, salar
 from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
-from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.apis_free.himalayas import HimalayasSource
 from src.sources.apis_free.hn_jobs import HNJobsSource
 from src.sources.apis_free.jobicy import JobicySource
@@ -68,7 +67,6 @@ from src.sources.apis_keyed.jooble import JoobleSource
 from src.sources.apis_keyed.jsearch import JSearchSource
 from src.sources.apis_keyed.reed import ReedSource
 from src.sources.ats.ashby import AshbySource
-from src.sources.ats.comeet import ComeetSource
 from src.sources.ats.greenhouse import GreenhouseSource
 from src.sources.ats.lever import LeverSource
 from src.sources.ats.personio import PersonioSource
@@ -92,11 +90,9 @@ from src.sources.other.indeed import JobSpySource
 from src.sources.other.nofluffjobs import NoFluffJobsSource
 from src.sources.other.themuse import TheMuseSource
 from src.sources.scrapers.aijobs_ai import AIJobsAISource
-from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
 from src.sources.scrapers.bcs_jobs import BCSJobsSource
 from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
-from src.sources.scrapers.jobtensor import JobTensorSource
 from src.sources.scrapers.linkedin import LinkedInSource
 from src.utils.logger import set_run_uuid, setup_logging
 from src.utils.telemetry import source_timer
@@ -143,27 +139,25 @@ SOURCE_REGISTRY = {
     "weworkremotely": WeWorkRemotelySource,
     "realworkfromanywhere": RealWorkFromAnywhereSource,
     "biospace": BioSpaceSource,
-    "jobtensor": JobTensorSource,
     "climatebase": ClimatebaseSource,
     "eightykhours": EightyKHoursSource,
     "bcs_jobs": BCSJobsSource,
     "uni_jobs": UniJobsSource,
     "successfactors": SuccessFactorsSource,
-    "aijobs_global": AIJobsGlobalSource,
     "aijobs_ai": AIJobsAISource,
     # Batch 3 additions
     "teaching_vacancies": TeachingVacanciesSource,
-    "gov_apprenticeships": GovApprenticeshipsSource,
     "nhs_jobs_xml": NHSJobsXMLSource,
     "rippling": RipplingSource,
-    "comeet": ComeetSource,
 }
 
 # Number of unique source instances created by _build_sources().
-# 49 not 50 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 45 not 46 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 4 dead sources removed in the 2026-06 M6 rotation: jobtensor, comeet,
+# gov_apprenticeships, aijobs_global — all upstream-dead.
 # Used by test_main.py::test_source_instance_count_matches_build to catch drift.
 # Update this when adding/removing sources.
-SOURCE_INSTANCE_COUNT = 49
+SOURCE_INSTANCE_COUNT = 45
 
 
 async def _ghost_detection_pass(
@@ -290,20 +284,16 @@ def _build_sources(
         WeWorkRemotelySource(session, search_config=sc),
         RealWorkFromAnywhereSource(session, search_config=sc),
         BioSpaceSource(session, search_config=sc),
-        JobTensorSource(session, search_config=sc),
         ClimatebaseSource(session, search_config=sc),
         EightyKHoursSource(session, search_config=sc),
         BCSJobsSource(session, search_config=sc),
         UniJobsSource(session, search_config=sc),
         SuccessFactorsSource(session, search_config=sc),
-        AIJobsGlobalSource(session, search_config=sc),
         AIJobsAISource(session, search_config=sc),
         # Group L: Batch 3 additions
         TeachingVacanciesSource(session, search_config=sc),
-        GovApprenticeshipsSource(session, search_config=sc),
         NHSJobsXMLSource(session, search_config=sc),
         RipplingSource(session, search_config=sc),
-        ComeetSource(session, search_config=sc),
     ]
     if source_filter:
         # Special case: glassdoor shares JobSpySource with indeed
@@ -331,6 +321,69 @@ def _recency_bucket(date_found: str | None) -> str:
         if hours <= limit:
             return label
     return "older"
+
+
+async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
+    """Funnel -> judge: LLM-match the top shortlisted jobs for THIS user.
+
+    Gated on MATCHER_ENABLED (default off — rule #18 analog: OFF must be a
+    byte-identical no-op). Any failure is logged and swallowed: the judge
+    upgrades scores, it never blocks a run. Lazy imports keep the default
+    path import-free.
+    """
+    try:
+        from src.services.llm_matcher import (  # noqa: PLC0415 — lazy by design
+            MATCHER_ENABLED,
+            MATCHER_MAX_JOBS,
+            MATCHER_THRESHOLD,
+            match_batch,
+            profile_to_matcher_text,
+        )
+
+        if not MATCHER_ENABLED:
+            return
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        profile = load_profile(user_id)
+        if profile is None:
+            logger.info("matcher: no profile for user %s — skipping", user_id)
+            return
+        shortlist = sorted(
+            (
+                j
+                for j in jobs
+                if getattr(j, "id", None) is not None
+                and j.match_score is not None
+                and j.match_score >= MATCHER_THRESHOLD
+            ),
+            key=lambda j: j.match_score,
+            reverse=True,
+        )[:MATCHER_MAX_JOBS]
+        if not shortlist:
+            return
+        t0 = time.perf_counter()
+        logger.info(
+            "matcher: judging %s shortlisted jobs for user %s",
+            len(shortlist),
+            user_id,
+        )
+        results = await match_batch(
+            shortlist,
+            user_id=user_id,
+            profile_text=profile_to_matcher_text(profile),
+            conn=db._conn,
+            semaphore_limit=3,
+        )
+        judged = sum(1 for r in results if r is not None)
+        logger.info(
+            "matcher: judged %s/%s jobs in %.1fs for user %s",
+            judged,
+            len(shortlist),
+            time.perf_counter() - t0,
+            user_id,
+        )
+    except Exception as e:  # noqa: BLE001 — judge failure must never kill the run
+        logger.warning("matcher stage failed (run continues): %s", e)
 
 
 async def run_search(
@@ -567,22 +620,6 @@ async def run_search(
             unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
             logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
 
-            # Step-1 B7 — gate LLM enrichment by score. No-op when the flag
-            # is OFF (CLAUDE.md rule #18). Only high-scored jobs go to the
-            # LLM, and the call fans out via a bounded semaphore so a slow
-            # provider can't block the pipeline.
-            if ENRICHMENT_ENABLED:
-                high_scored = [
-                    j for j in unique_jobs if j.match_score is not None and j.match_score >= ENRICHMENT_THRESHOLD
-                ]
-                if high_scored:
-                    logger.info(
-                        "Enriching %s jobs with match_score >= %s",
-                        len(high_scored),
-                        ENRICHMENT_THRESHOLD,
-                    )
-                    await enrich_batch(high_scored, semaphore_limit=10, conn=db._conn)
-
             if dry_run:
                 # Dry run: show results without DB writes or notifications
                 unique_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
@@ -605,6 +642,45 @@ async def run_search(
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info("New jobs: %s", len(new_jobs))
+
+            # Attach each job's DB id (the PK assigned by INSERT, resolved via
+            # normalized key). The Job dataclass carries no id until now, and
+            # enrich_batch persists keyed on ``job.id`` — so this MUST happen
+            # before enrichment or every result is silently dropped.
+            for job in unique_jobs:
+                cur = await db._conn.execute(
+                    "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
+                    job.normalized_key(),
+                )
+                r = await cur.fetchone()
+                job.id = r[0] if r is not None else None
+
+            # Step-1 B7 — gate LLM enrichment by score. No-op when the flag is
+            # OFF (CLAUDE.md rule #18). B7-2 fix: this runs AFTER insert so the
+            # jobs carry their DB id; enrich_batch persists to job_enrichment,
+            # which the scorer's enrichment_lookup applies on subsequent runs.
+            # Only high-scored jobs go to the LLM, fanned out via a bounded
+            # semaphore so a slow provider can't block the pipeline.
+            if ENRICHMENT_ENABLED:
+                high_scored = [
+                    j
+                    for j in unique_jobs
+                    if getattr(j, "id", None) is not None
+                    and j.match_score is not None
+                    and j.match_score >= ENRICHMENT_THRESHOLD
+                ]
+                if high_scored:
+                    logger.info(
+                        "Enriching %s jobs with match_score >= %s",
+                        len(high_scored),
+                        ENRICHMENT_THRESHOLD,
+                    )
+                    # Concurrency 3 (not 10): free-tier LLMs cap at ~30 requests/min
+                    # (Cerebras) and small token/min budgets (Groq). A burst of 10
+                    # concurrent × retries 429s every provider at once. 3 keeps the
+                    # batch under the per-minute limits while still parallelising.
+                    await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
+                    await db.commit()
 
             # Per-user feed: write THIS user's matched jobs into user_feed so the
             # dashboard shows only their jobs. The shared `jobs` table is the
@@ -636,6 +712,11 @@ async def run_search(
                     except Exception as e:  # never let a feed write fail the whole run
                         logger.warning("user_feed write failed for %r: %s", job.title, e)
                 logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)
+
+            # Funnel -> judge (LLM matcher). Per-user, post-feed-write so the
+            # verdict UPDATE always finds its user_feed row. Default OFF.
+            if user_id is not None and unique_jobs:
+                await _run_matcher_stage(db, user_id=user_id, jobs=unique_jobs)
 
             # Step-1 B8 — vector index upsert for newly-inserted jobs.
             # Gated on SEMANTIC_ENABLED (CLAUDE.md rule #18 — opt-in default OFF).
@@ -730,6 +811,7 @@ async def run_search(
                 per_source_errors=per_source_errors,
                 per_source_duration=per_source_duration,
                 total_duration=total_duration,
+                user_id=user_id,
             )
 
             # Step-5 — export metrics snapshots after every run (non-fatal).

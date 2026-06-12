@@ -45,3 +45,11 @@ frontend/playwright-report/
 # Personal/local Claude Code config — machine-specific (permissions, hooks).
 # Stays on disk; should not be version-controlled (W2 review fix).
 .claude/settings.local.json
+User_info/
+backend/data/experiment/
+
+# Per-tree test-gate stamp (scripts/agent-gate.sh) - never committable
+.claude/gate-stamp
+
+# Loop round lock - transient, never committable
+docs/maintenance/.lock

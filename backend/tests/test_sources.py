@@ -39,19 +39,15 @@ from src.sources.feeds.workanywhere import WorkAnywhereSource
 from src.sources.feeds.weworkremotely import WeWorkRemotelySource
 from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
 from src.sources.feeds.biospace import BioSpaceSource
-from src.sources.scrapers.jobtensor import JobTensorSource
 from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
 from src.sources.scrapers.bcs_jobs import BCSJobsSource
 from src.sources.feeds.uni_jobs import UniJobsSource
 from src.sources.ats.successfactors import SuccessFactorsSource
-from src.sources.scrapers.aijobs_global import AIJobsGlobalSource
 from src.sources.scrapers.aijobs_ai import AIJobsAISource
 from src.sources.apis_free.teaching_vacancies import TeachingVacanciesSource
-from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
 from src.sources.ats.rippling import RipplingSource
-from src.sources.ats.comeet import ComeetSource
 from src.services.profile.models import SearchConfig
 
 
@@ -242,6 +238,35 @@ def test_jobicy_parses_response():
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jobicy"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_jobicy_request_omits_short_tag_param():
+    """Jobicy's API 400s on 'tag' values under 3 chars; we must not send one.
+    Regression for the live HTTP 400 ('tag=ai') seen 2026-06-10."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://jobicy\.com/api/v2/remote-jobs.*"), payload={"jobs": []})
+                source = JobicySource(session)
+                await source.fetch_jobs()
+                # aioresponses records calls keyed by (method, URL); params are in kwargs
+                calls_list = list(m.requests.values())
+                assert len(calls_list) == 1, "Expected exactly one GET to Jobicy"
+                request_call = calls_list[0][0]
+                params_sent = request_call.kwargs.get("params") or {}
+                # Jobicy 400s on any tag shorter than 3 chars — must not send 'tag=ai'
+                assert "tag" not in params_sent, (
+                    f"'tag' key must not be in Jobicy request params; got {params_sent}"
+                )
+                # Fallback: if params were encoded into the URL key instead
+                url_key = str(list(m.requests.keys())[0])
+                assert "tag=" not in url_key, (
+                    f"'tag=' must not appear in the request URL; got {url_key}"
+                )
         finally:
             await session.close()
     _run(_test())
@@ -1551,43 +1576,6 @@ def test_biospace_parses_rss():
     _run(_test())
 
 
-# ---- JobTensor ----
-
-JOBTENSOR_HTML = """<html><body>
-<div class="job-card">
-  <a href="/uk/job/ml-engineer-123">ML Engineer</a>
-  <span class="company">TensorCo</span>
-  <span class="location">London, UK</span>
-  <span class="salary">70,000 - 100,000</span>
-</div>
-<div class="job-card">
-  <a href="/uk/job/marketing-456">Marketing Manager</a>
-  <span class="company">OtherCo</span>
-  <span class="location">London</span>
-</div>
-</body></html>"""
-
-
-def test_jobtensor_parses_html():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                # AJAX API returns empty, falls back to HTML
-                m.get(re.compile(r"https://jobtensor\.com/ajax/.*"),
-                      payload={"total": 0, "hits": []})
-                m.get("https://jobtensor.com/uk/AI-Machine-Learning-jobs",
-                      body=JOBTENSOR_HTML, content_type="text/html")
-                source = JobTensorSource(session)
-                jobs = await source.fetch_jobs()
-                assert isinstance(jobs, list)
-                if jobs:
-                    assert all(j.source == "jobtensor" for j in jobs)
-        finally:
-            await session.close()
-    _run(_test())
-
-
 # ---- Climatebase ----
 
 CLIMATEBASE_HTML = """<html><body>
@@ -1763,49 +1751,6 @@ def test_successfactors_parses_sitemap():
     _run(_test())
 
 
-# ---- AI Jobs Global ----
-
-AIJOBS_GLOBAL_HTML = """<html><body>
-<div class="job-listing">
-  <a href="/job/ml-engineer-globalco-123">ML Engineer</a>
-  <span class="company">GlobalCo</span>
-  <span class="location">London, UK</span>
-</div>
-</body></html>"""
-
-
-def test_aijobs_global_parses_html():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                # AJAX endpoint returns results
-                m.get(re.compile(r"https://ai-jobs\.global/wp-admin/admin-ajax\.php.*"),
-                      payload=[{"label": "ML Engineer", "url": "https://ai-jobs.global/jobs/123", "company": "GlobalCo", "location": "London, UK"}],
-                      repeat=True)
-                sc = _make_search_config(["ML engineer"])
-                source = AIJobsGlobalSource(session, search_config=sc)
-                jobs = await source.fetch_jobs()
-                assert isinstance(jobs, list)
-                if jobs:
-                    assert all(j.source == "aijobs_global" for j in jobs)
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_aijobs_global_skips_without_queries():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            source = AIJobsGlobalSource(session)
-            jobs = await source.fetch_jobs()
-            assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
 # ---- AI Jobs AI ----
 
 AIJOBS_AI_HTML = """<html><body>
@@ -1909,88 +1854,6 @@ def test_teaching_vacancies_handles_http_error():
             with aioresponses() as m:
                 m.get(TeachingVacanciesSource.API_URL, status=503, repeat=True)
                 source = TeachingVacanciesSource(session)
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-# ---- GOV.UK Apprenticeships ----
-# Rate-limit: 150 requests per 5 minutes per published docs at
-# https://findapprenticeship.service.gov.uk/pages/api — we poll every 15 min
-# with ≤5 keyword queries, so a full scrape uses ≤5 requests (3.3% of budget).
-
-GOV_APPRENTICESHIPS_PAYLOAD = {
-    "vacancies": [
-        {
-            "title": "Digital Marketing Apprentice",
-            "employerName": "Octopus Energy",
-            "location": "London",
-            "postedDate": "2026-04-12T00:00:00Z",
-            "vacancyUrl": "https://findapprenticeship.service.gov.uk/vacancy/1234",
-            "description": "Digital marketing L3 apprenticeship",
-        },
-        {
-            "title": "Software Engineering Apprentice",
-            "employerName": "BAE Systems",
-            "location": "Portsmouth",
-            "postedDate": "2026-04-11T00:00:00Z",
-            "vacancyUrl": "https://findapprenticeship.service.gov.uk/vacancy/5678",
-            "description": "Level 6 software engineer degree apprenticeship",
-        },
-    ]
-}
-
-
-def test_gov_apprenticeships_parses_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
-                    payload=GOV_APPRENTICESHIPS_PAYLOAD, repeat=True,
-                )
-                sc = _make_search_config(["apprentice"])
-                source = GovApprenticeshipsSource(session, search_config=sc)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) == 2
-                assert jobs[0].source == "gov_apprenticeships"
-                assert jobs[0].date_confidence == "high"
-                assert "Octopus" in jobs[0].company
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_gov_apprenticeships_empty_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
-                    payload={"vacancies": []}, repeat=True,
-                )
-                source = GovApprenticeshipsSource(session)
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_gov_apprenticeships_http_error():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://findapprenticeship\.service\.gov\.uk/api/v1/vacancies.*"),
-                    status=500, repeat=True,
-                )
-                source = GovApprenticeshipsSource(session)
                 jobs = await source.fetch_jobs()
                 assert jobs == []
         finally:
@@ -2152,79 +2015,36 @@ def test_rippling_http_error():
     _run(_test())
 
 
-# ---- Comeet ATS ----
+# ---- JobSpy glassdoor disabled (2026-06: Glassdoor blocks the location lookup) ----
 
-COMEET_PAYLOAD = [
-    {
-        "uid": "c-001",
-        "name": "Data Engineer",
-        "location": {"name": "London, UK"},
-        "time_created": "2026-04-16T12:00:00Z",
-        "url_comeet": "https://www.comeet.co/jobs/acme/c-001",
-        "description": "Data pipelines",
-    },
-    {
-        "uid": "c-002",
-        "name": "Tokyo-Only Role",
-        "location": {"name": "Tokyo, Japan"},
-        "time_created": "2026-04-16T12:00:00Z",
-        "url_comeet": "https://www.comeet.co/jobs/acme/c-002",
-        "description": "Japan only",
-    },
-]
+def test_jobspy_default_sites_exclude_glassdoor():
+    """Glassdoor querying is disabled by default: Glassdoor fronts the
+    findPopularLocationAjax.htm lookup with an anti-bot 403 ("Security |
+    Glassdoor") for every term, so jobspy logged "Glassdoor: location not
+    parsed" at ERROR on every query (6 lines per run) and returned zero
+    glassdoor jobs. Probed 2026-06-11 — the block is term-independent, so
+    no location format fixes it. scrape_jobs must be called with
+    site_name=["indeed"] only; explicit sites=... overrides remain
+    possible for a future re-enable."""
+    import sys
+    from unittest.mock import MagicMock, patch
+    import pandas as pd
 
-
-def test_comeet_parses_response():
     async def _test():
         session = aiohttp.ClientSession()
         try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
-                    payload=COMEET_PAYLOAD, repeat=True,
-                )
-                source = ComeetSource(session, companies=["celonis-process-mining"])
-                jobs = await source.fetch_jobs()
-                # India-only filtered out
-                assert len(jobs) == 1
-                assert jobs[0].source == "comeet"
-                assert jobs[0].title == "Data Engineer"
-                assert jobs[0].date_confidence == "high"
-                assert jobs[0].posted_at == "2026-04-16T12:00:00Z"
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_comeet_empty_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
-                    payload=[], repeat=True,
-                )
-                source = ComeetSource(session, companies=["celonis-process-mining"])
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_comeet_http_error():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://www\.comeet\.co/careers-api/2\.0/company/.*/positions.*"),
-                    status=500, repeat=True,
-                )
-                source = ComeetSource(session, companies=["celonis-process-mining"])
-                jobs = await source.fetch_jobs()
-                assert jobs == []
+            mock_module = MagicMock()
+            mock_module.scrape_jobs = MagicMock(return_value=pd.DataFrame())
+            with patch.dict(sys.modules, {"jobspy": mock_module}):
+                source = JobSpySource(session, search_config=_sc_ai_defaults())
+                await source.fetch_jobs()
+                assert mock_module.scrape_jobs.call_count > 0
+                for call in mock_module.scrape_jobs.call_args_list:
+                    site_name = call.kwargs.get("site_name")
+                    assert site_name == ["indeed"], (
+                        f"scrape_jobs called with site_name={site_name!r}; "
+                        "glassdoor must not be queried by default"
+                    )
         finally:
             await session.close()
     _run(_test())

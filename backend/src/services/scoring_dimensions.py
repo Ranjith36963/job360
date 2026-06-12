@@ -108,8 +108,16 @@ def seniority_score(enrichment: Optional[JobEnrichment], user_experience: str) -
       0 ranks apart → full weight
       1 rank apart  → 62 %
       2 ranks apart → 25 %
-      3+ ranks apart → 0
+      3 ranks apart → −50 % (penalty — a real mismatch, e.g. intern↔senior)
+      4+ ranks apart → −100 % (strong penalty, e.g. intern↔director)
     Missing signal on either side → neutral half weight.
+
+    The negative tail is deliberate: a "no reward" 0 let badly-mismatched roles
+    (an internship for a senior candidate) float to the top on the other
+    dimensions. A penalty pushes them below well-matched roles. Symmetric on
+    ``abs(diff)`` — both an intern role for a senior and a director role for a
+    grad are poor fits. The combined match_score is clamped to [0, 100] in the
+    scorer, so a negative dim simply subtracts.
     """
     max_pts = SENIORITY_WEIGHT
     if enrichment is None or enrichment.seniority == SeniorityLevel.UNKNOWN:
@@ -126,7 +134,9 @@ def seniority_score(enrichment: Optional[JobEnrichment], user_experience: str) -
         return int(round(max_pts * 0.625))
     if diff == 2:
         return int(round(max_pts * 0.25))
-    return 0
+    if diff == 3:
+        return -int(round(max_pts * 0.5))
+    return -max_pts
 
 
 # ---------------------------------------------------------------------------

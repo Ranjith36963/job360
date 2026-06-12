@@ -47,15 +47,20 @@ LEVER_COMPANIES = [
 
 # Workable boards: https://apply.workable.com/api/v2/accounts/{slug}/jobs
 # Verified Feb 2026 + expanded Batch 3 (Apr 2026).
+# Pruned 2026-06-12 (loop round 4): every slug probed live; these 7 return
+# HTTP 404 (account gone) and only burned a request per run: labelbox, adept,
+# livinglens, legalandgeneral, vorboss, welcometothejungle, rateit.
+# Empty-but-valid boards (HTTP 200, 0 openings today) are KEPT — they can
+# repopulate. The API itself is healthy (huggingface returned 9 jobs).
 WORKABLE_COMPANIES = [
-    # Original verified (8)
+    # Original verified (8 → 6 after pruning)
     "benevolentai", "exscientia", "oxa", "cervest",
-    "huggingface", "labelbox", "runway", "adept",
-    # Batch 3 additions (17) — UK/EU startups using Workable
-    "typeform", "livinglens", "phrasee", "signal",
-    "legalandgeneral", "vorboss", "gusto", "welcometothejungle",
+    "huggingface", "runway",
+    # Batch 3 additions (17 → 12 after pruning) — UK/EU startups using Workable
+    "typeform", "phrasee", "signal",
+    "gusto",
     "wunderman", "farfetch", "bumble", "trustpilot",
-    "papa", "upscale", "rateit",
+    "papa", "upscale",
     "mindlabs", "flo",
 ]
 
@@ -243,15 +248,4 @@ RIPPLING_COMPANIES = [
     "figma",
     "scalepath",
     "linear",
-]
-
-
-# Comeet ATS public board: https://www.comeet.co/careers-api/2.0/company/{slug}/positions
-# Added in Batch 3 — starter set of UK-facing slugs.
-COMEET_COMPANIES = [
-    "celonis-process-mining",
-    "riskified",
-    "lightricks",
-    "fiverr",
-    "placer-ai",
 ]

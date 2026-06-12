@@ -10,7 +10,9 @@
     "type-check": "tsc --noEmit",
     "test:unit": "vitest",
     "test:e2e": "playwright test",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "gen:types": "bash ../scripts/gen-api-types.sh",
+    "check:types-drift": "bash ../scripts/gen-api-types.sh && git diff --exit-code -- openapi.json src/lib/api-types.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -45,6 +47,7 @@
     "eslint-config-next": "16.2.2",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "jsdom": "^26.1.0",
+    "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.3"

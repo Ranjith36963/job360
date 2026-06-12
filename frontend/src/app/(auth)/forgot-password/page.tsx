@@ -7,6 +7,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
 import { requestPasswordReset } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -14,27 +17,39 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// ---------------------------------------------------------------------------
+// Schema
+// ---------------------------------------------------------------------------
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setPending(true);
+const forgotSchema = z.object({
+  email: z.string().email("Enter a valid email"),
+});
+
+type ForgotSchema = z.infer<typeof forgotSchema>;
+
+export default function ForgotPasswordPage() {
+  const [submitted, setSubmitted] = useState(false);
+  const [submittedEmail, setSubmittedEmail] = useState("");
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ForgotSchema>({ resolver: zodResolver(forgotSchema) });
+
+  const onSubmit = handleSubmit(async (data) => {
+    setServerError(null);
     try {
-      await requestPasswordReset(email);
+      await requestPasswordReset(data.email);
+      setSubmittedEmail(data.email);
       setSubmitted(true);
     } catch (err) {
       // The backend always returns 204; a failure here is genuinely a
       // network / parse problem and we surface it verbatim.
-      setError(err instanceof Error ? err.message : "request failed");
-    } finally {
-      setPending(false);
+      setServerError(err instanceof Error ? err.message : "request failed");
     }
-  }
+  });
 
   return (
     <div className="mx-auto max-w-md py-16">
@@ -51,7 +66,7 @@ export default function ForgotPasswordPage() {
           {submitted ? (
             <div className="space-y-4">
               <p className="text-sm">
-                If <span className="font-mono">{email}</span> is a Job360
+                If <span className="font-mono">{submittedEmail}</span> is a Job360
                 account, a reset link is on its way.
               </p>
               <p className="text-sm text-muted-foreground">
@@ -72,14 +87,15 @@ export default function ForgotPasswordPage() {
                   id="email"
                   type="email"
                   autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  {...register("email")}
                 />
+                {errors.email && (
+                  <p className="text-sm text-red-400">{errors.email.message}</p>
+                )}
               </div>
-              {error && <p className="text-sm text-red-400">{error}</p>}
-              <Button type="submit" className="w-full" disabled={pending}>
-                {pending ? "Sending…" : "Send reset link"}
+              {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? "Sending…" : "Send reset link"}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
                 <Link href="/login" className="underline">

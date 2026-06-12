@@ -94,6 +94,11 @@ class JobResponse(BaseModel):
     # follow-up batch (see plan §non-scope). Defaults to None today; the
     # frontend renders a fallback "no group info" badge until populated.
     dedup_group_ids: Optional[list[int]] = None
+    # Funnel->judge (LLM matcher) — per-user verdict from user_feed. None for
+    # unauthenticated reads, unjudged jobs, or MATCHER_ENABLED=false.
+    llm_fit_score: Optional[int] = None
+    llm_verdict: Optional[str] = None
+    llm_reason: Optional[str] = None
 
 
 class JobListResponse(BaseModel):

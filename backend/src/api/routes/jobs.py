@@ -168,7 +168,29 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
         nice_to_have_skills=_parse_json_list(row.get("enr_preferred_skills")),
         industry=row.get("enr_category"),
         years_experience_min=row.get("enr_experience_min_years"),
+        # Funnel->judge (LLM matcher) — per-user verdict from user_feed.
+        # None-safe: shared-catalog rows (unauthenticated path) lack these keys.
+        llm_fit_score=row.get("llm_fit_score"),
+        llm_verdict=row.get("llm_verdict"),
+        llm_reason=row.get("llm_reason"),
     )
+
+
+def _profile_query_text(profile) -> str:
+    """Build a semantic-query string from the user's profile — job titles +
+    skills + summary. LinkedIn/GitHub data is already merged into ``cv_data`` by
+    the upload routes, so this naturally includes it. Returns "" when there's
+    nothing usable (caller then falls back to the top job's title)."""
+    cv = getattr(profile, "cv_data", None)
+    if cv is None:
+        return ""
+    parts: list[str] = []
+    parts.extend(getattr(cv, "job_titles", []) or [])
+    parts.extend((getattr(cv, "skills", []) or [])[:40])
+    summary = getattr(cv, "summary", "") or ""
+    if summary:
+        parts.append(summary)
+    return " ".join(p for p in parts if p).strip()
 
 
 def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
@@ -222,24 +244,26 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     # Build the keyword-ranked id list (rows arrive in keyword order).
     keyword_ids = [r["id"] for r in rows if r.get("id") is not None]
 
-    # Stage B — semantic top-K via Chroma. Use the highest-scored job as a
-    # cheap query proxy when no profile vector is available; this keeps the
-    # endpoint usable without a full per-user query-vector cache.
+    # Stage B — semantic top-K via Chroma. Prefer a query vector built from the
+    # CALLER'S PROFILE (CV titles/skills/summary + LinkedIn) so results rank by
+    # similarity to THIS user, not to the top keyword hit. Fall back to the
+    # top-scored job's title only when no profile is available.
     semantic_ids: list[int] = []
     try:
         from src.services.embeddings import encode_job  # noqa: PLC0415
-
-        # Cheap proxy: encode the title of the best keyword hit.
-        # NOTE: a richer implementation would build a vector from the
-        # caller's profile; that lands behind a follow-up flag.
-        head = rows[0]
 
         class _StubJob:
             def __init__(self, title: str, description: str = ""):
                 self.title = title
                 self.description = description
 
-        stub = _StubJob(head.get("title", ""), head.get("description", ""))
+        query_text = _profile_query_text(profile) if profile is not None else ""
+        if query_text:
+            stub = _StubJob(query_text, "")
+        else:
+            # No usable profile — fall back to the best keyword hit's title.
+            head = rows[0]
+            stub = _StubJob(head.get("title", ""), head.get("description", ""))
         query_vec = encode_job(stub, None)
         sem_pairs = vix.query(query_vec, k=min(500, max(len(keyword_ids), 50)))
         semantic_ids = [job_id for job_id, _dist in sem_pairs]
@@ -352,7 +376,13 @@ async def list_jobs(
         all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
 
     if mode == "hybrid":
-        all_rows = _maybe_apply_hybrid_reorder(all_rows, profile=None)
+        # Rank semantically against the caller's OWN profile (not the top job).
+        hybrid_profile = None
+        if user is not None:
+            from src.services.profile.storage import load_profile  # noqa: PLC0415 — lazy
+
+            hybrid_profile = load_profile(user.id)
+        all_rows = _maybe_apply_hybrid_reorder(all_rows, profile=hybrid_profile)
 
     # Filter by hours cutoff
     if hours is not None:

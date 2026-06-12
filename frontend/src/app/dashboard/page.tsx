@@ -64,9 +64,16 @@ export default function DashboardPage() {
 
   // -- Filter / bucket state --
   const [activeBucket, setActiveBucket] = useState("7d");
+  // mode:"hybrid" makes the server fuse the keyword score with the semantic
+  // re-rank against the user's profile (engine #3). Combined with the stable
+  // score-sort below, the result is: highest score first (keyword + enrichment
+  // dims), and among equal scores semantic decides the order. All three engines
+  // participate. Falls back to keyword order automatically when SEMANTIC_ENABLED
+  // is off or the vector index is empty — so this is always safe to request.
   const [filters, setFilters] = useState<JobFilters>({
     hours: 168,
     min_score: 30,
+    mode: "hybrid",
   });
 
   // Keep a ref so the search-complete callback always sees the latest filters
@@ -105,7 +112,20 @@ export default function DashboardPage() {
     placeholderData: (prev) => prev, // keep previous data while re-fetching
   });
 
-  const jobs = jobsData?.jobs ?? [];
+  // Judge outranks funnel: sort by the LLM fit score when a job has been
+  // judged, else the keyword match_score — mirroring the server's
+  // COALESCE(llm_fit_score, score) order so the guarantee holds regardless
+  // of which path served the data. Array#sort is stable, so equal keys keep
+  // the server's secondary (recency) order.
+  const jobs = useMemo(
+    () =>
+      [...(jobsData?.jobs ?? [])].sort(
+        (a, b) =>
+          (b.llm_fit_score ?? b.match_score ?? 0) -
+          (a.llm_fit_score ?? a.match_score ?? 0)
+      ),
+    [jobsData?.jobs]
+  );
   const total = jobsData?.total ?? 0;
 
   // ---------------------------------------------------------------------------
@@ -193,6 +213,7 @@ export default function DashboardPage() {
       } else {
         await setJobAction(jobId, {
           action: action as "liked" | "applied" | "not_interested",
+          notes: "",
         });
       }
     } catch (err) {

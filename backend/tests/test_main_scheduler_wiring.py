@@ -249,6 +249,60 @@ async def test_dashboard_feed_isolated_between_two_users(tmp_db_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_enrichment_runs_after_insert_so_jobs_have_db_ids(tmp_db_path, monkeypatch):
+    """B7-2 regression: the jobs handed to enrich_batch must carry their DB id.
+
+    Enrichment used to run BEFORE the jobs were inserted, so every Job had
+    ``id is None`` — and enrich_batch's persistence (``getattr(job, "id", None)``)
+    silently dropped every result, leaving ``job_enrichment`` permanently empty.
+    This pins that the pipeline now enriches AFTER insert with ids attached.
+    """
+    from migrations import runner
+    from src import main as main_mod
+    from src.repositories.database import JobDatabase
+    from src.services.profile.models import CVData, SearchConfig, UserPreferences, UserProfile
+
+    _setup = JobDatabase(tmp_db_path)
+    await _setup.init_db()
+    await runner.up(tmp_db_path)
+    await _setup.close()
+
+    stub = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["python"]),
+    )
+    monkeypatch.setattr(main_mod, "load_profile", lambda uid: stub)
+    monkeypatch.setattr(
+        main_mod, "generate_search_config",
+        lambda p: SearchConfig(job_titles=["Engineer"], relevance_keywords=["engineer"]),
+    )
+    monkeypatch.setattr(
+        main_mod, "_build_sources",
+        lambda *a, **kw: [_FakeSource("s", "ats", result=[_make_job("Engineer", "AcmeCo")])],
+    )
+
+    # Turn enrichment ON and enrich everything that clears the score filter.
+    monkeypatch.setattr(main_mod, "ENRICHMENT_ENABLED", True)
+    monkeypatch.setattr(main_mod, "ENRICHMENT_THRESHOLD", 0)
+
+    # Capture the jobs handed to enrich_batch (no live LLM — rule #4).
+    captured: dict = {}
+
+    async def fake_enrich_batch(jobs, **kwargs):
+        captured["ids"] = [getattr(j, "id", None) for j in jobs]
+        return [None] * len(jobs)
+
+    monkeypatch.setattr(main_mod, "enrich_batch", fake_enrich_batch)
+
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True, user_id="u1")
+
+    assert captured.get("ids"), "enrich_batch should have been called with at least one job"
+    assert all(i is not None for i in captured["ids"]), (
+        f"every job sent to enrichment must carry its DB id; got {captured['ids']}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_job_detail_dims_are_per_user(tmp_db_path, monkeypatch):
     """Two users with DIFFERENT profiles view the SAME job. The detail-page
     8-D breakdown must reflect EACH user's own profile (not the shared

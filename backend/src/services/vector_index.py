@@ -77,10 +77,14 @@ class VectorIndex:
     ) -> None:
         """Insert-or-replace an embedding for a given job_id."""
         col = self._ensure_collection()
+        # Always send a NON-EMPTY metadata dict: newer chromadb (>=1.x) rejects
+        # an empty dict ("Expected metadata to be a non-empty dict"), and a bare
+        # job_id is a sensible default that also keeps the value a real dict for
+        # any caller/stub that iterates metadatas.
         col.upsert(
             ids=[str(job_id)],
             embeddings=[list(vector)],
-            metadatas=[metadata or {}],
+            metadatas=[metadata or {"job_id": int(job_id)}],
         )
 
     def query(

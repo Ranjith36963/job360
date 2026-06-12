@@ -112,7 +112,7 @@ async def test_dispatch_returns_error_on_apprise_false(channel_db):
 
     assert len(results) == 1
     assert results[0].ok is False
-    assert "returned False" in results[0].error
+    assert "delivery failed" in results[0].error
 
 
 @pytest.mark.asyncio

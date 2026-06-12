@@ -142,11 +142,6 @@ ATS_PROBES: Mapping[str, ATSProbe] = {
         "https://{slug}.recruitee.com/api/offers/",
         _count_offers,
     ),
-    "comeet": ATSProbe(
-        "comeet",
-        "https://www.comeet.co/careers-api/2.0/company/{slug}/positions",
-        _count_list,
-    ),
     "rippling": ATSProbe(
         "rippling",
         "https://ats.rippling.com/api/board/{slug}/jobs",

@@ -640,3 +640,27 @@ class TestCVParserEdgeCases:
 
         result = extract_text("resume.doc")
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# has_linkedin reflects ANY merged LinkedIn signal (B: positions, not just skills)
+# ---------------------------------------------------------------------------
+
+
+def test_has_linkedin_true_from_positions_even_without_skills():
+    """A LinkedIn PDF that yields positions but no detected skills still counts
+    as 'has LinkedIn'. The flag used to check only ``linkedin_skills``, so a
+    successful upload (route returns merged=True on skills OR positions) left
+    has_linkedin=False — the dashboard never showed LinkedIn as connected."""
+    from src.api.routes.profile import _build_profile_response
+
+    profile = UserProfile(
+        cv_data=CVData(
+            raw_text="x", skills=["python"], job_titles=["ML Engineer"],
+            linkedin_skills=[],  # none detected
+            linkedin_positions=[{"title": "Senior ML Engineer", "company": "Acme"}],
+        ),
+        preferences=UserPreferences(target_job_titles=["ML Engineer"]),
+    )
+    resp = _build_profile_response(profile)
+    assert resp.summary.has_linkedin is True

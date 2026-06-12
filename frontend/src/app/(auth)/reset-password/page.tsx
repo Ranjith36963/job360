@@ -10,6 +10,9 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
 import { confirmPasswordReset } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -17,45 +20,56 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+// ---------------------------------------------------------------------------
+// Schema
+// ---------------------------------------------------------------------------
+
+const resetSchema = z
+  .object({
+    password: z.string().min(8, "At least 8 characters"),
+    confirm: z.string().min(1, "Required"),
+  })
+  .refine((d) => d.password === d.confirm, {
+    message: "Passwords must match",
+    path: ["confirm"],
+  });
+
+type ResetSchema = z.infer<typeof resetSchema>;
+
 function ResetForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
 
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ResetSchema>({ resolver: zodResolver(resetSchema) });
+
+  const onSubmit = handleSubmit(async (data) => {
+    setServerError(null);
     if (!token) {
-      setError("Reset token missing from URL. Use the link from your email.");
+      setServerError("Reset token missing from URL. Use the link from your email.");
       return;
     }
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-    setPending(true);
     try {
-      await confirmPasswordReset(token, password);
+      await confirmPasswordReset(token, data.password);
       setDone(true);
     } catch (err) {
       // Backend returns 400 for any failure (unknown / expired / used /
       // deleted-user). Show a generic message — don't help an attacker
       // distinguish those cases.
-      setError(
+      setServerError(
         err instanceof Error
           ? err.message
           : "Reset link is invalid or expired. Request a new one.",
       );
-    } finally {
-      setPending(false);
     }
-  }
+  });
 
   if (done) {
     return (
@@ -79,11 +93,11 @@ function ResetForm() {
           id="password"
           type="password"
           autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          {...register("password")}
         />
+        {errors.password && (
+          <p className="text-sm text-red-400">{errors.password.message}</p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="confirm">Confirm new password</Label>
@@ -91,15 +105,15 @@ function ResetForm() {
           id="confirm"
           type="password"
           autoComplete="new-password"
-          required
-          minLength={8}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
+          {...register("confirm")}
         />
+        {errors.confirm && (
+          <p className="text-sm text-red-400">{errors.confirm.message}</p>
+        )}
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? "Updating…" : "Set new password"}
+      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      <Button type="submit" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? "Updating…" : "Set new password"}
       </Button>
       <p className="text-center text-sm text-muted-foreground">
         <Link href="/login" className="underline">

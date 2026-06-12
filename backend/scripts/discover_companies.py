@@ -50,7 +50,6 @@ _ATS_TO_LISTVAR = {
     "ashby": "ASHBY_COMPANIES",
     "smartrecruiters": "SMARTRECRUITERS_COMPANIES",
     "recruitee": "RECRUITEE_COMPANIES",
-    "comeet": "COMEET_COMPANIES",
     "rippling": "RIPPLING_COMPANIES",
 }
 

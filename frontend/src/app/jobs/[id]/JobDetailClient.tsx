@@ -147,7 +147,7 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
           await removeJobAction(job.id);
           setJob((prev) => (prev ? { ...prev, action: null } : prev));
         } else {
-          await setJobAction(job.id, { action });
+          await setJobAction(job.id, { action, notes: "" });
           setJob((prev) => (prev ? { ...prev, action } : prev));
         }
       } catch {

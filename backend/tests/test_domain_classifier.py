@@ -201,36 +201,23 @@ def test_base_source_has_general_default():
         ("src.sources.apis_free.teaching_vacancies", "TeachingVacanciesSource", {"education"}),
         ("src.sources.scrapers.climatebase", "ClimatebaseSource", {"climate"}),
         ("src.sources.scrapers.bcs_jobs", "BCSJobsSource", {"tech"}),
-        ("src.sources.scrapers.jobtensor", "JobTensorSource", {"tech"}),
         ("src.sources.apis_free.devitjobs", "DevITJobsSource", {"tech"}),
         ("src.sources.apis_free.landingjobs", "LandingJobsSource", {"tech"}),
         ("src.sources.apis_free.aijobs", "AIJobsSource", {"tech"}),
         ("src.sources.apis_free.hn_jobs", "HNJobsSource", {"tech"}),
         ("src.sources.other.hackernews", "HackerNewsSource", {"tech"}),
         ("src.sources.other.nofluffjobs", "NoFluffJobsSource", {"tech"}),
-        ("src.sources.scrapers.aijobs_global", "AIJobsGlobalSource", {"tech"}),
         ("src.sources.scrapers.aijobs_ai", "AIJobsAISource", {"tech"}),
     ],
 )
 def test_domain_tagged_sources_have_correct_domains(import_path, class_name, expected):
-    """The 17 single-domain sources in this parametrize list must advertise
-    the right set. (The 18th overridden source, gov_apprenticeships with
-    multi-tag {"education", "general"}, has its own dedicated test below —
-    total count of `DOMAINS`-overridden sources is 18.)"""
+    """Single-domain sources in this parametrize list must advertise the right
+    set. (jobtensor + aijobs_global were removed in the 2026-06 M6 rotation.)"""
     import importlib
 
     mod = importlib.import_module(import_path)
     cls = getattr(mod, class_name)
     assert cls.DOMAINS == expected
-
-
-def test_apprenticeships_source_spans_education_and_general():
-    """gov_apprenticeships deliberately spans {"education", "general"} — it's
-    the one source where the apprenticeship nature wants education tagging
-    BUT the content spans every trade (healthcare, engineering, finance)."""
-    from src.sources.apis_free.gov_apprenticeships import GovApprenticeshipsSource
-
-    assert GovApprenticeshipsSource.DOMAINS == {"education", "general"}
 
 
 # ---------------------------------------------------------------------------

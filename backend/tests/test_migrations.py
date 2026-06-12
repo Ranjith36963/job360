@@ -112,6 +112,66 @@ async def test_concurrent_up_is_race_safe(tmp_db_path, tmp_migrations_dir):
     assert applied_ids == {"0001_create_alpha", "0002_create_beta"}
 
 
+@pytest.mark.asyncio
+async def test_0017_adds_llm_verdict_columns(tmp_db_path):
+    """Migration 0017 adds the four per-user LLM-matcher columns to user_feed."""
+    # Pre-Batch-2 baseline tables must exist before the runner fires (same
+    # pattern as test_feed_service.py / conftest._bootstrap_async_db).
+    async with aiosqlite.connect(tmp_db_path) as db:
+        await db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'applied',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                jobs_found INTEGER NOT NULL DEFAULT 0,
+                jobs_new INTEGER NOT NULL DEFAULT 0,
+                duration_s REAL
+            );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                description TEXT,
+                apply_url TEXT,
+                source TEXT,
+                date_found TEXT,
+                match_score INTEGER DEFAULT 0,
+                normalized_key TEXT UNIQUE,
+                visa_flag INTEGER DEFAULT 0,
+                date_posted TEXT
+            );
+            """
+        )
+        await db.commit()
+    # Apply all real migrations (0000 -> latest).
+    await runner.up(tmp_db_path)
+    async with aiosqlite.connect(tmp_db_path) as conn:
+        cur = await conn.execute("PRAGMA table_info(user_feed)")
+        cols = {row[1] for row in await cur.fetchall()}
+    assert {"llm_fit_score", "llm_verdict", "llm_reason", "llm_matched_at"} <= cols
+
+
 def test_split_sql_statements_ignores_semicolon_in_inline_comment():
     """Regression: an inline ``--`` comment containing ``;`` must NOT split the
     statement it trails. 0015's ``-- NULL = not yet used; set on consume`` did,

@@ -130,20 +130,16 @@ RATE_LIMITS = {
     "weworkremotely": {"concurrent": 1, "delay": 2.0},
     "realworkfromanywhere": {"concurrent": 1, "delay": 2.0},
     "biospace": {"concurrent": 1, "delay": 2.0},
-    "jobtensor": {"concurrent": 1, "delay": 3.0},
     "climatebase": {"concurrent": 1, "delay": 3.0},
     "eightykhours": {"concurrent": 1, "delay": 2.0},
     "bcs_jobs": {"concurrent": 1, "delay": 3.0},
     "uni_jobs": {"concurrent": 1, "delay": 2.0},
     "successfactors": {"concurrent": 1, "delay": 2.0},
-    "aijobs_global": {"concurrent": 2, "delay": 1.0},
     "aijobs_ai": {"concurrent": 1, "delay": 2.0},
     # Batch 3 additions — published rate-limits cited in each source's tests
     "teaching_vacancies": {"concurrent": 1, "delay": 2.0},  # no stated cap, polite
-    "gov_apprenticeships": {"concurrent": 1, "delay": 2.0},  # 150 req / 5 min
     "nhs_jobs_xml": {"concurrent": 1, "delay": 2.0},  # feed XML, 15-min tier
     "rippling": {"concurrent": 2, "delay": 1.5},  # ATS, 60s tier
-    "comeet": {"concurrent": 2, "delay": 1.5},  # ATS, 60s tier
 }
 
 # Retry
@@ -153,3 +149,18 @@ RETRY_BACKOFF = [1, 2, 4]
 # HTTP
 REQUEST_TIMEOUT = 30
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
+
+# Hard ceiling (seconds) on a single source's whole fetch_jobs() call. The
+# scheduler gathers all ~49 sources at once, so without this one slow/hanging
+# source (a blocked host, a JobSpy scrape, a stuck ATS slug loop) would freeze
+# the entire search — the "Refresh hangs" bug. A source that exceeds this is
+# cancelled and counted as a failure; every other source's results still land.
+# Generous enough for legit multi-request sources (REQUEST_TIMEOUT is per
+# request); since sources run concurrently, total search ~= this value.
+SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))
+
+# ATS boards sweep hundreds of company slugs with per-request rate-limit
+# delays; measured unbounded: greenhouse 138.2s for 1,331 jobs (2026-06-11).
+# The generic 60s cap was cancelling those sweeps mid-flight and silently
+# discarding their results, so the "ats" category gets its own ceiling.
+SOURCE_FETCH_TIMEOUT_ATS = int(os.getenv("SOURCE_FETCH_TIMEOUT_ATS", "240"))

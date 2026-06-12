@@ -28,6 +28,21 @@ _SEMANTIC_STACK = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_chroma(monkeypatch, tmp_path):
+    """Give every test its own EMPTY chroma store.
+
+    These tests otherwise share the real ``data/chroma/`` persist dir, so one
+    test's upserts leak into another's "empty index" assertion. (This stayed
+    hidden while VectorIndex.upsert was silently failing on newer chromadb;
+    once upsert works, the leak surfaces.) Point the default persist dir at a
+    per-test tmp path so isolation is guaranteed.
+    """
+    monkeypatch.setattr(
+        "src.services.vector_index._DEFAULT_PATH", tmp_path / "chroma", raising=False
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Empty-index fallback — no semantic stack needed.
 # ---------------------------------------------------------------------------
@@ -145,3 +160,51 @@ def test_mode_hybrid_populated_index_fuses(monkeypatch):
     assert fused_order != keyword_order, f"Hybrid mode should reorder; got identical order {fused_order}"
     # All rows preserved (no losses).
     assert sorted(fused_order) == sorted(keyword_order)
+
+
+# ---------------------------------------------------------------------------
+# 4. Hybrid query is built from the USER'S PROFILE (not the top keyword hit)
+# ---------------------------------------------------------------------------
+
+
+def test_hybrid_query_uses_profile_when_provided(monkeypatch):
+    """When a profile is passed, the semantic query vector must come from the
+    profile text (titles/skills/summary), not the top keyword row's title."""
+    from src.core import settings
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    monkeypatch.setattr(settings, "SEMANTIC_ENABLED", True, raising=True)
+
+    captured: dict = {}
+
+    def fake_encode_job(job, _enr):
+        captured["text"] = f"{job.title} {job.description}"
+        return [0.1, 0.2, 0.3]
+
+    class _FakeVix:
+        def count(self):
+            return 5
+
+        def query(self, _vec, k):
+            return [(2, 0.1), (1, 0.2)]
+
+    monkeypatch.setattr("src.services.embeddings.encode_job", fake_encode_job)
+    monkeypatch.setattr("src.services.vector_index.VectorIndex", lambda *a, **k: _FakeVix())
+
+    rows = [
+        {"id": 1, "title": "Top Keyword Job", "description": "kw"},
+        {"id": 2, "title": "Other Job", "description": ""},
+    ]
+    profile = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["pytorch", "rag"], job_titles=["Senior ML Engineer"]),
+        preferences=UserPreferences(),
+    )
+
+    jobs_route._maybe_apply_hybrid_reorder(rows, profile=profile)
+
+    assert "Top Keyword Job" not in captured.get("text", ""), (
+        f"query should NOT use the top keyword row; got {captured.get('text')!r}"
+    )
+    assert "Senior ML Engineer" in captured.get("text", "") or "pytorch" in captured.get("text", ""), (
+        f"query should be built from the profile; got {captured.get('text')!r}"
+    )

@@ -1,68 +1,53 @@
 // ---------------------------------------------------------------------------
-// Job360 Frontend — TypeScript types matching FastAPI Pydantic schemas
+// Job360 Frontend — TypeScript types
+//
+// Generated aliases: 26 names aliased from the backend OpenAPI schema.
+// Frontend-only: JobFilters, DuplicateJobsResponse, DuplicateJobSummary,
+//                ProfileVersionDiff, PreferencesRequest, SkillProvenance,
+//                SkillTiers
 // ---------------------------------------------------------------------------
 
-// ---- Job ----
+import type { components } from "./api-types";
 
-export interface JobResponse {
-  id: number;
-  title: string;
-  company: string;
-  location: string;
-  salary: string | null;
-  match_score: number;
-  source: string;
-  date_found: string;
-  apply_url: string;
-  visa_flag: boolean;
-  job_type: string;
-  experience_level: string;
-  // 8D score breakdown
-  role: number;
-  skill: number;
-  seniority_score: number;
-  experience: number;
-  credentials: number;
-  location_score: number;
-  recency: number;
-  semantic: number;
-  penalty: number;
-  // Skill analysis
-  matched_skills: string[];
-  missing_required: string[];
-  transferable_skills: string[];
-  // User action
-  action: string | null;
-  bucket: string;
-  // Step-1 B6 — date-model fields (Pillar 3 Batch 1).
-  posted_at?: string | null;
-  first_seen_at?: string | null;
-  last_seen_at?: string | null;
-  date_confidence?: string | null;
-  staleness_state?: string | null;
-  // Step-1 B6 — enrichment fields (Pillar 2 Batch 2.5 subset).
-  title_canonical?: string | null;
-  seniority?: string | null;
-  employment_type?: string | null;
-  workplace_type?: string | null;
-  visa_sponsorship?: boolean | null;
-  salary_min_gbp?: number | null;
-  salary_max_gbp?: number | null;
-  salary_period?: string | null;
-  salary_currency_original?: string | null;
-  required_skills?: string[] | null;
-  nice_to_have_skills?: string[] | null;
-  industry?: string | null;
-  years_experience_min?: number | null;
-  // Step-2 T1 — dedup group ids (populated by dedup-group writer batch).
-  dedup_group_ids?: number[] | null;
-}
+type Schemas = components["schemas"];
 
-export interface JobListResponse {
-  jobs: JobResponse[];
-  total: number;
-  filters_applied: Record<string, unknown>;
-}
+// ---- Generated aliases ----
+
+export type ActionRequest = Schemas["ActionRequest"];
+export type ActionResponse = Schemas["ActionResponse"];
+export type ApplicationTimelineResponse = Schemas["ApplicationTimelineResponse"];
+export type CVDetail = Schemas["CVDetail"];
+export type HealthResponse = Schemas["HealthResponse"];
+export type JobListResponse = Schemas["JobListResponse"];
+export type JobResponse = Schemas["JobResponse"];
+export type JsonResumeResponse = Schemas["JsonResumeResponse"];
+export type NotificationLedgerEntry = Schemas["NotificationLedgerEntry"];
+export type NotificationLedgerListResponse = Schemas["NotificationLedgerListResponse"];
+export type NotificationRule = Schemas["NotificationRule"];
+export type NotificationRuleCreate = Schemas["NotificationRuleCreate"];
+export type NotificationRuleListResponse = Schemas["NotificationRuleListResponse"];
+export type NotificationRuleUpdate = Schemas["NotificationRuleUpdate"];
+export type PipelineAdvanceRequest = Schemas["PipelineAdvanceRequest"];
+export type PipelineApplication = Schemas["PipelineApplication"];
+export type ProfileResponse = Schemas["ProfileResponse"];
+export type ProfileSummary = Schemas["ProfileSummary"];
+export type ProfileVersionsListResponse = Schemas["ProfileVersionsListResponse"];
+export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];
+export type RunEntry = Schemas["RunEntry"];
+export type SearchStartResponse = Schemas["SearchStartResponse"];
+export type SearchStatusResponse = Schemas["SearchStatusResponse"];
+export type SourceInfo = Schemas["SourceInfo"];
+export type StatusResponse = Schemas["StatusResponse"];
+export type TimelineEntry = Schemas["TimelineEntry"];
+
+// ---- Name bridge: frontend name differs from schema name ----
+
+// The backend schema is RunsListResponse (includes limit + offset pagination).
+// The old hand-written RecentRunsResponse only had { runs, total }.
+// Callers in api.ts and dashboard only use .runs — the extra fields are benign.
+export type RecentRunsResponse = Schemas["RunsListResponse"];
+
+// ---- Frontend-only types (NOT in the backend schema) ----
 
 // T4: 10 new filter fields added
 export interface JobFilters {
@@ -91,232 +76,7 @@ export interface JobFilters {
   sort_by?: "score" | "date" | "salary" | "staleness";
 }
 
-// ---- Profile ----
-
-export interface ProfileSummary {
-  is_complete: boolean;
-  job_titles: string[];
-  skills_count: number;
-  cv_length: number;
-  has_linkedin: boolean;
-  has_github: boolean;
-  education: string[];
-  experience_level: string;
-}
-
-// T3: 6 new CVDetail fields
-export interface CVDetail {
-  raw_text: string;
-  skills: string[];
-  job_titles: string[];
-  education: string[];
-  certifications: string[];
-  summary_text: string;
-  experience_text: string;
-  // Step-2 T3 — new fields
-  name?: string | null;
-  headline?: string | null;
-  location?: string | null;
-  achievements?: string[] | null;
-  highlights?: string[] | null;
-  companies?: string[] | null;
-}
-
-// T2: 7 new ProfileResponse fields + skill tier / esco types
-export interface SkillTiers {
-  primary: string[];
-  secondary: string[];
-  tertiary: string[];
-}
-
-export interface SkillProvenance {
-  cv: string[];
-  linkedin: string[];
-  github: string[];
-  inferred: string[];
-}
-
-export interface ProfileResponse {
-  summary: ProfileSummary;
-  preferences: Record<string, unknown>;
-  cv_detail?: CVDetail | null;
-  // Step-2 T2 — new fields
-  skill_tiers?: SkillTiers | null;
-  skill_esco?: Record<string, string> | null;
-  skill_provenance?: SkillProvenance | null;
-  linkedin_subsections?: Record<string, unknown> | null;
-  github_temporal?: Record<string, unknown> | null;
-  current_version_id?: number | null;
-}
-
-export interface PreferencesRequest {
-  target_job_titles?: string[];
-  additional_skills?: string[];
-  excluded_skills?: string[];
-  preferred_locations?: string[];
-  industries?: string[];
-  salary_min?: number | null;
-  salary_max?: number | null;
-  work_arrangement?: string;
-  experience_level?: string;
-  negative_keywords?: string[];
-  about_me?: string;
-  excluded_companies?: string[];
-}
-
-// ---- Profile versions (Step-2 A1, from S3-MVP endpoints) ----
-
-export interface ProfileVersionSummary {
-  id: number;
-  created_at: string;
-  source_action: string;
-  cv_data: Record<string, unknown> | null;
-  preferences: Record<string, unknown> | null;
-}
-
-export interface ProfileVersionsListResponse {
-  versions: ProfileVersionSummary[];
-  total: number;
-}
-
-export interface JsonResumeResponse {
-  resume: {
-    basics: Record<string, unknown>;
-    work: unknown[];
-    education: unknown[];
-    skills: unknown[];
-    [key: string]: unknown;
-  };
-}
-
-// ---- Search ----
-
-export interface SearchStartResponse {
-  run_id: string;
-  status: string;
-}
-
-// T5: per_source_duration + per_source_errors
-export interface SearchStatusResponse {
-  run_id: string;
-  status: string;
-  progress: string;
-  result: Record<string, unknown> | null;
-  // Step-2 T5 — telemetry fields
-  per_source_duration?: Record<string, number> | null;
-  per_source_errors?: Record<string, string> | null;
-}
-
-// ---- Actions ----
-
-export interface ActionRequest {
-  action: "liked" | "applied" | "not_interested";
-  notes?: string;
-}
-
-export interface ActionResponse {
-  ok: boolean;
-  job_id: number;
-  action: string;
-}
-
-// ---- Pipeline ----
-
-export interface PipelineAdvanceRequest {
-  stage: string;
-}
-
-export interface PipelineApplication {
-  job_id: number;
-  stage: string;
-  created_at: string;
-  updated_at: string;
-  notes: string;
-  title?: string;
-  company?: string;
-}
-
-// ---- Status / Health / Sources ----
-
-export interface StatusResponse {
-  jobs_total: number;
-  last_run: Record<string, unknown> | null;
-  sources_active: number;
-  sources_total: number;
-  profile_exists: boolean;
-}
-
-export interface SourceInfo {
-  name: string;
-  type: string;
-  health: Record<string, unknown>;
-}
-
-export interface HealthResponse {
-  status: string;
-  version: string;
-}
-
-// ---- Step-3: Notification rules (C-02) ----
-
-export interface NotificationRule {
-  id: number;
-  user_id: string;
-  channel: string;
-  score_threshold: number;
-  notify_mode: "instant" | "digest";
-  quiet_hours_start: string | null;
-  quiet_hours_end: string | null;
-  digest_send_time: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface NotificationRuleCreate {
-  channel: string;
-  score_threshold?: number;
-  notify_mode?: "instant" | "digest";
-  quiet_hours_start?: string | null;
-  quiet_hours_end?: string | null;
-  digest_send_time?: string | null;
-  enabled?: boolean;
-}
-
-export interface NotificationRuleUpdate {
-  score_threshold?: number;
-  notify_mode?: "instant" | "digest";
-  quiet_hours_start?: string | null;
-  quiet_hours_end?: string | null;
-  digest_send_time?: string | null;
-  enabled?: boolean;
-}
-
-export interface NotificationRuleListResponse {
-  rules: NotificationRule[];
-}
-
-// ---- Step-3: Notification ledger (C-04) ----
-
-export interface NotificationLedgerEntry {
-  id: number;
-  job_id: number;
-  channel: string;
-  status: string;
-  sent_at: string | null;
-  error_message: string | null;
-  retry_count: number;
-  created_at: string;
-}
-
-export interface NotificationLedgerListResponse {
-  notifications: NotificationLedgerEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-// ---- Step-3: Duplicate jobs (C-05) ----
+// ---- Step-3: Duplicate jobs (C-05) — not in backend OpenAPI schema ----
 
 export interface DuplicateJobSummary {
   id: number;
@@ -333,7 +93,7 @@ export interface DuplicateJobsResponse {
   total: number;
 }
 
-// ---- Step-3: Profile version diff (C-06) ----
+// ---- Step-3: Profile version diff (C-06) — not in backend OpenAPI schema ----
 
 export interface ProfileVersionDiff {
   version_id1: number;
@@ -342,44 +102,39 @@ export interface ProfileVersionDiff {
   changed_fields: string[];
 }
 
-// ---- Step-3: Application timeline (C-11) ----
+// ---- Frontend-only preferences shape (sent as multipart form JSON) ----
 
-export interface TimelineEntry {
-  id: number;
-  job_id: number;
-  user_id: string;
-  from_stage: string | null;
-  to_stage: string;
-  transitioned_at: string;
-  notes: string | null;
+export interface PreferencesRequest {
+  target_job_titles?: string[];
+  additional_skills?: string[];
+  excluded_skills?: string[];
+  preferred_locations?: string[];
+  industries?: string[];
+  salary_min?: number | null;
+  salary_max?: number | null;
+  work_arrangement?: string;
+  experience_level?: string;
+  negative_keywords?: string[];
+  about_me?: string;
+  excluded_companies?: string[];
 }
 
-export interface ApplicationTimelineResponse {
-  job_id: number;
-  timeline: TimelineEntry[];
+// ---- Skill tier / provenance — frontend structuring of profile fields ----
+//
+// The backend ProfileResponse returns skill_tiers / skill_provenance as
+// generic { [key: string]: string[] } dicts.  These interfaces give the
+// frontend a typed view of the well-known keys.  Cast via the helpers on the
+// profile page: (profile.skill_tiers as unknown as SkillTiers | null)
+
+export interface SkillTiers {
+  primary: string[];
+  secondary: string[];
+  tertiary: string[];
 }
 
-// ---- Step-3: Recent runs (C-04 / sidebar) ----
-
-// Mirror of backend RunEntry (src/api/routes/runs.py). Schema-omission
-// previously hid R-1 (cross-tenant leak via user_id surfacing on the
-// wire while the type silently dropped it). Mirror every column the
-// backend may return so devtools / inspections see the full payload.
-export interface RunEntry {
-  id: number;
-  timestamp: string;
-  total_found: number | null;
-  new_jobs: number | null;
-  sources_queried: number | null;
-  per_source: string | null;
-  run_uuid: string | null;
-  per_source_errors: string | null;
-  per_source_duration: string | null;
-  total_duration: number | null;
-  user_id: string | null;
-}
-
-export interface RecentRunsResponse {
-  runs: RunEntry[];
-  total: number;
+export interface SkillProvenance {
+  cv: string[];
+  linkedin: string[];
+  github: string[];
+  inferred: string[];
 }

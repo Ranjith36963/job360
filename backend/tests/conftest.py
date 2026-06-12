@@ -1,3 +1,19 @@
+import os
+
+# --- Rule #18 test hermeticity (Pillar-2 feature flags) --------------------
+# The running app enables ENRICHMENT_ENABLED / SEMANTIC_ENABLED via the repo
+# .env so the dashboard uses all three engines. The test suite must NOT inherit
+# that — rule #18 says behaviour with the flags OFF must be the verified
+# baseline. settings.py calls load_dotenv(override=False), which will not
+# clobber a value already present in os.environ, so seeding "false" here (before
+# any `src.*`/`migrations` import binds the module-level constants) blocks the
+# .env value from leaking into tests. setdefault keeps an explicit shell export
+# (SEMANTIC_ENABLED=true pytest ...) working for ad-hoc debugging, and any test
+# that needs a flag ON opts in via its own monkeypatch.
+os.environ.setdefault("SEMANTIC_ENABLED", "false")
+os.environ.setdefault("ENRICHMENT_ENABLED", "false")
+os.environ.setdefault("MATCHER_ENABLED", "false")
+
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
