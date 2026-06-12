@@ -213,3 +213,9 @@ Sonnet executor un-skipped all 13 `_PRE_STEP_1_5_SCAFFOLDING_DEBT` tests in test
 - CAVEAT (genuine, unresolved): local origin/main ref is stale (last fetch 2026-06-08). Cannot confirm the TRUE current remote main without a read-only `git fetch`. The orphaned streamlit/security commits HINT a parallel line may exist on the real remote — or may be abandoned. Owner should confirm the loop branch is canonical, or authorize a fetch.
 - Calibration note for future rounds: round 13 + 14 both started to over-flag "divergence" off stale/orphaned refs. RULE: before claiming divergence, run `git branch -a --contains <sha>` (is it on a LIVE branch?) AND check `origin/*` ref freshness. Only a live branch with commits HEAD lacks is real divergence.
 - No integration, no P1, no owner-directed item → minimal. No code. Lock released.
+
+## 2026-06-12 ~23:30 UTC — LOOP PAUSED (owner request)
+- Fetch confirmed clean: real origin/main (d97ff88) has 0 non-merge commits the loop branch lacks; loop branch is the canonical, furthest-ahead line; the streamlit/security "ghost" commits are on no branch (abandoned). Resolves the round-13/14 stale-ref caveat.
+- Owner said "pause the loop" → deleted cron 8d6e31e9 (/integrator every 2h). Reason: last 3-4 heartbeats were empty minimal rounds — all remaining work is owner-gated (M2 Pillar-2 hands-off; 7b vector-index move; #9 telemetry migration = NEEDS-HUMAN) or worker-frontend (M3-rem) or follow-ups (M7a, M8a). No safe auto-work left, so the cron was pure token drip.
+- TO RESUME: re-arm a cron pointing at /integrator (e.g. CronCreate "11 */2 * * *" prompt "/integrator", durable) — OR just fire /integrator manually — once an item is unblocked. The board (MISSIONS.md), backlog, telemetry, and REVIEW-PACKET.md hold full state; nothing is lost.
+- Session-end tally: 6 missions DONE (M1/M4/M5/M6/M7/M8) + M3 slice; ~10 fixes; all local on fix/per-user-search-and-scoring-gate, gate-verified, NOT pushed (owner's gate).
