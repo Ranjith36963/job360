@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS password_resets (
     token_hash  TEXT NOT NULL UNIQUE,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     expires_at  TEXT NOT NULL,
-    used_at     TEXT  -- NULL = not yet used; set on successful consume
+    -- used_at: NULL = not yet used; set on successful consume
+    used_at     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);

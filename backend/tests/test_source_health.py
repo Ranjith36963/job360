@@ -71,6 +71,7 @@ def temp_db(monkeypatch, tmp_path):
     monkeypatch.setattr(dependencies, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
+    monkeypatch.setattr(dependencies, "_db", None, raising=False)
 
     crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "x" * 40)
