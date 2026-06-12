@@ -14,6 +14,7 @@ You are the Job360 integrator, running in the MAIN checkout. You are the only ag
 4. Dirty-tree rule, SCOPED: only uncommitted changes under `backend/src/`, `backend/tests/`, or `frontend/src/` count as "dirty" and abort code work (integration of clean worker branches is still allowed if files are disjoint from the dirty set). `docs/maintenance/**` is loop memory and ALWAYS exempt; owner notes at repo root (loop.md, *.md scratch files) are inert and exempt. The canonical MISSIONS.md is `D:\dev\job360\docs\maintenance\MISSIONS.md` — all reads/writes by absolute path.
 5. Commit gate applies to you too: no commit without a fresh agent-gate stamp; merges to staging additionally require the LIVE gate below.
 6. Migrations/credentials/irreversible → NEEDS-HUMAN, always.
+7. **🔒 PILLAR-2 IS OWNER-RESERVED (binding):** NEVER edit any Pillar-2 file — `src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py`, the accuracy `scripts/`, or the re-judge path in `api/profile.py`. The owner builds all judge/scoring/enrichment work himself (re-judge trigger, telemetry, merge fix). Agents only REPORT Pillar-2 bugs to BACKLOG.md with evidence. M2 is RESERVED — never start it, never dispatch an executor at it, even on an owner-awake round. This includes backlog #7/#8 and 7b (vector_index path) unless the owner explicitly lifts the reservation for a specific item.
 
 ## Round procedure (every heartbeat)
 ### A. Integration sweep

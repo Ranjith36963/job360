@@ -231,3 +231,10 @@ Worker-a (laptop) completed M3 on agent/m3-frontend (e108eed): settings/account 
 - Hygiene: gitignored test-artifacts/*.png so verification screenshots never break a gate again.
 - Merge committed 25c1b3c; loop branch fast-forwarded. Account forms live-verified (render + RHF+zod fields present). M3 → fully DONE (slice + worker-a's work combined).
 - NOTE: worker-a's closing-note flags test_retrieval_integration::test_mode_hybrid_empty_index_falls_back as PRE-EXISTING failing on clean d97ff88 (Pillar-2 hands-off zone) — NOT touched, NOT a regression. Filed awareness; it's in the SEMANTIC stack (only runs with the [semantic] extra installed), so it doesn't hit the canonical gate.
+
+## 2026-06-12 ~20:30 UTC — OWNER DIRECTIVE: M2 RESERVED, Pillar-2 hands-off reaffirmed + extended
+Owner: "hands-off STAYS for ALL of Pillar 2, including llm_matcher. M2 is mine — claimed-by owner, status reserved. Agents only report judge bugs with evidence, never edit. I'll build the re-judge trigger + telemetry myself."
+- MISSIONS.md M2 → claimed-by owner, status RESERVED, with explicit owner-reserved file list (incl. llm_matcher.py).
+- Encoded into the loop LAW so no unattended agent can drift: worker rule 5a + integrator rule 7 (never edit Pillar-2; never start M2; report-only).
+- Backlog 7b (vector_index path bug) reclassified OWNER-RESERVED — it's Pillar-2; agents report, owner fixes.
+- Memory updated (pillar2-hands-off): the matcher I authored this session is now the owner's; full reserved list recorded.

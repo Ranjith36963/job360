@@ -29,15 +29,11 @@ DoD:
 - [x] zero HTTP 400 and zero "Expecting value" log lines attributable to these four sources in one fresh pipeline run — integrator CONFIRMED at merge 3315fb3: run b0250268211a @21:10Z has zero such lines; the only matches in the log are pre-merge (run 9673808f @19:36)
 - [x] full backend suite green in the worktree (gate: 1291 passed, 3 skipped after fc55fb8); every fix has appended tests (single-probe/no-WARNING + revival/resume per source; site_name==["indeed"] for JobSpy)
 
-## M2 — Pillar 2: the judge stays correct over time  [worker-parallel, one item NEEDS-HUMAN]
-claimed-by: -   status: OPEN
-Backlog: #7 enrichment merge, #8 re-judge on profile change, (#9 telemetry = M2-3 blocked)
-files-owned: src/services/job_enrichment.py (merge logic), src/services/llm_matcher.py, src/api/profile.py (re-judge trigger), scripts/ (accuracy harness), their tests
-DoD:
-- [ ] enrichment L1 merge no longer prefers weak rules-seniority over LLM "unknown"; accuracy harness shows the measured −10pt regression recovered (run the harness, paste numbers)
-- [ ] profile version change clears/invalidates llm_matched_at for that user; next feed read triggers re-judge; proven by test + a live re-judge demonstration at integration
-- [ ] M2-3 (run_log telemetry columns) requires a migration → logged as NEEDS-HUMAN, not attempted
-- [ ] full backend suite green in the worktree
+## M2 — Pillar 2: the judge stays correct over time  [🔒 OWNER-RESERVED — DO NOT TOUCH]
+claimed-by: **owner**   status: **RESERVED** (owner decision 2026-06-12)
+**🔒 PILLAR-2 HANDS-OFF — BINDING ON ALL AGENTS (worker, integrator, scout, health, executors).** The owner builds the re-judge trigger + telemetry + enrichment-merge fix HIMSELF. No agent edits ANY Pillar-2 code. The hands-off zone EXPLICITLY includes `llm_matcher.py` (the funnel→judge matcher) AND `job_enrichment.py`, `scoring_dimensions.py`, `skill_matcher.py`, `embeddings.py`, `retrieval.py`, `vector_index.py`, the accuracy `scripts/`, and the Pillar-2 re-judge path in `api/profile.py`. Agents may ONLY **report** judge/scoring bugs to BACKLOG.md with evidence (logs, repro, measured numbers) — never fix, never edit, never "improve". If a heartbeat picks M2, it does NOT start it; it leaves this reservation intact.
+Backlog (owner's own list): #7 enrichment merge, #8 re-judge on profile change, #9 telemetry (needs migration).
+files-owned: OWNER ONLY — src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py, src/api/profile.py (re-judge path), scripts/ (accuracy harness), their tests.
 
 ## M3 — Pillar 3: frontend carry-overs  [worker-parallel, frontend-only]
 claimed-by: -   status: DONE (worker-a e108eed integrated → merge 25c1b3c; round 15). Settings/account forms (Change password/email, Delete account) RHF+zod; KanbanBoard @dnd-kit keyboard a11y; CV upload caps. Combined with the integrator's earlier M3-slice (auth forms + bounded-read V-04), M3 is fully complete. V-04 reconciled at merge = best of both (bounded memory-safe read + extension-only MIME). Gate green; account forms live-verified (test-artifacts/m3-account-forms.png). M3-rem follow-ups (noValidate, "50 sources" footer) remain in backlog.
