@@ -1,7 +1,17 @@
 "use client";
-// NOTE: @dnd-kit/core DnD is deferred — install with: npm install @dnd-kit/core @dnd-kit/sortable
 
 import { useState, useCallback } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Send,
   Mail,
@@ -164,6 +174,13 @@ function ApplicationCard({
   const overdue = isOverdue(app);
   const jobLabel = app.title || `Job #${app.job_id}`;
 
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({ id: app.job_id });
+
+  const style = transform
+    ? { transform: CSS.Transform.toString(transform), opacity: isDragging ? 0.5 : undefined }
+    : undefined;
+
   function handleAdvanceClick() {
     if (!next) return;
     // C-09: require confirmation when advancing to "rejected"
@@ -175,7 +192,14 @@ function ApplicationCard({
   }
 
   return (
-    <div className="glass-card rounded-lg p-3 flex flex-col gap-2">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="glass-card rounded-lg p-3 flex flex-col gap-2"
+      {...listeners}
+      {...attributes}
+      aria-describedby="kanban-keyboard-hint"
+    >
       {/* Title + overdue indicator */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -282,6 +306,7 @@ function KanbanColumn({
   const [collapsed, setCollapsed] = useState(false);
   const Icon = stage.icon;
   const count = applications.length;
+  const { isOver, setNodeRef: setDropRef } = useDroppable({ id: stage.key });
 
   return (
     <div
@@ -325,10 +350,11 @@ function KanbanColumn({
 
       {/* Column body */}
       <div
+        ref={setDropRef}
         id={`kanban-col-${stage.key}`}
-        className={`flex-1 rounded-b-xl border ${stage.borderColor} border-t-0 bg-card/30 ${
-          collapsed ? "hidden md:flex" : "flex"
-        } flex-col gap-2 p-2 overflow-y-auto max-h-[500px] md:max-h-[calc(100vh-320px)]`}
+        className={`flex-1 rounded-b-xl border ${stage.borderColor} border-t-0 ${
+          isOver ? "bg-card/60 ring-1 ring-inset ring-primary/30" : "bg-card/30"
+        } ${collapsed ? "hidden md:flex" : "flex"} flex-col gap-2 p-2 overflow-y-auto max-h-[500px] md:max-h-[calc(100vh-320px)]`}
       >
         {applications.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -366,6 +392,12 @@ interface KanbanBoardProps {
 }
 
 export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardProps) {
+  // Keyboard map: Space = pick up / drop, Arrow keys = move between columns, Escape = cancel
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor),
+  );
+
   // C-10: filtered subset
   const [filteredApps, setFilteredApps] = useState<PipelineApplication[]>(applications);
 
@@ -429,6 +461,21 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
     onRefresh?.();
   }, [onRefresh]);
 
+  // Handle drag-end: advance card to the dropped column
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over) return;
+    const jobId = Number(active.id);
+    const targetStage = String(over.id);
+    const app = filteredApps.find((a) => a.job_id === jobId);
+    if (!app || app.stage === targetStage) return;
+    if (targetStage === "rejected") {
+      handleRequestConfirm(jobId, targetStage);
+    } else {
+      onAdvance(jobId, targetStage);
+    }
+  }
+
   // Group filtered applications by stage
   const grouped = STAGES.reduce(
     (acc, stage) => {
@@ -439,7 +486,13 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
   );
 
   return (
-    <>
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      {/* Visually-hidden keyboard map — announced to screen readers */}
+      <p id="kanban-keyboard-hint" className="sr-only">
+        Keyboard: Space to pick up a card, Arrow keys to move between columns,
+        Space or Enter to drop, Escape to cancel.
+      </p>
+
       {/* C-10: Filter panel */}
       <PipelineFilterPanel
         applications={applications}
@@ -569,6 +622,6 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
           </div>
         </SheetContent>
       </Sheet>
-    </>
+    </DndContext>
   );
 }

@@ -172,7 +172,20 @@ async def upsert_profile(
     # Parse CV if provided
     if cv is not None:
         content = await cv.read()
-        suffix = os.path.splitext(cv.filename or ".pdf")[1] or ".pdf"
+        # V-04: enforce size cap and MIME allowlist server-side
+        _MAX_CV_BYTES = 10 * 1024 * 1024  # 10 MB
+        if len(content) > _MAX_CV_BYTES:
+            raise HTTPException(status_code=413, detail="CV file exceeds the 10 MB limit.")
+        suffix = os.path.splitext(cv.filename or "")[1].lower() if cv.filename else ""
+        _ALLOWED = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        if suffix not in _ALLOWED:
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file type. Upload a PDF or DOCX.",
+            )
         tmp_path = save_upload_to_temp(content, suffix)
         try:
             try:
