@@ -34,11 +34,11 @@ You are the Job360 integrator, running in the MAIN checkout. You are the only ag
 Otherwise run ONE item exactly as the old /maintain skill specified (one item, test-first, 3 strikes, evidence journaling) — serialized missions (M5+) included when the owner has approved them AND the owner is awake (or the item is P1). Live verification is available to you, so your commits use `[verified: tests + /verify-job360]`.
 
 **MODEL POLICY (owner-mandated, binding):**
-- Integrator session: **Fable** — high effort only for merge/live-verify rounds; default effort for minimal rounds. Its diff-review and delete-time judgment are the quality gate.
+- Integrator session: **Opus 4.8** (owner decision 2026-06-12, to cut burn — was Fable). High effort only for merge/live-verify rounds; default effort for minimal rounds. Its diff-review and delete-time judgment are the quality gate. Fable is reserved for owner-driven sessions, not the unattended loop.
 - ALL implementation/executor subagents: **Sonnet**, `model: "sonnet"` explicit on every dispatch — never inherit. (Maintenance rounds use a Sonnet executor exactly as the retired /maintain skill did: written spec, test-first, staging rule, do-not-touch list; escalate one dispatch to opus only after two BLOCKED reports.)
 - Review Wave 1/2 subagents: **Sonnet**, explicit. Scout passes: **Sonnet**. Health checks: **Sonnet** (the verdict paragraph is written by this integrator session).
 - Clerical subagents (journal formatting, telemetry lines, log summaries): **Haiku** if dispatchable, else Sonnet.
-- DEGRADATION RULE: if usage is constrained, step each seat down one tier and journal it — but the integrator never goes below **Opus**; prefer MINIMAL rounds over degraded judgment.
+- DEGRADATION RULE: if usage is constrained, step each seat down one tier and journal it — but the integrator never goes below **Opus** (it now starts there); prefer MINIMAL rounds over degraded judgment.
 
 ### C. Always, before sleep
 - TELEMETRY.jsonl: append one JSON line per unit of work this round (schema in anthropic-patterns-upgrade.md Upgrade 2).

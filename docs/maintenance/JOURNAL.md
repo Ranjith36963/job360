@@ -139,3 +139,9 @@ Run 2/2 clean (above) — two consecutive clean live runs ticked. **M5 → DONE.
 
 ### Round 1 addendum — NEAR-MISS during pruning (owner-ordered "stray root data/chroma" deletion)
 Deletion FAILED with a file lock — investigated before retrying, and the "stray" is the LIVE vector index: `vector_index.py:19` uses `parents[3]` (repo root), contradicting its own docstring (`backend/data/chroma`). Root `data/chroma` = 5 files/0.6MB = the only copy of the 92 embeddings; `backend/data/chroma` is EMPTY. Deleting it would have silently degraded hybrid to keyword (graceful fallback hides the loss). Deletion ABORTED; new backlog item 7b (fix path to parents[2] + move index + live-verify). LESSON for all agents: a file lock during cleanup is a STOP signal, not an obstacle — something live owns that file; identify the owner before retrying.
+
+## 2026-06-12 ~07:11 UTC — INTEGRATOR ROUND 5 (heartbeat) — MINIMAL
+minimal round — board state: nothing to integrate (no worker commits since M4); no actionable P1 (item 7 = M2 worker files, aged not started per throttle; 7b is P2); M2/M3/M8 OPEN for workers; M6/M7/C1 await owner-awake. No code touched, no commit. Lock released.
+
+## 2026-06-12 ~09:11 UTC — INTEGRATOR ROUND 6 (heartbeat) — policy edit
+Was a minimal round (nothing to integrate, no actionable P1). Owner directive mid-round: move the integrator seat OFF Fable to **Opus 4.8** to cut burn (owner already set the session default). Encoded: integrator skill MODEL POLICY now Opus 4.8 (degradation floor unchanged — it starts at Opus); worker skill notes Fable is not used in the loop at all. No product code touched; docs/skills only. Board otherwise unchanged: M2/M3/M8 open for workers, M6/M7/C1 await owner-awake, NEEDS-HUMAN queue intact.

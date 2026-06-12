@@ -15,7 +15,7 @@ You are a Job360 worker running in YOUR OWN worktree on YOUR OWN branch. You cla
 5. Migrations, credentials, paid APIs, irreversible operations → mark the task NEEDS-HUMAN in your mission entry and move on.
 6. Max 3 fix attempts per task; then `git checkout -- .` (your changes only), record the diagnosis in your mission entry, move to the next task.
 7. **MODEL POLICY (owner-mandated, binding):**
-   - Worker LEAD session: **Sonnet** (owner decision 2026-06-11; worker-a runs Sonnet 4.6). Escalate the lead to **Opus** for a mission you assess as design-heavy or ambiguous — journal the escalation. **Fable never**, unless the mission touches a CORE-list file (MISSIONS.md header) AND the owner approves; journal it. Quality backstop: the integrator (strong model) re-reviews everything at merge — your gate-stamped tests must carry the proof burden.
+   - Worker LEAD session: **Sonnet** (owner decision 2026-06-11; worker-a runs Sonnet 4.6). Escalate the lead to **Opus** for a mission you assess as design-heavy or ambiguous — journal the escalation. **Fable is not used in the loop at all** (owner cost decision 2026-06-12); the integrator runs Opus and re-reviews everything at merge — your gate-stamped tests carry the proof burden.
    - ALL implementation subagents: **Sonnet**, `model: "sonnet"` set explicitly on every dispatch — never inherit the parent model.
    - Review Wave 1 and Wave 2 subagents: **Sonnet**, explicit.
    - Clerical subagents (journal formatting, telemetry lines, log summaries): **Haiku** (`model: "haiku"`) if dispatchable, else Sonnet.
