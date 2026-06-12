@@ -72,7 +72,8 @@ DoD:
 Backlog 16b. status: DONE (1e709f7, round 8). 5 surfaces + SOURCE_INSTANCE_COUNT 49→45 + 4 files deleted + docs. Gate 1272 passed; live /api/sources = 46, 4 confirmed gone, lookalikes kept. Adversarial waves: 2 raw → 1 confirmed-fixed (discover_companies map) + 1 refuted (phase history). Five surfaces per rules #8/#13 (SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli, test_api) + doc count refs (CLAUDE.md/STATUS/ARCHITECTURE). Proof bar: jobtensor upstream-dead evidence already journaled (iteration 3) — re-cite in the removal commit.
 
 ## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only]
-Backlog #14, report problem #7. status: OPEN (owner APPROVED 2026-06-11, conditions binding): BEFORE implementing, compare openapi-typescript vs alternatives against FastAPI-schema → Next.js 16/TS on (a) zero runtime deps, (b) build-step fit, (c) maintenance burden; journal the choice + 3-line rationale. Then implement under CORE rules: integrator-serialized, adversarial review, full suite + live verify.
+Backlog #14, report problem #7. status: RESEARCH-DONE, AWAITING-OWNER-APPROVAL (research round 2026-06-12). Comparison + recommendation written to docs/maintenance/M7-codegen-research.md.
+**Recommendation: openapi-typescript (types-only).** 3-line rationale: (1) fixes the actual defect — types drift — with the smallest change, keeping our working hand-written api.ts; (2) uniquely zero-runtime-deps (criterion a), one-CLI-line build (b), near-zero maintenance + the tool's upkeep increasing in 2026 (c); (3) the only reason to pick Hey API instead is M3 zod synergy, which is thin (M3 zod is for form inputs, not 35-field API responses). Owner fork documented in the research file. DO NOT implement until owner picks openapi-typescript vs Hey API.
 
 ## M8 — End-to-end pipeline offline coverage  [worker-parallel, claim after M1 ships]
 Report problem #10. files-owned: backend/tests/test_main.py, tests/fixtures

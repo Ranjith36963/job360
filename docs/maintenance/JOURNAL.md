@@ -158,3 +158,10 @@ Owner awake, expanded scope + GO: bundled rotation 50→46, removing all 4 prove
 - LIVE VERIFY: server restarted (commits don't exist until restart); GET /api/sources = 46 sources, the 4 dead confirmed absent, all 6 lookalikes (aijobs/aijobs_ai/nhs_jobs/nhs_jobs_xml/hackernews/hn_jobs) present.
 - New fact: source count is now 46 registry / 45 unique classes (indeed+glassdoor still alias JobSpySource). Any doc/test asserting 50/49 is stale.
 - Backlog 16b CLOSED by this. M6 DONE.
+
+## 2026-06-12 ~15:30 UTC — INTEGRATOR ROUND 9 (owner-directed) — M7 RESEARCH (no implementation)
+Owner directed: research M7 codegen, recommend with 3-line rationale, do NOT implement.
+- Grounded in our stack first: types.ts = 389 lines/35 hand-mirrored types (the drift surface); api.ts hand-written client we like; TanStack Query v5 present; zod/RHF NOT installed (arrive with M3).
+- Researched openapi-typescript vs Hey API vs Orval (WebSearch + fetched the openapi-ts 2026 roadmap). DECISIVE FACT: openapi-fetch/openapi-react-query RUNTIME helpers go to maintenance mode in 2026, but the openapi-typescript TYPES generator does NOT (maintenance increasing, 8.0 roadmap) — and the maintenance caveat doesn't touch us since we don't use those runtime helpers.
+- RECOMMENDATION: openapi-typescript (types-only) — zero runtime deps, one-CLI-line build, minimal change (keep api.ts). Documented owner fork: Hey API only if they want a generated SDK+zod platform and will replace api.ts. Written to docs/maintenance/M7-codegen-research.md; M7 status = RESEARCH-DONE, AWAITING-OWNER-APPROVAL.
+- No code, no deps installed, nothing implemented (owner gate). Research+docs only.
