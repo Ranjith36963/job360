@@ -202,10 +202,10 @@ export default function NotificationsPage() {
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-foreground/60">
-                      {formatDate(n.sent_at)}
+                      {formatDate(n.sent_at ?? null)}
                     </td>
                     <td className="max-w-[240px] px-4 py-3 text-foreground/60" title={n.error_message ?? undefined}>
-                      {truncate(n.error_message)}
+                      {truncate(n.error_message ?? null)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-foreground/60">{n.retry_count}</td>
                   </tr>

@@ -213,6 +213,7 @@ export default function DashboardPage() {
       } else {
         await setJobAction(jobId, {
           action: action as "liked" | "applied" | "not_interested",
+          notes: "",
         });
       }
     } catch (err) {

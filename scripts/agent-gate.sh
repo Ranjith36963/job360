@@ -20,6 +20,19 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
   echo "[gate] backend suite..."
   (cd backend && python -m pytest -q -p no:randomly --ignore=tests/test_main.py)
 fi
+
+# M7 — API-types drift guard. A backend API-model change OR a frontend change
+# must keep frontend/src/lib/api-types.ts (generated from FastAPI's OpenAPI
+# schema) in sync with the backend. Regenerate and fail if it differs from
+# what's committed/staged. Guarded on the tool being installed so machines
+# without the frontend toolchain can still gate backend-only work.
+if { [ "$BACKEND_CHANGED" -gt 0 ] || [ "$FRONTEND_CHANGED" -gt 0 ]; } && [ -x "$ROOT/frontend/node_modules/.bin/openapi-typescript" ]; then
+  echo "[gate] api-types drift check..."
+  bash "$ROOT/scripts/gen-api-types.sh" >/dev/null
+  git diff --exit-code -- frontend/openapi.json frontend/src/lib/api-types.ts \
+    || { echo "[gate] FAIL: API types drifted from the backend schema — run 'npm run gen:types' in frontend/ and commit the result." >&2; exit 1; }
+fi
+
 if [ "$FRONTEND_CHANGED" -gt 0 ]; then
   echo "[gate] frontend gates..."
   (cd frontend && npm run -s test:unit && npm run -s type-check && npm run -s lint)
