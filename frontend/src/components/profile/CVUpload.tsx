@@ -85,6 +85,20 @@ function buildHighlightedCV(
   });
 }
 
+// ── V-04 upload guard (module-level so deps are stable) ───────────────────
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const ALLOWED_EXTENSIONS = [".pdf", ".docx"] as const;
+
+export function validateUploadFile(file: File): string | null {
+  if (file.size > MAX_FILE_BYTES) return "File is too large. Maximum size is 10 MB.";
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  if (!ALLOWED_EXTENSIONS.includes(ext as (typeof ALLOWED_EXTENSIONS)[number])) {
+    return "Only PDF or DOCX files are accepted.";
+  }
+  return null;
+}
+
 // ── Component ─────────────────────────────────────────────
 
 export function CVUpload({
@@ -102,6 +116,7 @@ export function CVUpload({
   const [githubUsername, setGithubUsername] = useState("");
   const [githubLoading, setGithubLoading] = useState(false);
   const [linkedinLoading, setLinkedinLoading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const hasCV = profile && profile.cv_length > 0;
 
@@ -126,8 +141,12 @@ export function CVUpload({
       const file = e.dataTransfer.files[0];
       if (!file) return;
 
-      const ext = file.name.toLowerCase();
-      if (!ext.endsWith(".pdf") && !ext.endsWith(".docx")) return;
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setUploadError(validationError);
+        return;
+      }
+      setUploadError(null);
 
       setUploading(true);
       try {
@@ -144,6 +163,14 @@ export function CVUpload({
       const file = e.target.files?.[0];
       if (!file) return;
 
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setUploadError(validationError);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      setUploadError(null);
+
       setUploading(true);
       try {
         await onUpload(file);
@@ -159,6 +186,20 @@ export function CVUpload({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file || !onLinkedinUpload) return;
+
+      // LinkedIn only accepts PDF (client-side guard)
+      if (file.size > MAX_FILE_BYTES) {
+        setUploadError("File is too large. Maximum size is 10 MB.");
+        if (linkedinInputRef.current) linkedinInputRef.current.value = "";
+        return;
+      }
+      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+      if (ext !== ".pdf") {
+        setUploadError("LinkedIn upload must be a PDF (profile → More → Save to PDF).");
+        if (linkedinInputRef.current) linkedinInputRef.current.value = "";
+        return;
+      }
+      setUploadError(null);
 
       setLinkedinLoading(true);
       try {
@@ -226,6 +267,11 @@ export function CVUpload({
             <CheckCircle className="ml-auto h-5 w-5 text-score-high" />
           )}
         </div>
+
+        {/* V-04 upload validation error */}
+        {uploadError && (
+          <p className="mb-3 text-sm text-red-400" role="alert">{uploadError}</p>
+        )}
 
         {/* Drop zone (when no CV or re-uploading) */}
         {!hasCV || uploading ? (

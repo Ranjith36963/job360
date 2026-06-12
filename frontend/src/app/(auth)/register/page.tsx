@@ -3,8 +3,11 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
-import { register } from "@/lib/api";
+import { register as registerUser } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,17 @@ export function safeNext(p: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Schema
+// ---------------------------------------------------------------------------
+
+const registerSchema = z.object({
+  email: z.string().email("Enter a valid email"),
+  password: z.string().min(8, "At least 8 characters"),
+});
+
+type RegisterSchema = z.infer<typeof registerSchema>;
+
+// ---------------------------------------------------------------------------
 // Inner component — uses useSearchParams so it must live inside <Suspense>
 // ---------------------------------------------------------------------------
 
@@ -30,24 +44,23 @@ function RegisterForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setPending(true);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterSchema>({ resolver: zodResolver(registerSchema) });
+
+  const onSubmit = handleSubmit(async (data) => {
+    setServerError(null);
     try {
-      await register(email, password);
+      await registerUser(data.email, data.password);
       router.push(safeNext(next));
     } catch (err) {
-      setError(friendlyAuthError(err, "Sign-up failed. Please try again."));
-    } finally {
-      setPending(false);
+      setServerError(friendlyAuthError(err, "Sign-up failed. Please try again."));
     }
-  }
+  });
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -57,10 +70,11 @@ function RegisterForm() {
           id="email"
           type="email"
           autoComplete="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          {...register("email")}
         />
+        {errors.email && (
+          <p className="text-sm text-red-400">{errors.email.message}</p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
@@ -68,18 +82,18 @@ function RegisterForm() {
           id="password"
           type="password"
           autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          {...register("password")}
         />
+        {errors.password && (
+          <p className="text-sm text-red-400">{errors.password.message}</p>
+        )}
         <p className="text-xs text-muted-foreground">
           Minimum 8 characters. We hash with argon2id — never store plaintext.
         </p>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? "Creating..." : "Create account"}
+      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      <Button type="submit" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? "Creating..." : "Create account"}
       </Button>
     </form>
   );

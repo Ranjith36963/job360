@@ -4,11 +4,17 @@ Cohort Z agent-Endpoints. The storage helpers (list_profile_versions,
 restore_profile_version, CVData.to_json_resume) already existed; these
 tests prove they are now reachable through authenticated HTTP under
 proper user_id scoping.
+
+V-04 upload cap tests are also included here (same endpoint, same fixture).
 """
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
+
+from src.services.profile.models import CVData
 
 
 @pytest.mark.asyncio
@@ -112,3 +118,72 @@ async def test_json_resume_returns_canonical_schema(authenticated_async_context)
     # JSON Resume canonical root keys (https://jsonresume.org/schema/)
     for key in ("basics", "work", "education", "skills"):
         assert key in resume
+
+
+# ── V-04: upload cap + MIME allowlist ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cv_upload_rejects_oversized_file(authenticated_async_context):
+    """A CV file larger than 10 MB must be rejected with HTTP 413."""
+    oversized_content = b"%PDF-1.4 " + b"x" * (10 * 1024 * 1024 + 1)
+    async with authenticated_async_context() as client:
+        resp = await client.post(
+            "/api/profile",
+            files={"cv": ("big.pdf", oversized_content, "application/pdf")},
+        )
+    assert resp.status_code == 413
+    assert "10MB" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cv_upload_rejects_wrong_mime(authenticated_async_context):
+    """A CV with an unsupported extension/content-type must return HTTP 415."""
+    async with authenticated_async_context() as client:
+        resp = await client.post(
+            "/api/profile",
+            files={"cv": ("resume.txt", b"hello", "text/plain")},
+        )
+    assert resp.status_code == 415
+    assert "PDF or DOCX" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cv_upload_accepts_valid_pdf(authenticated_async_context):
+    """A small valid PDF passes the size+MIME gate and reaches the parser."""
+    fake_cv = CVData(raw_text="Software Engineer with 5 years Python experience.")
+
+    with patch(
+        "src.api.routes.profile.parse_cv_async",
+        new=AsyncMock(return_value=fake_cv),
+    ):
+        async with authenticated_async_context() as client:
+            resp = await client.post(
+                "/api/profile",
+                files={"cv": ("cv.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+            )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_linkedin_upload_rejects_oversized_file(authenticated_async_context):
+    """A LinkedIn PDF larger than 10 MB must be rejected with HTTP 413."""
+    oversized_content = b"%PDF-1.4 " + b"x" * (10 * 1024 * 1024 + 1)
+    async with authenticated_async_context() as client:
+        resp = await client.post(
+            "/api/profile/linkedin",
+            files={"file": ("linkedin.pdf", oversized_content, "application/pdf")},
+        )
+    assert resp.status_code == 413
+    assert "10MB" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_linkedin_upload_rejects_wrong_type(authenticated_async_context):
+    """A LinkedIn upload with a non-PDF file must return HTTP 415."""
+    async with authenticated_async_context() as client:
+        resp = await client.post(
+            "/api/profile/linkedin",
+            files={"file": ("profile.docx", b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        )
+    assert resp.status_code == 415

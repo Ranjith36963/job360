@@ -175,7 +175,27 @@ async def upsert_profile(
 
     # Parse CV if provided
     if cv is not None:
-        content = await cv.read()
+        # Bounded read: cap memory even for a malicious oversized upload —
+        # read at most 10MB+1 so a 1GB body can't be materialised before the
+        # size check rejects it. Valid files (<=10MB) are read in full.
+        content = await cv.read(10 * 1024 * 1024 + 1)
+
+        # V-04 — size cap (10 MB)
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
+
+        # V-04 — MIME / extension allowlist
+        _filename = (cv.filename or "").lower()
+        _ctype = (cv.content_type or "").lower()
+        _allowed_exts = {".pdf", ".docx"}
+        _allowed_ctypes = {
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        _ext = os.path.splitext(_filename)[1]
+        if _ext not in _allowed_exts or _ctype not in _allowed_ctypes:
+            raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
+
         suffix = os.path.splitext(cv.filename or ".pdf")[1] or ".pdf"
         tmp_path = save_upload_to_temp(content, suffix)
         try:
@@ -228,10 +248,18 @@ async def upload_linkedin(
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
     """Enrich user profile with a LinkedIn 'Save to PDF' profile export."""
-    content = await file.read()
+    # Bounded read — see the CV endpoint: caps memory for oversized uploads.
+    content = await file.read(10 * 1024 * 1024 + 1)
+
+    # V-04 — size cap (10 MB)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
+
+    # V-04 — MIME / extension allowlist (LinkedIn must be PDF only)
     suffix = os.path.splitext(file.filename or ".pdf")[1].lower() or ".pdf"
-    if suffix != ".pdf":
-        raise HTTPException(status_code=400, detail="LinkedIn upload must be a PDF (profile → More → Save to PDF).")
+    _ctype = (file.content_type or "").lower()
+    if suffix != ".pdf" or _ctype not in {"application/pdf", ""}:
+        raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
         linkedin_data = parse_linkedin_pdf(tmp_path)
