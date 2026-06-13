@@ -488,8 +488,11 @@ export async function changeEmail(
   });
 }
 
-export async function deleteAccount(): Promise<void> {
-  await request<void>("/api/auth/users/me", { method: "DELETE" });
+export async function deleteAccount(currentPassword: string): Promise<void> {
+  await request<void>("/api/auth/users/me", {
+    method: "DELETE",
+    body: JSON.stringify({ current_password: currentPassword }),
+  });
 }
 
 // ---- Step-3: Notification ledger ----

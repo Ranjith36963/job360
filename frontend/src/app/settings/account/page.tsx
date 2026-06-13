@@ -52,7 +52,7 @@ const changeEmailSchema = z.object({
 
 type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
 type ChangeEmailValues = z.infer<typeof changeEmailSchema>;
-type DeleteConfirmValues = { confirmText: string };
+type DeleteConfirmValues = { confirmText: string; currentPassword: string };
 
 // ---------------------------------------------------------------------------
 // Shared field error helper
@@ -243,10 +243,10 @@ function DeleteAccountCard() {
     setDialogOpen(true);
   }
 
-  async function onConfirmDelete() {
+  async function onConfirmDelete(data: DeleteConfirmValues) {
     setServerError(null);
     try {
-      await deleteAccount();
+      await deleteAccount(data.currentPassword);
       router.push("/login");
     } catch (err) {
       setServerError(err instanceof Error ? err.message : "Failed to delete account.");
@@ -281,20 +281,35 @@ function DeleteAccountCard() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit(onConfirmDelete)} noValidate>
-            <div className="space-y-1 py-2">
-              <Label htmlFor="del-confirm">Type DELETE to confirm</Label>
-              <Input
-                id="del-confirm"
-                placeholder="DELETE"
-                autoComplete="off"
-                aria-label="Type DELETE to confirm account deletion"
-                aria-describedby="delete-dialog-desc"
-                aria-invalid={!!errors.confirmText}
-                {...register("confirmText", {
-                  validate: (v) => v === "DELETE" || "Type DELETE to confirm",
-                })}
-              />
-              <FieldError message={errors.confirmText?.message} />
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="del-password">Current password</Label>
+                <Input
+                  id="del-password"
+                  type="password"
+                  autoComplete="current-password"
+                  aria-invalid={!!errors.currentPassword}
+                  {...register("currentPassword", {
+                    required: "Enter your password",
+                  })}
+                />
+                <FieldError message={errors.currentPassword?.message} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="del-confirm">Type DELETE to confirm</Label>
+                <Input
+                  id="del-confirm"
+                  placeholder="DELETE"
+                  autoComplete="off"
+                  aria-label="Type DELETE to confirm account deletion"
+                  aria-describedby="delete-dialog-desc"
+                  aria-invalid={!!errors.confirmText}
+                  {...register("confirmText", {
+                    validate: (v) => v === "DELETE" || "Type DELETE to confirm",
+                  })}
+                />
+                <FieldError message={errors.confirmText?.message} />
+              </div>
               {serverError && <p className="text-sm text-red-400 mt-1" role="alert">{serverError}</p>}
             </div>
             <DialogFooter className="mt-4">

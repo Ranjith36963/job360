@@ -197,7 +197,8 @@ export interface paths {
         post?: never;
         /**
          * Delete Account
-         * @description Soft-delete the caller's account (GDPR Article 17). Sets deleted_at. Clears session cookie.
+         * @description Soft-delete the caller's account (GDPR Article 17). Requires current-password
+         *     verification (hard rule #26), then clears the session cookie.
          */
         delete: operations["delete_account_api_auth_users_me_delete"];
         options?: never;
@@ -1116,6 +1117,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountDeleteRequest */
+        AccountDeleteRequest: {
+            /** Current Password */
+            current_password: string;
+        };
         /** ActionRequest */
         ActionRequest: {
             /** Action */
@@ -2281,7 +2287,11 @@ export interface operations {
                 job360_session?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeleteRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
