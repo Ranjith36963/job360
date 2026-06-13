@@ -621,3 +621,13 @@ def test_score_catalog_row_sets_job_id_from_row():
     assert captured[0] == 99, (
         f"FIX 5: expected job.id == 99 inside enrichment_lookup, got {captured[0]!r}"
     )
+
+
+def test_rescore_logger_is_under_job360_namespace():
+    """Regression guard: the rescore logger MUST be under the 'job360' namespace
+    so setup_logging()'s handlers (stdout/file/JSON) actually emit its records.
+    A bare __name__ logger lands on the root logger (no job360 handler, WARNING
+    default) and its INFO lines vanish — proven live during verification."""
+    import src.services.rescore as rescore_mod
+
+    assert rescore_mod.logger.name == "job360.services.rescore"

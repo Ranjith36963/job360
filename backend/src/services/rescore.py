@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("job360.services.rescore")
 
 # FIX 4 — per-user asyncio.Lock dict so two concurrent re-scores for the
 # SAME user serialise; different users still run in parallel.

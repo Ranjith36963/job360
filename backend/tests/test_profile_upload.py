@@ -332,3 +332,12 @@ def test_rescore_task_pinned_to_bg_tasks_set(api, monkeypatch):
     assert hasattr(profile_route, "_rescore_bg_tasks"), (
         "FIX 2: _rescore_bg_tasks set is missing from profile route module"
     )
+
+
+def test_profile_route_logger_is_under_job360_namespace():
+    """Regression guard: the profile route logger MUST be under 'job360' so its
+    'rescore: background re-score scheduled' INFO line reaches setup_logging's
+    handlers. A __name__ logger would be silently dropped by the root logger."""
+    import src.api.routes.profile as profile_route
+
+    assert profile_route.logger.name == "job360.api.profile"

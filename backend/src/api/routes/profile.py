@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict
 
@@ -34,6 +35,11 @@ from src.services.profile.storage import (
 
 router = APIRouter(tags=["profile"])
 
+# Logger under the "job360" namespace so setup_logging()'s handlers (stdout +
+# file + JSON) actually emit these records. A bare __name__ logger lands on the
+# root logger, which has no job360 handler, so its INFO lines vanish.
+logger = logging.getLogger("job360.api.profile")
+
 # FIX 2 — keep a strong reference to every background re-score task so the
 # GC cannot collect it before it finishes (asyncio.create_task returns a weak
 # ref; without this set the task can be garbage-collected mid-run).
@@ -62,16 +68,12 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
         import asyncio  # noqa: PLC0415
         from src.services.rescore import rescore_user_feed  # noqa: PLC0415
 
-        import logging as _logging  # noqa: PLC0415
-        _logger = _logging.getLogger(__name__)
-
         task = asyncio.create_task(rescore_user_feed(user_id))
         _rescore_bg_tasks.add(task)
         task.add_done_callback(_rescore_bg_tasks.discard)
-        _logger.info("rescore: background re-score scheduled for user %s", user_id)
+        logger.info("rescore: background re-score scheduled for user %s", user_id)
     except Exception as exc:  # noqa: BLE001
-        import logging as _logging  # noqa: PLC0415
-        _logging.getLogger(__name__).warning(
+        logger.warning(
             "rescore: failed to schedule background re-score for user %s: %s",
             user_id,
             exc,
