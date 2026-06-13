@@ -33,7 +33,7 @@ M7a. **TODO — `lib/api.ts` still hand-mirrors 3 API types** (SourceHealthEntry
 
 ## P2 — matcher (funnel→judge) follow-ons
 
-8. **TODO — re-judge policy:** verdicts are judge-once (skip_existing). Decide + implement a cheap re-judge trigger when the user's profile version changes (profile upload bumps `user_profile_versions`): clear that user's `llm_matched_at` (set NULL) so the next search re-judges. Tests for the trigger.
+8. **DONE (2026-06-13, migration 0018 + rescore.py + profile.py trigger) — re-judge policy:** re-score on profile-version change implemented. When a user saves a new profile, the system detects the content change, clears all LLM verdicts (`clear_user_verdicts`), and re-scores the full 30-day catalog in the background (`rescore_user_feed`). `user_feed` rows are now stamped with `profile_version`. LLM re-judge fires only if `MATCHER_ENABLED=true`; keyword re-score always runs.
 9. **TODO — matcher telemetry:** count judged/skipped/failed per run into `run_log` extras (mirrors enrichment telemetry) so morning review can see judge health without grepping logs.
 10. **TODO — Level 6 experiment:** one combined LLM call returning facts + fit (salary still from source), measured head-to-head against L1+L4 in the harness; journal accuracy + latency + calls saved. Decision input for replacing two calls with one.
 

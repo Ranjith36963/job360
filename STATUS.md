@@ -116,6 +116,8 @@ Four engines are available, stacked funnel→judge. All default OFF except the k
 
 Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
 
+**Profile-version re-score (migration 0018, automatic, no new flags):** every `user_feed` row is now stamped with the profile version that produced its score. When a user saves a new profile (CV / LinkedIn / GitHub / preferences), the system detects whether the content actually changed, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile. Ordinary searches only score newly-fetched jobs — existing rows keep their scores. A job's score changes only when the profile changes, never just because time passed. Service: `src/services/rescore.py`; trigger: `src/api/routes/profile.py`.
+
 ---
 
 ## What's Next (Step 4 — Ops hardening / Batch 4 — Launch readiness)

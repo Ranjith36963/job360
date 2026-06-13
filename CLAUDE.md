@@ -313,7 +313,12 @@ Adds engine #4 — the LLM judge: `services/llm_matcher.py` (`MatchVerdict`, `ma
 
 **Measured performance:** 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras chain, zero provider failures). Judge spread 20–92 vs keyword engine 30–43 on the same corpus. Fit-bucket accuracy 10/10 on the labeled sample; correctly rejected every intern role for a senior-level profile.
 
-**Known follow-ons (backlog):** re-judge when profile changes (#8), judge telemetry (#9), Level-6 single-call experiment combining enrichment + judge (#10).
+**Known follow-ons (backlog):** ~~re-judge when profile changes (#8)~~ **DONE (2026-06-13, migration 0018 + rescore.py)**, judge telemetry (#9), Level-6 single-call experiment combining enrichment + judge (#10).
+
+**Profile-version re-score (automatic, no new flags).** Every `user_feed` row is now stamped with the `user_profile_versions` ID that produced its score. Two modes:
+- **Profile changes** → the API trigger in `profile.py` detects the change, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile (keyword re-score always; LLM re-judge only if `MATCHER_ENABLED=true`).
+- **Ordinary search** → only newly-fetched jobs are scored; existing rows keep their scores and verdicts untouched.
+A job's score changes only when the profile changes — never just because time passed.
 
 ## Related documentation
 

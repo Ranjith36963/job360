@@ -32,7 +32,8 @@ DoD:
 ## M2 — Pillar 2: the judge stays correct over time  [🔒 OWNER-RESERVED — DO NOT TOUCH]
 claimed-by: **owner**   status: **RESERVED** (owner decision 2026-06-12)
 **🔒 PILLAR-2 HANDS-OFF — BINDING ON ALL AGENTS (worker, integrator, scout, health, executors).** The owner builds the re-judge trigger + telemetry + enrichment-merge fix HIMSELF. No agent edits ANY Pillar-2 code. The hands-off zone EXPLICITLY includes `llm_matcher.py` (the funnel→judge matcher) AND `job_enrichment.py`, `scoring_dimensions.py`, `skill_matcher.py`, `embeddings.py`, `retrieval.py`, `vector_index.py`, the accuracy `scripts/`, and the Pillar-2 re-judge path in `api/profile.py`. Agents may ONLY **report** judge/scoring bugs to BACKLOG.md with evidence (logs, repro, measured numbers) — never fix, never edit, never "improve". If a heartbeat picks M2, it does NOT start it; it leaves this reservation intact.
-Backlog (owner's own list): #7 enrichment merge, #8 re-judge on profile change, #9 telemetry (needs migration).
+**2026-06-13 — owner authorized building the re-score/re-judge portion (backlog #8).** The profile-version re-score is now implemented: migration 0018 (`user_feed.profile_version`), `src/services/rescore.py`, `clear_user_verdicts` in `llm_matcher.py`, change-detector in `profile/storage.py`, and trigger in `api/routes/profile.py`. The broader Pillar-2 hands-off remains fully in force for all other items (#7 enrichment merge, #9 telemetry, all scoring/embedding/enrichment code).
+Backlog (owner's own list): #7 enrichment merge, ~~#8 re-judge on profile change~~ DONE 2026-06-13, #9 telemetry (needs migration).
 files-owned: OWNER ONLY — src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py, src/api/profile.py (re-judge path), scripts/ (accuracy harness), their tests.
 
 ## M3 — Pillar 3: frontend carry-overs  [worker-parallel, frontend-only]
