@@ -169,6 +169,15 @@ class FeedService:
         Returns the row id. Idempotent per (user_id, job_id) per UNIQUE constraint.
         ``profile_version`` stamps which user_profile_versions.id produced this
         row's score — None for legacy/unscored rows.
+
+        FIX 6 — Version-conditional score freeze:
+        On an EXISTING row, the score is FROZEN when the incoming
+        ``profile_version`` equals the stored one (SQLite ``IS`` is NULL-safe:
+        equal-or-both-NULL -> freeze).  The score is overwritten only when the
+        version differs (re-score under a new profile).  This means an ordinary
+        re-fetch of the same job under the same profile keeps its score stable
+        (no time-based drift), while a re-score under a new profile updates it.
+        ``bucket`` and ``profile_version`` are always overwritten.
         """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
@@ -176,10 +185,14 @@ class FeedService:
             INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at, profile_version)
             VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
             ON CONFLICT(user_id, job_id)
-            DO UPDATE SET score = excluded.score,
-                          bucket = excluded.bucket,
-                          updated_at = excluded.updated_at,
-                          profile_version = excluded.profile_version
+            DO UPDATE SET
+                score = CASE
+                    WHEN user_feed.profile_version IS excluded.profile_version THEN user_feed.score
+                    ELSE excluded.score
+                END,
+                bucket = excluded.bucket,
+                updated_at = excluded.updated_at,
+                profile_version = excluded.profile_version
             """,
             (user_id, job_id, score, bucket, now, now, profile_version),
         )
