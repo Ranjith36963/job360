@@ -17,6 +17,12 @@ Everything else is EDGE: full speed, small frequent gated commits, cheap revert.
 
 ---
 
+## ✅ ALL MISSIONS COMPLETE (M1–M8) — owner-confirmed 2026-06-13
+
+The mission program is finished. M1, M3–M8 were completed + integrated by the loop (evidence in each mission block + JOURNAL.md). M2 (Pillar-2, owner-reserved): the re-judge piece (#8) was built + live-verified this session with owner authorization (migration 0018 + `rescore.py` + trigger); the owner reports the remaining Pillar-2 items (#7 enrichment-merge, #9 telemetry) completed himself. No pending missions remain; the loop is **paused** (no active cron). Leftover items are small **BACKLOG.md** follow-ups, NOT missions: **M3-rem** (`noValidate` on auth forms, "50 sources" footer→46), **M7a** (`api.ts` hand-mirrored types), **M8a** (un-ignore `test_main.py`). The standing **Pillar-2 hands-off** rule for all agents stays in force via the worker/integrator skills regardless of M2's status — only the owner edits Pillar-2 code.
+
+---
+
 ## M1 — Pillar 1: every enabled source is healthy  [worker-parallel]
 claimed-by: -   status: DONE (integrated 3315fb3, live-verified run b0250268211a @2026-06-11T21:10Z)
 closing-note (worker-a, 2026-06-11): commits 1f30608 + fc55fb8 on agent/m1-sources. All four sources probed live 2026-06-11; all four upstreams are gone/blocked, so the pattern everywhere is the b7b2c60 jobtensor quarantine (1 un-retried canary/run, single INFO, auto-resume if upstream revives) rather than repair. Integrator at merge: (1) run the live-pipeline log check for DoD line 4; (2) add STATUS.md fragile rows for comeet, gov_apprenticeships, aijobs_global + a note that glassdoor querying is off (STATUS.md not in M1 files-owned); (3) journal the DfE subscription-key NEEDS-HUMAN; (4) comeet/gov_apprenticeships/aijobs_global are now strong candidates to bundle into the M6 source rotation.
@@ -30,10 +36,10 @@ DoD:
 - [x] full backend suite green in the worktree (gate: 1291 passed, 3 skipped after fc55fb8); every fix has appended tests (single-probe/no-WARNING + revival/resume per source; site_name==["indeed"] for JobSpy)
 
 ## M2 — Pillar 2: the judge stays correct over time  [🔒 OWNER-RESERVED — DO NOT TOUCH]
-claimed-by: **owner**   status: **RESERVED** (owner decision 2026-06-12)
+claimed-by: **owner**   status: **DONE** (owner-confirmed all M2 items complete, 2026-06-13)
 **🔒 PILLAR-2 HANDS-OFF — BINDING ON ALL AGENTS (worker, integrator, scout, health, executors).** The owner builds the re-judge trigger + telemetry + enrichment-merge fix HIMSELF. No agent edits ANY Pillar-2 code. The hands-off zone EXPLICITLY includes `llm_matcher.py` (the funnel→judge matcher) AND `job_enrichment.py`, `scoring_dimensions.py`, `skill_matcher.py`, `embeddings.py`, `retrieval.py`, `vector_index.py`, the accuracy `scripts/`, and the Pillar-2 re-judge path in `api/profile.py`. Agents may ONLY **report** judge/scoring bugs to BACKLOG.md with evidence (logs, repro, measured numbers) — never fix, never edit, never "improve". If a heartbeat picks M2, it does NOT start it; it leaves this reservation intact.
 **2026-06-13 — owner authorized building the re-score/re-judge portion (backlog #8).** The profile-version re-score is now implemented: migration 0018 (`user_feed.profile_version`), `src/services/rescore.py`, `clear_user_verdicts` in `llm_matcher.py`, change-detector in `profile/storage.py`, and trigger in `api/routes/profile.py`. The broader Pillar-2 hands-off remains fully in force for all other items (#7 enrichment merge, #9 telemetry, all scoring/embedding/enrichment code).
-Backlog (owner's own list): #7 enrichment merge, ~~#8 re-judge on profile change~~ DONE 2026-06-13, #9 telemetry (needs migration).
+Backlog (owner's own list): ALL COMPLETE per owner 2026-06-13 — ~~#7 enrichment merge~~ (owner), ~~#8 re-judge on profile change~~ (built + live-verified this session: migration 0018 + `rescore.py` + trigger), ~~#9 telemetry~~ (owner). #8 was built by the loop with owner authorization; #7 + #9 were completed by the owner himself.
 files-owned: OWNER ONLY — src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py, src/api/profile.py (re-judge path), scripts/ (accuracy harness), their tests.
 
 ## M3 — Pillar 3: frontend carry-overs  [worker-parallel, frontend-only]
