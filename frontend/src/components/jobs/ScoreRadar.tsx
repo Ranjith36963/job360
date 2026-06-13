@@ -107,6 +107,9 @@ export function ScoreRadar({ scores, size = 300 }: ScoreRadarProps) {
           boxShadow: "0 0 40px oklch(0.89 0.29 128 / 0.07)",
         }}
       >
+        {/* Explicit-size wrapper prevents Recharts ResponsiveContainer from
+            measuring a 0×0 container at first paint and logging width/height(-1). */}
+        <div style={{ width: "100%", height: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart cx="50%" cy="50%" outerRadius="65%" data={data}>
             <PolarGrid stroke="oklch(1 0 0 / 0.08)" />
@@ -130,6 +133,7 @@ export function ScoreRadar({ scores, size = 300 }: ScoreRadarProps) {
             <Tooltip content={<CustomTooltip />} />
           </RadarChart>
         </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Raw score grid */}

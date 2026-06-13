@@ -146,6 +146,23 @@ describe("ChangeEmailCard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Change Password card copy — must be truthful about sign-out (rule #26)
+// ---------------------------------------------------------------------------
+
+describe("ChangePasswordCard copy", () => {
+  it('does NOT say "remain logged in"', () => {
+    render(<AccountSettingsPage />);
+    expect(screen.queryByText(/remain logged in/i)).not.toBeInTheDocument();
+  });
+
+  it('tells the user they will be signed out after changing password', () => {
+    render(<AccountSettingsPage />);
+    expect(screen.getByText(/signed out on all devices/i)).toBeInTheDocument();
+    expect(screen.getByText(/sign in again/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Delete Account
 // ---------------------------------------------------------------------------
 

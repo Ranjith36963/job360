@@ -101,7 +101,8 @@ function ChangePasswordCard() {
       <CardHeader>
         <CardTitle>Change password</CardTitle>
         <CardDescription>
-          Update your password. You will remain logged in after changing it.
+          Update your password. For your security, you&apos;ll be signed out on
+          all devices and need to sign in again.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -242,7 +243,7 @@ function DeleteAccountCard() {
     setDialogOpen(true);
   }
 
-  async function onConfirmDelete(_data: DeleteConfirmValues) {
+  async function onConfirmDelete() {
     setServerError(null);
     try {
       await deleteAccount();
