@@ -46,7 +46,7 @@ export function Footer() {
         </nav>
 
         <p className="text-xs text-muted-foreground/60">
-          50 sources. 8D scoring. One dashboard.
+          46 sources. 8D scoring. One dashboard.
         </p>
       </div>
     </footer>

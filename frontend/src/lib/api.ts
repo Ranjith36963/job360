@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { ApiError } from "./api-error";
+import type { components } from "./api-types";
 import type {
   ActionRequest,
   ActionResponse,
@@ -375,11 +376,11 @@ export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
 // Channel config (Batch 2)
 // ---------------------------------------------------------------------------
 
-export type Channel = {
-  id: number;
+// `Channel` derives non-tightened fields from the generated ChannelOut schema.
+// `channel_type` is intentionally narrowed from `string` to a literal union —
+// the backend OpenAPI declares it as string but only these five values are valid.
+export type Channel = Omit<_Schemas["ChannelOut"], "channel_type"> & {
   channel_type: "email" | "slack" | "discord" | "telegram" | "webhook";
-  display_name: string;
-  enabled: boolean;
 };
 
 export type ChannelTestResult = { ok: boolean; error: string | null };
@@ -526,21 +527,20 @@ export async function getRecentRuns(
 }
 
 // ---- Phase −2 item D: per-source health ----
+//
+// Both types derive non-tightened fields from the generated schema so they
+// can't drift. Only `health` (SourceHealthEntry) is intentionally narrowed
+// from `string` to a literal union — the backend OpenAPI declares it as string
+// but the runtime always emits one of the three values below.
 
-export type SourceHealthEntry = {
-  source: string;
-  runs_observed: number;
-  runs_zero_jobs: number;
-  runs_errored: number;
-  avg_duration_seconds: number | null;
-  last_job_count: number | null;
-  last_error: string | null;
+type _Schemas = components["schemas"];
+
+export type SourceHealthEntry = Omit<_Schemas["SourceHealthEntry"], "health"> & {
   health: "ok" | "warning" | "critical";
 };
 
-export type SourceHealthResponse = {
+export type SourceHealthResponse = Omit<_Schemas["SourceHealthResponse"], "sources"> & {
   sources: SourceHealthEntry[];
-  runs_considered: number;
 };
 
 export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {
