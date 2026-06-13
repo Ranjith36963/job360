@@ -635,6 +635,8 @@ def test_providers_discord_configured(api, monkeypatch):
     monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
     monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
     monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", "", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_USERNAME", "", raising=True)
 
     _register(api, "alice@example.com")
     r = api.get("/api/settings/channels/providers")
@@ -654,6 +656,8 @@ def test_providers_both_configured(api, monkeypatch):
     monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
     monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
     monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", "", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_USERNAME", "", raising=True)
 
     _register(api, "alice@example.com")
     r = api.get("/api/settings/channels/providers")
@@ -668,6 +672,252 @@ def test_providers_requires_auth(api):
     """GET /providers without auth → 401."""
     r = api.get("/api/settings/channels/providers")
     assert r.status_code == 401
+
+
+# ===========================================================================
+# Telegram connect + poll tests
+# ===========================================================================
+
+
+def _patch_telegram(monkeypatch, token: str = "FAKE_TOKEN", username: str = "my_jobs_bot"):
+    """Patch both Telegram settings attrs."""
+    from src.core import settings as s
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", token, raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_USERNAME", username, raising=True)
+
+
+def _clear_telegram(monkeypatch):
+    """Ensure Telegram is NOT configured."""
+    from src.core import settings as s
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", "", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_USERNAME", "", raising=True)
+
+
+# ---------------------------------------------------------------------------
+# T1: GET /connect/telegram when configured → 200 + deep_link + state stored
+# ---------------------------------------------------------------------------
+
+def test_connect_telegram_when_configured(api, monkeypatch):
+    """GET /connect/telegram returns deep_link containing bot username + state."""
+    from src.api.routes import channels as ch
+
+    _patch_telegram(monkeypatch)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/connect/telegram")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "deep_link" in body
+    assert "state" in body
+    state = body["state"]
+    assert "my_jobs_bot" in body["deep_link"]
+    assert state in body["deep_link"]
+
+    # Confirm the state row was stored with channel_type='telegram'.
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
+                (state,),
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    assert row is not None, "state row missing from oauth_states"
+    assert row["channel_type"] == "telegram"
+
+
+# ---------------------------------------------------------------------------
+# T2: GET /connect/telegram when NOT configured → 404
+# ---------------------------------------------------------------------------
+
+def test_connect_telegram_not_configured(api, monkeypatch):
+    """GET /connect/telegram returns 404 when Telegram bot settings are blank."""
+    _clear_telegram(monkeypatch)
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/connect/telegram")
+    assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# T3: GET /providers with Telegram configured → telegram=true
+# ---------------------------------------------------------------------------
+
+def test_providers_telegram_configured(api, monkeypatch):
+    """GET /providers returns telegram=true when bot token + username are set."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", "FAKE_TOKEN", raising=True)
+    monkeypatch.setattr(s, "TELEGRAM_BOT_USERNAME", "my_jobs_bot", raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/providers")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["telegram"] is True
+    assert body["slack"] is False
+    assert body["discord"] is False
+
+
+# ---------------------------------------------------------------------------
+# T4: Poll happy path — Telegram message found → channel created, state consumed
+# ---------------------------------------------------------------------------
+
+def test_poll_telegram_happy_path(api, monkeypatch):
+    """Poll finds /start <state> in updates → connected=true, channel row created."""
+    from src.api.routes import channels as ch
+
+    token = "FAKE_TOKEN"
+    _patch_telegram(monkeypatch, token=token)
+
+    _register(api, "alice@example.com")
+
+    # Step 1: initiate connect to get a state.
+    r = api.get("/api/settings/channels/connect/telegram")
+    assert r.status_code == 200, r.text
+    state = r.json()["state"]
+
+    # Step 2: monkeypatch _telegram_get_updates to return the /start message.
+    async def _fake_updates() -> list:
+        return [
+            {
+                "message": {
+                    "text": f"/start {state}",
+                    "chat": {
+                        "id": 98765,
+                        "title": "My Jobs",
+                    },
+                }
+            }
+        ]
+
+    monkeypatch.setattr(ch, "_telegram_get_updates", _fake_updates)
+
+    r2 = api.get(f"/api/settings/channels/connect/telegram/poll?state={state}")
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["connected"] is True
+    assert body["target_label"] == "My Jobs"
+
+    # Verify the channel row in the DB.
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT channel_type, connection_status, target_label, "
+                "credential_encrypted FROM user_channels WHERE channel_type='telegram'"
+            )
+            ch_row = await cur.fetchone()
+            state_row = await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM oauth_states WHERE state = ?", (state,)
+                )
+            ).fetchone()
+            return ch_row, state_row[0]
+
+    ch_row, state_count = asyncio.run(_check())
+    assert ch_row is not None, "telegram channel row not created"
+    assert ch_row["connection_status"] == "connected"
+    assert ch_row["target_label"] == "My Jobs"
+    # Decrypted credential must be tgram://<token>/<chat_id>
+    decrypted = crypto.decrypt(ch_row["credential_encrypted"])
+    assert decrypted == f"tgram://{token}/98765"
+    # State must have been consumed.
+    assert state_count == 0, "state row was not consumed after successful poll"
+
+
+# ---------------------------------------------------------------------------
+# T5: Poll not-yet — no matching update → connected=false, state kept
+# ---------------------------------------------------------------------------
+
+def test_poll_telegram_not_yet(api, monkeypatch):
+    """Poll with no matching Telegram update → connected=false, state still alive."""
+    from src.api.routes import channels as ch
+
+    _patch_telegram(monkeypatch)
+
+    _register(api, "alice@example.com")
+
+    r = api.get("/api/settings/channels/connect/telegram")
+    state = r.json()["state"]
+
+    # No updates from Telegram yet.
+    async def _fake_updates() -> list:
+        return []
+
+    monkeypatch.setattr(ch, "_telegram_get_updates", _fake_updates)
+
+    r2 = api.get(f"/api/settings/channels/connect/telegram/poll?state={state}")
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["connected"] is False
+
+    # State row must still be present.
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM oauth_states WHERE state = ?", (state,)
+            )
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_check()) == 1, "state row was consumed prematurely"
+
+
+# ---------------------------------------------------------------------------
+# T6: Poll IDOR — user B polls user A's state → 400
+# ---------------------------------------------------------------------------
+
+def test_poll_telegram_idor_rejected(api, monkeypatch):
+    """User B cannot poll user A's Telegram state (IDOR guard)."""
+    from src.api.routes import channels as ch
+
+    _patch_telegram(monkeypatch)
+
+    # Register Alice and start her connect flow.
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/connect/telegram")
+    alice_state = r.json()["state"]
+
+    # Switch to Bob.
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    _register(api, "bob@example.com")
+
+    async def _fake_updates() -> list:
+        return []
+
+    monkeypatch.setattr(ch, "_telegram_get_updates", _fake_updates)
+
+    r2 = api.get(f"/api/settings/channels/connect/telegram/poll?state={alice_state}")
+    assert r2.status_code == 400, f"expected 400, got {r2.status_code}: {r2.text}"
+
+    # Bob must have no channel row.
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT id FROM users WHERE email = 'bob@example.com'")
+            bob_row = await cur.fetchone()
+            bob_id = bob_row["id"]
+            cur2 = await db.execute(
+                "SELECT COUNT(*) FROM user_channels WHERE user_id = ?", (bob_id,)
+            )
+            return (await cur2.fetchone())[0]
+
+    assert asyncio.run(_check()) == 0, "Bob must not have a channel row"
 
 
 # ===========================================================================

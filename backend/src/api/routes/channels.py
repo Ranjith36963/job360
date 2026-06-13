@@ -7,10 +7,11 @@ cookie-resolved user.
 """
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiosqlite
 import httpx
@@ -27,11 +28,17 @@ router = APIRouter(prefix="/settings/channels", tags=["channels"])
 
 _VALID_TYPES = {"email", "slack", "discord", "telegram", "webhook"}
 
+# Chat channel types that must use the Connect flow (not the paste path).
+_CONNECT_ONLY_TYPES = {"slack", "discord", "telegram"}
+
+# Simple email regex — intentionally lenient; catches obvious non-emails.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 class ChannelIn(BaseModel):
     channel_type: str = Field(pattern="^(email|slack|discord|telegram|webhook)$")
     display_name: str = Field(min_length=1, max_length=120)
-    credential: str = Field(min_length=1)  # the Apprise URL
+    credential: str = Field(min_length=1)  # interpreted per channel_type
 
 
 class ChannelOut(BaseModel):
@@ -49,11 +56,25 @@ class TestSendResult(BaseModel):
 
 
 class ProvidersOut(BaseModel):
-    """Which OAuth connect buttons the frontend should display."""
+    """Which OAuth/connect buttons the frontend should display."""
 
     slack: bool
     discord: bool
     telegram: bool
+
+
+class TelegramConnectOut(BaseModel):
+    """Response from GET /connect/telegram."""
+
+    deep_link: str
+    state: str
+
+
+class TelegramPollOut(BaseModel):
+    """Response from GET /connect/telegram/poll."""
+
+    connected: bool
+    target_label: Optional[str] = None
 
 
 @router.get("", response_model=list[ChannelOut])
@@ -84,7 +105,68 @@ async def list_channels(user: CurrentUser = Depends(require_user)) -> list[Chann
 async def create_channel(
     body: ChannelIn, user: CurrentUser = Depends(require_user)
 ) -> ChannelOut:
-    ct = crypto.encrypt(body.credential)
+    """Create a channel via direct credential input.
+
+    * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
+    * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
+      to the Apprise ``json[s]://`` URL scheme.
+    * ``email``: ``credential`` must be a valid email address; backend builds
+      the ``mailtos://`` Apprise URL from the platform SMTP creds.
+    """
+    ct_type = body.channel_type
+
+    if ct_type in _CONNECT_ONLY_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="use the Connect flow for this channel type",
+        )
+
+    if ct_type == "webhook":
+        cred = body.credential
+        if not (cred.startswith("http://") or cred.startswith("https://")):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="webhook must be an http(s) URL",
+            )
+        # Convert to Apprise JSON webhook scheme:
+        # https://example.com/hook → jsons://example.com/hook
+        # http://example.com/hook  → json://example.com/hook
+        if cred.startswith("https://"):
+            apprise_url = "jsons://" + cred[len("https://"):]
+        else:
+            apprise_url = "json://" + cred[len("http://"):]
+        encrypted = crypto.encrypt(apprise_url)
+
+    elif ct_type == "email":
+        dest = body.credential
+        if not _EMAIL_RE.match(dest):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="enter a valid email address",
+            )
+        smtp_user = _settings.SMTP_EMAIL
+        smtp_pass = _settings.SMTP_PASSWORD
+        if not smtp_user or not smtp_pass:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="email delivery is not configured",
+            )
+        # Build Apprise mailtos:// URL.
+        # mailtos://{user}:{pass}@{smtp_domain}?to={dest}
+        smtp_domain = smtp_user.split("@", 1)[1] if "@" in smtp_user else smtp_user
+        apprise_url = (
+            f"mailtos://{quote(smtp_user, safe='')}:{quote(smtp_pass, safe='')}"
+            f"@{smtp_domain}?to={quote(dest, safe='')}"
+        )
+        encrypted = crypto.encrypt(apprise_url)
+
+    else:
+        # Unknown type — should not reach here because ChannelIn.pattern guards it.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"unsupported channel type: {ct_type}",
+        )
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         cur = await db.execute(
             """
@@ -92,7 +174,7 @@ async def create_channel(
                                       credential_encrypted, enabled)
             VALUES(?, ?, ?, ?, 1)
             """,
-            (user.id, body.channel_type, body.display_name, ct),
+            (user.id, body.channel_type, body.display_name, encrypted),
         )
         await db.commit()
         channel_id = cur.lastrowid
@@ -148,11 +230,11 @@ async def test_send_channel(
 
 @router.get("/providers", response_model=ProvidersOut)
 async def get_providers(user: CurrentUser = Depends(require_user)) -> ProvidersOut:
-    """Return which OAuth Connect buttons are configured on this deployment."""
+    """Return which Connect buttons are configured on this deployment."""
     return ProvidersOut(
         slack=_slack_oauth_enabled(),
         discord=_discord_oauth_enabled(),
-        telegram=False,  # Telegram OAuth slice not yet implemented.
+        telegram=_telegram_enabled(),
     )
 
 
@@ -519,3 +601,160 @@ async def callback_discord(
         f"{_settings.OAUTH_REDIRECT_BASE}/settings/channels?connected=discord"
     )
     return RedirectResponse(settings_url, status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Telegram Bot deep-link + poll connect
+# ---------------------------------------------------------------------------
+
+
+def _telegram_enabled() -> bool:
+    """Return True only when both Telegram bot env vars are set."""
+    return bool(_settings.TELEGRAM_BOT_TOKEN and _settings.TELEGRAM_BOT_USERNAME)
+
+
+async def _telegram_get_updates() -> list[dict]:
+    """GET /getUpdates from the Telegram Bot API and return the result list.
+
+    This is the ONLY function that makes live HTTP to Telegram — isolated here
+    so tests can monkeypatch it without touching httpx internals.
+    """
+    token = _settings.TELEGRAM_BOT_TOKEN
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", [])
+
+
+@router.get("/connect/telegram", response_model=TelegramConnectOut)
+async def connect_telegram(
+    user: CurrentUser = Depends(require_user),
+) -> TelegramConnectOut:
+    """Return a Telegram deep-link the user must tap to start the bot.
+
+    The frontend polls ``GET /connect/telegram/poll?state=<state>`` until
+    the user's ``/start <state>`` message arrives in the bot's update queue.
+
+    Returns 404 when TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME are not set.
+    """
+    if not _telegram_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Telegram connect is not configured",
+        )
+
+    state = secrets.token_urlsafe(32)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        await db.execute(
+            "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+            "VALUES(?, ?, 'telegram', ?)",
+            (state, user.id, now_iso),
+        )
+        await db.commit()
+
+    deep_link = f"https://t.me/{_settings.TELEGRAM_BOT_USERNAME}?start={state}"
+    return TelegramConnectOut(deep_link=deep_link, state=state)
+
+
+@router.get("/connect/telegram/poll", response_model=TelegramPollOut)
+async def poll_telegram(
+    state: str,
+    user: CurrentUser = Depends(require_user),
+) -> TelegramPollOut:
+    """Poll whether the user has tapped the Telegram deep-link.
+
+    The frontend calls this repeatedly until ``connected=true`` or the state
+    expires.  The state row is NOT consumed until a matching Telegram message
+    is found (so callers can safely retry while the user is still tapping).
+
+    Security checks (without consuming the state):
+    - State must exist in ``oauth_states``.
+    - ``user_id`` must match the requesting user (IDOR guard).
+    - ``channel_type`` must be ``'telegram'``.
+    - Age must be ≤ ``_STATE_TTL_MINUTES`` (row is deleted on expiry).
+
+    If Telegram has received ``/start <state>`` from the user's chat, the
+    channel row is created and the state is consumed; returns
+    ``{connected: true, target_label: ...}``.  Otherwise returns
+    ``{connected: false}`` with the state still alive.
+    """
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT user_id, channel_type, created_at FROM oauth_states WHERE state = ?",
+            (state,),
+        )
+        row = await cur.fetchone()
+
+        if row is None:
+            # State never existed or was already consumed — permanent 400.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid or expired state",
+            )
+
+        if row["user_id"] != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid or expired state",
+            )
+
+        if row["channel_type"] != "telegram":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid or expired state",
+            )
+
+        created_at = datetime.fromisoformat(row["created_at"])
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - created_at
+        if age > timedelta(minutes=_STATE_TTL_MINUTES):
+            # Expired — clean up and reject.
+            await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid or expired state",
+            )
+
+        # State is valid — check Telegram for the matching /start message.
+        updates = await _telegram_get_updates()
+        expected_text = f"/start {state}"
+
+        for update in updates:
+            message = update.get("message", {})
+            if message.get("text") == expected_text:
+                chat = message["chat"]
+                chat_id = chat["id"]
+                label = (
+                    chat.get("title")
+                    or chat.get("username")
+                    or chat.get("first_name")
+                    or str(chat_id)
+                )
+                token = _settings.TELEGRAM_BOT_TOKEN
+                apprise_url = f"tgram://{token}/{chat_id}"
+                encrypted = crypto.encrypt(apprise_url)
+
+                await db.execute(
+                    """
+                    INSERT INTO user_channels(
+                        user_id, channel_type, display_name,
+                        credential_encrypted, connection_status, target_label, enabled
+                    ) VALUES(?, 'telegram', ?, ?, 'connected', ?, 1)
+                    """,
+                    (user.id, f"Telegram: {label}", encrypted, label),
+                )
+                # Consume the state (one-time use).
+                await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+                await db.commit()
+                return TelegramPollOut(connected=True, target_label=label)
+
+    # No matching update yet — return not-connected; state row kept alive.
+    return TelegramPollOut(connected=False)

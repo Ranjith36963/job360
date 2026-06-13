@@ -891,8 +891,77 @@ export interface paths {
         /** List Channels */
         get: operations["list_channels_api_settings_channels_get"];
         put?: never;
-        /** Create Channel */
+        /**
+         * Create Channel
+         * @description Create a channel via direct credential input.
+         *
+         *     * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
+         *     * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
+         *       to the Apprise ``json[s]://`` URL scheme.
+         *     * ``email``: ``credential`` must be a valid email address; backend builds
+         *       the ``mailtos://`` Apprise URL from the platform SMTP creds.
+         */
         post: operations["create_channel_api_settings_channels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/channels/connect/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Connect Telegram
+         * @description Return a Telegram deep-link the user must tap to start the bot.
+         *
+         *     The frontend polls ``GET /connect/telegram/poll?state=<state>`` until
+         *     the user's ``/start <state>`` message arrives in the bot's update queue.
+         *
+         *     Returns 404 when TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME are not set.
+         */
+        get: operations["connect_telegram_api_settings_channels_connect_telegram_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/channels/connect/telegram/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll Telegram
+         * @description Poll whether the user has tapped the Telegram deep-link.
+         *
+         *     The frontend calls this repeatedly until ``connected=true`` or the state
+         *     expires.  The state row is NOT consumed until a matching Telegram message
+         *     is found (so callers can safely retry while the user is still tapping).
+         *
+         *     Security checks (without consuming the state):
+         *     - State must exist in ``oauth_states``.
+         *     - ``user_id`` must match the requesting user (IDOR guard).
+         *     - ``channel_type`` must be ``'telegram'``.
+         *     - Age must be ≤ ``_STATE_TTL_MINUTES`` (row is deleted on expiry).
+         *
+         *     If Telegram has received ``/start <state>`` from the user's chat, the
+         *     channel row is created and the state is consumed; returns
+         *     ``{connected: true, target_label: ...}``.  Otherwise returns
+         *     ``{connected: false}`` with the state still alive.
+         */
+        get: operations["poll_telegram_api_settings_channels_connect_telegram_poll_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -908,7 +977,7 @@ export interface paths {
         };
         /**
          * Get Providers
-         * @description Return which OAuth Connect buttons are configured on this deployment.
+         * @description Return which Connect buttons are configured on this deployment.
          */
         get: operations["get_providers_api_settings_channels_providers_get"];
         put?: never;
@@ -1704,7 +1773,7 @@ export interface components {
         };
         /**
          * ProvidersOut
-         * @description Which OAuth connect buttons the frontend should display.
+         * @description Which OAuth/connect buttons the frontend should display.
          */
         ProvidersOut: {
             /** Discord */
@@ -1846,6 +1915,26 @@ export interface components {
             sources_active: number;
             /** Sources Total */
             sources_total: number;
+        };
+        /**
+         * TelegramConnectOut
+         * @description Response from GET /connect/telegram.
+         */
+        TelegramConnectOut: {
+            /** Deep Link */
+            deep_link: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * TelegramPollOut
+         * @description Response from GET /connect/telegram/poll.
+         */
+        TelegramPollOut: {
+            /** Connected */
+            connected: boolean;
+            /** Target Label */
+            target_label?: string | null;
         };
         /** TestSendResult */
         TestSendResult: {
@@ -3333,6 +3422,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChannelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_telegram_api_settings_channels_connect_telegram_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramConnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    poll_telegram_api_settings_channels_connect_telegram_poll_get: {
+        parameters: {
+            query: {
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramPollOut"];
                 };
             };
             /** @description Validation Error */

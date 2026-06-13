@@ -64,6 +64,12 @@ OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 
+# Telegram Bot credentials (deep-link + poll connect flow).
+# Create a bot via @BotFather on Telegram to obtain both values.
+# Leave blank (default) to disable the /connect/telegram endpoint.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+
 # Search
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100
