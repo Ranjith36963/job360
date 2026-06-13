@@ -156,22 +156,23 @@ describe("ChannelsSettingsPage — providers gating", () => {
     expect(discordBtn).toBeDisabled();
   });
 
-  it("shows 'not configured' note when all providers are false", async () => {
+  it("renders all three buttons (disabled) + a helper note when all providers are false", async () => {
     mockGetProviders.mockResolvedValue({
       slack: false,
       discord: false,
       telegram: false,
     });
     await renderPage();
+    // All three Connect buttons still render so the section looks intentional
+    // and consistent with Email/Webhook — but they are DISABLED until the
+    // server has the keys (they auto-enable once added).
+    expect(screen.getByRole("button", { name: /connect slack/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect discord/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect telegram/i })).toBeDisabled();
+    // A helper note explains why and points the user to email/webhook.
     expect(
-      screen.getByText(
-        /Chat connects \(Slack \/ Discord \/ Telegram\) aren't configured on this server yet\./i
-      )
+      screen.getByText(/need API keys configured on the server/i)
     ).toBeInTheDocument();
-    // No connect buttons should appear
-    expect(
-      screen.queryByRole("button", { name: /connect slack/i })
-    ).not.toBeInTheDocument();
   });
 });
 

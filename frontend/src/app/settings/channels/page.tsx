@@ -129,73 +129,73 @@ function ConnectRow({ providers, onRefresh }: ConnectRowProps) {
     }
   }
 
-  if (!anyEnabled) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Chat connects (Slack / Discord / Telegram) aren&apos;t configured on this
-        server yet.
-      </p>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap gap-3">
-      {providers.slack ? (
-        <Button
-          variant="outline"
-          onClick={() => {
-            window.location.href = "/api/settings/channels/connect/slack";
-          }}
-        >
-          Connect Slack
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          disabled
-          title="Slack isn't configured on this server"
-        >
-          Connect Slack
-        </Button>
-      )}
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        {providers.slack ? (
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.location.href = "/api/settings/channels/connect/slack";
+            }}
+          >
+            Connect Slack
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled
+            title="Slack isn't set up on this server yet — an admin needs to add its API keys"
+          >
+            Connect Slack
+          </Button>
+        )}
 
-      {providers.discord ? (
-        <Button
-          variant="outline"
-          onClick={() => {
-            window.location.href = "/api/settings/channels/connect/discord";
-          }}
-        >
-          Connect Discord
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          disabled
-          title="Discord isn't configured on this server"
-        >
-          Connect Discord
-        </Button>
-      )}
+        {providers.discord ? (
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.location.href = "/api/settings/channels/connect/discord";
+            }}
+          >
+            Connect Discord
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled
+            title="Discord isn't set up on this server yet — an admin needs to add its API keys"
+          >
+            Connect Discord
+          </Button>
+        )}
 
-      {providers.telegram ? (
-        <Button
-          variant="outline"
-          onClick={handleTelegram}
-          disabled={telegramPolling}
-        >
-          {telegramPolling
-            ? "Waiting for you to tap Start in Telegram…"
-            : "Connect Telegram"}
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          disabled
-          title="Telegram isn't configured on this server"
-        >
-          Connect Telegram
-        </Button>
+        {providers.telegram ? (
+          <Button
+            variant="outline"
+            onClick={handleTelegram}
+            disabled={telegramPolling}
+          >
+            {telegramPolling
+              ? "Waiting for you to tap Start in Telegram…"
+              : "Connect Telegram"}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled
+            title="Telegram isn't set up on this server yet — an admin needs to add its bot token"
+          >
+            Connect Telegram
+          </Button>
+        )}
+      </div>
+      {!anyEnabled && (
+        <p className="text-xs text-muted-foreground">
+          Slack, Discord, and Telegram need API keys configured on the server
+          before you can connect them — these buttons turn on automatically once
+          they&apos;re added. Email and webhook below work right now.
+        </p>
       )}
     </div>
   );
