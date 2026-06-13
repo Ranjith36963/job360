@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
-- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly --ignore=tests/test_main.py` (1,285 passing, 3 skipped on Windows as of a4fe829 — defer to the runtime collected count). `test_main.py` is excluded because JobSpy hits live Indeed.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (1,333 passing, 3 skipped on Windows as of M8 batch — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 46 entries but only 45 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
@@ -79,7 +79,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 
 ## Common Gotchas
 
-- **`test_main.py` hits live Indeed via JobSpy** (sync `requests`, can't be `aioresponses`-mocked). Exclude with `--ignore=tests/test_main.py` for fast runs. 13 tests in this file are skip-marked pending a rehab batch.
+- **`test_main.py` is now offline and fast** (~8 s, 14 tests). The M8 batch stubbed JobSpy (`fetch_jobs → []` via autouse fixture) and patched `load_profile`. It is part of the canonical run — do NOT add `--ignore=tests/test_main.py` back.
 - **`indeed` and `glassdoor` registry keys both → `JobSpySource`.** 46 registry entries, 45 unique classes. Test assertions treat 46 as authoritative.
 - **`teaching_vacancies` lives in `apis_free/` but declares `category="rss"`** for the 15-min scheduler tier. Folder location ≠ scheduler tier. (`gov_apprenticeships` was also in this category but was removed in the 2026-06 M6 rotation — API retired upstream.)
 - **Pillar 2 toggles default off.** Don't assume embeddings or LLM enrichment runs by default — they don't.
@@ -152,7 +152,7 @@ python -m src.cli view --visa-only
 
 # Tests (run from backend/ — pytest picks up pyproject.toml pythonpath=["."])
 python -m pytest tests/ -v                              # All tests
-python -m pytest -q -p no:randomly --ignore=tests/test_main.py   # Canonical fast run
+python -m pytest -q -p no:randomly   # Canonical fast run (test_main.py included — offline since M8)
 python -m pytest tests/test_scorer.py::test_name -v     # Single test
 
 # Migrations
@@ -271,9 +271,9 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 
 ## Testing
 
-**1,285 tests passing, 3 skipped** (1,288 collected as of `a4fe829`), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
+**1,333 tests passing, 3 skipped** (1,336 collected as of M8 batch — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
 
-`make test` (Makefile target) excludes `test_main.py` for the reason in Common Gotchas. The full suite including `test_main.py` is gated behind a future rehab batch.
+`make test` runs the full suite including `test_main.py` (rehabbed offline in M8 — JobSpy stubbed, runs in ~8 s).
 
 The per-test-file breakdown is in `STATUS.md` and grows with each batch — always defer to the runtime collected count, not the historical breakdown.
 

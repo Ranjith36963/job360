@@ -21,7 +21,7 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 ## P3 — M3 / M8 follow-ons
 
 M3-rem. **TODO — M3 remaining: settings forms (account/channels/notifications) RHF+zod, kanban a11y (C-07), and add `noValidate` to the 4 migrated auth forms** so zod's custom messages show instead of the browser's native validation (currently native pre-empts zod in the browser; zod is wired + vitest-tested but not user-visible). Also: footer hardcodes "50 sources" — now 46 after M6. `skipped: 0`
-M8a. **TODO — un-ignore test_main.py** now that it's offline+fast (11s): drop `--ignore=tests/test_main.py` from the Makefile, agent-gate.sh, CLAUDE.md canonical-run docs, and pyproject if set — so the rehabbed E2E tests are gated and can't silently rot again. Verify the full `pytest tests/` stays green. `skipped: 0`
+M8a. ~~**DONE — un-ignore test_main.py**~~ Removed `--ignore=tests/test_main.py` from Makefile (6 targets), agent-gate.sh, agentic-loop/hardening.md, root CLAUDE.md (3 spots), backend/CLAUDE.md, STATUS.md, and updated the stale comment block in test_main.py itself. Full suite: 1,333p / 3s / 0f confirmed green. `skipped: 0`
 
 ## P3 — frontend type hygiene (M7 follow-ons)
 
