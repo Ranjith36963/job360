@@ -137,6 +137,16 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
     };
   }, [resolvedId]);
 
+  // Sync browser tab title after client-side (soft) navigation.
+  // generateMetadata is SSR-only — it does not re-run on in-app nav, so the
+  // tab title is stale until this effect fires.  Guard on `job` so the
+  // loading / error states never clobber the SSR title.
+  useEffect(() => {
+    if (job) {
+      document.title = `${job.title} at ${job.company} — Job360`;
+    }
+  }, [job]);
+
   // Toggle action
   const handleAction = useCallback(
     async (action: "liked" | "not_interested") => {
