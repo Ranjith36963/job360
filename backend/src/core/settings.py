@@ -46,6 +46,16 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
+# Slack OAuth App credentials (one-click connect flow).
+# Register at https://api.slack.com/apps — set OAuth redirect URL to
+# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack
+# Leave blank (default) to disable the /connect/slack endpoint.
+SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
+# Public-facing base URL of this deployment (no trailing slash).
+# Used to build the OAuth redirect_uri sent to Slack.
+OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
+
 # Search
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100

@@ -229,6 +229,82 @@ async def test_0018_adds_profile_version_column(tmp_db_path):
     assert "profile_version" in cols
 
 
+@pytest.mark.asyncio
+async def test_0019_adds_oauth_states_table_and_channel_columns(tmp_db_path):
+    """Migration 0019 adds connection_status + target_label to user_channels
+    and creates the oauth_states table with the expected columns."""
+    async with aiosqlite.connect(tmp_db_path) as db:
+        await db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'applied',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                jobs_found INTEGER NOT NULL DEFAULT 0,
+                jobs_new INTEGER NOT NULL DEFAULT 0,
+                duration_s REAL
+            );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                description TEXT,
+                apply_url TEXT,
+                source TEXT,
+                date_found TEXT,
+                match_score INTEGER DEFAULT 0,
+                normalized_key TEXT UNIQUE,
+                visa_flag INTEGER DEFAULT 0,
+                date_posted TEXT
+            );
+            """
+        )
+        await db.commit()
+    await runner.up(tmp_db_path)
+    async with aiosqlite.connect(tmp_db_path) as conn:
+        # user_channels gains the two new columns.
+        cur = await conn.execute("PRAGMA table_info(user_channels)")
+        channel_cols = {row[1] for row in await cur.fetchall()}
+        assert "connection_status" in channel_cols, (
+            "user_channels missing connection_status after migration 0019"
+        )
+        assert "target_label" in channel_cols, (
+            "user_channels missing target_label after migration 0019"
+        )
+
+        # oauth_states table exists with all expected columns.
+        cur2 = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_states'"
+        )
+        assert await cur2.fetchone() is not None, "oauth_states table was not created"
+
+        cur3 = await conn.execute("PRAGMA table_info(oauth_states)")
+        oauth_cols = {row[1] for row in await cur3.fetchall()}
+        assert {"state", "user_id", "channel_type", "created_at"} <= oauth_cols, (
+            f"oauth_states missing expected columns; got {oauth_cols}"
+        )
+
+
 def test_split_sql_statements_ignores_semicolon_in_inline_comment():
     """Regression: an inline ``--`` comment containing ``;`` must NOT split the
     statement it trails. 0015's ``-- NULL = not yet used; set on consume`` did,

@@ -1,0 +1,414 @@
+"""OAuth flow tests for Slack one-click channel connect.
+
+All tests are offline:
+- No live HTTP — _exchange_slack_code is monkeypatched.
+- Slack settings attrs are monkeypatched via the module reference so that
+  _slack_oauth_enabled() picks up the patched values.
+
+Auth fixture is reused from test_channels_routes.py:
+- A fresh tmp SQLite DB is bootstrapped via migrations runner.
+- The DB_PATH is patched on every importer module.
+- Tests call /api/auth/register then hit the OAuth routes as that user.
+"""
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
+
+import aiosqlite
+import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+from migrations import runner
+from src.api.routes import channels as channels_route
+from src.services.channels import crypto
+
+
+# ---------------------------------------------------------------------------
+# Shared fixture (mirrors test_channels_routes.py exactly)
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def _noop_lifespan(app):
+    yield
+
+
+@pytest.fixture
+def api(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "test.db")
+
+    async def _bootstrap():
+        async with aiosqlite.connect(db_path) as db:
+            await db.executescript(
+                """
+                CREATE TABLE user_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(job_id)
+                );
+                CREATE TABLE applications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL,
+                    stage TEXT NOT NULL DEFAULT 'applied',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(job_id)
+                );
+                """
+            )
+            await db.commit()
+        await runner.up(db_path)
+
+    asyncio.run(_bootstrap())
+
+    from pathlib import Path
+
+    from src.api import auth_deps, dependencies
+    from src.api.routes import auth as auth_route
+    from src.core import settings
+
+    patched = Path(db_path)
+    monkeypatch.setattr(settings, "DB_PATH", patched, raising=True)
+    monkeypatch.setattr(dependencies, "DB_PATH", patched, raising=True)
+    monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
+    monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
+    monkeypatch.setattr(channels_route, "DB_PATH", patched, raising=True)
+
+    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "x" * 40)
+
+    from src.api.main import app
+
+    app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
+    return TestClient(app)
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def _register(client: TestClient, email: str, password: str = "s3cretpassword") -> None:
+    r = client.post("/api/auth/register", json={"email": email, "password": password})
+    assert r.status_code == 201, r.text
+
+
+_FAKE_SLACK_DATA = {
+    "ok": True,
+    "incoming_webhook": {
+        "url": "https://hooks.slack.com/services/T111/B222/zzz333",
+        "channel": "#jobs",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Test 1: connect/slack when configured → 302 to Slack + state row persisted
+# ---------------------------------------------------------------------------
+
+def test_connect_slack_when_configured(api, monkeypatch):
+    """GET /connect/slack redirects to Slack authorize URL and saves a state."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    # follow_redirects=False so we inspect the 302 Location header.
+    r = api.get("/api/settings/channels/connect/slack", follow_redirects=False)
+
+    assert r.status_code == 302, r.text
+    location = r.headers["location"]
+    assert location.startswith("https://slack.com/oauth/v2/authorize"), location
+    assert "TEST_CLIENT_ID" in location
+    assert "state=" in location
+
+    # Extract the state value from the Location header query string.
+    from urllib.parse import parse_qs, urlparse
+    qs = parse_qs(urlparse(location).query)
+    state = qs["state"][0]
+
+    # Confirm the state was written to oauth_states.
+    db_path = str(ch.DB_PATH)
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
+                (state,),
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    assert row is not None, "state row missing from oauth_states"
+    assert row["channel_type"] == "slack"
+
+
+# ---------------------------------------------------------------------------
+# Test 2: connect/slack when NOT configured → 404
+# ---------------------------------------------------------------------------
+
+def test_connect_slack_not_configured(api, monkeypatch):
+    """GET /connect/slack returns 404 when Slack OAuth settings are blank."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "", raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/connect/slack", follow_redirects=False)
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Test 3: callback happy path → channel row created with correct values
+# ---------------------------------------------------------------------------
+
+def test_callback_slack_happy_path(api, monkeypatch):
+    """Full happy-path: state seeded → callback → channel row created."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    # Seed a valid state row directly.
+    db_path = str(ch.DB_PATH)
+    test_state = "validstate_" + "a" * 20
+
+    async def _seed():
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(db_path) as db:
+            # Select by email to avoid the DEFAULT_TENANT_ID placeholder row
+            # inserted by migrations (which has a lower rowid than Alice).
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'alice@example.com'"
+            )
+            row = await cur.fetchone()
+            user_id = row[0]
+            await db.execute(
+                "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+                "VALUES(?, ?, 'slack', ?)",
+                (test_state, user_id, now),
+            )
+            await db.commit()
+        return user_id
+
+    asyncio.run(_seed())
+
+    # Monkeypatch the HTTP exchange so no live call goes out.
+    async def _fake_exchange(code: str) -> dict:
+        return _FAKE_SLACK_DATA
+
+    monkeypatch.setattr(ch, "_exchange_slack_code", _fake_exchange)
+
+    r = api.get(
+        f"/api/settings/channels/callback/slack?code=anycode&state={test_state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 302, r.text
+    assert "connected=slack" in r.headers["location"]
+
+    # Check DB for the new channel row.
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT channel_type, connection_status, target_label, "
+                "credential_encrypted FROM user_channels WHERE channel_type='slack'"
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    assert row is not None, "channel row not created"
+    assert row["channel_type"] == "slack"
+    assert row["connection_status"] == "connected"
+    assert row["target_label"] == "#jobs"
+
+    # Verify the decrypted credential is the expected Apprise URL.
+    decrypted = crypto.decrypt(row["credential_encrypted"])
+    assert decrypted == "slack://T111/B222/zzz333"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: callback with unknown/missing state → 400, no channel created
+# ---------------------------------------------------------------------------
+
+def test_callback_unknown_state(api, monkeypatch):
+    """Callback with a state that was never stored → 400."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    r = api.get(
+        "/api/settings/channels/callback/slack?code=anycode&state=doesnotexist",
+        follow_redirects=False,
+    )
+    assert r.status_code == 400
+
+    # Confirm no channel row was created.
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute("SELECT COUNT(*) FROM user_channels")
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_check()) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 5: callback with expired state → 400, state row cleaned up
+# ---------------------------------------------------------------------------
+
+def test_callback_expired_state(api, monkeypatch):
+    """State older than 10 minutes is rejected and the row is removed."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    db_path = str(ch.DB_PATH)
+    test_state = "expiredstate_" + "b" * 20
+
+    async def _seed():
+        # Set created_at 11 minutes ago.
+        old_ts = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+        async with aiosqlite.connect(db_path) as db:
+            # Select by email to avoid the DEFAULT_TENANT_ID placeholder row.
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'alice@example.com'"
+            )
+            user_id = (await cur.fetchone())[0]
+            await db.execute(
+                "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+                "VALUES(?, ?, 'slack', ?)",
+                (test_state, user_id, old_ts),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    async def _fake_exchange(code: str) -> dict:
+        return _FAKE_SLACK_DATA
+
+    monkeypatch.setattr(ch, "_exchange_slack_code", _fake_exchange)
+
+    r = api.get(
+        f"/api/settings/channels/callback/slack?code=anycode&state={test_state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 400
+
+    # State row should have been deleted.
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM oauth_states WHERE state = ?", (test_state,)
+            )
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_check()) == 0, "expired state row was not deleted"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: IDOR — user B cannot complete user A's pending state
+# ---------------------------------------------------------------------------
+
+def test_callback_idor_rejected(api, monkeypatch):
+    """A state belonging to user A is rejected when user B hits the callback."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    # Register two users.
+    _register(api, "alice@example.com")
+    # Log out alice.
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+
+    _register(api, "bob@example.com")
+    # Log out bob (so we can log back in as alice to seed the state).
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+
+    # Log in as alice to trigger the connect flow (creates a state for alice).
+    r_login = api.post(
+        "/api/auth/login",
+        json={"email": "alice@example.com", "password": "s3cretpassword"},
+    )
+    assert r_login.status_code == 200, r_login.text
+
+    # Hit /connect/slack as alice — captures the state.
+    r_connect = api.get(
+        "/api/settings/channels/connect/slack", follow_redirects=False
+    )
+    assert r_connect.status_code == 302
+
+    from urllib.parse import parse_qs, urlparse
+    qs = parse_qs(urlparse(r_connect.headers["location"]).query)
+    alice_state = qs["state"][0]
+
+    # Switch to bob.
+    api.post("/api/auth/logout")
+    api.cookies.clear()
+    r_bob = api.post(
+        "/api/auth/login",
+        json={"email": "bob@example.com", "password": "s3cretpassword"},
+    )
+    assert r_bob.status_code == 200, r_bob.text
+
+    async def _fake_exchange(code: str) -> dict:
+        return _FAKE_SLACK_DATA
+
+    monkeypatch.setattr(ch, "_exchange_slack_code", _fake_exchange)
+
+    # Bob tries to complete Alice's state.
+    r = api.get(
+        f"/api/settings/channels/callback/slack?code=anycode&state={alice_state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 400, f"expected 400, got {r.status_code}: {r.text}"
+
+    # Bob must not have gained a channel row.
+    db_path = str(ch.DB_PATH)
+
+    async def _check_bob():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'bob@example.com'"
+            )
+            bob_row = await cur.fetchone()
+            bob_id = bob_row["id"]
+            cur2 = await db.execute(
+                "SELECT COUNT(*) FROM user_channels WHERE user_id = ?", (bob_id,)
+            )
+            return (await cur2.fetchone())[0]
+
+    assert asyncio.run(_check_bob()) == 0, "Bob must not have a channel row"
