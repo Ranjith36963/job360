@@ -517,6 +517,28 @@ export async function updateApplicationNotes(
   });
 }
 
+// ---- Channels: OAuth connect + Telegram poll ----
+
+export type ChannelProviders = { slack: boolean; discord: boolean; telegram: boolean };
+
+export async function getProviders(): Promise<ChannelProviders> {
+  return request<ChannelProviders>("/api/settings/channels/providers");
+}
+
+export async function connectTelegram(): Promise<{ deep_link: string; state: string }> {
+  return request<{ deep_link: string; state: string }>(
+    "/api/settings/channels/connect/telegram"
+  );
+}
+
+export async function pollTelegram(
+  state: string
+): Promise<{ connected: boolean; target_label: string | null }> {
+  return request<{ connected: boolean; target_label: string | null }>(
+    `/api/settings/channels/connect/telegram/poll?state=${encodeURIComponent(state)}`
+  );
+}
+
 // ---- Step-3: Recent runs ----
 
 export async function getRecentRuns(
