@@ -412,3 +412,314 @@ def test_callback_idor_rejected(api, monkeypatch):
             return (await cur2.fetchone())[0]
 
     assert asyncio.run(_check_bob()) == 0, "Bob must not have a channel row"
+
+
+# ===========================================================================
+# Discord OAuth tests (mirror the Slack suite)
+# ===========================================================================
+
+_FAKE_DISCORD_DATA = {
+    "webhook": {
+        "url": "https://discord.com/api/webhooks/123/abctoken",
+        "name": "#general",
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Test D1: connect/discord when configured → 302 to Discord + state stored
+# ---------------------------------------------------------------------------
+
+def test_connect_discord_when_configured(api, monkeypatch):
+    """GET /connect/discord redirects to Discord authorize URL and saves a state."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    r = api.get("/api/settings/channels/connect/discord", follow_redirects=False)
+
+    assert r.status_code == 302, r.text
+    location = r.headers["location"]
+    assert location.startswith("https://discord.com/api/oauth2/authorize"), location
+    assert "DISC_CLIENT_ID" in location
+    assert "state=" in location
+    assert "webhook.incoming" in location
+
+    from urllib.parse import parse_qs, urlparse
+    qs = parse_qs(urlparse(location).query)
+    state = qs["state"][0]
+
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
+                (state,),
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    assert row is not None, "state row missing from oauth_states"
+    assert row["channel_type"] == "discord"
+
+
+# ---------------------------------------------------------------------------
+# Test D2: connect/discord when NOT configured → 404
+# ---------------------------------------------------------------------------
+
+def test_connect_discord_not_configured(api, monkeypatch):
+    """GET /connect/discord returns 404 when Discord OAuth settings are blank."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "", raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/connect/discord", follow_redirects=False)
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Test D3: callback happy path → channel row created with correct values
+# ---------------------------------------------------------------------------
+
+def test_callback_discord_happy_path(api, monkeypatch):
+    """Full happy-path: state seeded → callback → channel row with correct creds."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    db_path = str(ch.DB_PATH)
+    test_state = "disc_validstate_" + "a" * 20
+
+    async def _seed():
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'alice@example.com'"
+            )
+            row = await cur.fetchone()
+            user_id = row[0]
+            await db.execute(
+                "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+                "VALUES(?, ?, 'discord', ?)",
+                (test_state, user_id, now),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    async def _fake_exchange(code: str) -> dict:
+        return _FAKE_DISCORD_DATA
+
+    monkeypatch.setattr(ch, "_exchange_discord_code", _fake_exchange)
+
+    r = api.get(
+        f"/api/settings/channels/callback/discord?code=anycode&state={test_state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 302, r.text
+    assert "connected=discord" in r.headers["location"]
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT channel_type, connection_status, target_label, "
+                "credential_encrypted FROM user_channels WHERE channel_type='discord'"
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    assert row is not None, "channel row not created"
+    assert row["channel_type"] == "discord"
+    assert row["connection_status"] == "connected"
+    assert row["target_label"] == "#general"
+
+    decrypted = crypto.decrypt(row["credential_encrypted"])
+    assert decrypted == "discord://123/abctoken"
+
+
+# ---------------------------------------------------------------------------
+# Test D4: unknown state → 400
+# ---------------------------------------------------------------------------
+
+def test_callback_discord_unknown_state(api, monkeypatch):
+    """Discord callback with a state that was never stored → 400."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    r = api.get(
+        "/api/settings/channels/callback/discord?code=anycode&state=doesnotexist",
+        follow_redirects=False,
+    )
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Test D5: cross-type state (a 'slack' state used on /callback/discord) → 400
+# ---------------------------------------------------------------------------
+
+def test_callback_discord_cross_type_state_rejected(api, monkeypatch):
+    """A 'slack' state must be rejected on /callback/discord (channel_type guard)."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    # Seed a 'slack' state row.
+    db_path = str(ch.DB_PATH)
+    test_state = "slack_state_for_discord_test_" + "x" * 10
+
+    async def _seed():
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'alice@example.com'"
+            )
+            row = await cur.fetchone()
+            user_id = row[0]
+            await db.execute(
+                "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+                "VALUES(?, ?, 'slack', ?)",
+                (test_state, user_id, now),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    # Try to use it on the discord callback — must be rejected.
+    r = api.get(
+        f"/api/settings/channels/callback/discord?code=anycode&state={test_state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 400, (
+        f"expected 400 for cross-type state, got {r.status_code}: {r.text}"
+    )
+
+
+# ===========================================================================
+# GET /providers endpoint
+# ===========================================================================
+
+def test_providers_discord_configured(api, monkeypatch):
+    """GET /providers returns discord=true when Discord env vars are set."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/providers")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["discord"] is True
+    assert body["slack"] is False
+    assert body["telegram"] is False
+
+
+def test_providers_both_configured(api, monkeypatch):
+    """GET /providers returns slack=true + discord=true when both are configured."""
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "SLACK_CLIENT_ID", "TEST_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "SLACK_CLIENT_SECRET", "TEST_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.get("/api/settings/channels/providers")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["discord"] is True
+    assert body["slack"] is True
+    assert body["telegram"] is False
+
+
+def test_providers_requires_auth(api):
+    """GET /providers without auth → 401."""
+    r = api.get("/api/settings/channels/providers")
+    assert r.status_code == 401
+
+
+# ===========================================================================
+# list_channels returns connection_status + target_label
+# ===========================================================================
+
+def test_list_channels_returns_connection_status_and_target_label(api, monkeypatch):
+    """Channels created via OAuth expose connection_status + target_label."""
+    from src.api.routes import channels as ch
+    from src.core import settings as s
+
+    monkeypatch.setattr(s, "DISCORD_CLIENT_ID", "DISC_CLIENT_ID", raising=True)
+    monkeypatch.setattr(s, "DISCORD_CLIENT_SECRET", "DISC_CLIENT_SECRET", raising=True)
+    monkeypatch.setattr(s, "OAUTH_REDIRECT_BASE", "https://job360.example.com", raising=True)
+
+    _register(api, "alice@example.com")
+
+    db_path = str(ch.DB_PATH)
+    test_state = "disc_list_test_state_" + "b" * 20
+
+    async def _seed():
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT id FROM users WHERE email = 'alice@example.com'"
+            )
+            row = await cur.fetchone()
+            user_id = row[0]
+            await db.execute(
+                "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
+                "VALUES(?, ?, 'discord', ?)",
+                (test_state, user_id, now),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    async def _fake_exchange(code: str) -> dict:
+        return _FAKE_DISCORD_DATA
+
+    monkeypatch.setattr(ch, "_exchange_discord_code", _fake_exchange)
+
+    r_cb = api.get(
+        f"/api/settings/channels/callback/discord?code=anycode&state={test_state}",
+        follow_redirects=False,
+    )
+    assert r_cb.status_code == 302, r_cb.text
+
+    r = api.get("/api/settings/channels")
+    assert r.status_code == 200, r.text
+    channels = r.json()
+    assert len(channels) == 1
+    ch_row = channels[0]
+    assert ch_row["connection_status"] == "connected"
+    assert ch_row["target_label"] == "#general"

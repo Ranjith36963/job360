@@ -899,6 +899,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/channels/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Providers
+         * @description Return which OAuth Connect buttons are configured on this deployment.
+         */
+        get: operations["get_providers_api_settings_channels_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/channels/{channel_id}": {
         parameters: {
             query?: never;
@@ -1165,12 +1185,19 @@ export interface components {
         ChannelOut: {
             /** Channel Type */
             channel_type: string;
+            /**
+             * Connection Status
+             * @default connected
+             */
+            connection_status: string;
             /** Display Name */
             display_name: string;
             /** Enabled */
             enabled: boolean;
             /** Id */
             id: number;
+            /** Target Label */
+            target_label?: string | null;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -1674,6 +1701,18 @@ export interface components {
             total: number;
             /** Versions */
             versions: components["schemas"]["ProfileVersionSummary"][];
+        };
+        /**
+         * ProvidersOut
+         * @description Which OAuth connect buttons the frontend should display.
+         */
+        ProvidersOut: {
+            /** Discord */
+            discord: boolean;
+            /** Slack */
+            slack: boolean;
+            /** Telegram */
+            telegram: boolean;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -3294,6 +3333,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChannelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_providers_api_settings_channels_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersOut"];
                 };
             };
             /** @description Validation Error */

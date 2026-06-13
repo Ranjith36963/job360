@@ -247,6 +247,11 @@
             "title": "Channel Type",
             "type": "string"
           },
+          "connection_status": {
+            "default": "connected",
+            "title": "Connection Status",
+            "type": "string"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -258,6 +263,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "target_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Label"
           }
         },
         "required": [
@@ -1539,6 +1555,30 @@
           "total"
         ],
         "title": "ProfileVersionsListResponse",
+        "type": "object"
+      },
+      "ProvidersOut": {
+        "description": "Which OAuth connect buttons the frontend should display.",
+        "properties": {
+          "discord": {
+            "title": "Discord",
+            "type": "boolean"
+          },
+          "slack": {
+            "title": "Slack",
+            "type": "boolean"
+          },
+          "telegram": {
+            "title": "Telegram",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slack",
+          "discord",
+          "telegram"
+        ],
+        "title": "ProvidersOut",
         "type": "object"
       },
       "RegisterRequest": {
@@ -4653,6 +4693,56 @@
           }
         },
         "summary": "Create Channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/api/settings/channels/providers": {
+      "get": {
+        "description": "Return which OAuth Connect buttons are configured on this deployment.",
+        "operationId": "get_providers_api_settings_channels_providers_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Providers",
         "tags": [
           "channels"
         ]

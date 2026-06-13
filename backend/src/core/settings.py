@@ -53,8 +53,16 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
 # Public-facing base URL of this deployment (no trailing slash).
-# Used to build the OAuth redirect_uri sent to Slack.
+# Used to build the OAuth redirect_uri sent to Slack and Discord.
 OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
+
+# Discord OAuth App credentials (one-click connect flow).
+# Register at https://discord.com/developers/applications — add the
+# incoming-webhook scope and set the redirect URL to
+# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord
+# Leave blank (default) to disable the /connect/discord endpoint.
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 
 # Search
 MIN_MATCH_SCORE = 30
