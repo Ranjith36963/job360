@@ -8,6 +8,7 @@ import {
   Channel,
   ChannelProviders,
   ChannelTestResult,
+  channelConnectUrl,
   connectTelegram,
   createChannel,
   deleteChannel,
@@ -136,7 +137,7 @@ function ConnectRow({ providers, onRefresh }: ConnectRowProps) {
           <Button
             variant="outline"
             onClick={() => {
-              window.location.href = "/api/settings/channels/connect/slack";
+              window.location.href = channelConnectUrl("slack");
             }}
           >
             Connect Slack
@@ -155,7 +156,7 @@ function ConnectRow({ providers, onRefresh }: ConnectRowProps) {
           <Button
             variant="outline"
             onClick={() => {
-              window.location.href = "/api/settings/channels/connect/discord";
+              window.location.href = channelConnectUrl("discord");
             }}
           >
             Connect Discord

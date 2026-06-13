@@ -34,6 +34,16 @@ import type {
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+/**
+ * Absolute backend URL for a chat-provider OAuth connect. These routes are
+ * BROWSER NAVIGATIONS (window.location.href), not fetch — so they must point at
+ * the backend origin. A relative "/api/..." path would hit the frontend origin
+ * (:3000) and 404; the backend lives at ${API}.
+ */
+export function channelConnectUrl(provider: "slack" | "discord"): string {
+  return `${API}/api/settings/channels/connect/${provider}`;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
