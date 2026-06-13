@@ -210,6 +210,66 @@ def list_profile_versions(user_id: str, limit: int = 10) -> list[dict]:
     return out
 
 
+def current_profile_version_id(user_id: str) -> Optional[int]:
+    """Return the highest ``id`` from ``user_profile_versions`` for ``user_id``.
+
+    Returns None when no version row exists (new user) or when the table is
+    absent (pre-migration DB). Tolerates missing table via OperationalError.
+    """
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            cur = conn.execute(
+                "SELECT MAX(id) FROM user_profile_versions WHERE user_id = ?",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return int(row[0])
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return None
+        raise
+
+
+def profile_content_changed_since_previous(user_id: str) -> bool:
+    """Return True when the user's most-recent profile snapshot differs from the one before it.
+
+    Comparison key is ``(cv_data, preferences)`` JSON strings.
+
+    Rules:
+    - 0 rows  → False (no profile at all, nothing to compare)
+    - 1 row   → True  (first-ever save is always "changed")
+    - 2+ rows → True if the two most-recent rows differ, else False
+
+    Tolerates missing table (returns False on OperationalError "no such table").
+    """
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            cur = conn.execute(
+                """
+                SELECT cv_data, preferences
+                FROM user_profile_versions
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 2
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return False
+        raise
+
+    if len(rows) == 0:
+        return False
+    if len(rows) == 1:
+        return True
+    # Two rows: newest first. Changed if either column differs.
+    return rows[0][0] != rows[1][0] or rows[0][1] != rows[1][1]
+
+
 def load_profile(user_id: str) -> Optional[UserProfile]:
     """Load the UserProfile for ``user_id``, or None if absent.
 

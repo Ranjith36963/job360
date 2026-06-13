@@ -175,3 +175,65 @@ async def test_upsert_is_idempotent_on_conflict(feed_db):
     assert len(rows) == 1
     assert rows[0].score == 85  # upsert updated the score
     assert rows[0].bucket == "24_48h"
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — profile_version stamping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upsert_with_profile_version_stamps_column(feed_db):
+    """profile_version=7 is persisted in the user_feed row."""
+    async with aiosqlite.connect(feed_db) as db:
+        db.row_factory = aiosqlite.Row
+        svc = FeedService(db)
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=10, score=70, bucket="24h", profile_version=7
+        )
+        cur = await db.execute(
+            "SELECT profile_version FROM user_feed WHERE user_id = ? AND job_id = ?",
+            ("alice", 10),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["profile_version"] == 7
+
+
+@pytest.mark.asyncio
+async def test_upsert_without_profile_version_leaves_null(feed_db):
+    """Calling without profile_version kwarg must leave the column NULL."""
+    async with aiosqlite.connect(feed_db) as db:
+        db.row_factory = aiosqlite.Row
+        svc = FeedService(db)
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=11, score=55, bucket="24h"
+        )
+        cur = await db.execute(
+            "SELECT profile_version FROM user_feed WHERE user_id = ? AND job_id = ?",
+            ("alice", 11),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["profile_version"] is None
+
+
+@pytest.mark.asyncio
+async def test_upsert_updates_profile_version_on_conflict(feed_db):
+    """A second upsert with a new profile_version updates the column."""
+    async with aiosqlite.connect(feed_db) as db:
+        db.row_factory = aiosqlite.Row
+        svc = FeedService(db)
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=12, score=60, bucket="24h", profile_version=3
+        )
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=12, score=75, bucket="24h", profile_version=5
+        )
+        cur = await db.execute(
+            "SELECT profile_version FROM user_feed WHERE user_id = ? AND job_id = ?",
+            ("alice", 12),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["profile_version"] == 5

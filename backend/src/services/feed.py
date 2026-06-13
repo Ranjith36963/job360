@@ -162,22 +162,26 @@ class FeedService:
         job_id: int,
         score: int,
         bucket: str,
+        profile_version: Optional[int] = None,
     ) -> int:
-        """Insert a feed row or update (score, bucket) if (user, job) already tracked.
+        """Insert a feed row or update (score, bucket, profile_version) if (user, job) already tracked.
 
         Returns the row id. Idempotent per (user_id, job_id) per UNIQUE constraint.
+        ``profile_version`` stamps which user_profile_versions.id produced this
+        row's score — None for legacy/unscored rows.
         """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             """
-            INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?)
+            INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at, profile_version)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
             ON CONFLICT(user_id, job_id)
             DO UPDATE SET score = excluded.score,
                           bucket = excluded.bucket,
-                          updated_at = excluded.updated_at
+                          updated_at = excluded.updated_at,
+                          profile_version = excluded.profile_version
             """,
-            (user_id, job_id, score, bucket, now, now),
+            (user_id, job_id, score, bucket, now, now, profile_version),
         )
         await self._db.commit()
         cur = await self._db.execute(

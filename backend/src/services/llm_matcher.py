@@ -162,6 +162,21 @@ async def save_verdict(
     await conn.commit()
 
 
+async def clear_user_verdicts(conn: aiosqlite.Connection, user_id: str) -> int:
+    """Clear all LLM verdict fields for every feed row belonging to ``user_id``.
+
+    Used when the user's profile changes significantly (re-judge backlog).
+    Returns the number of rows updated.
+    """
+    cur = await conn.execute(
+        "UPDATE user_feed SET llm_fit_score = NULL, llm_verdict = NULL, "
+        "llm_reason = NULL, llm_matched_at = NULL WHERE user_id = ?",
+        (user_id,),
+    )
+    await conn.commit()
+    return cur.rowcount or 0
+
+
 async def match_batch(
     jobs: list[Job],
     *,

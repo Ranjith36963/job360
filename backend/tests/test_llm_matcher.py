@@ -403,3 +403,63 @@ async def test_matcher_stage_swallows_total_failure(stage_db, monkeypatch):
     job80 = await _seed_job(conn, "Boom Profile Job", "CorpB", 80, _UID)
 
     await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job80])  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — clear_user_verdicts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_clear_user_verdicts_nulls_all_llm_columns(mem_db):
+    """save_verdict then clear_user_verdicts: all four llm_ columns go NULL."""
+    from src.services.llm_matcher import clear_user_verdicts, has_verdict, save_verdict
+
+    conn = mem_db
+    uid = "user-clear-001"
+
+    # Insert a catalog job + feed row
+    cur = await conn.execute(
+        "INSERT INTO jobs(title, company, apply_url, source, date_found) VALUES (?,?,?,?,?)",
+        ("Clear Test Job", "CorpX", "https://x.com/1", "greenhouse", _NOW),
+    )
+    jid = cur.lastrowid
+    await conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+        (uid, jid, 70, "top"),
+    )
+    await conn.commit()
+
+    # Save a verdict
+    verdict = MatchVerdict(fit_score=80, verdict="strong", reason="domain")
+    await save_verdict(conn, uid, jid, verdict)
+    assert await has_verdict(conn, uid, jid) is True
+
+    # Clear
+    cleared = await clear_user_verdicts(conn, uid)
+    assert cleared >= 1
+
+    # has_verdict must now return False
+    assert await has_verdict(conn, uid, jid) is False
+
+    # All four llm_ columns must be NULL
+    cur = await conn.execute(
+        "SELECT llm_fit_score, llm_verdict, llm_reason, llm_matched_at "
+        "FROM user_feed WHERE user_id = ? AND job_id = ?",
+        (uid, jid),
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["llm_fit_score"] is None
+    assert row["llm_verdict"] is None
+    assert row["llm_reason"] is None
+    assert row["llm_matched_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_clear_user_verdicts_returns_zero_when_no_rows(mem_db):
+    """No feed rows for this user → returns 0 without error."""
+    from src.services.llm_matcher import clear_user_verdicts
+
+    cleared = await clear_user_verdicts(mem_db, "nonexistent-user")
+    assert cleared == 0

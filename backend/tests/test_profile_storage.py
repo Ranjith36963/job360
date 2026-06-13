@@ -332,3 +332,110 @@ def test_corrupt_legacy_json_does_not_crash_load(storage_db):
     result = load_profile(DEFAULT_TENANT_ID)
     assert result is None
     assert legacy_path.exists(), "corrupt JSON is preserved for user inspection"
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — current_profile_version_id + profile_content_changed_since_previous
+# ---------------------------------------------------------------------------
+
+
+def test_current_profile_version_id_none_when_no_versions(storage_db):
+    from src.services.profile.storage import current_profile_version_id
+
+    assert current_profile_version_id(USER_ALICE) is None
+
+
+def test_current_profile_version_id_returns_latest(storage_db):
+    from src.services.profile.storage import current_profile_version_id, save_profile
+
+    save_profile(_make_profile("python"), USER_ALICE)
+    save_profile(_make_profile("rust"), USER_ALICE)
+
+    vid = current_profile_version_id(USER_ALICE)
+    assert vid is not None
+    assert isinstance(vid, int)
+    assert vid >= 2  # at least 2 versions were saved
+
+
+def test_profile_changed_false_when_no_versions(storage_db):
+    from src.services.profile.storage import profile_content_changed_since_previous
+
+    assert profile_content_changed_since_previous(USER_ALICE) is False
+
+
+def test_profile_changed_true_when_one_version(storage_db):
+    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
+
+    save_profile(_make_profile("python"), USER_ALICE)
+    assert profile_content_changed_since_previous(USER_ALICE) is True
+
+
+def test_profile_changed_false_when_two_identical_versions(storage_db):
+    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
+
+    profile = _make_profile("python")
+    save_profile(profile, USER_ALICE)
+    save_profile(profile, USER_ALICE)  # identical second save
+    assert profile_content_changed_since_previous(USER_ALICE) is False
+
+
+def test_profile_changed_true_when_two_different_cv_data(storage_db):
+    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
+
+    save_profile(_make_profile("python"), USER_ALICE)
+    save_profile(_make_profile("rust"), USER_ALICE)  # different skills
+    assert profile_content_changed_since_previous(USER_ALICE) is True
+
+
+def test_profile_changed_true_when_two_different_preferences(storage_db):
+    """Different preferences alone should trigger changed=True."""
+    import sqlite3 as _sqlite3
+    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
+    from src.services.profile.models import UserPreferences
+
+    save_profile(_make_profile("python"), USER_ALICE)
+    # Same cv_data, different preferences
+    from src.services.profile.models import CVData, UserProfile
+    p2 = UserProfile(
+        cv_data=CVData(raw_text="cv for python", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(
+            target_job_titles=["Staff Engineer"],  # different
+            additional_skills=["python"],
+        ),
+    )
+    save_profile(p2, USER_ALICE)
+    assert profile_content_changed_since_previous(USER_ALICE) is True
+
+
+def test_current_profile_version_id_returns_none_missing_table(tmp_path, monkeypatch):
+    """Tolerate a DB without the user_profile_versions table."""
+    import sqlite3
+
+    db_path = tmp_path / "bare.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
+        conn.commit()
+
+    from src.services.profile import storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", db_path, raising=True)
+
+    result = storage_mod.current_profile_version_id("any-user")
+    assert result is None
+
+
+def test_profile_changed_returns_false_missing_table(tmp_path, monkeypatch):
+    """Tolerate a DB without user_profile_versions — return False."""
+    import sqlite3
+
+    db_path = tmp_path / "bare.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
+        conn.commit()
+
+    from src.services.profile import storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", db_path, raising=True)
+
+    result = storage_mod.profile_content_changed_since_previous("any-user")
+    assert result is False
