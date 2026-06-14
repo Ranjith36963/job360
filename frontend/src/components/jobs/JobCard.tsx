@@ -13,6 +13,7 @@ import {
   Check,
   AlertTriangle,
   Eye,
+  CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,21 @@ function timeAgo(dateStr: string): string {
   if (days < 7) return `${days}d ago`;
   const weeks = Math.floor(days / 7);
   return weeks === 1 ? "1w ago" : `${weeks}w ago`;
+}
+
+/** Format an ISO date string as "18 Jun 2026". */
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Days from now until the given ISO date (negative = in the past). */
+function daysUntil(iso: string): number {
+  const ms = new Date(iso).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0);
+  return Math.ceil(ms / 86_400_000);
 }
 
 function formatSalaryRange(min?: number | null, max?: number | null): string | null {
@@ -85,7 +101,33 @@ export function JobCard({ job, onAction }: JobCardProps) {
   const isSkipped = job.action === "not_interested";
 
   const salaryRange = formatSalaryRange(job.salary_min_gbp, job.salary_max_gbp);
-  const displayTime = job.last_seen_at ?? job.first_seen_at ?? job.date_found;
+
+  // ── Date freshness ──────────────────────────────────────────────────────────
+  // crawlerTime: the timestamp our crawler last/first saw the listing.
+  const crawlerTime = job.last_seen_at ?? job.first_seen_at ?? job.date_found;
+  // isLowConfidence: approximate / suspect date — show "~" prefix + muted text.
+  const isLowConfidence =
+    job.date_confidence === "low" || job.date_confidence === "fabricated";
+  // postedLabel: prefix for the posted line.
+  const postedPrefix = isLowConfidence ? "~Posted " : "Posted ";
+
+  // ── Deadline ────────────────────────────────────────────────────────────────
+  const deadlineDays = job.deadline ? daysUntil(job.deadline) : null;
+  const deadlineColor =
+    deadlineDays === null
+      ? "text-muted-foreground/60"
+      : deadlineDays < 0
+      ? "text-red-400"
+      : deadlineDays <= 7
+      ? "text-amber-400"
+      : "";
+  const deadlineTooltip =
+    job.deadline_source === "listing"
+      ? "Deadline from the job listing."
+      : job.deadline_source === "description"
+      ? "Deadline parsed from the listing text — verify on the source site."
+      : null;
+
   const hasStalenessBadge =
     job.staleness_state &&
     job.staleness_state !== "ACTIVE" &&
@@ -156,10 +198,74 @@ export function JobCard({ job, onAction }: JobCardProps) {
               <span className="truncate max-w-[120px]" title={job.location || "Remote"}>{job.location || "Remote"}</span>
             </span>
             <span className="hidden sm:inline text-border" aria-hidden="true">|</span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
-              {timeAgo(displayTime)}
-            </span>
+            {/* ── Posted / Seen line ── */}
+            {job.posted_at ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className={`flex items-center gap-1${isLowConfidence ? " text-muted-foreground/60" : ""}`}
+                      aria-label={`${postedPrefix}${timeAgo(job.posted_at)}`}
+                    />
+                  }
+                >
+                  <Clock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                  {postedPrefix}{timeAgo(job.posted_at)}
+                </TooltipTrigger>
+                <TooltipContent>
+                  Posted {formatDate(job.posted_at)} · confidence: {job.date_confidence ?? "unknown"}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className="flex items-center gap-1 text-muted-foreground/60"
+                      aria-label={`Seen ${timeAgo(crawlerTime)}`}
+                    />
+                  }
+                >
+                  <Clock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                  Seen {timeAgo(crawlerTime)}
+                </TooltipTrigger>
+                <TooltipContent>
+                  We first saw this listing then; the source didn&apos;t provide a posting date.
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+
+          {/* ── Deadline row ── */}
+          <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 text-sm">
+            {job.deadline ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className={`flex items-center gap-1 ${deadlineColor}`}
+                      aria-label={`Apply by ${formatDate(job.deadline)}`}
+                    />
+                  }
+                >
+                  <CalendarClock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                  {deadlineDays !== null && deadlineDays < 0
+                    ? `Closed ${formatDate(job.deadline)}`
+                    : `Apply by ${formatDate(job.deadline)}`}
+                </TooltipTrigger>
+                {deadlineTooltip && (
+                  <TooltipContent>{deadlineTooltip}</TooltipContent>
+                )}
+              </Tooltip>
+            ) : (
+              <span
+                className="flex items-center gap-1 text-muted-foreground/60"
+                aria-label="No deadline listed"
+              >
+                <CalendarClock className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                No deadline listed
+              </span>
+            )}
           </div>
         </div>
 
