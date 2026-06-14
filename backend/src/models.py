@@ -36,6 +36,10 @@ class Job:
     posted_at: Optional[str] = None
     date_confidence: str = "low"
     date_posted_raw: Optional[str] = None
+    # Application deadline — extracted from description or structured source.
+    # None means "no deadline listed" (UI shows fallback). NEVER fabricated.
+    deadline: Optional[str] = None          # ISO date YYYY-MM-DD
+    deadline_source: Optional[str] = None   # "listing" | "description" | None
     # Pillar 3 Batch 1 — lifecycle timestamps + ghost-detection state.
     # first_seen_at: ingestion lifecycle start (None ⇒ insert_job defaults to now).
     # last_seen_at: most-recent scrape that saw this job (None ⇒ insert_job defaults to now).

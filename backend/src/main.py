@@ -612,6 +612,18 @@ async def run_search(
                 job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
 
+            # Deadline extraction — fill in any job that didn't get a structured
+            # deadline (e.g. from JSON-LD validThrough) from its description text.
+            # Runs after scoring, before dedup, so every raw job is covered.
+            # Lazy-imported to keep the top-level import surface small.
+            from src.services.deadline import extract_deadline  # noqa: PLC0415
+
+            for job in all_jobs:
+                if job.deadline is None and job.description:
+                    result = extract_deadline(job.description)
+                    if result is not None:
+                        job.deadline, job.deadline_source = result
+
             # Deduplicate
             unique_jobs = deduplicate(all_jobs)
             logger.info("After dedup: %s unique jobs", len(unique_jobs))

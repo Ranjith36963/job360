@@ -558,3 +558,77 @@ async def test_jobs_response_includes_llm_verdict_values(authenticated_async_con
         f"expected judged job (id={job_b_id}) to rank first; "
         f"got id={body['jobs'][0]['id']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule #21 value-presence: deadline round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_jobs_response_includes_deadline_values(authenticated_async_context):
+    """Rule #21 value-presence: a job with a deadline phrase in its description
+    should surface the correct ISO deadline on GET /api/jobs and GET /api/jobs/{id}.
+
+    The deadline is inserted directly into the jobs table (simulating what the
+    ingestion pipeline would write after extract_deadline runs).  The test asserts
+    the EXACT value round-trips — not just that the field key exists.
+    """
+    db = await api_deps.get_db()
+
+    # Insert a job whose description contains a clear closing-date phrase.
+    # We also write the extracted value directly (as the pipeline would),
+    # so this proves the serializer reads deadline / deadline_source back.
+    job_id = await _insert_job_row(
+        db,
+        match_score=75,
+        description="Closing date: 30 September 2026. Great role for ML engineers.",
+        apply_url="https://example.com/jobs/deadline-test",
+        normalized_company="acme deadline co",
+        normalized_title="ml engineer deadline",
+        deadline="2026-09-30",
+        deadline_source="description",
+    )
+
+    async with authenticated_async_context() as client:
+        # List route
+        list_resp = await client.get("/api/jobs?limit=50")
+        assert list_resp.status_code == 200
+        list_jobs = list_resp.json()["jobs"]
+        target = next((j for j in list_jobs if j["id"] == job_id), None)
+        assert target is not None, "inserted job not found in /api/jobs list"
+        assert target["deadline"] == "2026-09-30", (
+            f"expected deadline '2026-09-30', got {target['deadline']!r}"
+        )
+        assert target["deadline_source"] == "description", (
+            f"expected deadline_source 'description', got {target['deadline_source']!r}"
+        )
+
+        # Detail route
+        detail_resp = await client.get(f"/api/jobs/{job_id}")
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        assert detail["deadline"] == "2026-09-30", (
+            f"detail deadline mismatch: got {detail['deadline']!r}"
+        )
+        assert detail["deadline_source"] == "description"
+
+
+@pytest.mark.asyncio
+async def test_jobs_response_deadline_null_when_not_set(authenticated_async_context):
+    """Jobs without a deadline should return null for both fields (not empty string)."""
+    db = await api_deps.get_db()
+    job_id = await _insert_job_row(
+        db,
+        match_score=65,
+        description="No deadline mentioned here.",
+        apply_url="https://example.com/jobs/no-deadline",
+        normalized_company="acme nodeadline",
+        normalized_title="data engineer nodeadline",
+    )
+    async with authenticated_async_context() as client:
+        resp = await client.get(f"/api/jobs/{job_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deadline"] is None
+    assert body["deadline_source"] is None

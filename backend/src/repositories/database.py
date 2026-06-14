@@ -51,6 +51,8 @@ class JobDatabase:
                 date_posted_raw TEXT,
                 consecutive_misses INTEGER DEFAULT 0,
                 staleness_state TEXT DEFAULT 'active',
+                deadline TEXT,
+                deadline_source TEXT,
                 UNIQUE(normalized_company, normalized_title)
             );
             CREATE TABLE IF NOT EXISTS run_log (
@@ -116,6 +118,9 @@ class JobDatabase:
             ("recency", "INTEGER DEFAULT 0"),
             ("semantic", "INTEGER DEFAULT 0"),
             ("penalty", "INTEGER DEFAULT 0"),
+            # Migration 0020 — application deadline columns.
+            ("deadline", "TEXT"),
+            ("deadline_source", "TEXT"),
         ]
         run_log_migrations = [
             # Step-0 pre-flight — migration 0010 observability columns.
@@ -247,9 +252,10 @@ class JobDatabase:
              posted_at, first_seen_at, last_seen_at, date_confidence,
              date_posted_raw,
              role, skill, seniority_score, experience, credentials,
-             location_score, recency, semantic, penalty)
+             location_score, recency, semantic, penalty,
+             deadline, deadline_source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -280,6 +286,8 @@ class JobDatabase:
                 job.recency,
                 job.semantic,
                 job.penalty,
+                job.deadline,
+                job.deadline_source,
             ),
         )
         return cursor.rowcount > 0

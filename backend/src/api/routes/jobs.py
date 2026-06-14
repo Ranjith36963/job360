@@ -173,6 +173,9 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
         llm_fit_score=row.get("llm_fit_score"),
         llm_verdict=row.get("llm_verdict"),
         llm_reason=row.get("llm_reason"),
+        # Application deadline — from jobs table (catalog-level, not per-user).
+        deadline=row.get("deadline"),
+        deadline_source=row.get("deadline_source"),
     )
 
 

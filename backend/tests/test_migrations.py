@@ -305,6 +305,64 @@ async def test_0019_adds_oauth_states_table_and_channel_columns(tmp_db_path):
         )
 
 
+@pytest.mark.asyncio
+async def test_0020_adds_deadline_columns(tmp_db_path):
+    """Migration 0020 adds deadline + deadline_source TEXT columns to jobs."""
+    async with aiosqlite.connect(tmp_db_path) as db:
+        await db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'applied',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                jobs_found INTEGER NOT NULL DEFAULT 0,
+                jobs_new INTEGER NOT NULL DEFAULT 0,
+                duration_s REAL
+            );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                description TEXT,
+                apply_url TEXT,
+                source TEXT,
+                date_found TEXT,
+                match_score INTEGER DEFAULT 0,
+                normalized_key TEXT UNIQUE,
+                visa_flag INTEGER DEFAULT 0,
+                date_posted TEXT
+            );
+            """
+        )
+        await db.commit()
+    await runner.up(tmp_db_path)
+    async with aiosqlite.connect(tmp_db_path) as conn:
+        cur = await conn.execute("PRAGMA table_info(jobs)")
+        cols = {row[1] for row in await cur.fetchall()}
+    assert "deadline" in cols, "jobs table missing 'deadline' column after migration 0020"
+    assert "deadline_source" in cols, "jobs table missing 'deadline_source' column after migration 0020"
+
+
 def test_split_sql_statements_ignores_semicolon_in_inline_comment():
     """Regression: an inline ``--`` comment containing ``;`` must NOT split the
     statement it trails. 0015's ``-- NULL = not yet used; set on consume`` did,

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import aiohttp
 
@@ -98,6 +98,38 @@ def _parse_company(node: dict) -> str:
     return ""
 
 
+def _parse_valid_through(raw: object) -> str | None:
+    """Parse Schema.org ``validThrough`` into a YYYY-MM-DD string.
+
+    Returns None when raw is absent, malformed, already past, or absurdly
+    far in the future (>2 years).  This is the high-trust path — only set
+    ``deadline`` when the date is clearly valid and future.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    # validThrough is an ISO 8601 datetime: "2026-09-30T00:00:00Z" or bare date.
+    raw_stripped = raw.strip()
+    parsed: date | None = None
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
+        try:
+            if fmt.endswith("%z"):
+                parsed = datetime.strptime(raw_stripped, fmt).date()
+            else:
+                parsed = datetime.strptime(raw_stripped[:10], "%Y-%m-%d").date()
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        return None
+    today = date.today()
+    if parsed <= today:
+        return None
+    max_future = date(today.year + 2, today.month, today.day)
+    if parsed > max_future:
+        return None
+    return parsed.strftime("%Y-%m-%d")
+
+
 def _parse_location(node: dict) -> str:
     loc = node.get("jobLocation")
     if isinstance(loc, list):
@@ -136,6 +168,9 @@ def parse_jobposting(node: dict, *, source: str, date_found: str) -> Job | None:
     if not isinstance(description, str):
         description = str(description)
 
+    # High-trust deadline from Schema.org validThrough field.
+    deadline_iso = _parse_valid_through(node.get("validThrough"))
+
     return Job(
         title=title[:300],
         company=_parse_company(node)[:200],
@@ -148,6 +183,8 @@ def parse_jobposting(node: dict, *, source: str, date_found: str) -> Job | None:
         salary_max=smax,
         posted_at=posted,
         date_confidence="high" if posted else "low",
+        deadline=deadline_iso,
+        deadline_source="listing" if deadline_iso else None,
     )
 
 

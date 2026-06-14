@@ -454,6 +454,28 @@
             "title": "Date Found",
             "type": "string"
           },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "deadline_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Source"
+          },
           "dedup_group_ids": {
             "anyOf": [
               {

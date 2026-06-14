@@ -1341,6 +1341,10 @@ export interface components {
             date_confidence?: string | null;
             /** Date Found */
             date_found: string;
+            /** Deadline */
+            deadline?: string | null;
+            /** Deadline Source */
+            deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
             /** Employment Type */
