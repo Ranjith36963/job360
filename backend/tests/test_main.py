@@ -667,3 +667,73 @@ def test_run_search_inert_when_enrichment_disabled():
     fake_job = MagicMock()
     fake_job.id = 1
     assert captured["enrichment_lookup"](fake_job) is None
+
+
+def test_metrics_export_uses_resolved_path_not_none_string():
+    """When run_search is called without db_path, the metrics exporters must
+    receive the resolved DB path (str(DB_PATH)), never the string "None".
+
+    Root cause: the bug passes str(db_path) where db_path=None at the call
+    site, yielding the literal string "None".  The fix uses `path` (already
+    resolved via `path = db_path or str(DB_PATH)`) instead.
+    """
+    import os
+    import tempfile
+
+    from src.core.settings import DB_PATH as REAL_DB_PATH
+
+    async def _test():
+        # Use a real temp file so DB_PATH resolution has a valid target.
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            tmp_db = f.name
+        try:
+            with (
+                aioresponses() as m,
+                patch("src.main.DB_PATH", tmp_db),
+                patch("src.main.export_pipeline_metrics", new_callable=AsyncMock) as mock_pipeline,
+                patch("src.main.export_notification_metrics", new_callable=AsyncMock) as mock_notif,
+                _patch_no_notifications(),
+            ):
+                _mock_free_sources(m)
+                # Call without explicit db_path — this is the failure path.
+                await run_search(db_path=None)
+
+            # The exporters must have been called exactly once each.
+            mock_pipeline.assert_awaited_once()
+            mock_notif.assert_awaited_once()
+
+            # Extract the first positional argument each was called with.
+            pipeline_arg = mock_pipeline.await_args[0][0]
+            notif_arg = mock_notif.await_args[0][0]
+
+            # Neither should be the string "None" or the Python None object.
+            assert pipeline_arg != "None", (
+                f"export_pipeline_metrics got literal string 'None'; "
+                f"the bug is still present. Got: {pipeline_arg!r}"
+            )
+            assert pipeline_arg is not None, "export_pipeline_metrics got Python None"
+            assert notif_arg != "None", (
+                f"export_notification_metrics got literal string 'None'; "
+                f"the bug is still present. Got: {notif_arg!r}"
+            )
+            assert notif_arg is not None, "export_notification_metrics got Python None"
+
+            # Both should equal the resolved path (our tmp_db).
+            assert pipeline_arg == tmp_db, (
+                f"Expected resolved path {tmp_db!r}, got {pipeline_arg!r}"
+            )
+            assert notif_arg == tmp_db, (
+                f"Expected resolved path {tmp_db!r}, got {notif_arg!r}"
+            )
+
+            # Confirm no stray file named "None" was created in cwd.
+            assert not os.path.exists("None"), (
+                "A file named 'None' was created in cwd — the bug fired."
+            )
+        finally:
+            try:
+                os.unlink(tmp_db)
+            except OSError:
+                pass
+
+    _run(_test())

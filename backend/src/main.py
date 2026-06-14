@@ -830,8 +830,8 @@ async def run_search(
 
             # Step-5 — export metrics snapshots after every run (non-fatal).
             try:
-                await export_pipeline_metrics(str(db_path))
-                await export_notification_metrics(str(db_path))
+                await export_pipeline_metrics(path)
+                await export_notification_metrics(path)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("metrics export failed: %s", exc)
 
