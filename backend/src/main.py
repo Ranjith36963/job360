@@ -374,13 +374,18 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             conn=db._conn,
             semaphore_limit=3,
         )
-        judged = sum(1 for r in results if r is not None)
+        verdicts = [r for r in results if r is not None]
+        judged = len(verdicts)
+        fits = [v.fit_score for v in verdicts]
         logger.info(
-            "matcher: judged %s/%s jobs in %.1fs for user %s",
+            "matcher: judged %s/%s jobs in %.1fs for user %s (fit min/avg/max = %s/%s/%s)",
             judged,
             len(shortlist),
             time.perf_counter() - t0,
             user_id,
+            min(fits) if fits else 0,
+            round(sum(fits) / len(fits), 1) if fits else 0,
+            max(fits) if fits else 0,
         )
     except Exception as e:  # noqa: BLE001 — judge failure must never kill the run
         logger.warning("matcher stage failed (run continues): %s", e)

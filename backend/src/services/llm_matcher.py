@@ -194,6 +194,12 @@ async def match_batch(
         return []
     sem = asyncio.Semaphore(semaphore_limit)
 
+    # Judge telemetry (backlog #9). Local import keeps the module import-light;
+    # the counters only move while match_batch runs, which is itself flag-gated.
+    from src.utils.telemetry import matcher_telemetry  # noqa: PLC0415
+
+    tel = matcher_telemetry()
+
     async def _one(job: Job) -> MatchVerdict | None:
         job_id = getattr(job, "id", None)
         if job_id is None:
@@ -201,6 +207,7 @@ async def match_batch(
         async with sem:
             try:
                 if skip_existing and await has_verdict(conn, user_id, job_id):
+                    tel.skipped_existing += 1
                     return None
                 enrichment = None
                 try:
@@ -218,8 +225,10 @@ async def match_batch(
                     llm_extract_validated_fn=llm_extract_validated_fn,
                 )
                 await save_verdict(conn, user_id, job_id, verdict)
+                tel.record_verdict(verdict.fit_score)
                 return verdict
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run
+                tel.failed += 1
                 logger.warning("match_batch: judge failed for job %s: %s", job_id, e)
                 return None
 

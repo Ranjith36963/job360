@@ -19,6 +19,11 @@ Three telemetry surfaces:
   set when the hybrid path degrades to keyword-only ("empty_index" |
   "stack_unavailable" | "exception").
 
+* :class:`MatcherTelemetry` — populated by
+  :func:`src.services.llm_matcher.match_batch`. Tracks judged / skipped /
+  failed counts and the fit_score spread (min / avg / max) per run. Counters
+  MUST stay zero when ``MATCHER_ENABLED`` is false (rule #18 analog).
+
 Plus :func:`source_timer` — a context manager that times a per-source fetch
 and emits a structured log line at exit.
 """
@@ -72,6 +77,36 @@ class HybridTelemetry:
     fallback_reason: Optional[str] = None
 
 
+@dataclass
+class MatcherTelemetry:
+    """Counters for the LLM judge (funnel→judge), populated by
+    :func:`src.services.llm_matcher.match_batch`.
+
+    Counters stay zero when ``MATCHER_ENABLED`` is false (the stage that calls
+    ``match_batch`` is flag-gated, rule #18 analog). ``fit_min`` / ``fit_max``
+    are ``None`` until the first verdict is recorded.
+    """
+
+    judged: int = 0
+    skipped_existing: int = 0
+    failed: int = 0
+    fit_sum: int = 0
+    fit_min: Optional[int] = None
+    fit_max: Optional[int] = None
+
+    def record_verdict(self, fit_score: int) -> None:
+        """Fold one successful verdict's fit_score into the spread counters."""
+        self.judged += 1
+        self.fit_sum += fit_score
+        self.fit_min = fit_score if self.fit_min is None else min(self.fit_min, fit_score)
+        self.fit_max = fit_score if self.fit_max is None else max(self.fit_max, fit_score)
+
+    @property
+    def avg_fit(self) -> float:
+        """Mean fit_score across judged jobs (0.0 when none judged)."""
+        return (self.fit_sum / self.judged) if self.judged else 0.0
+
+
 # ---------------------------------------------------------------------------
 # Module-level singletons (process-wide; reset between test runs as needed)
 # ---------------------------------------------------------------------------
@@ -80,6 +115,7 @@ class HybridTelemetry:
 _enrichment_tel = EnrichmentTelemetry()
 _embeddings_tel = EmbeddingsTelemetry()
 _hybrid_tel = HybridTelemetry()
+_matcher_tel = MatcherTelemetry()
 
 
 def enrichment_telemetry() -> EnrichmentTelemetry:
@@ -100,13 +136,20 @@ def hybrid_telemetry() -> HybridTelemetry:
     return _hybrid_tel
 
 
+def matcher_telemetry() -> MatcherTelemetry:
+    """Return the process-wide :class:`MatcherTelemetry` singleton."""
+
+    return _matcher_tel
+
+
 def reset_for_testing() -> None:
     """Zero every counter — tests call between cases for isolation."""
 
-    global _enrichment_tel, _embeddings_tel, _hybrid_tel
+    global _enrichment_tel, _embeddings_tel, _hybrid_tel, _matcher_tel
     _enrichment_tel = EnrichmentTelemetry()
     _embeddings_tel = EmbeddingsTelemetry()
     _hybrid_tel = HybridTelemetry()
+    _matcher_tel = MatcherTelemetry()
 
 
 # ---------------------------------------------------------------------------
