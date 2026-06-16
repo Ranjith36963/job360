@@ -219,3 +219,22 @@ Sonnet executor un-skipped all 13 `_PRE_STEP_1_5_SCAFFOLDING_DEBT` tests in test
 - Owner said "pause the loop" → deleted cron 8d6e31e9 (/integrator every 2h). Reason: last 3-4 heartbeats were empty minimal rounds — all remaining work is owner-gated (M2 Pillar-2 hands-off; 7b vector-index move; #9 telemetry migration = NEEDS-HUMAN) or worker-frontend (M3-rem) or follow-ups (M7a, M8a). No safe auto-work left, so the cron was pure token drip.
 - TO RESUME: re-arm a cron pointing at /integrator (e.g. CronCreate "11 */2 * * *" prompt "/integrator", durable) — OR just fire /integrator manually — once an item is unblocked. The board (MISSIONS.md), backlog, telemetry, and REVIEW-PACKET.md hold full state; nothing is lost.
 - Session-end tally: 6 missions DONE (M1/M4/M5/M6/M7/M8) + M3 slice; ~10 fixes; all local on fix/per-user-search-and-scoring-gate, gate-verified, NOT pushed (owner's gate).
+
+## 2026-06-12 ~20:00 UTC — INTEGRATOR ROUND 15 (owner-directed heartbeat) — M3 INTEGRATED → fully DONE
+Worker-a (laptop) completed M3 on agent/m3-frontend (e108eed): settings/account RHF+zod forms, KanbanBoard @dnd-kit keyboard a11y, CV upload caps. Integrated into the loop branch.
+- Branch was based on old d97ff88 (pre-M7), so the merge OVERLAPPED the integrator's earlier M3-slice on V-04 + zod/rhf deps. Conflicts resolved:
+  * profile.py V-04: combined the best of both — my BOUNDED read (memory-safe, read(10MB+1)) + worker-a's EXTENSION-ONLY MIME (more robust; doesn't false-reject PDFs sent as octet-stream). Strictly better than either alone.
+  * package.json: union (my zod/rhf + gen:types scripts + worker-a's @dnd-kit); lock regenerated via npm install.
+  * dropped worker-a's accidentally-committed .claude/gate-stamp (gitignored).
+- BUG FOUND + FIXED PRE-MERGE: the M3-slice committed auth forms importing zod/rhf but never committed the package.json dep declarations — a fresh npm install on the pushed branch would break. Declared them (separate commit before the merge).
+- Gate iteration: first merged gate FAILED on a test-expectation clash (my tests want "10MB", worker-a's want "10 MB"). Canonicalised the error message to "File exceeds the 10 MB limit" + updated my 2 assertions (the LinkedIn one needed a separate edit — different indentation, replace_all missed it). Re-gate GREEN.
+- Hygiene: gitignored test-artifacts/*.png so verification screenshots never break a gate again.
+- Merge committed 25c1b3c; loop branch fast-forwarded. Account forms live-verified (render + RHF+zod fields present). M3 → fully DONE (slice + worker-a's work combined).
+- NOTE: worker-a's closing-note flags test_retrieval_integration::test_mode_hybrid_empty_index_falls_back as PRE-EXISTING failing on clean d97ff88 (Pillar-2 hands-off zone) — NOT touched, NOT a regression. Filed awareness; it's in the SEMANTIC stack (only runs with the [semantic] extra installed), so it doesn't hit the canonical gate.
+
+## 2026-06-12 ~20:30 UTC — OWNER DIRECTIVE: M2 RESERVED, Pillar-2 hands-off reaffirmed + extended
+Owner: "hands-off STAYS for ALL of Pillar 2, including llm_matcher. M2 is mine — claimed-by owner, status reserved. Agents only report judge bugs with evidence, never edit. I'll build the re-judge trigger + telemetry myself."
+- MISSIONS.md M2 → claimed-by owner, status RESERVED, with explicit owner-reserved file list (incl. llm_matcher.py).
+- Encoded into the loop LAW so no unattended agent can drift: worker rule 5a + integrator rule 7 (never edit Pillar-2; never start M2; report-only).
+- Backlog 7b (vector_index path bug) reclassified OWNER-RESERVED — it's Pillar-2; agents report, owner fixes.
+- Memory updated (pillar2-hands-off): the matcher I authored this session is now the owner's; full reserved list recorded.

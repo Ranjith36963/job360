@@ -29,7 +29,7 @@ M7a. **TODO — `lib/api.ts` still hand-mirrors 3 API types** (SourceHealthEntry
 
 ## P2 — engine correctness
 
-7b. **TODO — vector index lives at the WRONG path (near-data-loss found at integrator round 1).** `src/services/vector_index.py:19` computes `Path(__file__).parents[3]/data/chroma` = the REPO ROOT — but its own docstring, CLAUDE.md, and CODEBASE_REPORT all say `backend/data/chroma/`. Root `data/chroma` holds the ONLY live index (92 embeddings); `backend/data/chroma` is empty; a hygiene prune nearly deleted the live one. Fix: change to `parents[2]` (backend/data/chroma), MOVE the existing index dir while the backend is stopped, restart, live-verify hybrid mode still reorders (non-fallback log line), and ensure root `data/` stays deleted. One integrator round. `skipped: 0`
+7b. **🔒 OWNER-RESERVED (Pillar-2 hands-off, 2026-06-12) — vector index lives at the WRONG path (near-data-loss found at integrator round 1).** vector_index.py is Pillar-2; agents report only, owner fixes. Evidence below kept for the owner. `src/services/vector_index.py:19` computes `Path(__file__).parents[3]/data/chroma` = the REPO ROOT — but its own docstring, CLAUDE.md, and CODEBASE_REPORT all say `backend/data/chroma/`. Root `data/chroma` holds the ONLY live index (92 embeddings); `backend/data/chroma` is empty; a hygiene prune nearly deleted the live one. Fix: change to `parents[2]` (backend/data/chroma), MOVE the existing index dir while the backend is stopped, restart, live-verify hybrid mode still reorders (non-fallback log line), and ensure root `data/` stays deleted. One integrator round. `skipped: 0`
 
 ## P2 — matcher (funnel→judge) follow-ons
 

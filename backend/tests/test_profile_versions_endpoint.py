@@ -133,7 +133,7 @@ async def test_cv_upload_rejects_oversized_file(authenticated_async_context):
             files={"cv": ("big.pdf", oversized_content, "application/pdf")},
         )
     assert resp.status_code == 413
-    assert "10MB" in resp.json()["detail"]
+    assert "10 MB" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_linkedin_upload_rejects_oversized_file(authenticated_async_contex
             files={"file": ("linkedin.pdf", oversized_content, "application/pdf")},
         )
     assert resp.status_code == 413
-    assert "10MB" in resp.json()["detail"]
+    assert "10 MB" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

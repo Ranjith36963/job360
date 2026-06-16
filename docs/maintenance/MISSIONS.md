@@ -29,25 +29,22 @@ DoD:
 - [x] zero HTTP 400 and zero "Expecting value" log lines attributable to these four sources in one fresh pipeline run — integrator CONFIRMED at merge 3315fb3: run b0250268211a @21:10Z has zero such lines; the only matches in the log are pre-merge (run 9673808f @19:36)
 - [x] full backend suite green in the worktree (gate: 1291 passed, 3 skipped after fc55fb8); every fix has appended tests (single-probe/no-WARNING + revival/resume per source; site_name==["indeed"] for JobSpy)
 
-## M2 — Pillar 2: the judge stays correct over time  [worker-parallel, one item NEEDS-HUMAN]
-claimed-by: -   status: OPEN
-Backlog: #7 enrichment merge, #8 re-judge on profile change, (#9 telemetry = M2-3 blocked)
-files-owned: src/services/job_enrichment.py (merge logic), src/services/llm_matcher.py, src/api/profile.py (re-judge trigger), scripts/ (accuracy harness), their tests
-DoD:
-- [ ] enrichment L1 merge no longer prefers weak rules-seniority over LLM "unknown"; accuracy harness shows the measured −10pt regression recovered (run the harness, paste numbers)
-- [ ] profile version change clears/invalidates llm_matched_at for that user; next feed read triggers re-judge; proven by test + a live re-judge demonstration at integration
-- [ ] M2-3 (run_log telemetry columns) requires a migration → logged as NEEDS-HUMAN, not attempted
-- [ ] full backend suite green in the worktree
+## M2 — Pillar 2: the judge stays correct over time  [🔒 OWNER-RESERVED — DO NOT TOUCH]
+claimed-by: **owner**   status: **RESERVED** (owner decision 2026-06-12)
+**🔒 PILLAR-2 HANDS-OFF — BINDING ON ALL AGENTS (worker, integrator, scout, health, executors).** The owner builds the re-judge trigger + telemetry + enrichment-merge fix HIMSELF. No agent edits ANY Pillar-2 code. The hands-off zone EXPLICITLY includes `llm_matcher.py` (the funnel→judge matcher) AND `job_enrichment.py`, `scoring_dimensions.py`, `skill_matcher.py`, `embeddings.py`, `retrieval.py`, `vector_index.py`, the accuracy `scripts/`, and the Pillar-2 re-judge path in `api/profile.py`. Agents may ONLY **report** judge/scoring bugs to BACKLOG.md with evidence (logs, repro, measured numbers) — never fix, never edit, never "improve". If a heartbeat picks M2, it does NOT start it; it leaves this reservation intact.
+Backlog (owner's own list): #7 enrichment merge, #8 re-judge on profile change, #9 telemetry (needs migration).
+files-owned: OWNER ONLY — src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py, src/api/profile.py (re-judge path), scripts/ (accuracy harness), their tests.
 
 ## M3 — Pillar 3: frontend carry-overs  [worker-parallel, frontend-only]
-claimed-by: -   status: OPEN
+claimed-by: -   status: DONE (worker-a e108eed integrated → merge 25c1b3c; round 15). Settings/account forms (Change password/email, Delete account) RHF+zod; KanbanBoard @dnd-kit keyboard a11y; CV upload caps. Combined with the integrator's earlier M3-slice (auth forms + bounded-read V-04), M3 is fully complete. V-04 reconciled at merge = best of both (bounded memory-safe read + extension-only MIME). Gate green; account forms live-verified (test-artifacts/m3-account-forms.png). M3-rem follow-ups (noValidate, "50 sources" footer) remain in backlog.
+closing-note (worker-a, 2026-06-12): commit e108eed on agent/m3-frontend. All four DoD lines proven. Pre-existing test_retrieval_integration::test_mode_hybrid_empty_index_falls_back confirmed failing on clean d97ff88 HEAD (Pillar 2 hands-off zone) — not a regression from M3 changes. Integrator: merge agent/m3-frontend; no migrations, no schema changes. Run live check on the settings/account page to verify form validation UX; drag a card in the pipeline KanbanBoard to verify keyboard a11y.
 Backlog: #12 V-01..V-03 RHF+zod validation, #13 C-07 kanban keyboard a11y, #11 V-04 CV upload cap+MIME (backend route + frontend)
 files-owned: frontend/src/** (forms, KanbanBoard), src/api/profile.py upload route (V-04 only), their tests
 DoD:
-- [ ] all auth/profile forms validate with RHF+zod; invalid submits blocked client-side with messages; vitest coverage for each form
-- [ ] KanbanBoard fully keyboard-operable via @dnd-kit (documented key map); a11y assertions in tests
-- [ ] CV upload enforces size cap + MIME allowlist server-side; rejecting test + accepting test
-- [ ] vitest, type-check, lint all green in the worktree
+- [x] all auth/profile forms validate with RHF+zod; invalid submits blocked client-side with messages; vitest coverage for each form (e108eed: ChangePassword+ChangeEmail use zodResolver; DeleteAccount uses RHF inline validate; 11 vitest tests; messages appear as role=alert)
+- [x] KanbanBoard fully keyboard-operable via @dnd-kit (documented key map); a11y assertions in tests (e108eed: DndContext+KeyboardSensor+PointerSensor wired; sr-only hint para with Space/Arrow/Enter/Escape map; 6 vitest a11y assertions)
+- [x] CV upload enforces size cap + MIME allowlist server-side; rejecting test + accepting test (e108eed: 413 for >10MB, 415 for non-PDF/DOCX; 6 pytest tests: oversized, boundary, .txt, no-ext, .pdf, .docx)
+- [x] vitest, type-check, lint all green in the worktree (e108eed: 71 vitest passed, tsc clean, eslint exit 0)
 
 ## M4 — Docs and hygiene match reality  [worker-parallel, no code]
 claimed-by: -   status: DONE (worker cb350db; integrated 83864b2 with 5 wave-survivor fixes incl. slug truth 264 — see JOURNAL round 3)
