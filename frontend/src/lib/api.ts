@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { ApiError } from "./api-error";
+import type { components } from "./api-types";
 import type {
   ActionRequest,
   ActionResponse,
@@ -32,6 +33,16 @@ import type {
 } from "./types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/**
+ * Absolute backend URL for a chat-provider OAuth connect. These routes are
+ * BROWSER NAVIGATIONS (window.location.href), not fetch — so they must point at
+ * the backend origin. A relative "/api/..." path would hit the frontend origin
+ * (:3000) and 404; the backend lives at ${API}.
+ */
+export function channelConnectUrl(provider: "slack" | "discord"): string {
+  return `${API}/api/settings/channels/connect/${provider}`;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -375,11 +386,11 @@ export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
 // Channel config (Batch 2)
 // ---------------------------------------------------------------------------
 
-export type Channel = {
-  id: number;
+// `Channel` derives non-tightened fields from the generated ChannelOut schema.
+// `channel_type` is intentionally narrowed from `string` to a literal union —
+// the backend OpenAPI declares it as string but only these five values are valid.
+export type Channel = Omit<_Schemas["ChannelOut"], "channel_type"> & {
   channel_type: "email" | "slack" | "discord" | "telegram" | "webhook";
-  display_name: string;
-  enabled: boolean;
 };
 
 export type ChannelTestResult = { ok: boolean; error: string | null };
@@ -516,6 +527,28 @@ export async function updateApplicationNotes(
   });
 }
 
+// ---- Channels: OAuth connect + Telegram poll ----
+
+export type ChannelProviders = { slack: boolean; discord: boolean; telegram: boolean };
+
+export async function getProviders(): Promise<ChannelProviders> {
+  return request<ChannelProviders>("/api/settings/channels/providers");
+}
+
+export async function connectTelegram(): Promise<{ deep_link: string; state: string }> {
+  return request<{ deep_link: string; state: string }>(
+    "/api/settings/channels/connect/telegram"
+  );
+}
+
+export async function pollTelegram(
+  state: string
+): Promise<{ connected: boolean; target_label: string | null }> {
+  return request<{ connected: boolean; target_label: string | null }>(
+    `/api/settings/channels/connect/telegram/poll?state=${encodeURIComponent(state)}`
+  );
+}
+
 // ---- Step-3: Recent runs ----
 
 export async function getRecentRuns(
@@ -526,21 +559,20 @@ export async function getRecentRuns(
 }
 
 // ---- Phase −2 item D: per-source health ----
+//
+// Both types derive non-tightened fields from the generated schema so they
+// can't drift. Only `health` (SourceHealthEntry) is intentionally narrowed
+// from `string` to a literal union — the backend OpenAPI declares it as string
+// but the runtime always emits one of the three values below.
 
-export type SourceHealthEntry = {
-  source: string;
-  runs_observed: number;
-  runs_zero_jobs: number;
-  runs_errored: number;
-  avg_duration_seconds: number | null;
-  last_job_count: number | null;
-  last_error: string | null;
+type _Schemas = components["schemas"];
+
+export type SourceHealthEntry = Omit<_Schemas["SourceHealthEntry"], "health"> & {
   health: "ok" | "warning" | "critical";
 };
 
-export type SourceHealthResponse = {
+export type SourceHealthResponse = Omit<_Schemas["SourceHealthResponse"], "sources"> & {
   sources: SourceHealthEntry[];
-  runs_considered: number;
 };
 
 export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {

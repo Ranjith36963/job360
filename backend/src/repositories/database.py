@@ -476,6 +476,22 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+    async def get_catalog_jobs_for_rescore(self, limit: int = 5000) -> list[dict]:
+        """Return the most-recently-found jobs from the shared catalog for rescoring.
+
+        Read-only. Returns a list of plain dicts with the columns that
+        ``score_catalog_row`` (``src/services/rescore.py``) needs to reconstruct
+        a ``Job`` for scoring. Respects ``limit`` so callers can cap memory use.
+        """
+        cursor = await self._conn.execute(
+            "SELECT id, title, company, apply_url, source, date_found, location, "
+            "description, salary_min, salary_max, posted_at, date_confidence "
+            "FROM jobs ORDER BY date_found DESC LIMIT ?",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
     async def get_last_source_counts(self, n: int = 5) -> dict[str, list[int]]:
         """Get per-source job counts from the last N runs for health tracking."""
         cursor = await self._conn.execute("SELECT per_source FROM run_log ORDER BY id DESC LIMIT ?", (n,))

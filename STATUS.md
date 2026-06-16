@@ -116,6 +116,8 @@ Four engines are available, stacked funnel→judge. All default OFF except the k
 
 Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
 
+**Profile-version re-score (migration 0018, automatic, no new flags):** every `user_feed` row is now stamped with the profile version that produced its score. When a user saves a new profile (CV / LinkedIn / GitHub / preferences), the system detects whether the content actually changed, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile. Ordinary searches only score newly-fetched jobs — existing rows keep their scores. A job's score changes only when the profile changes, never just because time passed. Service: `src/services/rescore.py`; trigger: `src/api/routes/profile.py`.
+
 ---
 
 ## What's Next (Step 4 — Ops hardening / Batch 4 — Launch readiness)
@@ -183,7 +185,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
-| `test_main.py` still hits live Indeed | Medium | JobSpy source lacks mock coverage; full suite run can take ~32 min. Documented in MEMORY notes; mocking tracked for a future batch. Rule #4 (mock all HTTP) is otherwise clean across the 1,285-test baseline. The `make test` target uses `--ignore=tests/test_main.py` for this reason. |
+| ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |
@@ -206,7 +208,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_models.py` | `models.py` Job dataclass | 21 |
 | `test_notifications.py` | Slack + Discord + Email channels | 19 |
 | `test_deduplicator.py` | `deduplicator.py` | 13 |
-| `test_main.py` | `main.py` orchestrator + error paths | 12 |
+| `test_main.py` | `main.py` orchestrator + error paths | 14 |
 | `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
 | `test_database.py` | SQLite database + migration + source history | 9 |
 | `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |

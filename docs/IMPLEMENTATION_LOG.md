@@ -13,6 +13,48 @@
 
 ---
 
+## Profile-version re-score batch (2026-06-13)
+
+Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-judge on profile change) — authorized by owner 2026-06-13.
+
+### What shipped
+
+**Migration 0018 (`0018_user_feed_profile_version.up.sql`)**
+- `ALTER TABLE user_feed ADD COLUMN profile_version INTEGER` — stores the `user_profile_versions.id` of the profile snapshot that produced each row's score and verdict.
+- Per-user state only; shared catalog tables (`jobs`, `job_enrichment`, `job_embeddings`) are unchanged (rules #10/#17).
+
+**`src/services/rescore.py` (new)**
+- `rescore_user_feed(user_id, conn, new_version_id)` — top-level entry point called by the API trigger. Loads the new profile, rebuilds `SearchConfig`, calls `score_catalog_row` for each job in the user's 30-day feed, writes fresh scores and the new `profile_version` stamp. If `MATCHER_ENABLED` is on, triggers the LLM re-judge for the top candidates.
+- `score_catalog_row(job_row, scorer)` — pure scoring helper; takes a `user_feed` + `jobs` join row and a `JobScorer` instance, returns an updated `match_score` + dim columns without touching the DB itself.
+
+**`src/services/llm_matcher.py` (extended)**
+- `clear_user_verdicts(user_id, conn)` — sets `llm_fit_score = NULL`, `llm_verdict = NULL`, `llm_reason = NULL`, `llm_matched_at = NULL` for all of a user's `user_feed` rows. Called before re-scoring so stale judge results do not survive a profile change.
+
+**`src/services/profile/storage.py` (extended)**
+- Change-detector helper compares the two most recent `user_profile_versions` rows for a user. Returns `True` if the serialized profile content differs. Used by the API trigger to decide whether a full re-score is warranted.
+
+**`src/api/routes/profile.py` (trigger)**
+- After every `save_profile` (CV upload, LinkedIn upload, preferences save), the route calls the change-detector. If content changed, it enqueues `rescore_user_feed` as a FastAPI `BackgroundTask` so the HTTP response is not blocked.
+- The LLM re-judge portion of the background task only fires when `MATCHER_ENABLED=true`; the keyword re-score always runs.
+
+**`src/services/feed.py` (extended)**
+- `write_feed_row` now stamps `profile_version` on every new row it inserts, using the currently-active version ID for the user.
+
+### Two operating modes
+
+- **Mode 1 — profile content changes.** Trigger fires; old verdicts cleared; full 30-day catalog re-scored against the new profile; new version ID stamped on every row.
+- **Mode 2 — ordinary search / refresh.** Only newly-fetched jobs are scored and stamped. Existing rows keep their scores and verdicts untouched.
+
+### No new env flags
+
+Re-score on profile change is automatic. No new environment variables were added. The LLM re-judge within a re-score still gates on the existing `MATCHER_ENABLED` flag.
+
+### Invariant
+
+A job's score changes only when the user's profile changes. It does not change just because time passed or because a new pipeline run fetched fresh jobs from sources.
+
+---
+
 ## Matcher batch — funnel → judge (post-Step-3, 2026-06)
 
 Branch: `fix/per-user-search-and-scoring-gate` off `main`. Core commits: a925f42..d801f78, plus 76f6ca7 (Python 3.9 compat: `from __future__ import annotations` + union syntax guard) and 6974bb6 (dashboard sort fix: frontend COALESCE ranking wiring).

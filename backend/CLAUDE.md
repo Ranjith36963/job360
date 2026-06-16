@@ -22,7 +22,7 @@ lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly --ignore=tests/test_main.py   # ~1,285 passing, 3 skipped (~2 min)
+python -m pytest -q -p no:randomly   # ~1,333 passing, 3 skipped (~2.5 min) — test_main.py included
 
 python -m pytest tests/test_scorer.py::test_name -v   # single test
 python -m ruff check .                                # lint (CI gate)
@@ -31,8 +31,9 @@ python main.py                                        # FastAPI on :8000
 python -m migrations.runner up                        # apply migrations (non-API contexts)
 ```
 
-`test_main.py` is excluded — it hits **live Indeed** via JobSpy (sync `requests`,
-can't be `aioresponses`-mocked).
+`test_main.py` is now part of the canonical run. The M8 batch stubbed JobSpy
+(`fetch_jobs → []` via autouse fixture) and patched `load_profile`, making it
+fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 ## Backend test-infra notes (hard-won; don't relearn)
 

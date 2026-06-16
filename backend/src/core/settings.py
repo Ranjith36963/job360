@@ -46,6 +46,30 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
+# Slack OAuth App credentials (one-click connect flow).
+# Register at https://api.slack.com/apps — set OAuth redirect URL to
+# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack
+# Leave blank (default) to disable the /connect/slack endpoint.
+SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
+# Public-facing base URL of this deployment (no trailing slash).
+# Used to build the OAuth redirect_uri sent to Slack and Discord.
+OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
+
+# Discord OAuth App credentials (one-click connect flow).
+# Register at https://discord.com/developers/applications — add the
+# incoming-webhook scope and set the redirect URL to
+# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord
+# Leave blank (default) to disable the /connect/discord endpoint.
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
+
+# Telegram Bot credentials (deep-link + poll connect flow).
+# Create a bot via @BotFather on Telegram to obtain both values.
+# Leave blank (default) to disable the /connect/telegram endpoint.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+
 # Search
 MIN_MATCH_SCORE = 30
 MAX_RESULTS_PER_SOURCE = 100

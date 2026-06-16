@@ -20,12 +20,12 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 
 ## P3 — M3 / M8 follow-ons
 
-M3-rem. **TODO — M3 remaining: settings forms (account/channels/notifications) RHF+zod, kanban a11y (C-07), and add `noValidate` to the 4 migrated auth forms** so zod's custom messages show instead of the browser's native validation (currently native pre-empts zod in the browser; zod is wired + vitest-tested but not user-visible). Also: footer hardcodes "50 sources" — now 46 after M6. `skipped: 0`
-M8a. **TODO — un-ignore test_main.py** now that it's offline+fast (11s): drop `--ignore=tests/test_main.py` from the Makefile, agent-gate.sh, CLAUDE.md canonical-run docs, and pyproject if set — so the rehabbed E2E tests are gated and can't silently rot again. Verify the full `pytest tests/` stays green. `skipped: 0`
+M3-rem. **MOSTLY DONE (2026-06-13, 56c8c76)** — ~~`noValidate` on the 4 RHF+zod auth forms~~ (login/register/forgot-password/reset-password; the 3 settings/account forms already had it) so zod messages show instead of native validation; ~~footer "50 sources" → "46"~~ (also fixed in page `<metadata>` ×3 + the landing-page copy). Kanban a11y (C-07) was already completed in the M3 mission (e108eed). **Residual (out of this session's scope):** channels/notifications settings forms may still use plain RHF without zod — verify and migrate if needed before fully closing. `skipped: 0`
+M8a. ~~**DONE — un-ignore test_main.py**~~ Removed `--ignore=tests/test_main.py` from Makefile (6 targets), agent-gate.sh, agentic-loop/hardening.md, root CLAUDE.md (3 spots), backend/CLAUDE.md, STATUS.md, and updated the stale comment block in test_main.py itself. Full suite: 1,333p / 3s / 0f confirmed green. `skipped: 0`
 
 ## P3 — frontend type hygiene (M7 follow-ons)
 
-M7a. **TODO — `lib/api.ts` still hand-mirrors 3 API types** (SourceHealthEntry, SourceHealthResponse, Channel). NOT pure drift: the frontend intentionally tightens backend `str` fields into literal unions (`health: "ok"|"warning"|"critical"`, `channel_type: "email"|"slack"|...`) that the backend schema declares as plain `string` — aliasing as-is would DOWNGRADE precision. Correct fix: either (a) `Omit<Schemas["SourceHealthResponse"], "..."> & {tightened fields}` to kill drift on the mirror fields while keeping the unions, OR (b) tighten the BACKEND to enums (channel_type, health) so the generated types are precise, then plain-alias. Found by M7 adversarial waves; judged out-of-M7-scope (api.ts, not types.ts). `skipped: 0`
+M7a. ~~**DONE (2026-06-13, 56c8c76)** — `lib/api.ts` no longer hand-mirrors the 3 types~~. Fixed via option (a): each is now `Omit<_Schemas[...], tightenedField> & { tightenedField }` — `SourceHealthEntry` (health), `SourceHealthResponse` (sources), `Channel` (→ generated `ChannelOut` schema, channel_type). Non-tightened fields derive from the generated `api-types.ts` (drift-proof); the intentional literal unions are preserved. No backend change needed. Frontend gates green (91 vitest, clean type-check, 0 lint errors). `skipped: 0`
 
 ## P2 — engine correctness
 
@@ -33,7 +33,7 @@ M7a. **TODO — `lib/api.ts` still hand-mirrors 3 API types** (SourceHealthEntry
 
 ## P2 — matcher (funnel→judge) follow-ons
 
-8. **TODO — re-judge policy:** verdicts are judge-once (skip_existing). Decide + implement a cheap re-judge trigger when the user's profile version changes (profile upload bumps `user_profile_versions`): clear that user's `llm_matched_at` (set NULL) so the next search re-judges. Tests for the trigger.
+8. **DONE (2026-06-13, migration 0018 + rescore.py + profile.py trigger) — re-judge policy:** re-score on profile-version change implemented. When a user saves a new profile, the system detects the content change, clears all LLM verdicts (`clear_user_verdicts`), and re-scores the full 30-day catalog in the background (`rescore_user_feed`). `user_feed` rows are now stamped with `profile_version`. LLM re-judge fires only if `MATCHER_ENABLED=true`; keyword re-score always runs.
 9. **TODO — matcher telemetry:** count judged/skipped/failed per run into `run_log` extras (mirrors enrichment telemetry) so morning review can see judge health without grepping logs.
 10. **TODO — Level 6 experiment:** one combined LLM call returning facts + fit (salary still from source), measured head-to-head against L1+L4 in the harness; journal accuracy + latency + calls saved. Decision input for replacing two calls with one.
 

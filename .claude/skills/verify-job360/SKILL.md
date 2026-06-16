@@ -78,7 +78,7 @@ cd backend && python main.py        # → http://127.0.0.1:8000  (/docs is the S
 ```
 Wait for `Application startup complete`. Migrations auto-apply on boot via the `lifespan`
 handler — a fresh DB gets the full schema. For pure logic changes, the test suite is also
-"running it": `python -m pytest -q -p no:randomly --ignore=tests/test_main.py`.
+"running it": `python -m pytest -q -p no:randomly`.
 
 **Drive it.** Hit the actual routes — don't just import a function:
 ```
@@ -155,7 +155,7 @@ These cost real time the first time. Reading them here saves the next run.
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.
 - **Playwright screenshots save to the repo root** by default. Read them from there, and
   tidy them into `test-artifacts/` afterward so they don't clutter the tree.
-- **`test_main.py` hits live Indeed** via JobSpy — exclude it from fast test runs.
+- **`test_main.py` is offline now** — the M8 batch stubbed JobSpy (`fetch_jobs → []`) and patched `load_profile`, so its 14 E2E tests run in ~8s with no network. It is part of the canonical suite (no `--ignore` anymore). Do NOT re-add `--ignore=tests/test_main.py`.
 - **Frontend uses Base UI (`@base-ui/react`), NOT Radix/shadcn.** Compose via the
   `render` prop (`<Button render={<Link href=.. />}>text</Button>`), never `asChild`
   (that's a Radix-ism and fails `tsc`). After frontend edits, run BOTH gates:

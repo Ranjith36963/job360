@@ -18,7 +18,7 @@ FRONTEND_CHANGED=$(echo "$CHANGED" | grep -c '^frontend/' || true)
 
 if [ "$BACKEND_CHANGED" -gt 0 ]; then
   echo "[gate] backend suite..."
-  (cd backend && python -m pytest -q -p no:randomly --ignore=tests/test_main.py)
+  (cd backend && python -m pytest -q -p no:randomly)
 fi
 
 # M7 — API-types drift guard. A backend API-model change OR a frontend change

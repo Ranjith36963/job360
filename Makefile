@@ -30,7 +30,7 @@ install:
 	cd backend && python -m pip install -e .
 
 test:
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly
+	cd backend && python -m pytest tests/ -q -p no:randomly
 
 test-fast:
 	cd backend && python -m pytest tests/ -m fast -q -p no:randomly
@@ -56,7 +56,7 @@ bootstrap:
 
 verify-step-0:
 	@echo "==> Step-0 gate: pytest"
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=no
+	cd backend && python -m pytest tests/ -q -p no:randomly --tb=no
 	@echo "==> Step-0 gate: env parity"
 	cd backend && python scripts/check_env_example.py
 	@echo "==> Step-0 gate: migrations applied"
@@ -85,7 +85,7 @@ verify-step-0:
 
 verify-step-1:
 	@echo "==> Step-1 gate: pytest regression (>=1,018p/0f/3s)"
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
 	@echo "==> Step-1 gate: migration concurrency"
 	cd backend && python scripts/verify_migration_race.py
 	@echo "==> Step-1 gate: dataclass round-trip (B1+B2)"
@@ -120,7 +120,7 @@ verify-step-1:
 
 verify-step-1-5:
 	@echo "==> Step-1.5 gate: pytest regression"
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
 	@echo "==> Step-1.5 gate: dim-column round-trip"
 	cd backend && python -m pytest tests/test_database.py::test_dim_columns_round_trip -v -p no:randomly
 	@echo "==> Step-1.5 gate: bombshell value-presence"
@@ -168,7 +168,7 @@ verify-batch:
 
 verify-step-2:
 	@echo "==> Step-2 gate: backend regression (>=1,056p/0f/3s)"
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
 	@echo "==> Step-2 gate: frontend type-check"
 	cd frontend && npm run type-check
 	@echo "==> Step-2 gate: frontend lint"
@@ -194,7 +194,7 @@ migrate-roundtrip:
 
 verify-step-3:
 	@echo "==> Step-3 gate: backend regression (>=1,081p/0f)"
-	cd backend && python -m pytest tests/ --ignore=tests/test_main.py -q -p no:randomly --tb=short
+	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
 	@echo "==> Step-3 gate: migration round-trip (0012, 0013, 0014)"
 	bash scripts/migration_roundtrip.sh
 	@echo "==> Step-3 gate: backend lint"

@@ -44,7 +44,7 @@ from src.services.metrics_exporter import export_notification_metrics, export_pi
 from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
-from src.services.profile.storage import load_profile
+from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.scheduler import TieredScheduler
 from src.services.skill_matcher import JobScorer, detect_experience_level, salary_in_range
 from src.sources.apis_free.aijobs import AIJobsSource
@@ -693,6 +693,7 @@ async def run_search(
 
                 feed = FeedService(db._conn)
                 feed_written = 0
+                feed_profile_version = current_profile_version_id(user_id)
                 for job in unique_jobs:
                     try:
                         cur = await db._conn.execute(
@@ -707,6 +708,7 @@ async def run_search(
                             job_id=r[0],
                             score=int(job.match_score or 0),
                             bucket=_recency_bucket(job.date_found),
+                            profile_version=feed_profile_version,
                         )
                         feed_written += 1
                     except Exception as e:  # never let a feed write fail the whole run

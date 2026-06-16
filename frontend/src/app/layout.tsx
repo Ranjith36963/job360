@@ -31,17 +31,17 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Job360 — Your Career Command Center",
   description:
-    "50 sources. 8D scoring. One dashboard. Upload your CV and let Job360 find your perfect match.",
+    "46 sources. 8D scoring. One dashboard. Upload your CV and let Job360 find your perfect match.",
   openGraph: {
     title: "Job360 — Your Career Command Center",
-    description: "50 sources. 8D scoring. One dashboard.",
+    description: "46 sources. 8D scoring. One dashboard.",
     type: "website",
     siteName: "Job360",
   },
   twitter: {
     card: "summary_large_image",
     title: "Job360 — Your Career Command Center",
-    description: "50 sources. 8D scoring. One dashboard.",
+    description: "46 sources. 8D scoring. One dashboard.",
   },
 };
 

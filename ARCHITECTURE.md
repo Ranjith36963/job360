@@ -276,6 +276,17 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 - API: `GET /api/jobs` exposes the four `llm_*` fields; dashboard renders an AI-verdict badge.
 - Measured: 18/18 judged in 89.8 s (concurrency 3); judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy.
 
+**Profile-version re-score (migration 0018, automatic, no new env flags):**
+
+Every row written to `user_feed` now carries a `profile_version INTEGER` column — the ID of the `user_profile_versions` snapshot that produced the score and verdict.
+
+Two operating modes:
+
+- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it fires `rescore_user_feed` as a FastAPI `BackgroundTask`. The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
+- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Existing `user_feed` rows are left untouched — their scores and verdicts stay as-is (`skip_existing` lock in `match_batch`).
+
+**Invariant:** a job's score only changes when the PROFILE changes, never just because time passed. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
+
 ---
 
 ## Source Architecture
@@ -528,7 +539,7 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 18 forward-migrations (0000–0017). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by 19 forward-migrations (0000–0018). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (

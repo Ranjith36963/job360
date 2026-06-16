@@ -224,37 +224,24 @@ def _stub_load_profile():
     with patch("src.main.load_profile", return_value=_profile):
         yield
 
-# Step-1.5 reviewer follow-up: test_main.py has accumulated three layers
-# of fixture-debt that pre-date Step 1.5 but were exposed when the
-# reviewer ran the full sweep including this file:
+# M8 rehab note: the three layers of fixture debt described in the Step-1.5
+# reviewer notes above the autouse fixtures have been resolved:
 #
-# 1. The orchestrator's no-profile guard (main.py:344-362) returns
-#    ``{error: "no_profile"}`` early when load_profile() yields nothing
-#    — every legacy test_main test expects ≥1 job through the pipeline.
-# 2. JobSpySource uses sync ``requests`` (not aiohttp); aioresponses
-#    cannot intercept it; live Indeed/Glassdoor calls take ~32 min
-#    (see project_test_http_leak.md).
-# 3. Post-Batch-3 the source registry grew to 50 entries × ~268 ATS
-#    company slugs; the inline ``_mock_free_sources`` URL list misses
-#    Greenhouse, Personio (XML), several SuccessFactors hosts, etc.
+# 1. _stub_load_profile (autouse) patches load_profile → full UserProfile so
+#    run_search() never returns early with {error: "no_profile"}.
+# 2. _stub_jobspy (autouse) patches JobSpySource.fetch_jobs → [] so no live
+#    Indeed/Glassdoor calls are made (~32 min hang fully eliminated).
+# 3. _mock_free_sources() URL catalog extended to cover all 46 sources
+#    including post-Batch-3 additions (nhs_jobs, rippling, teaching_vacancies).
 #
-# A proper rehab needs a per-test fixture that patches load_profile +
-# stubs JobSpySource + extends the URL mock to all 50 sources. That's
-# its own batch (mirrors the Batch 3.5.4 cleanup pattern: 600p/0f
-# baseline established by a dedicated test-debt session).
-#
-# For Step-1.5 the right disposition is the one CLAUDE.md already
-# prescribes for this file: ``--ignore=tests/test_main.py`` in the
-# default test run. The 9 individual tests below are skip-marked so
-# nobody runs them ad-hoc and burns 30+ minutes on JobSpy's live
-# Indeed retry loop.
+# This file now runs offline in ~8 s (14 tests, 0 skips) and is part of the
+# canonical pre-commit suite. Do NOT add --ignore=tests/test_main.py back.
 _PRE_STEP_1_5_SCAFFOLDING_DEBT = _pytest.mark.skip(
     reason=(
-        "Pre-Step-1.5 fixture debt: tests need a load_profile patch + "
-        "JobSpy stub + 268-slug URL mock catalog. Tracked as "
-        "follow-up to Step 1.5 (see IMPLEMENTATION_LOG.md). "
-        "CLAUDE.md test convention already excludes this file via "
-        "--ignore=tests/test_main.py in the default sweep."
+        "OBSOLETE — kept only so any lingering @_PRE_STEP_1_5_SCAFFOLDING_DEBT "
+        "decorator surfaces as a skipped test rather than a NameError. All tests "
+        "in this file were un-skipped in the M8 rehab batch. Remove this marker "
+        "once no test references it."
     )
 )
 

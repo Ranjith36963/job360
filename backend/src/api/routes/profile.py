@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict
 
@@ -33,6 +34,50 @@ from src.services.profile.storage import (
 )
 
 router = APIRouter(tags=["profile"])
+
+# Logger under the "job360" namespace so setup_logging()'s handlers (stdout +
+# file + JSON) actually emit these records. A bare __name__ logger lands on the
+# root logger, which has no job360 handler, so its INFO lines vanish.
+logger = logging.getLogger("job360.api.profile")
+
+# FIX 2 — keep a strong reference to every background re-score task so the
+# GC cannot collect it before it finishes (asyncio.create_task returns a weak
+# ref; without this set the task can be garbage-collected mid-run).
+_rescore_bg_tasks: set = set()
+
+
+async def _maybe_trigger_rescore(user_id: str) -> None:
+    """Fire-and-forget: schedule a background re-score if the profile content changed.
+
+    FIX 2 — changed to ``async def`` so it can safely be awaited from async
+    route handlers.  Uses ``asyncio.create_task`` (mirror of
+    search.py:79 / CLAUDE.md Task-7 spec) so the heavy re-score runs in the
+    background without blocking the HTTP response.  Task reference is pinned
+    to ``_rescore_bg_tasks`` to prevent GC loss.
+    Never lets scheduling errors propagate — the profile save must never 500.
+    Lazy imports keep the hot GET/POST paths import-cycle-free (rule #16).
+    """
+    try:
+        from src.services.profile.storage import (  # noqa: PLC0415
+            profile_content_changed_since_previous,
+        )
+
+        if not profile_content_changed_since_previous(user_id):
+            return
+
+        import asyncio  # noqa: PLC0415
+        from src.services.rescore import rescore_user_feed  # noqa: PLC0415
+
+        task = asyncio.create_task(rescore_user_feed(user_id))
+        _rescore_bg_tasks.add(task)
+        task.add_done_callback(_rescore_bg_tasks.discard)
+        logger.info("rescore: background re-score scheduled for user %s", user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "rescore: failed to schedule background re-score for user %s: %s",
+            user_id,
+            exc,
+        )
 
 
 def _build_profile_response(profile: UserProfile) -> ProfileResponse:
@@ -232,6 +277,7 @@ async def upsert_profile(
         profile.preferences = merged_prefs
 
     save_profile(profile, user.id)
+    await _maybe_trigger_rescore(user.id)
     return _build_profile_response(profile)
 
 
@@ -261,6 +307,7 @@ async def upload_linkedin(
             profile = load_profile(user.id) or UserProfile()
             profile.cv_data = enrich_cv_from_linkedin(profile.cv_data, linkedin_data)
             save_profile(profile, user.id)
+            await _maybe_trigger_rescore(user.id)
     finally:
         try:
             os.unlink(tmp_path)
@@ -280,6 +327,7 @@ async def upload_github(
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = username
     save_profile(profile, user.id)
+    await _maybe_trigger_rescore(user.id)
     return GitHubResponse(ok=True, merged=True)
 
 
