@@ -242,7 +242,7 @@ function DeleteAccountCard() {
     setDialogOpen(true);
   }
 
-  async function onConfirmDelete(_data: DeleteConfirmValues) {
+  async function onConfirmDelete() {
     setServerError(null);
     try {
       await deleteAccount();

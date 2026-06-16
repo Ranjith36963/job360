@@ -62,7 +62,7 @@ const FEATURES = [
 const STATS = [
   {
     icon: Globe,
-    value: "50",
+    value: "46",
     label: "Sources",
     description: "APIs, ATS, RSS & scrapers",
   },
