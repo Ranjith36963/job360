@@ -196,18 +196,93 @@ def _profile_query_text(profile) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
-def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
-    """Step-1 B8 — when ``?mode=hybrid`` is requested, fuse keyword + semantic
-    rankings via RRF and reorder ``rows`` accordingly.
+def _hybrid_reorder_rows(
+    rows: list[dict],
+    query_text: str,
+    *,
+    semantic_ids: Optional[list[int]] = None,
+    rerank_fn=None,
+    rrf_k: int = 60,
+) -> list[dict]:
+    """Pure engine-3 reorder core (offline-testable).
 
-    Always degrades to the keyword order on:
-    - SEMANTIC_ENABLED is false
+    Fuses three rankings via ``retrieve_for_user``:
+      * keyword — the order ``rows`` already arrive in (engine 1's SQL score),
+      * BM25 — ``bm25_rank(query_text, row_text)`` (pure, no heavy deps),
+      * semantic — the injected ``semantic_ids`` (Chroma ANN, gathered by the
+        caller; ``None`` / ``[]`` simply drops that leg),
+    then applies the injected ``rerank_fn`` (cross-encoder) and maps the fused
+    ids back onto the row dicts. No row is ever lost (belt-and-braces tail).
+    """
+    if not rows:
+        return rows
+    keyword_ids = [r["id"] for r in rows if r.get("id") is not None]
+    if not keyword_ids:
+        return rows
+
+    from src.services.retrieval import bm25_rank, retrieve_for_user  # noqa: PLC0415
+
+    docs = [
+        (r["id"], f"{r.get('title', '')} {r.get('description', '')}")
+        for r in rows
+        if r.get("id") is not None
+    ]
+
+    def keyword_fn(_profile, _limit):
+        return keyword_ids
+
+    bm25_fn = None
+    if query_text:
+
+        def bm25_fn(_profile, _limit):  # noqa: F811 — conditional definition
+            return [jid for jid, _score in bm25_rank(query_text, docs)]
+
+    semantic_fn = None
+    if semantic_ids:
+        _sem = list(semantic_ids)
+
+        def semantic_fn(_profile, _limit):  # noqa: F811
+            return _sem
+
+    fused_ids = retrieve_for_user(
+        profile=None,
+        k=len(keyword_ids),
+        keyword_fn=keyword_fn,
+        bm25_fn=bm25_fn,
+        semantic_fn=semantic_fn,
+        rerank_fn=rerank_fn,
+        rrf_k=rrf_k,
+    )
+
+    by_id = {r["id"]: r for r in rows if r.get("id") is not None}
+    reordered: list[dict] = []
+    seen: set = set()
+    for jid in fused_ids:
+        if jid in by_id and jid not in seen:
+            reordered.append(by_id[jid])
+            seen.add(jid)
+    # Belt-and-braces — never lose a row the user would otherwise have seen.
+    for r in rows:
+        rid = r.get("id")
+        if rid is not None and rid not in seen:
+            reordered.append(r)
+            seen.add(rid)
+    return reordered
+
+
+def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
+    """Engine 3 — when ``?mode=hybrid`` is requested, fuse keyword + BM25 +
+    semantic rankings via RRF, cross-encoder rerank the top survivors, and
+    reorder ``rows`` accordingly (delegates to the tested ``_hybrid_reorder_rows``).
+
+    Always degrades to keyword order on:
+    - SEMANTIC_ENABLED is false (rule #18 — byte-identical to pre-Pillar-2)
     - the semantic stack (sentence_transformers / chromadb) isn't installed
     - the vector index is empty
-    - any exception from the semantic path
 
-    Lazy-imports the heavy modules per CLAUDE.md rule #16. Returns the
-    original list unchanged when degradation triggers.
+    The semantic leg and the rerank are each guarded: if either fails, the
+    BM25 + keyword fusion still applies (it has no heavy deps). Lazy-imports
+    the heavy modules per CLAUDE.md rule #16.
     """
     try:
         from src.core.settings import SEMANTIC_ENABLED  # noqa: PLC0415 — lazy
@@ -218,10 +293,7 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
         return rows
 
     try:
-        from src.services.retrieval import (  # noqa: PLC0415 — lazy (rule #16)
-            is_hybrid_available,
-            reciprocal_rank_fusion,
-        )
+        from src.services.retrieval import is_hybrid_available  # noqa: PLC0415 — lazy (rule #16)
         from src.services.vector_index import VectorIndex  # noqa: PLC0415
     except Exception as e:
         logger.warning("hybrid mode requested but retrieval stack unavailable: %s", e)
@@ -244,13 +316,15 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     if not rows:
         return rows
 
-    # Build the keyword-ranked id list (rows arrive in keyword order).
     keyword_ids = [r["id"] for r in rows if r.get("id") is not None]
 
     # Stage B — semantic top-K via Chroma. Prefer a query vector built from the
     # CALLER'S PROFILE (CV titles/skills/summary + LinkedIn) so results rank by
     # similarity to THIS user, not to the top keyword hit. Fall back to the
-    # top-scored job's title only when no profile is available.
+    # top-scored job's title only when no profile is available. A failure here
+    # is NOT fatal — engine 3 still has the BM25 leg, so we degrade rather than
+    # bail to pure keyword.
+    query_text = _profile_query_text(profile) if profile is not None else ""
     semantic_ids: list[int] = []
     try:
         from src.services.embeddings import encode_job  # noqa: PLC0415
@@ -260,42 +334,46 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
                 self.title = title
                 self.description = description
 
-        query_text = _profile_query_text(profile) if profile is not None else ""
         if query_text:
             stub = _StubJob(query_text, "")
         else:
-            # No usable profile — fall back to the best keyword hit's title.
             head = rows[0]
             stub = _StubJob(head.get("title", ""), head.get("description", ""))
         query_vec = encode_job(stub, None)
         sem_pairs = vix.query(query_vec, k=min(500, max(len(keyword_ids), 50)))
         semantic_ids = [job_id for job_id, _dist in sem_pairs]
     except Exception as e:
-        logger.warning("hybrid retrieval failed: %s; falling back to keyword", e)
-        return rows
+        logger.warning("hybrid semantic leg failed: %s; using keyword + BM25 only", e)
+        semantic_ids = []
 
-    if not semantic_ids:
-        return rows
+    # Stage D — cross-encoder rerank wrapper. Only meaningful with a query; the
+    # heavy model load is lazy + cached, and any failure degrades to fused order.
+    rerank_fn = None
+    if query_text:
 
-    # Fuse and reorder.
-    fused = reciprocal_rank_fusion([keyword_ids, semantic_ids], k=60)
-    fused_ids = [item for item, _score in fused]
+        def rerank_fn(ids):  # noqa: F811 — conditional definition
+            try:
+                from src.services.retrieval import (  # noqa: PLC0415
+                    _load_cross_encoder,
+                    cross_encoder_rerank,
+                )
 
-    by_id = {r["id"]: r for r in rows if r.get("id") is not None}
-    reordered: list[dict] = []
-    seen: set[int] = set()
-    for jid in fused_ids:
-        if jid in by_id and jid not in seen:
-            reordered.append(by_id[jid])
-            seen.add(jid)
-    # Append any keyword rows not in the fused set (shouldn't happen, but
-    # belt-and-braces — never lose rows the user would have seen).
-    for r in rows:
-        rid = r.get("id")
-        if rid is not None and rid not in seen:
-            reordered.append(r)
-            seen.add(rid)
-    return reordered
+                text_by_id = {
+                    r["id"]: f"{r.get('title', '')} {r.get('description', '')}"
+                    for r in rows
+                    if r.get("id") is not None
+                }
+                candidates = [(jid, text_by_id.get(jid, "")) for jid in ids]
+                reranked = cross_encoder_rerank(
+                    query_text, candidates, encoder_factory=_load_cross_encoder
+                )
+                return [jid for jid, _score in reranked]
+            except Exception as e:
+                logger.warning("cross-encoder rerank failed; keeping fused order: %s", e)
+                return ids
+
+    # Stage C — fuse keyword + BM25 + semantic and rerank, via the tested core.
+    return _hybrid_reorder_rows(rows, query_text, semantic_ids=semantic_ids, rerank_fn=rerank_fn)
 
 
 @router.get("/jobs/export")
