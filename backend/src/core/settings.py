@@ -26,6 +26,10 @@ JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 CAREERJET_AFFID = os.getenv("CAREERJET_AFFID", "")
 FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+# DfE "Find an apprenticeship" Display Advert API v2 — register for a free
+# subscription key at https://developer.apprenticeships.education.gov.uk.
+# Empty (default) → the gov_apprenticeships source skips gracefully.
+DFE_APPRENTICESHIPS_API_KEY = os.getenv("DFE_APPRENTICESHIPS_API_KEY", "")
 
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -144,6 +148,7 @@ RATE_LIMITS = {
     "hackernews": {"concurrent": 2, "delay": 1.0},
     "careerjet": {"concurrent": 1, "delay": 2.0},
     "findwork": {"concurrent": 1, "delay": 2.0},
+    "gov_apprenticeships": {"concurrent": 1, "delay": 2.0},  # 150 req / 5 min = 1 per 2s
     "nofluffjobs": {"concurrent": 2, "delay": 1.5},
     # New sources (Phase 4)
     "hn_jobs": {"concurrent": 3, "delay": 0.5},

@@ -62,7 +62,7 @@ const FEATURES = [
 const STATS = [
   {
     icon: Globe,
-    value: "46",
+    value: "47",
     label: "Sources",
     description: "APIs, ATS, RSS & scrapers",
   },
@@ -284,7 +284,7 @@ export default function Home() {
                 step: "02",
                 title: "We search everywhere",
                 description:
-                  "46 sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in 8 dimensions.",
+                  "47 sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in 8 dimensions.",
                 icon: Zap,
               },
               {

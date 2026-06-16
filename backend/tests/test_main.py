@@ -231,8 +231,10 @@ def _stub_load_profile():
 #    run_search() never returns early with {error: "no_profile"}.
 # 2. _stub_jobspy (autouse) patches JobSpySource.fetch_jobs → [] so no live
 #    Indeed/Glassdoor calls are made (~32 min hang fully eliminated).
-# 3. _mock_free_sources() URL catalog extended to cover all 46 sources
+# 3. _mock_free_sources() URL catalog extended to cover all keyless sources
 #    including post-Batch-3 additions (nhs_jobs, rippling, teaching_vacancies).
+#    gov_apprenticeships (keyed, restored 2026-06-16) skips with no key, so it
+#    needs no mock here.
 #
 # This file now runs offline in ~8 s (14 tests, 0 skips) and is part of the
 # canonical pre-commit suite. Do NOT add --ignore=tests/test_main.py back.

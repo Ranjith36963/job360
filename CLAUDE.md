@@ -19,7 +19,7 @@ If you have time for nothing else: **read this section, the Hard Rules index bel
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (1,333 passing, 3 skipped on Windows as of M8 batch — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
-- **What surprises new sessions:** `SOURCE_REGISTRY` has 46 entries but only 45 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
+- **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but only 46 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
 
 ## Hard Rules (load-bearing, numbered, do not violate)
 
@@ -35,7 +35,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 ### Sources
 
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking all 45 source files that inherit from it.
-8. **When adding/removing sources: update the FIVE load-bearing surfaces** — `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, `tests/test_cli.py` (`len == N` + expected set), AND `tests/test_api.py` (rule #13 below). Current count: **46**.
+8. **When adding/removing sources: update the FIVE load-bearing surfaces** — `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, `tests/test_cli.py` (`len == N` + expected set), AND `tests/test_api.py` (rule #13 below). Current count: **47**.
 13. **The fifth surface (`tests/test_api.py`) has hardcoded `== N` checks** inside `test_sources_returns_*` + `test_status_returns_counts` + `test_full_api_workflow`. Rotating the count requires all five to move together.
 14. **Conditional fetch is opt-in.** Sources whose upstream honours ETag/Last-Modified call `self._get_json_conditional(url)`; everyone else stays on `self._get_json(url)`. Don't pollute the cache with un-validatable entries.
 15. **New sources MUST set `.category`** to one of: `"ats"`, `"rss"`, `"keyed_api"`, `"free_json"`, `"scrapers"`, `"other"` — or add a `NAME_TIER[source.name]` override in `scheduler.py`. Untagged sources fall to the 60-min default.
@@ -80,7 +80,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 ## Common Gotchas
 
 - **`test_main.py` is now offline and fast** (~8 s, 14 tests). The M8 batch stubbed JobSpy (`fetch_jobs → []` via autouse fixture) and patched `load_profile`. It is part of the canonical run — do NOT add `--ignore=tests/test_main.py` back.
-- **`indeed` and `glassdoor` registry keys both → `JobSpySource`.** 46 registry entries, 45 unique classes. Test assertions treat 46 as authoritative.
+- **`indeed` and `glassdoor` registry keys both → `JobSpySource`.** 47 registry entries, 46 unique classes. Test assertions treat 47 as authoritative.
 - **`teaching_vacancies` lives in `apis_free/` but declares `category="rss"`** for the 15-min scheduler tier. Folder location ≠ scheduler tier. (`gov_apprenticeships` was also in this category but was removed in the 2026-06 M6 rotation — API retired upstream.)
 - **Pillar 2 toggles default off.** Don't assume embeddings or LLM enrichment runs by default — they don't.
 - **Heavy deps lazy-imported.** Don't add a top-level `import sentence_transformers` even "just for typing" — see rules #11 + #16.
@@ -88,7 +88,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 
 ## Project Overview
 
-Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 46 sources (via `SOURCE_REGISTRY` in `src/main.py`), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Next.js frontend (backed by FastAPI). Users can personalise searches by providing a CV (PDF/DOCX), a LinkedIn profile PDF (profile → More → Save to PDF), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, the default keyword lists are empty (emptied 2026-04-09, commit `3ba1342`) — a profile is required for meaningful results.
+Job360 is an automated UK job search system supporting **any professional domain**. It aggregates jobs from 47 sources (via `SOURCE_REGISTRY` in `src/main.py`), scores them 0-100 against a user profile, deduplicates across sources, and delivers results via CLI, email, Slack, Discord, CSV, and a Next.js frontend (backed by FastAPI). Users can personalise searches by providing a CV (PDF/DOCX), a LinkedIn profile PDF (profile → More → Save to PDF), and/or GitHub username. When a user profile exists (`data/user_profile.json`), keywords are generated dynamically from CV + preferences + LinkedIn + GitHub via `SearchConfig`. Without a profile, the default keyword lists are empty (emptied 2026-04-09, commit `3ba1342`) — a profile is required for meaningful results.
 
 ## Tech Stack
 
@@ -146,7 +146,7 @@ python -m src.cli setup-profile --cv cv.pdf --github username
 
 # Other CLI
 python -m src.cli status       # Last run stats
-python -m src.cli sources      # List all 46 sources
+python -m src.cli sources      # List all 47 sources
 python -m src.cli view --hours 24 --min-score 50
 python -m src.cli view --visa-only
 
@@ -192,7 +192,7 @@ job360/
 │   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
 │   ├── migrations/            # 18 forward+reverse SQL migration pairs (0000 → 0017) + runner.py
 │   ├── src/
-│   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (46), _build_sources()
+│   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── models.py          # Job dataclass with normalized_key() for dedup
 │   │   ├── api/               # FastAPI app + 11 route modules (46 endpoints, all per-user routes gated)
@@ -212,7 +212,7 @@ job360/
 
 ### Key engine modules
 
-- `src/main.py` — `run_search()` + `SOURCE_REGISTRY` (46 entries — `indeed` and `glassdoor` alias `JobSpySource`) + `_build_sources()`.
+- `src/main.py` — `run_search()` + `SOURCE_REGISTRY` (47 entries — `indeed` and `glassdoor` alias `JobSpySource`) + `_build_sources()`.
 - `src/services/skill_matcher.py` — Scoring. Two paths: legacy `score_job()` (module-level, hard-coded keywords) and `JobScorer(config, user_preferences=None, enrichment_lookup=None).score()` (instance, dynamic + optional 7-dim per rules #19/#20). 4-component default: Title 40 / Skill 40 / Location 10 / Recency 10. Penalties: −30 negative title / −15 foreign location.
 - `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
 - `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
@@ -236,7 +236,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 
 - Python 3.9+ required.
 - Dependencies installed via `pip install -e ".[dev]"` from `backend/`.
-- `.env` in repo root for API keys + webhooks (see `.env.example`); 39 of 46 sources work without any keys.
+- `.env` in repo root for API keys + webhooks (see `.env.example`); 39 of 47 sources work without any keys.
 - Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `jobs.db`, `user_profile.json`, `chroma/`.
 
 ### Environment variables
@@ -291,7 +291,7 @@ Adds: auth (`users`, `sessions`), per-tenant isolation (`user_actions` / `applic
 
 ### Pillar 3 Batch 3 (tiered polling + source expansion)
 
-Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators, +5 sources (teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet), −3 drops (yc_companies, nomis, findajob), ATS slug catalog 104 → 268, source count 48 → 50. Rules added: #13 / #14 / #15. M6 rotation (2026-06): −4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), source count 50 → 46.
+Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators, +5 sources (teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet), −3 drops (yc_companies, nomis, findajob), ATS slug catalog 104 → 268, source count 48 → 50. Rules added: #13 / #14 / #15. M6 rotation (2026-06): −4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), source count 50 → 46. gov_apprenticeships restored 2026-06-16 on the DfE Display Advert API v2 (keyed), source count 46 → 47.
 
 ### Pillar 2 (search & match engine upgrade)
 

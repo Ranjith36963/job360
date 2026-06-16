@@ -30,6 +30,7 @@ from src.sources.other.themuse import TheMuseSource
 from src.sources.other.hackernews import HackerNewsSource
 from src.sources.apis_keyed.careerjet import CareerjetSource
 from src.sources.apis_keyed.findwork import FindworkSource
+from src.sources.apis_keyed.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.other.nofluffjobs import NoFluffJobsSource
 from src.sources.apis_free.hn_jobs import HNJobsSource
 from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
@@ -127,6 +128,112 @@ def test_reed_skips_without_key():
             source = ReedSource(session, api_key="")
             jobs = await source.fetch_jobs()
             assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# DfE "Find an apprenticeship" Display Advert API v2 (keyed). Real contract:
+# GET https://api.apprenticeships.education.gov.uk/vacancies/vacancy
+# headers Ocp-Apim-Subscription-Key + X-Version: 2; response {"vacancies": [...]}.
+GOV_APPR_PAYLOAD = {
+    "vacancies": [
+        {
+            "title": "Software Developer Apprentice",
+            "description": "Build web apps with our team.",
+            "vacancyReference": "VAC2000034031",
+            "vacancyUrl": "https://www.findapprenticeship.service.gov.uk/apprenticeship/VAC2000034031",
+            "applicationUrl": "https://apply.example.com/apprenticeship/123",
+            "postedDate": "2026-06-01T09:00:00Z",
+            "closingDate": "2026-07-15T23:59:59Z",
+            "employerName": "Acme Ltd",
+            "wage": {"wageType": "Custom", "wageAmount": 18000, "wageUnit": "Annually"},
+            "addresses": [
+                {"addressLine1": "1 Tech Street", "postcode": "EC2A 4BT",
+                 "latitude": 51.5224, "longitude": -0.0806},
+            ],
+        },
+    ],
+    "total": 1,
+    "totalFiltered": 1,
+    "totalPages": 1,
+}
+
+_GOV_APPR_URL = re.compile(
+    r"https://api\.apprenticeships\.education\.gov\.uk/vacancies/vacancy.*"
+)
+
+
+def test_gov_apprenticeships_parses_response():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(_GOV_APPR_URL, payload=GOV_APPR_PAYLOAD, repeat=True)
+                source = GovApprenticeshipsSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].title == "Software Developer Apprentice"
+                assert jobs[0].company == "Acme Ltd"
+                assert jobs[0].source == "gov_apprenticeships"
+                # Prefer the external apply link over the gov.uk page.
+                assert jobs[0].apply_url == "https://apply.example.com/apprenticeship/123"
+                # postedDate present → trustworthy date.
+                assert jobs[0].posted_at == "2026-06-01T09:00:00Z"
+                assert jobs[0].date_confidence == "high"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_skips_without_key():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = GovApprenticeshipsSource(session, api_key="")
+            jobs = await source.fetch_jobs()
+            assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_sends_subscription_headers():
+    """The v2 API 401s without Ocp-Apim-Subscription-Key and 404s without
+    X-Version: 2 — both headers must be on every request."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(_GOV_APPR_URL, payload={"vacancies": [], "totalPages": 1}, repeat=True)
+                source = GovApprenticeshipsSource(session, api_key="secret-key")
+                await source.fetch_jobs()
+                request_call = list(m.requests.values())[0][0]
+                headers_sent = request_call.kwargs.get("headers") or {}
+                assert headers_sent.get("Ocp-Apim-Subscription-Key") == "secret-key"
+                assert str(headers_sent.get("X-Version")) == "2"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_dedups_by_reference():
+    """The same vacancyReference must not produce two jobs (paged repeats)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            dup_payload = {
+                "vacancies": [
+                    GOV_APPR_PAYLOAD["vacancies"][0],
+                    GOV_APPR_PAYLOAD["vacancies"][0],
+                ],
+                "totalPages": 1,
+            }
+            with aioresponses() as m:
+                m.get(_GOV_APPR_URL, payload=dup_payload, repeat=True)
+                source = GovApprenticeshipsSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
         finally:
             await session.close()
     _run(_test())
