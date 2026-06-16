@@ -96,4 +96,26 @@
 | Location/remote | ✅ | ✅ (workplace) | | ✅ (rubric #4) | Spread thin |
 | Meaning/semantics | | | ✅ | ✅ | Engine 3 ↔ 4 overlap |
 
-**Plain takeaway:** Engine 1's lexical match overlaps Engine 3's keyword leg; Engine 2's dimensions overlap Engine 4's rubric. Turning everything on and summing **double/triple-weights** the same factors. The clean fix is *pipeline, not vote*: search ranks (1 or 3) → judge is final authority (4) → dimensions act as filters (2). The ablation/eval harness (next step) measures this empirically before you decide who to keep.
+**Plain takeaway:** Engine 1's lexical match overlaps Engine 3's keyword leg; Engine 2's dimensions overlap Engine 4's rubric. Turning everything on and summing **double/triple-weights** the same factors. The clean fix is *pipeline, not vote*: search ranks (1 or 3) → judge is final authority (4) → dimensions act as filters (2).
+
+---
+
+## Eval / ablation harness — `scripts/engine_ablation.py`
+
+**Built 2026-06-16 (strict TDD, 13 tests).** Read-only. Ranks jobs by each engine + combinations, scores every ranking against a **Claude-subscription gold** (independent of the free in-app judge). Run: `python -m scripts.engine_ablation --email <you> --golds golds.json` (use `--emit-prompts` first to build the grading prompts).
+
+**First run (bench user, n=13, gold = AI/ML internships graded 18–80):**
+
+| Config | NDCG | Spearman | Prec@k |
+|---|---|---|---|
+| **E1+E3+E4** | **0.970** | **0.690** | 0.615 |
+| All (1+2+3+4) | 0.969 | 0.662 | 0.615 |
+| E3+E4 | 0.956 | 0.400 | 0.615 |
+| E1+E3 | 0.955 | 0.425 | 0.615 |
+| E1 keyword | 0.951 | 0.447 | 0.615 |
+| **E2 dimensions** | **0.951** | **0.447** | 0.615 |
+| E3 bm25 | 0.928 | 0.166 | 0.615 |
+| E1+E4 | 0.921 | 0.494 | 0.615 |
+| E4 judge | 0.916 | 0.267 | 0.667 |
+
+**Findings:** (1) **E1+E3+E4 wins** on rank agreement. (2) Dropping Engine 1 (E3+E4) barely moves NDCG but halves Spearman → **Engine 1 not safe to drop yet**. (3) **E2 dimensions row is identical to keyword** → dims contribute nothing today (the flat/zero `job.id` bug — live proof). **Caveats:** n=13 + compressed gold → NDCG saturated, Spearman noisy. A real keep/drop decision needs more jobs + a fresh wider gold (now one command away).
