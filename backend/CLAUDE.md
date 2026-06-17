@@ -50,7 +50,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 ## Where things are
 
-- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (50) + `_build_sources()`
+- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (46) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
 - `src/repositories/database.py` — async SQLite · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`

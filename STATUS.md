@@ -19,12 +19,12 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Profile dataclasses | `backend/src/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
-| CV parser (PDF/DOCX) | `backend/src/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
-| Preferences validator | `backend/src/profile/preferences.py` | Done -- form validation, CV+prefs merge |
-| Profile storage | `backend/src/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
-| Keyword generator | `backend/src/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
-| JobScorer class | `backend/src/filters/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
+| Profile dataclasses | `backend/src/services/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
+| CV parser (PDF/DOCX) | `backend/src/services/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
+| Preferences validator | `backend/src/services/profile/preferences.py` | Done -- form validation, CV+prefs merge |
+| Profile storage | `backend/src/services/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
+| Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
+| JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
 | 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
@@ -52,12 +52,12 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| LinkedIn ZIP parser | `backend/src/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
-| LinkedIn CVData enrichment | `backend/src/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
-| GitHub API enricher | `backend/src/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
-| GitHub CVData enrichment | `backend/src/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
-| CVData model fields | `backend/src/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
-| UserPreferences field | `backend/src/profile/models.py` | Done -- github_username field |
+| LinkedIn ZIP parser | `backend/src/services/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
+| LinkedIn CVData enrichment | `backend/src/services/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
+| GitHub API enricher | `backend/src/services/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
+| GitHub CVData enrichment | `backend/src/services/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
+| CVData model fields | `backend/src/services/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
+| UserPreferences field | `backend/src/services/profile/models.py` | Done -- github_username field |
 | CLI --linkedin option | `backend/src/cli.py:setup-profile` | Done -- accepts LinkedIn ZIP path |
 | CLI --github option | `backend/src/cli.py:setup-profile` | Done -- accepts GitHub username |
 | GITHUB_TOKEN env var | `backend/src/config/settings.py`, `.env.example` | Done -- optional, for higher API rate limits |
@@ -85,8 +85,8 @@
 |-----------|---------|--------|
 | DB error logging | `backend/src/cli_view.py` | Done -- `except Exception` blocks now log errors before returning empty |
 | Magic number elimination | `backend/src/main.py`, `backend/tests/test_main.py` | Done -- `SOURCE_INSTANCE_COUNT` constant replaces hard-coded 47 |
-| Schema migration | `backend/src/storage/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
-| Source health tracking | `backend/src/main.py`, `backend/src/storage/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
+| Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
+| Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
 | Source category metadata | `backend/src/sources/base.py`, all 46 source files | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |

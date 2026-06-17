@@ -192,7 +192,7 @@ job360/
 │   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
 │   ├── migrations/            # 18 forward+reverse SQL migration pairs (0000 → 0017) + runner.py
 │   ├── src/
-│   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (50), _build_sources()
+│   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (46), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── models.py          # Job dataclass with normalized_key() for dedup
 │   │   ├── api/               # FastAPI app + 11 route modules (46 endpoints, all per-user routes gated)
