@@ -345,6 +345,10 @@ def deterministic_cv_fields(raw_text: str) -> dict:
     seen: set[str] = set()
     for line in skill_lines:
         for token in _det_split_line(line):
+            # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
+            # yields the real skills, not the category name.
+            if ":" in token:
+                token = token.rsplit(":", 1)[-1]
             for tok in _det_expand_token(token):
                 if tok and tok.lower() not in seen:
                     skills.append(tok)

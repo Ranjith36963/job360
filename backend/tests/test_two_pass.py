@@ -124,6 +124,23 @@ class TestCvDeterministicPass:
         s = set(out["skills"])
         assert {"OCR", "Tesseract", "Python", "Pandas", "NumPy", "Matplotlib"}.issubset(s)
 
+    def test_strips_category_label_prefix(self):
+        """CV skill lines like 'Cloud & MLOps: AWS (Bedrock, SageMaker)' should
+        drop the category label and keep the real skills (incl. inner tools)."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "Skills\n"
+            "Cloud & MLOps: AWS (Bedrock, SageMaker) • Docker\n"
+            "AI Automation Tools: n8n • Zapier\n\n"
+            "Experience\nx"
+        )
+        out = deterministic_cv_fields(text)
+        s = set(out["skills"])
+        assert {"AWS", "Bedrock", "SageMaker", "Docker", "n8n", "Zapier"}.issubset(s)
+        assert "Cloud & MLOps: AWS" not in s
+        assert "AI Automation Tools: n8n" not in s
+
     def test_extracts_skills_section_lines(self):
         from src.services.profile.cv_parser import deterministic_cv_fields
 
