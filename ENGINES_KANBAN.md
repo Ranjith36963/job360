@@ -104,18 +104,24 @@
 
 **Built 2026-06-16 (strict TDD, 13 tests).** Read-only. Ranks jobs by each engine + combinations, scores every ranking against a **Claude-subscription gold** (independent of the free in-app judge). Run: `python -m scripts.engine_ablation --email <you> --golds golds.json` (use `--emit-prompts` first to build the grading prompts).
 
-**First run (bench user, n=13, gold = AI/ML internships graded 18–80):**
+**Run 2 (bench user, n=19, fresh live fetch + full Claude gold + full judge coverage):**
 
 | Config | NDCG | Spearman | Prec@k |
 |---|---|---|---|
-| **E1+E3+E4** | **0.970** | **0.690** | 0.615 |
-| All (1+2+3+4) | 0.969 | 0.662 | 0.615 |
-| E3+E4 | 0.956 | 0.400 | 0.615 |
-| E1+E3 | 0.955 | 0.425 | 0.615 |
-| E1 keyword | 0.951 | 0.447 | 0.615 |
-| **E2 dimensions** | **0.951** | **0.447** | 0.615 |
-| E3 bm25 | 0.928 | 0.166 | 0.615 |
-| E1+E4 | 0.921 | 0.494 | 0.615 |
-| E4 judge | 0.916 | 0.267 | 0.667 |
+| **All (1+2+3+4)** | **0.948** | **0.464** | 0.579 |
+| E1 keyword | 0.939 | 0.427 | 0.579 |
+| **E2 dimensions** | **0.939** | **0.427** | 0.579 |
+| E1+E3+E4 | 0.938 | 0.436 | 0.579 |
+| E1+E3 | 0.936 | 0.213 | 0.579 |
+| E3+E4 | 0.924 | 0.242 | 0.579 |
+| E1+E4 | 0.918 | 0.427 | 0.579 |
+| E3 bm25 | 0.911 | **0.004** | 0.579 |
+| E4 judge | 0.884 | 0.373 | 0.579 |
 
-**Findings:** (1) **E1+E3+E4 wins** on rank agreement. (2) Dropping Engine 1 (E3+E4) barely moves NDCG but halves Spearman → **Engine 1 not safe to drop yet**. (3) **E2 dimensions row is identical to keyword** → dims contribute nothing today (the flat/zero `job.id` bug — live proof). **Caveats:** n=13 + compressed gold → NDCG saturated, Spearman noisy. A real keep/drop decision needs more jobs + a fresh wider gold (now one command away).
+**Findings (n=19 overturns part of the n=13 read):**
+1. **Engine 1 (keyword) is the backbone** — alone it nearly matches the full stack (0.939 vs 0.948 NDCG; 0.427 vs 0.464 Spearman). **Dropping it clearly hurts** (E3+E4 Spearman 0.242 ≪ E1+E3+E4 0.436). → **Do NOT drop Engine 1.**
+2. **Engine 2 (dimensions) is dead** — row *identical* to keyword in BOTH runs. The four dimension scores contribute literally nothing today (`job.id` bug). Highest-value fix.
+3. **BM25 alone is weak** (Spearman 0.004 — near-random). Likely because the profile query is a huge skill list, so BM25 matches common ML words everywhere → poor discrimination. It adds a little only in combination. → Engine 3's BM25 is **not** a substitute for Engine 1.
+4. Combining everything wins, but only marginally over keyword alone — the overlap/double-count concern is real: extra engines add little once keyword is present.
+
+**How the gold was built:** live `run_search` for the bench user (5799 fetched → only 6 new — the scoring/persist gate, not fetching, caps the catalog at 19), then all 19 graded by Claude (this session). **Caveat:** n=19 is still modest and the gate keeps only score≥30 jobs, so the gold lacks clearly-bad roles that would sharpen the ranking metrics. A wider gold needs the persist gate relaxed (a Pillar-2 config change).
