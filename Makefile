@@ -3,7 +3,7 @@
 # Convention: every target is self-describing. Run `make help` for a menu.
 # `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean redis-up redis-down worker
+.PHONY: help install test test-fast test-live lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean redis-up redis-down worker
 
 help:
 	@echo "Job360 targets:"
@@ -34,6 +34,11 @@ test:
 
 test-fast:
 	cd backend && python -m pytest tests/ -m fast -q -p no:randomly
+
+# Real ONLINE end-to-end test — hits live job-site APIs (no mocks). Needs
+# internet; excluded from `make test`. Runs on demand + nightly in CI.
+test-live:
+	cd backend && python -m pytest -m live -v -p no:randomly
 
 lint:
 	cd backend && python -m ruff check src tests
