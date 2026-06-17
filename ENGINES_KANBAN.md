@@ -113,15 +113,18 @@
 | Config | NDCG | **Spearman** | Prec@k | n |
 |---|---|---|---|---|
 | **E3 hybrid(full)** | 0.956 | **0.815** | 0.244 | 45 |
+| **E2+E3** | 0.951 | **0.810** | 0.244 | 45 |
 | E1+E3 | 0.953 | 0.798 | 0.244 | 45 |
+| E1+E2+E3 | 0.949 | 0.784 | 0.244 | 45 |
 | E3+E4 | 0.951 | 0.781 | 0.244 | 45 |
 | E1+E3+E4 | 0.945 | 0.772 | 0.244 | 45 |
 | All (1+2+3+4) | 0.943 | 0.767 | 0.244 | 45 |
-| - E3 bm25-only | 0.934 | 0.564 | 0.289 | 38 |
 | **E2 dimensions** | 0.928 | **0.723** | 0.244 | 45 |
+| E1+E4 | 0.920 | 0.719 | 0.244 | 45 |
+| E1+E2+E4 | 0.929 | 0.716 | 0.244 | 45 |
 | E1 keyword | 0.924 | 0.688 | 0.244 | 45 |
 | E4 judge | 0.922 | 0.604 | 0.533 | 15 |
-| E1+E4 | 0.920 | 0.719 | 0.244 | 45 |
+| - E3 bm25-only | 0.934 | 0.564 | 0.289 | 38 |
 
 **Findings (now trustworthy — Spearman spreads 0.56–0.82):**
 1. **E3 full hybrid is the clear winner** (Spearman 0.815) — and **combining other engines into it only dilutes** (E3 alone > E1+E3 > E3+E4 > All). A strong ranker fused with weaker ones via RRF regresses toward the weaker consensus.
@@ -129,5 +132,6 @@
 3. **Keyword (0.688) is the weakest search leg; BM25-alone 0.564** (n=38 — BM25 scores 0 for 7 jobs with no lexical overlap, so they drop out).
 4. **Judge has the best precision (0.53) on its top-15** but only judges the shortlist (n=15 coverage) — strong but narrow.
 5. Prec@k ≈ 0.244 for the full-45 configs because only 11/45 jobs are "good" (gold≥60) → that's the ceiling; the metric is coverage-bound here, so read Spearman.
+6. **Combo sweep (E2+E3, E1+E2+E3, E1+E2+E4, etc.):** every config WITH E3 scores 0.77–0.82; every config WITHOUT it ≤0.72 → **E3 (hybrid) is essential**. The best *combo* is **E2+E3 (0.810)** — dims are the most *compatible* partner to the hybrid (orthogonal preference signal, minimal dilution), whereas keyword/judge dilute it more. Judge-alone (0.604, n=15) and BM25-alone (0.564, n=38) are the weakest single signals.
 
 **How the gold was built:** profile updated via `save_profile` (version 2); one `run_search` with `MIN_MATCH_SCORE→1` grew the catalog 19→3,536 (real bad/irrelevant spread); `rescore_user_feed` refreshed keyword + re-judged the top vs the new profile; a stratified 45-sample (15 high / 15 mid / 15 low) graded by Claude → fit 5–80. **Caveat:** coverage varies by engine (E4 n=15, BM25 n=38); n=45 is solid but not huge.

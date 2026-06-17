@@ -58,6 +58,9 @@ DEFAULT_CONFIGS = [
     {"name": "E1+E4", "engines": ["keyword", "judge"]},
     {"name": "E3+E4", "engines": ["hybrid", "judge"]},
     {"name": "E1+E3", "engines": ["keyword", "hybrid"]},
+    {"name": "E2+E3", "engines": ["dims", "hybrid"]},
+    {"name": "E1+E2+E3", "engines": ["keyword", "dims", "hybrid"]},
+    {"name": "E1+E2+E4", "engines": ["keyword", "dims", "judge"]},
     {"name": "E1+E3+E4", "engines": ["keyword", "hybrid", "judge"]},
     {"name": "All (1+2+3+4)", "engines": ["keyword", "dims", "hybrid", "judge"]},
 ]
