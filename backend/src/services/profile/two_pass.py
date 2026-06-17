@@ -25,6 +25,7 @@ from src.services.profile.cv_parser import (
 from src.services.profile.github_enricher import llm_infer_github_skills
 from src.services.profile.linkedin_parser import (
     enrich_cv_from_linkedin,
+    llm_infer_linkedin_skills,
     parse_linkedin_from_text,
 )
 from src.services.profile.models import CVData, UserProfile
@@ -98,6 +99,15 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         try:
             ld = await parse_linkedin_from_text(cv.linkedin_raw_text)
             enrich_cv_from_linkedin(cv, ld)
+            # LLM skills pass — recovers the two-column "Top Skills" sidebar
+            # (LangGraph, Systems Design, …) the deterministic split loses, plus
+            # prose skills. Merge into linkedin_skills (dedup vs all known).
+            li_llm = await llm_infer_linkedin_skills(cv.linkedin_raw_text)
+            known = {s.lower() for s in cv.skills} | {s.lower() for s in cv.linkedin_skills}
+            for s in li_llm:
+                if s.lower() not in known:
+                    cv.linkedin_skills.append(s)
+                    known.add(s.lower())
         except Exception as e:  # noqa: BLE001
             logger.warning("two_pass: LinkedIn pass skipped: %s", e)
 

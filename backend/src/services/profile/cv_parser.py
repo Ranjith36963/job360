@@ -240,8 +240,61 @@ _DET_OTHER_HEADINGS = {
 }
 _DET_ALL_HEADINGS = _DET_SKILL_HEADINGS | _DET_SUMMARY_HEADINGS | _DET_OTHER_HEADINGS
 
-# Split a skills line on commas, pipes, slashes, bullets, semicolons.
-_DET_SKILL_SPLIT = re.compile(r"[,•·|;/]+")
+# Delimiters that separate skills on one line.
+_DET_SKILL_DELIMS = set(",•·|;/")
+# Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
+_DET_PAREN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
+
+
+def _det_split_line(line: str) -> list[str]:
+    """Split a skills line on delimiters, but NOT on commas inside parentheses.
+
+    "Python (Pandas, NumPy) • Docker" → ["Python (Pandas, NumPy)", "Docker"]
+    so the parenthetical survives for ``_det_expand_token`` to expand.
+    """
+    toks: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    for ch in line:
+        if ch == "(":
+            depth += 1
+            cur.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            cur.append(ch)
+        elif depth == 0 and ch in _DET_SKILL_DELIMS:
+            toks.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    toks.append("".join(cur))
+    return [t for t in toks if t.strip()]
+
+
+def _det_expand_token(token: str) -> list[str]:
+    """Expand a skill token that wraps tools in parentheses.
+
+    "OCR (Tesseract)" → ["OCR", "Tesseract"]
+    "Python (Pandas, NumPy, Matplotlib)" → ["Python", "Pandas", "NumPy", "Matplotlib"]
+    "Docker" → ["Docker"]
+    The outer term and each comma-separated inner term become separate skills,
+    so CV lines like "AWS (Bedrock, SageMaker, S3)" surface every tool.
+    """
+    tok = token.strip()
+    if not tok:
+        return []
+    m = _DET_PAREN.match(tok)
+    if not m:
+        return [tok]
+    out: list[str] = []
+    outer = m.group(1).strip()
+    if outer:
+        out.append(outer)
+    for inner in m.group(2).split(","):
+        inner = inner.strip()
+        if inner:
+            out.append(inner)
+    return out or [tok]
 
 
 def _det_heading_key(line: str) -> str:
@@ -291,11 +344,11 @@ def deterministic_cv_fields(raw_text: str) -> dict:
     skills: list[str] = []
     seen: set[str] = set()
     for line in skill_lines:
-        for token in _DET_SKILL_SPLIT.split(line):
-            tok = token.strip()
-            if tok and tok.lower() not in seen:
-                skills.append(tok)
-                seen.add(tok.lower())
+        for token in _det_split_line(line):
+            for tok in _det_expand_token(token):
+                if tok and tok.lower() not in seen:
+                    skills.append(tok)
+                    seen.add(tok.lower())
 
     summary = " ".join(_det_collect_section(lines, _DET_SUMMARY_HEADINGS)).strip()
     return {"skills": skills, "summary": summary}

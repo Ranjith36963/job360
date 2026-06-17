@@ -272,6 +272,61 @@ TEXT:
 ---"""
 
 
+_LINKEDIN_SKILLS_PROMPT = """Below is the raw text of a LinkedIn profile (exported "Save to PDF").
+The two-column layout means the "Top Skills" sidebar is often interleaved with
+other text, so read the WHOLE thing.
+
+List every concrete professional SKILL the person claims — their "Top Skills",
+technologies in their summary/experience, and anything in a "Continuously
+learning" or similar line.
+
+Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
+
+Rules:
+- Only skills the text supports. Do not invent.
+- Individual items, not categories.
+- Skip bare contact info, company names, and job titles.
+
+LINKEDIN TEXT:
+---
+{text}
+---"""
+
+
+async def llm_infer_linkedin_skills(raw_text: str) -> list[str]:
+    """Two-pass LLM enhance for LinkedIn skills.
+
+    LinkedIn's "Save to PDF" is two-column, so pdfplumber interleaves the
+    "Top Skills" sidebar with the main column and the deterministic heading
+    split loses it. This reads the FULL raw text with an LLM, recovering the
+    Top Skills plus skills mentioned in prose (e.g. "Vector databases • RLHF").
+
+    Returns ``[]`` (never raises) on blank input or provider failure. Blank
+    input never calls the LLM (cost guard).
+    """
+    if not raw_text or not raw_text.strip():
+        return []
+    try:
+        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
+        result = await llm_extract(
+            _LINKEDIN_SKILLS_PROMPT.format(text=raw_text), system=_LINKEDIN_SYSTEM
+        )
+    except Exception as e:  # noqa: BLE001 — never crash the pass
+        logger.warning("LinkedIn LLM skill inference failed: %s", e)
+        return []
+
+    raw = result.get("skills") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in raw:
+        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
+            out.append(s.strip())
+            seen.add(s.strip().lower())
+    return out
+
+
 async def _llm_json(prompt: str) -> dict[str, Any]:
     """Call the shared LLM provider; return {} on any failure."""
     if not prompt.strip():
