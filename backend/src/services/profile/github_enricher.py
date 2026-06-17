@@ -29,6 +29,40 @@ import aiohttp
 
 _GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
 
+
+def normalize_github_username(raw: str) -> str:
+    """Reduce any GitHub input to a bare username.
+
+    Accepts what users actually paste — a full profile URL
+    (``https://github.com/torvalds``), an ``@handle``, or the plain
+    username — and returns just the username. The caller still runs
+    ``_GITHUB_USERNAME_RE`` on the result, so junk input that doesn't
+    reduce to a valid handle is rejected downstream (returns "").
+
+    Examples:
+      ``https://github.com/torvalds``       -> ``torvalds``
+      ``github.com/torvalds/repo``          -> ``torvalds``
+      ``www.github.com/torvalds?tab=repos`` -> ``torvalds``
+      ``@torvalds``                         -> ``torvalds``
+      ``torvalds``                          -> ``torvalds``
+    """
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    # Drop a leading @ that users copy from social handles.
+    s = s.lstrip("@").strip()
+    # If it mentions github.com, take the first path segment after it.
+    # Tolerates http(s)://, www., a trailing path, query string, or fragment.
+    match = re.search(r"github\.com/+([^/?#\s]+)", s, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    # Otherwise treat the whole thing as a handle, but still strip any
+    # stray path/query so "torvalds/repo" -> "torvalds".
+    return re.split(r"[/?#\s]", s, maxsplit=1)[0]
+
+
 from src.core.settings import GITHUB_TOKEN
 from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
 from src.services.profile.dependency_map import lookup_skill
@@ -268,6 +302,8 @@ async def fetch_github_profile(
         "frameworks_inferred": [],
         "repos_brief": [],
     }
+    # Accept a full profile URL or @handle, not just a bare username.
+    username = normalize_github_username(username)
     if not _GITHUB_USERNAME_RE.match(username):
         logger.warning("Invalid GitHub username format: %s", username)
         return empty

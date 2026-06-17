@@ -22,7 +22,11 @@ from src.api.models import (
     ProfileVersionSummary,
 )
 from src.services.profile.cv_parser import parse_cv_async
-from src.services.profile.github_enricher import enrich_cv_from_github, fetch_github_profile
+from src.services.profile.github_enricher import (
+    enrich_cv_from_github,
+    fetch_github_profile,
+    normalize_github_username,
+)
 from src.services.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_pdf
 from src.services.profile.models import UserPreferences, UserProfile
 from src.services.profile.preferences import merge_cv_and_preferences
@@ -325,11 +329,16 @@ async def upload_github(
     username: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
-    """Enrich the caller's profile with GitHub public data."""
-    github_data = await fetch_github_profile(username)
+    """Enrich the caller's profile with GitHub public data.
+
+    Accepts a full profile URL or @handle, not just a bare username —
+    ``normalize_github_username`` reduces it to the handle before lookup.
+    """
+    clean_username = normalize_github_username(username)
+    github_data = await fetch_github_profile(clean_username)
     profile = load_profile(user.id) or UserProfile()
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
-    profile.preferences.github_username = username
+    profile.preferences.github_username = clean_username
     save_profile(profile, user.id)
     await _maybe_trigger_rescore(user.id)
     return GitHubResponse(ok=True, merged=True)
