@@ -226,6 +226,49 @@ def _extract_header_fields(header_text: str) -> dict[str, str]:
     return {"name": name, "headline": headline, "industry": industry}
 
 
+_TECH_LINE = re.compile(r"^\s*(?:technologies|tech stack|tools|skills)\s*:\s*(.*)$", re.IGNORECASE)
+_TECH_SPLIT = re.compile(r"[•·|,]|\s-\s")
+
+
+def _extract_inline_tech_skills(text: str) -> list[str]:
+    """Deterministically pull skills from inline 'Technologies: A • B • C' lines
+    in the experience body (incl. a wrapped continuation line starting '•').
+
+    LinkedIn lists the tech stack per role on these lines; the section-based
+    ``_extract_skills`` only reads the "Top Skills" sidebar, so without this the
+    deterministic pass misses Docker/AWS Bedrock/RAG/etc. that are stated outright.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    seen: set[str] = set()
+    i = 0
+    while i < len(lines):
+        m = _TECH_LINE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        buf = [m.group(1)]
+        j = i + 1
+        # Keep absorbing wrapped continuation lines. A wrap is signalled either
+        # by the previous line ending on a dangling bullet ("OpenAI API •") or
+        # by the next line starting with a bullet ("• Python • ...").
+        while j < len(lines):
+            prev_dangles = buf[-1].rstrip().endswith(("•", "·"))
+            nxt = lines[j].strip()
+            if prev_dangles or nxt[:1] in {"•", "·", "-"}:
+                buf.append(lines[j])
+                j += 1
+            else:
+                break
+        for tok in _TECH_SPLIT.split(" ".join(buf)):
+            t = tok.strip().lstrip("•·-").strip()
+            if t and 1 < len(t) <= 40 and t.lower() not in seen:
+                out.append(t)
+                seen.add(t.lower())
+        i = j
+    return out
+
+
 def _extract_skills(skills_text: str) -> list[str]:
     """LinkedIn lists one skill per line under 'Skills' / 'Top Skills'."""
     seen: set[str] = set()
@@ -608,6 +651,13 @@ async def parse_linkedin_from_text(text: str) -> dict:
     skills = _extract_skills(
         sections.get("skills", "") or sections.get("top skills", "")
     )
+    # Also harvest the inline "Technologies: A • B • C" lines stated per role —
+    # deterministic, and recovers the tech stack the Top-Skills sidebar omits.
+    seen_sk = {s.lower() for s in skills}
+    for s in _extract_inline_tech_skills(text):
+        if s.lower() not in seen_sk:
+            skills.append(s)
+            seen_sk.add(s.lower())
     experience_text = sections.get("experience", "")
     education_text = sections.get("education", "")
     certs_text = (

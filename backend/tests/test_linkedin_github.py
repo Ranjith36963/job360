@@ -60,6 +60,30 @@ class TestDewrapColumns:
 
     def test_empty_words_returns_none(self):
         assert _dewrap_columns([], 600) is None
+
+
+class TestInlineTechSkills:
+    def test_extracts_technologies_lines_with_wrap(self):
+        """LinkedIn experience 'Technologies: ...' lines (incl. the wrapped
+        continuation) are extracted deterministically."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Some achievement prose here.\n"
+            "Technologies: Docker • AWS Bedrock • Redis • Linux\n"
+            "• Python • RAG Pipelines • Generative AI\n"
+            "Next Company\n"
+        )
+        sk = set(_extract_inline_tech_skills(text))
+        assert {"Docker", "AWS Bedrock", "Redis", "Linux", "Python",
+                "RAG Pipelines", "Generative AI"}.issubset(sk)
+        assert "Some achievement prose here." not in sk
+        assert "Next Company" not in sk
+
+    def test_no_tech_line_returns_empty(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        assert _extract_inline_tech_skills("Just prose.\nNo tech line.\n") == []
 from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,
