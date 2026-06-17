@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from scripts.engine_ablation import (
     combine_rrf,
+    compare_configs,
     dim_only_score,
     evaluate_config,
     evaluate_ranking,
+    evaluate_ranking_strong,
     precision_at_k,
     ranking_to_scores,
     scores_to_ranking,
@@ -181,3 +183,56 @@ def test_dim_only_score_sums_the_four_enrichment_dims():
 def test_dim_only_score_zero_when_no_dims():
     bd = _FakeBreakdown(0, 0, 0, 0, match=45)
     assert dim_only_score(bd) == 0.0
+
+
+# --------------------------------------------------------------------------- #
+#  evaluate_ranking_strong — point estimates + bootstrap 95% CIs              #
+#  + NDCG@5 / NDCG@10 (top-focus)                                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_evaluate_ranking_strong_perfect_order():
+    golds = {"1": 90.0, "2": 70.0, "3": 40.0, "4": 10.0}
+    out = evaluate_ranking_strong([1, 2, 3, 4], golds, n_resamples=200, seed=1)
+    assert out["n"] == 4
+    assert out["ndcg"]["point"] == 1.0          # best jobs already on top
+    assert out["spearman"]["point"] == 1.0
+    assert "ndcg@5" in out and "ndcg@10" in out
+
+
+def test_evaluate_ranking_strong_has_ci_bounds():
+    golds = {"1": 90.0, "2": 10.0, "3": 70.0, "4": 40.0, "5": 20.0}
+    out = evaluate_ranking_strong([3, 1, 4, 5, 2], golds, n_resamples=300, seed=7)
+    for m in ("ndcg", "ndcg@5", "spearman"):
+        lo, hi = out[m]["ci"]
+        assert lo <= hi                          # CI is an interval
+        assert lo <= out[m]["point"] <= hi or abs(out[m]["point"] - hi) < 0.2
+
+
+def test_evaluate_ranking_strong_is_deterministic_with_seed():
+    golds = {"1": 90.0, "2": 10.0, "3": 70.0, "4": 40.0}
+    a = evaluate_ranking_strong([1, 3, 4, 2], golds, n_resamples=200, seed=42)
+    b = evaluate_ranking_strong([1, 3, 4, 2], golds, n_resamples=200, seed=42)
+    assert a["ndcg"]["ci"] == b["ndcg"]["ci"]    # same seed → same CI
+
+
+# --------------------------------------------------------------------------- #
+#  compare_configs — significance test (is the gap real or noise?)            #
+# --------------------------------------------------------------------------- #
+
+
+def test_compare_configs_detects_clearly_better():
+    golds = {"1": 95.0, "2": 80.0, "3": 65.0, "4": 45.0, "5": 25.0, "6": 5.0}
+    good = [1, 2, 3, 4, 5, 6]      # perfect
+    bad = [6, 5, 4, 3, 2, 1]       # reversed
+    out = compare_configs(good, bad, golds, metric="ndcg", n_resamples=500, seed=3)
+    assert out["diff"] > 0
+    assert out["significant"] is True            # CI of the diff excludes 0
+
+
+def test_compare_configs_identical_not_significant():
+    golds = {"1": 90.0, "2": 70.0, "3": 40.0, "4": 10.0}
+    r = [1, 2, 3, 4]
+    out = compare_configs(r, r, golds, metric="ndcg", n_resamples=400, seed=3)
+    assert abs(out["diff"]) < 1e-9
+    assert out["significant"] is False

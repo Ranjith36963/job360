@@ -169,6 +169,123 @@ def evaluate_ranking(
     return {"n": n, "ndcg": ndcg_val, "spearman": sp, "precision_at_k": prec}
 
 
+def _position_gold_pairs(ranking: list, golds: dict) -> list:
+    """For each gold-graded job, its ``(position, gold_fit)`` in the config's
+    gold-restricted ranking (position 0 = ranked best)."""
+    g = _normalize_golds(golds)
+    ranked = [jid for jid in ranking if str(jid) in g]
+    return [(i, g[str(jid)]) for i, jid in enumerate(ranked)]
+
+
+def _ndcg_from_pairs(pairs: list, k=None):
+    seq = [gold for _pos, gold in sorted(pairs, key=lambda pg: pg[0])]
+    return ndcg(seq, k)
+
+
+def _spearman_from_pairs(pairs: list):
+    n = len(pairs)
+    return spearman([(float(n - pos), gold) for pos, gold in pairs])
+
+
+def _percentile_ci(values: list, lo: float = 0.025, hi: float = 0.975):
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return (None, None)
+    n = len(vals)
+    li = max(0, min(n - 1, int(lo * n)))
+    hi_i = max(0, min(n - 1, int(hi * n) - 1))
+    return (vals[li], vals[hi_i])
+
+
+_STRONG_METRICS = ("ndcg", "ndcg@5", "ndcg@10", "spearman")
+
+
+def _metric_from_pairs(metric: str, pairs: list):
+    if metric == "ndcg":
+        return _ndcg_from_pairs(pairs)
+    if metric == "ndcg@5":
+        return _ndcg_from_pairs(pairs, 5)
+    if metric == "ndcg@10":
+        return _ndcg_from_pairs(pairs, 10)
+    if metric == "spearman":
+        return _spearman_from_pairs(pairs)
+    raise ValueError(f"unknown metric {metric!r}")
+
+
+def evaluate_ranking_strong(ranking: list, golds: dict, *, n_resamples: int = 2000, seed: int = 12345) -> dict:
+    """Point estimate + bootstrap 95% CI for NDCG, NDCG@5, NDCG@10, Spearman.
+
+    Bootstrap = resample the gold-graded jobs with replacement ``n_resamples``
+    times (seeded → reproducible); the 2.5/97.5 percentiles of each metric form
+    the 95% CI. A tight CI = a trustworthy number; a wide CI = the sample is too
+    small to trust the point estimate.
+    """
+    import random  # noqa: PLC0415
+
+    pairs = _position_gold_pairs(ranking, golds)
+    n = len(pairs)
+    if n == 0:
+        return {"n": 0, **{m: {"point": None, "ci": (None, None)} for m in _STRONG_METRICS}}
+
+    point = {m: _metric_from_pairs(m, pairs) for m in _STRONG_METRICS}
+    rng = random.Random(seed)
+    samples = {m: [] for m in _STRONG_METRICS}
+    for _ in range(n_resamples):
+        rs = [pairs[rng.randrange(n)] for _ in range(n)]
+        for m in _STRONG_METRICS:
+            samples[m].append(_metric_from_pairs(m, rs))
+
+    out = {"n": n}
+    for m in _STRONG_METRICS:
+        out[m] = {"point": point[m], "ci": _percentile_ci(samples[m])}
+    return out
+
+
+def compare_configs(
+    ranking_a: list,
+    ranking_b: list,
+    golds: dict,
+    *,
+    metric: str = "ndcg",
+    n_resamples: int = 2000,
+    seed: int = 12345,
+) -> dict:
+    """Paired bootstrap significance test: is config A's ``metric`` really
+    higher than B's, or is the gap noise?
+
+    Resamples the jobs golded in BOTH rankings, recomputes (metricA - metricB)
+    on each resample, and returns the 95% CI of the difference.
+    ``significant`` is True when that CI excludes 0.
+    """
+    import random  # noqa: PLC0415
+
+    g = _normalize_golds(golds)
+    ranked_a = [jid for jid in ranking_a if str(jid) in g]
+    ranked_b = [jid for jid in ranking_b if str(jid) in g]
+    pos_a = {jid: i for i, jid in enumerate(ranked_a)}
+    pos_b = {jid: i for i, jid in enumerate(ranked_b)}
+    triples = [(pos_a[jid], pos_b[jid], g[str(jid)]) for jid in ranked_a if jid in pos_b]
+    n = len(triples)
+    if n == 0:
+        return {"diff": 0.0, "ci": (None, None), "significant": False, "n": 0}
+
+    def _a(tr):
+        return _metric_from_pairs(metric, [(pa, gold) for pa, _pb, gold in tr]) or 0.0
+
+    def _b(tr):
+        return _metric_from_pairs(metric, [(pb, gold) for _pa, pb, gold in tr]) or 0.0
+
+    point_diff = _a(triples) - _b(triples)
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(n_resamples):
+        rs = [triples[rng.randrange(n)] for _ in range(n)]
+        diffs.append(_a(rs) - _b(rs))
+    lo, hi = _percentile_ci(diffs)
+    significant = lo is not None and (lo > 0 or hi < 0)
+    return {"diff": point_diff, "ci": (lo, hi), "significant": significant, "n": n}
+
+
 def combine_rrf(rankings: list, k: int = 60) -> list:
     """Fuse several ranked id lists into one via Reciprocal Rank Fusion."""
     from src.services.retrieval import reciprocal_rank_fusion  # noqa: PLC0415
@@ -315,6 +432,103 @@ def _fmt(v: float | None, decimals: int = 3) -> str:
     return "N/A" if v is None else f"{v:.{decimals}f}"
 
 
+def _config_ranking(config: dict, engine_scores: dict, rrf_k: int = 60) -> list:
+    """Produce one config's ranking (single engine or RRF-fused combo)."""
+    engines = config["engines"]
+    if len(engines) == 1:
+        return scores_to_ranking(engine_scores.get(engines[0], {}))
+    return combine_rrf([scores_to_ranking(engine_scores.get(e, {})) for e in engines], k=rrf_k)
+
+
+def run_leaderboard_strong(
+    profile: dict,
+    feed_rows: list[dict],
+    golds: dict,
+    configs: list[dict] | None = None,
+    *,
+    hybrid_profile=None,
+    n_resamples: int = 2000,
+    seed: int = 12345,
+) -> tuple:
+    """Rich leaderboard: each config with point + bootstrap-CI metrics
+    (NDCG, NDCG@5, NDCG@10, Spearman), its top-5 gold-ranked jobs, plus a
+    significance comparison of the best (by NDCG) config vs every other.
+
+    Returns ``(rows, significance, best_name)``.
+    """
+    cfgs = configs or DEFAULT_CONFIGS
+    engine_scores = build_engine_scores(profile, feed_rows, hybrid_profile=hybrid_profile)
+    g = _normalize_golds(golds)
+    rankings: dict = {}
+    rows: list[dict] = []
+    for c in cfgs:
+        ranking = _config_ranking(c, engine_scores)
+        rankings[c["name"]] = ranking
+        strong = evaluate_ranking_strong(ranking, golds, n_resamples=n_resamples, seed=seed)
+        top5 = [(jid, g[str(jid)]) for jid in ranking if str(jid) in g][:5]
+        rows.append({"name": c["name"], "strong": strong, "top5": top5})
+
+    rows.sort(
+        key=lambda r: (r["strong"]["ndcg"]["point"] is not None, r["strong"]["ndcg"]["point"] or 0.0),
+        reverse=True,
+    )
+    best = rows[0]["name"]
+    significance = {
+        r["name"]: compare_configs(
+            rankings[best], rankings[r["name"]], golds, metric="ndcg", n_resamples=n_resamples, seed=seed
+        )
+        for r in rows[1:]
+    }
+    return rows, significance, best
+
+
+def _fmt_ci(metric: dict) -> str:
+    pt = metric.get("point")
+    lo, hi = metric.get("ci", (None, None))
+    if pt is None:
+        return "  N/A"
+    if lo is None:
+        return f"{pt:.3f}"
+    return f"{pt:.3f} [{lo:.2f},{hi:.2f}]"
+
+
+def _print_strong_report(rows: list, significance: dict, best: str, gold_count: int, title_map: dict, out) -> None:
+    def _p(*a):
+        print(*a, file=out)
+
+    _p("=" * 92)
+    _p("JOB360 ENGINE ABLATION — STRONG (bootstrap 95% CIs + significance)")
+    _p("=" * 92)
+    _p(f"Gold-graded jobs (the Claude benchmark): {gold_count}")
+    _p("NDCG = are the BEST jobs at the top (top-heavy; your priority). NDCG@5/@10 = top-5/10 only.")
+    _p("Spearman = is the WHOLE list in order. [lo,hi] = 95% confidence interval (bootstrap).\n")
+    _p(f"{'CONFIG':<16}{'NDCG [95% CI]':<22}{'NDCG@5':<10}{'NDCG@10':<10}{'Spearman [95% CI]':<22}{'n':>4}")
+    _p("-" * 92)
+    for r in rows:
+        s = r["strong"]
+        _p(
+            f"{r['name']:<16}{_fmt_ci(s['ndcg']):<22}"
+            f"{(_fmt_ci(s['ndcg@5']).split(' ')[0]):<10}{(_fmt_ci(s['ndcg@10']).split(' ')[0]):<10}"
+            f"{_fmt_ci(s['spearman']):<22}{s['n']:>4}"
+        )
+    _p("-" * 92)
+    _p(f"\nSIGNIFICANCE — is the top config ({best}) really better on NDCG, or noise?")
+    _p("(paired bootstrap of the NDCG difference; SIGNIFICANT = 95% CI of the gap excludes 0)\n")
+    for name, cmp in significance.items():
+        lo, hi = cmp["ci"]
+        verdict = "SIGNIFICANT" if cmp["significant"] else "not significant (overlaps)"
+        ci_txt = f"[{lo:.3f},{hi:.3f}]" if lo is not None else "N/A"
+        _p(f"  {best} vs {name:<16} ΔNDCG={cmp['diff']:+.3f} CI={ci_txt:<18} {verdict}")
+    _p("\n" + "=" * 92)
+    _p("TOP-5 JOBS PER CONFIG (job_id · gold-fit · title) — the 'why'")
+    _p("=" * 92)
+    for r in rows:
+        _p(f"\n[{r['name']}]")
+        for jid, fit in r["top5"]:
+            _p(f"   {int(fit):>3}  #{jid}  {title_map.get(jid, '')[:60]}")
+    _p("=" * 92)
+
+
 def run_leaderboard(
     profile: dict,
     feed_rows: list[dict],
@@ -451,8 +665,11 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as exc:  # noqa: BLE001 — hybrid row is optional
         print(f"(hybrid row disabled — could not load profile: {exc})", file=sys.stderr)
 
-    rows = run_leaderboard(profile, feed_rows, golds, hybrid_profile=hybrid_profile)
-    _print_leaderboard(rows, gold_count=len(_normalize_golds(golds)), out=sys.stdout)
+    title_map = {r.get("job_id", r.get("id")): (r.get("title") or "") for r in feed_rows}
+    rows, significance, best = run_leaderboard_strong(profile, feed_rows, golds, hybrid_profile=hybrid_profile)
+    _print_strong_report(
+        rows, significance, best, gold_count=len(_normalize_golds(golds)), title_map=title_map, out=sys.stdout
+    )
 
 
 if __name__ == "__main__":
