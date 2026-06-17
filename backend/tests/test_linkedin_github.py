@@ -84,6 +84,13 @@ class TestInlineTechSkills:
         from src.services.profile.linkedin_parser import _extract_inline_tech_skills
 
         assert _extract_inline_tech_skills("Just prose.\nNo tech line.\n") == []
+
+    def test_extracts_continuously_learning_line(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Continuously learning: Prompt engineering • Vector databases • RLHF • AI evaluation frameworks\n"
+        sk = set(_extract_inline_tech_skills(text))
+        assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
 from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,

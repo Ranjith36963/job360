@@ -226,7 +226,10 @@ def _extract_header_fields(header_text: str) -> dict[str, str]:
     return {"name": name, "headline": headline, "industry": industry}
 
 
-_TECH_LINE = re.compile(r"^\s*(?:technologies|tech stack|tools|skills)\s*:\s*(.*)$", re.IGNORECASE)
+_TECH_LINE = re.compile(
+    r"^\s*(?:technologies|tech stack|tools|skills|continuously learning)\s*:\s*(.*)$",
+    re.IGNORECASE,
+)
 _TECH_SPLIT = re.compile(r"[•·|,]|\s-\s")
 
 
