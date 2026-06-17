@@ -44,18 +44,6 @@ from scripts.accuracy_audit import (
     spearman,
 )
 
-# Dimension score columns summed for the "E2 dims" engine.
-_DIM_COLUMNS = (
-    "role",
-    "skill",
-    "seniority_score",
-    "experience",
-    "credentials",
-    "location_score",
-    "recency",
-    "semantic",
-)
-
 GOLD_THRESHOLD = 60.0
 
 # The configs evaluated by default. Combinations fuse the per-engine rankings
@@ -110,6 +98,24 @@ def ranking_to_scores(ranking: list) -> dict:
     """
     n = len(ranking)
     return {jid: float(n - i) for i, jid in enumerate(ranking)}
+
+
+def dim_only_score(breakdown) -> float:
+    """Engine 2 in isolation: the enrichment dimension contribution ONLY
+    (seniority + salary + visa + workplace).
+
+    NOT ``match_score`` — match_score also contains the keyword components, and
+    the stored jobs-table dim columns (role/skill/…) *sum to* match_score, so
+    summing them just reproduces the keyword score (the bug that made the old
+    "E2" row mirror E1). This isolates the four enrichment dims so E2 is an
+    honest, independent engine.
+    """
+    return float(
+        getattr(breakdown, "seniority_score", 0)
+        + getattr(breakdown, "salary_score", 0)
+        + getattr(breakdown, "visa_score", 0)
+        + getattr(breakdown, "workplace_score", 0)
+    )
 
 
 def precision_at_k(
@@ -235,24 +241,65 @@ def _hybrid_ranking(feed_rows: list[dict], hybrid_profile) -> list:
     return [r["id"] for r in reordered if r.get("id") is not None]
 
 
+def _dim_scores(feed_rows: list[dict], hybrid_profile) -> dict:
+    """Engine 2 score per job — the enrichment dims (seniority/salary/visa/
+    workplace) computed LIVE, with ``job.id`` set so the enrichment lookup hits.
+
+    Uses the default-DB enrichment + the real profile preferences. Returns
+    ``{job_id: dim_sum}``. With a profile that has no differentiating
+    preferences the dims come out near-constant (a known limit, not a bug).
+    """
+    import asyncio  # noqa: PLC0415
+
+    from src.api.routes.jobs import _row_to_scoring_job  # noqa: PLC0415
+    from src.core.settings import DB_PATH  # noqa: PLC0415
+    from src.repositories.database import JobDatabase  # noqa: PLC0415
+    from src.services.job_enrichment import (  # noqa: PLC0415
+        ENRICHMENT_ENABLED,
+        _build_enrichment_lookup,
+    )
+    from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
+    from src.services.skill_matcher import JobScorer  # noqa: PLC0415
+
+    async def _load() -> dict:
+        db = JobDatabase(str(DB_PATH))
+        await db.init_db()
+        try:
+            return await _build_enrichment_lookup(db._conn) if ENRICHMENT_ENABLED else {}
+        finally:
+            await db.close()
+
+    enrichment = asyncio.run(_load())
+    scorer = JobScorer(
+        generate_search_config(hybrid_profile),
+        user_preferences=hybrid_profile.preferences,
+        enrichment_lookup=lambda j: enrichment.get(getattr(j, "id", None)),
+    )
+    out: dict = {}
+    for r in feed_rows:
+        row = dict(r)
+        row["id"] = r.get("id", r.get("job_id"))
+        out[r["job_id"]] = dim_only_score(scorer.score(_row_to_scoring_job(row)))
+    return out
+
+
 def build_engine_scores(profile: dict, feed_rows: list[dict], *, hybrid_profile=None) -> dict:
     """Build ``{engine_key: {job_id: score|None}}`` per engine.
 
-    ``keyword`` / ``judge`` / ``dims`` / ``bm25`` come from stored values or a
-    pure BM25 pass. When ``hybrid_profile`` (a real ``UserProfile``) is given,
-    ``hybrid`` is the FULL Engine-3 ranking (keyword+BM25+vector+rerank) from
-    the live stack, expressed as pseudo-scores.
+    ``keyword`` / ``judge`` from stored values; ``bm25`` from a pure BM25 pass.
+    When ``hybrid_profile`` (a real ``UserProfile``) is given, ``dims`` is the
+    isolated Engine-2 enrichment-dimension score and ``hybrid`` is the FULL
+    Engine-3 ranking (keyword+BM25+vector+rerank) — both computed live.
     """
     keyword = {r["job_id"]: r.get("keyword_score") for r in feed_rows}
     judge = {r["job_id"]: r.get("llm_fit_score") for r in feed_rows}
-    dims = {
-        r["job_id"]: sum(float(r.get(col, 0) or 0) for col in _DIM_COLUMNS)
-        for r in feed_rows
-    }
     bm25 = _bm25_scores(profile, feed_rows)
-    scores = {"keyword": keyword, "dims": dims, "bm25": bm25, "judge": judge}
+    scores = {"keyword": keyword, "bm25": bm25, "judge": judge}
     if hybrid_profile is not None:
+        scores["dims"] = _dim_scores(feed_rows, hybrid_profile)
         scores["hybrid"] = ranking_to_scores(_hybrid_ranking(feed_rows, hybrid_profile))
+    else:
+        scores["dims"] = {}
     return scores
 
 

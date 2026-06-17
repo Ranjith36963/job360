@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from scripts.engine_ablation import (
     combine_rrf,
+    dim_only_score,
     evaluate_config,
     evaluate_ranking,
     precision_at_k,
@@ -155,3 +156,28 @@ def test_ranking_to_scores_feeds_evaluate_config():
     golds = {"1": 80.0, "2": 20.0, "3": 90.0}
     out = evaluate_config({"name": "E3", "engines": ["hybrid"]}, engine_scores, golds)
     assert out["ndcg"] == 1.0   # ranking 3,1,2 == gold order 90,80,20
+
+
+# --------------------------------------------------------------------------- #
+#  dim_only_score — Engine 2 measured as the enrichment dims ONLY              #
+#  (seniority+salary+visa+workplace), NOT the full match_score                 #
+# --------------------------------------------------------------------------- #
+
+
+class _FakeBreakdown:
+    def __init__(self, sen, sal, visa, wp, match):
+        self.seniority_score = sen
+        self.salary_score = sal
+        self.visa_score = visa
+        self.workplace_score = wp
+        self.match_score = match
+
+
+def test_dim_only_score_sums_the_four_enrichment_dims():
+    bd = _FakeBreakdown(8, 10, 6, 6, match=99)
+    assert dim_only_score(bd) == 30.0   # 8+10+6+6 — NOT match_score (99)
+
+
+def test_dim_only_score_zero_when_no_dims():
+    bd = _FakeBreakdown(0, 0, 0, 0, match=45)
+    assert dim_only_score(bd) == 0.0

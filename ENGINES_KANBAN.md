@@ -108,7 +108,7 @@
 
 **Built 2026-06-16 (strict TDD, 13 tests).** Read-only. Ranks jobs by each engine + combinations, scores every ranking against a **Claude-subscription gold** (independent of the free in-app judge). Run: `python -m scripts.engine_ablation --email <you> --golds golds.json` (use `--emit-prompts` first to build the grading prompts).
 
-**Run 3 (n=19, E3 = FULL hybrid: keyword + BM25 + vector + cross-encoder rerank):**
+**Run 4 (n=19, all four engines measured HONESTLY — E2 = dims-only, E3 = full hybrid):**
 
 | Config | NDCG | Spearman | Prec@k |
 |---|---|---|---|
@@ -116,18 +116,18 @@
 | E3 hybrid(full) | 0.960 | 0.545 | 0.579 |
 | E1+E3+E4 | 0.959 | 0.538 | 0.579 |
 | E1+E3 | 0.952 | 0.595 | 0.579 |
-| All (1+2+3+4) | 0.950 | 0.515 | 0.579 |
+| All (1+2+3+4) | 0.945 | 0.537 | 0.579 |
 | E1 keyword | 0.940 | 0.432 | 0.579 |
-| E2 dimensions | 0.940 | 0.432 | 0.579 |
 | E1+E4 | 0.929 | 0.544 | 0.579 |
 | - E3 bm25-only | 0.911 | **0.004** | 0.579 |
 | E4 judge | 0.894 | 0.539 | 0.579 |
+| **E2 dimensions** | **0.893** | 0.532 | 0.579 |
 
-**Findings (full-hybrid E3 flips Run 2's read):**
-1. **E3 full hybrid is the strongest single engine** (0.960 / 0.545) — clearly beats E1 keyword (0.940 / 0.432). The vector + cross-encoder reranker do the work.
+**Findings:**
+1. **E3 full hybrid is the strongest single engine** (0.960 / 0.545) — clearly beats E1 keyword (0.940 / 0.432). Vector + cross-encoder reranker do the work.
 2. **BM25-alone is near-random** (Spearman 0.004). The BM25 leg adds little; semantics + rerank carry Engine 3.
-3. **Engine 1 is redundant *as a separate stage*** — `E3+E4` (0.969) **>** `E1+E3+E4` (0.959). The full hybrid already fuses the keyword signal internally, so adding E1 again double-counts. → **You CAN retire Engine 1 as its own engine once the full hybrid runs.** (This corrects Run 2's "keep E1" — Run 2 only measured BM25, not the real hybrid.)
+3. **Engine 1 is redundant *as a separate stage*** — `E3+E4` (0.969) **>** `E1+E3+E4` (0.959). The full hybrid fuses the keyword signal internally; adding E1 again double-counts. → **You CAN retire Engine 1 as its own engine once the full hybrid runs.**
 4. **E3+E4 is the best combo** — full hybrid search + LLM judge.
-5. **E2 dimensions is still the placeholder** (== keyword) — the harness still sums `match_score` components for "E2"; a true dims-only config is pending.
+5. **E2 dimensions now measured honestly** (dims-only, not match_score). For THIS profile the four dims come out **constant = 12 for all 19 jobs** (seniority 4 + salary 5 + visa 0 + workplace 3) → **zero ranking signal**. Its 0.532 Spearman is the tiebreak echoing the feed/judge order, NOT the dims discriminating. The dims only help with a profile that states differentiating preferences (seniority/salary/workplace/visa).
 
-**How E3 is measured now:** the harness reuses production's `_maybe_apply_hybrid_reorder` (keyword+BM25+vector+rerank via `retrieve_for_user`), so the leaderboard reflects exactly what `?mode=hybrid` serves. **Caveat:** n=19, gold compressed to score≥30 (no clearly-bad roles) → NDCG saturated; Spearman is the discriminating metric. A wider gold (relax the persist gate) would sharpen it.
+**How it's measured now:** E2 = `JobScorer` dims-only with `job.id` set (live enrichment); E3 reuses production's `_maybe_apply_hybrid_reorder` (so it reflects exactly what `?mode=hybrid` serves). **Caveat:** n=19, gold compressed to score≥30 (no clearly-bad roles) → NDCG saturated; Spearman is the discriminating metric. A wider gold (relax the persist gate) would sharpen it.
