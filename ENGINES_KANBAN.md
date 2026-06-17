@@ -48,7 +48,7 @@
 
 > **Correction to the earlier eval finding:** the ablation's "E2 dimensions == E1 keyword" did **not** prove dims are dead. The jobs-table dim columns (`role/skill/seniority_score/…`) *sum to `match_score`* — so summing them just reproduced the keyword score. The real issue is narrower: the **enrichment** dims (seniority/salary/visa/workplace) were 0 because of the id bug, now fixed.
 
-**Verdict (now):** The id bug that zeroed the enrichment dims is fixed and unit-proven. And with a **real profile** (graduate / £35–60k / remote / needs-visa), the eval shows the dims are a **genuine ranking signal — Spearman 0.723, beating keyword's 0.688** (Run 5, n=45). With a *sparse* profile they go near-constant and don't reorder — so the dims earn their place only when the user states real preferences.
+**Verdict (now):** The id bug that zeroed the enrichment dims is fixed and unit-proven. And with a **real profile** + a **fair eval** (Run 8, n=100, all engines fully covered), the dims are a **strong ranking signal — dims-alone Spearman 0.853 / NDCG 0.944**, and **adding dims to the hybrid HELPS** (E2+E3 > E3; E2+E3+E4 is the top config). The earlier "dims dilute" (Run 7) was an artifact of unfair coverage. Caveat: with a *sparse* profile (no stated preferences) the dims go near-constant and don't reorder — they earn their place only when the user states real preferences.
 
 ---
 
@@ -136,38 +136,39 @@
 
 ---
 
-## Run 7 — STRONG @ n=100 (definitive; full report: `docs/engine_eval_report.md`, gold: `docs/engine_eval_gold.json`)
+## Run 8 — FAIR @ n=100 (definitive; report: `docs/engine_eval_report.md`, gold: `docs/engine_eval_gold.json`)
 
-**What the Claude benchmark actually is:** a fixed set of **100 `(job → fit 0–100)` judgments** made by **Claude (Opus, this session)** reading each job's full posting and scoring fit against the profile + a fixed rubric (domain/role · seniority · skills · location+remote+visa · salary). Independent, premium reference — NOT the in-app free-LLM judge. Gold spans fit 3–80 (16 strong / 25 mid / 59 weak — a realistic search where most postings don't fit). Saved + reproducible at `docs/engine_eval_gold.json`.
+**Fairness fixes applied (this run reverses earlier conclusions — see below):**
+- **Judge (E4) measured on 99/100** (was 21): judged every gold job, lifting the score≥30 + max-jobs caps.
+- **BM25 on 100** (was 79): zero-overlap jobs get score 0 at the tail (not dropped).
+- **Clean head-to-head:** the bench feed was pruned 3,536→100 (only the gold jobs), so every engine ranks the same set.
+- **Sharper top metrics:** NDCG@3 + exponential-gain NDCG (rewards the #1 spot hardest).
 
-**16 configs, NDCG (priority) + NDCG@5/@10 + Spearman, all with 95% bootstrap CIs (resample 100 jobs 2000×, seeded). Top of the table:**
+| Config | NDCG [95% CI] | @3 | exp | Spearman [95% CI] | n |
+|---|---|---|---|---|---|
+| **E2+E3+E4** | **0.962** [0.94,0.98] | 0.911 | **0.918** | **0.880** [0.83,0.91] | 100 |
+| **E2+E3** | 0.960 [0.94,0.98] | 0.863 | 0.916 | 0.878 [0.82,0.91] | 100 |
+| E1+E3+E4 | 0.958 [0.93,0.98] | 0.911 | 0.915 | 0.873 | 100 |
+| All (1+2+3+4) | 0.958 [0.93,0.97] | 0.863 | 0.912 | 0.873 | 100 |
+| E3 hybrid(full) | 0.957 [0.93,0.98] | 0.906 | 0.914 | 0.831 | 100 |
+| E1+E3 | 0.953 | 0.875 | 0.908 | 0.836 | 100 |
+| E3+E4 | 0.949 [0.91,0.97] | 0.824 | 0.896 | 0.876 | 100 |
+| E2 dimensions | 0.944 | 0.863 | 0.891 | 0.853 | 100 |
+| E1 keyword | 0.933 [0.89,0.96] | 0.869 | 0.876 | 0.797 | 100 |
+| E4 judge | 0.915 [0.87,0.95] | 0.749 | 0.833 | 0.822 | **99** |
+| E3 bm25-only | 0.906 [0.84,0.94] | 0.777 | 0.848 | 0.668 | 100 |
 
-| Config | NDCG [95% CI] | NDCG@5 | Spearman | n |
-|---|---|---|---|---|
-| **E3+E4** | **0.953** [0.93,0.97] | 0.902 | 0.778 | 100 |
-| E3 hybrid(full) | 0.951 [0.93,0.97] | 0.911 | 0.780 | 100 |
-| E1+E3+E4 | 0.950 [0.93,0.97] | 0.906 | 0.770 | 100 |
-| E2+E3 | 0.949 [0.92,0.97] | 0.884 | 0.774 | 100 |
-| E2+E3+E4 | 0.949 [0.92,0.97] | 0.886 | 0.768 | 100 |
-| E1+E3 | 0.949 [0.93,0.97] | 0.881 | 0.771 | 100 |
-| All (1+2+3+4) | 0.946 | 0.884 | 0.760 | 100 |
-| E1+E2+E3 | 0.944 | 0.878 | 0.758 | 100 |
-| E2 dims / E1 keyword | 0.930 / 0.929 | — | 0.717 / 0.713 | 100 |
-| E4 judge | 0.933 | 0.761 | 0.569 | **21** |
-| E3 bm25-only | 0.925 | 0.861 | 0.557 | **79** |
+**⚠️ The fairness fixes REVERSED Run 7's conclusion (this is the honest headline):**
+1. **Engine 2 (dimensions) HELPS, it does not dilute.** E2+E3 (0.960) **>** E3 alone (0.957); E2+E3+E4 (0.962) **>** E3+E4 (0.949); E2+E3+E4 is the top config. Run 7's "dims dilute / drop E2" was an **artifact of unfair coverage** (judge on only 21) + the narrower gold.
+2. **The judge is a strong ranker** — fairly measured, Spearman jumped **0.60 → 0.82** (it correctly ranks junk low; it just couldn't show that on 21 top-only jobs).
+3. **Best stack = E2+E3+E4 (dims + hybrid + judge), or E2+E3.** NDCG 0.96, Spearman 0.88, exp-gain 0.92.
 
-**Significance (top = E3+E4 vs rest, paired-bootstrap ΔNDCG; SIGNIFICANT = CI excludes 0):**
-- **Tied (not significant) with:** E3 hybrid, E1+E3+E4, E2+E3, E1+E3 → the **"hybrid + at most one partner" cluster** is the top tier; n=100 still can't split it.
-- **SIGNIFICANTLY better than:** every no-E3 config (E1, E2, E1+E2, E1+E4, E2+E4, E1+E2+E4) **and the over-fused 3+ engine configs (E2+E3+E4, E1+E2+E3, All)**. → **More engines ≠ better; piling onto the hybrid dilutes it.**
+**Significance (top = E2+E3+E4 vs rest, paired-bootstrap ΔNDCG):**
+- **Tied (not significant)** with the whole E3-based top tier (E2+E3, E1+E3+E4, All, E3, E1+E2+E3, E1+E3, E1+E2+E4, E3+E4, E2 dims). n=100 still can't split the top tier.
+- **SIGNIFICANTLY better than:** E2+E4, E1+E2, E1+E4, E1 keyword, E4-judge-alone, BM25-alone → the weak singles/no-hybrid configs.
 
-**Answers to the combos you asked for:**
-- **E2+E3+E4 (the "clean pipeline") is significantly WORSE than E3+E4** (adding dims dilutes hybrid+judge). Hypothesis rejected.
-- **E2+E4 / E1+E2 / E1+E2+E4 (no hybrid) all ≈0.72 Spearman** — clearly worse; **E3 is essential**.
+**Per-config "why" (top-5, see report):** top configs surface genuine AI/ML internships (gold 58–74). Judge-alone & E1+E4 still rank the title-trap #26 "Remote AI/ML Engineer" (gold 30, advisory/tax firm) high; semantics (E3) avoid it. BM25 grabs a senior CUDA/Rust misfit (#2, gold 28) by lexical overlap.
 
-**Per-config "why" (top-5, see report):** the top-tier configs put genuine AI/ML internships (gold 58–74) on top. **E4 judge and E1+E4 still rank the title-trap #26 "Remote AI/ML Engineer" (gold 30, an advisory/tax firm) in their top-5** — semantics (E3) avoid it. BM25 grabs a senior CUDA/Rust misfit (#2, gold 28) by lexical overlap.
+**Bottom line (fair, n=100):** **The dimensions (E2) earn their place** — the best stack is **E2+E3+E4** (or E2+E3): semantic search + preference dims, with the judge as a strong partner. The top tier (everything with the hybrid) is statistically tied ~0.95–0.96. **Keyword-alone, BM25-alone, and judge-alone are the weak singles.** Lesson: the *unfair* eval (Run 7) gave the *opposite* answer — measurement fairness changed the decision.
 
-**⚠️ Honest caveat — uneven coverage:** E4 judge is scored on only **n=21** (the judge sees just the score≥30 shortlist) and BM25 on **n=79** (21 jobs have zero lexical overlap → dropped). Their numbers are NOT directly comparable to the n=100 configs (wider CIs, softer rank). Judge-alone Spearman CI is still wide [0.12,0.83].
-
-**Bottom line (statistically honest, n=100):** **E3+E4 (hybrid → judge) is the best stack** — significantly beats 10 of 15 alternatives. The top tier is "**hybrid + at most one partner**" (E3, E3+E4, E2+E3, E1+E3 are tied). **Adding more engines beyond that significantly hurts.** Keyword (E1), dims-alone (E2), BM25, and judge-alone are all weak on their own; E1 is redundant inside E3.
-
-**How the gold was built:** profile updated via `save_profile` (version 2); one `run_search` with `MIN_MATCH_SCORE→1` grew the catalog 19→3,536 (real bad/irrelevant spread); `rescore_user_feed` refreshed keyword + re-judged the top vs the new profile; a stratified 45-sample (15 high / 15 mid / 15 low) graded by Claude → fit 5–80. **Caveat:** coverage varies by engine (E4 n=15, BM25 n=38); n=45 is solid but not huge.
+**How the gold was built:** profile set via `save_profile` (graduate/£35–60k/remote/needs-visa, version 2); `run_search` @ `MIN_MATCH_SCORE→1` grew the catalog to 3,536 for a real spread; stratified 100-sample graded by Claude → fit 3–80 (16 strong/25 mid/59 weak); judged all 100; feed pruned to the 100. **Remaining caveat:** still one grader + one profile — a 2nd profile would test generalization.
