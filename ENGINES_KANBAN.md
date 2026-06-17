@@ -136,24 +136,38 @@
 
 ---
 
-## Run 6 — STRONG: confidence intervals + significance (full report: `docs/engine_eval_report.md`)
+## Run 7 — STRONG @ n=100 (definitive; full report: `docs/engine_eval_report.md`, gold: `docs/engine_eval_gold.json`)
 
-**What the Claude benchmark actually is:** a fixed set of **45 `(job → fit 0–100)` judgments** made by **Claude (Opus, this session)** reading each job's full posting and scoring fit against the profile + a fixed rubric (domain/role · seniority · skills · location+remote+visa · salary). It is an **independent, premium reference** — NOT the in-app free-LLM judge (Gemini/Groq/Cerebras). Each engine is scored on how well its ranking orders jobs by *this* fit. The benchmark is saved + reproducible at **`docs/engine_eval_gold.json`**.
+**What the Claude benchmark actually is:** a fixed set of **100 `(job → fit 0–100)` judgments** made by **Claude (Opus, this session)** reading each job's full posting and scoring fit against the profile + a fixed rubric (domain/role · seniority · skills · location+remote+visa · salary). Independent, premium reference — NOT the in-app free-LLM judge. Gold spans fit 3–80 (16 strong / 25 mid / 59 weak — a realistic search where most postings don't fit). Saved + reproducible at `docs/engine_eval_gold.json`.
 
-**Metrics (both, with 95% bootstrap CIs):** NDCG (best-at-top, the priority) + NDCG@5/@10 (sharper top focus) + Spearman (whole-list order). CIs come from resampling the 45 jobs 2000× (seeded).
+**16 configs, NDCG (priority) + NDCG@5/@10 + Spearman, all with 95% bootstrap CIs (resample 100 jobs 2000×, seeded). Top of the table:**
 
-**Significance verdict (top config E3 hybrid vs the rest, paired bootstrap of ΔNDCG):**
-- **E3 hybrid > E1 keyword: SIGNIFICANT** (ΔNDCG +0.032, 95% CI [0.003, 0.091] — excludes 0).
-- **vs everything else: NOT significant** — E1+E3, E2+E3, E3+E4, dims, judge all have CIs that overlap E3. **At n=45 they are statistically tied.**
-- Spearman CIs are wide (E3 0.815 **[0.64, 0.90]**; judge 0.604 **[0.02, 0.93]**) → n=45 cannot finely separate the strong configs. A bigger gold (n≈100+) is needed to do that.
+| Config | NDCG [95% CI] | NDCG@5 | Spearman | n |
+|---|---|---|---|---|
+| **E3+E4** | **0.953** [0.93,0.97] | 0.902 | 0.778 | 100 |
+| E3 hybrid(full) | 0.951 [0.93,0.97] | 0.911 | 0.780 | 100 |
+| E1+E3+E4 | 0.950 [0.93,0.97] | 0.906 | 0.770 | 100 |
+| E2+E3 | 0.949 [0.92,0.97] | 0.884 | 0.774 | 100 |
+| E2+E3+E4 | 0.949 [0.92,0.97] | 0.886 | 0.768 | 100 |
+| E1+E3 | 0.949 [0.93,0.97] | 0.881 | 0.771 | 100 |
+| All (1+2+3+4) | 0.946 | 0.884 | 0.760 | 100 |
+| E1+E2+E3 | 0.944 | 0.878 | 0.758 | 100 |
+| E2 dims / E1 keyword | 0.930 / 0.929 | — | 0.717 / 0.713 | 100 |
+| E4 judge | 0.933 | 0.761 | 0.569 | **21** |
+| E3 bm25-only | 0.925 | 0.861 | 0.557 | **79** |
 
-**Per-config "why" (from each config's top-5, see report):**
-- **E3 hybrid / E2+E3 / E3+E4 (top tier):** top-5 are all genuine AI/ML internships (gold 62–74). The semantic vectors + reranker understand *meaning*, so they avoid title-traps.
-- **E1 keyword:** puts job **#26 "Remote AI/ML Engineer" (gold 30 — actually an advisory/tax firm)** in its top-5. Keyword matches the *title* and gets fooled. This trap is exactly why it's the one config E3 significantly beats.
-- **E4 judge:** also ranks the #26 trap (gold 30) and a senior role (#1, gold 42) high in its top-5, and only sees 15 jobs → noisy, wide CI.
-- **E3 bm25-only:** grabs a senior CUDA/Rust misfit (#2, gold 28) via lexical overlap → noisier than full hybrid.
-- **E2 dimensions:** top-5 are clean internships — it ranks by *preference fit* (graduate/remote/salary), which favors the right roles; that's why it scores a real 0.723.
+**Significance (top = E3+E4 vs rest, paired-bootstrap ΔNDCG; SIGNIFICANT = CI excludes 0):**
+- **Tied (not significant) with:** E3 hybrid, E1+E3+E4, E2+E3, E1+E3 → the **"hybrid + at most one partner" cluster** is the top tier; n=100 still can't split it.
+- **SIGNIFICANTLY better than:** every no-E3 config (E1, E2, E1+E2, E1+E4, E2+E4, E1+E2+E4) **and the over-fused 3+ engine configs (E2+E3+E4, E1+E2+E3, All)**. → **More engines ≠ better; piling onto the hybrid dilutes it.**
 
-**Bottom line (statistically honest):** E3 hybrid is the **safe top pick** and is the only one *provably* better than plain keyword. Beyond that, **the data can't yet crown a single winner among the E3-based configs** — treat E3, E2+E3, E3+E4 as a tied top tier. To separate them, widen the gold to ~100+ jobs.
+**Answers to the combos you asked for:**
+- **E2+E3+E4 (the "clean pipeline") is significantly WORSE than E3+E4** (adding dims dilutes hybrid+judge). Hypothesis rejected.
+- **E2+E4 / E1+E2 / E1+E2+E4 (no hybrid) all ≈0.72 Spearman** — clearly worse; **E3 is essential**.
+
+**Per-config "why" (top-5, see report):** the top-tier configs put genuine AI/ML internships (gold 58–74) on top. **E4 judge and E1+E4 still rank the title-trap #26 "Remote AI/ML Engineer" (gold 30, an advisory/tax firm) in their top-5** — semantics (E3) avoid it. BM25 grabs a senior CUDA/Rust misfit (#2, gold 28) by lexical overlap.
+
+**⚠️ Honest caveat — uneven coverage:** E4 judge is scored on only **n=21** (the judge sees just the score≥30 shortlist) and BM25 on **n=79** (21 jobs have zero lexical overlap → dropped). Their numbers are NOT directly comparable to the n=100 configs (wider CIs, softer rank). Judge-alone Spearman CI is still wide [0.12,0.83].
+
+**Bottom line (statistically honest, n=100):** **E3+E4 (hybrid → judge) is the best stack** — significantly beats 10 of 15 alternatives. The top tier is "**hybrid + at most one partner**" (E3, E3+E4, E2+E3, E1+E3 are tied). **Adding more engines beyond that significantly hurts.** Keyword (E1), dims-alone (E2), BM25, and judge-alone are all weak on their own; E1 is redundant inside E3.
 
 **How the gold was built:** profile updated via `save_profile` (version 2); one `run_search` with `MIN_MATCH_SCORE→1` grew the catalog 19→3,536 (real bad/irrelevant spread); `rescore_user_feed` refreshed keyword + re-judged the top vs the new profile; a stratified 45-sample (15 high / 15 mid / 15 low) graded by Claude → fit 5–80. **Caveat:** coverage varies by engine (E4 n=15, BM25 n=38); n=45 is solid but not huge.

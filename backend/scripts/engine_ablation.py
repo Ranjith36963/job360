@@ -62,6 +62,13 @@ DEFAULT_CONFIGS = [
     {"name": "E1+E2+E3", "engines": ["keyword", "dims", "hybrid"]},
     {"name": "E1+E2+E4", "engines": ["keyword", "dims", "judge"]},
     {"name": "E1+E3+E4", "engines": ["keyword", "hybrid", "judge"]},
+    # E2+E3+E4 = the "clean pipeline": search + dims + judge, dropping keyword
+    # (E1 is redundant inside the hybrid). Does removing the double-count help?
+    {"name": "E2+E3+E4", "engines": ["dims", "hybrid", "judge"]},
+    # E2+E4 = preference + judge with NO search — is retrieval essential?
+    {"name": "E2+E4", "engines": ["dims", "judge"]},
+    # E1+E2 = lightweight pair (no embeddings, no LLM) — cheap/fast baseline.
+    {"name": "E1+E2", "engines": ["keyword", "dims"]},
     {"name": "All (1+2+3+4)", "engines": ["keyword", "dims", "hybrid", "judge"]},
 ]
 
