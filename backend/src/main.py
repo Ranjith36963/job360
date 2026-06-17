@@ -699,6 +699,29 @@ async def run_search(
                     await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
                     await db.commit()
 
+                    # Engine 2 dim-scoring fix: the first score() (above) ran
+                    # before these jobs had DB ids or enrichment rows, so the
+                    # enrichment dims (seniority/salary/visa/workplace) scored 0.
+                    # Now they have both — re-score with a rebuilt lookup so the
+                    # dims fold into match_score, and persist so the feed write
+                    # below + the catalog reflect the dim-inclusive score.
+                    fresh_lookup = await _build_enrichment_lookup(db._conn)
+                    dim_scorer = JobScorer(
+                        search_config,
+                        user_preferences=profile.preferences if profile else None,
+                        enrichment_lookup=lambda job: fresh_lookup.get(getattr(job, "id", None)),
+                    )
+                    for job in high_scored:
+                        bd = dim_scorer.score(job)
+                        job.match_score = bd.match_score
+                        job.role = bd.title_score
+                        job.skill = bd.skill_score
+                        job.location_score = bd.location_score
+                        job.recency = bd.recency_score
+                        job.seniority_score = bd.seniority_score
+                        await db.update_job_scores(job)
+                    await db.commit()
+
             # Per-user feed: write THIS user's matched jobs into user_feed so the
             # dashboard shows only their jobs. The shared `jobs` table is the
             # universal catalog/cache; user_feed is the isolated per-user view

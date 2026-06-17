@@ -292,6 +292,38 @@ class JobDatabase:
         )
         return cursor.rowcount > 0
 
+    async def update_job_scores(self, job: Job) -> None:
+        """Persist a re-scored job's match_score + dim columns to the catalog.
+
+        Used after enrichment, when a job is re-scored with its DB ``id`` set so
+        the enrichment dims (seniority/salary/visa/workplace, folded into
+        match_score) actually land on the stored row. No-op without ``job.id``.
+        """
+        job_id = getattr(job, "id", None)
+        if job_id is None:
+            return
+        await self._conn.execute(
+            """UPDATE jobs SET
+                   match_score = ?, role = ?, skill = ?, seniority_score = ?,
+                   experience = ?, credentials = ?, location_score = ?,
+                   recency = ?, semantic = ?, penalty = ?, visa_flag = ?
+               WHERE id = ?""",
+            (
+                job.match_score,
+                job.role,
+                job.skill,
+                job.seniority_score,
+                job.experience,
+                job.credentials,
+                job.location_score,
+                job.recency,
+                job.semantic,
+                job.penalty,
+                int(job.visa_flag),
+                job_id,
+            ),
+        )
+
     async def update_last_seen(self, normalized_key: tuple[str, str]) -> None:
         """Mark a job as re-seen this scrape cycle. Resets ghost-detection counters."""
         now = datetime.now(timezone.utc).isoformat()

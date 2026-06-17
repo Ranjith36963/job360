@@ -38,13 +38,17 @@
 
 **What it is (plain):** four extra checks — does the seniority match you, does the salary overlap your range, does it sponsor a visa if you need one, is the workplace (remote/onsite/hybrid) what you want. Adds up to +30 on top of Engine 1.
 
-| ✅ Done & working | 🔨 Built but blocked | 📋 To build / enhance |
-|---|---|---|
-| 4 scorers coded + unit-tested: seniority `:104-139`, salary `:147-192`, visa `:200-216`, workplace `:231-259` | **Only contributes when an enrichment row exists** (`skill_matcher.py:520-521`); `ENRICHMENT_ENABLED` defaults `false` → dims = 0 in default app | Confirm + fix the dim-id bug, then add an end-to-end value-presence test (rule #21) |
-| Sensible curves (seniority penalises big mismatches `:131-139`; salary band-overlap `:179-192`) | **Known prior-evidence bug:** `job.id` unset at scoring time → dims silently 0 *even when enabled* (saved memory `project_dim_scoring_id_bug` — **re-verify before fixing**) | Decide: keep dims as *score adders* (Engine 1 style) or convert to *hard filters* (cleaner ownership — see Overlaps below) |
-| Clamp to 100 keeps the +30 from blowing the scale (`skill_matcher.py:537`) | | |
+> **UPDATED 2026-06-17** — root cause found + the id bug fixed at all sites (strict TDD). Also corrects an earlier mismeasurement (see note).
 
-**Verdict:** The math is built and tested in isolation, but in the live app these scores are effectively **always 0** today (flag off + suspected id bug). This overlaps with Engine 4's rubric (the judge also weighs seniority/visa).
+| ✅ Done & working | 🔨 Built but limited | 📋 Remaining |
+|---|---|---|
+| 4 scorers coded + unit-tested: seniority `:104-139`, salary `:147-192`, visa `:200-216`, workplace `:231-259` | Dims only contribute when an **enrichment row** exists for the job (`skill_matcher.py:520-521`); enrichment itself is gated by `ENRICHMENT_ENABLED` + `ENRICHMENT_THRESHOLD` | Decide: keep dims as *score adders* or convert to *hard filters* (cleaner ownership) |
+| **id bug FIXED at all 3 sites** — `enrichment_lookup` keys on `job.id`, which was unset at score time. Now: run-time re-scores after enrichment with ids (`main.py`); detail recompute uses `_row_to_scoring_job` which sets id (`jobs.py`); `rescore.py` already correct | salary/visa/workplace dims are **computed but have no DB columns** — only seniority is persisted (`main.py:616`); a future migration could store them | Persist salary/visa/workplace dim columns |
+| `update_job_scores` persists re-scored dims to the catalog; clamp to 100 (`skill_matcher.py:537`) | **The effect on *ranking* depends on the profile** — a profile with no seniority/salary/workplace preferences makes the dims near-constant, so they don't reorder | |
+
+> **Correction to the earlier eval finding:** the ablation's "E2 dimensions == E1 keyword" did **not** prove dims are dead. The jobs-table dim columns (`role/skill/seniority_score/…`) *sum to `match_score`* — so summing them just reproduced the keyword score. The real issue is narrower: the **enrichment** dims (seniority/salary/visa/workplace) were 0 because of the id bug, now fixed.
+
+**Verdict (now):** The id bug that zeroed the enrichment dims is fixed and unit-proven. Whether dims change your *ranking* depends on having differentiating preferences in your profile; with a sparse profile they add near-constant points and don't reorder.
 
 ---
 
