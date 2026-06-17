@@ -29,6 +29,40 @@ import aiohttp
 
 _GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
 
+
+def normalize_github_username(raw: str) -> str:
+    """Reduce any GitHub input to a bare username.
+
+    Accepts what users actually paste — a full profile URL
+    (``https://github.com/torvalds``), an ``@handle``, or the plain
+    username — and returns just the username. The caller still runs
+    ``_GITHUB_USERNAME_RE`` on the result, so junk input that doesn't
+    reduce to a valid handle is rejected downstream (returns "").
+
+    Examples:
+      ``https://github.com/torvalds``       -> ``torvalds``
+      ``github.com/torvalds/repo``          -> ``torvalds``
+      ``www.github.com/torvalds?tab=repos`` -> ``torvalds``
+      ``@torvalds``                         -> ``torvalds``
+      ``torvalds``                          -> ``torvalds``
+    """
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    # Drop a leading @ that users copy from social handles.
+    s = s.lstrip("@").strip()
+    # If it mentions github.com, take the first path segment after it.
+    # Tolerates http(s)://, www., a trailing path, query string, or fragment.
+    match = re.search(r"github\.com/+([^/?#\s]+)", s, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    # Otherwise treat the whole thing as a handle, but still strip any
+    # stray path/query so "torvalds/repo" -> "torvalds".
+    return re.split(r"[/?#\s]", s, maxsplit=1)[0]
+
+
 from src.core.settings import GITHUB_TOKEN
 from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
 from src.services.profile.dependency_map import lookup_skill
@@ -266,7 +300,10 @@ async def fetch_github_profile(
         "topics": [],
         "skills_inferred": [],
         "frameworks_inferred": [],
+        "repos_brief": [],
     }
+    # Accept a full profile URL or @handle, not just a bare username.
+    username = normalize_github_username(username)
     if not _GITHUB_USERNAME_RE.match(username):
         logger.warning("Invalid GitHub username format: %s", username)
         return empty
@@ -338,12 +375,26 @@ async def fetch_github_profile(
 
         skills_inferred = _infer_skills(weighted_languages, all_topics)
 
+        # Two-pass — compact repo briefs (name/description/topics) for the
+        # LLM pass. Only repos with prose worth reading (a description or
+        # topics) are kept, capped so the prompt stays small.
+        repos_brief = [
+            {
+                "name": r["name"],
+                "description": r.get("description", ""),
+                "topics": list(r.get("topics", []) or []),
+            }
+            for r in repositories
+            if r.get("description") or r.get("topics")
+        ][:MAX_REPOS]
+
         return {
             "repositories": repositories,
             "languages": weighted_languages,
             "topics": sorted(all_topics),
             "skills_inferred": skills_inferred,
             "frameworks_inferred": frameworks_inferred,
+            "repos_brief": repos_brief,
         }
     finally:
         if own_session:
@@ -370,6 +421,77 @@ def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
     return skills
 
 
+# ── GitHub LLM pass (Pass 2) — read repo prose for extra skills ─────
+
+_GITHUB_LLM_SYSTEM = (
+    "You are an expert at reading a developer's GitHub repositories and naming "
+    "the concrete technologies, frameworks, and domains they demonstrate. You "
+    "return JSON only and never invent skills the text does not support."
+)
+
+_GITHUB_LLM_PROMPT = """Below is a list of a developer's public GitHub repositories — each with
+a name, description, and topic tags.
+
+Infer the concrete technical SKILLS this developer demonstrates: frameworks,
+libraries, tools, platforms, and technical domains. Focus on things a
+hard-coded language/topic table would MISS — e.g. "LangChain", "RAG",
+"Stripe API", "Computer Vision", "Kubernetes Operators".
+
+Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
+
+Rules:
+- Only skills the repo text actually supports. Do not guess from nothing.
+- Individual items, not categories ("PyTorch", not "ML frameworks").
+- Skip bare programming languages (Python/Java/etc.) — those are covered elsewhere.
+
+REPOSITORIES:
+---
+{repos}
+---"""
+
+
+async def llm_infer_github_skills(repos_brief: list[dict]) -> list[str]:
+    """Pass 2 for GitHub — ask the LLM to read repo prose and name skills the
+    hard-coded ``LANGUAGE_TO_SKILL`` / ``TOPIC_TO_SKILL`` tables can't know.
+
+    Returns ``[]`` (never raises) when there are no repos worth reading or the
+    provider chain fails — graceful no-op, mirroring the deterministic path.
+    The empty-input branch never calls the LLM (cost guard).
+    """
+    if not repos_brief:
+        return []
+
+    lines: list[str] = []
+    for r in repos_brief:
+        name = (r.get("name") or "").strip()
+        desc = (r.get("description") or "").strip()
+        topics = ", ".join(t for t in (r.get("topics") or []) if t)
+        if not (name or desc or topics):
+            continue
+        lines.append(f"- {name}: {desc} [topics: {topics}]")
+    if not lines:
+        return []
+
+    prompt = _GITHUB_LLM_PROMPT.format(repos="\n".join(lines))
+    try:
+        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
+        result = await llm_extract(prompt, system=_GITHUB_LLM_SYSTEM)
+    except Exception as e:  # noqa: BLE001 — never crash the pass
+        logger.warning("GitHub LLM skill inference failed: %s", e)
+        return []
+
+    raw = result.get("skills") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in raw:
+        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
+            out.append(s.strip())
+            seen.add(s.strip().lower())
+    return out
+
+
 def enrich_cv_from_github(cv: CVData, github_data: dict) -> CVData:
     """Merge GitHub-inferred skills into CVData, deduplicating.
 
@@ -377,6 +499,9 @@ def enrich_cv_from_github(cv: CVData, github_data: dict) -> CVData:
     ``frameworks_inferred`` with dedup against existing CV skills AND
     the language/topic-derived skills, so the same framework never
     appears twice in a downstream SearchConfig.
+
+    Two-pass — also stores ``github_repos_brief`` so the LLM pass can re-run
+    offline on a later profile change.
     """
     seen_skills = {s.lower() for s in cv.skills}
 
@@ -396,5 +521,9 @@ def enrich_cv_from_github(cv: CVData, github_data: dict) -> CVData:
     cv.github_topics = github_data.get("topics", [])
     cv.github_skills_inferred = new_github_skills
     cv.github_frameworks = new_frameworks
+    # Two-pass — keep repo briefs for offline LLM re-runs. Only overwrite when
+    # a non-empty value arrives, so a partial re-enrich never wipes them.
+    if github_data.get("repos_brief"):
+        cv.github_repos_brief = github_data["repos_brief"]
 
     return cv

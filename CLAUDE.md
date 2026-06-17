@@ -320,6 +320,18 @@ Adds engine #4 — the LLM judge: `services/llm_matcher.py` (`MatchVerdict`, `ma
 - **Ordinary search** → only newly-fetched jobs are scored; existing rows keep their scores and verdicts untouched.
 A job's score changes only when the profile changes — never just because time passed.
 
+### Two-pass profile extraction (branch `feat/two-pass-profile-extraction`, 2026-06-17)
+
+Every profile input now runs a **deterministic pass** (plain code) AND an **LLM enhance pass**, merged into one `CVData`. The two passes per input:
+- **CV** — `cv_parser.deterministic_cv_fields(raw_text)` (no-LLM skills/summary) + `cv_parser.llm_cv_fields_from_text(raw_text)` (LLM).
+- **LinkedIn** — deterministic header/skills split + `linkedin_parser.parse_linkedin_from_text` (LLM prose). Now stores `cv.linkedin_raw_text`.
+- **GitHub** — deterministic lookup tables + NEW `github_enricher.llm_infer_github_skills(repos_brief)` (LLM reads repo prose). Stores `cv.github_repos_brief`.
+- **Preferences** — plain form parse + NEW `preferences.llm_infer_from_about_me(about_me)` (LLM mines free text).
+
+`services/profile/two_pass.py` orchestrates: `run_two_pass_extraction(profile)` re-runs both passes for all four inputs **from stored data only** (no re-upload, no GitHub re-fetch); each pass no-ops when its input/keys are absent and never raises. `reextract_and_rescore(user_id)` = load → re-extract → `save_profile(..., "two_pass_reextract")` (new version id) → `rescore_user_feed`. The `profile.py` change trigger now schedules `reextract_and_rescore` instead of bare `rescore_user_feed`.
+
+**Rule analog (same spirit as #18):** new `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`, `about_me_inferred_skills`) need **no migration** — profiles store as a JSON blob and `storage._filter_fields` drops unknown keys, so old rows load with defaults. New skill-tiering sources: `about_me_llm` (2.0) and `github_llm` (1.5) in `skill_tiering._SOURCE_WEIGHTS`. **Cost note:** any input change re-runs all LLM passes in the background (faithful to design); gate behind a flag later if it proves expensive. M2 / the LLM judge is untouched.
+
 ## Related documentation
 
 - **`STATUS.md`** — Current phase, what's complete/next, known issues, fragile-source table.

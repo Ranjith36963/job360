@@ -429,6 +429,10 @@ UserProfile
   |     +-- github_languages: dict[str, int]     # From GitHub API
   |     +-- github_topics: list[str]             # From GitHub API
   |     +-- github_skills_inferred: list[str]    # From GitHub API
+  |     +-- linkedin_raw_text: str               # Two-pass: stored for offline LLM re-run
+  |     +-- github_repos_brief: list[dict]       # Two-pass: name/description/topics for LLM re-run
+  |     +-- github_llm_skills: list[str]         # Two-pass: LLM read repo prose
+  |     +-- about_me_inferred_skills: list[str]  # Two-pass: LLM mined preferences.about_me
   +-- preferences: UserPreferences
         +-- target_job_titles: list[str]
         +-- additional_skills: list[str]
@@ -504,6 +508,29 @@ PDF/DOCX -> extract_text() -> raw text
   |     Returns: skills[], job_titles[], education[], certifications[], summary
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```
+
+### Two-Pass Extraction (`services/profile/two_pass.py`)
+
+Every input gets a **deterministic pass** (plain code) AND an **LLM enhance pass**,
+both merged into one `CVData`:
+
+```
+run_two_pass_extraction(profile)        # in place, never raises, no network
+  CV         : deterministic_cv_fields(raw_text)      + llm_cv_fields_from_text(raw_text)
+  LinkedIn   : header/skills split (deterministic)    + parse_linkedin_from_text(linkedin_raw_text)
+  GitHub     : LANGUAGE/TOPIC lookup (deterministic)  + llm_infer_github_skills(github_repos_brief)
+  Preferences: form parse (deterministic)             + llm_infer_from_about_me(about_me)
+
+reextract_and_rescore(user_id)          # change trigger (background)
+  load_profile -> run_two_pass_extraction -> save_profile("two_pass_reextract")
+               -> new profile version id -> rescore_user_feed
+```
+
+Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
+`github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each pass
+no-ops when its input or LLM key is missing. Skill provenance is preserved: the
+new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
+`skill_tiering` alongside the existing ones.
 
 ---
 

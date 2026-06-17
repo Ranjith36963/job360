@@ -1394,3 +1394,54 @@ Initial commit `eb5c030` claimed `frontend/.env.local.example` was added, but th
 
 - **Step 1 (Batch S1 — Engine→API seam):** date-model fields, 7-dim score breakdown, `enrich_job()` invocation, `mode=hybrid` wiring. See `docs/ExecutionOrder.md` for the full 6-step roadmap.
 - **Tag candidate:** `step-0-done-2026-04-24` for quick-reference.
+
+---
+
+## Two-pass profile extraction (2026-06-17, branch `feat/two-pass-profile-extraction`)
+
+**Goal (user-side profile improvement):** every profile input runs through a
+**deterministic pass** (plain code) AND an **LLM enhance pass**, merged into one
+`CVData`. When the user changes ANY input later, both passes re-run from STORED
+raw inputs (no re-upload, no network re-fetch), producing a refreshed CVData and
+a new profile-version id, then the feed re-scores. (M2 / the LLM judge was left
+untouched per scope.)
+
+**What existed before:** CV = LLM-only; LinkedIn = hybrid (deterministic headers
++ LLM prose); GitHub = deterministic lookup-table only; preferences = plain form
+parse. New-id-per-save + change→rescore already existed (`storage.py`,
+`profile.py::_maybe_trigger_rescore`).
+
+**New code (all TDD, offline, LLM mocked):**
+- `models.py` — `CVData` gains `linkedin_raw_text`, `github_repos_brief`,
+  `github_llm_skills`, `about_me_inferred_skills`. **No migration** — profiles
+  store as a JSON blob and `storage._filter_fields` drops unknown keys, so old
+  rows load with defaults.
+- `linkedin_parser.py` — `parse_*` now returns `raw_text`; `enrich_cv_from_linkedin`
+  stores it on `cv.linkedin_raw_text`. Factored `parse_linkedin_from_text(text)`
+  so the LLM pass can re-run offline.
+- `github_enricher.py` — `fetch_github_profile` now returns `repos_brief`
+  (name/description/topics); new `llm_infer_github_skills(repos_brief)` reads repo
+  prose for skills the lookup tables miss (e.g. "LangChain", "RAG").
+- `preferences.py` — new `llm_infer_from_about_me(about_me)` mines the free-text
+  blurb for skills.
+- `cv_parser.py` — new `deterministic_cv_fields(raw_text)` (no-LLM skills/summary
+  grab); factored `llm_cv_fields_from_text(raw_text)` so the CV LLM pass re-runs
+  from stored text.
+- `skill_tiering.py` — two new evidence sources + weights: `about_me_llm` (2.0,
+  user's own words) and `github_llm` (1.5, inferred-but-demonstrated).
+- `two_pass.py` (NEW) — `run_two_pass_extraction(profile)` runs both passes over
+  all four inputs in place (never raises; each pass no-ops when its input/keys are
+  absent); `reextract_and_rescore(user_id)` = load → re-extract → save (new
+  version, `source_action="two_pass_reextract"`) → rescore.
+- `api/routes/profile.py` — the change trigger now schedules
+  `reextract_and_rescore` instead of bare `rescore_user_feed`.
+
+**Tests:** `tests/test_two_pass.py` (17) + new cases in `test_linkedin_github.py`
+and `test_github_deps.py`. Full suite **1540 passed, 3 skipped**. Lint: no new
+ruff findings vs baseline.
+
+**Known cost tradeoff (no flag added):** a change to ANY input re-runs all LLM
+passes in the background (faithful to the ask). On a CV upload this re-runs the
+CV LLM once more than strictly needed. If this proves expensive, gate
+`reextract_and_rescore`'s LLM passes behind a flag later — the deterministic
+passes are free and always safe.

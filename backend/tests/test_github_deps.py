@@ -240,6 +240,53 @@ def _make_async_session():
     return AsyncMock()
 
 
+# ── github_enricher — username normalisation (URL / @handle / bare) ─
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("https://github.com/torvalds", "torvalds"),
+        ("http://github.com/torvalds", "torvalds"),
+        ("github.com/torvalds", "torvalds"),
+        ("www.github.com/torvalds", "torvalds"),
+        ("github.com/torvalds/linux", "torvalds"),
+        ("https://github.com/torvalds/?tab=repositories", "torvalds"),
+        ("https://github.com/torvalds/", "torvalds"),
+        ("@torvalds", "torvalds"),
+        ("torvalds", "torvalds"),
+        ("torvalds/linux", "torvalds"),
+        ("  torvalds  ", "torvalds"),
+        ("https://github.com/foo-bar", "foo-bar"),
+        ("", ""),
+    ],
+)
+def test_normalize_github_username(raw, expected):
+    assert github_enricher.normalize_github_username(raw) == expected
+
+
+def test_normalize_github_username_non_string():
+    assert github_enricher.normalize_github_username(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_accepts_full_url():
+    """A pasted profile URL is normalised to the username before the API call."""
+    captured: dict = {}
+
+    async def fake_get_json(session, url):
+        captured["url"] = url
+        return []  # empty repo list → early return with empty payload
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json):
+        result = await github_enricher.fetch_github_profile(
+            "https://github.com/torvalds", session=_make_async_session()
+        )
+
+    assert "users/torvalds/repos" in captured["url"]
+    assert result["repositories"] == []
+
+
 def _passthrough_cm(resp_status: int, resp_json: dict | list | None):
     """Build a MagicMock behaving like aiohttp's async context manager on ``session.get``."""
     response = MagicMock()
@@ -318,6 +365,99 @@ async def test_fetch_github_profile_aggregates_frameworks():
     frameworks = result["frameworks_inferred"]
     assert frameworks.count("FastAPI") == 1
     assert set(frameworks) == {"FastAPI", "Pydantic", "React", "Next.js"}
+
+
+# ── GitHub LLM pass (Pass 2) — infer skills from repo prose ─────────
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_parses_skills():
+    """The LLM reads repo name/description/topics and returns extra skills
+    the hard-coded lookup table can't know (e.g. 'LangChain', 'RAG')."""
+    seen = {}
+
+    async def fake_llm(prompt, system=""):
+        seen["prompt"] = prompt
+        return {"skills": ["LangChain", "RAG", "Vector Search"]}
+
+    repos_brief = [
+        {"name": "rag-bot", "description": "A retrieval bot built with langchain", "topics": ["llm"]},
+    ]
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        skills = await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert "rag-bot" in seen["prompt"]  # repo data reached the prompt
+    assert "LangChain" in skills and "RAG" in skills
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_empty_input_skips_llm():
+    """No repos → return [] without ever calling the LLM (cost guard)."""
+    called = False
+
+    async def fake_llm(prompt, system=""):
+        nonlocal called
+        called = True
+        return {"skills": ["should-not-happen"]}
+
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        skills = await github_enricher.llm_infer_github_skills([])
+
+    assert skills == []
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_llm_failure_returns_empty():
+    """Provider error must not crash the pass — returns [] (never raises)."""
+    async def boom(prompt, system=""):
+        raise RuntimeError("no LLM key configured")
+
+    repos_brief = [{"name": "r", "description": "d", "topics": []}]
+    with patch("src.services.profile.llm_provider.llm_extract", new=boom):
+        skills = await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert skills == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_includes_repos_brief():
+    """fetch_github_profile exposes repos_brief (name/description/topics) so the
+    LLM pass can re-run offline on a later profile change."""
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    repos = [
+        {"name": "rag-bot", "language": "Python", "description": "RAG with langchain",
+         "stargazers_count": 3, "topics": ["llm", "rag"], "pushed_at": now_iso, "fork": False},
+    ]
+
+    async def fake_get_json(session, url):
+        if url.endswith("/repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            return {"Python": 1}
+        return None
+
+    fake_session = _make_async_session()
+    with patch("src.services.profile.github_enricher._get_json", side_effect=fake_get_json), \
+         patch("src.services.profile.github_enricher._fetch_repo_frameworks",
+               new=AsyncMock(return_value=[])), \
+         patch("src.services.profile.github_enricher.aiohttp.ClientSession", return_value=fake_session):
+        result = await github_enricher.fetch_github_profile("alice")
+
+    brief = result["repos_brief"]
+    assert brief and brief[0]["name"] == "rag-bot"
+    assert brief[0]["description"] == "RAG with langchain"
+    assert "rag" in brief[0]["topics"]
+
+
+def test_enrich_cv_from_github_stores_repos_brief():
+    cv = CVData()
+    github_data = {
+        "languages": {}, "topics": [], "skills_inferred": [], "frameworks_inferred": [],
+        "repos_brief": [{"name": "x", "description": "y", "topics": ["z"]}],
+    }
+    out = github_enricher.enrich_cv_from_github(cv, github_data)
+    assert out.github_repos_brief == [{"name": "x", "description": "y", "topics": ["z"]}]
 
 
 @pytest.mark.asyncio

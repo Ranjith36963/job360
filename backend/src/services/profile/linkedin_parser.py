@@ -437,6 +437,8 @@ def _empty_linkedin_data() -> dict:
         "projects": [],
         "volunteer": [],
         "courses": [],
+        # Two-pass — raw text kept for offline LLM re-runs (empty here).
+        "raw_text": "",
     }
 
 
@@ -452,6 +454,20 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
     if not text or not _looks_like_linkedin(text):
         if text:
             logger.info("PDF at %s does not look like a LinkedIn export; skipping", file_path)
+        return _empty_linkedin_data()
+
+    return await parse_linkedin_from_text(text)
+
+
+async def parse_linkedin_from_text(text: str) -> dict:
+    """Parse already-extracted LinkedIn text into the canonical dict schema.
+
+    Factored out of ``parse_linkedin_pdf_async`` so the two-pass orchestrator
+    can re-run the LinkedIn LLM pass from the stored ``cv.linkedin_raw_text``
+    on a later profile change — no re-upload needed. Returns the empty-data
+    dict when the text doesn't look like a LinkedIn export.
+    """
+    if not text or not _looks_like_linkedin(text):
         return _empty_linkedin_data()
 
     sections = _split_sections(text)
@@ -510,6 +526,9 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
         "projects": _coerce_projects(_get(proj_raw, "projects")),
         "volunteer": _coerce_volunteer(_get(vol_raw, "volunteer")),
         "courses": _coerce_courses(_get(course_raw, "courses")),
+        # Two-pass — keep the extracted text so the LLM pass can re-run on a
+        # later profile change without the user re-uploading the PDF.
+        "raw_text": text,
     }
 
 
@@ -571,6 +590,11 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict) -> CVData:
     cv.linkedin_positions = linkedin_data.get("positions", [])
     cv.linkedin_skills = new_linkedin_skills
     cv.linkedin_industry = linkedin_data.get("industry", "")
+    # Two-pass — keep the raw text (if the parser supplied it) so the LLM
+    # pass can re-run offline. Only overwrite when a non-empty value arrives,
+    # so a partial re-enrich never wipes a previously-stored transcript.
+    if linkedin_data.get("raw_text"):
+        cv.linkedin_raw_text = linkedin_data["raw_text"]
 
     # Batch 1.5 — expanded sections. Overwrite rather than merge: LinkedIn
     # is the canonical source for these, and re-parsing a profile should
