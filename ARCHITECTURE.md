@@ -39,7 +39,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 18 forward/reverse SQL migrations (0000 → 0017) + runner.py
+│   ├── migrations/                   # 21 forward/reverse SQL migrations (0000 → 0020) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (46 keys → 45 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
@@ -93,7 +93,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+│   └── tests/                        # 1,531 collected / 1,528 passing across 60+ files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -539,7 +539,7 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 19 forward-migrations (0000–0018). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by 21 forward-migrations (0000–0020). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `user_channels` OAuth columns (migration 0019); `jobs` gains a deadline column (migration 0020); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (

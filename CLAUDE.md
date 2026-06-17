@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
-- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (1,333 passing, 3 skipped on Windows as of M8 batch — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (1,528 passing, 3 skipped on Windows; 1,531 collected — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 46 entries but only 45 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
@@ -190,7 +190,7 @@ job360/
 │   ├── main.py                # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml         # Deps + ruff/mypy/pytest config
 │   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
-│   ├── migrations/            # 18 forward+reverse SQL migration pairs (0000 → 0017) + runner.py
+│   ├── migrations/            # 21 forward+reverse SQL migration pairs (0000 → 0020) + runner.py
 │   ├── src/
 │   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (46), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
@@ -202,7 +202,7 @@ job360/
 │   │   ├── sources/           # 49 source files in 6 category subfolders; 50 SOURCE_REGISTRY entries
 │   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep, send_daily_digest)
 │   │   └── utils/             # logger, rate_limiter, time_buckets
-│   └── tests/                 # 1,288 collected across 60+ files (defer to runtime count)
+│   └── tests/                 # 1,531 collected across 60+ files (defer to runtime count)
 └── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
     └── src/
         ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, settings/{layout,channels,notifications,account}, notifications
@@ -271,7 +271,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 
 ## Testing
 
-**1,333 tests passing, 3 skipped** (1,336 collected as of M8 batch — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
+**1,528 tests passing, 3 skipped** (1,531 collected — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
 
 `make test` runs the full suite including `test_main.py` (rehabbed offline in M8 — JobSpy stubbed, runs in ~8 s).
 
