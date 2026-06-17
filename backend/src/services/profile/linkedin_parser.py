@@ -63,8 +63,77 @@ _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.IGNORECASE)
 
 # ── Text extraction (thin wrapper over pdfplumber) ────────────────
 
+# Minimum clear vertical gutter (px) that marks a real two-column layout.
+_COLUMN_GUTTER_MIN = 24
+
+
+def _words_to_lines(words: list[dict]) -> str:
+    """Rebuild text from words: group by ``top`` (3px tolerance), sort lines
+    top→bottom and words left→right within a line."""
+    from collections import defaultdict
+
+    rows: dict = defaultdict(list)
+    for w in words:
+        rows[round(float(w.get("top", 0)) / 3.0)].append(w)
+    out: list[str] = []
+    for key in sorted(rows):
+        ws = sorted(rows[key], key=lambda w: float(w.get("x0", 0)))
+        out.append(" ".join(str(w.get("text", "")) for w in ws))
+    return "\n".join(out)
+
+
+def _dewrap_columns(words: list[dict], page_width: float) -> str | None:
+    """De-interleave a two-column page so each column reads top-to-bottom.
+
+    LinkedIn's "Save to PDF" puts a sidebar (Contact / Top Skills /
+    Certifications) beside the main column. pdfplumber's ``extract_text``
+    reads them in visual-line order, interleaving the two — which orphans the
+    "Top Skills" items under the wrong heading. This finds a clear vertical
+    gutter and emits the left column fully, then the right column.
+
+    Returns ``None`` when there is no genuine two-column structure (no wide
+    empty gutter, or one side is sparse) — the caller then uses flat text, so
+    single-column CVs/LinkedIn exports are unaffected.
+    """
+    if not words or page_width <= 0:
+        return None
+    lo, hi = int(page_width * 0.18), int(page_width * 0.58)
+    if hi <= lo:
+        return None
+    # Mark every x covered by a word within the candidate gutter region.
+    covered = bytearray(hi - lo + 1)
+    for w in words:
+        x0 = int(float(w.get("x0", 0)))
+        x1 = int(float(w.get("x1", x0)))
+        for x in range(max(lo, x0), min(hi, x1) + 1):
+            covered[x - lo] = 1
+    # Longest run of uncovered x in [lo, hi] = the gutter.
+    best_w = best_a = best_b = 0
+    run_start = None
+    for i in range(len(covered) + 1):
+        if i < len(covered) and covered[i] == 0:
+            if run_start is None:
+                run_start = i
+        elif run_start is not None:
+            if i - run_start > best_w:
+                best_w, best_a, best_b = i - run_start, run_start + lo, i + lo
+            run_start = None
+    if best_w < _COLUMN_GUTTER_MIN:
+        return None
+    left = [w for w in words if float(w.get("x1", 0)) <= best_a]
+    right = [w for w in words if float(w.get("x0", 0)) >= best_b]
+    if len(left) < 6 or len(right) < 6:
+        return None
+    return _words_to_lines(left) + "\n" + _words_to_lines(right)
+
+
 def _extract_text(file_path: str) -> str:
-    """Read all pages of a PDF into one newline-joined string. Empty on failure."""
+    """Read all pages of a PDF into one newline-joined string. Empty on failure.
+
+    Two-column pages are de-interleaved (``_dewrap_columns``) so a sidebar
+    reads as a contiguous block; single-column pages fall back to flat
+    ``extract_text`` unchanged.
+    """
     try:
         import pdfplumber
     except ImportError:
@@ -72,7 +141,15 @@ def _extract_text(file_path: str) -> str:
         return ""
     try:
         with pdfplumber.open(file_path) as pdf:
-            parts = [p.extract_text() or "" for p in pdf.pages]
+            parts: list[str] = []
+            for page in pdf.pages:
+                col: str | None = None
+                try:
+                    words = page.extract_words()
+                    col = _dewrap_columns(words, float(page.width or 0))
+                except Exception:  # noqa: BLE001 — fall back to flat text
+                    col = None
+                parts.append(col if col is not None else (page.extract_text() or ""))
         return "\n".join(parts)
     except Exception as e:
         logger.warning("Failed to read LinkedIn PDF %s: %s", file_path, e)

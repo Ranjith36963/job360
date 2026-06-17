@@ -25,6 +25,10 @@ Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 Rules:
 - Only skills the text actually supports. Do not invent.
 - Individual items, not categories.
+- Extract BOTH named tools AND the higher-level capabilities they imply —
+  "production GenAI systems" → "Production GenAI"; "cloud-scale deployments" →
+  "Cloud Deployment"; "vector databases (ChromaDB, FAISS)" → "Vector Databases",
+  "ChromaDB", "FAISS".
 - Domain-agnostic: technical OR non-technical (e.g. "Stakeholder Management", "HIPAA Compliance", "Welding").
 
 ABOUT ME:

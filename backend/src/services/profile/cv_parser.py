@@ -67,7 +67,7 @@ Return a JSON object with exactly these fields:
 RULES:
 1. Extract EVERYTHING. If in doubt, include it. A missed skill means a missed job match.
 2. Skills should be individual items, not categories. "Python" not "Programming Languages: Python".
-3. For compound tools, keep them together: "AWS Bedrock" not just "AWS" and "Bedrock" separately.
+3. For a single compound tool keep it whole: "AWS Bedrock". BUT when a skill lists tools in parentheses, extract the parent AND each tool inside as SEPARATE skills — "AWS (Bedrock, SageMaker, S3, CloudWatch)" → "AWS", "AWS Bedrock", "SageMaker", "S3", "CloudWatch"; "Python (Pandas, NumPy, Matplotlib)" → "Python", "Pandas", "NumPy", "Matplotlib"; "OCR (Tesseract)" → "OCR", "Tesseract".
 4. Include achievements with their metrics: "achieving 90% accuracy" not just "90%".
 5. If something appears in both the skills section AND experience bullets, include it once in skills.
 6. Domain-agnostic: whether it's "TensorFlow" or "HIPAA compliance" or "Contract negotiation" — extract it.

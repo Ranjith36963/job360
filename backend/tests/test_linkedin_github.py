@@ -26,7 +26,40 @@ from src.services.profile.linkedin_parser import (
     _coerce_positions,
     _coerce_education,
     _coerce_certifications,
+    _dewrap_columns,
 )
+
+
+# ---------------------------------------------------------------------------
+# Two-column de-interleaving (LinkedIn "Save to PDF" sidebar fix)
+# ---------------------------------------------------------------------------
+
+class TestDewrapColumns:
+    def test_deinterleaves_two_columns(self):
+        """A clear left sidebar + right main column → left text fully precedes
+        right text, so 'Top Skills' content stays under its heading."""
+        words = []
+        for i, t in enumerate(
+            ["Top", "Skills", "LangGraph", "Systems", "Design", "Multi-agent", "Certifications"]
+        ):
+            words.append({"text": t, "x0": 50, "x1": 140, "top": 100 + i * 20})
+        for i, t in enumerate(["Summary", "I", "build", "AI", "systems", "that", "scale"]):
+            words.append({"text": t, "x0": 320, "x1": 430, "top": 100 + i * 20})
+        out = _dewrap_columns(words, 600)
+        assert out is not None
+        assert out.index("LangGraph") < out.index("Summary")
+
+    def test_single_column_returns_none(self):
+        """Dense single-column text has no clear vertical gutter → None (caller
+        falls back to flat extraction, so normal CVs are unaffected)."""
+        words = []
+        for r in range(8):
+            for x0 in (50, 160, 270, 380, 490):
+                words.append({"text": "w", "x0": x0, "x1": x0 + 95, "top": 100 + r * 20})
+        assert _dewrap_columns(words, 600) is None
+
+    def test_empty_words_returns_none(self):
+        assert _dewrap_columns([], 600) is None
 from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,
