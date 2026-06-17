@@ -48,7 +48,7 @@
 
 > **Correction to the earlier eval finding:** the ablation's "E2 dimensions == E1 keyword" did **not** prove dims are dead. The jobs-table dim columns (`role/skill/seniority_score/…`) *sum to `match_score`* — so summing them just reproduced the keyword score. The real issue is narrower: the **enrichment** dims (seniority/salary/visa/workplace) were 0 because of the id bug, now fixed.
 
-**Verdict (now):** The id bug that zeroed the enrichment dims is fixed and unit-proven. Whether dims change your *ranking* depends on having differentiating preferences in your profile; with a sparse profile they add near-constant points and don't reorder.
+**Verdict (now):** The id bug that zeroed the enrichment dims is fixed and unit-proven. And with a **real profile** (graduate / £35–60k / remote / needs-visa), the eval shows the dims are a **genuine ranking signal — Spearman 0.723, beating keyword's 0.688** (Run 5, n=45). With a *sparse* profile they go near-constant and don't reorder — so the dims earn their place only when the user states real preferences.
 
 ---
 
@@ -108,26 +108,26 @@
 
 **Built 2026-06-16 (strict TDD, 13 tests).** Read-only. Ranks jobs by each engine + combinations, scores every ranking against a **Claude-subscription gold** (independent of the free in-app judge). Run: `python -m scripts.engine_ablation --email <you> --golds golds.json` (use `--emit-prompts` first to build the grading prompts).
 
-**Run 4 (n=19, all four engines measured HONESTLY — E2 = dims-only, E3 = full hybrid):**
+**Run 5 (n=45, WIDE gold + REAL profile — the trustworthy run):** gold spans fit 5–80 (11 strong / 12 mid / 22 weak, incl. clearly-bad jobs); profile states experience=graduate, £35–60k, remote, needs-visa. NDCG now near-saturated, so **Spearman is the signal**.
 
-| Config | NDCG | Spearman | Prec@k |
-|---|---|---|---|
-| **E3+E4** | **0.969** | **0.589** | 0.579 |
-| E3 hybrid(full) | 0.960 | 0.545 | 0.579 |
-| E1+E3+E4 | 0.959 | 0.538 | 0.579 |
-| E1+E3 | 0.952 | 0.595 | 0.579 |
-| All (1+2+3+4) | 0.945 | 0.537 | 0.579 |
-| E1 keyword | 0.940 | 0.432 | 0.579 |
-| E1+E4 | 0.929 | 0.544 | 0.579 |
-| - E3 bm25-only | 0.911 | **0.004** | 0.579 |
-| E4 judge | 0.894 | 0.539 | 0.579 |
-| **E2 dimensions** | **0.893** | 0.532 | 0.579 |
+| Config | NDCG | **Spearman** | Prec@k | n |
+|---|---|---|---|---|
+| **E3 hybrid(full)** | 0.956 | **0.815** | 0.244 | 45 |
+| E1+E3 | 0.953 | 0.798 | 0.244 | 45 |
+| E3+E4 | 0.951 | 0.781 | 0.244 | 45 |
+| E1+E3+E4 | 0.945 | 0.772 | 0.244 | 45 |
+| All (1+2+3+4) | 0.943 | 0.767 | 0.244 | 45 |
+| - E3 bm25-only | 0.934 | 0.564 | 0.289 | 38 |
+| **E2 dimensions** | 0.928 | **0.723** | 0.244 | 45 |
+| E1 keyword | 0.924 | 0.688 | 0.244 | 45 |
+| E4 judge | 0.922 | 0.604 | 0.533 | 15 |
+| E1+E4 | 0.920 | 0.719 | 0.244 | 45 |
 
-**Findings:**
-1. **E3 full hybrid is the strongest single engine** (0.960 / 0.545) — clearly beats E1 keyword (0.940 / 0.432). Vector + cross-encoder reranker do the work.
-2. **BM25-alone is near-random** (Spearman 0.004). The BM25 leg adds little; semantics + rerank carry Engine 3.
-3. **Engine 1 is redundant *as a separate stage*** — `E3+E4` (0.969) **>** `E1+E3+E4` (0.959). The full hybrid fuses the keyword signal internally; adding E1 again double-counts. → **You CAN retire Engine 1 as its own engine once the full hybrid runs.**
-4. **E3+E4 is the best combo** — full hybrid search + LLM judge.
-5. **E2 dimensions now measured honestly** (dims-only, not match_score). For THIS profile the four dims come out **constant = 12 for all 19 jobs** (seniority 4 + salary 5 + visa 0 + workplace 3) → **zero ranking signal**. Its 0.532 Spearman is the tiebreak echoing the feed/judge order, NOT the dims discriminating. The dims only help with a profile that states differentiating preferences (seniority/salary/workplace/visa).
+**Findings (now trustworthy — Spearman spreads 0.56–0.82):**
+1. **E3 full hybrid is the clear winner** (Spearman 0.815) — and **combining other engines into it only dilutes** (E3 alone > E1+E3 > E3+E4 > All). A strong ranker fused with weaker ones via RRF regresses toward the weaker consensus.
+2. **Engine 2 dimensions is now a REAL signal — 0.723** — it even **beats keyword (0.688)**. With a real profile the dims differentiate (no longer the flat 12 of Run 4). Validates the Engine-2 id-bug fix AND the dimensions concept.
+3. **Keyword (0.688) is the weakest search leg; BM25-alone 0.564** (n=38 — BM25 scores 0 for 7 jobs with no lexical overlap, so they drop out).
+4. **Judge has the best precision (0.53) on its top-15** but only judges the shortlist (n=15 coverage) — strong but narrow.
+5. Prec@k ≈ 0.244 for the full-45 configs because only 11/45 jobs are "good" (gold≥60) → that's the ceiling; the metric is coverage-bound here, so read Spearman.
 
-**How it's measured now:** E2 = `JobScorer` dims-only with `job.id` set (live enrichment); E3 reuses production's `_maybe_apply_hybrid_reorder` (so it reflects exactly what `?mode=hybrid` serves). **Caveat:** n=19, gold compressed to score≥30 (no clearly-bad roles) → NDCG saturated; Spearman is the discriminating metric. A wider gold (relax the persist gate) would sharpen it.
+**How the gold was built:** profile updated via `save_profile` (version 2); one `run_search` with `MIN_MATCH_SCORE→1` grew the catalog 19→3,536 (real bad/irrelevant spread); `rescore_user_feed` refreshed keyword + re-judged the top vs the new profile; a stratified 45-sample (15 high / 15 mid / 15 low) graded by Claude → fit 5–80. **Caveat:** coverage varies by engine (E4 n=15, BM25 n=38); n=45 is solid but not huge.
