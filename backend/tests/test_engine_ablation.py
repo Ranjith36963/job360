@@ -11,6 +11,7 @@ from scripts.engine_ablation import (
     evaluate_config,
     evaluate_ranking,
     precision_at_k,
+    ranking_to_scores,
     scores_to_ranking,
 )
 
@@ -130,3 +131,27 @@ def test_evaluate_config_combines_engines_via_rrf():
     assert out["n"] == 3
     # job 3 is mid in both lists → RRF lifts it; it's also the best gold (90)
     assert out["ndcg"] is not None
+
+
+# --------------------------------------------------------------------------- #
+#  ranking_to_scores — lets a pre-ordered ranking (e.g. the full hybrid) slot  #
+#  into the score-map model                                                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_ranking_to_scores_preserves_order():
+    s = ranking_to_scores([7, 3, 9])
+    assert s[7] > s[3] > s[9]
+    assert scores_to_ranking(s) == [7, 3, 9]
+
+
+def test_ranking_to_scores_empty():
+    assert ranking_to_scores([]) == {}
+
+
+def test_ranking_to_scores_feeds_evaluate_config():
+    """A hybrid ranking expressed as pseudo-scores evaluates like any engine."""
+    engine_scores = {"hybrid": ranking_to_scores([3, 1, 2])}
+    golds = {"1": 80.0, "2": 20.0, "3": 90.0}
+    out = evaluate_config({"name": "E3", "engines": ["hybrid"]}, engine_scores, golds)
+    assert out["ndcg"] == 1.0   # ranking 3,1,2 == gold order 90,80,20

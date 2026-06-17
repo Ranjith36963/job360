@@ -108,24 +108,26 @@
 
 **Built 2026-06-16 (strict TDD, 13 tests).** Read-only. Ranks jobs by each engine + combinations, scores every ranking against a **Claude-subscription gold** (independent of the free in-app judge). Run: `python -m scripts.engine_ablation --email <you> --golds golds.json` (use `--emit-prompts` first to build the grading prompts).
 
-**Run 2 (bench user, n=19, fresh live fetch + full Claude gold + full judge coverage):**
+**Run 3 (n=19, E3 = FULL hybrid: keyword + BM25 + vector + cross-encoder rerank):**
 
 | Config | NDCG | Spearman | Prec@k |
 |---|---|---|---|
-| **All (1+2+3+4)** | **0.948** | **0.464** | 0.579 |
-| E1 keyword | 0.939 | 0.427 | 0.579 |
-| **E2 dimensions** | **0.939** | **0.427** | 0.579 |
-| E1+E3+E4 | 0.938 | 0.436 | 0.579 |
-| E1+E3 | 0.936 | 0.213 | 0.579 |
-| E3+E4 | 0.924 | 0.242 | 0.579 |
-| E1+E4 | 0.918 | 0.427 | 0.579 |
-| E3 bm25 | 0.911 | **0.004** | 0.579 |
-| E4 judge | 0.884 | 0.373 | 0.579 |
+| **E3+E4** | **0.969** | **0.589** | 0.579 |
+| E3 hybrid(full) | 0.960 | 0.545 | 0.579 |
+| E1+E3+E4 | 0.959 | 0.538 | 0.579 |
+| E1+E3 | 0.952 | 0.595 | 0.579 |
+| All (1+2+3+4) | 0.950 | 0.515 | 0.579 |
+| E1 keyword | 0.940 | 0.432 | 0.579 |
+| E2 dimensions | 0.940 | 0.432 | 0.579 |
+| E1+E4 | 0.929 | 0.544 | 0.579 |
+| - E3 bm25-only | 0.911 | **0.004** | 0.579 |
+| E4 judge | 0.894 | 0.539 | 0.579 |
 
-**Findings (n=19 overturns part of the n=13 read):**
-1. **Engine 1 (keyword) is the backbone** — alone it nearly matches the full stack (0.939 vs 0.948 NDCG; 0.427 vs 0.464 Spearman). **Dropping it clearly hurts** (E3+E4 Spearman 0.242 ≪ E1+E3+E4 0.436). → **Do NOT drop Engine 1.**
-2. **Engine 2 (dimensions) is dead** — row *identical* to keyword in BOTH runs. The four dimension scores contribute literally nothing today (`job.id` bug). Highest-value fix.
-3. **BM25 alone is weak** (Spearman 0.004 — near-random). Likely because the profile query is a huge skill list, so BM25 matches common ML words everywhere → poor discrimination. It adds a little only in combination. → Engine 3's BM25 is **not** a substitute for Engine 1.
-4. Combining everything wins, but only marginally over keyword alone — the overlap/double-count concern is real: extra engines add little once keyword is present.
+**Findings (full-hybrid E3 flips Run 2's read):**
+1. **E3 full hybrid is the strongest single engine** (0.960 / 0.545) — clearly beats E1 keyword (0.940 / 0.432). The vector + cross-encoder reranker do the work.
+2. **BM25-alone is near-random** (Spearman 0.004). The BM25 leg adds little; semantics + rerank carry Engine 3.
+3. **Engine 1 is redundant *as a separate stage*** — `E3+E4` (0.969) **>** `E1+E3+E4` (0.959). The full hybrid already fuses the keyword signal internally, so adding E1 again double-counts. → **You CAN retire Engine 1 as its own engine once the full hybrid runs.** (This corrects Run 2's "keep E1" — Run 2 only measured BM25, not the real hybrid.)
+4. **E3+E4 is the best combo** — full hybrid search + LLM judge.
+5. **E2 dimensions is still the placeholder** (== keyword) — the harness still sums `match_score` components for "E2"; a true dims-only config is pending.
 
-**How the gold was built:** live `run_search` for the bench user (5799 fetched → only 6 new — the scoring/persist gate, not fetching, caps the catalog at 19), then all 19 graded by Claude (this session). **Caveat:** n=19 is still modest and the gate keeps only score≥30 jobs, so the gold lacks clearly-bad roles that would sharpen the ranking metrics. A wider gold needs the persist gate relaxed (a Pillar-2 config change).
+**How E3 is measured now:** the harness reuses production's `_maybe_apply_hybrid_reorder` (keyword+BM25+vector+rerank via `retrieve_for_user`), so the leaderboard reflects exactly what `?mode=hybrid` serves. **Caveat:** n=19, gold compressed to score≥30 (no clearly-bad roles) → NDCG saturated; Spearman is the discriminating metric. A wider gold (relax the persist gate) would sharpen it.

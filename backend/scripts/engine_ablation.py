@@ -64,13 +64,14 @@ GOLD_THRESHOLD = 60.0
 DEFAULT_CONFIGS = [
     {"name": "E1 keyword", "engines": ["keyword"]},
     {"name": "E2 dimensions", "engines": ["dims"]},
-    {"name": "E3 bm25", "engines": ["bm25"]},
+    {"name": "E3 hybrid(full)", "engines": ["hybrid"]},  # keyword+BM25+vector+rerank
+    {"name": "  E3 bm25-only", "engines": ["bm25"]},  # diagnostic: BM25 leg alone
     {"name": "E4 judge", "engines": ["judge"]},
     {"name": "E1+E4", "engines": ["keyword", "judge"]},
-    {"name": "E3+E4", "engines": ["bm25", "judge"]},
-    {"name": "E1+E3", "engines": ["keyword", "bm25"]},
-    {"name": "E1+E3+E4", "engines": ["keyword", "bm25", "judge"]},
-    {"name": "All (1+2+3+4)", "engines": ["keyword", "dims", "bm25", "judge"]},
+    {"name": "E3+E4", "engines": ["hybrid", "judge"]},
+    {"name": "E1+E3", "engines": ["keyword", "hybrid"]},
+    {"name": "E1+E3+E4", "engines": ["keyword", "hybrid", "judge"]},
+    {"name": "All (1+2+3+4)", "engines": ["keyword", "dims", "hybrid", "judge"]},
 ]
 
 
@@ -98,6 +99,17 @@ def scores_to_ranking(scores: dict) -> list:
     items = [(jid, s) for jid, s in scores.items() if s is not None]
     items.sort(key=lambda kv: -float(kv[1]))
     return [jid for jid, _s in items]
+
+
+def ranking_to_scores(ranking: list) -> dict:
+    """Convert an explicit ranking (best first) into descending pseudo-scores.
+
+    Lets a pre-ordered ranking — e.g. the full Engine-3 hybrid, which produces
+    an order rather than per-job scalars — slot into the score-map model used
+    by ``evaluate_config`` / ``combine_rrf``.
+    """
+    n = len(ranking)
+    return {jid: float(n - i) for i, jid in enumerate(ranking)}
 
 
 def precision_at_k(
@@ -200,8 +212,37 @@ def _bm25_scores(profile: dict, feed_rows: list[dict]) -> dict:
     return {jid: score for jid, score in bm25_rank(query, docs)}
 
 
-def build_engine_scores(profile: dict, feed_rows: list[dict]) -> dict:
-    """Build ``{engine_key: {job_id: score|None}}`` for all four engines."""
+def _hybrid_ranking(feed_rows: list[dict], hybrid_profile) -> list:
+    """Full Engine-3 ranking via the LIVE retrieval stack: keyword + BM25 +
+    vector(ANN) + cross-encoder rerank, fused by RRF.
+
+    Reuses ``jobs.py::_maybe_apply_hybrid_reorder`` so the harness measures
+    EXACTLY what production serves on ``?mode=hybrid``. Requires
+    SEMANTIC_ENABLED + a populated vector index + the ``[semantic]`` extra;
+    otherwise it degrades to keyword order (and this row collapses to E1).
+
+    The feed rows key the job id as ``job_id``; the live helper expects ``id``,
+    so we remap before calling it. Returns job ids, best first.
+    """
+    from src.api.routes.jobs import _maybe_apply_hybrid_reorder  # noqa: PLC0415
+
+    rows = []
+    for r in feed_rows:
+        rr = dict(r)
+        rr["id"] = r.get("id", r.get("job_id"))
+        rows.append(rr)
+    reordered = _maybe_apply_hybrid_reorder(rows, profile=hybrid_profile)
+    return [r["id"] for r in reordered if r.get("id") is not None]
+
+
+def build_engine_scores(profile: dict, feed_rows: list[dict], *, hybrid_profile=None) -> dict:
+    """Build ``{engine_key: {job_id: score|None}}`` per engine.
+
+    ``keyword`` / ``judge`` / ``dims`` / ``bm25`` come from stored values or a
+    pure BM25 pass. When ``hybrid_profile`` (a real ``UserProfile``) is given,
+    ``hybrid`` is the FULL Engine-3 ranking (keyword+BM25+vector+rerank) from
+    the live stack, expressed as pseudo-scores.
+    """
     keyword = {r["job_id"]: r.get("keyword_score") for r in feed_rows}
     judge = {r["job_id"]: r.get("llm_fit_score") for r in feed_rows}
     dims = {
@@ -209,7 +250,10 @@ def build_engine_scores(profile: dict, feed_rows: list[dict]) -> dict:
         for r in feed_rows
     }
     bm25 = _bm25_scores(profile, feed_rows)
-    return {"keyword": keyword, "dims": dims, "bm25": bm25, "judge": judge}
+    scores = {"keyword": keyword, "dims": dims, "bm25": bm25, "judge": judge}
+    if hybrid_profile is not None:
+        scores["hybrid"] = ranking_to_scores(_hybrid_ranking(feed_rows, hybrid_profile))
+    return scores
 
 
 # =========================================================================== #
@@ -226,10 +270,16 @@ def run_leaderboard(
     feed_rows: list[dict],
     golds: dict,
     configs: list[dict] | None = None,
+    *,
+    hybrid_profile=None,
 ) -> list[dict]:
-    """Evaluate every config and return rows sorted by NDCG (best first)."""
+    """Evaluate every config and return rows sorted by NDCG (best first).
+
+    ``hybrid_profile`` (a real ``UserProfile``) enables the full Engine-3
+    hybrid row; without it the ``hybrid`` configs collapse to empty.
+    """
     cfgs = configs or DEFAULT_CONFIGS
-    engine_scores = build_engine_scores(profile, feed_rows)
+    engine_scores = build_engine_scores(profile, feed_rows, hybrid_profile=hybrid_profile)
     rows = [evaluate_config(c, engine_scores, golds) for c in cfgs]
     rows.sort(key=lambda r: (r["ndcg"] is not None, r["ndcg"] or 0.0), reverse=True)
     return rows
@@ -341,7 +391,17 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         conn2.close()
 
-    rows = run_leaderboard(profile, feed_rows, golds)
+    # Real UserProfile (DB-backed) enables the full Engine-3 hybrid row — it
+    # supplies the cv_data the semantic query vector + cross-encoder need.
+    hybrid_profile = None
+    try:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        hybrid_profile = load_profile(user_id)
+    except Exception as exc:  # noqa: BLE001 — hybrid row is optional
+        print(f"(hybrid row disabled — could not load profile: {exc})", file=sys.stderr)
+
+    rows = run_leaderboard(profile, feed_rows, golds, hybrid_profile=hybrid_profile)
     _print_leaderboard(rows, gold_count=len(_normalize_golds(golds)), out=sys.stdout)
 
 
