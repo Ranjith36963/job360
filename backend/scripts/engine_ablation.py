@@ -189,6 +189,34 @@ def _ndcg_from_pairs(pairs: list, k=None):
     return ndcg(seq, k)
 
 
+def _ndcg_exp(gold_seq: list, k=None):
+    """NDCG with EXPONENTIAL gain (``2^(fit/25) − 1``) instead of linear.
+
+    Exponential gain rewards getting the very-best jobs at the very top far
+    more than mid jobs — the sharpest expression of 'is the best job at #1?'.
+    De-saturates when many jobs are decent (linear NDCG can't separate them).
+    """
+    import math  # noqa: PLC0415
+
+    if not gold_seq:
+        return None
+    cutoff = len(gold_seq) if k is None else min(k, len(gold_seq))
+
+    def gain(f):
+        return (2.0 ** (f / 25.0)) - 1.0
+
+    def dcg(seq, top):
+        return sum(gain(seq[i]) / math.log2(i + 2) for i in range(top))
+
+    ideal = dcg(sorted(gold_seq, reverse=True), cutoff)
+    return 1.0 if ideal == 0 else dcg(gold_seq, cutoff) / ideal
+
+
+def _ndcg_exp_from_pairs(pairs: list, k=None):
+    seq = [gold for _pos, gold in sorted(pairs, key=lambda pg: pg[0])]
+    return _ndcg_exp(seq, k)
+
+
 def _spearman_from_pairs(pairs: list):
     n = len(pairs)
     return spearman([(float(n - pos), gold) for pos, gold in pairs])
@@ -204,16 +232,20 @@ def _percentile_ci(values: list, lo: float = 0.025, hi: float = 0.975):
     return (vals[li], vals[hi_i])
 
 
-_STRONG_METRICS = ("ndcg", "ndcg@5", "ndcg@10", "spearman")
+_STRONG_METRICS = ("ndcg", "ndcg@3", "ndcg@5", "ndcg@10", "ndcg_exp", "spearman")
 
 
 def _metric_from_pairs(metric: str, pairs: list):
     if metric == "ndcg":
         return _ndcg_from_pairs(pairs)
+    if metric == "ndcg@3":
+        return _ndcg_from_pairs(pairs, 3)
     if metric == "ndcg@5":
         return _ndcg_from_pairs(pairs, 5)
     if metric == "ndcg@10":
         return _ndcg_from_pairs(pairs, 10)
+    if metric == "ndcg_exp":
+        return _ndcg_exp_from_pairs(pairs)
     if metric == "spearman":
         return _spearman_from_pairs(pairs)
     raise ValueError(f"unknown metric {metric!r}")
@@ -329,8 +361,24 @@ def evaluate_config(
 # =========================================================================== #
 
 
+def _scores_with_zeros(ranked_pairs: list, all_ids: list) -> dict:
+    """Turn a ranked ``[(id, score)]`` list into a FULL score map, assigning
+    0.0 to any id not ranked.
+
+    A ranker that only emits matches (e.g. BM25 drops zero-overlap jobs) would
+    otherwise be scored on fewer jobs than the others — unfair. Filling 0.0
+    puts its no-match jobs at the tail (score 0 = 'no relevance') so it covers
+    every job and is comparable to engines that score everything.
+    """
+    scores = {jid: float(s) for jid, s in ranked_pairs}
+    for jid in all_ids:
+        scores.setdefault(jid, 0.0)
+    return scores
+
+
 def _bm25_scores(profile: dict, feed_rows: list[dict]) -> dict:
-    """Compute a BM25 score per job from the profile query vs (title+desc)."""
+    """BM25 score per job (profile query vs title+desc). Zero-overlap jobs get
+    0.0 (ranked last) rather than dropped, so BM25 covers the full set."""
     from src.services.retrieval import bm25_rank  # noqa: PLC0415
 
     query = " ".join(
@@ -342,7 +390,7 @@ def _bm25_scores(profile: dict, feed_rows: list[dict]) -> dict:
         (row["job_id"], f"{row.get('title', '')} {row.get('description', '')}")
         for row in feed_rows
     ]
-    return {jid: score for jid, score in bm25_rank(query, docs)}
+    return _scores_with_zeros(bm25_rank(query, docs), [r["job_id"] for r in feed_rows])
 
 
 def _hybrid_ranking(feed_rows: list[dict], hybrid_profile) -> list:
@@ -507,18 +555,24 @@ def _print_strong_report(rows: list, significance: dict, best: str, gold_count: 
     _p("JOB360 ENGINE ABLATION — STRONG (bootstrap 95% CIs + significance)")
     _p("=" * 92)
     _p(f"Gold-graded jobs (the Claude benchmark): {gold_count}")
-    _p("NDCG = are the BEST jobs at the top (top-heavy; your priority). NDCG@5/@10 = top-5/10 only.")
-    _p("Spearman = is the WHOLE list in order. [lo,hi] = 95% confidence interval (bootstrap).\n")
-    _p(f"{'CONFIG':<16}{'NDCG [95% CI]':<22}{'NDCG@5':<10}{'NDCG@10':<10}{'Spearman [95% CI]':<22}{'n':>4}")
-    _p("-" * 92)
+    _p("NDCG = best jobs at the top (your priority). @3 = top-3 only. exp = exponential-gain")
+    _p("(rewards the #1 spot hardest — sharpest 'best job at top'). Spearman = whole-list order.")
+    _p("[lo,hi] = 95% bootstrap confidence interval.\n")
+    _p(
+        f"{'CONFIG':<16}{'NDCG [95% CI]':<22}{'@3':<8}{'@5':<8}{'exp':<8}"
+        f"{'Spearman [95% CI]':<22}{'n':>4}"
+    )
+    _p("-" * 96)
     for r in rows:
         s = r["strong"]
+        a3 = _fmt_ci(s["ndcg@3"]).split(" ")[0]
+        a5 = _fmt_ci(s["ndcg@5"]).split(" ")[0]
+        ex = _fmt_ci(s["ndcg_exp"]).split(" ")[0]
         _p(
             f"{r['name']:<16}{_fmt_ci(s['ndcg']):<22}"
-            f"{(_fmt_ci(s['ndcg@5']).split(' ')[0]):<10}{(_fmt_ci(s['ndcg@10']).split(' ')[0]):<10}"
-            f"{_fmt_ci(s['spearman']):<22}{s['n']:>4}"
+            f"{a3:<8}{a5:<8}{ex:<8}{_fmt_ci(s['spearman']):<22}{s['n']:>4}"
         )
-    _p("-" * 92)
+    _p("-" * 96)
     _p(f"\nSIGNIFICANCE — is the top config ({best}) really better on NDCG, or noise?")
     _p("(paired bootstrap of the NDCG difference; SIGNIFICANT = 95% CI of the gap excludes 0)\n")
     for name, cmp in significance.items():

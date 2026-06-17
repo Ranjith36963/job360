@@ -7,6 +7,7 @@ No DB, no network. Run from backend/.
 from __future__ import annotations
 
 from scripts.engine_ablation import (
+    _scores_with_zeros,
     combine_rrf,
     compare_configs,
     dim_only_score,
@@ -236,3 +237,31 @@ def test_compare_configs_identical_not_significant():
     out = compare_configs(r, r, golds, metric="ndcg", n_resamples=400, seed=3)
     assert abs(out["diff"]) < 1e-9
     assert out["significant"] is False
+
+
+# --------------------------------------------------------------------------- #
+#  Fairness fixes — BM25 ranks all jobs (zeros at tail) + NDCG@3 / exp-gain    #
+# --------------------------------------------------------------------------- #
+
+
+def test_scores_with_zeros_fills_unranked_at_tail():
+    """Jobs BM25 didn't match get 0.0 (ranked last), not dropped — so BM25
+    covers the full set, fairly comparable to the other engines."""
+    out = _scores_with_zeros([(1, 5.0), (3, 2.0)], [1, 2, 3])
+    assert out == {1: 5.0, 2: 0.0, 3: 2.0}
+    assert scores_to_ranking(out) == [1, 3, 2]   # job 2 (no match) sits last
+
+
+def test_evaluate_strong_includes_ndcg3_and_exp():
+    golds = {"1": 90.0, "2": 70.0, "3": 40.0, "4": 10.0}
+    out = evaluate_ranking_strong([1, 2, 3, 4], golds, n_resamples=100, seed=1)
+    assert out["ndcg@3"]["point"] == 1.0       # perfect order
+    assert out["ndcg_exp"]["point"] == 1.0     # exponential-gain NDCG
+
+
+def test_ndcg_exp_punishes_top_miss_harder_than_linear():
+    """Putting the single best job last should hurt exp-gain NDCG more than
+    plain NDCG (exp gain emphasises the very top)."""
+    golds = {"1": 90.0, "2": 20.0, "3": 10.0}
+    miss = evaluate_ranking_strong([2, 3, 1], golds, n_resamples=50, seed=1)  # best (1) last
+    assert miss["ndcg_exp"]["point"] <= miss["ndcg"]["point"]
