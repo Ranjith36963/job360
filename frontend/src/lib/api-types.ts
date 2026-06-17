@@ -650,6 +650,9 @@ export interface paths {
         /**
          * Upload Github
          * @description Enrich the caller's profile with GitHub public data.
+         *
+         *     Accepts a full profile URL or @handle, not just a bare username —
+         *     ``normalize_github_username`` reduces it to the handle before lookup.
          */
         post: operations["upload_github_api_profile_github_post"];
         delete?: never;

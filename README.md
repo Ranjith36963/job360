@@ -1,6 +1,6 @@
 # Job360
 
-Automated UK job search system supporting **any professional domain**. Aggregates jobs from **49 source instances** (50 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+Automated UK job search system supporting **any professional domain**. Aggregates jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
 > **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
 
@@ -17,7 +17,7 @@ flowchart TD
     CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
     Cron["Cron 4AM/4PM\nEurope/London"]
 
-    subgraph Sources["46 Job Sources (45 live instances)"]
+    subgraph Sources["47 Job Sources (46 live instances)"]
         direction LR
         KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
         FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
@@ -48,9 +48,9 @@ flowchart TD
 
 ## Features
 
-### Job Sources (45 classes / 46 registry keys / 45 instances)
+### Job Sources (46 classes / 47 registry keys / 46 instances)
 
-> The reconciliation: 45 *class files* on disk → 46 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 45 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 46`).
+> The reconciliation: 46 *class files* on disk → 47 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 46 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 47`).
 
 - **7 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully if no API key set
 - **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
@@ -59,7 +59,7 @@ flowchart TD
 - **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
 - **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
 
-**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings). **Dropped in M6 rotation (2026-06)**: `jobtensor` (pivoted to JS-only German app), `comeet` (token-gated API), `gov_apprenticeships` (v1 API retired), `aijobs_global` (board abandoned Oct 2023).
+**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings). **Dropped in M6 rotation (2026-06)**: `jobtensor` (pivoted to JS-only German app), `comeet` (token-gated API), `aijobs_global` (board abandoned Oct 2023). `gov_apprenticeships` was briefly dropped but **restored 2026-06-16** on the DfE Display Advert API v2 (`DFE_APPRENTICESHIPS_API_KEY`; `category="keyed_api"`).
 
 **Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/pillars/03-job-providers.md` §4.7.
 
@@ -97,7 +97,7 @@ flowchart TD
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
-- `sources` — list all 50 registry sources (49 live instances)
+- `sources` — list all 47 registry sources (46 live instances)
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
@@ -111,7 +111,7 @@ flowchart TD
 - **Persistent tracking** — SQLite database prevents duplicate notifications across runs
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
-- **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request, 120s timeout per source
+- **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request; per-source fetch ceiling 240s (ATS) / 60s (others) via `TieredScheduler.resolve_fetch_timeout()`
 - **Cron scheduling** — `cron_setup.sh` sets up 4AM/4PM UK time (Europe/London)
 - **Logging** — rotating file handler (5MB max, 3 backups) + console output
 - **Dry-run mode** — fetch and score without writing to DB or sending notifications
@@ -119,13 +119,13 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (1,288 collected / 1,285 passing, 3 skipped — run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (~1,409 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
 
 > Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly --ignore=tests/test_main.py 2>nul` for live per-file counts.
 
 | Test file | Approx. count | What it covers |
 |-----------|-------|----------------|
-| `test_sources.py` | 55+ | All 46 sources with mocked HTTP |
+| `test_sources.py` | 55+ | All 47 sources with mocked HTTP |
 | `test_profile.py` | 55+ | CV parser, preferences, keyword generator, JobScorer |
 | `test_linkedin_github.py` | 58+ | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
 | `test_scorer.py` | 53+ | Scoring algorithm, penalties, recency tiers, edge cases |
@@ -184,7 +184,7 @@ bash cron_setup.sh
 ## CLI Usage
 
 ```bash
-# Full pipeline — fetch from all 46 sources, score, deduplicate, notify
+# Full pipeline — fetch from all 47 sources (46 live instances), score, deduplicate, notify
 python -m src.cli run
 
 # Single source only
@@ -244,7 +244,7 @@ python -m src.cli sources
 | Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
 | Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
 
-**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, Teaching Vacancies, Gov Apprenticeships, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, Comeet, jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, JobTensor, Climatebase, 80000Hours, BCS Jobs, AIJobs Global, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs — **43 of 50 sources work without any API keys**. Dropped in Batch 3: yc_companies, findajob, nomis.
+**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **39 of 47 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global.
 
 ## Scoring Algorithm
 
@@ -346,9 +346,9 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/              # 18 forward+reverse SQL migration pairs (0000 → 0017) + runner.py
+│   ├── migrations/              # 20 forward+reverse SQL migration pairs (0000 → 0019) + runner.py
 │   └── src/
-│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (46), _build_sources()
+│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │       ├── models.py            # Job dataclass + normalized_key()
 │       ├── api/                 # FastAPI app + 11 route modules (46+ endpoints)
@@ -379,7 +379,7 @@ job360/
 │       ├── repositories/        # (renamed from storage/)
 │       │   ├── database.py
 │       │   └── csv_export.py
-│       ├── sources/             # 49 source files in 6 category subfolders; 50 SOURCE_REGISTRY keys
+│       ├── sources/             # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (7)
 │       │   ├── apis_free/   (9 free_json + 2 rss-tier)
@@ -389,7 +389,7 @@ job360/
 │       │   └── other/       (4 classes / 5 keys)
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+├── backend/tests/               # ~1,409 collected offline (2 live deselected) across 60+ files (defer to runtime count)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
@@ -413,7 +413,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-The full suite passes (1,285 passed, 3 skipped on Windows). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+The full suite passes (~1,409 collected offline, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
 
 ## Output
 

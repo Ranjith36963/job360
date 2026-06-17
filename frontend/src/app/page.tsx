@@ -24,7 +24,7 @@ const FEATURES = [
   },
   {
     icon: Globe,
-    title: "50 Job Sources",
+    title: "47 Job Sources",
     description:
       "APIs, ATS boards, RSS feeds, and intelligent scrapers. From Greenhouse to HackerNews, Reed to RemoteOK — all aggregated in real time.",
     stagger: 2,
@@ -140,7 +140,7 @@ export default function Home() {
               Your CV.
             </span>
             <span className="animate-fade-in-up stagger-3 block mt-1">
-              50 Sources.
+              47 Sources.
             </span>
             <span className="animate-fade-in-up stagger-4 block mt-1">
               One{" "}
@@ -158,7 +158,7 @@ export default function Home() {
               360
             </span>
             &apos;s 8-dimensional scoring engine find your perfect match across
-            50 job sources.
+            47 job sources.
           </p>
 
           {/* CTAs */}

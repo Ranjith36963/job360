@@ -19,7 +19,7 @@ Everything else is EDGE: full speed, small frequent gated commits, cheap revert.
 
 ## ✅ ALL MISSIONS COMPLETE (M1–M8) — owner-confirmed 2026-06-13
 
-The mission program is finished. M1, M3–M8 were completed + integrated by the loop (evidence in each mission block + JOURNAL.md). M2 (Pillar-2, owner-reserved): the re-judge piece (#8) was built + live-verified this session with owner authorization (migration 0018 + `rescore.py` + trigger); the owner reports the remaining Pillar-2 items (#7 enrichment-merge, #9 telemetry) completed himself. No pending missions remain; the loop is **paused** (no active cron). Leftover items are small **BACKLOG.md** follow-ups, NOT missions: **M3-rem** (`noValidate` on auth forms, "50 sources" footer→46), **M7a** (`api.ts` hand-mirrored types), **M8a** (un-ignore `test_main.py`). The standing **Pillar-2 hands-off** rule for all agents stays in force via the worker/integrator skills regardless of M2's status — only the owner edits Pillar-2 code.
+The mission program is finished. M1, M3–M8 were completed + integrated by the loop (evidence in each mission block + JOURNAL.md). M2 (Pillar-2, owner-reserved): the re-judge piece (#8) was built + live-verified this session with owner authorization (migration 0018 + `rescore.py` + trigger); the owner reports the remaining Pillar-2 items (#7 enrichment-merge, #9 telemetry) completed himself. No pending missions remain; the loop is **paused** (no active cron). The three follow-up items formerly listed as open backlog are now **all DONE**: **M3-rem** (`noValidate` on auth forms ✅ done; homepage copy "50 sources" → 47 ✅ fixed), **M7a** (`api.ts` no longer hand-mirrors types — resolved by M7's codegen ✅), **M8a** (`test_main.py` un-ignored and included in the gate ✅). The standing **Pillar-2 hands-off** rule for all agents stays in force via the worker/integrator skills regardless of M2's status — only the owner edits Pillar-2 code.
 
 ---
 
@@ -74,6 +74,7 @@ DoD:
 
 ## M6 — Source rotation 50→46 (bundled: jobtensor+comeet+gov_apprenticeships+aijobs_global)  [SERIALIZED — integrator only]
 Backlog 16b. status: DONE (1e709f7, round 8). 5 surfaces + SOURCE_INSTANCE_COUNT 49→45 + 4 files deleted + docs. Gate 1272 passed; live /api/sources = 46, 4 confirmed gone, lookalikes kept. Adversarial waves: 2 raw → 1 confirmed-fixed (discover_companies map) + 1 refuted (phase history). Five surfaces per rules #8/#13 (SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli, test_api) + doc count refs (CLAUDE.md/STATUS/ARCHITECTURE). Proof bar: jobtensor upstream-dead evidence already journaled (iteration 3) — re-cite in the removal commit.
+**POST-M6 NOTE (2026-06-16):** `gov_apprenticeships` was restored as a new source on the DfE Display Advert API v2 (different endpoint from the retired v1). SOURCE_REGISTRY is now **47** (not 46). The M6 removal is historical fact; the restoration is a separate commit on `fix/per-user-search-and-scoring-gate`.
 
 ## M7 — OpenAPI→TS codegen  [SERIALIZED — integrator only]
 Backlog #14, report problem #7. status: DONE (53e2020, owner-approved openapi-typescript). types.ts → thin alias layer over generated api-types.ts (net −249 lines); offline gen script + npm scripts + drift guard wired into agent-gate (backend API change OR frontend change that desyncs types now FAILS the commit). Adversarial waves caught + resolved: 3 call-site drift fixes, a real skill_tiers latent crash (dict defaults to {}, profile page accessed .primary unguarded), 1 follow-up filed (M7a — api.ts hand-mirrors 3 types with intentional tighter unions). Gate: backend 1272 + drift + frontend 65/type-check/lint green. Live-verified: profile + dashboard render with generated types, only the benign dark-mode hydration badge (test-artifacts/m7-{profile,dashboard}-render.png).
@@ -83,13 +84,13 @@ Report problem #10. files-owned: backend/tests/test_main.py
 DoD:
 - [x] 13 skip-marked scaffolding tests un-skipped + rehabbed offline (JobSpy stub + profile stub + breaker-registry reset fixtures; missing URL mocks added). All 14 pass in 11s (was ~32 min live). Assertion fix on 2 tests bypasses domain filtering via classify_user_domain→set() to exercise the include-all-sources path (documented, not weakened).
 - [x] no live network: timed run 11.1s (a single live JobSpy call alone is 30s+). Canonical suite still 1277 green, no regressions.
-status: DONE (round 12). FOLLOW-UP M8a: test_main.py is now offline+fast but still --ignore'd everywhere (Makefile/CLAUDE.md/agent-gate/pyproject) — un-ignore it so the E2E tests are gated and can't rot. Small cross-cutting change, deliberate follow-up.
+status: DONE (round 12). FOLLOW-UP M8a: ✅ DONE — test_main.py un-ignored; it now runs in the canonical gate (no `--ignore` anywhere in Makefile/CLAUDE.md/agent-gate/pyproject). The 14 tests pass in ~8 s offline.
 
 ---
 
 ## NEEDS-HUMAN queue (answer in the morning)
 1. M2-3 migration approval (telemetry columns)
-2. DfE "Display Adverts" replacement API subscription key — register it to revive gov_apprenticeships, or leave the source quarantined (M1 closing note)
-3. M6 scope expansion proposal: bundle comeet + gov_apprenticeships + aijobs_global into the rotation alongside jobtensor (50→46 instead of 50→49)? All four are now proven-dead quarantines. Your approved scope is jobtensor-only; expanding needs your word.
+2. ~~DfE "Display Adverts" replacement API subscription key~~ — **RESOLVED 2026-06-16**: `gov_apprenticeships` restored and active on DfE Display Advert API v2; SOURCE_REGISTRY = 47.
+3. ~~M6 scope expansion proposal: bundle comeet + gov_apprenticeships + aijobs_global~~ — **RESOLVED**: M6 shipped (jobtensor+comeet+aijobs_global removed, 50→46); `gov_apprenticeships` subsequently restored 2026-06-16 (46→47). SOURCE_REGISTRY = 47.
 4. API keys: jsearch / jooble / careerjet / findwork — provide or mark permanently-skipped
 5. SMTP / channel credentials for real notification sends

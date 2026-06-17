@@ -12,10 +12,10 @@
 > `docs/IMPLEMENTATION_LOG.md` for the full entry.
 
 **Last updated:** 2026-06-17
-**Total tests:** 1,285 passing / 0 failing / 3 skipped (1,288 collected as of `a4fe829` — defer to the runtime collected count, not this figure)
-**Source files:** 45 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
-**Job sources:** 46 registered in `SOURCE_REGISTRY` post-M6 rotation (Batch 3 added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet, dropped yc_companies/nomis/findajob; M6 2026-06 dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — all upstream-dead). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `a4fe829` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
+**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
+**Latest merged head:** `d003c4f` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
@@ -46,7 +46,7 @@
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
 - When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
-- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 46, post-M6-rotation)
+- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 47; 46 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
 - All original tests pass without modification
 
 ---
@@ -97,7 +97,7 @@
 | Schema migration | `backend/src/storage/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
 | Source health tracking | `backend/src/main.py`, `backend/src/storage/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
-| Source category metadata | `backend/src/sources/base.py`, all 46 source files | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
+| Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
 
 ---
@@ -145,17 +145,17 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 **Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
 
-**Step 3 carry-overs (technical debt to close in Step 3.5 stabilisation or Step 4):**
-- V-01..V-03 form-validation library (RHF + zod) — never installed; new C-02/C-03 forms ship with bespoke `useState` validation.
-- V-04 CV upload size cap + MIME allowlist — verify or backfill.
-- V-05 OpenAPI → TS codegen — explicitly P2; deferred.
-- C-07 `@dnd-kit/core` + `@dnd-kit/sortable` — KanbanBoard ships without these libs; if keyboard a11y on cards is needed, reintroduce.
+**Step 3 carry-overs — ALL SHIPPED (closed):**
+- V-01..V-03 form-validation library (RHF + zod) — DONE; forms now use RHF + zod validation.
+- V-04 CV upload size cap + MIME allowlist — DONE; 413/415 responses wired, MIME allowlist enforced.
+- V-05 OpenAPI → TS codegen — DONE; codegen pipeline in place.
+- C-07 `@dnd-kit/core` + `@dnd-kit/sortable` keyboard a11y on KanbanBoard — DONE; `@dnd-kit/*` installed and keyboard a11y active.
 
 ---
 
 ## What Is Working Right Now
 
-- Full 46-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed 4 dead sources)
+- Full 47-source pipeline (46 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16)
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
@@ -170,7 +170,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- 1,285 tests pass, 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests) — 1,288 collected as of `a4fe829`
+- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
 
 ---
 
@@ -209,7 +209,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Test file | Module tested | Tests |
 |-----------|--------------|-------|
-| `test_sources.py` | All 46 sources | 55+ |
+| `test_sources.py` | All 47 registry entries (46 source classes) | 55+ |
 | `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
 | `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
@@ -230,7 +230,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | **1,285** passing / 0 failing / 3 skipped on Windows (1,288 collected as of `a4fe829` — defer to runtime count) |
+| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
 
 ### Not covered or lightly covered
 
@@ -261,5 +261,5 @@ python -m src.cli run --dry-run --log-level DEBUG
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"
-# Output: 46 (post-M6 rotation; 4 upstream-dead sources removed 2026-06)
+# Output: 47 (46 live instances; gov_apprenticeships restored 2026-06-16; only jobtensor/comeet/aijobs_global remain removed)
 ```

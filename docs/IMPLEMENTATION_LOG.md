@@ -24,7 +24,7 @@ Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-j
 - Per-user state only; shared catalog tables (`jobs`, `job_enrichment`, `job_embeddings`) are unchanged (rules #10/#17).
 
 **`src/services/rescore.py` (new)**
-- `rescore_user_feed(user_id, conn, new_version_id)` — top-level entry point called by the API trigger. Loads the new profile, rebuilds `SearchConfig`, calls `score_catalog_row` for each job in the user's 30-day feed, writes fresh scores and the new `profile_version` stamp. If `MATCHER_ENABLED` is on, triggers the LLM re-judge for the top candidates.
+- `rescore_user_feed(user_id, db_path=None)` — top-level entry point called internally by `reextract_and_rescore`. Opens its own DB connection (does NOT accept `conn` or `new_version_id`; resolves the current profile version via `current_profile_version_id()`). Loads the new profile, rebuilds `SearchConfig`, calls `score_catalog_row` for each job in the user's 30-day feed, writes fresh scores and the new `profile_version` stamp. If `MATCHER_ENABLED` is on, triggers the LLM re-judge for the top candidates.
 - `score_catalog_row(job_row, scorer)` — pure scoring helper; takes a `user_feed` + `jobs` join row and a `JobScorer` instance, returns an updated `match_score` + dim columns without touching the DB itself.
 
 **`src/services/llm_matcher.py` (extended)**
@@ -34,7 +34,7 @@ Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-j
 - Change-detector helper compares the two most recent `user_profile_versions` rows for a user. Returns `True` if the serialized profile content differs. Used by the API trigger to decide whether a full re-score is warranted.
 
 **`src/api/routes/profile.py` (trigger)**
-- After every `save_profile` (CV upload, LinkedIn upload, preferences save), the route calls the change-detector. If content changed, it enqueues `rescore_user_feed` as a FastAPI `BackgroundTask` so the HTTP response is not blocked.
+- After every `save_profile` (CV upload, LinkedIn upload, preferences save), the route calls the change-detector via `_maybe_trigger_rescore`. If content changed, it fires `reextract_and_rescore(user_id)` via `asyncio.create_task` (NOT a FastAPI `BackgroundTask`) so the HTTP response is not blocked. `reextract_and_rescore` internally calls `rescore_user_feed`.
 - The LLM re-judge portion of the background task only fires when `MATCHER_ENABLED=true`; the keyword re-score always runs.
 
 **`src/services/feed.py` (extended)**

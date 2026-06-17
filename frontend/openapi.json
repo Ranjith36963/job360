@@ -4017,7 +4017,7 @@
     },
     "/api/profile/github": {
       "post": {
-        "description": "Enrich the caller's profile with GitHub public data.",
+        "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.",
         "operationId": "upload_github_api_profile_github_post",
         "parameters": [
           {
