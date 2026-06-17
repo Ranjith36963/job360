@@ -2,7 +2,16 @@
 
 ## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
 
-**Last updated:** 2026-06-11
+> **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
+> profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
+> deterministic pass **and** an LLM enhance pass, merged into one `CVData`. New
+> `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`,
+> `about_me_inferred_skills`) store raw inputs so both passes re-run from storage on
+> any profile change (`two_pass.reextract_and_rescore`) → new profile version → feed
+> re-score. No DB migration (JSON-blob storage). M2 / LLM judge untouched. See
+> `docs/IMPLEMENTATION_LOG.md` for the full entry.
+
+**Last updated:** 2026-06-17
 **Total tests:** 1,285 passing / 0 failing / 3 skipped (1,288 collected as of `a4fe829` — defer to the runtime collected count, not this figure)
 **Source files:** 45 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 46 registered in `SOURCE_REGISTRY` post-M6 rotation (Batch 3 added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet, dropped yc_companies/nomis/findajob; M6 2026-06 dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — all upstream-dead). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.

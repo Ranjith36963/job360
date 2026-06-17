@@ -320,6 +320,99 @@ async def test_fetch_github_profile_aggregates_frameworks():
     assert set(frameworks) == {"FastAPI", "Pydantic", "React", "Next.js"}
 
 
+# ── GitHub LLM pass (Pass 2) — infer skills from repo prose ─────────
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_parses_skills():
+    """The LLM reads repo name/description/topics and returns extra skills
+    the hard-coded lookup table can't know (e.g. 'LangChain', 'RAG')."""
+    seen = {}
+
+    async def fake_llm(prompt, system=""):
+        seen["prompt"] = prompt
+        return {"skills": ["LangChain", "RAG", "Vector Search"]}
+
+    repos_brief = [
+        {"name": "rag-bot", "description": "A retrieval bot built with langchain", "topics": ["llm"]},
+    ]
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        skills = await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert "rag-bot" in seen["prompt"]  # repo data reached the prompt
+    assert "LangChain" in skills and "RAG" in skills
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_empty_input_skips_llm():
+    """No repos → return [] without ever calling the LLM (cost guard)."""
+    called = False
+
+    async def fake_llm(prompt, system=""):
+        nonlocal called
+        called = True
+        return {"skills": ["should-not-happen"]}
+
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        skills = await github_enricher.llm_infer_github_skills([])
+
+    assert skills == []
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_llm_failure_returns_empty():
+    """Provider error must not crash the pass — returns [] (never raises)."""
+    async def boom(prompt, system=""):
+        raise RuntimeError("no LLM key configured")
+
+    repos_brief = [{"name": "r", "description": "d", "topics": []}]
+    with patch("src.services.profile.llm_provider.llm_extract", new=boom):
+        skills = await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert skills == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_includes_repos_brief():
+    """fetch_github_profile exposes repos_brief (name/description/topics) so the
+    LLM pass can re-run offline on a later profile change."""
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    repos = [
+        {"name": "rag-bot", "language": "Python", "description": "RAG with langchain",
+         "stargazers_count": 3, "topics": ["llm", "rag"], "pushed_at": now_iso, "fork": False},
+    ]
+
+    async def fake_get_json(session, url):
+        if url.endswith("/repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            return {"Python": 1}
+        return None
+
+    fake_session = _make_async_session()
+    with patch("src.services.profile.github_enricher._get_json", side_effect=fake_get_json), \
+         patch("src.services.profile.github_enricher._fetch_repo_frameworks",
+               new=AsyncMock(return_value=[])), \
+         patch("src.services.profile.github_enricher.aiohttp.ClientSession", return_value=fake_session):
+        result = await github_enricher.fetch_github_profile("alice")
+
+    brief = result["repos_brief"]
+    assert brief and brief[0]["name"] == "rag-bot"
+    assert brief[0]["description"] == "RAG with langchain"
+    assert "rag" in brief[0]["topics"]
+
+
+def test_enrich_cv_from_github_stores_repos_brief():
+    cv = CVData()
+    github_data = {
+        "languages": {}, "topics": [], "skills_inferred": [], "frameworks_inferred": [],
+        "repos_brief": [{"name": "x", "description": "y", "topics": ["z"]}],
+    }
+    out = github_enricher.enrich_cv_from_github(cv, github_data)
+    assert out.github_repos_brief == [{"name": "x", "description": "y", "topics": ["z"]}]
+
+
 @pytest.mark.asyncio
 async def test_fetch_repo_frameworks_parses_real_manifest_content():
     """Smoke test: given a real requirements.txt payload the helper yields mapped skills."""
