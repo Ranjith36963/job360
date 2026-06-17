@@ -319,6 +319,7 @@ class TestParseLinkedInPdfEndToEnd:
             "positions", "skills", "education", "certifications",
             "summary", "industry", "headline",
             "languages", "projects", "volunteer", "courses",
+            "raw_text",
         }
         assert data["skills"] == ["Python"]
 
@@ -337,6 +338,38 @@ class TestParseLinkedInPdfEndToEnd:
         assert data["skills"] == ["Python", "Rust"]
         assert data["positions"] == []
         assert data["education"] == []
+
+
+# ---------------------------------------------------------------------------
+# Two-pass: LinkedIn raw text storage (re-run extraction without re-upload)
+# ---------------------------------------------------------------------------
+
+class TestLinkedInRawTextStorage:
+    @pytest.mark.asyncio
+    async def test_parse_returns_raw_text(self, tmp_path):
+        """parse_linkedin_pdf_async exposes the extracted text under 'raw_text'
+        so the two-pass orchestrator can re-run the LLM pass without the file."""
+        path = _make_linkedin_pdf(
+            tmp_path,
+            summary="",
+            experience=None, education=None,
+            skills=["Python", "Rust"], certifications=None,
+        )
+        data = await parse_linkedin_pdf_async(str(path))
+        assert "raw_text" in data
+        assert "Python" in data["raw_text"]
+
+    def test_enrich_stores_linkedin_raw_text(self):
+        cv = CVData()
+        data = {"skills": ["Python"], "positions": [], "raw_text": "RAW LINKEDIN TEXT"}
+        out = enrich_cv_from_linkedin(cv, data)
+        assert out.linkedin_raw_text == "RAW LINKEDIN TEXT"
+
+    def test_enrich_missing_raw_text_leaves_empty(self):
+        """Older callers that don't pass raw_text don't crash; field stays ''."""
+        cv = CVData()
+        out = enrich_cv_from_linkedin(cv, {"skills": [], "positions": []})
+        assert out.linkedin_raw_text == ""
 
 
 # ---------------------------------------------------------------------------

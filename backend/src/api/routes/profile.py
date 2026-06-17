@@ -66,12 +66,16 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
             return
 
         import asyncio  # noqa: PLC0415
-        from src.services.rescore import rescore_user_feed  # noqa: PLC0415
 
-        task = asyncio.create_task(rescore_user_feed(user_id))
+        # Two-pass: a profile change re-runs the deterministic + LLM passes over
+        # ALL inputs from stored data, saves a new profile version (new id),
+        # THEN re-scores the feed against the refreshed profile.
+        from src.services.profile.two_pass import reextract_and_rescore  # noqa: PLC0415
+
+        task = asyncio.create_task(reextract_and_rescore(user_id))
         _rescore_bg_tasks.add(task)
         task.add_done_callback(_rescore_bg_tasks.discard)
-        logger.info("rescore: background re-score scheduled for user %s", user_id)
+        logger.info("two_pass: background re-extract + re-score scheduled for user %s", user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "rescore: failed to schedule background re-score for user %s: %s",

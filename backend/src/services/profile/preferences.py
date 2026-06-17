@@ -2,7 +2,64 @@
 
 from __future__ import annotations
 
+import logging
+
 from src.services.profile.models import UserPreferences
+
+logger = logging.getLogger("job360.profile.preferences")
+
+
+# ── Preferences LLM pass (Pass 2) — mine free-text about_me ─────────
+
+_ABOUT_ME_SYSTEM = (
+    "You read a job-seeker's free-text 'about me' blurb and name the concrete "
+    "professional skills it implies. You return JSON only and never invent "
+    "skills the text does not support."
+)
+
+_ABOUT_ME_PROMPT = """Read this job-seeker's free-text "about me" and extract the concrete
+professional SKILLS it implies — tools, methods, domains, specialities.
+
+Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
+
+Rules:
+- Only skills the text actually supports. Do not invent.
+- Individual items, not categories.
+- Domain-agnostic: technical OR non-technical (e.g. "Stakeholder Management", "HIPAA Compliance", "Welding").
+
+ABOUT ME:
+---
+{about_me}
+---"""
+
+
+async def llm_infer_from_about_me(about_me: str) -> list[str]:
+    """Pass 2 for preferences — mine the free-text ``about_me`` for skills the
+    structured form never captured.
+
+    Returns ``[]`` (never raises) on blank input or provider failure. Blank
+    input never calls the LLM (cost guard).
+    """
+    if not about_me or not about_me.strip():
+        return []
+    prompt = _ABOUT_ME_PROMPT.format(about_me=about_me.strip())
+    try:
+        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
+        result = await llm_extract(prompt, system=_ABOUT_ME_SYSTEM)
+    except Exception as e:  # noqa: BLE001 — never crash the pass
+        logger.warning("about_me LLM skill inference failed: %s", e)
+        return []
+
+    raw = result.get("skills") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in raw:
+        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
+            out.append(s.strip())
+            seen.add(s.strip().lower())
+    return out
 
 
 def _split_and_clean(value: str) -> list[str]:
