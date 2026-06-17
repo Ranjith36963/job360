@@ -270,6 +270,67 @@ def test_normalize_github_username_non_string():
 
 
 @pytest.mark.asyncio
+async def test_unauthenticated_caps_request_footprint(monkeypatch):
+    """With no GITHUB_TOKEN, the language + dep-file probes are capped so a
+    single fetch fits the 60 req/hr unauthenticated budget (≈48 calls)."""
+    monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "")
+    repos = [
+        {"name": f"r{i}", "language": "Python", "description": "d",
+         "stargazers_count": 0, "topics": [], "pushed_at": None, "fork": False}
+        for i in range(30)
+    ]
+    lang_calls, dep_calls = [], []
+
+    async def fake_get_json(session, url):
+        if url.endswith("repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            lang_calls.append(url)
+            return {"Python": 1}
+        return None
+
+    async def fake_fw(session, user, repo):
+        dep_calls.append(repo)
+        return []
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks", side_effect=fake_fw), \
+         patch.object(github_enricher.aiohttp, "ClientSession", return_value=_make_async_session()):
+        await github_enricher.fetch_github_profile("alice")
+
+    assert len(lang_calls) <= 12, f"language probes not capped: {len(lang_calls)}"
+    assert len(dep_calls) <= 5, f"dep probes not capped: {len(dep_calls)}"
+    assert 1 + len(lang_calls) + len(dep_calls) * 7 < 60
+
+
+@pytest.mark.asyncio
+async def test_authenticated_keeps_full_coverage(monkeypatch):
+    """With a token (5000/hr) the fuller probe is preserved (up to 20 langs)."""
+    monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "tok123")
+    repos = [
+        {"name": f"r{i}", "language": "Python", "description": "d",
+         "stargazers_count": 0, "topics": [], "pushed_at": None, "fork": False}
+        for i in range(30)
+    ]
+    lang_calls = []
+
+    async def fake_get_json(session, url):
+        if url.endswith("repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            lang_calls.append(url)
+            return {"Python": 1}
+        return None
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks", new=AsyncMock(return_value=[])), \
+         patch.object(github_enricher.aiohttp, "ClientSession", return_value=_make_async_session()):
+        await github_enricher.fetch_github_profile("alice")
+
+    assert len(lang_calls) == 20
+
+
+@pytest.mark.asyncio
 async def test_fetch_github_profile_accepts_full_url():
     """A pasted profile URL is normalised to the username before the API call."""
     captured: dict = {}

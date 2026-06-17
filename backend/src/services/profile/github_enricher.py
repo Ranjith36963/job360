@@ -335,10 +335,19 @@ async def fetch_github_profile(
             repositories.append(repo_info)
             all_topics.update(repo.get("topics", []))
 
-        # Fetch per-repo language breakdown for top 20 repos with temporal weight.
+        # Request-budget guard: unauthenticated GitHub allows only 60 req/hr,
+        # and a full probe (1 + 20 languages + 10×7 dep-files ≈ 91) blows it,
+        # so the later calls 403 and the result is empty. With no token we cap
+        # the footprint (12 languages + 5×7 dep-files ≈ 48 < 60) so a fetch
+        # reliably returns data. With a token (5000/hr) we keep full coverage.
+        authed = bool(GITHUB_TOKEN)
+        lang_n = 20 if authed else 12
+        dep_n = MAX_REPOS_FOR_DEPS if authed else 5
+
+        # Fetch per-repo language breakdown with temporal weight.
         # We keep a per-repo map so the recency multiplier can be applied
         # per-repo *before* aggregation, not after.
-        top_for_languages = repositories[:20]
+        top_for_languages = repositories[:lang_n]
         lang_tasks = [
             _get_json(
                 session,
@@ -359,7 +368,7 @@ async def fetch_github_profile(
         # Batch 1.2 — dep-file parsing across the top N repos (network-heavy).
         dep_tasks = [
             _fetch_repo_frameworks(session, username, repo["name"])
-            for repo in repositories[:MAX_REPOS_FOR_DEPS]
+            for repo in repositories[:dep_n]
         ]
         dep_results = await asyncio.gather(*dep_tasks, return_exceptions=True)
         frameworks_inferred: list[str] = []
