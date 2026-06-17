@@ -138,7 +138,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 **Step 3 carry-overs (technical debt to close in Step 3.5 stabilisation or Step 4):**
 - V-01..V-03 form-validation library (RHF + zod) — never installed; new C-02/C-03 forms ship with bespoke `useState` validation.
-- V-04 CV upload size cap + MIME allowlist — verify or backfill.
+- ~~V-04 CV upload size cap + MIME allowlist — verify or backfill.~~ **DONE** — `POST /api/profile` enforces a 10 MB bounded read (HTTP 413) + `.pdf`/`.docx` extension allowlist (HTTP 415) at `backend/src/api/routes/profile.py:226-237`. (MIME is extension-only on the CV route by design; the LinkedIn route also checks `content_type`.)
 - V-05 OpenAPI → TS codegen — explicitly P2; deferred.
 - C-07 `@dnd-kit/core` + `@dnd-kit/sortable` — KanbanBoard ships without these libs; if keyboard a11y on cards is needed, reintroduce.
 
