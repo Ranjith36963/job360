@@ -461,91 +461,139 @@ async def nightly_ghost_sweep(ctx: dict) -> dict:
 # the LLM provider chain is never touched during pytest (CLAUDE.md rule #4).
 
 
+MAX_BUNDLE_RETRIES = 5
+
+
 async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     """ARQ task: send all queued digest notifications for user_id across all channels.
 
     Called by notification_tick when a bundle is due for the user.
     Sends with force=True to bypass mode/quiet-hours gate (bundle already decided).
 
+    Per-channel outcome handling (blueprint §6 / rules #23/#24):
+      * success  → mark that channel's queue rows ``sent``, write ledger ``sent``.
+      * failure  → leave the queue rows (so the next tick retries), write ledger
+        ``failed`` (increments retry_count). Once retry_count reaches
+        ``MAX_BUNDLE_RETRIES`` the ledger row flips to ``dlq`` and the queue rows
+        are dropped so a permanently-bad channel cannot wedge the queue.
+      * skipped  → leave the queue rows untouched (rule disabled mid-flight etc.).
+    ``last_sent_at`` is stamped only when at least one channel actually sent.
+
     Returns {'sent': int, 'failed': int, 'jobs_count': int}.
     """
     db: aiosqlite.Connection = ctx["db"]
     db.row_factory = aiosqlite.Row
 
-    # Get all channels that have pending digest rows for this user
     try:
         cur = await db.execute(
-            "SELECT DISTINCT channel FROM user_notification_digests "
+            "SELECT channel, job_id FROM user_notification_digests "
             "WHERE user_id = ? AND sent = 0",
             (user_id,),
         )
-        channels_with_pending = [r[0] for r in await cur.fetchall()]
+        pending = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
         return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    if not channels_with_pending:
+    if not pending:
         return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    # Collect all pending job_ids across channels
-    try:
-        cur = await db.execute(
-            "SELECT DISTINCT job_id FROM user_notification_digests "
-            "WHERE user_id = ? AND sent = 0",
-            (user_id,),
-        )
-        job_ids = [r[0] for r in await cur.fetchall()]
-    except Exception:  # noqa: BLE001
-        return {"sent": 0, "failed": 0, "jobs_count": 0}
+    by_channel: dict[str, list[int]] = {}
+    for r in pending:
+        by_channel.setdefault(r["channel"], []).append(r["job_id"])
 
-    # Fetch job details
-    job_details: list[dict] = []
-    for jid in job_ids:
+    # Fetch job details for every queued job_id (deduped).
+    job_details: dict[int, dict] = {}
+    for jid in {r["job_id"] for r in pending}:
         cur = await db.execute(
             "SELECT title, company, apply_url FROM jobs WHERE id = ?", (jid,)
         )
         row = await cur.fetchone()
         if row:
-            job_details.append({
-                "job_id": jid,
-                "title": row["title"],
-                "company": row["company"],
-                "apply_url": row["apply_url"],
-            })
+            job_details[jid] = {"title": row["title"], "company": row["company"], "apply_url": row["apply_url"]}
 
     jobs_count = len(job_details)
     if jobs_count == 0:
+        # Jobs were purged — drop the orphaned queue rows so we don't loop forever.
         await _mark_digest_rows_sent(db, user_id)
         return {"sent": 0, "failed": 0, "jobs_count": 0}
 
     digest_title = f"Job360 Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
-    lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details]
+    lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details.values()]
     digest_body = "\n".join(lines)
 
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
         from src.services.channels.dispatcher import dispatch as real_dispatch
+
         dispatcher_fn = real_dispatch
 
     # dispatch with force=True to bypass mode/quiet-hours gate
     results = await dispatcher_fn(db, user_id=user_id, title=digest_title, body=digest_body, force=True)
-    sent = sum(1 for r in results if r.ok and not r.skipped)
-    failed = sum(1 for r in results if not r.ok)
 
-    # Mark all pending rows as sent
-    await _mark_digest_rows_sent(db, user_id)
+    # Map each channel_type to ('sent'|'failed'|'skipped', error).
+    status_by_channel: dict[str, tuple[str, str]] = {}
+    for r in results:
+        if r.ok and not r.skipped and not getattr(r, "queued_digest", False):
+            status_by_channel[r.channel_type] = ("sent", "")
+        elif r.skipped:
+            status_by_channel[r.channel_type] = ("skipped", r.error or "")
+        else:
+            status_by_channel[r.channel_type] = ("failed", r.error or "delivery failed")
 
-    # Update last_sent_at on the rule
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        await db.execute(
-            "UPDATE notification_rules SET last_sent_at = ? WHERE user_id = ?",
-            (now, user_id),
-        )
-        await db.commit()
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("Could not update last_sent_at for user %s: %s", user_id, exc)
+    sent = failed = 0
+    any_sent = False
+    for channel, jids in by_channel.items():
+        uniq_jids = [j for j in dict.fromkeys(jids) if j in job_details]
+        if not uniq_jids:
+            continue
+        st, err = status_by_channel.get(channel, ("failed", "channel not dispatched"))
+        if st == "skipped":
+            continue  # leave the queue rows untouched
+        for jid in uniq_jids:
+            await _record_ledger_if_new(db, user_id=user_id, job_id=jid, channel=channel)
+        if st == "sent":
+            for jid in uniq_jids:
+                await mark_ledger_sent(db, user_id=user_id, job_id=jid, channel=channel)
+            await db.execute(
+                "UPDATE user_notification_digests SET sent=1, "
+                "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+                "WHERE user_id=? AND channel=? AND sent=0",
+                (user_id, channel),
+            )
+            await db.commit()
+            sent += 1
+            any_sent = True
+        else:  # failed → leave rows for retry, ledger failed, DLQ after the cap
+            for jid in uniq_jids:
+                await mark_ledger_failed(db, user_id=user_id, job_id=jid, channel=channel, error=err)
+            await db.execute(
+                "UPDATE notification_ledger SET status='dlq' "
+                "WHERE user_id=? AND channel=? AND retry_count >= ?",
+                (user_id, channel, MAX_BUNDLE_RETRIES),
+            )
+            await db.execute(
+                "DELETE FROM user_notification_digests WHERE user_id=? AND channel=? AND sent=0 "
+                "AND job_id IN (SELECT job_id FROM notification_ledger "
+                "  WHERE user_id=? AND channel=? AND status='dlq')",
+                (user_id, channel, user_id, channel),
+            )
+            await db.commit()
+            failed += 1
+
+    if any_sent:
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            await db.execute(
+                "UPDATE notification_rules SET last_sent_at = ? WHERE user_id = ?",
+                (now, user_id),
+            )
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "Could not update last_sent_at for user %s: %s", user_id, exc
+            )
 
     return {"sent": sent, "failed": failed, "jobs_count": jobs_count}
 

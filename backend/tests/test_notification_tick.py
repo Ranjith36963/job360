@@ -180,3 +180,100 @@ async def test_send_bundle_dispatches(tick_db):
     assert result["jobs_count"] == 1
     assert result["sent"] == 1
     assert dispatched[0]["force"] is True
+
+
+# ── send_bundle ledger + failure handling (caught by live verification) ──────
+
+
+async def _seed_job_and_digest(path, channel="slack"):
+    async with aiosqlite.connect(path) as db:
+        now_str = datetime.now(timezone.utc).isoformat()
+        cur = await db.execute(
+            "INSERT INTO jobs(title, company, apply_url, source, date_found, "
+            "normalized_company, normalized_title, first_seen) VALUES(?,?,?,?,?,?,?,?)",
+            ("Dev", "Corp", "https://x.com", "test", now_str, "corp", "dev", now_str),
+        )
+        job_id = cur.lastrowid
+        await db.execute(
+            "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?,?,?)",
+            ("alice", channel, job_id),
+        )
+        await db.commit()
+    return job_id
+
+
+@pytest.mark.asyncio
+async def test_send_bundle_success_writes_ledger_and_drains(tick_db):
+    job_id = await _seed_job_and_digest(tick_db)
+    from src.services.channels.dispatcher import ChannelSendResult
+
+    async def ok_dispatch(db, *, user_id, title, body, force=False, **kw):
+        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=True)]
+
+    async with aiosqlite.connect(tick_db) as db:
+        res = await send_bundle({"db": db, "dispatcher": ok_dispatch}, "alice")
+        assert res["sent"] == 1
+        # ledger row written as 'sent'
+        led = await (await db.execute(
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            (job_id,))).fetchone()
+        assert led is not None and led[0] == "sent"
+        # queue drained
+        pend = await (await db.execute(
+            "SELECT COUNT(*) FROM user_notification_digests WHERE user_id='alice' AND sent=0")).fetchone()
+        assert pend[0] == 0
+        # last_sent_at stamped
+        async with aiosqlite.connect(tick_db) as _:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_send_bundle_failure_keeps_rows_and_marks_failed(tick_db):
+    job_id = await _seed_job_and_digest(tick_db)
+    from src.services.channels.dispatcher import ChannelSendResult
+
+    async def bad_dispatch(db, *, user_id, title, body, force=False, **kw):
+        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=False, error="boom")]
+
+    async with aiosqlite.connect(tick_db) as db:
+        res = await send_bundle({"db": db, "dispatcher": bad_dispatch}, "alice")
+        assert res["failed"] == 1 and res["sent"] == 0
+        # ledger row 'failed', not 'sent'
+        led = await (await db.execute(
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            (job_id,))).fetchone()
+        assert led is not None and led[0] == "failed"
+        # queue rows KEPT for retry (not drained, not lost)
+        pend = await (await db.execute(
+            "SELECT COUNT(*) FROM user_notification_digests WHERE user_id='alice' AND sent=0")).fetchone()
+        assert pend[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_bundle_dlq_after_max_retries(tick_db):
+    job_id = await _seed_job_and_digest(tick_db)
+    from src.services.channels.dispatcher import ChannelSendResult
+    from src.workers.tasks import MAX_BUNDLE_RETRIES
+
+    # Pre-seed a ledger row already at the retry cap.
+    async with aiosqlite.connect(tick_db) as db:
+        await db.execute(
+            "INSERT INTO notification_ledger(user_id, job_id, channel, status, retry_count) "
+            "VALUES('alice', ?, 'slack', 'failed', ?)",
+            (job_id, MAX_BUNDLE_RETRIES),
+        )
+        await db.commit()
+
+    async def bad_dispatch(db, *, user_id, title, body, force=False, **kw):
+        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=False, error="boom")]
+
+    async with aiosqlite.connect(tick_db) as db:
+        await send_bundle({"db": db, "dispatcher": bad_dispatch}, "alice")
+        led = await (await db.execute(
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            (job_id,))).fetchone()
+        assert led[0] == "dlq"
+        # queue rows dropped (DLQ)
+        pend = await (await db.execute(
+            "SELECT COUNT(*) FROM user_notification_digests WHERE user_id='alice' AND sent=0")).fetchone()
+        assert pend[0] == 0
