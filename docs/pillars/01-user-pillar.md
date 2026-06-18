@@ -171,7 +171,7 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 - **Password hashing — `backend/src/services/auth/passwords.py`.** Argon2id with OWASP-recommended params (`time_cost=3`, `memory_cost=64 MiB`, `parallelism=4`). Salt is unique per password; verification is constant-time.
 - **Sessions — `backend/src/services/auth/sessions.py`.** Cookie format `<session_id>.<hmac>` signed with `itsdangerous.TimestampSigner` using `SESSION_SECRET`. Signature is verified *before* any DB lookup, so a tampered cookie is rejected for zero cost. 30-day absolute TTL.
 - **FastAPI guards — `backend/src/api/auth_deps.py`.** Two dependencies: `require_user` (401 on missing/invalid/expired cookie) and `optional_user` (returns `None`). Both populate a frozen `CurrentUser` dataclass with `{id, email}`.
-- **Routes — `backend/src/api/routes/auth.py`.** All seven endpoints in the table above. There is **no** rate-limit, lockout, or email-verification step today — see Status table at the end.
+- **Routes — `backend/src/api/routes/auth.py`.** All seven endpoints in the table above. There is **no** rate-limit or lockout on login today. Email-verification and password-reset endpoints **do** exist (verify-email is not enforced at login; password-reset is fully wired) — see Status table at the end.
 - **DB schema — `backend/migrations/0001_auth.up.sql`.** Two tables: `users(id, email UNIQUE, password_hash, created_at, deleted_at)` and `sessions(id, user_id FK, created_at, expires_at, last_seen, user_agent, ip_hash)`.
 - **Multi-tenant placeholder — `backend/src/core/tenancy.py`.** Constant `DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001"`. Used as the owner for any row created by the *CLI* (pre-auth) or migrated from the pre-Batch-2 single-tenant world. Its `password_hash` is literally `"!"` so it can never be logged into. This is how migration `0002_multi_tenant` backfilled legacy data without throwing it away.
 
@@ -517,8 +517,8 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Soft-delete account | ✅ | `deleted_at` is honoured by `_current_user_from_cookie` |
 | Session timeout extension on activity | 🟡 | `last_seen` is updated but absolute TTL is still 30 d — no rolling renewal |
 | Rate-limit / brute-force lockout | ❌ | not implemented (`test_api_security.py` only covers concurrent-search throttle) |
-| Email verification | ❌ | not implemented |
-| Password reset (forgot password) | ❌ | not implemented |
+| Email verification | 🟡 | implemented but **not enforced at login** — endpoints `/verify-email/request,confirm` (migration 0016) + frontend `/verify-email` page; `users.email_verified_at` is set but the login path does not require it |
+| Password reset (forgot password) | ✅ | implemented — `POST /api/auth/password-reset/request` → 204 + `/confirm`; token SHA256-hashed, 1 h TTL, revokes all sessions on reset (migration 0015). Email send is SMTP-conditional |
 | MFA / TOTP | ❌ | not implemented |
 | OAuth (Google / GitHub) | ❌ | not implemented |
 | `DEFAULT_TENANT_ID` placeholder user | ✅ | `core/tenancy.py`, backfilled by `0002_multi_tenant` |

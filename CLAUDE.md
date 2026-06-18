@@ -134,7 +134,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000         # Production-style
 python -m src.cli api --port 3001 --host 0.0.0.0    # Custom host/port
 
 # Pipeline
-python -m src.cli run                               # Full pipeline (49 instances)
+python -m src.cli run                               # Full pipeline (45 instances)
 python -m src.cli run --source arbeitnow            # Single source
 python -m src.cli run --dry-run --log-level DEBUG    # Dry run with debug
 python -m src.cli run --no-email                     # Skip notifications
@@ -199,7 +199,7 @@ job360/
 │   │   ├── core/              # settings, keywords, companies, skill_synonyms, fx, tenancy
 │   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
 │   │   ├── repositories/      # database, csv_export
-│   │   ├── sources/           # 49 source files in 6 category subfolders; 50 SOURCE_REGISTRY entries
+│   │   ├── sources/           # 45 source files in 6 category subfolders; 46 SOURCE_REGISTRY entries
 │   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep, send_daily_digest)
 │   │   └── utils/             # logger, rate_limiter, time_buckets
 │   └── tests/                 # 1,531 collected across 60+ files (defer to runtime count)

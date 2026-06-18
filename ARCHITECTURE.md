@@ -4,14 +4,14 @@
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **49 source instances** (50 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **45 source instances** (46 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
 -----------                   -----------------------------          ------
-                          +-> Sources (49) -+                    +-> Email (Apprise per-user)
+                          +-> Sources (45) -+                    +-> Email (Apprise per-user)
 CLI / Frontend   --+      |  (async fetch)  |                    +-> Slack / Discord / Telegram
                    |      v   tiered cadence v                   +-> Webhook
 Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
@@ -51,7 +51,7 @@ job360/
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (46 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
-│   │   │   ├── skill_synonyms.py     # 529-entry alias dict (k8s↔kubernetes, ...)
+│   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 21-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
@@ -125,7 +125,7 @@ else:
 
 ### 2. Source Instantiation (`main.py:_build_sources`)
 
-All 48 sources get `search_config` passed through:
+All 45 sources get `search_config` passed through:
 ```python
 ReedSource(session, api_key=REED_API_KEY, search_config=sc)
 ArbeitnowSource(session, search_config=sc)
@@ -142,7 +142,7 @@ The `_build_sources()` function groups sources into labeled groups (A through K)
 2. `sources` command — lists all available source names
 3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 48` and checks the exact set of keys
 
-Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 48 registry entries but 47 unique classes.
+Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 46 registry entries but 45 unique classes.
 
 ### 4. Keyword Resolution (`base.py` properties)
 

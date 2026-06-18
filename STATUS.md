@@ -3,7 +3,7 @@
 ## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
 
 **Last updated:** 2026-06-11
-**Total tests:** 1,285 passing / 0 failing / 3 skipped (1,288 collected as of `a4fe829` — defer to the runtime collected count, not this figure)
+**Total tests:** 1,528 passing / 0 failing / 3 skipped (1,531 collected — defer to the runtime collected count, not this figure)
 **Source files:** 45 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 46 registered in `SOURCE_REGISTRY` post-M6 rotation (Batch 3 added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet, dropped yc_companies/nomis/findajob; M6 2026-06 dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — all upstream-dead). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `a4fe829` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
@@ -26,7 +26,7 @@
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
-| 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
+| 45 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
 | CLI setup-profile | `backend/src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `backend/tests/test_profile.py` | Done -- 56 tests covering all profile modules |
@@ -99,7 +99,7 @@
 - AI-powered CV summarization for better keyword extraction
 - Multi-profile support (different job searches simultaneously)
 - Job recommendation engine based on profile match patterns
-- Interview tracking and application pipeline
+- ~~Interview tracking and application pipeline~~ **SHIPPED in Step 3** — Kanban pipeline (5 stages, timeline, notes, reminders) at `/pipeline` + `src/api/routes/pipeline.py`
 
 ---
 
@@ -134,7 +134,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 **Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
-**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
+**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), friend dogfood, prod-Redis smoke. (Password-reset/forgot-password is already shipped — migration 0015 + `auth.py` routes — pending only production SMTP/SES for reliable delivery.)
 
 **Step 3 carry-overs (technical debt to close in Step 3.5 stabilisation or Step 4):**
 - V-01..V-03 form-validation library (RHF + zod) — never installed; new C-02/C-03 forms ship with bespoke `useState` validation.
@@ -146,7 +146,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## What Is Working Right Now
 
-- Full 46-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed 4 dead sources)
+- Full 46-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed 4 dead sources). **Note:** the CLI `run_search` notify path uses the legacy env-var channels (email/Slack/Discord webhook); the per-user Apprise dispatcher (rules, quiet hours, digest) only delivers when a Redis-backed ARQ worker is running.
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
@@ -161,7 +161,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- 1,285 tests pass, 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests) — 1,288 collected as of `a4fe829`
+- 1,528 tests pass, 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests) — 1,531 collected
 
 ---
 
@@ -221,7 +221,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | **1,285** passing / 0 failing / 3 skipped on Windows (1,288 collected as of `a4fe829` — defer to runtime count) |
+| **Total (current green baseline)** | | **1,528** passing / 0 failing / 3 skipped on Windows (1,531 collected — defer to runtime count) |
 
 ### Not covered or lightly covered
 

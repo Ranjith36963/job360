@@ -1,14 +1,14 @@
 # Pillar 3 — Job Providers
 
-> **Audience.** Read this if you want to understand where Job360's raw job postings actually come from — the 49 source classes, the one base class they all inherit, the shared retry/rate-limit/conditional-fetch machinery, the ATS company-slug catalog, and how a posting becomes a normalised `Job` row in the shared catalog.
+> **Audience.** Read this if you want to understand where Job360's raw job postings actually come from — the 45 source classes, the one base class they all inherit, the shared retry/rate-limit/conditional-fetch machinery, the ATS company-slug catalog, and how a posting becomes a normalised `Job` row in the shared catalog.
 >
-> **Scope.** Covers code on `main` as of 2026-05-28 (HEAD `a7a2268`), post-Batch-3 source rotation. Counts in this doc were verified directly against the files on disk and the test assertions — not taken from prose.
+> **Scope.** Covers code on `main`, post-Batch-3 source rotation and the **M6 rotation (2026-06)** that dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global). Current canonical counts: **45 classes / 46 registry keys / 45 instances**. Counts in this doc were verified against the files on disk and the test assertions.
 
 ---
 
 ## 1. TL;DR — what the providers pillar does
 
-> *Job360 talks to 49 distinct job-source classes — keyed aggregators, free JSON APIs, company ATS boards, RSS/XML feeds, HTML scrapers, and a few one-offs. Every one inherits a single `BaseJobSource` that gives it retry-with-backoff, per-source rate limiting, optional conditional (ETag/304) fetching, and a UK/remote location filter for free. Each source's only real job is to implement one async method — `fetch_jobs() -> list[Job]` — turning whatever shape the upstream returns into the canonical `Job` dataclass. The orchestrator (Pillar 2) then scores, dedups, and stores them.*
+> *Job360 talks to 45 distinct job-source classes — keyed aggregators, free JSON APIs, company ATS boards, RSS/XML feeds, HTML scrapers, and a few one-offs. Every one inherits a single `BaseJobSource` that gives it retry-with-backoff, per-source rate limiting, optional conditional (ETag/304) fetching, and a UK/remote location filter for free. Each source's only real job is to implement one async method — `fetch_jobs() -> list[Job]` — turning whatever shape the upstream returns into the canonical `Job` dataclass. The orchestrator (Pillar 2) then scores, dedups, and stores them.*
 
 ### The count reconciliation (read this once, never wonder again)
 
@@ -16,17 +16,17 @@ Three numbers float around the codebase and they're all correct because they cou
 
 | Number | What it counts | Where |
 | --- | --- | --- |
-| **49** | Source *class files* on disk | `find src/sources -name '*.py'` minus `__init__`/`base` = 7+11+12+8+7+4 |
-| **50** | *Registry keys* in `SOURCE_REGISTRY` | `main.py:106-159` — `"glassdoor"` is a second key that aliases `JobSpySource` |
-| **49** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 49` (`main.py:165`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
+| **45** | Source *class files* on disk | `find src/sources -name '*.py'` minus `__init__`/`base` = 7+10+11+8+5+4 |
+| **46** | *Registry keys* in `SOURCE_REGISTRY` | `main.py:103-152` — `"glassdoor"` is a second key that aliases `JobSpySource` |
+| **45** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 45` (`main.py:160`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
 
-So: **49 classes → 50 registry keys → 49 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 50`, `test_api.py` asserts `sources_total == 50` in three places (CLAUDE.md rule #13).
+So: **45 classes → 46 registry keys → 45 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 46`, `test_api.py` asserts `sources_total == 46` in three places (CLAUDE.md rule #13).
 
 ---
 
 ## Walkthrough — One source's fetch cycle (worked example)
 
-> Trace exactly what happens from the scheduler deciding it's time to poll `greenhouse` to a `Job` row landing back in the orchestrator. Uses Greenhouse because it's the cleanest of the ATS sources, but the same shape applies to all 49.
+> Trace exactly what happens from the scheduler deciding it's time to poll `greenhouse` to a `Job` row landing back in the orchestrator. Uses Greenhouse because it's the cleanest of the ATS sources, but the same shape applies to all 45.
 
 ### T+0 — Scheduler decides
 
@@ -178,7 +178,7 @@ def __init__(self, session: aiohttp.ClientSession, search_config=None):
 
 - `session` — one shared `aiohttp.ClientSession` across all sources (connection pooling).
 - `search_config=None` — when present, the source uses the user's dynamic keywords; when `None`, it falls back to the (now-empty) hard-coded defaults from `keywords.py`.
-- Rate limiter is pulled per-source from `RATE_LIMITS` (50 entries) with a safe `{concurrent:2, delay:1.0}` default.
+- Rate limiter is pulled per-source from `RATE_LIMITS` (46 entries) with a safe `{concurrent:2, delay:1.0}` default.
 
 ### 2.2 The three dynamic properties (`base.py:71-87`)
 
@@ -295,7 +295,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ## 4. The six source categories
 
-49 classes across 6 folders. The pattern each follows is the differentiator.
+45 classes across 6 folders. The pattern each follows is the differentiator.
 
 ### 4.1 Keyed APIs — `apis_keyed/` (7)
 
@@ -311,17 +311,17 @@ Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if t
 | Careerjet | multi-country search | `CAREERJET_AFFID` |
 | Findwork | remote/freelance (Token auth) | `FINDWORK_API_KEY` |
 
-### 4.2 Free JSON APIs — `apis_free/` (11)
+### 4.2 Free JSON APIs — `apis_free/` (10)
 
 Pattern: no auth, filter results with `self.relevance_keywords` on title+description, `_is_uk_or_remote()` on location.
 
-Arbeitnow (DE/EU tech), RemoteOK (skips metadata element 0), Jobicy (remote data/AI), Himalayas (paginated remote), Remotive (remote software-dev), DevITJobs `{tech}`, Landing.jobs `{tech}`, AIJobs.net `{tech}`, HN Jobs (Firebase "Who is Hiring") `{tech}`, **Teaching Vacancies** `{education}` (Batch 3), **Gov Apprenticeships** `{education,general}` (Batch 3, 150 req/5 min).
+Arbeitnow (DE/EU tech), RemoteOK (skips metadata element 0), Jobicy (remote data/AI), Himalayas (paginated remote), Remotive (remote software-dev), DevITJobs `{tech}`, Landing.jobs `{tech}`, AIJobs.net `{tech}`, HN Jobs (Firebase "Who is Hiring") `{tech}`, **Teaching Vacancies** `{education}` (Batch 3). _(Gov Apprenticeships dropped in M6 rotation — API retired upstream.)_
 
-### 4.3 ATS boards — `ats/` (12)
+### 4.3 ATS boards — `ats/` (11)
 
 Pattern: accept a `companies` slug list (default from `companies.py`), iterate each company's board API. See §5 for the catalog.
 
-Greenhouse, Lever (`createdAt` ms epoch), Workable (POST `/v2/accounts/{slug}/jobs`), Ashby (uses `publishedAt`), SmartRecruiters, Pinpoint (`{slug}.pinpointhq.com`), Recruitee (`{slug}.recruitee.com`), Workday (XML/HTML scrape, dict-config slugs), Personio (XML feed, 3 s inter-company delay), SuccessFactors (sitemap XML), **Rippling** (Batch 3, `ats.rippling.com/api/board/{slug}/jobs`), **Comeet** (Batch 3, `comeet.co/careers-api/2.0/...`).
+Greenhouse, Lever (`createdAt` ms epoch), Workable (POST `/v2/accounts/{slug}/jobs`), Ashby (uses `publishedAt`), SmartRecruiters, Pinpoint (`{slug}.pinpointhq.com`), Recruitee (`{slug}.recruitee.com`), Workday (XML/HTML scrape, dict-config slugs), Personio (XML feed, 3 s inter-company delay), SuccessFactors (sitemap XML), **Rippling** (Batch 3, `ats.rippling.com/api/board/{slug}/jobs`). _(Comeet dropped in M6 rotation — upstream-dead.)_
 
 ### 4.4 RSS/XML feeds — `feeds/` (8)
 
@@ -329,11 +329,11 @@ Pattern: `_get_text()` + `xml.etree.ElementTree`, extract `<item>` from `<channe
 
 jobs.ac.uk `{academia}`, NHS Jobs (keyword-search XML) `{healthcare}`, **nhs_jobs_xml** (full vacancy feed, **conditional fetch pilot**) `{healthcare}` (Batch 3), WorkAnywhere (remote data/AI), WeWorkRemotely, RealWorkFromAnywhere, BioSpace `{healthcare}`, University Jobs (Cambridge + others) `{academia}`.
 
-### 4.5 HTML scrapers — `scrapers/` (7)
+### 4.5 HTML scrapers — `scrapers/` (5)
 
 Pattern: `_get_text()` + regex/embedded-JSON parsing. No auth.
 
-LinkedIn (guest API, regex HTML fragments), JobTensor `{tech}` (AJAX), Climatebase `{climate}` (Next.js embedded JSON), 80,000 Hours (Algolia API, public keys), BCS Jobs `{tech}`, AIJobs.ai `{tech}`, AIJobs Global `{tech}` (WP Job Manager AJAX).
+LinkedIn (guest API, regex HTML fragments), Climatebase `{climate}` (Next.js embedded JSON), 80,000 Hours (Algolia API, public keys), BCS Jobs `{tech}`, AIJobs.ai `{tech}`. _(JobTensor and AIJobs Global dropped in M6 rotation — upstream-dead.)_
 
 ### 4.6 Other — `other/` (4)
 
@@ -343,10 +343,10 @@ Indeed/Glassdoor (`JobSpySource` wrapping `python-jobspy`, optional dep — skip
 
 `_build_sources()` calls `classify_user_domain(profile)` and keeps only sources whose `DOMAINS` overlap (or are `{"general"}`):
 
-- **tech**: devitjobs, landingjobs, aijobs, hn_jobs, jobtensor, climatebase, bcs_jobs, aijobs_ai, aijobs_global, nofluffjobs
+- **tech**: devitjobs, landingjobs, aijobs, hn_jobs, climatebase, bcs_jobs, aijobs_ai, nofluffjobs
 - **healthcare**: nhs_jobs, nhs_jobs_xml, biospace
 - **academia**: jobs_ac_uk, uni_jobs
-- **education**: teaching_vacancies, gov_apprenticeships
+- **education**: teaching_vacancies
 - **climate**: climatebase
 - **general** (every user): all keyed aggregators + RemoteOK, Jobicy, Himalayas, Remotive, Arbeitnow, LinkedIn, 80000hours, the remote feeds, Indeed, HackerNews, TheMuse
 
@@ -368,7 +368,6 @@ ATS sources don't search — they poll a *known list of companies'* boards. The 
 | Pinpoint | ~15 | slug strings |
 | SmartRecruiters | ~15 | slug strings |
 | Rippling | 5 | slug strings (Batch 3 starter) |
-| Comeet | 5 | slug strings (Batch 3 starter) |
 | SuccessFactors | 3 | **dicts** `{name, sitemap_url}` (sitemap crawl) |
 
 A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited`) to display names (`Darktrace`) for the UI. Most platforms take simple slug lists; Workday and SuccessFactors need structured dicts because their URLs aren't derivable from a slug alone.
@@ -379,7 +378,7 @@ A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited
 
 ### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:93-146`
 
-50 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
+46 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
 
 | Source | concurrent | delay (s) | Why |
 | --- | --- | --- | --- |
@@ -409,9 +408,9 @@ Effect: at most `concurrent` parallel requests, with a minimum `delay` between a
 
 ---
 
-## 7. The Batch-3 source rotation (the most recent change)
+## 7. Source rotations (Batch 3, then M6)
 
-Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys.
+Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46**. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
 
 ### Dropped (verified absent from disk)
 
@@ -426,10 +425,10 @@ Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry k
 | Source | Folder | Upstream | Tier |
 | --- | --- | --- | --- |
 | `teaching_vacancies` | apis_free/ | gov.uk Teaching Vacancies API (schema.org JobPosting, `datePosted` → high confidence) | rss (15 min) |
-| `gov_apprenticeships` | apis_free/ | GOV.UK Find an Apprenticeship API (150 req/5 min) | rss (15 min) |
+| `gov_apprenticeships` | apis_free/ | GOV.UK Find an Apprenticeship API (150 req/5 min) | rss (15 min) — **later dropped in M6** |
 | `nhs_jobs_xml` | feeds/ | NHS full `all_current_vacancies.xml` (**additive** — coexists with keyword-search `nhs_jobs`) | rss (15 min) |
 | `rippling` | ats/ | `ats.rippling.com/api/board/{slug}/jobs` | ats (60 s) |
-| `comeet` | ats/ | `comeet.co/careers-api/2.0/company/{slug}/positions` | ats (60 s) |
+| `comeet` | ats/ | `comeet.co/careers-api/2.0/company/{slug}/positions` | ats (60 s) — **later dropped in M6** |
 
 ### The five load-bearing surfaces (CLAUDE.md rule #13)
 
@@ -437,20 +436,20 @@ Adding/removing a source means moving **all five** together, or tests break:
 
 1. `src/main.py` — `SOURCE_REGISTRY` dict + `_build_sources()` list
 2. `src/core/settings.py` — `RATE_LIMITS` dict
-3. `tests/test_cli.py` — `len(SOURCE_REGISTRY) == 50` + the expected set
-4. `tests/test_api.py` — three `== 50` checks (`test_sources_returns_*`, `test_status_returns_counts`, `test_full_api_workflow`)
+3. `tests/test_cli.py` — `len(SOURCE_REGISTRY) == 46` + the expected set
+4. `tests/test_api.py` — three `== 46` checks (`test_sources_returns_*`, `test_status_returns_counts`, `test_full_api_workflow`)
 5. `CLAUDE.md` — the documented count
 
-All five are currently aligned at **50**.
+All five are currently aligned at **46**.
 
 ---
 
 ## 8. Testing — `backend/tests/test_sources.py` + friends
 
-- **`test_sources.py`** — 81 test functions covering all 50 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
+- **`test_sources.py`** — 81 test functions covering all 46 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
 - **`test_conditional_fetch.py`** — 11 tests for the shared ETag/Last-Modified/304 machinery, FIFO eviction at 256 entries, and the `nhs_jobs_xml` pilot proving `If-None-Match` is sent on the second call.
-- **`test_cli.py`** — `len(SOURCE_REGISTRY) == 50` + exact expected set.
-- **`test_api.py`** — the three hardcoded `== 50` assertions.
+- **`test_cli.py`** — `len(SOURCE_REGISTRY) == 46` + exact expected set.
+- **`test_api.py`** — the three hardcoded `== 46` assertions.
 
 There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source tests live inline in `test_sources.py`.
 
@@ -509,7 +508,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Surface | Status | Notes |
 | --- | --- | --- |
 | `BaseJobSource` retry (3×, backoff 1/2/4) | ✅ | `base.py:100-155` |
-| Per-source rate limiting via `RATE_LIMITS` | ✅ | 50 entries, all sources covered |
+| Per-source rate limiting via `RATE_LIMITS` | ✅ | 46 entries, all sources covered |
 | 429 `Retry-After` honouring (cap 60 s) | ✅ | |
 | No-retry on 401/403/404/422 | ✅ | |
 | Conditional fetch (ETag/304) infrastructure | ✅ | `_get_json_conditional` / `_get_text_conditional` |
@@ -524,12 +523,12 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| 49 source classes / 50 registry keys / 49 instances | ✅ | reconciled in §1 |
+| 45 source classes / 46 registry keys / 45 instances | ✅ | reconciled in §1 |
 | 7 keyed APIs (skip gracefully without key) | ✅ | |
-| 11 free JSON APIs | ✅ | |
-| 12 ATS boards over ~266 company slugs | ✅ | `companies.py` |
+| 10 free JSON APIs | ✅ | |
+| 11 ATS boards over ~261 company slugs | ✅ | `companies.py` |
 | 8 RSS/XML feeds | ✅ | |
-| 7 HTML scrapers | ✅ | regex/embedded-JSON — brittle by nature ⚠️ |
+| 5 HTML scrapers | ✅ | regex/embedded-JSON — brittle by nature ⚠️ |
 | 4 other (incl. optional jobspy) | ✅ | jobspy skips with warning if uninstalled |
 | Batch-3 rotation (−3, +5) | ✅ | verified on disk |
 | Domain tagging via `.DOMAINS` | ✅ | 5 domains + general |
@@ -540,7 +539,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Item | Status | Notes |
 | --- | --- | --- |
 | HTML scrapers break when sites change markup | ⚠️ | inherent to LinkedIn/Workday/BCS/AIJobs regex parsing — no schema contract upstream |
-| Rippling/Comeet slug lists are 5-company starters | 🟡 | need expansion to be impactful |
+| Rippling slug list is a 5-company starter | 🟡 | need expansion to be impactful (Comeet dropped in M6) |
 | ATS catalog is hand-curated | 🟡 | no auto-discovery of new company boards |
 | Conditional fetch used by only 1 of ~16 eligible feeds/ATS | 🟡 | rule #14 — opportunity to reduce upstream load |
 | University Jobs — only Cambridge feed confirmed valid | ⚠️ | other uni feeds may silently return nothing |
@@ -556,31 +555,30 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 backend/src/sources/
 ├── base.py                         — BaseJobSource: retry, rate-limit, conditional fetch, _is_uk_or_remote
 ├── apis_keyed/   (7)               — reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork
-├── apis_free/    (11)              — arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs,
-│                                     landingjobs, aijobs, hn_jobs, teaching_vacancies*, gov_apprenticeships*
-├── ats/          (12)              — greenhouse, lever, workable, ashby, smartrecruiters, pinpoint,
-│                                     recruitee, workday, personio, successfactors, rippling*, comeet*
+├── apis_free/    (10)              — arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs,
+│                                     landingjobs, aijobs, hn_jobs, teaching_vacancies*
+├── ats/          (11)              — greenhouse, lever, workable, ashby, smartrecruiters, pinpoint,
+│                                     recruitee, workday, personio, successfactors, rippling*
 ├── feeds/        (8)               — jobs_ac_uk, nhs_jobs, nhs_jobs_xml*, workanywhere, weworkremotely,
 │                                     realworkfromanywhere, biospace, uni_jobs
-├── scrapers/     (7)               — linkedin, jobtensor, climatebase, eightykhours, bcs_jobs,
-│                                     aijobs_ai, aijobs_global
+├── scrapers/     (5)               — linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 └── other/        (4)               — indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
                                        (* = added in Batch 3)
 
 backend/src/
 ├── models.py                       — Job dataclass + normalized_key() (rule #1)
-├── main.py:106-318                 — SOURCE_REGISTRY (50 keys) + _build_sources() + domain filter
+├── main.py:103-318                 — SOURCE_REGISTRY (46 keys) + _build_sources() + domain filter
 ├── core/
-│   ├── companies.py                — ~266 ATS slugs across 12 platforms + name overrides
-│   ├── settings.py:93-146          — RATE_LIMITS (50 entries)
+│   ├── companies.py                — ~261 ATS slugs across 11 platforms + name overrides
+│   ├── settings.py:93-146          — RATE_LIMITS (46 entries)
 │   └── keywords.py                 — LOCATIONS + VISA_KEYWORDS (the rest emptied 2026-04-09)
 └── utils/rate_limiter.py           — async semaphore + delay
 
 backend/tests/
 ├── test_sources.py                 — 81 tests, all sources, aioresponses-mocked
 ├── test_conditional_fetch.py       — 11 tests, ETag/304/FIFO + nhs_jobs_xml pilot
-├── test_cli.py                     — len(SOURCE_REGISTRY) == 50
-└── test_api.py                     — three == 50 assertions
+├── test_cli.py                     — len(SOURCE_REGISTRY) == 46
+└── test_api.py                     — three == 46 assertions
 ```
 
 ---
@@ -604,4 +602,4 @@ backend/tests/
 
 ---
 
-*Last updated 2026-05-28. HEAD `a7a2268`. Source roster verified on disk: 49 classes / 50 registry keys / 49 instances. Backend test baseline 600p/0f/3s.*
+*Source roster (post-M6 rotation, 2026-06): 45 classes / 46 registry keys / 45 instances. Backend test baseline 1,528p/0f/3s (1,531 collected — defer to runtime count).*

@@ -6,7 +6,7 @@ Job360 is built as three architectural pillars. This folder documents each one f
 | --- | --- | --- | --- |
 | 1 | **User Side** | Identity, profile (CV/LinkedIn/GitHub), per-user delivery (feed, channels, notifications, pipeline), the Next.js dashboard | [`01-user-pillar.md`](./01-user-pillar.md) |
 | 2 | **Search & Match Engine** | The 6-stage pipeline: fetch → prefilter → score → dedup → enrich → store. Scoring, embeddings, retrieval, scheduler, breakers | [`02-search-and-match-engine.md`](./02-search-and-match-engine.md) |
-| 3 | **Job Providers** | The 49 source classes, the shared `BaseJobSource`, the ATS company catalog, the Batch-3 roster | [`03-job-providers.md`](./03-job-providers.md) |
+| 3 | **Job Providers** | The 45 source classes, the shared `BaseJobSource`, the ATS company catalog, the source roster | [`03-job-providers.md`](./03-job-providers.md) |
 | — | **Glossary** | Plain-English definition of every domain term used across the three pillar docs | [`glossary.md`](./glossary.md) |
 | — | **Runbook** | "I see a problem, what do I do?" — operational answers across all three pillars (DB queries, debug commands, error→fix table) | [`runbook.md`](./runbook.md) |
 
@@ -21,7 +21,7 @@ Each pillar doc also has three "manual" sections inside it:
    PILLAR 3                  PILLAR 2                       PILLAR 1
    Job Providers             Search & Match Engine          User Side
    ─────────────             ─────────────────────          ─────────
-   49 sources                run_search():                  profile → SearchConfig
+   45 sources                run_search():                  profile → SearchConfig
       │  fetch_jobs()           prefilter                       │  (feeds keywords IN)
       ▼                         score (9-dim)                   ▼
    list[Job] ───────────────▶  dedup (4-layer)  ──────────▶  user_feed (SSOT)
@@ -39,9 +39,9 @@ Each pillar doc also has three "manual" sections inside it:
 
 | Pillar | Core | Advanced / opt-in | Notable gaps |
 | --- | --- | --- | --- |
-| **1 — User** | ✅ Auth (Argon2id + signed cookies), profile (CV/LinkedIn/GitHub, LLM-only), feed, actions, pipeline, channels, notification rules, ledger | 🟡 ARQ worker deployment install-dependent; ESCO normalisation behind `SEMANTIC_ENABLED` | ❌ password reset, email verification, MFA, OAuth, push notifications; ⚠️ FE/BE types hand-synced |
+| **1 — User** | ✅ Auth (Argon2id + signed cookies), profile (CV/LinkedIn/GitHub, LLM-only), feed, actions, pipeline, channels, notification rules, ledger | 🟡 ARQ worker deployment install-dependent; ESCO normalisation behind `SEMANTIC_ENABLED` | ✅ password reset (forgot-password, migration 0015); 🟡 email verification (built, not enforced at login); ❌ MFA, OAuth, push notifications; ⚠️ FE/BE types hand-synced |
 | **2 — Engine** | ✅ 9-dim scoring, 3-stage prefilter, 4-layer dedup, tiered scheduler, circuit breakers, conditional cache | 🟡 enrichment + embeddings + hybrid retrieval (both flags default OFF) | ⚠️ legacy `score_job()` scores against empty `keywords.py`; ❌ LLM cost tracking, re-embedding on model change |
-| **3 — Providers** | ✅ 49 sources / 50 keys, `BaseJobSource` retry+rate-limit, ATS catalog (~266 slugs), Batch-3 roster | 🟡 conditional fetch adopted by only 1 of ~16 eligible feeds | ⚠️ HTML scrapers brittle to markup changes; 🟡 Rippling/Comeet slug lists are 5-company starters; ❌ per-source health dashboard |
+| **3 — Providers** | ✅ 45 sources / 46 keys, `BaseJobSource` retry+rate-limit, ATS catalog (~261 slugs), post-M6 roster | 🟡 conditional fetch adopted by only 1 of ~16 eligible feeds | ⚠️ HTML scrapers brittle to markup changes; 🟡 Rippling slug list is a 5-company starter; ❌ per-source health dashboard |
 
 **Test baseline:** 600 passed / 0 failed / 3 skipped (post-3.5.4 green baseline).
 

@@ -23,7 +23,7 @@ Async Redis-backed task queue Job360 uses for the notification worker. Worker co
 
 ### ATS (Applicant Tracking System)
 
-A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `companies.py` (~266 slugs across 12 platforms).
+A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `companies.py` (~261 slugs across 11 platforms).
 **Code:** `backend/src/sources/ats/` · **Pillar 3**
 
 ### Batch (Batch 1, Batch 2, Batch 3, …)
@@ -211,12 +211,12 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 
 ### Skill synonyms (canonicalize_skill / aliases_for)
 
-529-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
+493-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
 **Code:** `backend/src/core/skill_synonyms.py` · **Pillar 2**
 
 ### SOURCE_REGISTRY
 
-The 50-key dict in `main.py` mapping source-name to class. Builds 49 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 50` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
+The 46-key dict in `main.py` mapping source-name to class. Builds 45 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 46` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
 **Code:** `backend/src/main.py:106-159` · **Pillar 3**
 
 ### Stale (vs Confirmed Expired)
