@@ -1025,7 +1025,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/notification-rules": {
+    "/api/settings/notification-rule": {
         parameters: {
             query?: never;
             header?: never;
@@ -1033,52 +1033,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Notification Rules
-         * @description Return all notification rules for the authenticated user.
+         * Get Notification Rule
+         * @description Return the authenticated user's notification rule, or 404 if none set.
          */
-        get: operations["list_notification_rules_api_settings_notification_rules_get"];
-        put?: never;
+        get: operations["get_notification_rule_api_settings_notification_rule_get"];
         /**
-         * Create Notification Rule
-         * @description Create or upsert a notification rule for the given channel.
+         * Upsert Notification Rule
+         * @description Create or update the authenticated user's single notification rule.
          *
-         *     If a rule already exists for (user, channel), it is replaced in-place
-         *     with the new settings (upsert semantics via UNIQUE(user_id, channel)).
+         *     Fields not supplied keep their current value (or schema default on first
+         *     create). Uses upsert semantics via UNIQUE(user_id).
          */
-        post: operations["create_notification_rule_api_settings_notification_rules_post"];
+        put: operations["upsert_notification_rule_api_settings_notification_rule_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/settings/notification-rules/{rule_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Notification Rule
-         * @description Delete a notification rule.
-         *
-         *     Returns 404 when the rule does not exist or belongs to a different user.
-         */
-        delete: operations["delete_notification_rule_api_settings_notification_rules__rule_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Notification Rule
-         * @description Partially update a notification rule.
-         *
-         *     Only fields supplied in the request body are changed. Returns 404 when
-         *     the rule does not exist or belongs to a different user.
-         */
-        patch: operations["update_notification_rule_api_settings_notification_rules__rule_id__patch"];
         trace?: never;
     };
     "/api/sources": {
@@ -1537,43 +1508,25 @@ export interface components {
         };
         /** NotificationRule */
         NotificationRule: {
-            /** Channel */
-            channel: string;
             /** Created At */
-            created_at: string;
-            /** Digest Send Time */
-            digest_send_time: string | null;
-            /** Enabled */
-            enabled: boolean;
-            /** Id */
-            id: number;
-            /** Notify Mode */
-            notify_mode: string;
-            /** Quiet Hours End */
-            quiet_hours_end: string | null;
-            /** Quiet Hours Start */
-            quiet_hours_start: string | null;
-            /** Score Threshold */
-            score_threshold: number;
-            /** Updated At */
-            updated_at: string;
-            /** User Id */
-            user_id: string;
-        };
-        /** NotificationRuleCreate */
-        NotificationRuleCreate: {
-            /** Channel */
-            channel: string;
+            created_at?: string | null;
             /**
-             * Digest Send Time
+             * Daily Send Time
              * @default 08:00
              */
-            digest_send_time: string | null;
+            daily_send_time: string;
             /**
              * Enabled
              * @default true
              */
             enabled: boolean;
+            /**
+             * Interval Hours
+             * @default 6
+             */
+            interval_hours: number;
+            /** Last Sent At */
+            last_sent_at?: string | null;
             /**
              * Notify Mode
              * @default instant
@@ -1588,18 +1541,19 @@ export interface components {
              * @default 60
              */
             score_threshold: number;
-        };
-        /** NotificationRuleListResponse */
-        NotificationRuleListResponse: {
-            /** Rules */
-            rules: components["schemas"]["NotificationRule"][];
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id: string;
         };
         /** NotificationRuleUpdate */
         NotificationRuleUpdate: {
-            /** Digest Send Time */
-            digest_send_time?: string | null;
+            /** Daily Send Time */
+            daily_send_time?: string | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Interval Hours */
+            interval_hours?: number | null;
             /** Notify Mode */
             notify_mode?: string | null;
             /** Quiet Hours End */
@@ -3597,7 +3551,7 @@ export interface operations {
             };
         };
     };
-    list_notification_rules_api_settings_notification_rules_get: {
+    get_notification_rule_api_settings_notification_rule_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3610,41 +3564,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotificationRuleListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_notification_rule_api_settings_notification_rules_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NotificationRuleCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3663,44 +3582,11 @@ export interface operations {
             };
         };
     };
-    delete_notification_rule_api_settings_notification_rules__rule_id__delete: {
+    upsert_notification_rule_api_settings_notification_rule_put: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                rule_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_notification_rule_api_settings_notification_rules__rule_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rule_id: number;
-            };
+            path?: never;
             cookie?: {
                 job360_session?: string | null;
             };

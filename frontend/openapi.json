@@ -967,15 +967,7 @@
       },
       "NotificationRule": {
         "properties": {
-          "channel": {
-            "title": "Channel",
-            "type": "string"
-          },
           "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "digest_send_time": {
             "anyOf": [
               {
                 "type": "string"
@@ -984,105 +976,42 @@
                 "type": "null"
               }
             ],
-            "title": "Digest Send Time"
+            "title": "Created At"
           },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "notify_mode": {
-            "title": "Notify Mode",
-            "type": "string"
-          },
-          "quiet_hours_end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quiet Hours End"
-          },
-          "quiet_hours_start": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quiet Hours Start"
-          },
-          "score_threshold": {
-            "title": "Score Threshold",
-            "type": "integer"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "channel",
-          "score_threshold",
-          "notify_mode",
-          "quiet_hours_start",
-          "quiet_hours_end",
-          "digest_send_time",
-          "enabled",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "NotificationRule",
-        "type": "object"
-      },
-      "NotificationRuleCreate": {
-        "properties": {
-          "channel": {
-            "title": "Channel",
-            "type": "string"
-          },
-          "digest_send_time": {
-            "anyOf": [
-              {
-                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+          "daily_send_time": {
             "default": "08:00",
-            "title": "Digest Send Time"
+            "title": "Daily Send Time",
+            "type": "string"
           },
           "enabled": {
             "default": true,
             "title": "Enabled",
             "type": "boolean"
           },
+          "interval_hours": {
+            "default": 6,
+            "title": "Interval Hours",
+            "type": "integer"
+          },
+          "last_sent_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent At"
+          },
           "notify_mode": {
             "default": "instant",
-            "pattern": "^(instant|digest)$",
             "title": "Notify Mode",
             "type": "string"
           },
           "quiet_hours_end": {
             "anyOf": [
               {
-                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
                 "type": "string"
               },
               {
@@ -1094,7 +1023,6 @@
           "quiet_hours_start": {
             "anyOf": [
               {
-                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
                 "type": "string"
               },
               {
@@ -1105,37 +1033,34 @@
           },
           "score_threshold": {
             "default": 60,
-            "maximum": 100.0,
-            "minimum": 0.0,
             "title": "Score Threshold",
             "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
           }
         },
         "required": [
-          "channel"
+          "user_id"
         ],
-        "title": "NotificationRuleCreate",
-        "type": "object"
-      },
-      "NotificationRuleListResponse": {
-        "properties": {
-          "rules": {
-            "items": {
-              "$ref": "#/components/schemas/NotificationRule"
-            },
-            "title": "Rules",
-            "type": "array"
-          }
-        },
-        "required": [
-          "rules"
-        ],
-        "title": "NotificationRuleListResponse",
+        "title": "NotificationRule",
         "type": "object"
       },
       "NotificationRuleUpdate": {
         "properties": {
-          "digest_send_time": {
+          "daily_send_time": {
             "anyOf": [
               {
                 "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
@@ -1145,7 +1070,7 @@
                 "type": "null"
               }
             ],
-            "title": "Digest Send Time"
+            "title": "Daily Send Time"
           },
           "enabled": {
             "anyOf": [
@@ -1158,10 +1083,23 @@
             ],
             "title": "Enabled"
           },
+          "interval_hours": {
+            "anyOf": [
+              {
+                "maximum": 24.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Hours"
+          },
           "notify_mode": {
             "anyOf": [
               {
-                "pattern": "^(instant|digest)$",
+                "pattern": "^(instant|daily|every_n_hours)$",
                 "type": "string"
               },
               {
@@ -5011,10 +4949,10 @@
         ]
       }
     },
-    "/api/settings/notification-rules": {
+    "/api/settings/notification-rule": {
       "get": {
-        "description": "Return all notification rules for the authenticated user.",
-        "operationId": "list_notification_rules_api_settings_notification_rules_get",
+        "description": "Return the authenticated user's notification rule, or 404 if none set.",
+        "operationId": "get_notification_rule_api_settings_notification_rule_get",
         "parameters": [
           {
             "in": "cookie",
@@ -5038,64 +4976,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationRuleListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Notification Rules",
-        "tags": [
-          "notification-rules"
-        ]
-      },
-      "post": {
-        "description": "Create or upsert a notification rule for the given channel.\n\nIf a rule already exists for (user, channel), it is replaced in-place\nwith the new settings (upsert semantics via UNIQUE(user_id, channel)).",
-        "operationId": "create_notification_rule_api_settings_notification_rules_post",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NotificationRuleCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
                   "$ref": "#/components/schemas/NotificationRule"
                 }
               }
@@ -5113,76 +4993,15 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Notification Rule",
-        "tags": [
-          "notification-rules"
-        ]
-      }
-    },
-    "/api/settings/notification-rules/{rule_id}": {
-      "delete": {
-        "description": "Delete a notification rule.\n\nReturns 404 when the rule does not exist or belongs to a different user.",
-        "operationId": "delete_notification_rule_api_settings_notification_rules__rule_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Notification Rule",
+        "summary": "Get Notification Rule",
         "tags": [
           "notification-rules"
         ]
       },
-      "patch": {
-        "description": "Partially update a notification rule.\n\nOnly fields supplied in the request body are changed. Returns 404 when\nthe rule does not exist or belongs to a different user.",
-        "operationId": "update_notification_rule_api_settings_notification_rules__rule_id__patch",
+      "put": {
+        "description": "Create or update the authenticated user's single notification rule.\n\nFields not supplied keep their current value (or schema default on first\ncreate). Uses upsert semantics via UNIQUE(user_id).",
+        "operationId": "upsert_notification_rule_api_settings_notification_rule_put",
         "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "integer"
-            }
-          },
           {
             "in": "cookie",
             "name": "job360_session",
@@ -5232,7 +5051,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Notification Rule",
+        "summary": "Upsert Notification Rule",
         "tags": [
           "notification-rules"
         ]

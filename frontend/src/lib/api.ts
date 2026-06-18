@@ -16,8 +16,6 @@ import type {
   JsonResumeResponse,
   NotificationLedgerListResponse,
   NotificationRule,
-  NotificationRuleCreate,
-  NotificationRuleListResponse,
   NotificationRuleUpdate,
   PipelineAdvanceRequest,
   PipelineApplication,
@@ -421,36 +419,29 @@ export async function testChannel(id: number): Promise<ChannelTestResult> {
   });
 }
 
-// ---- Step-3: Notification rules ----
+// ---- Notification rule (one shared rulebook per user) ----
 
-export async function getNotificationRules(): Promise<NotificationRuleListResponse> {
-  return request<NotificationRuleListResponse>("/api/settings/notification-rules");
+/**
+ * Get the user's single notification rule. The backend returns 404 when the
+ * user has not saved one yet — we treat that as "no rule, use defaults" and
+ * return null rather than throwing.
+ */
+export async function getNotificationRule(): Promise<NotificationRule | null> {
+  try {
+    return await request<NotificationRule>("/api/settings/notification-rule");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
-export async function createNotificationRule(
-  body: NotificationRuleCreate
-): Promise<NotificationRule> {
-  return request<NotificationRule>("/api/settings/notification-rules", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function updateNotificationRule(
-  id: number,
+export async function saveNotificationRule(
   body: NotificationRuleUpdate
 ): Promise<NotificationRule> {
-  return request<NotificationRule>(`/api/settings/notification-rules/${id}`, {
-    method: "PATCH",
+  return request<NotificationRule>("/api/settings/notification-rule", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
-}
-
-export async function deleteNotificationRule(id: number): Promise<void> {
-  await request<void>(`/api/settings/notification-rules/${id}`, {
-    method: "DELETE",
   });
 }
 
