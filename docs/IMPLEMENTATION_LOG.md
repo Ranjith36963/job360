@@ -13,6 +13,29 @@
 
 ---
 
+## Channels & Notifications Overhaul (2026-06-17)
+
+Branch: `worktree-channels-notifications-overhaul`. Spec: `docs/superpowers/specs/2026-06-17-channels-notifications-overhaul-design.md`; plan: `docs/superpowers/plans/2026-06-17-channels-notifications-overhaul.md`.
+
+### What shipped
+- **One rulebook per user.** Migration 0020 rebuilds `notification_rules` from one-row-per-channel to **one-row-per-user** (`UNIQUE(user_id)`). Dropped `channel` + `digest_send_time`; added `interval_hours`, `daily_send_time`, `last_sent_at`; widened `notify_mode` CHECK to `('instant','daily','every_n_hours')`. Inline DDL in `database.py` mirrors it. Old per-channel rows fold to the most-recent rule per user (`digest`→`daily`).
+- **Three timing modes.** `instant` (send inline when a job matches), `daily` (bundle at `daily_send_time`, user tz), `every_n_hours` (bundle every `interval_hours`). The rule applies to ALL the user's enabled channels.
+- **The missing scheduler.** New `notification_tick` ARQ cron (every 5 min) + pure `_bundle_due()` decide when a bundle is due (daily clock / interval elapsed / quiet-hours flush) and enqueue `send_bundle`, which drains `user_notification_digests`, dispatches one message per channel with `force=True`, records the ledger, marks rows `sent`/leaves on failure/`dlq` after 5 retries, and stamps `last_sent_at`. This fixes the prior P0 where `send_daily_digest` existed but was never scheduled (digests queued forever).
+- **One path only.** Removed the legacy global `.env`-webhook notification path (`main.py` loop + `services/notifications/{base,email,slack,discord}_notify.py` + dead tests). The only path is now worker/tick → `dispatcher.dispatch()` → Apprise → `notification_ledger`.
+- **API + UI.** Per-channel rule CRUD replaced by single `GET`/`PUT /settings/notification-rule`. Frontend notifications page is now ONE rulebook form (mode + conditional interval/daily-time + threshold + quiet hours + master enable); `api.ts`/`types.ts`/`api-types.ts` updated.
+- **Channels unchanged.** Connect/test/OAuth/Fernet for Slack/email/Telegram/Discord/webhook left as-is (already working). Telegram delivery confirmed wired (`channels.py` stores `tgram://{token}/{chat_id}`; dispatcher is channel-agnostic).
+- **Queue hygiene.** `cleanup_old_digests(days=30)` repo method to bound the digest queue.
+
+### Verification
+- Backend: 1392 passed, 3 skipped (full suite, `-p no:randomly`), ruff clean.
+- Frontend: type-check + lint clean, 107 unit tests pass; api-types regenerated (no drift).
+- Live end-to-end: see verification notes appended after the live run.
+
+### Rules touched
+CLAUDE.md #23/#24 rewritten for the single-rule + three-mode model and the legacy-path removal.
+
+---
+
 ## Profile-version re-score batch (2026-06-13)
 
 Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-judge on profile change) — authorized by owner 2026-06-13.

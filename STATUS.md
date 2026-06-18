@@ -11,6 +11,16 @@
 > re-score. No DB migration (JSON-blob storage). M2 / LLM judge untouched. See
 > `docs/IMPLEMENTATION_LOG.md` for the full entry.
 
+> **In flight (branch `worktree-channels-notifications-overhaul`, 2026-06-17):**
+> channels & notifications overhaul. Notifications collapsed to ONE rule per user
+> (migration 0020) with three timing modes (`instant`/`daily`/`every_n_hours`); new
+> `notification_tick` ARQ cron (every 5 min) + `send_bundle` drain the digest queue
+> (fixes the P0 where digests queued but never sent); legacy global `.env`-webhook
+> path removed (one path: worker/tick → dispatcher → Apprise → ledger); API is one
+> `GET`/`PUT /settings/notification-rule`; frontend is one rulebook form. Backend
+> 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests. See
+> `docs/IMPLEMENTATION_LOG.md` for the full entry.
+
 **Last updated:** 2026-06-17
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules

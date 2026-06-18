@@ -61,8 +61,8 @@ Rules are reference material — keep them in one place. Long-form context for e
 
 ### Notifications
 
-23. **Notification dispatch consults `notification_rules` for (user_id, channel) AND converts UTC `now` to the user's `users.timezone` (IANA) via `zoneinfo.ZoneInfo`** before comparing against `quiet_hours_start/end` HH:MM strings. Skipping the timezone conversion silently leaks notifications during BST/DST transitions. Use stdlib `zoneinfo` — not `pytz`.
-24. **`notify_mode == "digest"` queues into `user_notification_digests`** instead of dispatching. `send_daily_digest` ARQ periodic drains the queue at the user's `digest_send_time`. Tests for new dispatch paths must cover both branches (instant + digest) AND both quiet-hours states.
+23. **Notifications are ONE rule row per user** (`notification_rules`, `UNIQUE(user_id)` — migration 0020). The rule governs ALL of the user's enabled channels at once (no per-channel rules). Dispatch loads the single rule, then converts UTC `now` to the user's `users.timezone` (IANA) via `zoneinfo.ZoneInfo` before comparing against `quiet_hours_start/end` HH:MM strings. Skipping the timezone conversion silently leaks notifications during BST/DST transitions. Use stdlib `zoneinfo` — not `pytz`.
+24. **`notify_mode` is `instant` | `daily` | `every_n_hours`.** `instant` sends inline from the worker the moment a job matches; `daily`/`every_n_hours` (and any send caught inside quiet hours) queue into `user_notification_digests`. The `notification_tick` ARQ cron (every 5 min) decides when a bundle is due (daily clock vs `interval_hours` elapsed vs quiet-hours flush) and enqueues `send_bundle`, which drains the queue, dispatches with `force=True` (bypassing the mode/quiet gate), records the ledger, marks rows `sent` on success / leaves them on failure / `dlq` after 5 retries, and stamps `last_sent_at`. Tests for new dispatch paths must cover all three modes AND both quiet-hours states. The legacy global `.env`-webhook path was removed — the only path is worker/tick → `dispatcher.dispatch()` → Apprise → `notification_ledger`.
 
 ### Process + verification
 
@@ -200,7 +200,7 @@ job360/
 │   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
 │   │   ├── repositories/      # database, csv_export
 │   │   ├── sources/           # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY entries
-│   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep, send_daily_digest)
+│   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep @02:00, notification_tick @every 5m)
 │   │   └── utils/             # logger, rate_limiter, time_buckets
 │   └── tests/                 # ~1,409 collected offline (defer to runtime collected count)
 └── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
@@ -216,7 +216,7 @@ job360/
 - `src/services/skill_matcher.py` — Scoring. Two paths: legacy `score_job()` (module-level, hard-coded keywords) and `JobScorer(config, user_preferences=None, enrichment_lookup=None).score()` (instance, dynamic + optional 7-dim per rules #19/#20). 4-component default: Title 40 / Skill 40 / Location 10 / Recency 10. Penalties: −30 negative title / −15 foreign location.
 - `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
 - `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
-- `src/services/channels/dispatcher.py` — Apprise wrapper. Post-Step-3, consults `notification_rules` for (user, channel): score-threshold filter, timezone-aware quiet-hours skip, digest-queue routing (rules #23/#24).
+- `src/services/channels/dispatcher.py` — Apprise wrapper. Consults the single per-user `notification_rules` row: score-threshold filter, timezone-aware quiet-hours hold-and-queue, mode routing (instant send vs daily/every_n_hours queue); `force=True` bypasses the gate for bundle sends (rules #23/#24).
 - `src/repositories/database.py` — Async SQLite (aiosqlite), WAL, 5s busy timeout. Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
 
 ### Sources
