@@ -29,7 +29,18 @@ Branch: `worktree-channels-notifications-overhaul`. Spec: `docs/superpowers/spec
 ### Verification
 - Backend: 1392 passed, 3 skipped (full suite, `-p no:randomly`), ruff clean.
 - Frontend: type-check + lint clean, 107 unit tests pass; api-types regenerated (no drift).
-- Live end-to-end: see verification notes appended after the live run.
+- Live end-to-end (2026-06-18, fresh DB, real API+frontend):
+  - Migration 0020 applied on FastAPI boot — live `notification_rules` has the new
+    columns + `UNIQUE(user_id)` (created via the migration RENAME, not just init_db).
+  - API: register → `GET /settings/notification-rule` 404 (no rule) → `PUT` (every_n_hours,
+    interval 8, threshold 70, quiet 23:00–07:00) 200 → `GET` 200 persisted. Second PUT
+    (switch to daily) UPDATES the same row (interval kept) — still 1 row/user. Invalid
+    `notify_mode` and `interval_hours=99` both rejected 422.
+  - UI: `/settings/notifications` renders ONE rulebook form, seeded from the saved rule;
+    switching mode swaps the conditional interval ↔ daily-time field; clicking Save
+    persisted `notify_mode=daily, daily_send_time=08:00` to SQLite (UI→API→DB).
+    Only console error is the known benign dark-mode hydration mismatch.
+    Evidence: `test-artifacts/notif-rulebook-every-n-hours.png`.
 
 ### Rules touched
 CLAUDE.md #23/#24 rewritten for the single-rule + three-mode model and the legacy-path removal.
