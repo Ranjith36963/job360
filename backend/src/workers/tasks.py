@@ -461,94 +461,185 @@ async def nightly_ghost_sweep(ctx: dict) -> dict:
 # the LLM provider chain is never touched during pytest (CLAUDE.md rule #4).
 
 
-async def send_daily_digest(ctx: dict, user_id: str, channel: str) -> dict[str, int]:
-    """ARQ periodic task: send queued digest notifications for (user_id, channel).
+async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
+    """ARQ task: send all queued digest notifications for user_id across all channels.
 
-    Step-3 B-04 — daily digest sender.
+    Called by notification_tick when a bundle is due for the user.
+    Sends with force=True to bypass mode/quiet-hours gate (bundle already decided).
 
-    Workflow:
-      1. Fetch all pending rows from ``user_notification_digests`` for the
-         (user_id, channel) pair.
-      2. Load job details for every queued job_id.
-      3. Format a combined digest message and send via the channel's Apprise
-         credentials (through ``send_notification`` test hook if present in ctx).
-      4. Mark all pending rows as sent via the DB helper.
-
-    This task is registered in ``WorkerSettings.cron_jobs`` and is designed
-    to be enqueued once per user per channel per day by a scheduler — the
-    caller controls frequency; the task is idempotent (no-op if no pending rows).
-
-    Returns ``{'sent': 0|1, 'jobs_count': N}``.
+    Returns {'sent': int, 'failed': int, 'jobs_count': int}.
     """
     db: aiosqlite.Connection = ctx["db"]
     db.row_factory = aiosqlite.Row
 
-    # 1. Get pending digest rows
+    # Get all channels that have pending digest rows for this user
     try:
         cur = await db.execute(
-            "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
-            (user_id, channel),
+            "SELECT DISTINCT channel FROM user_notification_digests "
+            "WHERE user_id = ? AND sent = 0",
+            (user_id,),
         )
-        digest_rows = [dict(r) for r in await cur.fetchall()]
+        channels_with_pending = [r[0] for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"sent": 0, "jobs_count": 0}
+        return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    if not digest_rows:
-        return {"sent": 0, "jobs_count": 0}
+    if not channels_with_pending:
+        return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    # 2. Fetch job details
-    job_ids = list({r["job_id"] for r in digest_rows})
+    # Collect all pending job_ids across channels
+    try:
+        cur = await db.execute(
+            "SELECT DISTINCT job_id FROM user_notification_digests "
+            "WHERE user_id = ? AND sent = 0",
+            (user_id,),
+        )
+        job_ids = [r[0] for r in await cur.fetchall()]
+    except Exception:  # noqa: BLE001
+        return {"sent": 0, "failed": 0, "jobs_count": 0}
+
+    # Fetch job details
     job_details: list[dict] = []
     for jid in job_ids:
-        cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (jid,))
+        cur = await db.execute(
+            "SELECT title, company, apply_url FROM jobs WHERE id = ?", (jid,)
+        )
         row = await cur.fetchone()
         if row:
-            job_details.append(
-                {"job_id": jid, "title": row["title"], "company": row["company"], "apply_url": row["apply_url"]}
-            )
+            job_details.append({
+                "job_id": jid,
+                "title": row["title"],
+                "company": row["company"],
+                "apply_url": row["apply_url"],
+            })
 
-    # 3. Build digest message and dispatch
     jobs_count = len(job_details)
     if jobs_count == 0:
-        # Jobs may have been purged — mark digests sent to avoid re-processing.
-        await _mark_digest_rows_sent(db, user_id, channel)
-        return {"sent": 0, "jobs_count": 0}
+        await _mark_digest_rows_sent(db, user_id)
+        return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    digest_title = f"Job360 Daily Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
+    digest_title = f"Job360 Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
     lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details]
     digest_body = "\n".join(lines)
 
-    # Re-use the send_notification dispatcher hook when available (for tests).
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
         from src.services.channels.dispatcher import dispatch as real_dispatch
-
         dispatcher_fn = real_dispatch
 
-    results = await dispatcher_fn(db, user_id=user_id, title=digest_title, body=digest_body)
-    any_sent = any(r.ok and not r.skipped and not r.queued_digest for r in results)
+    # dispatch with force=True to bypass mode/quiet-hours gate
+    results = await dispatcher_fn(db, user_id=user_id, title=digest_title, body=digest_body, force=True)
+    sent = sum(1 for r in results if r.ok and not r.skipped)
+    failed = sum(1 for r in results if not r.ok)
 
-    # 4. Mark rows as sent regardless of dispatch outcome (avoid infinite retry floods).
-    await _mark_digest_rows_sent(db, user_id, channel)
+    # Mark all pending rows as sent
+    await _mark_digest_rows_sent(db, user_id)
 
-    return {"sent": int(any_sent), "jobs_count": jobs_count}
+    # Update last_sent_at on the rule
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        await db.execute(
+            "UPDATE notification_rules SET last_sent_at = ? WHERE user_id = ?",
+            (now, user_id),
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("Could not update last_sent_at for user %s: %s", user_id, exc)
+
+    return {"sent": sent, "failed": failed, "jobs_count": jobs_count}
 
 
-async def _mark_digest_rows_sent(db: aiosqlite.Connection, user_id: str, channel: str) -> None:
-    """Helper: flip sent=1 on all pending digest rows for (user_id, channel)."""
+async def _mark_digest_rows_sent(db: aiosqlite.Connection, user_id: str) -> None:
+    """Flip sent=1 on all pending digest rows for user_id (all channels)."""
     import logging
-    from datetime import datetime, timezone
-
     _log = logging.getLogger(__name__)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         await db.execute(
-            "UPDATE user_notification_digests SET sent=1, sent_at=? " "WHERE user_id=? AND channel=? AND sent=0",
-            (now, user_id, channel),
+            "UPDATE user_notification_digests SET sent=1, sent_at=? "
+            "WHERE user_id=? AND sent=0",
+            (now, user_id),
         )
         await db.commit()
     except Exception as exc:  # noqa: BLE001
-        _log.debug("Could not mark digests sent for user %s channel %s: %s", user_id, channel, exc)
+        _log.debug("Could not mark digests sent for user %s: %s", user_id, exc)
+
+
+def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
+    """Return True when it is time to send a bundle for this rule.
+
+    - notify_mode == 'instant': never bundle (always immediate)
+    - notify_mode == 'daily': true when now_local.hour:minute matches daily_send_time
+    - notify_mode == 'every_n_hours': true when last_sent_at is None OR
+      now_utc - last_sent_at >= interval_hours
+
+    Always returns False on parse errors.
+    """
+    from datetime import timedelta
+    mode = rule.get("notify_mode", "instant")
+    if mode == "instant":
+        return False
+    if mode == "daily":
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_tz)
+            now_local = now_utc.astimezone(tz)
+            send_time_str = rule.get("daily_send_time", "08:00")
+            h, m = map(int, send_time_str.split(":"))
+            # Match within the same minute
+            return now_local.hour == h and now_local.minute == m
+        except Exception:  # noqa: BLE001
+            return False
+    if mode == "every_n_hours":
+        interval = int(rule.get("interval_hours", 6))
+        last_sent_str = rule.get("last_sent_at")
+        if last_sent_str is None:
+            return True
+        try:
+            last_sent = datetime.fromisoformat(last_sent_str.replace("Z", "+00:00"))
+            return (now_utc - last_sent) >= timedelta(hours=interval)
+        except Exception:  # noqa: BLE001
+            return True
+    return False
+
+
+async def notification_tick(ctx: dict) -> dict[str, int]:
+    """ARQ cron task: check all users with notification rules, enqueue send_bundle when due.
+
+    Runs every 5 minutes (configured in WorkerSettings.get_cron_jobs).
+    For each user with an enabled rule, checks _bundle_due(); if true, enqueues send_bundle.
+    """
+    db: aiosqlite.Connection = ctx["db"]
+    db.row_factory = aiosqlite.Row
+    now_utc = datetime.now(timezone.utc)
+
+    try:
+        cur = await db.execute("SELECT * FROM notification_rules WHERE enabled = 1")
+        rules = [dict(r) for r in await cur.fetchall()]
+    except Exception:  # noqa: BLE001
+        return {"checked": 0, "enqueued": 0}
+
+    enqueued = 0
+    for rule in rules:
+        user_id = rule["user_id"]
+        # Get user timezone
+        try:
+            cur = await db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
+            row = await cur.fetchone()
+            user_tz = (row["timezone"] if row and row["timezone"] else "UTC")
+        except Exception:  # noqa: BLE001
+            user_tz = "UTC"
+
+        if _bundle_due(rule, now_utc=now_utc, user_tz=user_tz):
+            enqueue = ctx.get("enqueue")
+            if enqueue is not None:
+                result = enqueue("send_bundle", user_id)
+                if hasattr(result, "__await__"):
+                    await result
+            enqueued += 1
+
+    return {"checked": len(rules), "enqueued": enqueued}
 
 
 async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:

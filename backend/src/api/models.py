@@ -316,48 +316,32 @@ class ApplicationTimelineResponse(BaseModel):
     timeline: list[TimelineEntry]
 
 
-# ── Step-3 B-02 — Notification rules (per-user per-channel preferences) ──
+# ── Single-rulebook notification model (migration 0020) ──────────────────────
+# One rule per user, applies to ALL connected channels.
 
-
-class NotificationRule(BaseModel):
-    id: int
-    user_id: str
-    channel: str
-    score_threshold: int
-    notify_mode: str
-    quiet_hours_start: Optional[str]
-    quiet_hours_end: Optional[str]
-    digest_send_time: Optional[str]
-    enabled: bool
-    created_at: str
-    updated_at: str
-
-
-# R-7: HH:MM (24-hour) regex shared by Create + Update. Validates at the
-# model boundary — defence-in-depth alongside the dispatcher's try/except.
-# Pydantic's ``pattern`` rejects malformed strings with 422 before they
-# ever reach the DB or the dispatcher.
+# HH:MM (24-hour) regex for time fields.
 _HHMM_PATTERN = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
 
 
-class NotificationRuleCreate(BaseModel):
-    channel: str
-    score_threshold: int = Field(default=60, ge=0, le=100)
-    notify_mode: str = Field(default="instant", pattern="^(instant|digest)$")
-    quiet_hours_start: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    quiet_hours_end: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    digest_send_time: Optional[str] = Field(default="08:00", pattern=_HHMM_PATTERN)
+class NotificationRule(BaseModel):
+    user_id: str
+    score_threshold: int = 60
+    notify_mode: str = "instant"  # instant | daily | every_n_hours
+    interval_hours: int = 6
+    daily_send_time: str = "08:00"
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    last_sent_at: Optional[str] = None
     enabled: bool = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class NotificationRuleUpdate(BaseModel):
-    score_threshold: Optional[int] = Field(None, ge=0, le=100)
-    notify_mode: Optional[str] = Field(None, pattern="^(instant|digest)$")
+    score_threshold: Optional[int] = Field(default=None, ge=0, le=100)
+    notify_mode: Optional[str] = Field(default=None, pattern="^(instant|daily|every_n_hours)$")
+    interval_hours: Optional[int] = Field(default=None, ge=1, le=24)
+    daily_send_time: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
     quiet_hours_start: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
     quiet_hours_end: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    digest_send_time: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
     enabled: Optional[bool] = None
-
-
-class NotificationRuleListResponse(BaseModel):
-    rules: list[NotificationRule]

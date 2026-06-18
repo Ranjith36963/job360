@@ -288,3 +288,38 @@ async def test_feed_jobs_surface_and_rank_by_llm_verdict(db):
     assert rows[1]["llm_fit_score"] is None, (
         f"Unjudged job A must have llm_fit_score=NULL, got {rows[1]['llm_fit_score']}"
     )
+
+
+# ── Channels & Notifications overhaul — Task 1: single-rule schema ──────────
+
+
+def test_notification_rules_single_per_user_schema(db):
+    """After migration 0020 the table is one-row-per-user with the new columns."""
+
+    async def _cols():
+        cur = await db._conn.execute("PRAGMA table_info(notification_rules)")
+        return {r[1] for r in await cur.fetchall()}
+
+    cols = asyncio.run(_cols())
+    assert "interval_hours" in cols
+    assert "daily_send_time" in cols
+    assert "last_sent_at" in cols
+    assert "channel" not in cols          # per-channel column removed
+    assert "digest_send_time" not in cols  # renamed to daily_send_time
+
+
+def test_notification_rules_unique_user(db):
+    """A second insert for the same user must conflict (UNIQUE(user_id))."""
+
+    async def _insert_twice():
+        await db._conn.execute(
+            "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','instant')"
+        )
+        await db._conn.commit()
+        await db._conn.execute(
+            "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','daily')"
+        )
+        await db._conn.commit()
+
+    with pytest.raises(Exception):
+        asyncio.run(_insert_twice())

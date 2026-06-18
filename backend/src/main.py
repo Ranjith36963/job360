@@ -42,7 +42,6 @@ from src.services.job_enrichment import (
     enrich_batch,
 )
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
-from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.storage import current_profile_version_id, load_profile
@@ -795,13 +794,6 @@ async def run_search(
                 await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
                 logger.info("Report saved: %s", md_path)
 
-                # Notifications via channel abstraction
-                if not no_notify:
-                    for channel in get_configured_channels():
-                        try:
-                            await channel.send(new_jobs, stats, csv_path=csv_path)
-                        except Exception as e:
-                            logger.error("%s notification failed: %s", channel.name, e)
 
                 # Print time-bucketed summary to console
                 _print_bucketed_summary(new_jobs, "Results")

@@ -132,8 +132,14 @@ MOCK_JOB_PAYLOAD = {
 
 
 def _patch_no_notifications():
-    """Patch get_configured_channels to return empty list (no notifications sent)."""
-    return patch("src.main.get_configured_channels", return_value=[])
+    """No-op context: legacy global notification path removed (migration 0020).
+
+    The per-env webhook channels (email/Slack/Discord) are gone; notifications
+    now flow through the per-user ARQ worker path.  Tests that used to silence
+    them by patching ``get_configured_channels`` just need a null context.
+    """
+    import contextlib
+    return contextlib.nullcontext()
 
 
 # Step-1.5 Cohort-X follow-up: the orchestrator's no-profile guard
@@ -307,29 +313,25 @@ def test_jobs_are_scored_with_recency():
 
 
 def test_all_notification_channels_called():
-    """When new jobs are found, all configured notification channels should be invoked."""
+    """Legacy global channel notification path removed (migration 0020).
+
+    Notifications now flow through the per-user ARQ worker/dispatcher path.
+    This test is kept as a placeholder to confirm run_search completes without
+    error when new jobs are found — the channel calls are no longer in-process.
+    """
 
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            # Create 3 mock channels
-            mock_channels = []
-            for name in ["Email", "Slack", "Discord"]:
-                ch = MagicMock()
-                ch.name = name
-                ch.send = AsyncMock()
-                mock_channels.append(ch)
-
-            with patch("src.main.get_configured_channels", return_value=mock_channels):
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    with (
-                        patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"),
-                        patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"),
-                    ):
-                        stats = await run_search(db_path=":memory:")
-                        if stats["new_jobs"] > 0:
-                            for ch in mock_channels:
-                                ch.send.assert_awaited_once()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with (
+                    patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"),
+                    patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"),
+                ):
+                    stats = await run_search(db_path=":memory:")
+                    # Just verify run_search completes with a valid stats dict.
+                    assert isinstance(stats, dict)
+                    assert "new_jobs" in stats
 
     _run(_test())
 
@@ -409,28 +411,22 @@ def test_second_run_finds_no_new_jobs():
 
 
 def test_run_search_no_notify_skips_channels():
-    """With no_notify=True, notification channels should not be called."""
+    """With no_notify=True, run_search completes without dispatching notifications.
+
+    Legacy global channel path removed; no_notify=True is still accepted as a
+    flag but the worker dispatch path is already gated per-user.
+    """
 
     async def _test():
         with aioresponses() as m:
             _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
-            mock_channels = []
-            for name in ["Email", "Slack"]:
-                ch = MagicMock()
-                ch.name = name
-                ch.send = AsyncMock()
-                mock_channels.append(ch)
-
-            with patch("src.main.get_configured_channels", return_value=mock_channels):
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    with (
-                        patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"),
-                        patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"),
-                    ):
-                        await run_search(db_path=":memory:", no_notify=True)
-                        # Channels should NOT have been called
-                        for ch in mock_channels:
-                            ch.send.assert_not_awaited()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with (
+                    patch("src.main.EXPORTS_DIR", Path(tmpdir) / "exports"),
+                    patch("src.main.REPORTS_DIR", Path(tmpdir) / "reports"),
+                ):
+                    stats = await run_search(db_path=":memory:", no_notify=True)
+                    assert isinstance(stats, dict)
 
     _run(_test())
 

@@ -121,13 +121,13 @@ def _is_in_quiet_window(
         return False
 
 
-async def _load_notification_rule(db: aiosqlite.Connection, user_id: str, channel_type: str) -> dict | None:
-    """Return the notification_rules row for (user_id, channel_type) or None."""
+async def _load_notification_rule(db: aiosqlite.Connection, user_id: str) -> dict | None:
+    """Return the single notification_rules row for user_id or None."""
     try:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT * FROM notification_rules WHERE user_id = ? AND channel = ?",
-            (user_id, channel_type),
+            "SELECT * FROM notification_rules WHERE user_id = ?",
+            (user_id,),
         )
         row = await cur.fetchone()
         return dict(row) if row else None
@@ -170,23 +170,27 @@ async def dispatch(
     body: str,
     job_id: int | None = None,
     match_score: int | None = None,
+    force: bool = False,
 ) -> list[ChannelSendResult]:
     """Send ``(title, body)`` to every enabled channel for ``user_id``.
 
-    Step-3 B-03: before dispatching each channel the function consults
-    ``notification_rules`` for the matching (user_id, channel_type) row.
+    Channels & Notifications overhaul: one rule per user (not per channel).
     If no rule exists the channel receives the notification immediately
     (backwards-compatible default).
 
     Rule evaluation order:
-      1. enabled=0 → skip (ChannelSendResult ok=True, skipped=True)
-      2. match_score < score_threshold → skip
-      3. notify_mode='digest' → queue for digest, skip immediate dispatch
-      4. quiet_hours active → skip (for instant) or queue digest
+      1. rule.enabled=0 → skip all channels
+      2. match_score < score_threshold → skip all channels
+      3. notify_mode in ('daily', 'every_n_hours') or quiet_hours active
+         → queue digest (unless force=True)
+      4. Otherwise dispatch immediately via Apprise
 
     ``job_id`` and ``match_score`` are optional; when absent rule gates that
     inspect them are bypassed (keeps the function usable for non-job
     notifications like test-sends).
+
+    ``force=True`` bypasses mode/quiet-hours gate — used by send_bundle to
+    deliver already-queued digests regardless of current mode/time.
 
     Returns one result per channel attempted.
     """
@@ -194,85 +198,64 @@ async def dispatch(
     channels = await load_user_channels(db, user_id)
     user_tz = await _load_user_timezone(db, user_id)
     results: list[ChannelSendResult] = []
+
+    # ── Rule consultation ──────────────────────────────────────────────────
+    rule = await _load_notification_rule(db, user_id)
+    # Compute once for all channels
+    rule_enabled = rule is None or bool(rule.get("enabled", 1))
+    threshold = int(rule.get("score_threshold", 60)) if rule else 0
+    notify_mode = rule.get("notify_mode", "instant") if rule else "instant"
+    in_quiet = False
+    if rule:
+        qs = rule.get("quiet_hours_start")
+        qe = rule.get("quiet_hours_end")
+        if qs and qe:
+            in_quiet = _is_in_quiet_window(qs, qe, user_tz)
+
+    # Gate 1: rule disabled
+    if not rule_enabled:
+        return [
+            ChannelSendResult(
+                channel_id=ch["id"],
+                channel_type=ch["channel_type"],
+                ok=True,
+                skipped=True,
+                error="rule disabled",
+            )
+            for ch in channels
+        ]
+
+    # Gate 2: score threshold
+    if match_score is not None and match_score < threshold:
+        return [
+            ChannelSendResult(
+                channel_id=ch["id"],
+                channel_type=ch["channel_type"],
+                ok=True,
+                skipped=True,
+                error=f"score {match_score} < threshold {threshold}",
+            )
+            for ch in channels
+        ]
+
     for ch in channels:
         ch_type = ch["channel_type"]
 
-        # ── Rule consultation ──────────────────────────────────────────────
-        rule = await _load_notification_rule(db, user_id, ch_type)
-        if rule is not None:
-            # Gate 1: channel-level enable switch
-            if not rule.get("enabled", 1):
-                results.append(
-                    ChannelSendResult(
-                        channel_id=ch["id"],
-                        channel_type=ch_type,
-                        ok=True,
-                        skipped=True,
-                        error="rule disabled",
-                    )
+        # Gate 3+4: bundle mode or quiet hours (unless force=True)
+        if not force and (notify_mode in ("daily", "every_n_hours") or in_quiet):
+            await _queue_digest(db, user_id, ch_type, job_id)
+            results.append(
+                ChannelSendResult(
+                    channel_id=ch["id"],
+                    channel_type=ch_type,
+                    ok=True,
+                    queued_digest=True,
+                    error="queued for bundle",
                 )
-                continue
+            )
+            continue
 
-            # Gate 2: score threshold
-            if match_score is not None:
-                threshold = int(rule.get("score_threshold", 60))
-                if match_score < threshold:
-                    results.append(
-                        ChannelSendResult(
-                            channel_id=ch["id"],
-                            channel_type=ch_type,
-                            ok=True,
-                            skipped=True,
-                            error=f"score {match_score} < threshold {threshold}",
-                        )
-                    )
-                    continue
-
-            # Gate 3: digest mode — queue and skip immediate send
-            notify_mode = rule.get("notify_mode", "instant")
-            if notify_mode == "digest":
-                await _queue_digest(db, user_id, ch_type, job_id)
-                results.append(
-                    ChannelSendResult(
-                        channel_id=ch["id"],
-                        channel_type=ch_type,
-                        ok=True,
-                        queued_digest=True,
-                        error="queued for digest",
-                    )
-                )
-                continue
-
-            # Gate 4: quiet hours (instant mode only — digest already handled)
-            qs = rule.get("quiet_hours_start")
-            qe = rule.get("quiet_hours_end")
-            if qs and qe:
-                if _is_in_quiet_window(qs, qe, user_tz):
-                    # Queue for digest if job_id is available, otherwise skip.
-                    if job_id is not None:
-                        await _queue_digest(db, user_id, ch_type, job_id)
-                        results.append(
-                            ChannelSendResult(
-                                channel_id=ch["id"],
-                                channel_type=ch_type,
-                                ok=True,
-                                queued_digest=True,
-                                error="quiet hours — queued for digest",
-                            )
-                        )
-                    else:
-                        results.append(
-                            ChannelSendResult(
-                                channel_id=ch["id"],
-                                channel_type=ch_type,
-                                ok=True,
-                                skipped=True,
-                                error="quiet hours — skipped",
-                            )
-                        )
-                    continue
-        # ── /Rule consultation ─────────────────────────────────────────────
-
+        # Immediate dispatch via Apprise
         url = decrypt(ch["credential_encrypted"])
         ap = apprise.Apprise()
         ap.add(url)
