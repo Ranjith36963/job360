@@ -344,7 +344,9 @@ _PROSE_SKILL_TERMS: list[tuple[str, str]] = [
     ("llm fine tuning", "LLM Fine-Tuning"),
     ("fine-tuning", "LLM Fine-Tuning"),
     ("cloud deployment", "Cloud Deployment"),
+    ("cloud deployments", "Cloud Deployment"),
     ("cloud-scale deployment", "Cloud Deployment"),
+    ("cloud-scale deployments", "Cloud Deployment"),
     ("internet of things", "IoT"),
     ("iot", "IoT"),
     ("regression", "Regression"),
@@ -354,6 +356,7 @@ _PROSE_SKILL_TERMS: list[tuple[str, str]] = [
     ("natural language processing", "NLP"),
     ("retrieval augmented generation", "RAG"),
     ("retrieval-augmented generation", "RAG"),
+    ("rag", "RAG"),
     ("generative ai", "Generative AI"),
     ("vector databases", "Vector Databases"),
     ("vector database", "Vector Databases"),
@@ -365,6 +368,17 @@ _PROSE_SKILL_TERMS: list[tuple[str, str]] = [
     ("data preprocessing", "Data Preprocessing"),
     ("large language models", "Large Language Models"),
     ("neural networks", "Neural Networks"),
+    ("production genai", "Production GenAI"),
+    ("production gen ai", "Production GenAI"),
+]
+
+# Common infrastructure / named tools that are unambiguous single words — safe to
+# match verbatim in prose (not CV-specific overfitting; universal tech vocabulary).
+_COMMON_TOOL_TERMS: list[tuple[str, str]] = [
+    ("docker", "Docker"), ("kubernetes", "Kubernetes"), ("redis", "Redis"),
+    ("kafka", "Apache Kafka"), ("airflow", "Apache Airflow"), ("spark", "Apache Spark"),
+    ("postgresql", "PostgreSQL"), ("mongodb", "MongoDB"), ("linux", "Linux"),
+    ("kubernetes", "Kubernetes"), ("terraform", "Terraform"),
 ]
 
 

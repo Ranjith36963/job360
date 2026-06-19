@@ -37,6 +37,45 @@ ABOUT ME:
 ---"""
 
 
+def deterministic_about_me_skills(about_me: str) -> list[str]:
+    """Mine the free-text ``about_me`` for skills WITHOUT an LLM — gives
+    preferences a deterministic floor so they don't fully depend on the
+    (rate-limited, variance-prone) LLM pass. Combines:
+      • grounded prose-term scan (Multimodal AI, Cloud Deployment, RAG, ...)
+      • common named infra tools present verbatim (Docker, Redis, ...)
+      • tools inside parentheses ("vector databases (ChromaDB, FAISS)").
+    """
+    if not about_me or not about_me.strip():
+        return []
+    import re  # noqa: PLC0415
+    from src.services.profile.cv_parser import (  # noqa: PLC0415
+        _COMMON_TOOL_TERMS,
+        scan_prose_skills,
+    )
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(s: str) -> None:
+        s = s.strip()
+        if s and s.lower() not in seen:
+            out.append(s)
+            seen.add(s.lower())
+
+    for s in scan_prose_skills(about_me):
+        _add(s)
+    low = about_me.lower()
+    for term, skill in _COMMON_TOOL_TERMS:
+        if re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", low):
+            _add(skill)
+    for inner in re.findall(r"\(([^)]*)\)", about_me):
+        for tok in inner.split(","):
+            tok = tok.strip()
+            if tok and len(tok) <= 40:
+                _add(tok)
+    return out
+
+
 async def llm_infer_from_about_me(about_me: str) -> list[str]:
     """Pass 2 for preferences — mine the free-text ``about_me`` for skills the
     structured form never captured.

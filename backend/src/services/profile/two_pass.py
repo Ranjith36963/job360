@@ -118,12 +118,27 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         except Exception as e:  # noqa: BLE001
             logger.warning("two_pass: GitHub LLM pass skipped: %s", e)
 
-    # ── Preferences: LLM mine of the free-text about_me ──
+    # ── Preferences: deterministic + LLM mine of the free-text about_me ──
     if prefs.about_me:
+        merged: list[str] = []
+        seen_am: set[str] = set()
+        # Deterministic floor first (works with no LLM / when throttled).
+        from src.services.profile.preferences import (  # noqa: PLC0415
+            deterministic_about_me_skills,
+        )
+
+        for s in deterministic_about_me_skills(prefs.about_me):
+            if s.lower() not in seen_am:
+                merged.append(s)
+                seen_am.add(s.lower())
         try:
-            cv.about_me_inferred_skills = await llm_infer_from_about_me(prefs.about_me)
+            for s in await llm_infer_from_about_me(prefs.about_me):
+                if s.lower() not in seen_am:
+                    merged.append(s)
+                    seen_am.add(s.lower())
         except Exception as e:  # noqa: BLE001
             logger.warning("two_pass: about_me LLM pass skipped: %s", e)
+        cv.about_me_inferred_skills = merged
 
     return profile
 

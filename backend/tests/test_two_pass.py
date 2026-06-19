@@ -37,6 +37,19 @@ class TestPreferencesLlmPass:
         assert "stakeholder" in captured["prompt"].lower()
         assert "Stakeholder Management" in skills
 
+    def test_deterministic_about_me_skills(self):
+        """about_me is mined WITHOUT the LLM: prose terms + parenthetical tools +
+        common infra names, so preferences have a real deterministic floor."""
+        from src.services.profile.preferences import deterministic_about_me_skills
+
+        about = ("Production GenAI engineer — RAG pipelines, multimodal AI, cloud-scale "
+                 "deployments. Strong in Docker, vector databases (ChromaDB, FAISS), "
+                 "prompt engineering, LLM fine-tuning.")
+        s = {x.lower() for x in deterministic_about_me_skills(about)}
+        for want in ["multimodal ai", "cloud deployment", "vector databases", "chromadb",
+                     "faiss", "prompt engineering", "docker", "production genai", "rag"]:
+            assert want in s, f"missing {want} in {s}"
+
     @pytest.mark.asyncio
     async def test_blank_about_me_skips_llm(self):
         from src.services.profile.preferences import llm_infer_from_about_me
