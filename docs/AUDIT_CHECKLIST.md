@@ -123,3 +123,46 @@ Postgres for real concurrency (proper). This is a **Step 4 / production-readines
 3. Admin source-health lacks a role gate (any user can read ops data).
 4. Email verification not enforced — confirm if intended.
 5. CSV export endpoint has no UI affordance.
+
+---
+
+## Integration findings (from full FE↔BE code map)
+
+**Test coverage is strong (correction to columns above):** backend pytest files exist for
+nearly every feature — `test_auth_routes`, `test_auth_sessions`, `test_email_verification`,
+`test_password_reset`, `test_csv_export`, `test_profile`/`_upload`/`_storage`/`_versions`,
+`test_linkedin_github`, `test_pipeline_timeline`, `test_channels_routes`/`_oauth`/`_crypto`/`_dispatcher`,
+`test_notification_rules`, `test_notifications_endpoint`, `test_account_mgmt`, `test_source_health`,
+`test_deduplicator`, `test_scoring_dimensions`. Frontend vitest covers the major flows
+(landing, login, dashboard, filters, job detail, JobCard, CV upload, preferences, KanbanBoard,
+channels page, account forms). So **Tested = ✅ for most rows**; the gaps are FE tests for
+register/forgot/verify/version-drawers/notifications pages.
+
+### 🔌 Wired-but-unused frontend functions (dead-end client code)
+These `api.ts` functions exist (and their backend routes + tests exist) but **no page/component calls them** — the capability is built but not surfaced to users:
+| Function | Backend route | Impact / Fix |
+|---|---|---|
+| `exportJobsCsv()` | `GET /api/jobs/export` | **CSV export has no button** anywhere — add UI affordance |
+| `getRecentRuns()` | `GET /api/runs/recent` | run history not shown — add to admin/dashboard or remove |
+| `getEmailVerified()` | `GET /api/auth/me/email-verified` | **no "verify your email" banner** rendered — add it (ties to #4) |
+| `getActions()` / `getActionCounts()` | `GET /api/actions(/counts)` | actions filtered via `/jobs` query instead — likely fine, dead client fns |
+| `deleteNotificationRule(id)` | `DELETE /settings/notification-rules/{id}` | **no delete button** on the notifications page — add it |
+
+### 🔚 Backend routes with no frontend caller (dead ends)
+- `GET /api/notifications/stats` — implemented + in OpenAPI, no UI consumer
+- `GET /api/runs/recent` — implemented, no UI consumer
+- OAuth callbacks `/settings/channels/callback/{slack,discord}` — browser redirects (expected, not fetch)
+- `GET /api/auth/me/email-verified`, `GET /api/actions(/counts)` — see above
+
+### Shell pages (no API, intentional)
+- `/jobs` → pure redirect to `/dashboard`
+- `/settings` → tab navigation shell only
+
+### Note: notification-rule has TWO endpoint shapes
+- `GET/PUT /api/settings/notification-rule` (singular) — simple one-rule form
+- `GET/POST/PATCH/DELETE /api/settings/notification-rules` (plural, CRUD, used by the FE) — `notification_rules.py`, registered `main.py:72`, tested
+Both work; minor redundancy/tech-debt, not a break.
+
+### New DB tables surfaced by the map
+`email_verifications`, `password_resets`, `oauth_states` (auth/channel flows) — in addition to
+the core per-user tables already listed.
