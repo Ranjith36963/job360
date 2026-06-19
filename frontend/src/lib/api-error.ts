@@ -42,6 +42,21 @@ export class ApiError extends Error {
 }
 
 /**
+ * Human-readable message for any API error. Prefers the backend's ``detail``
+ * (e.g. "email delivery is not configured") over the raw ``API error 503: …``
+ * string that leaks the HTTP status into the UI.
+ */
+export function apiErrorMessage(
+  err: unknown,
+  fallback = "Something went wrong. Please try again."
+): string {
+  if (err instanceof ApiError) {
+    return err.detail || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/**
  * Map an error to a user-friendly message for auth forms (login / register /
  * password reset). Without this, forms rendered the raw `API error 401:
  * invalid credentials` string, leaking the HTTP status to the user.

@@ -477,11 +477,21 @@ export async function deleteAccount(): Promise<void> {
 
 export async function getNotificationLedger(
   limit = 20,
-  offset = 0
+  offset = 0,
+  filters: { channel?: string; status?: string } = {}
 ): Promise<NotificationLedgerListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.channel) params.set("channel", filters.channel);
+  if (filters.status) params.set("status", filters.status);
   return request<NotificationLedgerListResponse>(
-    `/api/notifications?limit=${limit}&offset=${offset}`
+    `/api/notifications?${params.toString()}`
   );
+}
+
+/** Per-channel ledger aggregation: { channel: { sent, failed, queued, ... } }.
+ *  Used to list ALL channels in the history filter, not just the current page. */
+export async function getNotificationStats(): Promise<Record<string, Record<string, number>>> {
+  return request<Record<string, Record<string, number>>>("/api/notifications/stats");
 }
 
 // ---- Step-3: Duplicate jobs ----

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Bell } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { getNotificationLedger } from "@/lib/api";
+import { getNotificationLedger, getNotificationStats } from "@/lib/api";
 import type { NotificationLedgerListResponse } from "@/lib/types";
 
 const PAGE_LIMIT = 20;
@@ -13,8 +13,19 @@ const PAGE_LIMIT = 20;
 const STATUS_STYLES: Record<string, string> = {
   sent: "bg-emerald-500/15 text-emerald-400",
   failed: "bg-red-500/15 text-red-400",
-  pending: "bg-amber-500/15 text-amber-400",
+  queued: "bg-amber-500/15 text-amber-400",
+  dlq: "bg-red-700/20 text-red-300",
 };
+
+// Status filter options — values match the real ledger statuses the backend
+// stores (queued/sent/failed/dlq), not invented ones.
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "sent", label: "Sent" },
+  { value: "failed", label: "Failed" },
+  { value: "queued", label: "Queued" },
+  { value: "dlq", label: "Dead-letter" },
+];
 
 function statusStyle(status: string): string {
   return STATUS_STYLES[status] ?? "bg-muted text-muted-foreground";
@@ -41,33 +52,47 @@ export default function NotificationsPage() {
   const [offset, setOffset] = useState(0);
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [allChannels, setAllChannels] = useState<string[]>([]);
 
-  const fetchData = useCallback(async (pageOffset: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await getNotificationLedger(PAGE_LIMIT, pageOffset);
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load notifications");
-    } finally {
-      setLoading(false);
-    }
+  // Full channel list for the filter — from the stats endpoint so it covers
+  // every channel in the user's history, not just the current page.
+  useEffect(() => {
+    getNotificationStats()
+      .then((stats) => setAllChannels(Object.keys(stats).sort()))
+      .catch(() => setAllChannels([]));
   }, []);
 
+  // Fetch one page server-side WITH the active filters, so the table, the
+  // count, and pagination all reflect the whole history — not just one page.
+  const fetchData = useCallback(
+    async (pageOffset: number, channel: string, status: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await getNotificationLedger(PAGE_LIMIT, pageOffset, {
+          channel: channel === "all" ? undefined : channel,
+          status: status === "all" ? undefined : status,
+        });
+        setData(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load notifications");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  // Reset to the first page whenever a filter changes.
   useEffect(() => {
-    fetchData(offset);
-  }, [fetchData, offset]);
+    setOffset(0);
+  }, [channelFilter, statusFilter]);
+
+  useEffect(() => {
+    fetchData(offset, channelFilter, statusFilter);
+  }, [fetchData, offset, channelFilter, statusFilter]);
 
   const notifications = data?.notifications ?? [];
-  const uniqueChannels = Array.from(new Set(notifications.map((n) => n.channel))).sort();
-
-  const filtered = notifications.filter((n) => {
-    if (channelFilter !== "all" && n.channel !== channelFilter) return false;
-    if (statusFilter !== "all" && n.status !== statusFilter) return false;
-    return true;
-  });
-
   const total = data?.total ?? 0;
   const hasPrev = offset > 0;
   const hasNext = offset + PAGE_LIMIT < total;
@@ -124,7 +149,7 @@ export default function NotificationsPage() {
             className="rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           >
             <option value="all">All channels</option>
-            {uniqueChannels.map((ch) => (
+            {allChannels.map((ch) => (
               <option key={ch} value={ch}>{ch}</option>
             ))}
           </select>
@@ -140,16 +165,15 @@ export default function NotificationsPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           >
-            <option value="all">All</option>
-            <option value="sent">Sent</option>
-            <option value="failed">Failed</option>
-            <option value="pending">Pending</option>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </div>
 
         {data && (
           <span className="ml-auto text-xs text-muted-foreground" aria-live="polite">
-            {filtered.length} of {total} notification{total !== 1 ? "s" : ""}
+            {total} notification{total !== 1 ? "s" : ""}
           </span>
         )}
       </div>
@@ -159,7 +183,7 @@ export default function NotificationsPage() {
           <span className="text-sm font-medium text-foreground/80">Notification Ledger</span>
         </CardHeader>
         <CardContent className="p-0">
-          {filtered.length === 0 ? (
+          {notifications.length === 0 ? (
             <EmptyState
               icon={<Bell />}
               title="No notifications found"
@@ -185,7 +209,7 @@ export default function NotificationsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((n) => (
+                {notifications.map((n) => (
                   <tr
                     key={n.id}
                     className="border-b border-foreground/5 transition-colors last:border-0 hover:bg-foreground/[0.02]"
