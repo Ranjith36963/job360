@@ -166,3 +166,42 @@ Both work; minor redundancy/tech-debt, not a break.
 ### New DB tables surfaced by the map
 `email_verifications`, `password_resets`, `oauth_states` (auth/channel flows) — in addition to
 the core per-user tables already listed.
+
+---
+
+## Visual pass (Playwright, real browser)
+
+Drove a real Chromium via Playwright MCP against the running app (frontend :3000 + backend :8000).
+
+**Page render status (every route):**
+| Page | Result | Note |
+|---|---|---|
+| `/` landing | ✅ renders | footer shows **"47 sources"** (fix live); screenshot `audit-landing.png` |
+| `/login` | ✅ renders | form (RHF), nav, footer all present; screenshot captured |
+| `/register` | ✅ renders | screenshot `audit-register.png` |
+| `/forgot-password`,`/reset-password`,`/verify-email` | ✅ 200 | render (server) |
+| `/notifications` | ⚠️ 200 to logged-out | renders shell then client-checks (not server-gated) |
+| `/admin/sources` | ⚠️ 200 to logged-out | renders shell; **no role gate** (ties to earlier finding) |
+| `/profile`,`/pipeline`,`/settings/{channels,notifications,account}` | ✅ 307 → `/login?next=…` | **auth guard works** (confirmed visually: `/profile` → `/login?next=%2Fprofile`) |
+
+**Auth guard:** ✅ verified — gated routes redirect to login preserving `next`.
+
+**Login form:** code is correct — `<form onSubmit={handleSubmit(...)} noValidate>` (RHF preventDefaults).
+
+### ⚠️ Audit-method finding: dev server is unreliable for interactive Playwright
+While button-testing login, submitting put credentials in the URL (`/login?email=…&password=…`) —
+a **native GET submission**, i.e. React had **not hydrated** when the key was pressed. Root cause:
+the Next.js **dev HMR websocket is broken under the MCP browser** (10× `webpack-hmr ... WebSocket
+handshake failed` console errors per page), making hydration race-prone; and first navigation to an
+un-compiled route **times out** (~60s Turbopack cold compile). **This is a dev-mode artifact, NOT an
+app bug** (the form code is correct; the API login works — verified 200 in the route sweep).
+
+**Correct method for exhaustive interactive testing (every authenticated page + every button + success/
+failure):** run a **production build** (`npm run build && npm run start`) — no HMR, reliable hydration,
+no cold-compile timeouts — against a **stable backend** (fix BUG #1 SQLite locks first, or the search/feed
+writes drop under load). The dev server is fine for render/guard checks (done above) but not for
+reliable click-through automation.
+
+### Visual-pass status
+- ✅ Done: every page's render/guard status; landing/login/register screenshots; auth-guard redirect; login-form code.
+- ⏳ Deferred (needs prod build + stable backend): authenticated-page screenshots, button-by-button clicks, and success/failure flows for dashboard/profile/pipeline/channels/notifications/account. The **backend + API + DB + tests** for all of these are already verified (route sweep + code map + pytest); what remains is the **UI click-through on a prod build**.
