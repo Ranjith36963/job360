@@ -42,6 +42,37 @@ Branch: `worktree-channels-notifications-overhaul`. Spec: `docs/superpowers/spec
     Only console error is the known benign dark-mode hydration mismatch.
     Evidence: `test-artifacts/notif-rulebook-every-n-hours.png`.
 
+### Full browser sweep — every button/feature (2026-06-19)
+Drove both pages end-to-end in a real browser (Playwright). Channels: connect
+buttons (correct disabled state without provider creds), email validation +
+"not configured" path, webhook validation + create, **Send test proven against
+a real endpoint (httpbin → "Test succeeded")** plus a real failure case, and
+remove. Notifications: 404→defaults, all three modes with their conditional
+fields, interval/daily-time/threshold/quiet-hours/enable, Save→API→DB persisted
+(verified via API), and the no-channels empty state. History: empty + populated
+table, status badges, pagination.
+
+Three more bugs found by this sweep and fixed (commit ddecc0d):
+- **History filters were per-page only.** Status/Channel filters + the "X of Y"
+  count applied to the current 20-row page client-side, so e.g. "Failed" showed
+  a wrong partial count and the channel dropdown only listed current-page
+  channels. Now the filters are sent to the API (which already supported them);
+  table, count, and pagination reflect the whole history. Channel list now comes
+  from `/notifications/stats`.
+- **"Pending" status filter never matched.** Dropdown value was `pending` but the
+  real ledger status is `queued`, so the filter returned nothing and queued rows
+  rendered an unstyled badge. Fixed to the real statuses (sent/failed/queued/dlq)
+  with an amber queued badge.
+- **Raw "API error 503:" leaked** in channel error messages; now shows the
+  backend's clean detail (e.g. "email delivery is not configured") via a new
+  `apiErrorMessage()` helper.
+
+**Honest limits (need real credentials, not testable here):** real Slack/Discord/
+Telegram OAuth connect (no provider keys on server — buttons correctly disabled)
+and real SMTP email delivery (backend correctly returns "not configured"). Real
+outbound delivery for the shared dispatcher→Apprise path IS proven via the
+webhook httpbin success.
+
 ### Rules touched
 CLAUDE.md #23/#24 rewritten for the single-rule + three-mode model and the legacy-path removal.
 
