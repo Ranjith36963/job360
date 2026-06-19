@@ -124,6 +124,23 @@ class TestCvDeterministicPass:
         s = set(out["skills"])
         assert {"OCR", "Tesseract", "Python", "Pandas", "NumPy", "Matplotlib"}.issubset(s)
 
+    def test_scans_prose_for_known_skill_terms(self):
+        """Grounded prose scan: known multi-word skills stated in flowing text
+        (education/projects/summary) are caught even outside a Skills section."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "Summary\nML engineer.\n\n"
+            "Education\nRelevant Coursework: Reinforcement Learning, Computer Vision.\n"
+            "Project: traffic system integrating ML algorithms with IoT sensors.\n"
+            "Built predictive maintenance using regression models.\n"
+        )
+        s = {x.lower() for x in deterministic_cv_fields(text)["skills"]}
+        assert "reinforcement learning" in s
+        assert "iot" in s
+        assert "predictive maintenance" in s
+        assert "regression" in s
+
     def test_strips_category_label_prefix(self):
         """CV skill lines like 'Cloud & MLOps: AWS (Bedrock, SageMaker)' should
         drop the category label and keep the real skills (incl. inner tools)."""

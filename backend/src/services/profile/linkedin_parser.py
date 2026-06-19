@@ -664,6 +664,14 @@ async def parse_linkedin_from_text(text: str) -> dict:
         if s.lower() not in seen_sk:
             skills.append(s)
             seen_sk.add(s.lower())
+    # Grounded prose scan — catches summary/"WHAT I DO" skills (Multimodal AI,
+    # LLM Fine-Tuning, Cloud Deployment, ...) stated in flowing text.
+    from src.services.profile.cv_parser import scan_prose_skills  # noqa: PLC0415
+
+    for s in scan_prose_skills(text):
+        if s.lower() not in seen_sk:
+            skills.append(s)
+            seen_sk.add(s.lower())
     experience_text = sections.get("experience", "")
     education_text = sections.get("education", "")
     certs_text = (
