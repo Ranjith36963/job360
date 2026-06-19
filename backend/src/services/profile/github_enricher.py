@@ -381,6 +381,8 @@ async def fetch_github_profile(
                 if skill.lower() not in seen_framework:
                     frameworks_inferred.append(skill)
                     seen_framework.add(skill.lower())
+        # Drop dev-tooling noise (linters/formatters/config) — not real skills.
+        frameworks_inferred = _filter_dev_tooling(frameworks_inferred)
 
         skills_inferred = _infer_skills(weighted_languages, all_topics)
 
@@ -466,6 +468,23 @@ def _infer_skills_from_descriptions(repos_brief: list[dict]) -> list[str]:
                 out.append(skill)
                 seen.add(skill.lower())
     return out
+
+
+# Dev tooling that shows up in dep files but isn't a recruiter-relevant "skill"
+# (linters, formatters, type-checkers, config helpers, icon libs). Dropped so it
+# doesn't pollute the profile or tank precision. Matched case-insensitively.
+_DEV_TOOLING_DENYLIST: set[str] = {
+    "eslint", "prettier", "ruff", "mypy", "black", "isort", "flake8", "pylint",
+    "python-dotenv", "dotenv", "lucide", "lucide-react", "clsx", "tailwind-merge",
+    "autoprefixer", "postcss", "husky", "lint-staged", "commitlint", "editorconfig",
+    "nodemon", "concurrently", "rimraf", "cross-env", "ts-node", "tsx",
+}
+
+
+def _filter_dev_tooling(skills: list[str]) -> list[str]:
+    """Drop non-skill dev tooling (linters/formatters/config helpers) so the
+    GitHub skill list stays recruiter-relevant and precise."""
+    return [s for s in skills if s.strip().lower() not in _DEV_TOOLING_DENYLIST]
 
 
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:

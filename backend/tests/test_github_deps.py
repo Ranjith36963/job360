@@ -269,6 +269,17 @@ def test_normalize_github_username_non_string():
     assert github_enricher.normalize_github_username(None) == ""
 
 
+def test_dev_tooling_denylist_filters_noise():
+    """Linters/formatters/config helpers are not recruiter-relevant 'skills' —
+    they're dropped so they don't pollute the profile or tank precision."""
+    raw = ["React", "FastAPI", "ESLint", "Prettier", "Ruff", "mypy",
+           "python-dotenv", "Lucide", "PyTorch"]
+    kept = github_enricher._filter_dev_tooling(raw)
+    assert "React" in kept and "FastAPI" in kept and "PyTorch" in kept
+    for noise in ("ESLint", "Prettier", "Ruff", "mypy", "python-dotenv", "Lucide"):
+        assert noise not in kept
+
+
 def test_infer_skills_from_descriptions_grounded():
     """Repo descriptions are scanned for verbatim known tech terms only —
     grounded (no inference), so 'Machine Learning Fraud Detection System' yields
