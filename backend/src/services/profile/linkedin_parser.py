@@ -400,14 +400,17 @@ The two-column layout means the "Top Skills" sidebar is often interleaved with
 other text, so read the WHOLE thing.
 
 List every concrete professional SKILL the person claims — their "Top Skills",
-technologies in their summary/experience, and anything in a "Continuously
-learning" or similar line.
+technologies in their summary/experience, anything in a "Continuously learning"
+or similar line, AND skills named inside summary sentences or "WHAT I DO"-style
+bullets (e.g. "Multimodal AI", "LLM fine-tuning", "prompt engineering", "FAISS",
+"vector databases", "cloud deployment").
 
 Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 
 Rules:
 - Only skills the text supports. Do not invent.
-- Individual items, not categories.
+- Individual items, not categories. Pull each tool out of a parenthesis list,
+  e.g. "vector databases (ChromaDB, FAISS)" → "Vector Databases", "ChromaDB", "FAISS".
 - Skip bare contact info, company names, and job titles.
 
 LINKEDIN TEXT:

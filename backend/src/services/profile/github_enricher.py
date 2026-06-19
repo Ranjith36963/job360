@@ -397,6 +397,12 @@ async def fetch_github_profile(
             if r.get("description") or r.get("topics")
         ][:MAX_REPOS]
 
+        # Grounded description scan — recovers description-derived skills
+        # (RAG, Fraud Detection, ...) deterministically, no LLM/variance.
+        for s in _infer_skills_from_descriptions(repos_brief):
+            if s.lower() not in {x.lower() for x in skills_inferred}:
+                skills_inferred.append(s)
+
         return {
             "repositories": repositories,
             "languages": weighted_languages,
@@ -408,6 +414,58 @@ async def fetch_github_profile(
     finally:
         if own_session:
             await session.close()
+
+
+# Grounded description terms → skill. Matched verbatim (case-insensitive,
+# word-boundary) in repo descriptions, so a skill only lands when the phrase
+# literally appears. Longer phrases are checked first so "machine learning"
+# wins over a bare "learning". Domain-agnostic common tech vocabulary.
+_DESC_SKILL_TERMS: list[tuple[str, str]] = [
+    ("retrieval augmented generation", "RAG"),
+    ("retrieval-augmented generation", "RAG"),
+    ("machine learning", "Machine Learning"),
+    ("deep learning", "Deep Learning"),
+    ("fraud detection", "Fraud Detection"),
+    ("generative ai", "Generative AI"),
+    ("genai", "Generative AI"),
+    ("computer vision", "Computer Vision"),
+    ("natural language processing", "NLP"),
+    ("cloudflare worker", "Cloudflare Workers"),
+    ("code generator", "Code Generation"),
+    ("code generation", "Code Generation"),
+    ("cold outreach", "Cold Outreach"),
+    ("multi-agent", "Multi-agent Systems"),
+    ("multimodal", "Multimodal AI"),
+    ("chatbot", "Chatbots"),
+    ("recommendation", "Recommendation Systems"),
+    ("portfolio", "Web Development"),
+    ("rag", "RAG"),
+    ("llm", "LLM"),
+    ("nlp", "NLP"),
+]
+
+
+def _infer_skills_from_descriptions(repos_brief: list[dict]) -> list[str]:
+    """Grounded scan of repo descriptions for known tech terms present verbatim.
+
+    Deterministic and stable (no LLM, no inference): a skill lands only when its
+    phrase literally appears in a description. Recovers the description-derived
+    skills (RAG, Fraud Detection, Machine Learning, ...) the language/topic
+    lookups can't see, without the variance/hallucination of the LLM pass.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for repo in repos_brief or []:
+        desc = (repo.get("description") or "").lower()
+        if not desc:
+            continue
+        for term, skill in _DESC_SKILL_TERMS:
+            if skill.lower() in seen:
+                continue
+            if re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", desc):
+                out.append(skill)
+                seen.add(skill.lower())
+    return out
 
 
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
@@ -444,12 +502,14 @@ a name, description, and topic tags.
 Infer the concrete technical SKILLS this developer demonstrates: frameworks,
 libraries, tools, platforms, and technical domains. Focus on things a
 hard-coded language/topic table would MISS — e.g. "LangChain", "RAG",
-"Stripe API", "Computer Vision", "Kubernetes Operators".
+"Computer Vision", "Fraud Detection", "Cloudflare Workers".
 
 Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 
 Rules:
-- Only skills the repo text actually supports. Do not guess from nothing.
+- GROUNDED ONLY: every skill must be supported by words actually in the name,
+  description, or topics. Do NOT guess a tech stack from a repo's purpose — e.g.
+  for "cold outreach platform" do not assume "Gmail API"/"GPT-4o" unless named.
 - Individual items, not categories ("PyTorch", not "ML frameworks").
 - Skip bare programming languages (Python/Java/etc.) — those are covered elsewhere.
 
