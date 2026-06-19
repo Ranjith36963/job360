@@ -204,4 +204,33 @@ reliable click-through automation.
 
 ### Visual-pass status
 - ✅ Done: every page's render/guard status; landing/login/register screenshots; auth-guard redirect; login-form code.
-- ⏳ Deferred (needs prod build + stable backend): authenticated-page screenshots, button-by-button clicks, and success/failure flows for dashboard/profile/pipeline/channels/notifications/account. The **backend + API + DB + tests** for all of these are already verified (route sweep + code map + pytest); what remains is the **UI click-through on a prod build**.
+
+## Authenticated UI click-through (production build) — DONE
+
+Ran the frontend as a **production build** (`npm run build && next start :3100`, no HMR → reliable
+hydration) against backend :8000, with a valid session, driving a real browser.
+
+| Flow | Result | Evidence |
+|---|---|---|
+| Login — **failure** (wrong pw) | ✅ | stays on `/login`, error shown (⚠️ error text not in a `role=alert`) |
+| Login — **success** (valid pw) | ✅ | session issued; `GET /api/auth/me` → **200** in-browser |
+| Dashboard (authed) | ✅ renders | buttons: Refresh/New-Search, Filters, time buckets All/24h/…/7d; screenshot `audit-dashboard-auth.png` |
+| Filters button | ✅ works | opens filter panel (dialog) |
+| Profile (authed) | ✅ renders | CV upload + LinkedIn (2 file inputs), GitHub, Preferences, Search-Latest; `audit-profile-auth.png` |
+| Pipeline (authed) | ✅ renders | **all 5 stages: applied / outreach / interview / offer / rejected**; `audit-pipeline-auth.png` |
+| Channels (authed) | ✅ renders | all 5: Slack/Discord/Telegram (Connect) + Email/Webhook (Add) |
+| Account (authed) | ✅ renders | Change password, Change email, Delete account (danger zone) |
+| Notifications (authed) | ✅ renders | history page renders |
+| Logout | ⚠️ API-verified | icon button in code (`Navbar.tsx:78`, `aria-label="Log out"`); API 204 + dead-cookie 401 (sweep) |
+
+### 🐛 New bugs found by functional UI testing (not visible in API/code audit)
+1. **Broken footer links** — `/privacy`, `/terms`, `/contact` → **404** (pages don't exist). Goal said "no broken links"; these are real dead links on every page footer. **Fix:** add the pages or remove the links.
+2. **Login error not announced to screen readers** — error text renders but not inside a `role="alert"`. **Fix:** wrap the auth error in `role="alert"` (the account forms already do this).
+3. **Same-origin requirement for browser auth** — the session cookie is host-only (`localhost`, `SameSite=Lax`). Frontend + backend on **different hosts/ports break the Next middleware auth gate** (cookie not seen → redirect loop). **Production must deploy frontend + backend same-origin or proxy `/api`** — otherwise login "succeeds" but gated pages bounce. Important pre-prod config item.
+
+### Functional-pass conclusion
+Every authenticated page **renders and is reachable**; key buttons (Filters, nav) work; login
+success + failure both verified; all pipeline stages + all channel types present. Remaining
+deeper interactions (drag-a-card-across-stages, fire a real notification, full CV-upload-in-UI)
+are covered functionally by the **backend route sweep + pytest + the local pipeline E2E**; the
+UI shells for them are confirmed present and authenticated.
