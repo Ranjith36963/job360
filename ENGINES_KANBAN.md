@@ -172,3 +172,52 @@
 **Bottom line (fair, n=100):** **The dimensions (E2) earn their place** — the best stack is **E2+E3+E4** (or E2+E3): semantic search + preference dims, with the judge as a strong partner. The top tier (everything with the hybrid) is statistically tied ~0.95–0.96. **Keyword-alone, BM25-alone, and judge-alone are the weak singles.** Lesson: the *unfair* eval (Run 7) gave the *opposite* answer — measurement fairness changed the decision.
 
 **How the gold was built:** profile set via `save_profile` (graduate/£35–60k/remote/needs-visa, version 2); `run_search` @ `MIN_MATCH_SCORE→1` grew the catalog to 3,536 for a real spread; stratified 100-sample graded by Claude → fit 3–80 (16 strong/25 mid/59 weak); judged all 100; feed pruned to the 100. **Remaining caveat:** still one grader + one profile — a 2nd profile would test generalization.
+
+---
+
+## Run 9 — Gold-standard hardening (consistency + generalization across profiles)
+
+After the user asked "how do we make the gold *standard* stronger," we attacked the two biggest weak spots: **is my grading consistent**, and **does the verdict hold for more than one person**.
+
+### Part A — Self-consistency (is the gold reliable?)
+Re-graded 25 jobs by an independent method (score each dimension 0–20, then sum) and compared to the original holistic 0–100 grades.
+- **Spearman (rank order) = 0.977**, Pearson 0.941 → the two methods **rank jobs almost identically**. Since the eval uses the gold as a *ranking*, **the gold is reliable for the eval's conclusions.**
+- BUT mean-abs-diff = **21.7 pts**, 8/25 cross the "good≥60" line: the naive equal-weight per-dimension sum **inflates off-domain junk** (a backend dev → 57 vs holistic 22) because it doesn't treat *domain* as a gate. → Confirms holistic (domain-gating) grading was the right method, and that **absolute fit values are softer than the rank order** (so trust NDCG/Spearman over precision).
+
+### Part B — Generalization: a Senior AI/ML profile (n=100, its own gold + judged)
+Set a genuinely senior profile (senior titles + senior preferences), re-graded all 100 jobs for a senior, judged all 100, ran the full leaderboard. **The winners REVERSE vs the graduate:**
+
+| Config | Graduate NDCG | Senior NDCG | Senior NDCG@3 |
+|---|---|---|---|
+| E3 hybrid **alone** | 0.957 | **0.790** | 0.24 |
+| E1 keyword | 0.929 | 0.782 | 0.30 |
+| E4 judge alone | 0.933 | **0.946** | 0.79 |
+| **E3+E4** | ~0.95 | **0.956** | **0.96** |
+| E2+E3+E4 | 0.962 | 0.939 | 0.95 |
+
+- **Search engines (hybrid/keyword/BM25/dims) are seniority-BLIND.** They match on topic/skills — identical for an intern and a senior AI/ML role — so for a senior candidate they still rank *internships* on top (NDCG@3 ≈ 0.24, near-worst).
+- **Only the LLM judge (E4) adapts to *who the candidate is*** — it reads "senior" and ranks senior roles up, internships down (NDCG@3 = 0.96).
+- **E3+E4 (hybrid + judge) is the one config that wins for BOTH profiles.** → **Always include the judge.** Had we tested only the graduate, "hybrid alone is great" would have been a trap — it's near-worst for a senior.
+
+**Robust recommendation (across 2 profiles):** ship **E3+E4** (or E2+E3+E4). The hybrid does retrieval; **the judge is the essential generaliser** that makes the ranking correct for *any* candidate level. (Part C — Full-Stack SWE — is below.)
+
+### Part C — Generalization: a Full-Stack SWE profile (different FIELD, n=100, own gold + judged)
+Set a mid-level full-stack SWE profile, fetched fresh SWE jobs (catalog → 4,784), rescored + judged all 100 for SWE, graded 100 (29 strong/38 mid/33 weak). **E1 keyword wins here (NDCG 0.974, NDCG@3 0.978)** — a SWE searching SWE jobs has titles ("Software Engineer", "Full Stack") that match cleanly. Judge-alone (0.951) and hybrid-alone (0.961) are *lower* than keyword. Top tier (all keyword-inclusive combos) ~0.97–0.98, statistically tied. (NDCG saturated — the fetch found many good SWE matches; Spearman favours multi-engine combos: E1+E2+E3 0.861, E1+E3+E4 0.854.) *Caveat: the new SWE jobs were only partly enriched, so E2's dims are partially measured here.*
+
+### Cross-profile verdict (3 profiles: graduate AI/ML · senior AI/ML · full-stack SWE)
+
+| Config | Graduate | Senior | SWE | Worst-case |
+|---|---|---|---|---|
+| E1 keyword alone | 0.93 | **0.78** | 0.97 | 0.78 |
+| E3 hybrid alone | 0.96 | **0.79** | 0.96 | 0.79 |
+| E4 judge alone | 0.93 | 0.95 | 0.95 | 0.93 |
+| **E3+E4** | ~0.95 | 0.96 | 0.97 | **~0.95** |
+| **E2+E3+E4** | 0.96 | 0.94 | 0.97 | **0.94** |
+
+**Conclusions (decision-grade, now generalised):**
+1. **No single engine wins for every candidate.** The best engine flips with the person — keyword for the SWE, judge for the senior, hybrid+dims for the graduate.
+2. **Single search engines (keyword, hybrid) are fragile** — both collapse for the senior because they're blind to *level* ("Senior ML Engineer" lexically/semantically matches internships too).
+3. **The LLM judge (E4) is the stabiliser** — the only single engine solid across all three (0.93–0.95); it adapts to who the candidate is.
+4. **Ship a judge-inclusive combination — E2+E3+E4 or E3+E4** — never below ~0.94 NDCG for any profile. That is the robust, generalising stack.
+
+**Gold-standard hardening — done:** consistency measured (rank-order Spearman 0.977), generalisation tested across 3 profiles. Golds saved + reproducible: `docs/engine_eval_gold.json` (graduate), `docs/engine_eval_gold_senior.json`, `docs/engine_eval_gold_swe.json`. **Remaining bar-raisers (brainstormed, not yet done):** multi-model consensus gold (kill single-grader bias), behavioural gold (real clicks/applies), automate re-grading.
