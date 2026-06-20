@@ -463,3 +463,106 @@ async def test_clear_user_verdicts_returns_zero_when_no_rows(mem_db):
 
     cleared = await clear_user_verdicts(mem_db, "nonexistent-user")
     assert cleared == 0
+
+
+# ---------------------------------------------------------------------------
+# Engine 4 enhancement — judge telemetry (backlog #9)
+# ---------------------------------------------------------------------------
+
+
+def test_matcher_telemetry_accessor_and_reset():
+    from src.utils import telemetry
+
+    telemetry.reset_for_testing()
+    tel = telemetry.matcher_telemetry()
+    assert tel.judged == 0
+    assert tel.failed == 0
+    assert tel.skipped_existing == 0
+    assert tel.avg_fit == 0.0
+
+    tel.record_verdict(88)
+    tel.record_verdict(20)
+    assert tel.judged == 2
+    assert tel.fit_min == 20
+    assert tel.fit_max == 88
+    assert tel.avg_fit == 54.0
+
+    telemetry.reset_for_testing()
+    assert telemetry.matcher_telemetry().judged == 0
+
+
+@pytest.mark.asyncio
+async def test_match_batch_populates_telemetry(mem_db):
+    """One success + one failure + one pre-judged → judged/failed/skipped + spread."""
+    from src.utils import telemetry
+
+    telemetry.reset_for_testing()
+    conn = mem_db
+    uid = "user-tel-001"
+
+    ids = []
+    for title in ("Tel Good", "Tel BOOM", "Tel Judged"):
+        cur = await conn.execute(
+            "INSERT INTO jobs(title, company, apply_url, source, date_found) VALUES (?,?,?,?,?)",
+            (title, "C", f"https://x.com/{title}", "greenhouse", _NOW),
+        )
+        jid = cur.lastrowid
+        ids.append(jid)
+        await conn.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+            (uid, jid, 50, "top"),
+        )
+    await conn.execute(
+        "UPDATE user_feed SET llm_fit_score=50, llm_matched_at=datetime('now') "
+        "WHERE user_id=? AND job_id=?",
+        (uid, ids[2]),
+    )
+    await conn.commit()
+
+    jobs = []
+    for title, jid in zip(("Tel Good", "Tel BOOM", "Tel Judged"), ids):
+        j = _make_job(title=title)
+        j.id = jid  # type: ignore[attr-defined]
+        jobs.append(j)
+
+    async def fake(prompt, schema, system):
+        if "BOOM" in prompt:
+            raise RuntimeError("provider down")
+        return MatchVerdict(fit_score=88, verdict="good", reason="r")
+
+    await match_batch(
+        jobs, user_id=uid, profile_text="p", conn=conn, llm_extract_validated_fn=fake
+    )
+
+    tel = telemetry.matcher_telemetry()
+    assert tel.judged == 1
+    assert tel.failed == 1
+    assert tel.skipped_existing == 1
+    assert tel.fit_min == 88
+    assert tel.fit_max == 88
+
+
+@pytest.mark.asyncio
+async def test_matcher_stage_logs_fit_spread(stage_db, monkeypatch, caplog):
+    """The judge stage logs the fit-score spread (min/avg/max) for visibility."""
+    import logging
+
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    async def fake(prompt, schema, system):
+        return MatchVerdict(fit_score=77, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    job = await _seed_job(conn, "Spread Job", "CorpS", 80, _UID)
+
+    with caplog.at_level(logging.INFO, logger="job360.main"):
+        await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job])
+
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "fit" in msgs.lower()
+    assert "77" in msgs  # single job → min == avg == max == 77

@@ -436,7 +436,7 @@ class JobScorer:
     the old 100, clamped to 100 post-addition.
     """
 
-    def __init__(self, config, *, user_preferences=None, enrichment_lookup=None):
+    def __init__(self, config, *, user_preferences=None, enrichment_lookup=None, engine1=None):
         """Accept a SearchConfig (from src.services.profile.models).
 
         Optional kwargs (Batch 2.9):
@@ -446,10 +446,18 @@ class JobScorer:
           * ``enrichment_lookup`` — a callable `(job) -> JobEnrichment | None`
             that returns the enriched row for a given job. Defaults to a
             lambda that returns None (no enrichment dims contribute).
+          * ``engine1`` — Engine 1 (keyword) on/off switch. ``None`` (default)
+            reads ``settings.ENGINE1_ENABLED`` (default on). When False the
+            keyword components (title/skill/location/recency) contribute 0, so
+            only Engine 2 dimensions (if any) drive the score.
         """
         self._config = config
         self._user_preferences = user_preferences
         self._enrichment_lookup = enrichment_lookup or (lambda job: None)
+        if engine1 is None:
+            from src.core.settings import ENGINE1_ENABLED  # noqa: PLC0415 — runtime read
+            engine1 = ENGINE1_ENABLED
+        self._engine1 = engine1
 
     def _title_score(self, job_title: str) -> int:
         title_lower = job_title.lower()
@@ -494,22 +502,28 @@ class JobScorer:
         ``user_preferences`` + ``enrichment_lookup`` are both supplied.
         """
         text = f"{job.title} {job.description}"
-        title_pts = self._title_score(job.title)
-        skill_pts = self._skill_score(text)
-        suppressed = _gate_suppressed_score(title_pts, skill_pts)
-        if suppressed is not None:
-            # Gate-suppressed path: title/skill are the raw (sub-gate) ints,
-            # location/recency are not computed, match_score = suppressed floor.
-            return ScoreBreakdown(
-                title_score=title_pts,
-                skill_score=skill_pts,
-                match_score=suppressed,
-            )
-        location_pts = _location_score(job.location)
-        recency_pts = recency_score_for_job(job)
-        penalty = self._negative_penalty(job.title)
-        foreign_penalty = _foreign_location_penalty(job.location)
-        base = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+        if self._engine1:
+            title_pts = self._title_score(job.title)
+            skill_pts = self._skill_score(text)
+            suppressed = _gate_suppressed_score(title_pts, skill_pts)
+            if suppressed is not None:
+                # Gate-suppressed path: title/skill are the raw (sub-gate) ints,
+                # location/recency are not computed, match_score = suppressed floor.
+                return ScoreBreakdown(
+                    title_score=title_pts,
+                    skill_score=skill_pts,
+                    match_score=suppressed,
+                )
+            location_pts = _location_score(job.location)
+            recency_pts = recency_score_for_job(job)
+            penalty = self._negative_penalty(job.title)
+            foreign_penalty = _foreign_location_penalty(job.location)
+            base = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+        else:
+            # Engine 1 OFF — keyword contributes nothing. Only Engine 2 dims
+            # (computed below, if enrichment + preferences exist) drive the score.
+            title_pts = skill_pts = location_pts = recency_pts = 0
+            base = 0
 
         # Pillar 2 Batch 2.9 — additional enrichment-driven dimensions.
         seniority_pts = 0

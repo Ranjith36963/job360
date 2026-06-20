@@ -173,6 +173,9 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
         llm_fit_score=row.get("llm_fit_score"),
         llm_verdict=row.get("llm_verdict"),
         llm_reason=row.get("llm_reason"),
+        # Application deadline — from jobs table (catalog-level, not per-user).
+        deadline=row.get("deadline"),
+        deadline_source=row.get("deadline_source"),
     )
 
 
@@ -193,32 +196,108 @@ def _profile_query_text(profile) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
-def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
-    """Step-1 B8 — when ``?mode=hybrid`` is requested, fuse keyword + semantic
-    rankings via RRF and reorder ``rows`` accordingly.
+def _hybrid_reorder_rows(
+    rows: list[dict],
+    query_text: str,
+    *,
+    semantic_ids: Optional[list[int]] = None,
+    rerank_fn=None,
+    rrf_k: int = 60,
+) -> list[dict]:
+    """Pure engine-3 reorder core (offline-testable).
 
-    Always degrades to the keyword order on:
-    - SEMANTIC_ENABLED is false
+    Fuses three rankings via ``retrieve_for_user``:
+      * keyword — the order ``rows`` already arrive in (engine 1's SQL score),
+      * BM25 — ``bm25_rank(query_text, row_text)`` (pure, no heavy deps),
+      * semantic — the injected ``semantic_ids`` (Chroma ANN, gathered by the
+        caller; ``None`` / ``[]`` simply drops that leg),
+    then applies the injected ``rerank_fn`` (cross-encoder) and maps the fused
+    ids back onto the row dicts. No row is ever lost (belt-and-braces tail).
+    """
+    if not rows:
+        return rows
+    keyword_ids = [r["id"] for r in rows if r.get("id") is not None]
+    if not keyword_ids:
+        return rows
+
+    from src.services.retrieval import bm25_rank, retrieve_for_user  # noqa: PLC0415
+
+    docs = [
+        (r["id"], f"{r.get('title', '')} {r.get('description', '')}")
+        for r in rows
+        if r.get("id") is not None
+    ]
+
+    def keyword_fn(_profile, _limit):
+        return keyword_ids
+
+    bm25_fn = None
+    if query_text:
+
+        def bm25_fn(_profile, _limit):  # noqa: F811 — conditional definition
+            return [jid for jid, _score in bm25_rank(query_text, docs)]
+
+    semantic_fn = None
+    if semantic_ids:
+        _sem = list(semantic_ids)
+
+        def semantic_fn(_profile, _limit):  # noqa: F811
+            return _sem
+
+    fused_ids = retrieve_for_user(
+        profile=None,
+        k=len(keyword_ids),
+        keyword_fn=keyword_fn,
+        bm25_fn=bm25_fn,
+        semantic_fn=semantic_fn,
+        rerank_fn=rerank_fn,
+        rrf_k=rrf_k,
+    )
+
+    by_id = {r["id"]: r for r in rows if r.get("id") is not None}
+    reordered: list[dict] = []
+    seen: set = set()
+    for jid in fused_ids:
+        if jid in by_id and jid not in seen:
+            reordered.append(by_id[jid])
+            seen.add(jid)
+    # Belt-and-braces — never lose a row the user would otherwise have seen.
+    for r in rows:
+        rid = r.get("id")
+        if rid is not None and rid not in seen:
+            reordered.append(r)
+            seen.add(rid)
+    return reordered
+
+
+def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
+    """Engine 3 — when ``?mode=hybrid`` is requested, fuse keyword + BM25 +
+    semantic rankings via RRF, cross-encoder rerank the top survivors, and
+    reorder ``rows`` accordingly (delegates to the tested ``_hybrid_reorder_rows``).
+
+    Always degrades to keyword order on:
+    - SEMANTIC_ENABLED is false (rule #18 — byte-identical to pre-Pillar-2)
     - the semantic stack (sentence_transformers / chromadb) isn't installed
     - the vector index is empty
-    - any exception from the semantic path
 
-    Lazy-imports the heavy modules per CLAUDE.md rule #16. Returns the
-    original list unchanged when degradation triggers.
+    The semantic leg and the rerank are each guarded: if either fails, the
+    BM25 + keyword fusion still applies (it has no heavy deps). Lazy-imports
+    the heavy modules per CLAUDE.md rule #16.
     """
     try:
-        from src.core.settings import SEMANTIC_ENABLED  # noqa: PLC0415 — lazy
+        from src.core.settings import (  # noqa: PLC0415 — lazy
+            ENGINE3_ENABLED,
+            SEMANTIC_ENABLED,
+        )
     except Exception:
         return rows
 
-    if not SEMANTIC_ENABLED:
+    # Engine 3 switch (ENGINE3_ENABLED) OR the legacy SEMANTIC_ENABLED flag.
+    if not (ENGINE3_ENABLED or SEMANTIC_ENABLED):
         return rows
 
     try:
-        from src.services.retrieval import (  # noqa: PLC0415 — lazy (rule #16)
-            is_hybrid_available,
-            reciprocal_rank_fusion,
-        )
+        from src.services.retrieval import is_hybrid_available  # noqa: PLC0415 — lazy (rule #16)
         from src.services.vector_index import VectorIndex  # noqa: PLC0415
     except Exception as e:
         logger.warning("hybrid mode requested but retrieval stack unavailable: %s", e)
@@ -241,13 +320,15 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     if not rows:
         return rows
 
-    # Build the keyword-ranked id list (rows arrive in keyword order).
     keyword_ids = [r["id"] for r in rows if r.get("id") is not None]
 
     # Stage B — semantic top-K via Chroma. Prefer a query vector built from the
     # CALLER'S PROFILE (CV titles/skills/summary + LinkedIn) so results rank by
     # similarity to THIS user, not to the top keyword hit. Fall back to the
-    # top-scored job's title only when no profile is available.
+    # top-scored job's title only when no profile is available. A failure here
+    # is NOT fatal — engine 3 still has the BM25 leg, so we degrade rather than
+    # bail to pure keyword.
+    query_text = _profile_query_text(profile) if profile is not None else ""
     semantic_ids: list[int] = []
     try:
         from src.services.embeddings import encode_job  # noqa: PLC0415
@@ -257,42 +338,46 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
                 self.title = title
                 self.description = description
 
-        query_text = _profile_query_text(profile) if profile is not None else ""
         if query_text:
             stub = _StubJob(query_text, "")
         else:
-            # No usable profile — fall back to the best keyword hit's title.
             head = rows[0]
             stub = _StubJob(head.get("title", ""), head.get("description", ""))
         query_vec = encode_job(stub, None)
         sem_pairs = vix.query(query_vec, k=min(500, max(len(keyword_ids), 50)))
         semantic_ids = [job_id for job_id, _dist in sem_pairs]
     except Exception as e:
-        logger.warning("hybrid retrieval failed: %s; falling back to keyword", e)
-        return rows
+        logger.warning("hybrid semantic leg failed: %s; using keyword + BM25 only", e)
+        semantic_ids = []
 
-    if not semantic_ids:
-        return rows
+    # Stage D — cross-encoder rerank wrapper. Only meaningful with a query; the
+    # heavy model load is lazy + cached, and any failure degrades to fused order.
+    rerank_fn = None
+    if query_text:
 
-    # Fuse and reorder.
-    fused = reciprocal_rank_fusion([keyword_ids, semantic_ids], k=60)
-    fused_ids = [item for item, _score in fused]
+        def rerank_fn(ids):  # noqa: F811 — conditional definition
+            try:
+                from src.services.retrieval import (  # noqa: PLC0415
+                    _load_cross_encoder,
+                    cross_encoder_rerank,
+                )
 
-    by_id = {r["id"]: r for r in rows if r.get("id") is not None}
-    reordered: list[dict] = []
-    seen: set[int] = set()
-    for jid in fused_ids:
-        if jid in by_id and jid not in seen:
-            reordered.append(by_id[jid])
-            seen.add(jid)
-    # Append any keyword rows not in the fused set (shouldn't happen, but
-    # belt-and-braces — never lose rows the user would have seen).
-    for r in rows:
-        rid = r.get("id")
-        if rid is not None and rid not in seen:
-            reordered.append(r)
-            seen.add(rid)
-    return reordered
+                text_by_id = {
+                    r["id"]: f"{r.get('title', '')} {r.get('description', '')}"
+                    for r in rows
+                    if r.get("id") is not None
+                }
+                candidates = [(jid, text_by_id.get(jid, "")) for jid in ids]
+                reranked = cross_encoder_rerank(
+                    query_text, candidates, encoder_factory=_load_cross_encoder
+                )
+                return [jid for jid, _score in reranked]
+            except Exception as e:
+                logger.warning("cross-encoder rerank failed; keeping fused order: %s", e)
+                return ids
+
+    # Stage C — fuse keyword + BM25 + semantic and rerank, via the tested core.
+    return _hybrid_reorder_rows(rows, query_text, semantic_ids=semantic_ids, rerank_fn=rerank_fn)
 
 
 @router.get("/jobs/export")
@@ -470,6 +555,34 @@ async def get_job_duplicates(
     return {"job_id": job_id, "duplicates": duplicates, "total": len(duplicates)}
 
 
+def _row_to_scoring_job(row: dict):
+    """Reconstruct a ``Job`` from a stored DB row for re-scoring.
+
+    CRUCIAL: sets ``job.id`` from the row. The scorer's ``enrichment_lookup``
+    is keyed on ``job.id``; omitting it makes every enrichment dim
+    (seniority/salary/visa/workplace) silently score 0 (the dim-scoring-id
+    bug). ``score()`` reads title/description/location/salary + the date
+    fields, so we populate just those.
+    """
+    from src.models import Job  # noqa: PLC0415 — lazy (rule #16)
+
+    job = Job(
+        title=row.get("title", "") or "",
+        company=row.get("company", "") or "",
+        apply_url=row.get("apply_url", "") or "",
+        source=row.get("source", "") or "",
+        date_found=row.get("date_found", "") or "",
+        location=row.get("location", "") or "",
+        description=row.get("description", "") or "",
+        salary_min=row.get("salary_min"),
+        salary_max=row.get("salary_max"),
+        posted_at=row.get("posted_at"),
+        date_confidence=row.get("date_confidence") or "low",
+    )
+    job.id = row.get("id")  # type: ignore[attr-defined]
+    return job
+
+
 async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> dict:
     """Rewrite the per-dimension breakdown on ``row`` to reflect ``user``'s
     own profile, returning a shallow copy with the dim columns overridden.
@@ -490,7 +603,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     there is nothing to personalise against). Heavy scoring imports are kept
     local per CLAUDE.md rule #16 — they only load on an authenticated detail GET.
     """
-    from src.models import Job  # noqa: PLC0415 — lazy (rule #16)
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
     from src.services.feed import FeedService  # noqa: PLC0415
     from src.services.job_enrichment import (  # noqa: PLC0415
         ENRICHMENT_ENABLED,
@@ -507,28 +620,18 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     search_config = generate_search_config(profile)
     # Mirror run_search's scorer wiring exactly so a recompute against an
     # unchanged profile reproduces the stored feed score (CLAUDE.md rule #19).
-    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if ENRICHMENT_ENABLED else {}
+    # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+    enrichment_on = ENGINE2_ENABLED or ENRICHMENT_ENABLED
+    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if enrichment_on else {}
     scorer = JobScorer(
         search_config,
         user_preferences=profile.preferences,
         enrichment_lookup=lambda j: enrichment_lookup_dict.get(getattr(j, "id", None)),
     )
 
-    # Reconstruct just enough of the Job for scoring: score() reads title,
-    # description, location, salary, and the date fields (recency).
-    job = Job(
-        title=row.get("title", "") or "",
-        company=row.get("company", "") or "",
-        apply_url=row.get("apply_url", "") or "",
-        source=row.get("source", "") or "",
-        date_found=row.get("date_found", "") or "",
-        location=row.get("location", "") or "",
-        description=row.get("description", "") or "",
-        salary_min=row.get("salary_min"),
-        salary_max=row.get("salary_max"),
-        posted_at=row.get("posted_at"),
-        date_confidence=row.get("date_confidence") or "low",
-    )
+    # Reconstruct the Job for scoring — _row_to_scoring_job sets job.id so the
+    # enrichment_lookup (keyed on id) actually hits and the dims contribute.
+    job = _row_to_scoring_job(row)
     breakdown = scorer.score(job)
 
     feed_score = await FeedService(db._conn).get_score(user.id, row["id"])

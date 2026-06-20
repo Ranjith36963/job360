@@ -277,3 +277,169 @@ def test_cross_encoder_rerank_scores_are_float():
     result = cross_encoder_rerank("q", candidates, encoder_factory=lambda: enc)
     for _id, score in result:
         assert isinstance(score, float)
+
+
+# ---------------------------------------------------------------------------
+# Engine 3 enhancement — BM25 lexical ranking (pure function)
+# ---------------------------------------------------------------------------
+
+
+from src.services.retrieval import bm25_rank
+
+
+def test_bm25_ranks_doc_containing_query_term_first():
+    """A doc with the query term outranks one without it."""
+    docs = [(1, "python developer"), (2, "java developer")]
+    result = bm25_rank("python", docs)
+    assert result[0][0] == 1
+
+
+def test_bm25_empty_query_returns_empty():
+    assert bm25_rank("", [(1, "python")]) == []
+    assert bm25_rank("   ", [(1, "python")]) == []
+
+
+def test_bm25_empty_documents_returns_empty():
+    assert bm25_rank("python", []) == []
+
+
+def test_bm25_no_matching_doc_returns_empty():
+    """A query term present in no document yields no evidence → no ranking."""
+    docs = [(1, "java"), (2, "ruby")]
+    assert bm25_rank("python", docs) == []
+
+
+def test_bm25_rare_term_outweighs_common_term():
+    """IDF: the doc holding the RARE query term ranks above the doc holding
+    only the COMMON query term, even though both match one query word."""
+    docs = [
+        (1, "rare alpha"),     # holds the rare term
+        (2, "common alpha"),   # holds the common term
+        (3, "common beta"),    # common appears in 3/4 docs
+        (4, "common gamma"),
+    ]
+    result = bm25_rank("common rare", docs)
+    assert result[0][0] == 1
+
+
+def test_bm25_shorter_doc_ranks_higher_for_same_term_count():
+    """Length normalisation: same single 'python' hit, shorter doc wins."""
+    long_text = "python " + " ".join(f"w{i}" for i in range(50))
+    docs = [(1, "python"), (2, long_text)]
+    result = bm25_rank("python", docs)
+    assert result[0][0] == 1
+
+
+def test_bm25_more_occurrences_rank_higher_at_equal_length():
+    """Term frequency: two hits beat one hit when doc lengths are equal."""
+    docs = [(1, "python python"), (2, "python java")]
+    result = bm25_rank("python", docs)
+    assert result[0][0] == 1
+
+
+def test_bm25_preserves_ids_verbatim():
+    """Item ids returned as-is — no int coercion, no reorder by id."""
+    docs = [("a", "python"), ("b", "java"), ("c", "python python")]
+    result = bm25_rank("python", docs)
+    result_ids = {r[0] for r in result}
+    assert result_ids == {"a", "c"}        # 'b' has no match → excluded
+    assert result[0][0] == "c"             # two hits outrank one
+
+
+def test_bm25_is_deterministic():
+    docs = [(1, "python data"), (2, "data python"), (3, "python python data")]
+    assert bm25_rank("python data", docs) == bm25_rank("python data", docs)
+
+
+def test_bm25_scores_are_float_and_descending():
+    docs = [(1, "python python"), (2, "python")]
+    result = bm25_rank("python", docs)
+    scores = [s for _id, s in result]
+    assert all(isinstance(s, float) for s in scores)
+    assert scores == sorted(scores, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Engine 3 enhancement — retrieve_for_user fuses BM25 + applies rerank hook
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_for_user_fuses_bm25_leg():
+    """A bm25_fn ranking fuses with the keyword ranking via RRF."""
+    def kw(profile, limit):
+        return [1, 2, 3, 4]
+    def bm(profile, limit):
+        return [4, 3, 5, 6]
+
+    result = retrieve_for_user(
+        profile=object(), k=10, keyword_fn=kw, bm25_fn=bm,
+    )
+    assert set(result[:2]) == {3, 4}            # in both lists → top
+    assert set(result) == {1, 2, 3, 4, 5, 6}
+
+
+def test_retrieve_for_user_ignores_empty_bm25():
+    def kw(profile, limit):
+        return [1, 2, 3]
+    def bm(profile, limit):
+        return []
+
+    result = retrieve_for_user(
+        profile=object(), k=10, keyword_fn=kw, bm25_fn=bm,
+    )
+    assert result == [1, 2, 3]
+
+
+def test_retrieve_for_user_bm25_exception_falls_back():
+    """A bm25_fn that raises must not bubble — degrade to keyword."""
+    def kw(profile, limit):
+        return [1, 2, 3]
+    def bm(profile, limit):
+        raise RuntimeError("bm25 boom")
+
+    result = retrieve_for_user(
+        profile=object(), k=10, keyword_fn=kw, bm25_fn=bm,
+    )
+    assert result == [1, 2, 3]
+
+
+def test_retrieve_for_user_applies_rerank_fn():
+    """rerank_fn reorders the final id list."""
+    def kw(profile, limit):
+        return [1, 2, 3, 4]
+    def rr(ids):
+        return list(reversed(ids))
+
+    result = retrieve_for_user(
+        profile=object(), k=10, keyword_fn=kw, rerank_fn=rr,
+    )
+    assert result == [4, 3, 2, 1]
+
+
+def test_retrieve_for_user_rerank_runs_before_truncation():
+    """rerank can promote a low-ranked candidate above the k cut-off."""
+    def kw(profile, limit):
+        return list(range(100))
+    def rr(ids):
+        return list(reversed(ids))
+
+    result = retrieve_for_user(
+        profile=object(), k=5, keyword_fn=kw, rerank_fn=rr,
+    )
+    assert result == [99, 98, 97, 96, 95]
+
+
+def test_retrieve_for_user_fuses_three_lists():
+    """keyword + bm25 + semantic all fuse together."""
+    def kw(profile, limit):
+        return [1, 2, 3]
+    def bm(profile, limit):
+        return [3, 4]
+    def sem(profile, limit):
+        return [4, 5]
+
+    result = retrieve_for_user(
+        profile=object(), k=10, keyword_fn=kw, bm25_fn=bm, semantic_fn=sem,
+    )
+    assert set(result[:2]) == {3, 4}            # each in two lists
+    assert set(result) == {1, 2, 3, 4, 5}

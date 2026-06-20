@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import aiosqlite
 import pytest
@@ -117,19 +118,37 @@ def _login(client: TestClient, email: str, password: str = "s3cretpassword") -> 
 # ---------------------------------------------------------------------------
 
 
+def _delete_me(client: TestClient, password: Optional[str] = None) -> "Response":
+    """Send DELETE /api/auth/users/me.
+
+    Starlette's TestClient.delete() does not expose a body parameter — use
+    ``client.request("DELETE", ...)`` with an explicit JSON body instead.
+    """
+    import json as _json
+
+    if password is not None:
+        return client.request(
+            "DELETE",
+            "/api/auth/users/me",
+            content=_json.dumps({"current_password": password}),
+            headers={"Content-Type": "application/json"},
+        )
+    return client.delete("/api/auth/users/me")
+
+
 def test_delete_account_requires_auth(client):
     """DELETE without a session cookie must return 401."""
-    r = client.delete("/api/auth/users/me")
+    r = _delete_me(client, "s3cretpassword")
     assert r.status_code == 401
 
 
 def test_delete_account_soft_deletes(client, temp_db):
-    """DELETE sets deleted_at; subsequent login with the same credentials fails."""
+    """DELETE with correct password sets deleted_at; subsequent login fails (rule #26)."""
     _register(client, "del@example.com", "s3cretpassword")
     # Sanity: authenticated GET /me works before delete
     assert client.get("/api/auth/me").status_code == 200
 
-    r = client.delete("/api/auth/users/me")
+    r = _delete_me(client, "s3cretpassword")
     assert r.status_code == 204
 
     # Session cookie cleared — /me is now 401
@@ -138,6 +157,67 @@ def test_delete_account_soft_deletes(client, temp_db):
 
     # Login must fail because deleted_at IS NOT NULL
     assert _login(client, "del@example.com") == 401
+
+
+def test_delete_account_wrong_password_is_rejected(client, temp_db):
+    """DELETE with a wrong password must return 401 and NOT soft-delete the account.
+
+    This is the regression test for the confirmed HIGH-severity security bug where
+    the handler previously accepted any body (including no body / wrong password)
+    and deleted the account immediately. Hard rule #26.
+    """
+    _register(client, "del_wrong@example.com", "s3cretpassword")
+
+    r = _delete_me(client, "WRONGPASSWORD")
+    assert r.status_code == 401, "wrong password must be rejected"
+
+    # The account must NOT have been soft-deleted — login still works
+    client.cookies.clear()
+    assert _login(client, "del_wrong@example.com", "s3cretpassword") == 200
+
+
+def test_delete_account_wrong_password_does_not_soft_delete_db(client, temp_db):
+    """Verify at the DB level that deleted_at stays NULL after a wrong-password attempt."""
+    _register(client, "del_db_check@example.com", "s3cretpassword")
+
+    _delete_me(client, "WRONGPASSWORD")
+
+    async def _check():
+        async with aiosqlite.connect(temp_db) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT deleted_at FROM users WHERE email = ?",
+                ("del_db_check@example.com",),
+            )
+            row = await cur.fetchone()
+        return row
+
+    row = asyncio.run(_check())
+    assert row is not None, "user row missing from DB"
+    assert row["deleted_at"] is None, "deleted_at must remain NULL after wrong-password attempt"
+
+
+def test_delete_account_missing_body_is_422(client):
+    """DELETE with no body at all must return 422 (Pydantic validation).
+
+    The old handler ignored the body and would 204; the new one requires
+    `current_password` so an empty request must be rejected before any DB call.
+    """
+    _register(client, "del_nobody@example.com", "s3cretpassword")
+    # Send DELETE with no JSON body
+    r = _delete_me(client)
+    assert r.status_code == 422
+
+
+def test_delete_account_clears_session_cookie(client, temp_db):
+    """Successful delete must clear the session cookie (rule #26)."""
+    _register(client, "del_cookie@example.com", "s3cretpassword")
+    r = _delete_me(client, "s3cretpassword")
+    assert r.status_code == 204
+    # The Set-Cookie header must clear the job360_session cookie
+    assert "job360_session=" in r.headers.get("set-cookie", ""), (
+        "response must clear job360_session cookie on successful delete"
+    )
 
 
 def test_delete_account_no_user_id_url_param(client):

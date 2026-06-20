@@ -59,6 +59,10 @@ Rules are reference material — keep them in one place. Long-form context for e
 20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup`** — pass both or neither. Passing only `user_preferences` produces silent zeros for the new dim scorers; the combined `match_score` looks legacy but the dim columns mislead.
 27. **Multi-dim weights total 30 on top of the legacy 100; the clamp to [0, 100] is load-bearing.** `SALARY_WEIGHT` (10) + `SENIORITY_WEIGHT` (8) + `VISA_WEIGHT` (6) + `WORKPLACE_WEIGHT` (6) are added to the legacy 4-component sum, so the raw max is **130**. The final `match_score` is clamped to `[0, 100]` — never remove the clamp.
 
+### Extraction must be data-driven (no hardcoded keyword lists)
+
+28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** Extraction is **data-driven (ESCO ontology, loaded from `data/esco/`) + LLM** only. Hand-typed skill maps overfit one CV, are brittle (new skill = code edit), and inflate eval scores dishonestly. **Banned in code:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict/denylist. Offenders being removed: `cv_parser._PROSE_SKILL_TERMS` / `_COMMON_TOOL_TERMS`, `github_enricher._DESC_SKILL_TERMS` / `LANGUAGE_TO_SKILL` / `TOPIC_TO_SKILL` / `_DEV_TOOLING_DENYLIST`, `dependency_map.py`, `core/skill_synonyms.py`. Deterministic pass = STRUCTURE only (sections/bullets/exact tokens) + ESCO-vocabulary match; semantic prose→skill mapping belongs to the LLM (prompt-steering is fine, that's not hardcoding). If you find a keyword list in extraction, remove it and route through ESCO data or the LLM.
+
 ### Notifications
 
 23. **Notifications are ONE rule row per user** (`notification_rules`, `UNIQUE(user_id)` — migration 0020). The rule governs ALL of the user's enabled channels at once (no per-channel rules). Dispatch loads the single rule, then converts UTC `now` to the user's `users.timezone` (IANA) via `zoneinfo.ZoneInfo` before comparing against `quiet_hours_start/end` HH:MM strings. Skipping the timezone conversion silently leaks notifications during BST/DST transitions. Use stdlib `zoneinfo` — not `pytz`.
@@ -251,7 +255,8 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
-| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles |
+| `ENGINE1_ENABLED` / `ENGINE2_ENABLED` / `ENGINE3_ENABLED` / `ENGINE4_ENABLED` | No (E1 default `true`; E2/E3/E4 default to their legacy flag) | **Independent per-engine switches** — any combo. Effective gate is `ENGINEx_ENABLED OR <legacy flag>` (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`). E1 (keyword) had no prior flag. |
+| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles (legacy gates for E2 / E3) |
 | `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No (default `0.15` / `0.15`) | Pillar 2.2 gate thresholds |
 | `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No (defaults 10/8/6/6) | Pillar 2.9 dimension weights |
 | `MATCHER_ENABLED` | No (default `false`) | LLM judge (engine #4) opt-in toggle |

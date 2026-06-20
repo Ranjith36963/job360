@@ -51,5 +51,8 @@ backend/data/experiment/
 # Per-tree test-gate stamp (scripts/agent-gate.sh) - never committable
 .claude/gate-stamp
 
+# One-time step-verification receipts (transient, regenerated per run - never committable)
+.claude/step-*-verified.txt
+
 # Loop round lock - transient, never committable
 docs/maintenance/.lock

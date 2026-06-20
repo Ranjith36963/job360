@@ -265,11 +265,11 @@ The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-
 
 Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.**
 
-**Engine 1 — Keyword funnel** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula, gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), penalties −30/−15. With `user_preferences + enrichment_lookup` adds four dimension scorers (Salary 10 / Seniority 8 / Visa 6 / Workplace 6), clamped to [0, 100].
+**Engine 1 — Keyword** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula (0–100), gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), penalties −30/−15.
 
-**Engine 2 — Dimensions** (opt-in, `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py` (wired in `skill_matcher.py`). Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data comes from the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default 60) go to the Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (18-field `JobEnrichment` schema, 8 enums). Same `ENRICHMENT_ENABLED` flag gates both.
+**Engine 2 — Dimensions** (opt-in, `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py`, wired into `JobScorer` at `skill_matcher.py:519-536`. Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data is supplied by the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default 60) go to the Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (18-field `JobEnrichment` schema, 8 enums, idempotent). The same `ENRICHMENT_ENABLED` flag gates both halves.
 
-**Engine 3 — Semantic retrieval** (opt-in, `SEMANTIC_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in ChromaDB (`services/vector_index.py`). Query path (`services/retrieval.py`) fuses BM25 + vector results via RRF (k=60) and cross-encoder reranks. Surfaced via `GET /api/jobs?mode=hybrid`.
+**Engine 3 — Hybrid retrieval** (opt-in, `SEMANTIC_ENABLED=true` / `ENGINE3_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in ChromaDB (`services/vector_index.py`). Query path (`services/retrieval.py` `retrieve_for_user`, wired live via `_hybrid_reorder_rows` in `api/routes/jobs.py`) fuses three rankings via RRF (k=60) — keyword `match_score`, **BM25** (`bm25_rank`), and vector ANN — then **cross-encoder reranks** the top survivors (`cross_encoder_rerank`, `ms-marco-MiniLM-L-6-v2`). Surfaced via `GET /api/jobs?mode=hybrid`. The BM25 leg is pure-Python, so it still applies even if the semantic leg or the reranker degrade.
 
 **Engine 4 — LLM judge** (opt-in, `MATCHER_ENABLED=true`): `services/llm_matcher.py`. Per-user `MatchVerdict{fit_score 0-100, verdict, reason}` persisted onto `user_feed` (migration 0017). Runs after the per-user feed write (`_run_matcher_stage`). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Dashboard shows AI-verdict badge. Measured: 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras), judge spread 20–92 vs keyword 30–43, 10/10 fit accuracy on labeled sample.
 
@@ -346,7 +346,7 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/              # 21 forward+reverse SQL migration pairs (0000 → 0020) + runner.py
+│   ├── migrations/              # 20 forward+reverse SQL migration pairs (0000 → 0019) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile

@@ -146,6 +146,23 @@ describe("ChangeEmailCard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Change Password card copy — must be truthful about sign-out (rule #26)
+// ---------------------------------------------------------------------------
+
+describe("ChangePasswordCard copy", () => {
+  it('does NOT say "remain logged in"', () => {
+    render(<AccountSettingsPage />);
+    expect(screen.queryByText(/remain logged in/i)).not.toBeInTheDocument();
+  });
+
+  it('tells the user they will be signed out after changing password', () => {
+    render(<AccountSettingsPage />);
+    expect(screen.getByText(/signed out on all devices/i)).toBeInTheDocument();
+    expect(screen.getByText(/sign in again/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Delete Account
 // ---------------------------------------------------------------------------
 
@@ -165,6 +182,8 @@ describe("DeleteAccountCard", () => {
     await user.click(screen.getByRole("button", { name: /delete my account/i }));
 
     const dialog = await screen.findByRole("dialog");
+    // Fill the password field but leave the confirm text wrong
+    await user.type(within(dialog).getByLabelText(/current password/i), "mypassword");
     const input = within(dialog).getByLabelText(/type DELETE to confirm/i);
     await user.type(input, "wrong");
     await user.keyboard("{Enter}");
@@ -177,16 +196,33 @@ describe("DeleteAccountCard", () => {
     expect(mockDeleteAccount).not.toHaveBeenCalled();
   });
 
-  it("calls deleteAccount when DELETE typed and form submitted", async () => {
+  it("shows validation error when password is missing", async () => {
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: /delete my account/i }));
 
     const dialog = await screen.findByRole("dialog");
+    // Type DELETE in the confirm field but leave the password blank
+    await user.type(within(dialog).getByLabelText(/type DELETE to confirm/i), "DELETE");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole("alert");
+      expect(alerts.some((el) => /enter your password/i.test(el.textContent ?? ""))).toBe(true);
+    });
+    expect(mockDeleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("calls deleteAccount with the password when DELETE typed and form submitted", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: /delete my account/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/current password/i), "mypassword");
     await user.type(within(dialog).getByLabelText(/type DELETE to confirm/i), "DELETE");
 
     const submitBtn = within(dialog).getByRole("button", { name: /delete my account/i });
     await user.click(submitBtn);
 
-    await waitFor(() => expect(mockDeleteAccount).toHaveBeenCalled());
+    await waitFor(() => expect(mockDeleteAccount).toHaveBeenCalledWith("mypassword"));
   });
 });

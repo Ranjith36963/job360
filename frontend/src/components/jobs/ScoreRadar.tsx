@@ -6,7 +6,6 @@ import {
   PolarAngleAxis,
   PolarRadiusAxis,
   Radar,
-  ResponsiveContainer,
   Tooltip,
 } from "recharts";
 
@@ -107,29 +106,30 @@ export function ScoreRadar({ scores, size = 300 }: ScoreRadarProps) {
           boxShadow: "0 0 40px oklch(0.89 0.29 128 / 0.07)",
         }}
       >
-        <ResponsiveContainer width="100%" height="100%">
-          <RadarChart cx="50%" cy="50%" outerRadius="65%" data={data}>
-            <PolarGrid stroke="oklch(1 0 0 / 0.08)" />
-            <PolarAngleAxis
-              dataKey="dimension"
-              tick={{
-                fill: "white",
-                fontSize: 11,
-                fontFamily: "var(--font-sora)",
-              }}
-            />
-            <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
-            <Radar
-              name="Score"
-              dataKey="value"
-              fill="oklch(0.89 0.29 128 / 0.2)"
-              stroke="oklch(0.89 0.29 128)"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Tooltip content={<CustomTooltip />} />
-          </RadarChart>
-        </ResponsiveContainer>
+        {/* Fixed numeric size (no ResponsiveContainer): the chart never measures
+            a "100%" container, so Recharts can't log the width/height(-1) warning
+            on first paint. The outer div is already exactly size×size. */}
+        <RadarChart width={size} height={size} cx="50%" cy="50%" outerRadius="65%" data={data}>
+          <PolarGrid stroke="oklch(1 0 0 / 0.08)" />
+          <PolarAngleAxis
+            dataKey="dimension"
+            tick={{
+              fill: "white",
+              fontSize: 11,
+              fontFamily: "var(--font-sora)",
+            }}
+          />
+          <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
+          <Radar
+            name="Score"
+            dataKey="value"
+            fill="oklch(0.89 0.29 128 / 0.2)"
+            stroke="oklch(0.89 0.29 128)"
+            strokeWidth={2}
+            dot={false}
+          />
+          <Tooltip content={<CustomTooltip />} />
+        </RadarChart>
       </div>
 
       {/* Raw score grid */}

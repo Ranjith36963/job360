@@ -40,6 +40,11 @@ const baseJob: JobResponse = {
   bucket: "hot",
 };
 
+// Helper to build a minimal valid job fixture on top of baseJob.
+function makeJob(overrides: Partial<JobResponse>): JobResponse {
+  return { ...baseJob, ...overrides };
+}
+
 describe("JobCard", () => {
   const mockOnAction = vi.fn();
 
@@ -120,5 +125,61 @@ describe("JobCard", () => {
     expect(screen.getByText(longJob.title)).toHaveAttribute("title", longJob.title);
     expect(screen.getByText(longJob.company)).toHaveAttribute("title", longJob.company);
     expect(screen.getByText(longJob.location)).toHaveAttribute("title", longJob.location);
+  });
+
+  // ── Date / deadline tests ──────────────────────────────────────────────────
+
+  // D-1: renders "Posted X ago" when posted_at is set, not "Seen"
+  it("D-1: shows 'Posted' label (not 'Seen') when posted_at is provided", () => {
+    const job = makeJob({
+      posted_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(), // 2d ago
+      date_confidence: "high",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText(/^Posted /)).toBeInTheDocument();
+    // Must NOT say "Seen" when posted_at is present
+    expect(screen.queryByText(/^Seen /)).not.toBeInTheDocument();
+  });
+
+  // D-2: low/fabricated confidence renders "~" prefix (approx marker)
+  it("D-2: prefixes '~' when date_confidence is 'low'", () => {
+    const job = makeJob({
+      posted_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+      date_confidence: "low",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    // The posted text should begin with "~Posted"
+    expect(screen.getByText(/^~Posted /)).toBeInTheDocument();
+  });
+
+  // D-3: when posted_at is null, falls back to "Seen …" — never "Posted"
+  it("D-3: falls back to 'Seen' label (never 'Posted') when posted_at is null", () => {
+    const job = makeJob({
+      posted_at: null,
+      date_confidence: null,
+      last_seen_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText(/^Seen /)).toBeInTheDocument();
+    expect(screen.queryByText(/^Posted /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^~Posted /)).not.toBeInTheDocument();
+  });
+
+  // D-4: renders "Apply by 18 Jun 2026" when deadline is set (clock-independent assertion)
+  it("D-4: renders formatted deadline date when deadline is present", () => {
+    const job = makeJob({ deadline: "2026-06-18", deadline_source: "listing" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    // The deadline renders inside a Base UI Tooltip trigger whose accessible
+    // name is set via aria-label ("Apply by 18 Jun 2026"); the visible text is
+    // split across the icon + text nodes, so query by the accessible label
+    // (a11y-correct and reliable in jsdom). "18 Jun 2026" is clock-independent.
+    expect(screen.getByLabelText(/Apply by 18 Jun 2026/)).toBeInTheDocument();
+  });
+
+  // D-5: renders "No deadline listed" when deadline is null
+  it("D-5: renders 'No deadline listed' when deadline is null", () => {
+    const job = makeJob({ deadline: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("No deadline listed")).toBeInTheDocument();
   });
 });

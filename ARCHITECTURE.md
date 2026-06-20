@@ -25,7 +25,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF + cross-encoder rerank) + ESCO skill normalisation activate
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) + ESCO skill normalisation activate
 
 ---
 
@@ -39,7 +39,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 21 forward/reverse SQL migrations (0000 → 0020) + runner.py
+│   ├── migrations/                   # 20 forward/reverse SQL migrations (0000 → 0019) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
@@ -71,13 +71,13 @@ job360/
 │   │   │   ├── job_enrichment_schema.py  # 18-field Pydantic JobEnrichment + 8 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
-│   │   │   ├── retrieval.py          # RRF fusion + cross-encoder rerank (opt-in)
+│   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 21-migration forward-compat schema
+│   │   │   ├── database.py           # Async SQLite + 20-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -262,9 +262,9 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword funnel | `services/skill_matcher.py` (`JobScorer`) | always on | ON |
-| 2 | LLM enrichment | `services/job_enrichment.py` | `ENRICHMENT_ENABLED` | false |
-| 3 | Semantic retrieval | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:519-536`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
+| 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
 **Engine 4 — LLM judge detail:**
