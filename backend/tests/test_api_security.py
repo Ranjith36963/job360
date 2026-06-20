@@ -142,6 +142,19 @@ def _register_user_and_get_cookie(app, email: str) -> str:
     cookie = sync_client.cookies.get("job360_session")
     sync_client.close()
     assert cookie
+    # #15: /search now requires a verified email; this test checks the
+    # per-user concurrency cap, not verification — mark the user verified.
+    import sqlite3 as _sqlite3
+
+    import src.core.settings as _settings
+
+    _c = _sqlite3.connect(str(_settings.DB_PATH))
+    _c.execute(
+        "UPDATE users SET email_verified_at = ? WHERE email = ?",
+        ("2026-01-01T00:00:00Z", email),
+    )
+    _c.commit()
+    _c.close()
     return cookie
 
 

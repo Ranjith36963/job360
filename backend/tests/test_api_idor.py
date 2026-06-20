@@ -129,6 +129,19 @@ def _register(client, email, password="s3cretpassword"):
         "/api/auth/register", json={"email": email, "password": password}
     )
     assert r.status_code == 201, r.text
+    # #15: app routes (e.g. /search) now require a verified email. These tests
+    # exercise IDOR/auth scoping, not verification, so mark the user verified.
+    import sqlite3 as _sqlite3
+
+    import src.core.settings as _settings
+
+    _c = _sqlite3.connect(str(_settings.DB_PATH))
+    _c.execute(
+        "UPDATE users SET email_verified_at = ? WHERE email = ?",
+        ("2026-01-01T00:00:00Z", email),
+    )
+    _c.commit()
+    _c.close()
 
 
 # ---------------------------------------------------------------------------

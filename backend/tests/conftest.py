@@ -159,6 +159,21 @@ def authenticated_async_context(monkeypatch, tmp_path):
     captured_user_id = me.json().get("id") if me.status_code == 200 else None
     sync_client.close()
 
+    # Email verification is enforced on app routes (Finding #15). New users
+    # register UNVERIFIED, so mark this fixture user verified — otherwise every
+    # authed test hitting a gated route would 403. (Unverified behaviour is
+    # covered explicitly in test_email_enforcement.py.)
+    if captured_user_id:
+        import sqlite3 as _sqlite3
+
+        _vc = _sqlite3.connect(str(db_path))
+        _vc.execute(
+            "UPDATE users SET email_verified_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:00Z", captured_user_id),
+        )
+        _vc.commit()
+        _vc.close()
+
     @asynccontextmanager
     async def _make():
         async with AsyncClient(

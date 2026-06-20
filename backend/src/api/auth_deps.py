@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import aiosqlite
-from fastapi import Cookie, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 
 from src.core.settings import DB_PATH
 from src.services.auth import sessions as auth_sessions
@@ -46,6 +46,7 @@ def _secret() -> str:
 class CurrentUser:
     id: str
     email: str
+    email_verified: bool = False
 
 
 async def _current_user_from_cookie(
@@ -61,11 +62,18 @@ async def _current_user_from_cookie(
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT id, email FROM users WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, email, email_verified_at FROM users "
+            "WHERE id = ? AND deleted_at IS NULL",
             (user_id,),
         )
         row = await cur.fetchone()
-    return CurrentUser(id=row["id"], email=row["email"]) if row else None
+    if not row:
+        return None
+    return CurrentUser(
+        id=row["id"],
+        email=row["email"],
+        email_verified=row["email_verified_at"] is not None,
+    )
 
 
 async def require_user(
@@ -84,3 +92,22 @@ async def optional_user(
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Optional[CurrentUser]:
     return await _current_user_from_cookie(job360_session)
+
+
+async def require_verified_user(
+    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+) -> CurrentUser:
+    """Like ``require_user`` but also requires a confirmed email (Finding #15).
+
+    Gate app/data routes with this so unverified users can't use the product
+    until they confirm their email. Auth / verify-email / account / logout /
+    /me routes must keep using ``require_user`` so an unverified user can still
+    verify, manage their account, and sign out. Returns HTTP 403 with detail
+    ``email_not_verified`` (distinct from the 401 'authentication required').
+    """
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="email_not_verified",
+        )
+    return user

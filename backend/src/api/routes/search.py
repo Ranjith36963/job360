@@ -14,7 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import CurrentUser, require_user, require_verified_user
 from src.api.models import SearchStartResponse, SearchStatusResponse
 from src.core import settings
 from src.main import run_search
@@ -40,7 +40,7 @@ def _active_run_count_for_user(user_id: str) -> int:
 @router.post("/search", response_model=SearchStartResponse)
 async def start_search(
     source: Optional[str] = Query(None),
-    user: CurrentUser = Depends(require_user),  # noqa: B008  # FastAPI dep idiom
+    user: CurrentUser = Depends(require_verified_user),  # noqa: B008 — #15: verified email required
 ):
     """Start an async job search run. Returns a run_id to poll for status.
 
