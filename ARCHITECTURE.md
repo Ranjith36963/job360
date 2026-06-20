@@ -4,14 +4,14 @@
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **49 source instances** (50 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
 -----------                   -----------------------------          ------
-                          +-> Sources (49) -+                    +-> Email (Apprise per-user)
+                          +-> Sources (46) -+                    +-> Email (Apprise per-user)
 CLI / Frontend   --+      |  (async fetch)  |                    +-> Slack / Discord / Telegram
                    |      v   tiered cadence v                   +-> Webhook
 Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
@@ -39,20 +39,20 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 18 forward/reverse SQL migrations (0000 → 0017) + runner.py
+│   ├── migrations/                   # 20 forward/reverse SQL migrations (0000 → 0019) + runner.py
 │   ├── src/
-│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (46 keys → 45 instances), _build_sources()
+│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 11 route modules
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
-│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (46 entries), thresholds, feature flags
+│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
 │   │   │   ├── skill_synonyms.py     # 529-entry alias dict (k8s↔kubernetes, ...)
-│   │   │   ├── fx.py                 # 21-currency → GBP rates
+│   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── skill_matcher.py      # JobScorer + score_job; 9-field ScoreBreakdown
@@ -77,12 +77,12 @@ job360/
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 18-migration forward-compat schema
+│   │   │   ├── database.py           # Async SQLite + 20-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
-│   │   │   ├── apis_keyed/   (7)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork
-│   │   │   ├── apis_free/    (10)    # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
+│   │   │   ├── apis_keyed/   (8)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork, gov_apprenticeships
+│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
 │   │   │   ├── ats/          (11)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling
 │   │   │   ├── feeds/        (8)     # jobs_ac_uk, nhs_jobs, nhs_jobs_xml, workanywhere, weworkremotely, realworkfromanywhere, biospace, uni_jobs
 │   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
@@ -125,24 +125,24 @@ else:
 
 ### 2. Source Instantiation (`main.py:_build_sources`)
 
-All 48 sources get `search_config` passed through:
+All 46 sources get `search_config` passed through:
 ```python
 ReedSource(session, api_key=REED_API_KEY, search_config=sc)
 ArbeitnowSource(session, search_config=sc)
 GreenhouseSource(session, search_config=sc)
-# ... etc for all 48
+# ... etc for all 46
 ```
 
 The `_build_sources()` function groups sources into labeled groups (A through K) and instantiates all of them. When `--source <name>` is passed, it filters to just the matching source. Special case: `--source glassdoor` maps to `JobSpySource` (same as `indeed`).
 
 ### 3. SOURCE_REGISTRY
 
-`SOURCE_REGISTRY` is a `dict[str, type]` mapping 48 source names to their classes. It serves two purposes:
+`SOURCE_REGISTRY` is a `dict[str, type]` mapping 47 source names to their classes. It serves two purposes:
 1. CLI `--source` validation — Click uses it for `click.Choice(sorted(SOURCE_REGISTRY.keys()))`
 2. `sources` command — lists all available source names
-3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 48` and checks the exact set of keys
+3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 47` and checks the exact set of keys
 
-Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 48 registry entries but 47 unique classes.
+Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 47 registry entries but 46 unique classes.
 
 ### 4. Keyword Resolution (`base.py` properties)
 
@@ -173,13 +173,14 @@ Sources that use `self.search_queries` with their own fallback lists: JSearch, L
 ### 5. Fetch (async, concurrent)
 
 ```python
-results = await asyncio.gather(*[_fetch_source(s) for s in sources])
+results = await asyncio.gather(*[_safe_fetch(s) for s in sources])
 # Each source filters by self.relevance_keywords in fetch_jobs()
-# Each source has 120s timeout (asyncio.wait_for)
+# Fetch ceiling: 240s for ATS-category sources / 60s for all others
+#   resolved by TieredScheduler.resolve_fetch_timeout() inside _safe_fetch()
 # Each _get_json/_get_text has 30s timeout (REQUEST_TIMEOUT)
 ```
 
-`_fetch_source` wraps each call in `asyncio.wait_for(timeout=120)` and catches both `TimeoutError` and general `Exception`, logging warnings/errors but never crashing the pipeline.
+`_safe_fetch` calls `TieredScheduler.resolve_fetch_timeout(source)` to pick the ceiling (240 s for ATS, 60 s for others), wraps the call in `asyncio.wait_for`, and catches both `TimeoutError` and general `Exception`, logging warnings/errors but never crashing the pipeline.
 
 ### 6. Scoring
 
@@ -261,9 +262,9 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword funnel | `services/skill_matcher.py` (`JobScorer`) | always on | ON |
-| 2 | LLM enrichment | `services/job_enrichment.py` | `ENRICHMENT_ENABLED` | false |
-| 3 | Semantic retrieval | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:519-536`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
+| 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
 **Engine 4 — LLM judge detail:**
@@ -307,7 +308,7 @@ BaseJobSource (ABC)
 
 ### Source Categories and Patterns
 
-**Keyed APIs** (7 — need API key in .env, skip with info log when empty):
+**Keyed APIs** (8 — need API key in .env, skip with info log when empty):
 ```
 ReedSource(session, api_key, search_config)
 AdzunaSource(session, app_id, app_key, search_config)
@@ -316,16 +317,17 @@ JoobleSource(session, api_key, search_config)
 GoogleJobsSource(session, api_key, search_config)
 CareerjetSource(session, affid, search_config)
 FindworkSource(session, api_key, search_config)
+GovApprenticeships(session, api_key, search_config)  # DfE Display Advert API v2 (restored 2026-06-16)
 ```
 
-**Free JSON APIs** (10 — no auth, filter by relevance_keywords):
+**Free JSON APIs** (9 — no auth, filter by relevance_keywords):
 ```
 ArbeitnowSource, RemoteOKSource, JobicySource, HimalayasSource,
 RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource,
-HNJobsSource, YCCompaniesSource
+HNJobsSource
 ```
 
-**ATS Boards** (10 — iterate company slugs from companies.py):
+**ATS Boards** (11 — iterate company slugs from companies.py):
 ```
 GreenhouseSource(session, companies, search_config)   # 25 companies
 LeverSource(session, companies, search_config)         # 12 companies
@@ -337,26 +339,29 @@ RecruiteeSource(session, companies, search_config)     # 8 companies
 WorkdaySource(session, companies, search_config)       # 15 companies (dict format)
 PersonioSource(session, companies, search_config)      # 10 companies
 SuccessFactorsSource(session, companies, search_config) # 3 companies (sitemap format)
+RipplingSource(session, companies, search_config)       # added Batch 3
 ```
 
-**RSS/XML Feeds** (8 — parse with xml.etree.ElementTree):
+**RSS/XML Feeds** (9 — parse with xml.etree.ElementTree):
 ```
-JobsAcUkSource, NHSJobsSource, WorkAnywhereSource, WeWorkRemotelySource,
-RealWorkFromAnywhereSource, BioSpaceSource, UniJobsSource, FindAJobSource
-```
-
-**HTML Scrapers** (7 — parse with regex):
-```
-LinkedInSource, JobTensorSource, ClimatebaseSource, EightyKHoursSource,
-BCSJobsSource, AIJobsGlobalSource, AIJobsAISource
+JobsAcUkSource, NHSJobsSource, NHSJobsXMLSource, WorkAnywhereSource, WeWorkRemotelySource,
+RealWorkFromAnywhereSource, BioSpaceSource, UniJobsSource,
+TeachingVacanciesSource  # lives in apis_free/ but category="rss"
 ```
 
-**Special** (5):
-- `JobSpySource` — uses python-jobspy for Indeed/Glassdoor (optional dependency, skips with warning if not installed)
+**HTML Scrapers** (5 — parse with regex):
+```
+LinkedInSource, ClimatebaseSource, EightyKHoursSource,
+BCSJobsSource, AIJobsAISource
+```
+
+**Special** (4 classes / 5 registry keys):
+- `JobSpySource` — uses python-jobspy for Indeed/Glassdoor (`"indeed"` + `"glassdoor"` keys); optional dependency, skips with warning if not installed
 - `HackerNewsSource` — Algolia "Who is Hiring" threads
 - `TheMuseSource` — TheMuse public API
 - `NoFluffJobsSource` — NoFluffJobs public API
-- `NomisSource` — UK GOV vacancy statistics (market intelligence, not individual listings)
+
+Note: `YCCompaniesSource`, `NomisSource`, `FindAJobSource`, `JobTensorSource`, `AIJobsGlobalSource` were removed in earlier rotations (upstream dead or retired).
 
 ---
 
@@ -429,6 +434,10 @@ UserProfile
   |     +-- github_languages: dict[str, int]     # From GitHub API
   |     +-- github_topics: list[str]             # From GitHub API
   |     +-- github_skills_inferred: list[str]    # From GitHub API
+  |     +-- linkedin_raw_text: str               # Two-pass: stored for offline LLM re-run
+  |     +-- github_repos_brief: list[dict]       # Two-pass: name/description/topics for LLM re-run
+  |     +-- github_llm_skills: list[str]         # Two-pass: LLM read repo prose
+  |     +-- about_me_inferred_skills: list[str]  # Two-pass: LLM mined preferences.about_me
   +-- preferences: UserPreferences
         +-- target_job_titles: list[str]
         +-- additional_skills: list[str]
@@ -505,6 +514,29 @@ PDF/DOCX -> extract_text() -> raw text
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```
 
+### Two-Pass Extraction (`services/profile/two_pass.py`)
+
+Every input gets a **deterministic pass** (plain code) AND an **LLM enhance pass**,
+both merged into one `CVData`:
+
+```
+run_two_pass_extraction(profile)        # in place, never raises, no network
+  CV         : deterministic_cv_fields(raw_text)      + llm_cv_fields_from_text(raw_text)
+  LinkedIn   : header/skills split (deterministic)    + parse_linkedin_from_text(linkedin_raw_text)
+  GitHub     : LANGUAGE/TOPIC lookup (deterministic)  + llm_infer_github_skills(github_repos_brief)
+  Preferences: form parse (deterministic)             + llm_infer_from_about_me(about_me)
+
+reextract_and_rescore(user_id)          # change trigger (background)
+  load_profile -> run_two_pass_extraction -> save_profile("two_pass_reextract")
+               -> new profile version id -> rescore_user_feed
+```
+
+Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
+`github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each pass
+no-ops when its input or LLM key is missing. Skill provenance is preserved: the
+new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
+`skill_tiering` alongside the existing ones.
+
 ---
 
 ## Notification System
@@ -539,7 +571,7 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 19 forward-migrations (0000–0018). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by 20 forward-migrations (0000–0019). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -622,7 +654,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `DISCORD_WEBHOOK_URL` | No | Discord notifications |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range sorting (default 40k-120k) |
 
-All API keys are optional — 39 of 46 sources work without any keys.
+All API keys are optional — 39 of 47 sources work without any keys.
 
 ### Constants (`settings.py`)
 

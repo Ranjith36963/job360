@@ -17,6 +17,7 @@ import {
   pollTelegram,
   testChannel,
 } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,7 +63,7 @@ function OAuthReturnToast({ onConnected }: { onConnected: () => void }) {
     }
 
     // Strip the query param so a refresh doesn't re-toast
-    router.replace("/settings/channels");
+    router.replace("/channels");
   }, [searchParams, onConnected, router]);
 
   return null;
@@ -125,7 +126,7 @@ function ConnectRow({ providers, onRefresh }: ConnectRowProps) {
       }, POLL_INTERVAL_MS);
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Failed to start Telegram connect";
+        apiErrorMessage(err, "Failed to start Telegram connect");
       toast.error(msg);
     }
   }
@@ -236,7 +237,7 @@ function EmailAddForm({ onRefresh }: { onRefresh: () => void }) {
       toast.success("Email channel added");
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Failed to add email channel";
+        apiErrorMessage(err, "Failed to add email channel");
       setError(msg);
       toast.error(msg);
     } finally {
@@ -301,7 +302,7 @@ function WebhookAddForm({ onRefresh }: { onRefresh: () => void }) {
       toast.success("Webhook added");
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Failed to add webhook";
+        apiErrorMessage(err, "Failed to add webhook");
       setError(msg);
       toast.error(msg);
     } finally {
@@ -360,7 +361,7 @@ export default function ChannelsSettingsPage() {
       setChannels(rows);
       setProviders(provs);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load channels");
+      setError(apiErrorMessage(err, "Failed to load channels"));
     } finally {
       setLoading(false);
     }
@@ -377,7 +378,7 @@ export default function ChannelsSettingsPage() {
       toast.success("Channel removed");
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Failed to delete channel";
+        apiErrorMessage(err, "Failed to delete channel");
       setError(msg);
       toast.error(msg);
     }
@@ -394,7 +395,7 @@ export default function ChannelsSettingsPage() {
         toast.error(result.error ?? "Test failed");
       }
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Test failed";
+      const errMsg = apiErrorMessage(err, "Test failed");
       setLastTest((prev) => ({ ...prev, [id]: { ok: false, error: errMsg } }));
       toast.error(errMsg);
     } finally {

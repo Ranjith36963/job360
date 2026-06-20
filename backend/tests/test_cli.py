@@ -41,14 +41,16 @@ def test_sources_command():
         assert name in result.output
 
 
-def test_source_registry_has_46_sources():
-    """SOURCE_REGISTRY should have 46 sources after 2026-06 M6 rotation (-4 dead).
+def test_source_registry_has_47_sources():
+    """SOURCE_REGISTRY: 46 after the 2026-06 M6 rotation (-4 dead), then 47
+    after gov_apprenticeships was restored 2026-06-16 against the DfE
+    Display Advert API v2 (keyed).
 
     Per CLAUDE.md rule #8: when adding/removing sources, update this
     assertion AND the expected set AND RATE_LIMITS entry AND
     _build_sources() list. All four must agree.
     """
-    assert len(SOURCE_REGISTRY) == 46
+    assert len(SOURCE_REGISTRY) == 47
     expected = {"reed", "adzuna", "jsearch", "arbeitnow", "remoteok",
                 "jobicy", "himalayas", "greenhouse", "lever", "workable",
                 "ashby", "remotive", "jooble", "linkedin",
@@ -62,9 +64,11 @@ def test_source_registry_has_46_sources():
                 "biospace", "climatebase", "eightykhours",
                 "bcs_jobs", "uni_jobs", "successfactors",
                 "aijobs_ai",
-                # Batch 3 additions (jobtensor, gov_apprenticeships, comeet dropped 2026-06 M6)
+                # Batch 3 additions (jobtensor, comeet dropped 2026-06 M6)
                 "teaching_vacancies", "nhs_jobs_xml",
-                "rippling"}
+                "rippling",
+                # Restored 2026-06-16 on the DfE Display Advert API v2 (keyed)
+                "gov_apprenticeships"}
     assert set(SOURCE_REGISTRY.keys()) == expected
 
 

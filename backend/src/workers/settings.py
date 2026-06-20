@@ -34,8 +34,9 @@ from src.workers.tasks import (
     mark_ledger_failed_task,
     mark_ledger_sent_task,
     nightly_ghost_sweep,
+    notification_tick,
     score_and_ingest,
-    send_daily_digest,
+    send_bundle,
     send_notification,
 )
 
@@ -95,8 +96,9 @@ class WorkerSettings:
         mark_ledger_sent_task,
         mark_ledger_failed_task,
         enrich_job_task,
-        # Step-3 B-04 — daily digest sender
-        send_daily_digest,
+        # Channels & Notifications overhaul — bundle sender + tick
+        send_bundle,
+        notification_tick,
         # Step-3 B-14 — nightly ghost-detection sweep
         nightly_ghost_sweep,
     ]
@@ -112,6 +114,7 @@ class WorkerSettings:
 
         return [
             cron(nightly_ghost_sweep, hour=2, minute=0),
+            cron(notification_tick, minute=set(range(0, 60, 5))),
         ]
 
     # ARQ reads WorkerSettings.cron_jobs as an attribute (list[CronJob]).

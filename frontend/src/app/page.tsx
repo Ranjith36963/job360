@@ -24,7 +24,7 @@ const FEATURES = [
   },
   {
     icon: Globe,
-    title: "46 Job Sources",
+    title: "47 Job Sources",
     description:
       "APIs, ATS boards, RSS feeds, and intelligent scrapers. From Greenhouse to HackerNews, Reed to RemoteOK — all aggregated in real time.",
     stagger: 2,
@@ -62,7 +62,7 @@ const FEATURES = [
 const STATS = [
   {
     icon: Globe,
-    value: "46",
+    value: "47",
     label: "Sources",
     description: "APIs, ATS, RSS & scrapers",
   },
@@ -140,7 +140,7 @@ export default function Home() {
               Your CV.
             </span>
             <span className="animate-fade-in-up stagger-3 block mt-1">
-              46 Sources.
+              47 Sources.
             </span>
             <span className="animate-fade-in-up stagger-4 block mt-1">
               One{" "}
@@ -158,7 +158,7 @@ export default function Home() {
               360
             </span>
             &apos;s 8-dimensional scoring engine find your perfect match across
-            46 job sources.
+            47 job sources.
           </p>
 
           {/* CTAs */}
@@ -284,7 +284,7 @@ export default function Home() {
                 step: "02",
                 title: "We search everywhere",
                 description:
-                  "46 sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in 8 dimensions.",
+                  "47 sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in 8 dimensions.",
                 icon: Zap,
               },
               {

@@ -13,6 +13,101 @@
 
 ---
 
+## Settings IA restructure — Channels top-level, Settings = Notifications + Account (2026-06-20)
+
+Owner-requested navigation change. Channels is now its own top-level page; the
+Settings gear (top-right) holds only Notifications + Account.
+
+### What changed
+- **Frontend route move:** `app/settings/channels/` → `app/channels/` (standalone,
+  no longer wrapped by the Settings tab layout). Its `useSearchParams` Suspense
+  wrapper is preserved (Next.js 16 build requirement). Internal post-OAuth
+  `router.replace` → `/channels`.
+- **Navbar (`components/layout/Navbar.tsx`):** top-level **Channels** link → `/channels`
+  (Send icon); separate **Settings** gear (top-right, desktop) + a Settings entry in
+  the mobile menu → `/settings`.
+- **Settings tabs (`app/settings/_tabs.tsx`):** Channels tab removed; "Notification
+  Rules" renamed **Notifications**; tabs = Notifications · Account.
+- `app/settings/page.tsx` redirect → `/settings/notifications`. Layout subtitle reworded.
+- **`middleware.ts`:** `/channels` added to `PROTECTED_PATHS` (login-gated).
+- **Backend:** Slack + Discord OAuth success redirects now return the browser to
+  `/channels?connected=...` (`api/routes/channels.py`). The API path prefix
+  `/api/settings/channels` is unchanged — it is an internal endpoint URL; renaming it
+  would churn ~10 frontend bindings + tests + api-types for no user-facing benefit.
+
+### Verification
+- Frontend: type-check + lint clean, 107 unit tests pass (the channels page test moved
+  with the page; its `../page` import + router mock still resolve).
+- Backend OAuth tests assert only the `connected=` query substring, so they still pass.
+- Live browser pass: see notes after the live run.
+
+---
+
+## Channels & Notifications Overhaul (2026-06-17)
+
+Branch: `worktree-channels-notifications-overhaul`. Spec: `docs/superpowers/specs/2026-06-17-channels-notifications-overhaul-design.md`; plan: `docs/superpowers/plans/2026-06-17-channels-notifications-overhaul.md`.
+
+### What shipped
+- **One rulebook per user.** Migration 0020 rebuilds `notification_rules` from one-row-per-channel to **one-row-per-user** (`UNIQUE(user_id)`). Dropped `channel` + `digest_send_time`; added `interval_hours`, `daily_send_time`, `last_sent_at`; widened `notify_mode` CHECK to `('instant','daily','every_n_hours')`. Inline DDL in `database.py` mirrors it. Old per-channel rows fold to the most-recent rule per user (`digest`→`daily`).
+- **Three timing modes.** `instant` (send inline when a job matches), `daily` (bundle at `daily_send_time`, user tz), `every_n_hours` (bundle every `interval_hours`). The rule applies to ALL the user's enabled channels.
+- **The missing scheduler.** New `notification_tick` ARQ cron (every 5 min) + pure `_bundle_due()` decide when a bundle is due (daily clock / interval elapsed / quiet-hours flush) and enqueue `send_bundle`, which drains `user_notification_digests`, dispatches one message per channel with `force=True`, records the ledger, marks rows `sent`/leaves on failure/`dlq` after 5 retries, and stamps `last_sent_at`. This fixes the prior P0 where `send_daily_digest` existed but was never scheduled (digests queued forever).
+- **One path only.** Removed the legacy global `.env`-webhook notification path (`main.py` loop + `services/notifications/{base,email,slack,discord}_notify.py` + dead tests). The only path is now worker/tick → `dispatcher.dispatch()` → Apprise → `notification_ledger`.
+- **API + UI.** Per-channel rule CRUD replaced by single `GET`/`PUT /settings/notification-rule`. Frontend notifications page is now ONE rulebook form (mode + conditional interval/daily-time + threshold + quiet hours + master enable); `api.ts`/`types.ts`/`api-types.ts` updated.
+- **Channels unchanged.** Connect/test/OAuth/Fernet for Slack/email/Telegram/Discord/webhook left as-is (already working). Telegram delivery confirmed wired (`channels.py` stores `tgram://{token}/{chat_id}`; dispatcher is channel-agnostic).
+- **Queue hygiene.** `cleanup_old_digests(days=30)` repo method to bound the digest queue.
+
+### Verification
+- Backend: 1392 passed, 3 skipped (full suite, `-p no:randomly`), ruff clean.
+- Frontend: type-check + lint clean, 107 unit tests pass; api-types regenerated (no drift).
+- Live end-to-end (2026-06-18, fresh DB, real API+frontend):
+  - Migration 0020 applied on FastAPI boot — live `notification_rules` has the new
+    columns + `UNIQUE(user_id)` (created via the migration RENAME, not just init_db).
+  - API: register → `GET /settings/notification-rule` 404 (no rule) → `PUT` (every_n_hours,
+    interval 8, threshold 70, quiet 23:00–07:00) 200 → `GET` 200 persisted. Second PUT
+    (switch to daily) UPDATES the same row (interval kept) — still 1 row/user. Invalid
+    `notify_mode` and `interval_hours=99` both rejected 422.
+  - UI: `/settings/notifications` renders ONE rulebook form, seeded from the saved rule;
+    switching mode swaps the conditional interval ↔ daily-time field; clicking Save
+    persisted `notify_mode=daily, daily_send_time=08:00` to SQLite (UI→API→DB).
+    Only console error is the known benign dark-mode hydration mismatch.
+    Evidence: `test-artifacts/notif-rulebook-every-n-hours.png`.
+
+### Full browser sweep — every button/feature (2026-06-19)
+Drove both pages end-to-end in a real browser (Playwright). Channels: connect
+buttons (correct disabled state without provider creds), email validation +
+"not configured" path, webhook validation + create, **Send test proven against
+a real endpoint (httpbin → "Test succeeded")** plus a real failure case, and
+remove. Notifications: 404→defaults, all three modes with their conditional
+fields, interval/daily-time/threshold/quiet-hours/enable, Save→API→DB persisted
+(verified via API), and the no-channels empty state. History: empty + populated
+table, status badges, pagination.
+
+Three more bugs found by this sweep and fixed (commit ddecc0d):
+- **History filters were per-page only.** Status/Channel filters + the "X of Y"
+  count applied to the current 20-row page client-side, so e.g. "Failed" showed
+  a wrong partial count and the channel dropdown only listed current-page
+  channels. Now the filters are sent to the API (which already supported them);
+  table, count, and pagination reflect the whole history. Channel list now comes
+  from `/notifications/stats`.
+- **"Pending" status filter never matched.** Dropdown value was `pending` but the
+  real ledger status is `queued`, so the filter returned nothing and queued rows
+  rendered an unstyled badge. Fixed to the real statuses (sent/failed/queued/dlq)
+  with an amber queued badge.
+- **Raw "API error 503:" leaked** in channel error messages; now shows the
+  backend's clean detail (e.g. "email delivery is not configured") via a new
+  `apiErrorMessage()` helper.
+
+**Honest limits (need real credentials, not testable here):** real Slack/Discord/
+Telegram OAuth connect (no provider keys on server — buttons correctly disabled)
+and real SMTP email delivery (backend correctly returns "not configured"). Real
+outbound delivery for the shared dispatcher→Apprise path IS proven via the
+webhook httpbin success.
+
+### Rules touched
+CLAUDE.md #23/#24 rewritten for the single-rule + three-mode model and the legacy-path removal.
+
+---
+
 ## Profile-version re-score batch (2026-06-13)
 
 Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-judge on profile change) — authorized by owner 2026-06-13.
@@ -24,7 +119,7 @@ Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-j
 - Per-user state only; shared catalog tables (`jobs`, `job_enrichment`, `job_embeddings`) are unchanged (rules #10/#17).
 
 **`src/services/rescore.py` (new)**
-- `rescore_user_feed(user_id, conn, new_version_id)` — top-level entry point called by the API trigger. Loads the new profile, rebuilds `SearchConfig`, calls `score_catalog_row` for each job in the user's 30-day feed, writes fresh scores and the new `profile_version` stamp. If `MATCHER_ENABLED` is on, triggers the LLM re-judge for the top candidates.
+- `rescore_user_feed(user_id, db_path=None)` — top-level entry point called internally by `reextract_and_rescore`. Opens its own DB connection (does NOT accept `conn` or `new_version_id`; resolves the current profile version via `current_profile_version_id()`). Loads the new profile, rebuilds `SearchConfig`, calls `score_catalog_row` for each job in the user's 30-day feed, writes fresh scores and the new `profile_version` stamp. If `MATCHER_ENABLED` is on, triggers the LLM re-judge for the top candidates.
 - `score_catalog_row(job_row, scorer)` — pure scoring helper; takes a `user_feed` + `jobs` join row and a `JobScorer` instance, returns an updated `match_score` + dim columns without touching the DB itself.
 
 **`src/services/llm_matcher.py` (extended)**
@@ -34,7 +129,7 @@ Branch: `fix/per-user-search-and-scoring-gate`. Implements backlog item #8 (re-j
 - Change-detector helper compares the two most recent `user_profile_versions` rows for a user. Returns `True` if the serialized profile content differs. Used by the API trigger to decide whether a full re-score is warranted.
 
 **`src/api/routes/profile.py` (trigger)**
-- After every `save_profile` (CV upload, LinkedIn upload, preferences save), the route calls the change-detector. If content changed, it enqueues `rescore_user_feed` as a FastAPI `BackgroundTask` so the HTTP response is not blocked.
+- After every `save_profile` (CV upload, LinkedIn upload, preferences save), the route calls the change-detector via `_maybe_trigger_rescore`. If content changed, it fires `reextract_and_rescore(user_id)` via `asyncio.create_task` (NOT a FastAPI `BackgroundTask`) so the HTTP response is not blocked. `reextract_and_rescore` internally calls `rescore_user_feed`.
 - The LLM re-judge portion of the background task only fires when `MATCHER_ENABLED=true`; the keyword re-score always runs.
 
 **`src/services/feed.py` (extended)**
@@ -1394,3 +1489,54 @@ Initial commit `eb5c030` claimed `frontend/.env.local.example` was added, but th
 
 - **Step 1 (Batch S1 — Engine→API seam):** date-model fields, 7-dim score breakdown, `enrich_job()` invocation, `mode=hybrid` wiring. See `docs/ExecutionOrder.md` for the full 6-step roadmap.
 - **Tag candidate:** `step-0-done-2026-04-24` for quick-reference.
+
+---
+
+## Two-pass profile extraction (2026-06-17, branch `feat/two-pass-profile-extraction`)
+
+**Goal (user-side profile improvement):** every profile input runs through a
+**deterministic pass** (plain code) AND an **LLM enhance pass**, merged into one
+`CVData`. When the user changes ANY input later, both passes re-run from STORED
+raw inputs (no re-upload, no network re-fetch), producing a refreshed CVData and
+a new profile-version id, then the feed re-scores. (M2 / the LLM judge was left
+untouched per scope.)
+
+**What existed before:** CV = LLM-only; LinkedIn = hybrid (deterministic headers
++ LLM prose); GitHub = deterministic lookup-table only; preferences = plain form
+parse. New-id-per-save + change→rescore already existed (`storage.py`,
+`profile.py::_maybe_trigger_rescore`).
+
+**New code (all TDD, offline, LLM mocked):**
+- `models.py` — `CVData` gains `linkedin_raw_text`, `github_repos_brief`,
+  `github_llm_skills`, `about_me_inferred_skills`. **No migration** — profiles
+  store as a JSON blob and `storage._filter_fields` drops unknown keys, so old
+  rows load with defaults.
+- `linkedin_parser.py` — `parse_*` now returns `raw_text`; `enrich_cv_from_linkedin`
+  stores it on `cv.linkedin_raw_text`. Factored `parse_linkedin_from_text(text)`
+  so the LLM pass can re-run offline.
+- `github_enricher.py` — `fetch_github_profile` now returns `repos_brief`
+  (name/description/topics); new `llm_infer_github_skills(repos_brief)` reads repo
+  prose for skills the lookup tables miss (e.g. "LangChain", "RAG").
+- `preferences.py` — new `llm_infer_from_about_me(about_me)` mines the free-text
+  blurb for skills.
+- `cv_parser.py` — new `deterministic_cv_fields(raw_text)` (no-LLM skills/summary
+  grab); factored `llm_cv_fields_from_text(raw_text)` so the CV LLM pass re-runs
+  from stored text.
+- `skill_tiering.py` — two new evidence sources + weights: `about_me_llm` (2.0,
+  user's own words) and `github_llm` (1.5, inferred-but-demonstrated).
+- `two_pass.py` (NEW) — `run_two_pass_extraction(profile)` runs both passes over
+  all four inputs in place (never raises; each pass no-ops when its input/keys are
+  absent); `reextract_and_rescore(user_id)` = load → re-extract → save (new
+  version, `source_action="two_pass_reextract"`) → rescore.
+- `api/routes/profile.py` — the change trigger now schedules
+  `reextract_and_rescore` instead of bare `rescore_user_feed`.
+
+**Tests:** `tests/test_two_pass.py` (17) + new cases in `test_linkedin_github.py`
+and `test_github_deps.py`. Full suite **1540 passed, 3 skipped**. Lint: no new
+ruff findings vs baseline.
+
+**Known cost tradeoff (no flag added):** a change to ANY input re-runs all LLM
+passes in the background (faithful to the ask). On a CV upload this re-runs the
+CV LLM once more than strictly needed. If this proves expensive, gate
+`reextract_and_rescore`'s LLM passes behind a flag later — the deterministic
+passes are free and always safe.

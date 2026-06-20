@@ -26,7 +26,71 @@ from src.services.profile.linkedin_parser import (
     _coerce_positions,
     _coerce_education,
     _coerce_certifications,
+    _dewrap_columns,
 )
+
+
+# ---------------------------------------------------------------------------
+# Two-column de-interleaving (LinkedIn "Save to PDF" sidebar fix)
+# ---------------------------------------------------------------------------
+
+class TestDewrapColumns:
+    def test_deinterleaves_two_columns(self):
+        """A clear left sidebar + right main column → left text fully precedes
+        right text, so 'Top Skills' content stays under its heading."""
+        words = []
+        for i, t in enumerate(
+            ["Top", "Skills", "LangGraph", "Systems", "Design", "Multi-agent", "Certifications"]
+        ):
+            words.append({"text": t, "x0": 50, "x1": 140, "top": 100 + i * 20})
+        for i, t in enumerate(["Summary", "I", "build", "AI", "systems", "that", "scale"]):
+            words.append({"text": t, "x0": 320, "x1": 430, "top": 100 + i * 20})
+        out = _dewrap_columns(words, 600)
+        assert out is not None
+        assert out.index("LangGraph") < out.index("Summary")
+
+    def test_single_column_returns_none(self):
+        """Dense single-column text has no clear vertical gutter → None (caller
+        falls back to flat extraction, so normal CVs are unaffected)."""
+        words = []
+        for r in range(8):
+            for x0 in (50, 160, 270, 380, 490):
+                words.append({"text": "w", "x0": x0, "x1": x0 + 95, "top": 100 + r * 20})
+        assert _dewrap_columns(words, 600) is None
+
+    def test_empty_words_returns_none(self):
+        assert _dewrap_columns([], 600) is None
+
+
+class TestInlineTechSkills:
+    def test_extracts_technologies_lines_with_wrap(self):
+        """LinkedIn experience 'Technologies: ...' lines (incl. the wrapped
+        continuation) are extracted deterministically."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Some achievement prose here.\n"
+            "Technologies: Docker • AWS Bedrock • Redis • Linux\n"
+            "• Python • RAG Pipelines • Generative AI\n"
+            "Next Company\n"
+        )
+        sk = set(_extract_inline_tech_skills(text))
+        assert {"Docker", "AWS Bedrock", "Redis", "Linux", "Python",
+                "RAG Pipelines", "Generative AI"}.issubset(sk)
+        assert "Some achievement prose here." not in sk
+        assert "Next Company" not in sk
+
+    def test_no_tech_line_returns_empty(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        assert _extract_inline_tech_skills("Just prose.\nNo tech line.\n") == []
+
+    def test_extracts_continuously_learning_line(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Continuously learning: Prompt engineering • Vector databases • RLHF • AI evaluation frameworks\n"
+        sk = set(_extract_inline_tech_skills(text))
+        assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
 from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,
@@ -319,6 +383,7 @@ class TestParseLinkedInPdfEndToEnd:
             "positions", "skills", "education", "certifications",
             "summary", "industry", "headline",
             "languages", "projects", "volunteer", "courses",
+            "raw_text",
         }
         assert data["skills"] == ["Python"]
 
@@ -337,6 +402,38 @@ class TestParseLinkedInPdfEndToEnd:
         assert data["skills"] == ["Python", "Rust"]
         assert data["positions"] == []
         assert data["education"] == []
+
+
+# ---------------------------------------------------------------------------
+# Two-pass: LinkedIn raw text storage (re-run extraction without re-upload)
+# ---------------------------------------------------------------------------
+
+class TestLinkedInRawTextStorage:
+    @pytest.mark.asyncio
+    async def test_parse_returns_raw_text(self, tmp_path):
+        """parse_linkedin_pdf_async exposes the extracted text under 'raw_text'
+        so the two-pass orchestrator can re-run the LLM pass without the file."""
+        path = _make_linkedin_pdf(
+            tmp_path,
+            summary="",
+            experience=None, education=None,
+            skills=["Python", "Rust"], certifications=None,
+        )
+        data = await parse_linkedin_pdf_async(str(path))
+        assert "raw_text" in data
+        assert "Python" in data["raw_text"]
+
+    def test_enrich_stores_linkedin_raw_text(self):
+        cv = CVData()
+        data = {"skills": ["Python"], "positions": [], "raw_text": "RAW LINKEDIN TEXT"}
+        out = enrich_cv_from_linkedin(cv, data)
+        assert out.linkedin_raw_text == "RAW LINKEDIN TEXT"
+
+    def test_enrich_missing_raw_text_leaves_empty(self):
+        """Older callers that don't pass raw_text don't crash; field stays ''."""
+        cv = CVData()
+        out = enrich_cv_from_linkedin(cv, {"skills": [], "positions": []})
+        assert out.linkedin_raw_text == ""
 
 
 # ---------------------------------------------------------------------------

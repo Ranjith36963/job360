@@ -12,6 +12,7 @@ from src.core.settings import (
     ADZUNA_APP_KEY,
     CAREERJET_AFFID,
     DB_PATH,
+    DFE_APPRENTICESHIPS_API_KEY,
     ENRICHMENT_THRESHOLD,
     EXPORTS_DIR,
     FINDWORK_API_KEY,
@@ -41,7 +42,6 @@ from src.services.job_enrichment import (
     enrich_batch,
 )
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
-from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.storage import current_profile_version_id, load_profile
@@ -63,6 +63,7 @@ from src.sources.apis_keyed.adzuna import AdzunaSource
 from src.sources.apis_keyed.careerjet import CareerjetSource
 from src.sources.apis_keyed.findwork import FindworkSource
 from src.sources.apis_keyed.google_jobs import GoogleJobsSource
+from src.sources.apis_keyed.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.apis_keyed.jooble import JoobleSource
 from src.sources.apis_keyed.jsearch import JSearchSource
 from src.sources.apis_keyed.reed import ReedSource
@@ -129,6 +130,7 @@ SOURCE_REGISTRY = {
     "hackernews": HackerNewsSource,
     "careerjet": CareerjetSource,
     "findwork": FindworkSource,
+    "gov_apprenticeships": GovApprenticeshipsSource,
     "nofluffjobs": NoFluffJobsSource,
     # Phase 4: New free sources
     "hn_jobs": HNJobsSource,
@@ -152,12 +154,13 @@ SOURCE_REGISTRY = {
 }
 
 # Number of unique source instances created by _build_sources().
-# 45 not 46 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 46 not 47 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
 # 4 dead sources removed in the 2026-06 M6 rotation: jobtensor, comeet,
-# gov_apprenticeships, aijobs_global — all upstream-dead.
+# gov_apprenticeships, aijobs_global — all upstream-dead. gov_apprenticeships
+# was restored 2026-06-16 against the DfE Display Advert API v2 (keyed).
 # Used by test_main.py::test_source_instance_count_matches_build to catch drift.
 # Update this when adding/removing sources.
-SOURCE_INSTANCE_COUNT = 45
+SOURCE_INSTANCE_COUNT = 46
 
 
 async def _ghost_detection_pass(
@@ -274,6 +277,7 @@ def _build_sources(
         HackerNewsSource(session, search_config=sc),
         CareerjetSource(session, affid=CAREERJET_AFFID, search_config=sc),
         FindworkSource(session, api_key=FINDWORK_API_KEY, search_config=sc),
+        GovApprenticeshipsSource(session, api_key=DFE_APPRENTICESHIPS_API_KEY, search_config=sc),
         NoFluffJobsSource(session, search_config=sc),
         # Group K: Phase 4 new free sources
         HNJobsSource(session, search_config=sc),
@@ -838,13 +842,6 @@ async def run_search(
                 await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
                 logger.info("Report saved: %s", md_path)
 
-                # Notifications via channel abstraction
-                if not no_notify:
-                    for channel in get_configured_channels():
-                        try:
-                            await channel.send(new_jobs, stats, csv_path=csv_path)
-                        except Exception as e:
-                            logger.error("%s notification failed: %s", channel.name, e)
 
                 # Print time-bucketed summary to console
                 _print_bucketed_summary(new_jobs, "Results")

@@ -1,14 +1,15 @@
-"""Step-3 B-01..05, O-01, O-02 — notification rules + dispatcher rule gate + digest.
+"""Notification rule API tests — single-rulebook model (migration 0020).
 
 Tests:
-  1. test_list_rules_empty            — GET /settings/notification-rules → empty for new user
-  2. test_create_rule                 — POST creates, GET returns it
-  3. test_update_rule                 — PATCH updates score_threshold
-  4. test_delete_rule_idor            — DELETE with wrong user_id → 404
-  5. test_dispatcher_skips_below_threshold — score=70, threshold=80 → no dispatch
-  6. test_dispatcher_fires_above_threshold — score=85, threshold=80 → dispatches
-  7. test_dispatcher_quiet_hours_skips    — within quiet window → skips/queues
-  8. test_notification_stats          — O-02 endpoint returns expected shape
+  1. test_get_rule_returns_defaults    — GET returns instant/60/enabled defaults
+  2. test_put_rule_updates_mode        — PUT every_n_hours saves and reads back
+  3. test_put_rule_partial_update      — PUT only changes the supplied fields
+  4. test_dispatcher_skips_below_threshold — score < threshold → skipped
+  5. test_dispatcher_fires_above_threshold — score ≥ threshold → dispatched
+  6. test_dispatcher_quiet_hours_skips    — quiet window → queued
+  7. test_notification_stats           — O-02 endpoint returns expected shape
+  8. test_notifications_filter_by_job_id — O-01 ?job_id= filter
+  9. test_notifications_filter_by_time_range — O-01 ?start_time= filter
 """
 
 from __future__ import annotations
@@ -25,19 +26,14 @@ from cryptography.fernet import Fernet
 from migrations import runner
 from src.services.channels import crypto, dispatcher
 
-# ── Shared DB fixtures ────────────────────────────────────────────────────────
+# ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 async def rules_db():
-    """Provide a migrated aiosqlite connection with notification_rules tables.
-
-    Sets up minimal schema (users, user_channels) then runs all migrations
-    so notification_rules + user_notification_digests exist.
-    """
+    """Migrated aiosqlite DB path with users seeded."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    # Initialise base schema that migration 0000 expects
     async with aiosqlite.connect(path) as db:
         await db.executescript(
             """
@@ -84,9 +80,6 @@ def _fernet_key():
     crypto.set_test_key(Fernet.generate_key().decode("ascii"))
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-
 async def _insert_channel(db_path: str, user_id: str, channel_type: str, url: str, enabled: int = 1) -> int:
     ct = crypto.encrypt(url)
     async with aiosqlite.connect(db_path) as db:
@@ -102,24 +95,25 @@ async def _insert_channel(db_path: str, user_id: str, channel_type: str, url: st
 async def _insert_notification_rule(
     db_path: str,
     user_id: str,
-    channel: str,
+    *,
     score_threshold: int = 60,
     notify_mode: str = "instant",
     enabled: int = 1,
     quiet_hours_start: str | None = None,
     quiet_hours_end: str | None = None,
-) -> int:
+) -> None:
+    """Insert a single notification rule for a user (new schema)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     async with aiosqlite.connect(db_path) as db:
-        cur = await db.execute(
-            "INSERT INTO notification_rules"
-            "(user_id, channel, score_threshold, notify_mode, enabled, "
+        await db.execute(
+            "INSERT OR REPLACE INTO notification_rules"
+            "(user_id, score_threshold, notify_mode, enabled, "
             " quiet_hours_start, quiet_hours_end, created_at, updated_at)"
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, channel, score_threshold, notify_mode, enabled, quiet_hours_start, quiet_hours_end, now, now),
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, score_threshold, notify_mode, enabled,
+             quiet_hours_start, quiet_hours_end, now, now),
         )
         await db.commit()
-        return cur.lastrowid
 
 
 async def _insert_job(db_path: str) -> int:
@@ -136,87 +130,65 @@ async def _insert_job(db_path: str) -> int:
         return cur.lastrowid
 
 
-# ── HTTP-layer tests (B-02) via authenticated_async_context ──────────────────
+# ── API tests ─────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_list_rules_empty(authenticated_async_context):
-    """1. GET /settings/notification-rules returns empty list for new user."""
+async def test_get_rule_404_when_none(authenticated_async_context):
+    """1. GET returns 404 for new user (no rule yet)."""
     async with authenticated_async_context() as client:
-        resp = await client.get("/api/settings/notification-rules")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["rules"] == []
-
-
-@pytest.mark.asyncio
-async def test_create_rule(authenticated_async_context):
-    """2. POST creates a rule, GET returns it with the correct fields."""
-    async with authenticated_async_context() as client:
-        resp = await client.post(
-            "/api/settings/notification-rules",
-            json={
-                "channel": "email",
-                "score_threshold": 75,
-                "notify_mode": "instant",
-                "enabled": True,
-            },
-        )
-        assert resp.status_code == 201, resp.text
-        rule = resp.json()
-        assert rule["channel"] == "email"
-        assert rule["score_threshold"] == 75
-        assert rule["enabled"] is True
-
-        list_resp = await client.get("/api/settings/notification-rules")
-    assert list_resp.status_code == 200
-    assert len(list_resp.json()["rules"]) == 1
-    assert list_resp.json()["rules"][0]["channel"] == "email"
-
-
-@pytest.mark.asyncio
-async def test_update_rule(authenticated_async_context):
-    """3. PATCH updates score_threshold."""
-    async with authenticated_async_context() as client:
-        create = await client.post(
-            "/api/settings/notification-rules",
-            json={"channel": "slack", "score_threshold": 50},
-        )
-        rule_id = create.json()["id"]
-
-        patch_resp = await client.patch(
-            f"/api/settings/notification-rules/{rule_id}",
-            json={"score_threshold": 90},
-        )
-    assert patch_resp.status_code == 200
-    assert patch_resp.json()["score_threshold"] == 90
-
-
-@pytest.mark.asyncio
-async def test_delete_rule_idor(authenticated_async_context, rules_db):
-    """4. DELETE with wrong user_id → 404 (IDOR guard).
-
-    We insert a rule under 'alice' via direct SQL, then try to delete it
-    via the authenticated test user (who is a different user).
-    """
-    rule_id = await _insert_notification_rule(rules_db, "alice", "email")
-
-    async with authenticated_async_context() as client:
-        resp = await client.delete(f"/api/settings/notification-rules/{rule_id}")
-    # The fixture user is NOT alice, so the WHERE id=? AND user_id=? should miss.
+        resp = await client.get("/api/settings/notification-rule")
     assert resp.status_code == 404
 
 
-# ── Dispatcher rule gate tests (B-03) ────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_put_rule_updates_mode(authenticated_async_context):
+    """2. PUT every_n_hours saves and reads back correctly."""
+    async with authenticated_async_context() as client:
+        put_resp = await client.put(
+            "/api/settings/notification-rule",
+            json={"notify_mode": "every_n_hours", "interval_hours": 8, "score_threshold": 70},
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        body = put_resp.json()
+        assert body["notify_mode"] == "every_n_hours"
+        assert body["interval_hours"] == 8
+        assert body["score_threshold"] == 70
+
+        get_resp = await client.get("/api/settings/notification-rule")
+    assert get_resp.json()["notify_mode"] == "every_n_hours"
+    assert get_resp.json()["interval_hours"] == 8
+
+
+@pytest.mark.asyncio
+async def test_put_rule_partial_update(authenticated_async_context):
+    """3. PUT only changes the supplied fields, leaves others at their saved value."""
+    async with authenticated_async_context() as client:
+        await client.put(
+            "/api/settings/notification-rule",
+            json={"notify_mode": "daily", "score_threshold": 80},
+        )
+        # Second PUT only changes score_threshold
+        resp2 = await client.put(
+            "/api/settings/notification-rule",
+            json={"score_threshold": 90},
+        )
+        assert resp2.json()["score_threshold"] == 90
+        # notify_mode should still be daily (not reset to instant)
+        get_resp = await client.get("/api/settings/notification-rule")
+    assert get_resp.json()["score_threshold"] == 90
+
+
+# ── Dispatcher rule gate tests ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_skips_below_threshold(rules_db):
-    """5. score=70, threshold=80 → no Apprise call (skipped=True)."""
+    """4. score=70, threshold=80 → no Apprise call (skipped=True)."""
     await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
-    await _insert_notification_rule(rules_db, "alice", "slack", score_threshold=80)
+    await _insert_notification_rule(rules_db, "alice", score_threshold=80)
 
-    with patch("apprise.Apprise") as mock_app:  # noqa: N806
+    with patch("apprise.Apprise") as mock_app:
         instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
@@ -231,7 +203,6 @@ async def test_dispatcher_skips_below_threshold(rules_db):
                 match_score=70,
             )
 
-    # Should be skipped — score < threshold
     assert len(results) == 1
     assert results[0].skipped is True
     assert instance.notify.call_count == 0
@@ -239,11 +210,11 @@ async def test_dispatcher_skips_below_threshold(rules_db):
 
 @pytest.mark.asyncio
 async def test_dispatcher_fires_above_threshold(rules_db):
-    """6. score=85, threshold=80 → dispatches normally."""
+    """5. score=85, threshold=80 → dispatches normally."""
     await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
-    await _insert_notification_rule(rules_db, "alice", "slack", score_threshold=80)
+    await _insert_notification_rule(rules_db, "alice", score_threshold=80)
 
-    with patch("apprise.Apprise") as mock_app:  # noqa: N806
+    with patch("apprise.Apprise") as mock_app:
         instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
@@ -258,7 +229,6 @@ async def test_dispatcher_fires_above_threshold(rules_db):
                 match_score=85,
             )
 
-    # Should fire
     assert len(results) == 1
     assert results[0].ok is True
     assert results[0].skipped is False
@@ -267,25 +237,19 @@ async def test_dispatcher_fires_above_threshold(rules_db):
 
 @pytest.mark.asyncio
 async def test_dispatcher_quiet_hours_skips(rules_db):
-    """7. Within quiet window → skips / queues digest.
-
-    We patch ``_is_in_quiet_window`` to always return True so the test
-    doesn't depend on the real clock — it only needs to verify the
-    dispatcher respects the quiet-hours gate.
-    """
+    """6. Within quiet window → queued for digest (not dispatched immediately)."""
     await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
     job_id = await _insert_job(rules_db)
     await _insert_notification_rule(
         rules_db,
         "alice",
-        "slack",
         score_threshold=0,
         quiet_hours_start="00:00",
         quiet_hours_end="23:59",
     )
 
     with patch("src.services.channels.dispatcher._is_in_quiet_window", return_value=True):
-        with patch("apprise.Apprise") as mock_app:  # noqa: N806
+        with patch("apprise.Apprise") as mock_app:
             instance = mock_app.return_value
             instance.notify.return_value = True
             if hasattr(instance, "async_notify"):
@@ -301,10 +265,8 @@ async def test_dispatcher_quiet_hours_skips(rules_db):
                     match_score=95,
                 )
 
-    # Should be queued for digest, not dispatched
     assert len(results) == 1
     result = results[0]
-    # Either skipped=True or queued_digest=True — quiet hours gate fires
     assert result.skipped or result.queued_digest
     assert instance.notify.call_count == 0
 
@@ -314,16 +276,14 @@ async def test_dispatcher_quiet_hours_skips(rules_db):
 
 @pytest.mark.asyncio
 async def test_notification_stats(authenticated_async_context, fixture_user_id):
-    """8. O-02 endpoint returns expected shape."""
+    """7. O-02 endpoint returns expected shape."""
     from src.api import dependencies as api_deps
 
     db = await api_deps.get_db()
     now = datetime.now(timezone.utc).isoformat()
-    # Insert ledger rows for the fixture user — use distinct job_ids to satisfy
-    # UNIQUE(user_id, job_id, channel) on notification_ledger (migration 0004).
     for jid, status_str in [(1001, "sent"), (1002, "sent"), (1003, "failed")]:
         await db._conn.execute(
-            "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) " "VALUES(?, ?, ?, ?, ?)",
+            "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) VALUES(?, ?, ?, ?, ?)",
             (fixture_user_id, jid, "email", status_str, now),
         )
     await db._conn.commit()
@@ -333,7 +293,6 @@ async def test_notification_stats(authenticated_async_context, fixture_user_id):
 
     assert resp.status_code == 200
     body = resp.json()
-    # Should have email channel with sent/failed counts
     assert "email" in body
     assert body["email"].get("sent", 0) == 2
     assert body["email"].get("failed", 0) == 1
@@ -344,17 +303,17 @@ async def test_notification_stats(authenticated_async_context, fixture_user_id):
 
 @pytest.mark.asyncio
 async def test_notifications_filter_by_job_id(authenticated_async_context, fixture_user_id):
-    """O-01: ?job_id= filter returns only the matching ledger row."""
+    """8. O-01: ?job_id= filter returns only the matching ledger row."""
     from src.api import dependencies as api_deps
 
     db = await api_deps.get_db()
     now = datetime.now(timezone.utc).isoformat()
     await db._conn.execute(
-        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) " "VALUES(?, ?, ?, ?, ?)",
+        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) VALUES(?, ?, ?, ?, ?)",
         (fixture_user_id, 100, "email", "sent", now),
     )
     await db._conn.execute(
-        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) " "VALUES(?, ?, ?, ?, ?)",
+        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) VALUES(?, ?, ?, ?, ?)",
         (fixture_user_id, 200, "email", "sent", now),
     )
     await db._conn.commit()
@@ -369,18 +328,18 @@ async def test_notifications_filter_by_job_id(authenticated_async_context, fixtu
 
 @pytest.mark.asyncio
 async def test_notifications_filter_by_time_range(authenticated_async_context, fixture_user_id):
-    """O-01: ?start_time= / ?end_time= filter on created_at."""
+    """9. O-01: ?start_time= / ?end_time= filter on created_at."""
     from src.api import dependencies as api_deps
 
     db = await api_deps.get_db()
     early = "2026-01-01T00:00:00+00:00"
     late = "2026-12-31T23:59:59+00:00"
     await db._conn.execute(
-        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) " "VALUES(?, ?, ?, ?, ?)",
+        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) VALUES(?, ?, ?, ?, ?)",
         (fixture_user_id, 1, "email", "sent", early),
     )
     await db._conn.execute(
-        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) " "VALUES(?, ?, ?, ?, ?)",
+        "INSERT INTO notification_ledger(user_id, job_id, channel, status, created_at) VALUES(?, ?, ?, ?, ?)",
         (fixture_user_id, 2, "email", "sent", late),
     )
     await db._conn.commit()
@@ -389,6 +348,5 @@ async def test_notifications_filter_by_time_range(authenticated_async_context, f
         resp = await client.get("/api/notifications?start_time=2026-06-01T00:00:00%2B00:00")
     assert resp.status_code == 200
     body = resp.json()
-    # Only the late row should appear
     assert body["total"] == 1
     assert body["notifications"][0]["job_id"] == 2

@@ -26,6 +26,11 @@ class CVData:
     linkedin_positions: list[dict] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
     linkedin_industry: str = ""
+    # Two-pass extraction — the raw text pdfplumber pulled from the LinkedIn
+    # "Save to PDF" export. Stored so the LLM pass can re-run on any profile
+    # change WITHOUT the user re-uploading the file (the temp file is deleted
+    # after the first parse). Empty when no LinkedIn PDF was ever uploaded.
+    linkedin_raw_text: str = ""
     # Batch 1.5 — expanded LinkedIn sections (Languages, Projects,
     # Volunteer Experience, Courses). All are LinkedIn-sourced display
     # fields: they inform the CV viewer and feed relevance keywords
@@ -44,6 +49,15 @@ class CVData:
     # separate from github_skills_inferred so downstream can audit
     # where a skill came from (language signal vs declared dependency).
     github_frameworks: list[str] = field(default_factory=list)
+    # Two-pass extraction — a compact list of {name, description, topics}
+    # for the user's public repos. Stored so the GitHub LLM pass can re-run
+    # offline (no re-fetch) on a later profile change.
+    github_repos_brief: list[dict] = field(default_factory=list)
+    # Two-pass extraction — skills the LLM inferred by reading repo prose
+    # (names/descriptions/topics) that the hard-coded language/topic lookup
+    # tables can't recognise (e.g. "LangChain", "RAG"). Separate field so
+    # skill-tiering can weight this signal independently.
+    github_llm_skills: list[str] = field(default_factory=list)
     # Batch 1.1 — archetype classification (CareerDomain enum value).
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).
@@ -63,6 +77,11 @@ class CVData:
     # behaviour. ProfileResponse expansion surfaces this as
     # ``skill_provenance``.
     cv_skills_esco: dict[str, str] = field(default_factory=dict)
+    # Two-pass extraction — skills the LLM mined from the user's free-text
+    # ``preferences.about_me``. Stored on CVData (the skill container) so
+    # skill-tiering can weight this "user's own words" signal. Empty when
+    # about_me is blank or the LLM pass is unavailable.
+    about_me_inferred_skills: list[str] = field(default_factory=list)
 
     @classmethod
     def from_json_resume(cls, data: dict) -> CVData:

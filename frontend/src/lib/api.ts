@@ -16,8 +16,6 @@ import type {
   JsonResumeResponse,
   NotificationLedgerListResponse,
   NotificationRule,
-  NotificationRuleCreate,
-  NotificationRuleListResponse,
   NotificationRuleUpdate,
   PipelineAdvanceRequest,
   PipelineApplication,
@@ -32,16 +30,27 @@ import type {
   StatusResponse,
 } from "./types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// `fetch` calls default to a RELATIVE base ("") so requests hit the SAME origin
+// as the frontend and are proxied to the backend by the Next rewrite in
+// next.config.ts (`/api/:path*`). Same-origin = the session cookie (host-only,
+// SameSite=Lax) is always sent → the middleware auth gate works in any
+// deployment (fixes the split-host cookie bug). Set NEXT_PUBLIC_API_URL only to
+// force a direct cross-origin backend (e.g. a dev setup without the proxy).
+const API = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+// `channelConnectUrl` is a BROWSER NAVIGATION (window.location.href), not fetch,
+// so it must be an ABSOLUTE backend URL (a relative path would hit the frontend
+// origin). Always resolve to a concrete backend origin.
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
  * Absolute backend URL for a chat-provider OAuth connect. These routes are
  * BROWSER NAVIGATIONS (window.location.href), not fetch — so they must point at
  * the backend origin. A relative "/api/..." path would hit the frontend origin
- * (:3000) and 404; the backend lives at ${API}.
+ * and 404; the backend lives at ${BACKEND}.
  */
 export function channelConnectUrl(provider: "slack" | "discord"): string {
-  return `${API}/api/settings/channels/connect/${provider}`;
+  return `${BACKEND}/api/settings/channels/connect/${provider}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,36 +440,29 @@ export async function testChannel(id: number): Promise<ChannelTestResult> {
   });
 }
 
-// ---- Step-3: Notification rules ----
+// ---- Notification rule (one shared rulebook per user) ----
 
-export async function getNotificationRules(): Promise<NotificationRuleListResponse> {
-  return request<NotificationRuleListResponse>("/api/settings/notification-rules");
+/**
+ * Get the user's single notification rule. The backend returns 404 when the
+ * user has not saved one yet — we treat that as "no rule, use defaults" and
+ * return null rather than throwing.
+ */
+export async function getNotificationRule(): Promise<NotificationRule | null> {
+  try {
+    return await request<NotificationRule>("/api/settings/notification-rule");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
-export async function createNotificationRule(
-  body: NotificationRuleCreate
-): Promise<NotificationRule> {
-  return request<NotificationRule>("/api/settings/notification-rules", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function updateNotificationRule(
-  id: number,
+export async function saveNotificationRule(
   body: NotificationRuleUpdate
 ): Promise<NotificationRule> {
-  return request<NotificationRule>(`/api/settings/notification-rules/${id}`, {
-    method: "PATCH",
+  return request<NotificationRule>("/api/settings/notification-rule", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
-}
-
-export async function deleteNotificationRule(id: number): Promise<void> {
-  await request<void>(`/api/settings/notification-rules/${id}`, {
-    method: "DELETE",
   });
 }
 
@@ -499,11 +501,21 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
 
 export async function getNotificationLedger(
   limit = 20,
-  offset = 0
+  offset = 0,
+  filters: { channel?: string; status?: string } = {}
 ): Promise<NotificationLedgerListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.channel) params.set("channel", filters.channel);
+  if (filters.status) params.set("status", filters.status);
   return request<NotificationLedgerListResponse>(
-    `/api/notifications?limit=${limit}&offset=${offset}`
+    `/api/notifications?${params.toString()}`
   );
+}
+
+/** Per-channel ledger aggregation: { channel: { sent, failed, queued, ... } }.
+ *  Used to list ALL channels in the history filter, not just the current page. */
+export async function getNotificationStats(): Promise<Record<string, Record<string, number>>> {
+  return request<Record<string, Record<string, number>>>("/api/notifications/stats");
 }
 
 // ---- Step-3: Duplicate jobs ----

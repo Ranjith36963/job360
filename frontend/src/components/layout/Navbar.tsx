@@ -9,6 +9,7 @@ import {
   Kanban,
   Menu,
   Activity,
+  Send,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -20,7 +21,7 @@ const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
-  { href: "/settings/channels", label: "Channels", icon: Settings },
+  { href: "/channels", label: "Channels", icon: Send },
 ] as const;
 
 export function Navbar() {
@@ -67,6 +68,18 @@ export function Navbar() {
             page ("Search Latest Jobs") — a nav link here only navigated and
             misled users into thinking it searched. */}
         <div className="hidden md:flex items-center gap-2">
+          <Link
+            href="/settings"
+            aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+            aria-label="Settings"
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              pathname.startsWith("/settings")
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Settings className="h-4 w-4" aria-hidden="true" />
+          </Link>
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
               <span className="text-xs text-muted-foreground max-w-[140px] truncate">
@@ -119,6 +132,19 @@ export function Navbar() {
                   </Link>
                 );
               })}
+              <Link
+                href="/settings"
+                onClick={() => setMobileOpen(false)}
+                aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  pathname.startsWith("/settings")
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <Settings className="h-4 w-4" aria-hidden="true" />
+                Settings
+              </Link>
             </nav>
 
             {/* Mobile: user email + logout + theme toggle */}
