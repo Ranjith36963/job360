@@ -45,7 +45,7 @@ plan, a status snapshot, a reference, or an architectural decision.
 ## Architecture
 
 - [`../CLAUDE.md`](../CLAUDE.md) — the load-bearing architecture doc. Data
-  flow, module map, hard rules (26 of them), scoring algorithm, env vars,
+  flow, module map, hard rules (27 of them), scoring algorithm, env vars,
   Batch 2 + Batch 3 + Pillar 2 + Step 3 additions.
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — deeper technical reference with
   diagrams, DB schema, config variables, dependency list.

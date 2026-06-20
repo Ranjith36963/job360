@@ -37,7 +37,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking all 45 source files that inherit from it.
 8. **When adding/removing sources: update the FIVE load-bearing surfaces** — `SOURCE_REGISTRY` dict, `_build_sources()` list, `RATE_LIMITS` dict, `tests/test_cli.py` (`len == N` + expected set), AND `tests/test_api.py` (rule #13 below). Current count: **46**.
 13. **The fifth surface (`tests/test_api.py`) has hardcoded `== N` checks** inside `test_sources_returns_*` + `test_status_returns_counts` + `test_full_api_workflow`. Rotating the count requires all five to move together.
-14. **Conditional fetch is opt-in.** Sources whose upstream honours ETag/Last-Modified call `self._get_json_conditional(url)`; everyone else stays on `self._get_json(url)`. Don't pollute the cache with un-validatable entries.
+14. **Conditional fetch is opt-in.** Sources whose upstream honours ETag/Last-Modified call `self._get_json_conditional(url)` (or `self._get_text_conditional(url)` for XML/RSS — which is what the one live adopter, `nhs_jobs_xml`, uses); everyone else stays on `self._get_json(url)`. Don't pollute the cache with un-validatable entries.
 15. **New sources MUST set `.category`** to one of: `"ats"`, `"rss"`, `"keyed_api"`, `"free_json"`, `"scrapers"`, `"other"` — or add a `NAME_TIER[source.name]` override in `scheduler.py`. Untagged sources fall to the 60-min default.
 
 ### Heavy imports
@@ -84,7 +84,7 @@ Rules are reference material — keep them in one place. Long-form context for e
 - **`teaching_vacancies` lives in `apis_free/` but declares `category="rss"`** for the 15-min scheduler tier. Folder location ≠ scheduler tier. (`gov_apprenticeships` was also in this category but was removed in the 2026-06 M6 rotation — API retired upstream.)
 - **Pillar 2 toggles default off.** Don't assume embeddings or LLM enrichment runs by default — they don't.
 - **Heavy deps lazy-imported.** Don't add a top-level `import sentence_transformers` even "just for typing" — see rules #11 + #16.
-- **Migrations auto-apply on FastAPI boot** via `lifespan` in `src/api/dependencies.py`. The CLI `python -m migrations.runner up` is for non-API contexts.
+- **Migrations auto-apply on FastAPI boot** via the `lifespan` handler in `src/api/main.py` (which calls `init_db()` in `src/api/dependencies.py`). The CLI `python -m migrations.runner up` is for non-API contexts.
 
 ## Project Overview
 
@@ -215,7 +215,7 @@ job360/
 - `src/main.py` — `run_search()` + `SOURCE_REGISTRY` (46 entries — `indeed` and `glassdoor` alias `JobSpySource`) + `_build_sources()`.
 - `src/services/skill_matcher.py` — Scoring. Two paths: legacy `score_job()` (module-level, hard-coded keywords) and `JobScorer(config, user_preferences=None, enrichment_lookup=None).score()` (instance, dynamic + optional 7-dim per rules #19/#20). 4-component default: Title 40 / Skill 40 / Location 10 / Recency 10. Penalties: −30 negative title / −15 foreign location.
 - `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
-- `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
+- `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 15m RSS / 60m keyed-api, free-json & scrapers; plus name-overrides `reed` 5m and `workday` 15m). Consults `circuit_breaker.BreakerRegistry` before each tick.
 - `src/services/channels/dispatcher.py` — Apprise wrapper. Post-Step-3, consults `notification_rules` for (user, channel): score-threshold filter, timezone-aware quiet-hours skip, digest-queue routing (rules #23/#24).
 - `src/repositories/database.py` — Async SQLite (aiosqlite), WAL, 5s busy timeout. Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
 
@@ -266,7 +266,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 - **Adding a notification channel:** Implement `NotificationChannel` ABC, register in `get_all_channels()` in `src/services/notifications/base.py`. For multi-channel routing via Apprise, work in `src/services/channels/dispatcher.py` instead — and ensure rules #23 + #24 are respected.
 - **Keyed source pattern:** Accept `api_key`, return `[]` early with info-log if empty, pass `search_config` through.
 - **ATS source pattern:** Accept `companies` list and `search_config=None`; iterate slugs from `companies.py`.
-- **RSS/XML source pattern:** `_get_text()` → parse with stdlib `xml.etree.ElementTree`. Consider `_get_json_conditional` if upstream honours ETag (rule #14).
+- **RSS/XML source pattern:** `_get_text()` → parse with stdlib `xml.etree.ElementTree`. Consider `_get_text_conditional` if upstream honours ETag (rule #14).
 - **HTML scraper pattern:** `_get_text()` → regex parse. Fragile by nature — tag scrapers in `STATUS.md`'s "fragile/risky" table.
 
 ## Testing

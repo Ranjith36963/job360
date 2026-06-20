@@ -526,7 +526,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | 45 source classes / 46 registry keys / 45 instances | ✅ | reconciled in §1 |
 | 7 keyed APIs (skip gracefully without key) | ✅ | |
 | 10 free JSON APIs | ✅ | |
-| 11 ATS boards over ~261 company slugs | ✅ | `companies.py` |
+| 11 ATS boards over ~256 company slugs | ✅ | `companies.py` |
 | 8 RSS/XML feeds | ✅ | |
 | 5 HTML scrapers | ✅ | regex/embedded-JSON — brittle by nature ⚠️ |
 | 4 other (incl. optional jobspy) | ✅ | jobspy skips with warning if uninstalled |
@@ -569,7 +569,7 @@ backend/src/
 ├── models.py                       — Job dataclass + normalized_key() (rule #1)
 ├── main.py:103-318                 — SOURCE_REGISTRY (46 keys) + _build_sources() + domain filter
 ├── core/
-│   ├── companies.py                — ~261 ATS slugs across 11 platforms + name overrides
+│   ├── companies.py                — ~256 ATS slugs across 11 platforms + name overrides
 │   ├── settings.py:93-146          — RATE_LIMITS (46 entries)
 │   └── keywords.py                 — LOCATIONS + VISA_KEYWORDS (the rest emptied 2026-04-09)
 └── utils/rate_limiter.py           — async semaphore + delay

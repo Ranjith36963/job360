@@ -41,7 +41,7 @@ Each pillar doc also has three "manual" sections inside it:
 | --- | --- | --- | --- |
 | **1 — User** | ✅ Auth (Argon2id + signed cookies), profile (CV/LinkedIn/GitHub, LLM-only), feed, actions, pipeline, channels, notification rules, ledger | 🟡 ARQ worker deployment install-dependent; ESCO normalisation behind `SEMANTIC_ENABLED` | ✅ password reset (forgot-password, migration 0015); 🟡 email verification (built, not enforced at login); ❌ MFA, OAuth, push notifications; ⚠️ FE/BE types hand-synced |
 | **2 — Engine** | ✅ 9-dim scoring, 3-stage prefilter, 4-layer dedup, tiered scheduler, circuit breakers, conditional cache | 🟡 enrichment + embeddings + hybrid retrieval (both flags default OFF) | ⚠️ legacy `score_job()` scores against empty `keywords.py`; ❌ LLM cost tracking, re-embedding on model change |
-| **3 — Providers** | ✅ 45 sources / 46 keys, `BaseJobSource` retry+rate-limit, ATS catalog (~261 slugs), post-M6 roster | 🟡 conditional fetch adopted by only 1 of ~16 eligible feeds | ⚠️ HTML scrapers brittle to markup changes; 🟡 Rippling slug list is a 5-company starter; ❌ per-source health dashboard |
+| **3 — Providers** | ✅ 45 sources / 46 keys, `BaseJobSource` retry+rate-limit, ATS catalog (~256 slugs), post-M6 roster | 🟡 conditional fetch adopted by only 1 of ~16 eligible feeds | ⚠️ HTML scrapers brittle to markup changes; 🟡 Rippling slug list is a 5-company starter; ❌ per-source health dashboard |
 
 **Test baseline:** 600 passed / 0 failed / 3 skipped (post-3.5.4 green baseline).
 

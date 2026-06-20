@@ -52,7 +52,7 @@ job360/
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
-│   │   │   ├── fx.py                 # 21-currency → GBP rates
+│   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── skill_matcher.py      # JobScorer + score_job; 9-field ScoreBreakdown
@@ -77,7 +77,7 @@ job360/
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 18-migration forward-compat schema
+│   │   │   ├── database.py           # Async SQLite + 21-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -130,17 +130,17 @@ All 45 sources get `search_config` passed through:
 ReedSource(session, api_key=REED_API_KEY, search_config=sc)
 ArbeitnowSource(session, search_config=sc)
 GreenhouseSource(session, search_config=sc)
-# ... etc for all 48
+# ... etc for all 45
 ```
 
 The `_build_sources()` function groups sources into labeled groups (A through K) and instantiates all of them. When `--source <name>` is passed, it filters to just the matching source. Special case: `--source glassdoor` maps to `JobSpySource` (same as `indeed`).
 
 ### 3. SOURCE_REGISTRY
 
-`SOURCE_REGISTRY` is a `dict[str, type]` mapping 48 source names to their classes. It serves two purposes:
+`SOURCE_REGISTRY` is a `dict[str, type]` mapping 46 source names to their classes. It serves two purposes:
 1. CLI `--source` validation — Click uses it for `click.Choice(sorted(SOURCE_REGISTRY.keys()))`
 2. `sources` command — lists all available source names
-3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 48` and checks the exact set of keys
+3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 46` and checks the exact set of keys
 
 Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 46 registry entries but 45 unique classes.
 
@@ -318,45 +318,36 @@ CareerjetSource(session, affid, search_config)
 FindworkSource(session, api_key, search_config)
 ```
 
-**Free JSON APIs** (10 — no auth, filter by relevance_keywords):
+**Free JSON APIs** (9 — no auth, filter by relevance_keywords):
 ```
 ArbeitnowSource, RemoteOKSource, JobicySource, HimalayasSource,
-RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource,
-HNJobsSource, YCCompaniesSource
+RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource, HNJobsSource
 ```
 
-**ATS Boards** (10 — iterate company slugs from companies.py):
+**ATS Boards** (11 — iterate company slugs from companies.py; ~256 slugs total):
 ```
-GreenhouseSource(session, companies, search_config)   # 25 companies
-LeverSource(session, companies, search_config)         # 12 companies
-WorkableSource(session, companies, search_config)      # 8 companies
-AshbySource(session, companies, search_config)         # 9 companies
-SmartRecruitersSource(session, companies, search_config) # 6 companies
-PinpointSource(session, companies, search_config)      # 8 companies
-RecruiteeSource(session, companies, search_config)     # 8 companies
-WorkdaySource(session, companies, search_config)       # 15 companies (dict format)
-PersonioSource(session, companies, search_config)      # 10 companies
-SuccessFactorsSource(session, companies, search_config) # 3 companies (sitemap format)
+GreenhouseSource, LeverSource, WorkableSource, AshbySource,
+SmartRecruitersSource, PinpointSource, RecruiteeSource, WorkdaySource,
+PersonioSource, SuccessFactorsSource, RipplingSource
 ```
 
 **RSS/XML Feeds** (8 — parse with xml.etree.ElementTree):
 ```
-JobsAcUkSource, NHSJobsSource, WorkAnywhereSource, WeWorkRemotelySource,
-RealWorkFromAnywhereSource, BioSpaceSource, UniJobsSource, FindAJobSource
+JobsAcUkSource, NHSJobsSource, NHSJobsXMLSource, WorkAnywhereSource,
+WeWorkRemotelySource, RealWorkFromAnywhereSource, BioSpaceSource, UniJobsSource
 ```
 
-**HTML Scrapers** (7 — parse with regex):
+**HTML Scrapers** (5 — parse with regex):
 ```
-LinkedInSource, JobTensorSource, ClimatebaseSource, EightyKHoursSource,
-BCSJobsSource, AIJobsGlobalSource, AIJobsAISource
+LinkedInSource, ClimatebaseSource, EightyKHoursSource,
+BCSJobsSource, AIJobsAISource
 ```
 
-**Special** (5):
-- `JobSpySource` — uses python-jobspy for Indeed/Glassdoor (optional dependency, skips with warning if not installed)
+**Special** (4):
+- `JobSpySource` — uses python-jobspy for Indeed/Glassdoor (optional dependency, skips with warning if not installed; one class behind two registry keys)
 - `HackerNewsSource` — Algolia "Who is Hiring" threads
 - `TheMuseSource` — TheMuse public API
 - `NoFluffJobsSource` — NoFluffJobs public API
-- `NomisSource` — UK GOV vacancy statistics (market intelligence, not individual listings)
 
 ---
 
@@ -647,7 +638,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | Arbeitnow/Jobicy | 2 | 1.0s |
 | Greenhouse/Lever | 2 | 1.5s |
 | HN Jobs | 3 | 0.5s |
-| WorkAnywhere/Nomis | 1 | 5.0s |
+| WorkAnywhere | 1 | 5.0s |
 
 ---
 

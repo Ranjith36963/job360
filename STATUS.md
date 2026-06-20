@@ -60,7 +60,7 @@
 | UserPreferences field | `backend/src/services/profile/models.py` | Done -- github_username field |
 | CLI --linkedin option | `backend/src/cli.py:setup-profile` | Done -- accepts LinkedIn ZIP path |
 | CLI --github option | `backend/src/cli.py:setup-profile` | Done -- accepts GitHub username |
-| GITHUB_TOKEN env var | `backend/src/config/settings.py`, `.env.example` | Done -- optional, for higher API rate limits |
+| GITHUB_TOKEN env var | `backend/src/core/settings.py`, `.env.example` | Done -- optional, for higher API rate limits |
 | LinkedIn/GitHub tests | `backend/tests/test_linkedin_github.py` | Done -- 54 tests |
 
 ### How it works

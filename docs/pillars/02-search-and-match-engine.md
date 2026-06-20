@@ -263,7 +263,7 @@ Each scorer reads from the `JobEnrichment` row (a no-op if the row is missing or
 
 - **Negative title** (`-30`) — title contains a word from `NEGATIVE_TITLE_KEYWORDS`. *Note:* the list is empty by default now, so this fires only when the user populates negative keywords on their profile.
 - **Foreign location** (`-15`) — location matches `FOREIGN_INDICATORS` (63 entries — countries, major non-UK cities, US state abbreviations like `, CA`).
-- **Title-gate / Skill-gate** (`MIN_TITLE_GATE=0.15`, `MIN_SKILL_GATE=0.15`) — if either component is below 15 % of its max (6 pts of 40), the entire score collapses to `max(10, (title+skill)*0.25)`. This prevents a perfect location + recency from elevating an obviously-irrelevant job.
+- **Title-gate / Skill-gate** (`MIN_TITLE_GATE=0.15`, `MIN_SKILL_GATE=0.15`) — if **both** components are below 15 % of their max (6 pts of 40 each — an AND, not OR; `skill_matcher.py:396`), the entire score collapses to `max(10, (title+skill)*0.25)`. This prevents a perfect location + recency from elevating an obviously-irrelevant job.
 
 #### 3.4 Final clamp
 
@@ -376,7 +376,7 @@ Coverage spans programming languages, frameworks, databases, cloud platforms, De
 | annual | × 1 |
 | unknown | × 1 (safe default) |
 
-Then `to_gbp(amount, currency)` converts via a **21-currency** static rate table (`fx.py`, Q1 2026 averages — USD=0.79, EUR=0.86, JPY=0.0053, …). Unknown currency → ×1.0 (treated as already-GBP — safe degraded mode).
+Then `to_gbp(amount, currency)` converts via an **18-currency** static rate table (`fx.py`, Q1 2026 averages — USD=0.79, EUR=0.86, JPY=0.0053, …). Unknown currency → ×1.0 (treated as already-GBP — safe degraded mode).
 
 If only one bound is posted, the other is backfilled (single-point band). Returns `None` if both bounds are absent — downstream `salary_score()` then awards the neutral 50 %.
 
@@ -653,7 +653,7 @@ backend/
 │   │   ├── keywords.py                        — empty defaults + LOCATIONS + VISA_KEYWORDS (post-3ba1342)
 │   │   ├── settings.py                        — MIN_MATCH_SCORE, weights, gates, feature flags
 │   │   ├── skill_synonyms.py                  — 493-entry alias dict
-│   │   └── fx.py                              — 21-currency → GBP rates
+│   │   └── fx.py                              — 18-currency → GBP rates
 │   ├── services/
 │   │   ├── skill_matcher.py                   — JobScorer + score_job + helpers (legacy + Batch 2.9 paths)
 │   │   ├── scoring_dimensions.py              — seniority / salary / visa / workplace scorers + ScoreBreakdown

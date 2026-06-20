@@ -23,7 +23,7 @@ Async Redis-backed task queue Job360 uses for the notification worker. Worker co
 
 ### ATS (Applicant Tracking System)
 
-A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `companies.py` (~261 slugs across 11 platforms).
+A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `companies.py` (~256 slugs across 11 platforms).
 **Code:** `backend/src/sources/ats/` · **Pillar 3**
 
 ### Batch (Batch 1, Batch 2, Batch 3, …)
@@ -108,7 +108,7 @@ Symmetric encryption format (AES-128-CBC + HMAC-SHA256) from the `cryptography` 
 
 ### FX (Foreign exchange)
 
-Static 21-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
+Static 18-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
 **Code:** `backend/src/core/fx.py` · **Pillar 2**
 
 ### Ghost detection
@@ -172,7 +172,7 @@ Composite of `CVData` (from CV/LinkedIn/GitHub) + `UserPreferences` (form fields
 
 ### Rate limiter
 
-Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (50 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
+Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (46 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
 **Code:** `backend/src/utils/rate_limiter.py` · **Pillar 3**
 
 ### Recency scoring
