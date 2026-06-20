@@ -11,26 +11,26 @@
 > re-score. No DB migration (JSON-blob storage). M2 / LLM judge untouched. See
 > `docs/IMPLEMENTATION_LOG.md` for the full entry.
 
-> **In flight (branch `worktree-channels-notifications-overhaul`, 2026-06-17):**
-> channels & notifications overhaul. Notifications collapsed to ONE rule per user
-> (migration 0020) with three timing modes (`instant`/`daily`/`every_n_hours`); new
+> **✅ MERGED to main (channels & notifications overhaul, 2026-06-20):** fully
+> shipped and in sync on `origin/main`. Notifications collapsed to ONE rule per user
+> (migration 0020) with three timing modes (`instant`/`daily`/`every_n_hours`);
 > `notification_tick` ARQ cron (every 5 min) + `send_bundle` drain the digest queue
 > (fixes the P0 where digests queued but never sent); legacy global `.env`-webhook
 > path removed (one path: worker/tick → dispatcher → Apprise → ledger); API is one
-> `GET`/`PUT /settings/notification-rule`; frontend is one rulebook form. Backend
-> 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests. See
-> `docs/IMPLEMENTATION_LOG.md` for the full entry.
->
-> **Nav IA restructure (2026-06-20):** Channels is now a top-level page (`/channels`);
-> the Settings gear (top-right) holds only Notifications + Account. Frontend route
-> move + navbar + middleware + Slack/Discord OAuth return path. API path
-> `/api/settings/channels` unchanged (internal URL). See log for details.
+> `GET`/`PUT /settings/notification-rule`; frontend is one rulebook form. **Nav IA:**
+> Channels is now a top-level page (`/channels`); the Settings gear holds only
+> Notifications + Account. Off-state made unmistakable; notification-history filters
+> fixed to server-side; Account/Channels error messages cleaned. Verified end-to-end
+> in a real browser (Playwright manual-tester pass — every button/feature/state).
+> Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
+> Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
+> delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
 **Last updated:** 2026-06-20
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `d003c4f` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
+**Latest merged head:** `824879d` on `origin/main` — includes the full channels & notifications overhaul + nav IA restructure (this worktree) plus the audit-fix rounds. Everything from `worktree-channels-notifications-overhaul` is merged and in sync. Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
