@@ -95,8 +95,6 @@ from src.services.profile.github_enricher import (
     fetch_github_profile,
     enrich_cv_from_github,
     _infer_skills,
-    LANGUAGE_TO_SKILL,
-    TOPIC_TO_SKILL,
 )
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.storage import save_profile, load_profile
@@ -566,35 +564,37 @@ class TestEnrichCVFromLinkedIn:
 # ---------------------------------------------------------------------------
 
 class TestInferSkills:
-    def test_languages_mapped(self):
+    # Rule #28: _infer_skills returns the RAW GitHub language/topic strings
+    # (no hardcoded mapping). Languages keep their casing; topics get a cosmetic
+    # hyphen->space cleanup. The LLM pass canonicalises meaning downstream.
+    def test_languages_raw_ranked_by_bytes(self):
         languages = {"Python": 50000, "JavaScript": 30000, "HCL": 10000}
         skills = _infer_skills(languages, set())
-        assert skills[0] == "Python"
+        assert skills[0] == "Python"           # most bytes first
         assert "JavaScript" in skills
-        assert "Terraform" in skills
+        assert "HCL" in skills                 # raw, not mapped to "Terraform"
 
-    def test_topics_mapped(self):
+    def test_topics_raw_with_hyphen_cleanup(self):
         topics = {"react", "docker", "machine-learning"}
         skills = _infer_skills({}, topics)
-        assert "React" in skills
-        assert "Docker" in skills
-        assert "Machine Learning" in skills
+        assert "react" in skills
+        assert "docker" in skills
+        assert "machine learning" in skills    # hyphen -> space, no mapping
 
     def test_deduplicates_across_lang_and_topic(self):
-        languages = {"Python": 50000}
-        topics = {"docker"}
-        languages["Dockerfile"] = 5000
-        skills = _infer_skills(languages, topics)
-        assert sum(1 for s in skills if s == "Docker") == 1
+        # "docker" appears as both a language-ish entry and a topic → once only.
+        skills = _infer_skills({"Python": 50000, "docker": 5000}, {"docker"})
+        assert sum(1 for s in skills if s.lower() == "docker") == 1
 
     def test_empty_inputs(self):
         assert _infer_skills({}, set()) == []
 
-    def test_unknown_language_skipped(self):
-        assert _infer_skills({"COBOL": 1000}, set()) == []
+    def test_unknown_language_kept_raw(self):
+        # No allowlist any more — every signal the API returns is surfaced.
+        assert _infer_skills({"COBOL": 1000}, set()) == ["COBOL"]
 
-    def test_unknown_topic_skipped(self):
-        assert _infer_skills({}, {"some-random-topic"}) == []
+    def test_unknown_topic_kept_raw(self):
+        assert _infer_skills({}, {"some-random-topic"}) == ["some random topic"]
 
 
 class TestFetchGitHubProfile:
