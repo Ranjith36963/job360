@@ -40,11 +40,19 @@ def normalize_github_username(raw: str) -> str:
     reduce to a valid handle is rejected downstream (returns "").
 
     Examples:
+<<<<<<< ours
       ``https://github.com/torvalds``       -> ``torvalds``
       ``github.com/torvalds/repo``          -> ``torvalds``
       ``www.github.com/torvalds?tab=repos`` -> ``torvalds``
       ``@torvalds``                         -> ``torvalds``
       ``torvalds``                          -> ``torvalds``
+=======
+      ``https://github.com/torvalds``      -> ``torvalds``
+      ``github.com/torvalds/repo``         -> ``torvalds``
+      ``www.github.com/torvalds?tab=repos`` -> ``torvalds``
+      ``@torvalds``                        -> ``torvalds``
+      ``torvalds``                         -> ``torvalds``
+>>>>>>> theirs
     """
     if not isinstance(raw, str):
         return ""

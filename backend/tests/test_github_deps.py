@@ -212,6 +212,53 @@ def test_is_recent_accepts_now_injection():
     assert github_enricher._is_recent("2023-01-01T00:00:00Z", now=frozen) is False
 
 
+# ── github_enricher — username normalisation (URL / @handle / bare) ─
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("https://github.com/torvalds", "torvalds"),
+        ("http://github.com/torvalds", "torvalds"),
+        ("github.com/torvalds", "torvalds"),
+        ("www.github.com/torvalds", "torvalds"),
+        ("github.com/torvalds/linux", "torvalds"),
+        ("https://github.com/torvalds/?tab=repositories", "torvalds"),
+        ("https://github.com/torvalds/", "torvalds"),
+        ("@torvalds", "torvalds"),
+        ("torvalds", "torvalds"),
+        ("torvalds/linux", "torvalds"),
+        ("  torvalds  ", "torvalds"),
+        ("https://github.com/foo-bar", "foo-bar"),
+        ("", ""),
+    ],
+)
+def test_normalize_github_username(raw, expected):
+    assert github_enricher.normalize_github_username(raw) == expected
+
+
+def test_normalize_github_username_non_string():
+    assert github_enricher.normalize_github_username(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_accepts_full_url():
+    """A pasted profile URL is normalised to the username before the API call."""
+    captured: dict = {}
+
+    async def fake_get_json(session, url):
+        captured["url"] = url
+        return []  # empty repo list → early return with empty payload
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json):
+        result = await github_enricher.fetch_github_profile(
+            "https://github.com/torvalds", session=_make_async_session()
+        )
+
+    assert "users/torvalds/repos" in captured["url"]
+    assert result["repositories"] == []
+
+
 # ── github_enricher — fetch + temporal weighting integration ────────
 
 
