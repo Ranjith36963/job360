@@ -221,3 +221,32 @@ Set a mid-level full-stack SWE profile, fetched fresh SWE jobs (catalog → 4,78
 4. **Ship a judge-inclusive combination — E2+E3+E4 or E3+E4** — never below ~0.94 NDCG for any profile. That is the robust, generalising stack.
 
 **Gold-standard hardening — done:** consistency measured (rank-order Spearman 0.977), generalisation tested across 3 profiles. Golds saved + reproducible: `docs/engine_eval_gold.json` (graduate), `docs/engine_eval_gold_senior.json`, `docs/engine_eval_gold_swe.json`. **Remaining bar-raisers (brainstormed, not yet done):** multi-model consensus gold (kill single-grader bias), behavioural gold (real clicks/applies), automate re-grading.
+
+---
+
+## Run 10 — 10 fake technical profiles (breadth generalization; harness in scripts/)
+
+Built **10 realistic-but-FAKE profiles** (data engineer, AI engineer, forward-deployed, data analyst, data scientist, cyber security, SOC analyst, business analyst, full-stack, DevOps/SRE) — each a full fake CV + GitHub + LinkedIn + preferences (`scripts/fake_profiles.py`). Each got its own user, a live keyword-scored sample of ~24 jobs from the shared catalog, judged + graded by Claude (a high-bar gold, 238 jobs total, `docs/engine_eval_gold_fake10.json`). Reproducible via `scripts/prep_fake_profiles.py` → `judge_fake_profiles.py` → `score_fake_profiles.py`.
+
+**Best config PER profile varies** (no universal single winner): E4-judge (data engineer), E1-keyword (data analyst, cyber), E1+E4 (ai eng, business analyst), E1+E3 (FDE), E1+E3+E4 (data scientist, full-stack), E1+E2+E3 (SOC, DevOps).
+
+**Cross-profile aggregate (mean + WORST-CASE across all 10):**
+
+| Config | mean NDCG | worst NDCG | mean Spearman |
+|---|---|---|---|
+| **E1+E3+E4** | **0.990** | **0.980** | **0.889** |
+| All (1+2+3+4) | 0.988 | 0.980 | 0.876 |
+| E1+E4 | 0.987 | 0.972 | 0.890 |
+| E1 keyword | 0.985 | 0.967 | 0.869 |
+| E3+E4 | 0.982 | 0.970 | 0.854 |
+| E2+E3+E4 | 0.982 | 0.966 | 0.849 |
+| E4 judge alone | 0.972 | 0.917 | 0.852 |
+| E3 hybrid alone | 0.961 | 0.909 | 0.768 |
+| E2 dims alone | 0.920 | 0.831 | 0.782 |
+| BM25 alone | 0.891 | 0.815 | 0.512 |
+
+**Verdict:** **Ship E1+E3+E4 (keyword + hybrid + judge)** — best mean NDCG, best worst-case (≥0.980 on every role), best Spearman. Every strong config is a **search + judge combo**; every single engine alone is weaker; BM25-alone is worst everywhere.
+
+**Caveats:** (1) E2 dims under-measured — the fresh fake-profile job pool is mostly **not enriched**, so dims ≈ 0 (E2's 0.920 is a no-enrichment artifact, not a fair verdict; the enriched 3-profile run showed E2 helps). (2) NDCG saturated (0.89–0.99) → read Spearman + worst-case. (3) Fake profiles + Claude gold = engine-behaviour signal, not real-world accuracy.
+
+**Net across ALL runs (3 real-ish + 10 fake = 13 profiles):** the robust, generalising pick is a **combination of search (keyword/hybrid) + the LLM judge** — never a single engine. The judge is the level/context adapter; keyword+hybrid do retrieval; combining them is what holds up across every role and seniority.
