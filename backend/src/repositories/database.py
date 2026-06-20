@@ -24,7 +24,11 @@ class JobDatabase:
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        await self._conn.execute("PRAGMA busy_timeout=5000")
+        # 30s (was 5s): under concurrent writes (search pipeline + per-user
+        # re-score + LLM judge) the 5s wait expired and raised 'database is
+        # locked', which callers then dropped. Longer wait + with_write_retry
+        # (Finding #11) stops rows being lost. See src/repositories/db_retry.py.
+        await self._conn.execute("PRAGMA busy_timeout=30000")
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

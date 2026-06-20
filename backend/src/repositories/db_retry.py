@@ -1,0 +1,45 @@
+"""SQLite write-retry helper (Finding #11).
+
+SQLite serialises writers; under concurrent writes (the search pipeline +
+per-user re-score + the LLM judge all writing at once) a writer can get
+``OperationalError: database is locked`` even with a generous ``busy_timeout``.
+
+Before, the re-score loop and the judge caught that and *dropped the row*,
+silently losing scored jobs / verdicts. ``with_write_retry`` retries the write
+a few times with exponential backoff so a transient lock no longer loses data;
+it only retries genuine lock errors (not, say, a bad-SQL OperationalError), and
+re-raises if the lock never clears.
+"""
+import asyncio
+import sqlite3
+from typing import Awaitable, Callable, TypeVar
+
+T = TypeVar("T")
+
+
+def _is_locked(exc: sqlite3.OperationalError) -> bool:
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+async def with_write_retry(
+    fn: Callable[[], Awaitable[T]],
+    *,
+    attempts: int = 5,
+    base_delay: float = 0.05,
+) -> T:
+    """Run ``fn`` (an async DB write); retry on 'database is locked'.
+
+    Retries up to ``attempts`` times with exponential backoff. Non-lock
+    OperationalErrors (e.g. bad SQL) are raised immediately. The final lock
+    failure is re-raised so callers can decide what to do.
+    """
+    for i in range(attempts):
+        try:
+            return await fn()
+        except sqlite3.OperationalError as exc:
+            if _is_locked(exc) and i < attempts - 1:
+                await asyncio.sleep(base_delay * (2**i))
+                continue
+            raise
+    raise RuntimeError("unreachable")  # pragma: no cover

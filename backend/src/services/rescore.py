@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from src.repositories.db_retry import with_write_retry
+
 logger = logging.getLogger("job360.services.rescore")
 
 # FIX 4 — per-user asyncio.Lock dict so two concurrent re-scores for the
@@ -198,12 +200,17 @@ async def rescore_user_feed(
                     ms = breakdown.match_score
 
                     if ms > 0 or jid in existing_feed_ids:
-                        await feed.upsert_feed_row(
-                            user_id=user_id,
-                            job_id=jid,
-                            score=int(ms),
-                            bucket=_recency_bucket(row.get("date_found")),
-                            profile_version=version,
+                        # Finding #11: retry on 'database is locked' so a
+                        # transient lock under concurrent writes doesn't drop
+                        # this scored row (the except below used to swallow it).
+                        await with_write_retry(
+                            lambda: feed.upsert_feed_row(
+                                user_id=user_id,
+                                job_id=jid,
+                                score=int(ms),
+                                bucket=_recency_bucket(row.get("date_found")),
+                                profile_version=version,
+                            )
                         )
                         rescored += 1
 

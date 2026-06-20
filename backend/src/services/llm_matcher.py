@@ -28,6 +28,7 @@ import aiosqlite
 from pydantic import BaseModel, Field
 
 from src.models import Job
+from src.repositories.db_retry import with_write_retry
 from src.services.profile.llm_provider import llm_extract_validated
 
 logger = logging.getLogger("job360.services.llm_matcher")
@@ -224,7 +225,12 @@ async def match_batch(
                     _facts_hint(job, enrichment),
                     llm_extract_validated_fn=llm_extract_validated_fn,
                 )
-                await save_verdict(conn, user_id, job_id, verdict)
+                # Finding #11: retry on 'database is locked' so a transient lock
+                # under concurrent writes doesn't drop this verdict (the except
+                # below used to swallow it as "judge failed").
+                await with_write_retry(
+                    lambda: save_verdict(conn, user_id, job_id, verdict)
+                )
                 tel.record_verdict(verdict.fit_score)
                 return verdict
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run
