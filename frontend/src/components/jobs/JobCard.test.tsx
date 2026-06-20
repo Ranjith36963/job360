@@ -169,10 +169,11 @@ describe("JobCard", () => {
   it("D-4: renders formatted deadline date when deadline is present", () => {
     const job = makeJob({ deadline: "2026-06-18", deadline_source: "listing" });
     render(<JobCard job={job} onAction={mockOnAction} />);
-    // The deadline trigger exposes "Apply by <formatted date>" as its accessible
-    // name (aria-label). Asserting on that is robust to the Base UI tooltip's
-    // render-prop children not rendering in jsdom (they render fine in a browser).
-    expect(screen.getByLabelText(/Apply by 18 Jun 2026/i)).toBeInTheDocument();
+    // The deadline renders inside a Base UI Tooltip trigger whose accessible
+    // name is set via aria-label ("Apply by 18 Jun 2026"); the visible text is
+    // split across the icon + text nodes, so query by the accessible label
+    // (a11y-correct and reliable in jsdom). "18 Jun 2026" is clock-independent.
+    expect(screen.getByLabelText(/Apply by 18 Jun 2026/)).toBeInTheDocument();
   });
 
   // D-5: renders "No deadline listed" when deadline is null

@@ -211,7 +211,7 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 
 ### Skill synonyms (canonicalize_skill / aliases_for)
 
-529-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
+493-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
 **Code:** `backend/src/core/skill_synonyms.py` · **Pillar 2**
 
 ### SOURCE_REGISTRY
