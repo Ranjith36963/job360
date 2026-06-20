@@ -335,10 +335,19 @@ async def fetch_github_profile(
             repositories.append(repo_info)
             all_topics.update(repo.get("topics", []))
 
-        # Fetch per-repo language breakdown for top 20 repos with temporal weight.
+        # Request-budget guard: unauthenticated GitHub allows only 60 req/hr,
+        # and a full probe (1 + 20 languages + 10×7 dep-files ≈ 91) blows it,
+        # so the later calls 403 and the result is empty. With no token we cap
+        # the footprint (12 languages + 5×7 dep-files ≈ 48 < 60) so a fetch
+        # reliably returns data. With a token (5000/hr) we keep full coverage.
+        authed = bool(GITHUB_TOKEN)
+        lang_n = 20 if authed else 12
+        dep_n = MAX_REPOS_FOR_DEPS if authed else 5
+
+        # Fetch per-repo language breakdown with temporal weight.
         # We keep a per-repo map so the recency multiplier can be applied
         # per-repo *before* aggregation, not after.
-        top_for_languages = repositories[:20]
+        top_for_languages = repositories[:lang_n]
         lang_tasks = [
             _get_json(
                 session,
@@ -359,7 +368,7 @@ async def fetch_github_profile(
         # Batch 1.2 — dep-file parsing across the top N repos (network-heavy).
         dep_tasks = [
             _fetch_repo_frameworks(session, username, repo["name"])
-            for repo in repositories[:MAX_REPOS_FOR_DEPS]
+            for repo in repositories[:dep_n]
         ]
         dep_results = await asyncio.gather(*dep_tasks, return_exceptions=True)
         frameworks_inferred: list[str] = []
@@ -401,6 +410,12 @@ async def fetch_github_profile(
             await session.close()
 
 
+# NOTE (CLAUDE.md rule #28): the hardcoded description-term vocabulary and the
+# dev-tooling denylist that used to live here were removed. Repo descriptions are
+# read by the LLM pass (llm_infer_github_skills); the deterministic side only
+# surfaces the raw signals the GitHub API itself returns.
+
+
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
     """Map languages and topics to skill names, ranked by (weighted) code bytes."""
     seen: set[str] = set()
@@ -435,12 +450,14 @@ a name, description, and topic tags.
 Infer the concrete technical SKILLS this developer demonstrates: frameworks,
 libraries, tools, platforms, and technical domains. Focus on things a
 hard-coded language/topic table would MISS — e.g. "LangChain", "RAG",
-"Stripe API", "Computer Vision", "Kubernetes Operators".
+"Computer Vision", "Fraud Detection", "Cloudflare Workers".
 
 Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 
 Rules:
-- Only skills the repo text actually supports. Do not guess from nothing.
+- GROUNDED ONLY: every skill must be supported by words actually in the name,
+  description, or topics. Do NOT guess a tech stack from a repo's purpose — e.g.
+  for "cold outreach platform" do not assume "Gmail API"/"GPT-4o" unless named.
 - Individual items, not categories ("PyTorch", not "ML frameworks").
 - Skip bare programming languages (Python/Java/etc.) — those are covered elsewhere.
 

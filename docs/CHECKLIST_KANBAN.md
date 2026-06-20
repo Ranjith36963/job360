@@ -19,6 +19,12 @@ GitHub `Ranjith36963`, demo account loading the real profile.
 - Slack/Discord OAuth connect → no provider creds in `.env` (routes exist, correctly gated-disabled).
 - Browser auth needs **frontend + backend same-origin** (see Finding #12).
 
+> **Re-verified against `main` codebase (2026-06-19, branch `worktree-widen-live-e2e` = local `main`).**
+> Main has **47 sources** (`gov_apprenticeships` restored, `SOURCE_INSTANCE_COUNT=46`), and **all 4
+> engines present** in code (`llm_matcher.py`, `job_enrichment.py`, `scoring_dimensions.py`,
+> `embeddings.py`, `rescore.py`). Delete-account is password-gated (Finding #6 fixed here too).
+> Open findings #10 (no `/privacy` page → 404) and #13 (admin not in `middleware.ts`) confirmed still open on main.
+
 ---
 
 ## Part 1 — Functional live verification (real data, every page + route)
@@ -113,23 +119,37 @@ button), `getRecentRuns`, `getEmailVerified` (no verify banner), `getActions`/`g
 
 ---
 
-## Part 4 — Worktree / branch consolidation status (re-checked 2026-06-19 vs `origin/main` = `fe9935a`)
+## Part 4 — Worktree / branch consolidation status (2026-06-19)
 
-Main codebase verified at `fe9935a`: **47 sources** / 46 instances, **21 migrations** (0000→0020),
-**493** skill-synonym aliases, **18-currency** FX, all 4 engines present, `gov_apprenticeships` restored.
+> **UPDATE 2026-06-20:** `fix/per-user-search-and-scoring-gate` (per-engine
+> switches `ENGINE1..4_ENABLED` + ablation eval + 10-profile eval) was merged
+> into `main`, on top of PR #18 (`feat/two-pass-on-main`). Decision (1) resolved:
+> **47 sources kept** (the branch's stale 46 was reconciled up to the live count).
 
-**✅ Already on main** (pulled in): `main` (`fe9935a`), `worktree-channels-notifications-overhaul`,
-`worktree-github-url-input`, `worktree-safe-fixes`.
+The repo is spread across **8 worktrees**. `main` (= `worktree-widen-live-e2e`) is a complete, working
+codebase: 47 sources, all 4 engines, password-gated delete, the merged checklist.
 
-**☐ NOT on main yet — need pulling:**
-| Branch | Ahead / Behind | What's unique | Merge ease |
-|---|---|---|---|
-| `worktree-harness-hardening` | 1 / 0 | channels/notif fixes + worker DLQ + health schedule | ✅ clean fast-forward |
-| `feat/two-pass-on-main` | 10 / 22 | deterministic profile skill mining (no hardcoded keywords) | ⚠️ behind → conflicts |
-| `feat/two-pass-profile-extraction` | 14 / 31 | GitHub-URL input + engine 3/4 + eval scripts | ⚠️ behind → conflicts |
-| `fix/per-user-search-and-scoring-gate` | 27 / 31 | per-engine on/off switches + ablation eval (**drops gov_app → 46**) | ⚠️ 47/46 conflict |
-| `sync/docs-path-fix` | 23 / 31 | superseded doc branch (its fixes re-applied on `fe9935a` directly) | — skip |
+**Already on `origin/main`** (no action): `worktree-widen-live-e2e` (this checklist), `worktree-channels-notifications-overhaul` (nav refactor), `worktree-github-url-input`.
 
-**Open decisions before a full merge:** (1) `gov_apprenticeships` keep 47 / drop 46; (2) which two-pass
-version wins (`feat/two-pass-profile-extraction` vs `feat/two-pass-on-main`). `worktree-harness-hardening`
-is the one safe immediate pull (clean FF).
+**NOT on main — have code/docs to pull in:**
+| Branch (worktree) | Ahead of main | Unique content |
+|---|---|---|
+| `fix/per-user-search-and-scoring-gate` | 26 | LLM-matcher/scoring refinements — **but DROPS `gov_apprenticeships` (→ 46 sources)** |
+| `feat/two-pass-profile-extraction` | 14 | Two-pass profile extraction (CV/LinkedIn/GitHub/prefs) + GitHub URL/@handle input |
+| `feat/two-pass-on-main` | 10 | **Alternate cut** of the same two-pass profile work |
+| `sync/docs-path-fix` | 23 | Doc-accuracy fixes — written for the **46-source** state |
+| `worktree-harness-hardening` | 1 | `health-daily` scripts (tooling) |
+
+**Why a blind "merge everything" doesn't work:** each branch merges cleanly into main *individually*
+(0 conflicts), but they conflict with *each other* — several are **competing versions of the same
+frontend pages** (`settings/account/page.tsx`, landing `page.tsx`, notifications) and the same
+profile feature (`feat/two-pass-*` are two cuts of one thing).
+
+**Two decisions needed before consolidating into one codebase:**
+1. **`gov_apprenticeships` — keep (47, main) or drop (46, `fix/`)?** This propagates to `main.py`,
+   landing copy, tests, and all the count docs.
+2. **Two-pass profile — which version wins**, `feat/two-pass-profile-extraction` (has GitHub-URL input)
+   or `feat/two-pass-on-main`? They can't both merge.
+
+Once those two are settled, the branches can be merged in priority order (app code → docs last),
+taking the chosen version for the overlapping files.

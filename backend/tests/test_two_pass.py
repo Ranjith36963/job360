@@ -67,10 +67,80 @@ class TestPreferencesLlmPass:
         assert skills == []
 
 
+# ── LinkedIn LLM skills pass (fixes 2-column "Top Skills" loss) ─────
+
+
+class TestLinkedInLlmSkills:
+    @pytest.mark.asyncio
+    async def test_extracts_skills_from_raw_text(self):
+        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
+
+        async def fake(prompt, system=""):
+            assert "LangGraph" in prompt
+            return {"skills": ["LangGraph", "Systems Design", "Multi-agent Systems", "RLHF"]}
+
+        with patch("src.services.profile.llm_provider.llm_extract", new=fake):
+            sk = await llm_infer_linkedin_skills("Top Skills\nLangGraph\nSystems Design\nRLHF")
+        assert "LangGraph" in sk and "RLHF" in sk
+
+    @pytest.mark.asyncio
+    async def test_blank_skips_llm(self):
+        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
+
+        called = False
+
+        async def fake(prompt, system=""):
+            nonlocal called
+            called = True
+            return {"skills": ["x"]}
+
+        with patch("src.services.profile.llm_provider.llm_extract", new=fake):
+            sk = await llm_infer_linkedin_skills("   ")
+        assert sk == [] and called is False
+
+    @pytest.mark.asyncio
+    async def test_failsafe_returns_empty(self):
+        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
+
+        async def boom(prompt, system=""):
+            raise RuntimeError("no provider")
+
+        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
+            sk = await llm_infer_linkedin_skills("real linkedin text")
+        assert sk == []
+
+
 # ── CV deterministic pass (Pass 1) — no-LLM field grab ──────────────
 
 
 class TestCvDeterministicPass:
+    def test_splits_parenthetical_tools(self):
+        """'OCR (Tesseract)' and 'Python (Pandas, NumPy)' should yield the outer
+        term AND each tool inside the parentheses as separate skills."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = "Skills\nOCR (Tesseract)\nPython (Pandas, NumPy, Matplotlib)\n\nExperience\nx"
+        out = deterministic_cv_fields(text)
+        s = set(out["skills"])
+        assert {"OCR", "Tesseract", "Python", "Pandas", "NumPy", "Matplotlib"}.issubset(s)
+
+    def test_strips_category_label_prefix(self):
+        """CV skill lines like 'Cloud & MLOps: AWS (Bedrock, SageMaker)' should
+        drop the category label and keep the real skills (incl. inner tools)."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "Skills\n"
+            "Cloud & MLOps: AWS (Bedrock, SageMaker) • Docker\n"
+            "AI Automation Tools: n8n • Zapier\n\n"
+            "Experience\nx"
+        )
+        out = deterministic_cv_fields(text)
+        s = set(out["skills"])
+        assert {"AWS", "Bedrock", "SageMaker", "Docker", "n8n", "Zapier"}.issubset(s)
+        assert "Cloud & MLOps: AWS" not in s
+        assert "AI Automation Tools: n8n" not in s
+
     def test_extracts_skills_section_lines(self):
         from src.services.profile.cv_parser import deterministic_cv_fields
 
@@ -178,8 +248,12 @@ class TestTwoPassOrchestrator:
         async def fake_about(text):
             return ["Stakeholder Management"]
 
+        async def fake_li_skills(text):
+            return ["LangGraph", "Systems Design"]
+
         monkeypatch.setattr(two_pass, "llm_cv_fields_from_text", fake_cv)
         monkeypatch.setattr(two_pass, "parse_linkedin_from_text", fake_linkedin)
+        monkeypatch.setattr(two_pass, "llm_infer_linkedin_skills", fake_li_skills)
         monkeypatch.setattr(two_pass, "llm_infer_github_skills", fake_gh)
         monkeypatch.setattr(two_pass, "llm_infer_from_about_me", fake_about)
 
@@ -191,8 +265,9 @@ class TestTwoPassOrchestrator:
         # LLM CV pass enhanced.
         assert "FastAPI" in c.skills
         assert "Engineer" in c.job_titles
-        # LinkedIn pass merged.
+        # LinkedIn pass merged (deterministic + LLM skills).
         assert "Kubernetes" in c.linkedin_skills
+        assert "LangGraph" in c.linkedin_skills and "Systems Design" in c.linkedin_skills
         # GitHub LLM pass.
         assert c.github_llm_skills == ["LangChain"]
         # Preferences LLM pass.

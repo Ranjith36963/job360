@@ -25,12 +25,21 @@ Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 Rules:
 - Only skills the text actually supports. Do not invent.
 - Individual items, not categories.
+- Extract BOTH named tools AND the higher-level capabilities they imply —
+  "production GenAI systems" → "Production GenAI"; "cloud-scale deployments" →
+  "Cloud Deployment"; "vector databases (ChromaDB, FAISS)" → "Vector Databases",
+  "ChromaDB", "FAISS".
 - Domain-agnostic: technical OR non-technical (e.g. "Stakeholder Management", "HIPAA Compliance", "Welding").
 
 ABOUT ME:
 ---
 {about_me}
 ---"""
+
+
+# NOTE (CLAUDE.md rule #28): the deterministic about_me skill scanner that used
+# to live here was removed — it relied on hardcoded skill-term vocabularies.
+# Mining the free-text about_me for skills is the LLM's job (llm_infer_from_about_me).
 
 
 async def llm_infer_from_about_me(about_me: str) -> list[str]:
