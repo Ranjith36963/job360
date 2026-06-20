@@ -65,7 +65,6 @@ def normalize_github_username(raw: str) -> str:
 
 from src.core.settings import GITHUB_TOKEN
 from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
-from src.services.profile.dependency_map import lookup_skill
 from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.github")
@@ -81,88 +80,9 @@ RECENT_REPO_MULTIPLIER = 3
 MAX_REPOS_FOR_DEPS = 10
 
 
-# Map GitHub language names to skill names
-LANGUAGE_TO_SKILL: dict[str, str] = {
-    "Python": "Python",
-    "JavaScript": "JavaScript",
-    "TypeScript": "TypeScript",
-    "Java": "Java",
-    "C#": "C#",
-    "C++": "C++",
-    "C": "C",
-    "Go": "Go",
-    "Rust": "Rust",
-    "Ruby": "Ruby",
-    "PHP": "PHP",
-    "Swift": "Swift",
-    "Kotlin": "Kotlin",
-    "Scala": "Scala",
-    "R": "R",
-    "Dart": "Dart",
-    "Lua": "Lua",
-    "Shell": "Shell Scripting",
-    "PowerShell": "PowerShell",
-    "Perl": "Perl",
-    "Haskell": "Haskell",
-    "Elixir": "Elixir",
-    "Clojure": "Clojure",
-    "Jupyter Notebook": "Jupyter",
-    "HCL": "Terraform",
-    "Dockerfile": "Docker",
-    "Nix": "Nix",
-    "Vue": "Vue.js",
-    "SCSS": "CSS/SCSS",
-    "CSS": "CSS",
-    "HTML": "HTML",
-}
-
-
-# Map GitHub topic tags to skill names
-TOPIC_TO_SKILL: dict[str, str] = {
-    "react": "React",
-    "reactjs": "React",
-    "nextjs": "Next.js",
-    "angular": "Angular",
-    "vue": "Vue.js",
-    "svelte": "Svelte",
-    "django": "Django",
-    "flask": "Flask",
-    "fastapi": "FastAPI",
-    "express": "Express.js",
-    "nodejs": "Node.js",
-    "docker": "Docker",
-    "kubernetes": "Kubernetes",
-    "terraform": "Terraform",
-    "aws": "AWS",
-    "azure": "Azure",
-    "gcp": "GCP",
-    "machine-learning": "Machine Learning",
-    "deep-learning": "Deep Learning",
-    "natural-language-processing": "NLP",
-    "nlp": "NLP",
-    "computer-vision": "Computer Vision",
-    "pytorch": "PyTorch",
-    "tensorflow": "TensorFlow",
-    "data-science": "Data Science",
-    "graphql": "GraphQL",
-    "rest-api": "REST API",
-    "postgresql": "PostgreSQL",
-    "mongodb": "MongoDB",
-    "redis": "Redis",
-    "elasticsearch": "Elasticsearch",
-    "ci-cd": "CI/CD",
-    "github-actions": "GitHub Actions",
-    "pandas": "Pandas",
-    "numpy": "NumPy",
-    "scikit-learn": "scikit-learn",
-    "spark": "Apache Spark",
-    "kafka": "Apache Kafka",
-    "airflow": "Apache Airflow",
-    "sql": "SQL",
-    "devops": "DevOps",
-    "web-scraping": "Web Scraping",
-    "automation": "Automation",
-}
+# NOTE (CLAUDE.md rule #28): the hardcoded LANGUAGE_TO_SKILL and TOPIC_TO_SKILL
+# maps were removed. _infer_skills uses the raw GitHub language/topic strings;
+# the LLM pass canonicalises their meaning.
 
 
 def _headers() -> dict[str, str]:
@@ -255,12 +175,13 @@ async def _fetch_dep_file(
 async def _fetch_repo_frameworks(
     session: aiohttp.ClientSession, username: str, repo_name: str
 ) -> list[str]:
-    """Probe all 7 manifest filenames for a single repo and return mapped skills.
+    """Probe all 7 manifest filenames for a single repo and return the raw
+    declared dependency names.
 
-    Runs the 7 contents-API fetches in parallel. Unmapped dependencies
-    (i.e. not in ``dependency_map``) are dropped rather than returned
-    as bare names — we only care about *recognisable* frameworks for
-    skill inference. Aggregation + dedup happens at the caller.
+    CLAUDE.md rule #28: NO hardcoded dependency→skill map. We parse the manifest
+    *structure* (still data — dep_file_parser) and return the dependency names
+    verbatim; the LLM pass canonicalises which of them are recruiter-relevant
+    skills. Aggregation + dedup happens at the caller.
     """
     fetches = [
         _fetch_dep_file(session, username, repo_name, filename)
@@ -273,12 +194,12 @@ async def _fetch_repo_frameworks(
     for (filename, _), content in zip(MANIFEST_FILES, contents):
         if isinstance(content, Exception) or not content:
             continue
-        ecosystem, dep_names = parse_manifest(filename, content)
+        _ecosystem, dep_names = parse_manifest(filename, content)
         for dep in dep_names:
-            skill = lookup_skill(ecosystem, dep)
-            if skill and skill.lower() not in seen:
-                skills.append(skill)
-                seen.add(skill.lower())
+            d = (dep or "").strip()
+            if d and d.lower() not in seen:
+                skills.append(d)
+                seen.add(d.lower())
     return skills
 
 
@@ -417,21 +338,23 @@ async def fetch_github_profile(
 
 
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
-    """Map languages and topics to skill names, ranked by (weighted) code bytes."""
+    """Surface the raw GitHub signals as candidate skills — languages ranked by
+    (weighted) code bytes, then repo topics. CLAUDE.md rule #28: NO hardcoded
+    language/topic→skill map; the API strings are used as-is (topics only get a
+    cosmetic hyphen→space cleanup), and the LLM pass canonicalises meaning."""
     seen: set[str] = set()
     skills: list[str] = []
 
     for lang, _ in sorted(languages.items(), key=lambda x: x[1], reverse=True):
-        skill = LANGUAGE_TO_SKILL.get(lang)
-        if skill and skill.lower() not in seen:
-            skills.append(skill)
-            seen.add(skill.lower())
+        if lang and lang.lower() not in seen:
+            skills.append(lang)
+            seen.add(lang.lower())
 
     for topic in sorted(topics):
-        skill = TOPIC_TO_SKILL.get(topic)
-        if skill and skill.lower() not in seen:
-            skills.append(skill)
-            seen.add(skill.lower())
+        t = topic.replace("-", " ").strip()
+        if t and t.lower() not in seen:
+            skills.append(t)
+            seen.add(t.lower())
 
     return skills
 

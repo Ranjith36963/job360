@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.profile import dep_file_parser, dependency_map, github_enricher
+from src.services.profile import dep_file_parser, github_enricher
 from src.services.profile.models import CVData
 
 
@@ -183,28 +183,8 @@ def test_parse_manifest_unknown_filename():
     assert deps == set()
 
 
-# ── dependency_map — lookup + guard ─────────────────────────────────
-
-
-def test_dependency_map_lookup_hit():
-    assert dependency_map.lookup_skill("pypi", "fastapi") == "FastAPI"
-    assert dependency_map.lookup_skill("npm", "react") == "React"
-    assert dependency_map.lookup_skill("cargo", "tokio") == "Tokio"
-
-
-def test_dependency_map_lookup_case_insensitive():
-    assert dependency_map.lookup_skill("npm", "REACT") == "React"
-    assert dependency_map.lookup_skill("pypi", "Django") == "Django"
-
-
-def test_dependency_map_lookup_miss_returns_none():
-    assert dependency_map.lookup_skill("pypi", "not-a-real-pkg-9999") is None
-    assert dependency_map.lookup_skill("unknown_ecosystem", "react") is None
-
-
-def test_dependency_map_total_mappings_floor():
-    # Guard against accidental deletions. Plan §4.2 targets ≥200 entries.
-    assert dependency_map.total_mappings() >= 200
+# NOTE (CLAUDE.md rule #28): dependency_map (hardcoded dep-name→skill) was retired.
+# _fetch_repo_frameworks now returns raw dependency names; the LLM pass canonicalises.
 
 
 # ── github_enricher — temporal weighting ────────────────────────────
@@ -528,7 +508,8 @@ def test_enrich_cv_from_github_stores_repos_brief():
 
 @pytest.mark.asyncio
 async def test_fetch_repo_frameworks_parses_real_manifest_content():
-    """Smoke test: given a real requirements.txt payload the helper yields mapped skills."""
+    """Smoke test: given a real requirements.txt payload the helper yields the RAW
+    declared dependency names (rule #28 — no dep->skill mapping)."""
     content = "fastapi>=0.115\npydantic>=2.0\nuvicorn"
     encoded = base64.b64encode(content.encode()).decode()
     contents_payload = {"content": encoded, "encoding": "base64"}
@@ -544,9 +525,9 @@ async def test_fetch_repo_frameworks_parses_real_manifest_content():
 
     skills = await github_enricher._fetch_repo_frameworks(session, "alice", "repo")
 
-    assert "FastAPI" in skills
-    assert "Pydantic" in skills
-    assert "Uvicorn" in skills
+    assert "fastapi" in skills
+    assert "pydantic" in skills
+    assert "uvicorn" in skills
 
 
 # ── enrich_cv_from_github — new framework field ─────────────────────
