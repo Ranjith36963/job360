@@ -10,13 +10,13 @@ You are checking that the codebase and documentation reflect the same informatio
 
 Read the actual code and extract current facts. Check ALL of these:
 
-- **Source count**: Count classes in `src/sources/` that extend `BaseJobSource`, count entries in `SOURCE_REGISTRY` in `src/main.py`, count entries in `_build_sources()`
-- **Test count**: Run `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
-- **Scoring rules**: Read `src/filters/skill_matcher.py` for actual dimensions, weights, penalties, threshold
-- **DB schema**: Read `src/storage/database.py` for table definitions (jobs, run_log, user_actions, applications), column names, UNIQUE constraints, indexes
-- **Features**: Check what modules exist in `src/filters/`, `src/profile/`, `src/notifications/`, `src/api/` — what's actually implemented
-- **Commands**: Read `src/cli.py` for actual CLI commands and flags
-- **Dependencies**: Read `requirements.txt` for actual packages
+- **Source count**: Count classes in `backend/src/sources/` that extend `BaseJobSource`, count entries in `SOURCE_REGISTRY` in `backend/src/main.py`, count entries in `_build_sources()` (note: `SOURCE_INSTANCE_COUNT` in `main.py` is the unique-instance count — one less than the registry size, because `indeed` and `glassdoor` both map to `JobSpySource`)
+- **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
+- **Scoring rules**: Read `backend/src/services/skill_matcher.py` for actual dimensions, weights, penalties, threshold
+- **DB schema**: Read `backend/src/repositories/database.py` for table definitions (jobs, run_log, user_actions, applications), column names, UNIQUE constraints, indexes
+- **Features**: Check what modules exist in `backend/src/services/`, `backend/src/services/profile/`, `backend/src/services/notifications/`, `backend/src/api/` — what's actually implemented
+- **Commands**: Read `backend/src/cli.py` for actual CLI commands and flags
+- **Dependencies**: Read `backend/pyproject.toml` for actual packages
 
 **Output**: A bullet list of every fact extracted from the code.
 
@@ -27,6 +27,7 @@ Read the actual code and extract current facts. Check ALL of these:
 Read each MD file and flag every mismatch:
 
 - `CLAUDE.md` — project overview, commands, architecture, scoring, source count, test count, core rules
+- `backend/CLAUDE.md` — thin backend pointer; check its `SOURCE_REGISTRY (N)` count + module-path lines
 - `ARCHITECTURE.md` — deep system description, module relationships, data flow
 - `STATUS.md` — what's done, what's in progress, what's next
 - `README.md` — quickstart, features overview, usage examples

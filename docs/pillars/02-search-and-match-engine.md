@@ -204,7 +204,7 @@ The 6 stages live inside one async function (`main.py:321-690`). Walking it from
 - **Instantiate the scorer once**: `scorer = JobScorer(search_config, user_preferences, enrichment_lookup)` (`main.py:389`). All three kwargs — satisfies rule #20.
 - **Build sources** via `_build_sources(search_config, ...)` (`main.py:230-318`):
   - Domain-filtered: `classify_user_domain(profile)` returns a set like `{"tech"}` or `{"healthcare", "academia"}`; sources whose `DOMAINS` don't overlap are skipped. Sources marked `"general"` are always included.
-  - Yields **49 instances** from a 50-key `SOURCE_REGISTRY` (indeed/glassdoor share the `JobSpySource` class).
+  - Yields **45 instances** from a 46-key `SOURCE_REGISTRY` (indeed/glassdoor share the `JobSpySource` class). (Was 49/50 before the M6 rotation dropped jobtensor, comeet, gov_apprenticeships, aijobs_global.)
 - **Snapshot the breaker registry** before dispatch so the run log can show which breakers opened.
 - **Dispatch** via `TieredScheduler.tick(force=True)` — the `force=True` bypasses per-source interval timers (the CLI is a one-shot, not a long-running poller).
 - **Per-result handling**: each source's outcome is either a `list[Job]` (call `breaker.record_success()`) or an `Exception` (call `breaker.record_failure()`).
@@ -263,7 +263,7 @@ Each scorer reads from the `JobEnrichment` row (a no-op if the row is missing or
 
 - **Negative title** (`-30`) — title contains a word from `NEGATIVE_TITLE_KEYWORDS`. *Note:* the list is empty by default now, so this fires only when the user populates negative keywords on their profile.
 - **Foreign location** (`-15`) — location matches `FOREIGN_INDICATORS` (63 entries — countries, major non-UK cities, US state abbreviations like `, CA`).
-- **Title-gate / Skill-gate** (`MIN_TITLE_GATE=0.15`, `MIN_SKILL_GATE=0.15`) — if either component is below 15 % of its max (6 pts of 40), the entire score collapses to `max(10, (title+skill)*0.25)`. This prevents a perfect location + recency from elevating an obviously-irrelevant job.
+- **Title-gate / Skill-gate** (`MIN_TITLE_GATE=0.15`, `MIN_SKILL_GATE=0.15`) — if **both** components are below 15 % of their max (6 pts of 40 each — an AND, not OR; `skill_matcher.py:396`), the entire score collapses to `max(10, (title+skill)*0.25)`. This prevents a perfect location + recency from elevating an obviously-irrelevant job.
 
 #### 3.4 Final clamp
 
@@ -356,7 +356,7 @@ All length-bounded to prevent DB bloat from a malformed LLM response.
 
 ### 3.3 Skill synonyms — `backend/src/core/skill_synonyms.py`
 
-A flat 529-entry alias dict (`_ALIASES_TO_CANONICAL`) makes `"k8s"`, `"kube"`, and `"kubernetes"` interchangeable everywhere skill matching happens. Two helpers:
+A flat 493-entry alias dict (`_ALIASES_TO_CANONICAL`) makes `"k8s"`, `"kube"`, and `"kubernetes"` interchangeable everywhere skill matching happens. Two helpers:
 
 - `canonicalize_skill(raw) -> str` — case-fold, whitespace-normalise, look up; unknown terms pass through unchanged.
 - `aliases_for(skill) -> tuple[str, ...]` — returns canonical + all known surface strings (for word-boundary regex grep in job text).
@@ -376,7 +376,7 @@ Coverage spans programming languages, frameworks, databases, cloud platforms, De
 | annual | × 1 |
 | unknown | × 1 (safe default) |
 
-Then `to_gbp(amount, currency)` converts via a **21-currency** static rate table (`fx.py`, Q1 2026 averages — USD=0.79, EUR=0.86, JPY=0.0053, …). Unknown currency → ×1.0 (treated as already-GBP — safe degraded mode).
+Then `to_gbp(amount, currency)` converts via an **18-currency** static rate table (`fx.py`, Q1 2026 averages — USD=0.79, EUR=0.86, JPY=0.0053, …). Unknown currency → ×1.0 (treated as already-GBP — safe degraded mode).
 
 If only one bound is posted, the other is backfilled (single-point band). Returns `None` if both bounds are absent — downstream `salary_score()` then awards the neutral 50 %.
 
@@ -404,11 +404,11 @@ Per-source polling cadence:
 
 | Tier | Interval | Examples |
 | --- | --- | --- |
-| `ats` | 60 s | Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, Pinpoint, Personio, Rippling, Comeet |
+| `ats` | 60 s | Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, Pinpoint, Personio, Rippling |
 | `reed` (name override) | 5 min | (Reed's quota is 2000 req/hr, hand-tuned) |
 | `workday` (name override) | 15 min | (anti-scraper) |
 | `rss` | 15 min | jobs.ac.uk, NHS Jobs, WeWorkRemotely, FindAJob, BioSpace, … |
-| `scrapers` | 60 min | LinkedIn, JobTensor, BCSJobs, AIJobs.* |
+| `scrapers` | 60 min | LinkedIn, Climatebase, 80000Hours, BCSJobs, AIJobs.ai |
 | `keyed_api` | 60 min | Adzuna, JSearch, Jooble, Careerjet, Findwork, Google Jobs (SerpApi) |
 | `free_json` | 60 min | Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITJobs, LandingJobs |
 | `default` | 60 min | Anything un-categorised falls here |
@@ -619,7 +619,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | `run_search()` 6-stage pipeline | ✅ | `main.py:321-690` |
 | Domain-filtered source build | ✅ | `classify_user_domain` × source `.DOMAINS` |
-| 49 source instances from 50-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 49` |
+| 45 source instances from 46-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 45` |
 | `TieredScheduler.tick(force=True)` one-shot dispatch | ✅ | CLI path |
 | `TieredScheduler.run_forever()` long-running poller | 🟡 | written but not wired to systemd (Batch 4 scope) |
 | `CircuitBreaker` 5-fail/300s state machine | ✅ | per-source registry |
@@ -652,8 +652,8 @@ backend/
 │   ├── core/
 │   │   ├── keywords.py                        — empty defaults + LOCATIONS + VISA_KEYWORDS (post-3ba1342)
 │   │   ├── settings.py                        — MIN_MATCH_SCORE, weights, gates, feature flags
-│   │   ├── skill_synonyms.py                  — 529-entry alias dict
-│   │   └── fx.py                              — 21-currency → GBP rates
+│   │   ├── skill_synonyms.py                  — 493-entry alias dict
+│   │   └── fx.py                              — 18-currency → GBP rates
 │   ├── services/
 │   │   ├── skill_matcher.py                   — JobScorer + score_job + helpers (legacy + Batch 2.9 paths)
 │   │   ├── scoring_dimensions.py              — seniority / salary / visa / workplace scorers + ScoreBreakdown
@@ -714,7 +714,7 @@ tests/
 ## 8. What this pillar does *not* cover
 
 - **The user's preferences & CV that feed the engine** → Pillar 1 (User Side) — `services/profile/`, `keyword_generator.py`, the bridge into `SearchConfig`.
-- **Where the raw job postings come from** → Pillar 3 (Job Providers) — the 49 source classes, `BaseJobSource`, the rotation history, ATS company slug catalog, conditional-fetch opt-ins per source.
+- **Where the raw job postings come from** → Pillar 3 (Job Providers) — the 45 source classes, `BaseJobSource`, the rotation history, ATS company slug catalog, conditional-fetch opt-ins per source.
 - **How a scored job reaches a specific user's inbox** → Pillar 1 Ring 3 — `user_feed`, `notification_ledger`, `dispatcher.py`, ARQ workers.
 
 ---
