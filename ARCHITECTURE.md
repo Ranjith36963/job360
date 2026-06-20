@@ -51,7 +51,7 @@ job360/
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
-│   │   │   ├── skill_synonyms.py     # 529-entry alias dict (k8s↔kubernetes, ...)
+│   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
