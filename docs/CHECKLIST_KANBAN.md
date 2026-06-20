@@ -95,6 +95,14 @@ button), `getRecentRuns`, `getEmailVerified` (no verify banner), `getActions`/`g
 gate is real notification **delivery**, which needs **Redis + ARQ worker** installed (infra,
 not code). Postgres remains the recommended long-term scale upgrade behind the #11 mitigation.
 
+**Live verification of the two fixes (loop2, this session, running app):**
+- **#15** — registered an unverified user → `POST /api/search` returned **403 `email_not_verified`**;
+  after marking the email verified → `POST /api/search` returned **200 `{run_id, running}`**. Enforcement live.
+- **#11** — ran a real search + per-user re-score against the live app: **zero `database is locked`**
+  log lines (those were the errors that previously dropped rows). busy_timeout=30s + with_write_retry in the path.
+- Full feed lifecycle (register → CV → search → **4,773 scored jobs** → dashboard → pipeline) was
+  verified live earlier this session on the main checkout (with `.env` keys); see Part 1 / the prod-build pass.
+
 ### Reported / not-a-bug (owner domain or intentional)
 - #5 run-time vs re-score keyword score differs → **Pillar 2, owner-handled, hands-off.**
 - #9 metrics export "no such table: run_log" → worktree DB-path / telemetry only.
