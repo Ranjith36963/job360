@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "AccountDeleteRequest": {
+        "properties": {
+          "current_password": {
+            "title": "Current Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "title": "AccountDeleteRequest",
+        "type": "object"
+      },
       "ActionRequest": {
         "properties": {
           "action": {
@@ -440,6 +453,28 @@
           "date_found": {
             "title": "Date Found",
             "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "deadline_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Source"
           },
           "dedup_group_ids": {
             "anyOf": [
@@ -2495,7 +2530,7 @@
     },
     "/api/auth/users/me": {
       "delete": {
-        "description": "Soft-delete the caller's account (GDPR Article 17). Sets deleted_at. Clears session cookie.",
+        "description": "Soft-delete the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.",
         "operationId": "delete_account_api_auth_users_me_delete",
         "parameters": [
           {
@@ -2515,6 +2550,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "Successful Response"

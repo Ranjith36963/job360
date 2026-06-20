@@ -251,7 +251,8 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
-| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles |
+| `ENGINE1_ENABLED` / `ENGINE2_ENABLED` / `ENGINE3_ENABLED` / `ENGINE4_ENABLED` | No (E1 default `true`; E2/E3/E4 default to their legacy flag) | **Independent per-engine switches** — any combo. Effective gate is `ENGINEx_ENABLED OR <legacy flag>` (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`). E1 (keyword) had no prior flag. |
+| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles (legacy gates for E2 / E3) |
 | `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No (default `0.15` / `0.15`) | Pillar 2.2 gate thresholds |
 | `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No (defaults 10/8/6/6) | Pillar 2.9 dimension weights |
 | `MATCHER_ENABLED` | No (default `false`) | LLM judge (engine #4) opt-in toggle |

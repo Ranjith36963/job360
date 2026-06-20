@@ -25,7 +25,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF + cross-encoder rerank) + ESCO skill normalisation activate
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) + ESCO skill normalisation activate
 
 ---
 
@@ -71,7 +71,7 @@ job360/
 │   │   │   ├── job_enrichment_schema.py  # 18-field Pydantic JobEnrichment + 8 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
-│   │   │   ├── retrieval.py          # RRF fusion + cross-encoder rerank (opt-in)
+│   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)

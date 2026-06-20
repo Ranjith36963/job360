@@ -51,6 +51,8 @@ class JobDatabase:
                 date_posted_raw TEXT,
                 consecutive_misses INTEGER DEFAULT 0,
                 staleness_state TEXT DEFAULT 'active',
+                deadline TEXT,
+                deadline_source TEXT,
                 UNIQUE(normalized_company, normalized_title)
             );
             CREATE TABLE IF NOT EXISTS run_log (
@@ -116,6 +118,9 @@ class JobDatabase:
             ("recency", "INTEGER DEFAULT 0"),
             ("semantic", "INTEGER DEFAULT 0"),
             ("penalty", "INTEGER DEFAULT 0"),
+            # Migration 0020 — application deadline columns.
+            ("deadline", "TEXT"),
+            ("deadline_source", "TEXT"),
         ]
         run_log_migrations = [
             # Step-0 pre-flight — migration 0010 observability columns.
@@ -249,9 +254,10 @@ class JobDatabase:
              posted_at, first_seen_at, last_seen_at, date_confidence,
              date_posted_raw,
              role, skill, seniority_score, experience, credentials,
-             location_score, recency, semantic, penalty)
+             location_score, recency, semantic, penalty,
+             deadline, deadline_source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -282,9 +288,43 @@ class JobDatabase:
                 job.recency,
                 job.semantic,
                 job.penalty,
+                job.deadline,
+                job.deadline_source,
             ),
         )
         return cursor.rowcount > 0
+
+    async def update_job_scores(self, job: Job) -> None:
+        """Persist a re-scored job's match_score + dim columns to the catalog.
+
+        Used after enrichment, when a job is re-scored with its DB ``id`` set so
+        the enrichment dims (seniority/salary/visa/workplace, folded into
+        match_score) actually land on the stored row. No-op without ``job.id``.
+        """
+        job_id = getattr(job, "id", None)
+        if job_id is None:
+            return
+        await self._conn.execute(
+            """UPDATE jobs SET
+                   match_score = ?, role = ?, skill = ?, seniority_score = ?,
+                   experience = ?, credentials = ?, location_score = ?,
+                   recency = ?, semantic = ?, penalty = ?, visa_flag = ?
+               WHERE id = ?""",
+            (
+                job.match_score,
+                job.role,
+                job.skill,
+                job.seniority_score,
+                job.experience,
+                job.credentials,
+                job.location_score,
+                job.recency,
+                job.semantic,
+                job.penalty,
+                int(job.visa_flag),
+                job_id,
+            ),
+        )
 
     async def update_last_seen(self, normalized_key: tuple[str, str]) -> None:
         """Mark a job as re-seen this scrape cycle. Resets ghost-detection counters."""

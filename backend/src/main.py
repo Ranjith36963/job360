@@ -336,6 +336,7 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
     path import-free.
     """
     try:
+        from src.core.settings import ENGINE4_ENABLED  # noqa: PLC0415
         from src.services.llm_matcher import (  # noqa: PLC0415 — lazy by design
             MATCHER_ENABLED,
             MATCHER_MAX_JOBS,
@@ -344,7 +345,8 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             profile_to_matcher_text,
         )
 
-        if not MATCHER_ENABLED:
+        # Engine 4 switch (ENGINE4_ENABLED) OR the legacy MATCHER_ENABLED flag.
+        if not (ENGINE4_ENABLED or MATCHER_ENABLED):
             return
         from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -378,13 +380,18 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             conn=db._conn,
             semaphore_limit=3,
         )
-        judged = sum(1 for r in results if r is not None)
+        verdicts = [r for r in results if r is not None]
+        judged = len(verdicts)
+        fits = [v.fit_score for v in verdicts]
         logger.info(
-            "matcher: judged %s/%s jobs in %.1fs for user %s",
+            "matcher: judged %s/%s jobs in %.1fs for user %s (fit min/avg/max = %s/%s/%s)",
             judged,
             len(shortlist),
             time.perf_counter() - t0,
             user_id,
+            min(fits) if fits else 0,
+            round(sum(fits) / len(fits), 1) if fits else 0,
+            max(fits) if fits else 0,
         )
     except Exception as e:  # noqa: BLE001 — judge failure must never kill the run
         logger.warning("matcher stage failed (run continues): %s", e)
@@ -457,7 +464,10 @@ async def run_search(
         # ENRICHMENT_ENABLED is false we pass an empty dict so the lookup
         # callable always returns None and the multi-dim contribution is 0
         # (CLAUDE.md rule #19 — legacy callers see legacy behaviour).
-        if ENRICHMENT_ENABLED:
+        # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
             enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
         else:
             enrichment_lookup_dict = {}
@@ -616,6 +626,18 @@ async def run_search(
                 job.visa_flag = scorer.check_visa_flag(job)
                 job.experience_level = detect_experience_level(job.title)
 
+            # Deadline extraction — fill in any job that didn't get a structured
+            # deadline (e.g. from JSON-LD validThrough) from its description text.
+            # Runs after scoring, before dedup, so every raw job is covered.
+            # Lazy-imported to keep the top-level import surface small.
+            from src.services.deadline import extract_deadline  # noqa: PLC0415
+
+            for job in all_jobs:
+                if job.deadline is None and job.description:
+                    result = extract_deadline(job.description)
+                    if result is not None:
+                        job.deadline, job.deadline_source = result
+
             # Deduplicate
             unique_jobs = deduplicate(all_jobs)
             logger.info("After dedup: %s unique jobs", len(unique_jobs))
@@ -665,7 +687,10 @@ async def run_search(
             # which the scorer's enrichment_lookup applies on subsequent runs.
             # Only high-scored jobs go to the LLM, fanned out via a bounded
             # semaphore so a slow provider can't block the pipeline.
-            if ENRICHMENT_ENABLED:
+            # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+            from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+            if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
                 high_scored = [
                     j
                     for j in unique_jobs
@@ -684,6 +709,29 @@ async def run_search(
                     # concurrent × retries 429s every provider at once. 3 keeps the
                     # batch under the per-minute limits while still parallelising.
                     await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
+                    await db.commit()
+
+                    # Engine 2 dim-scoring fix: the first score() (above) ran
+                    # before these jobs had DB ids or enrichment rows, so the
+                    # enrichment dims (seniority/salary/visa/workplace) scored 0.
+                    # Now they have both — re-score with a rebuilt lookup so the
+                    # dims fold into match_score, and persist so the feed write
+                    # below + the catalog reflect the dim-inclusive score.
+                    fresh_lookup = await _build_enrichment_lookup(db._conn)
+                    dim_scorer = JobScorer(
+                        search_config,
+                        user_preferences=profile.preferences if profile else None,
+                        enrichment_lookup=lambda job: fresh_lookup.get(getattr(job, "id", None)),
+                    )
+                    for job in high_scored:
+                        bd = dim_scorer.score(job)
+                        job.match_score = bd.match_score
+                        job.role = bd.title_score
+                        job.skill = bd.skill_score
+                        job.location_score = bd.location_score
+                        job.recency = bd.recency_score
+                        job.seniority_score = bd.seniority_score
+                        await db.update_job_scores(job)
                     await db.commit()
 
             # Per-user feed: write THIS user's matched jobs into user_feed so the
@@ -815,8 +863,8 @@ async def run_search(
 
             # Step-5 — export metrics snapshots after every run (non-fatal).
             try:
-                await export_pipeline_metrics(str(db_path))
-                await export_notification_metrics(str(db_path))
+                await export_pipeline_metrics(path)
+                await export_notification_metrics(path)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("metrics export failed: %s", exc)
 

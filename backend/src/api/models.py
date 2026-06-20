@@ -99,6 +99,9 @@ class JobResponse(BaseModel):
     llm_fit_score: Optional[int] = None
     llm_verdict: Optional[str] = None
     llm_reason: Optional[str] = None
+    # Application deadline — None means "no deadline listed".
+    deadline: Optional[str] = None           # ISO date YYYY-MM-DD
+    deadline_source: Optional[str] = None    # "listing" | "description" | None
 
 
 class JobListResponse(BaseModel):

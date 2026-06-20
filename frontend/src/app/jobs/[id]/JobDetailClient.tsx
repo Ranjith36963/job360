@@ -13,6 +13,7 @@ import {
   MapPin,
   Building2,
   Calendar,
+  CalendarClock,
   Briefcase,
   Shield,
   Star,
@@ -57,6 +58,21 @@ function relativeDate(iso: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function daysUntil(iso: string): number {
+  return Math.ceil(
+    (new Date(iso).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) /
+      86_400_000
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +153,16 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
     };
   }, [resolvedId]);
 
+  // Sync browser tab title after client-side (soft) navigation.
+  // generateMetadata is SSR-only — it does not re-run on in-app nav, so the
+  // tab title is stale until this effect fires.  Guard on `job` so the
+  // loading / error states never clobber the SSR title.
+  useEffect(() => {
+    if (job) {
+      document.title = `${job.title} at ${job.company} — Job360`;
+    }
+  }, [job]);
+
   // Toggle action
   const handleAction = useCallback(
     async (action: "liked" | "not_interested") => {
@@ -182,6 +208,27 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
   }
 
   const bucket = scoreBucket(job.match_score);
+
+  // Deadline derived values
+  const deadlineDays = job.deadline ? daysUntil(job.deadline) : null;
+  const deadlineColor =
+    deadlineDays === null
+      ? ""
+      : deadlineDays < 0
+      ? "text-red-400"
+      : deadlineDays <= 7
+      ? "text-amber-400"
+      : "";
+  const deadlineNote =
+    job.deadline_source === "listing"
+      ? "from listing"
+      : job.deadline_source === "description"
+      ? "parsed from listing text"
+      : null;
+
+  // Low-confidence date: dim the posted-at span
+  const isLowConfidenceDate =
+    job.date_confidence === "low" || job.date_confidence === "fabricated";
 
   return (
     <div className="relative">
@@ -298,15 +345,36 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
               {/* Date model display */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 {job.posted_at && (
-                  <span className="flex items-center gap-1">
+                  <span
+                    className={`flex items-center gap-1${isLowConfidenceDate ? " opacity-60" : ""}`}
+                  >
                     <Calendar className="h-3 w-3" />
                     Posted {relativeDate(job.posted_at)}
+                    {isLowConfidenceDate && (
+                      <span className="opacity-70">· approx</span>
+                    )}
                   </span>
                 )}
                 {job.last_seen_at && (
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
                     Last seen {relativeDate(job.last_seen_at)}
+                  </span>
+                )}
+                {job.deadline ? (
+                  <span className={`flex items-center gap-1 ${deadlineColor}`}>
+                    <CalendarClock className="h-3 w-3" />
+                    {deadlineDays !== null && deadlineDays < 0
+                      ? `Closed ${formatDate(job.deadline)}`
+                      : `Apply by ${formatDate(job.deadline)}`}
+                    {deadlineNote && (
+                      <span className="opacity-70 ml-0.5">· {deadlineNote}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 opacity-60">
+                    <CalendarClock className="h-3 w-3" />
+                    No deadline listed
                   </span>
                 )}
                 {job.staleness_state && job.staleness_state !== "ACTIVE" && (

@@ -15,6 +15,8 @@ not installed), the retrieval gracefully falls back to keyword-only.
 from __future__ import annotations
 
 import logging
+import math
+import re
 from collections.abc import Iterable
 from typing import Any, Callable, Optional
 
@@ -65,6 +67,82 @@ def reciprocal_rank_fusion(
 
 
 # ---------------------------------------------------------------------------
+# BM25 — pure lexical ranker (the BM25 leg of the hybrid engine)
+# ---------------------------------------------------------------------------
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lower-case word/number tokens. Shared by BM25 query + docs."""
+    return _TOKEN_RE.findall((text or "").lower())
+
+
+def bm25_rank(
+    query: str,
+    documents: list[tuple[Any, str]],
+    *,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> list[tuple[Any, float]]:
+    """Rank ``documents`` by Okapi BM25 relevance to ``query``.
+
+    Pure, dependency-free lexical ranker — distinct from engine 1's weighted
+    keyword scorer in that it applies IDF (rare query terms weigh more),
+    term-frequency saturation (``k1``) and length normalisation (``b``).
+
+    Args:
+        query: free text (the user's profile titles/skills/summary).
+        documents: ``(item_id, text)`` pairs; ids are returned verbatim.
+        k1: term-frequency saturation constant (Robertson default 1.5).
+        b: length-normalisation strength in [0, 1] (default 0.75).
+
+    Returns:
+        ``[(item_id, score)]`` for documents with score > 0, sorted
+        descending. Stable tiebreak by first-appearance order. An empty
+        query, empty corpus, or a query matching no document → ``[]``.
+    """
+    q_terms = set(_tokenize(query))
+    if not q_terms or not documents:
+        return []
+
+    doc_tokens = [_tokenize(text) for _id, text in documents]
+    doc_lens = [len(toks) for toks in doc_tokens]
+    n_docs = len(documents)
+    avgdl = sum(doc_lens) / n_docs if n_docs else 0.0
+
+    # Document frequency per query term.
+    df: dict[str, int] = {}
+    for toks in doc_tokens:
+        present = set(toks)
+        for term in q_terms & present:
+            df[term] = df.get(term, 0) + 1
+
+    # Robust BM25 IDF — the +1 keeps weights positive even for common terms.
+    idf = {
+        term: math.log(1 + (n_docs - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5))
+        for term in q_terms
+    }
+
+    scored: list[tuple[int, Any, float]] = []
+    for idx, ((item_id, _text), toks, dl) in enumerate(zip(documents, doc_tokens, doc_lens)):
+        if dl == 0:
+            continue
+        tf: dict[str, int] = {}
+        for t in toks:
+            if t in q_terms:
+                tf[t] = tf.get(t, 0) + 1
+        norm = k1 * (1 - b + b * (dl / avgdl)) if avgdl else k1
+        score = sum(idf[term] * (freq * (k1 + 1)) / (freq + norm) for term, freq in tf.items())
+        if score > 0:
+            scored.append((idx, item_id, score))
+
+    scored.sort(key=lambda t: (-t[2], t[0]))
+    return [(item_id, score) for _idx, item_id, score in scored]
+
+
+# ---------------------------------------------------------------------------
 # Retrieval orchestrator
 # ---------------------------------------------------------------------------
 
@@ -76,22 +154,33 @@ def retrieve_for_user(
     keyword_fn: Optional[Callable[[Any, int], list[int]]] = None,
     semantic_fn: Optional[Callable[[Any, int], list[int]]] = None,
     rrf_k: int = 60,
+    bm25_fn: Optional[Callable[[Any, int], list[int]]] = None,
+    rerank_fn: Optional[Callable[[list[int]], list[int]]] = None,
 ) -> list[int]:
-    """Return the top-`k` fused job ids for a user profile.
+    """Return the top-`k` fused job ids for a user profile — the single
+    orchestration seam for the hybrid engine (engine 3).
 
-    This is sync-friendly (pure orchestration) — the upstream fetchers are
-    injected via ``keyword_fn`` and ``semantic_fn``. Callers from FastAPI
-    or ARQ pass their own wrappers that hit SQLite + ChromaDB.
+    Sync-friendly (pure orchestration) — every upstream is injected, so this
+    is fully unit-testable offline. Callers from FastAPI or ARQ pass wrappers
+    that hit SQLite / SQLite-BM25 / ChromaDB / the cross-encoder.
+
+    Pipeline: keyword anchor → (optional) BM25 + semantic legs fused via RRF
+    → (optional) cross-encoder rerank → truncate to ``k``.
 
     Args:
-        profile: a ``UserProfile`` — passed through to both fetchers.
-        k: how many ids to return after fusion.
+        profile: a ``UserProfile`` — passed through to every fetcher.
+        k: how many ids to return after rerank.
         keyword_fn: ``(profile, limit) -> list[int]`` of top keyword-matched
-            job ids. Required — this is the always-available path.
-        semantic_fn: ``(profile, limit) -> list[int]`` of semantically
-            closest job ids. Optional — when None or it returns [],
-            retrieval degrades to keyword-only.
+            job ids. Required — this is the always-available anchor.
+        semantic_fn: ``(profile, limit) -> list[int]`` of semantically closest
+            ids. Optional — None / [] / exception degrades that leg silently.
         rrf_k: RRF smoothing constant (default 60).
+        bm25_fn: ``(profile, limit) -> list[int]`` BM25-ranked ids. Optional —
+            None / [] / exception degrades that leg silently. Pure-Python, no
+            heavy deps, so it can run even when the semantic stack is absent.
+        rerank_fn: ``(list[int]) -> list[int]`` cross-encoder rerank applied to
+            the fused list BEFORE truncation, so a strong rerank can promote a
+            candidate above the ``k`` cut-off. Optional.
 
     Returns:
         List of job ids, best first. Length up to ``k``.
@@ -108,17 +197,26 @@ def retrieve_for_user(
     semantic_on = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     tel = hybrid_telemetry() if semantic_on else None
 
-    # Stage A — keyword top 500.
+    # Stage A — keyword top 500 (always-available anchor).
     keyword_ids = keyword_fn(profile, 500)
     if not keyword_ids:
-        # Nothing to fuse. Bail early — semantic results alone would
-        # produce rankings with no keyword corroboration.
+        # Nothing to fuse. Bail early — extra legs alone would produce
+        # rankings with no keyword corroboration.
         if tel is not None:
             tel.keyword_calls += 1
             tel.fallback_reason = "empty_index"
         return []
 
-    # Stage B — semantic top 500 (when available).
+    # Stage A2 — BM25 lexical leg (optional; pure, no heavy deps).
+    bm25_ids: list[int] = []
+    if bm25_fn is not None:
+        try:
+            bm25_ids = bm25_fn(profile, 500) or []
+        except Exception as e:
+            logger.warning("BM25 retrieval failed — skipping that leg: %s", e)
+            bm25_ids = []
+
+    # Stage B — semantic top 500 (optional; heavy, may be unavailable).
     semantic_ids: list[int] = []
     fallback_reason: str | None = None
     if semantic_fn is None:
@@ -131,18 +229,27 @@ def retrieve_for_user(
             semantic_ids = []
             fallback_reason = "exception"
 
-    if not semantic_ids:
+    # Stage C — fuse whatever extra signals we have with the keyword anchor.
+    extra_lists = [lst for lst in (bm25_ids, semantic_ids) if lst]
+    if not extra_lists:
         if tel is not None:
             tel.keyword_calls += 1
             tel.fallback_reason = fallback_reason or "empty_index"
-        return keyword_ids[:k]
+        result_ids = list(keyword_ids)
+    else:
+        if tel is not None:
+            tel.hybrid_calls += 1
+            # Telemetry's hybrid/keyword split tracks the SEMANTIC leg only;
+            # a BM25-only fusion still records the semantic fallback reason.
+            tel.fallback_reason = None if semantic_ids else fallback_reason
+        fused = reciprocal_rank_fusion([keyword_ids, *extra_lists], k=rrf_k)
+        result_ids = [item for item, _score in fused]
 
-    # Stage C — RRF fusion.
-    if tel is not None:
-        tel.hybrid_calls += 1
-        tel.fallback_reason = None
-    fused = reciprocal_rank_fusion([keyword_ids, semantic_ids], k=rrf_k)
-    return [item for item, _score in fused[:k]]
+    # Stage D — optional cross-encoder rerank, BEFORE truncation.
+    if rerank_fn is not None:
+        result_ids = rerank_fn(result_ids)
+
+    return result_ids[:k]
 
 
 def is_hybrid_available(vector_index_count: int) -> bool:

@@ -204,13 +204,28 @@ async def me(user: CurrentUser = Depends(require_user)) -> UserResponse:
 # ── B-11: Soft-delete (GDPR Article 17) ──────────────────────────────────────
 
 
+class AccountDeleteRequest(BaseModel):
+    current_password: str
+
+
 @router.delete("/users/me", status_code=204)
 async def delete_account(
+    req: AccountDeleteRequest,
     response: Response,
     db: JobDatabase = Depends(get_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
-    """Soft-delete the caller's account (GDPR Article 17). Sets deleted_at. Clears session cookie."""
+    """Soft-delete the caller's account (GDPR Article 17). Requires current-password
+    verification (hard rule #26), then clears the session cookie."""
+    async with aiosqlite.connect(str(DB_PATH)) as adb:
+        adb.row_factory = aiosqlite.Row
+        cursor = await adb.execute(
+            "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
+            (user.id,),
+        )
+        row = await cursor.fetchone()
+    if not row or not verify_password(row["password_hash"], req.current_password):
+        raise HTTPException(status_code=401, detail="current password is incorrect")
     await db.soft_delete_user(user.id)
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).

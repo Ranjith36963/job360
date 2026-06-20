@@ -58,10 +58,20 @@ export function channelConnectUrl(provider: "slack" | "discord"): string {
 // ---------------------------------------------------------------------------
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Auto-inject Content-Type: application/json when the body is a JSON string
+  // and the caller hasn't already set one. FormData bodies are intentionally
+  // excluded (typeof FormData !== "string") so uploads set their own
+  // multipart/form-data; boundary=... header via the browser.
+  const headers = new Headers(init?.headers as HeadersInit | undefined);
+  if (init?.body && typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   // credentials: 'include' so the session cookie rides on every call.
   const res = await fetch(`${API}${path}`, {
     credentials: "include",
     ...init,
+    headers,
   });
 
   if (!res.ok) {
@@ -480,8 +490,11 @@ export async function changeEmail(
   });
 }
 
-export async function deleteAccount(): Promise<void> {
-  await request<void>("/api/auth/users/me", { method: "DELETE" });
+export async function deleteAccount(currentPassword: string): Promise<void> {
+  await request<void>("/api/auth/users/me", {
+    method: "DELETE",
+    body: JSON.stringify({ current_password: currentPassword }),
+  });
 }
 
 // ---- Step-3: Notification ledger ----
