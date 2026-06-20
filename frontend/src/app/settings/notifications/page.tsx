@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Bell, BellOff } from "lucide-react";
 
 import {
   listChannels,
@@ -159,15 +160,25 @@ export default function NotificationRulePage() {
           <CardHeader className="border-b pb-4">
             <div className="flex items-center justify-between">
               <CardTitle>Notification rule</CardTitle>
-              <Button
-                variant={draft.enabled ? "outline" : "secondary"}
-                size="sm"
-                aria-pressed={draft.enabled}
-                aria-label={`${draft.enabled ? "Disable" : "Enable"} all notifications`}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draft.enabled}
+                aria-label={`Notifications are ${draft.enabled ? "on" : "off"} — click to turn ${draft.enabled ? "off" : "on"}`}
                 onClick={() => update({ enabled: !draft.enabled })}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  draft.enabled
+                    ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25"
+                    : "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30 hover:bg-amber-500/25"
+                }`}
               >
-                {draft.enabled ? "Enabled" : "Disabled"}
-              </Button>
+                {draft.enabled ? (
+                  <Bell className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <BellOff className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {draft.enabled ? "On" : "Off"}
+              </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Applies to {channels.length} connected channel
@@ -176,6 +187,18 @@ export default function NotificationRulePage() {
           </CardHeader>
 
           <CardContent className="space-y-6 pt-4">
+            {/* Off-state notice — make a disabled rule unmistakable so a user
+                doesn't configure everything and silently receive nothing. */}
+            {!draft.enabled && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                <BellOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>
+                  Notifications are <strong>off</strong>. You won&apos;t receive any job
+                  alerts until you turn them on (top-right) and Save.
+                </span>
+              </div>
+            )}
+
             {/* Delivery mode */}
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium leading-none">
