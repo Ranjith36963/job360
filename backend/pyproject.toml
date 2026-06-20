@@ -92,12 +92,16 @@ pythonpath = ["."]
 # "deterministic green baseline", so we opt out unless the developer
 # explicitly enables it via `pytest -p randomly ...` during a
 # flake-hunt session.
-addopts = "-p no:randomly"
+# Exclude live ONLINE tests from the default run — the offline gate must
+# stay fast + deterministic (rule #4). Run them explicitly with `pytest -m live`
+# (a CLI -m overrides this default). See tests/test_live_pipeline.py.
+addopts = "-p no:randomly -m 'not live'"
 # Step-0 pre-flight (Tier B) — registered markers. Keep this list
 # alphabetised; custom markers without registration raise
 # PytestUnknownMarkWarning and poison CI logs.
 markers = [
     "fast: smoke subset runnable in < 5s",
+    "live: real ONLINE end-to-end test that hits live job-site APIs (excluded from the default offline run; use 'pytest -m live')",
     "real_sleep: opt out of the instant-asyncio-sleep fixture (tests asserting on real elapsed time)",
 ]
 

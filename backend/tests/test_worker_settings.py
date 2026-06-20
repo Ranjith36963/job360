@@ -6,9 +6,7 @@ rationale), arq is a ~4MB dep chain that pytest should never touch.
 The import is lazy inside the method that actually spins up ARQ.
 """
 import importlib
-import os
 import sys
-from unittest.mock import patch
 
 
 def test_worker_settings_functions_includes_send_notification():
@@ -23,6 +21,19 @@ def test_worker_settings_functions_includes_send_notification():
     )
     assert "score_and_ingest" in func_names, (
         f"score_and_ingest missing from WorkerSettings.functions: {func_names}"
+    )
+
+
+def test_worker_settings_functions_includes_notification_tasks():
+    """notification_tick and send_bundle must be in WorkerSettings.functions."""
+    mod = importlib.import_module("src.workers.settings")
+    funcs = mod.WorkerSettings.functions
+    func_names = {getattr(f, "__name__", str(f)) for f in funcs}
+    assert "notification_tick" in func_names, (
+        f"notification_tick missing from WorkerSettings.functions: {func_names}"
+    )
+    assert "send_bundle" in func_names, (
+        f"send_bundle missing from WorkerSettings.functions: {func_names}"
     )
 
 

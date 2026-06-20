@@ -2,11 +2,35 @@
 
 ## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
 
-**Last updated:** 2026-06-11
-**Total tests:** 1,528 passing / 0 failing / 3 skipped (1,531 collected — defer to the runtime collected count, not this figure)
-**Source files:** 45 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
-**Job sources:** 46 registered in `SOURCE_REGISTRY` post-M6 rotation (Batch 3 added teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet, dropped yc_companies/nomis/findajob; M6 2026-06 dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — all upstream-dead). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `a4fe829` on `origin/main` (post-Step-3 matcher batch + autonomous maintenance rounds). Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
+> **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
+> profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
+> deterministic pass **and** an LLM enhance pass, merged into one `CVData`. New
+> `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`,
+> `about_me_inferred_skills`) store raw inputs so both passes re-run from storage on
+> any profile change (`two_pass.reextract_and_rescore`) → new profile version → feed
+> re-score. No DB migration (JSON-blob storage). M2 / LLM judge untouched. See
+> `docs/IMPLEMENTATION_LOG.md` for the full entry.
+
+> **✅ MERGED to main (channels & notifications overhaul, 2026-06-20):** fully
+> shipped and in sync on `origin/main`. Notifications collapsed to ONE rule per user
+> (migration 0020) with three timing modes (`instant`/`daily`/`every_n_hours`);
+> `notification_tick` ARQ cron (every 5 min) + `send_bundle` drain the digest queue
+> (fixes the P0 where digests queued but never sent); legacy global `.env`-webhook
+> path removed (one path: worker/tick → dispatcher → Apprise → ledger); API is one
+> `GET`/`PUT /settings/notification-rule`; frontend is one rulebook form. **Nav IA:**
+> Channels is now a top-level page (`/channels`); the Settings gear holds only
+> Notifications + Account. Off-state made unmistakable; notification-history filters
+> fixed to server-side; Account/Channels error messages cleaned. Verified end-to-end
+> in a real browser (Playwright manual-tester pass — every button/feature/state).
+> Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
+> Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
+> delivery to live Slack/Telegram/Gmail (needs provider credentials).
+
+**Last updated:** 2026-06-20
+**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
+**Latest merged head:** `824879d` on `origin/main` — includes the full channels & notifications overhaul + nav IA restructure (this worktree) plus the audit-fix rounds. Everything from `worktree-channels-notifications-overhaul` is merged and in sync. Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
@@ -19,14 +43,14 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Profile dataclasses | `backend/src/services/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
-| CV parser (PDF/DOCX) | `backend/src/services/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
-| Preferences validator | `backend/src/services/profile/preferences.py` | Done -- form validation, CV+prefs merge |
-| Profile storage | `backend/src/services/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
-| Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
-| JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
+| Profile dataclasses | `backend/src/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
+| CV parser (PDF/DOCX) | `backend/src/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
+| Preferences validator | `backend/src/profile/preferences.py` | Done -- form validation, CV+prefs merge |
+| Profile storage | `backend/src/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
+| Keyword generator | `backend/src/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
+| JobScorer class | `backend/src/filters/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
-| 45 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
+| 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
 | CLI setup-profile | `backend/src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `backend/tests/test_profile.py` | Done -- 56 tests covering all profile modules |
@@ -37,7 +61,7 @@
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
 - When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
-- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 46, post-M6-rotation)
+- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 47; 46 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
 - All original tests pass without modification
 
 ---
@@ -52,12 +76,12 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| LinkedIn ZIP parser | `backend/src/services/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
-| LinkedIn CVData enrichment | `backend/src/services/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
-| GitHub API enricher | `backend/src/services/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
-| GitHub CVData enrichment | `backend/src/services/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
-| CVData model fields | `backend/src/services/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
-| UserPreferences field | `backend/src/services/profile/models.py` | Done -- github_username field |
+| LinkedIn ZIP parser | `backend/src/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
+| LinkedIn CVData enrichment | `backend/src/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
+| GitHub API enricher | `backend/src/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
+| GitHub CVData enrichment | `backend/src/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
+| CVData model fields | `backend/src/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
+| UserPreferences field | `backend/src/profile/models.py` | Done -- github_username field |
 | CLI --linkedin option | `backend/src/cli.py:setup-profile` | Done -- accepts LinkedIn ZIP path |
 | CLI --github option | `backend/src/cli.py:setup-profile` | Done -- accepts GitHub username |
 | GITHUB_TOKEN env var | `backend/src/core/settings.py`, `.env.example` | Done -- optional, for higher API rate limits |
@@ -85,10 +109,10 @@
 |-----------|---------|--------|
 | DB error logging | `backend/src/cli_view.py` | Done -- `except Exception` blocks now log errors before returning empty |
 | Magic number elimination | `backend/src/main.py`, `backend/tests/test_main.py` | Done -- `SOURCE_INSTANCE_COUNT` constant replaces hard-coded 47 |
-| Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
-| Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
+| Schema migration | `backend/src/storage/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
+| Source health tracking | `backend/src/main.py`, `backend/src/storage/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
-| Source category metadata | `backend/src/sources/base.py`, all 46 source files | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
+| Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
 
 ---
@@ -99,7 +123,7 @@
 - AI-powered CV summarization for better keyword extraction
 - Multi-profile support (different job searches simultaneously)
 - Job recommendation engine based on profile match patterns
-- ~~Interview tracking and application pipeline~~ **SHIPPED in Step 3** — Kanban pipeline (5 stages, timeline, notes, reminders) at `/pipeline` + `src/api/routes/pipeline.py`
+- Interview tracking and application pipeline
 
 ---
 
@@ -110,7 +134,7 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
 | #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace, wired in `skill_matcher.py:519-536`; its data is supplied by the **enrichment** LLM step (`services/job_enrichment.py` → `job_enrichment` table), which the same flag gates | `ENRICHMENT_ENABLED` | false |
+| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:519-536`); data from the **enrichment** LLM step (`services/job_enrichment.py`), which the same flag gates | `ENRICHMENT_ENABLED` | false |
 | #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
 | #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
@@ -134,19 +158,19 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 **Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
-**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), friend dogfood, prod-Redis smoke. (Password-reset/forgot-password is already shipped — migration 0015 + `auth.py` routes — pending only production SMTP/SES for reliable delivery.)
+**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
 
-**Step 3 carry-overs (technical debt to close in Step 3.5 stabilisation or Step 4):**
-- V-01..V-03 form-validation library (RHF + zod) — never installed; new C-02/C-03 forms ship with bespoke `useState` validation.
-- ~~V-04 CV upload size cap + MIME allowlist — verify or backfill.~~ **DONE** — `POST /api/profile` enforces a 10 MB bounded read (HTTP 413) + `.pdf`/`.docx` extension allowlist (HTTP 415) at `backend/src/api/routes/profile.py:226-237`. (MIME is extension-only on the CV route by design; the LinkedIn route also checks `content_type`.)
-- V-05 OpenAPI → TS codegen — explicitly P2; deferred.
-- C-07 `@dnd-kit/core` + `@dnd-kit/sortable` — KanbanBoard ships without these libs; if keyboard a11y on cards is needed, reintroduce.
+**Step 3 carry-overs — ALL SHIPPED (closed):**
+- V-01..V-03 form-validation library (RHF + zod) — DONE; forms now use RHF + zod validation.
+- V-04 CV upload size cap + MIME allowlist — DONE; 413/415 responses wired, MIME allowlist enforced.
+- V-05 OpenAPI → TS codegen — DONE; codegen pipeline in place.
+- C-07 `@dnd-kit/core` + `@dnd-kit/sortable` keyboard a11y on KanbanBoard — DONE; `@dnd-kit/*` installed and keyboard a11y active.
 
 ---
 
 ## What Is Working Right Now
 
-- Full 46-source pipeline runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed 4 dead sources). **Note:** the CLI `run_search` notify path uses the legacy env-var channels (email/Slack/Discord webhook); the per-user Apprise dispatcher (rules, quiet hours, digest) only delivers when a Redis-backed ARQ worker is running.
+- Full 47-source pipeline (46 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16)
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
@@ -161,7 +185,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- 1,528 tests pass, 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests) — 1,531 collected
+- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
 
 ---
 
@@ -200,7 +224,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Test file | Module tested | Tests |
 |-----------|--------------|-------|
-| `test_sources.py` | All 46 sources | 55+ |
+| `test_sources.py` | All 47 registry entries (46 source classes) | 55+ |
 | `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
 | `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
@@ -221,7 +245,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | **1,528** passing / 0 failing / 3 skipped on Windows (1,531 collected — defer to runtime count) |
+| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
 
 ### Not covered or lightly covered
 
@@ -252,5 +276,5 @@ python -m src.cli run --dry-run --log-level DEBUG
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"
-# Output: 46 (post-M6 rotation; 4 upstream-dead sources removed 2026-06)
+# Output: 47 (46 live instances; gov_apprenticeships restored 2026-06-16; only jobtensor/comeet/aijobs_global remain removed)
 ```

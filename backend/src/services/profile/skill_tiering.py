@@ -49,7 +49,14 @@ _SOURCE_WEIGHTS: dict[SourceName, float] = {
     "user_declared": 3.0,
     "cv_explicit": 2.0,
     "linkedin": 2.0,
+    # Two-pass LLM enhance sources. ``about_me_llm`` = skills the LLM mined
+    # from the user's own free-text blurb (the user's own words → trust on a
+    # par with an explicit CV mention). ``github_llm`` = skills the LLM read
+    # off repo prose (demonstrated usage but inferred → same trust as a
+    # declared dependency).
+    "about_me_llm": 2.0,
     "github_dep": 1.5,
+    "github_llm": 1.5,
     "github_lang": 1.0,
 }
 
@@ -144,5 +151,10 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
             _add(s, "github_dep")
         for s in getattr(cv, "github_skills_inferred", []) or []:
             _add(s, "github_lang")
+        # Two-pass LLM enhance sources.
+        for s in getattr(cv, "github_llm_skills", []) or []:
+            _add(s, "github_llm")
+        for s in getattr(cv, "about_me_inferred_skills", []) or []:
+            _add(s, "about_me_llm")
 
     return list(evidence.values())

@@ -12,7 +12,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your notifications, account, and preferences
+            Manage your notifications and account
           </p>
         </div>
       </div>

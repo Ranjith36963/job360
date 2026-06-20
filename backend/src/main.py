@@ -12,6 +12,7 @@ from src.core.settings import (
     ADZUNA_APP_KEY,
     CAREERJET_AFFID,
     DB_PATH,
+    DFE_APPRENTICESHIPS_API_KEY,
     ENRICHMENT_THRESHOLD,
     EXPORTS_DIR,
     FINDWORK_API_KEY,
@@ -41,7 +42,6 @@ from src.services.job_enrichment import (
     enrich_batch,
 )
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
-from src.services.notifications.base import get_configured_channels
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.storage import current_profile_version_id, load_profile
@@ -63,6 +63,7 @@ from src.sources.apis_keyed.adzuna import AdzunaSource
 from src.sources.apis_keyed.careerjet import CareerjetSource
 from src.sources.apis_keyed.findwork import FindworkSource
 from src.sources.apis_keyed.google_jobs import GoogleJobsSource
+from src.sources.apis_keyed.gov_apprenticeships import GovApprenticeshipsSource
 from src.sources.apis_keyed.jooble import JoobleSource
 from src.sources.apis_keyed.jsearch import JSearchSource
 from src.sources.apis_keyed.reed import ReedSource
@@ -129,6 +130,7 @@ SOURCE_REGISTRY = {
     "hackernews": HackerNewsSource,
     "careerjet": CareerjetSource,
     "findwork": FindworkSource,
+    "gov_apprenticeships": GovApprenticeshipsSource,
     "nofluffjobs": NoFluffJobsSource,
     # Phase 4: New free sources
     "hn_jobs": HNJobsSource,
@@ -152,12 +154,13 @@ SOURCE_REGISTRY = {
 }
 
 # Number of unique source instances created by _build_sources().
-# 45 not 46 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 46 not 47 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
 # 4 dead sources removed in the 2026-06 M6 rotation: jobtensor, comeet,
-# gov_apprenticeships, aijobs_global — all upstream-dead.
+# gov_apprenticeships, aijobs_global — all upstream-dead. gov_apprenticeships
+# was restored 2026-06-16 against the DfE Display Advert API v2 (keyed).
 # Used by test_main.py::test_source_instance_count_matches_build to catch drift.
 # Update this when adding/removing sources.
-SOURCE_INSTANCE_COUNT = 45
+SOURCE_INSTANCE_COUNT = 46
 
 
 async def _ghost_detection_pass(
@@ -274,6 +277,7 @@ def _build_sources(
         HackerNewsSource(session, search_config=sc),
         CareerjetSource(session, affid=CAREERJET_AFFID, search_config=sc),
         FindworkSource(session, api_key=FINDWORK_API_KEY, search_config=sc),
+        GovApprenticeshipsSource(session, api_key=DFE_APPRENTICESHIPS_API_KEY, search_config=sc),
         NoFluffJobsSource(session, search_config=sc),
         # Group K: Phase 4 new free sources
         HNJobsSource(session, search_config=sc),
@@ -332,6 +336,7 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
     path import-free.
     """
     try:
+        from src.core.settings import ENGINE4_ENABLED  # noqa: PLC0415
         from src.services.llm_matcher import (  # noqa: PLC0415 — lazy by design
             MATCHER_ENABLED,
             MATCHER_MAX_JOBS,
@@ -340,7 +345,8 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             profile_to_matcher_text,
         )
 
-        if not MATCHER_ENABLED:
+        # Engine 4 switch (ENGINE4_ENABLED) OR the legacy MATCHER_ENABLED flag.
+        if not (ENGINE4_ENABLED or MATCHER_ENABLED):
             return
         from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -458,7 +464,10 @@ async def run_search(
         # ENRICHMENT_ENABLED is false we pass an empty dict so the lookup
         # callable always returns None and the multi-dim contribution is 0
         # (CLAUDE.md rule #19 — legacy callers see legacy behaviour).
-        if ENRICHMENT_ENABLED:
+        # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
             enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
         else:
             enrichment_lookup_dict = {}
@@ -678,7 +687,10 @@ async def run_search(
             # which the scorer's enrichment_lookup applies on subsequent runs.
             # Only high-scored jobs go to the LLM, fanned out via a bounded
             # semaphore so a slow provider can't block the pipeline.
-            if ENRICHMENT_ENABLED:
+            # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+            from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+            if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
                 high_scored = [
                     j
                     for j in unique_jobs
@@ -697,6 +709,29 @@ async def run_search(
                     # concurrent × retries 429s every provider at once. 3 keeps the
                     # batch under the per-minute limits while still parallelising.
                     await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
+                    await db.commit()
+
+                    # Engine 2 dim-scoring fix: the first score() (above) ran
+                    # before these jobs had DB ids or enrichment rows, so the
+                    # enrichment dims (seniority/salary/visa/workplace) scored 0.
+                    # Now they have both — re-score with a rebuilt lookup so the
+                    # dims fold into match_score, and persist so the feed write
+                    # below + the catalog reflect the dim-inclusive score.
+                    fresh_lookup = await _build_enrichment_lookup(db._conn)
+                    dim_scorer = JobScorer(
+                        search_config,
+                        user_preferences=profile.preferences if profile else None,
+                        enrichment_lookup=lambda job: fresh_lookup.get(getattr(job, "id", None)),
+                    )
+                    for job in high_scored:
+                        bd = dim_scorer.score(job)
+                        job.match_score = bd.match_score
+                        job.role = bd.title_score
+                        job.skill = bd.skill_score
+                        job.location_score = bd.location_score
+                        job.recency = bd.recency_score
+                        job.seniority_score = bd.seniority_score
+                        await db.update_job_scores(job)
                     await db.commit()
 
             # Per-user feed: write THIS user's matched jobs into user_feed so the
@@ -807,13 +842,6 @@ async def run_search(
                 await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
                 logger.info("Report saved: %s", md_path)
 
-                # Notifications via channel abstraction
-                if not no_notify:
-                    for channel in get_configured_channels():
-                        try:
-                            await channel.send(new_jobs, stats, csv_path=csv_path)
-                        except Exception as e:
-                            logger.error("%s notification failed: %s", channel.name, e)
 
                 # Print time-bucketed summary to console
                 _print_bucketed_summary(new_jobs, "Results")

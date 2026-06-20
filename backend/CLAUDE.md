@@ -22,7 +22,7 @@ lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly   # ~1,528 passing, 3 skipped (~2.5 min) — test_main.py included
+python -m pytest -q -p no:randomly   # ~1,333 passing, 3 skipped (~2.5 min) — test_main.py included
 
 python -m pytest tests/test_scorer.py::test_name -v   # single test
 python -m ruff check .                                # lint (CI gate)
@@ -50,7 +50,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 ## Where things are
 
-- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (46) + `_build_sources()`
+- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (47) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
 - `src/repositories/database.py` — async SQLite · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`

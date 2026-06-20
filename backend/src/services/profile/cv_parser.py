@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from src.services.profile.models import CVData
@@ -66,7 +67,7 @@ Return a JSON object with exactly these fields:
 RULES:
 1. Extract EVERYTHING. If in doubt, include it. A missed skill means a missed job match.
 2. Skills should be individual items, not categories. "Python" not "Programming Languages: Python".
-3. For compound tools, keep them together: "AWS Bedrock" not just "AWS" and "Bedrock" separately.
+3. For a single compound tool keep it whole: "AWS Bedrock". BUT when a skill lists tools in parentheses, extract the parent AND each tool inside as SEPARATE skills — "AWS (Bedrock, SageMaker, S3, CloudWatch)" → "AWS", "AWS Bedrock", "SageMaker", "S3", "CloudWatch"; "Python (Pandas, NumPy, Matplotlib)" → "Python", "Pandas", "NumPy", "Matplotlib"; "OCR (Tesseract)" → "OCR", "Tesseract".
 4. Include achievements with their metrics: "achieving 90% accuracy" not just "90%".
 5. If something appears in both the skills section AND experience bullets, include it once in skills.
 6. Domain-agnostic: whether it's "TensorFlow" or "HIPAA compliance" or "Contract negotiation" — extract it.
@@ -219,6 +220,153 @@ def _build_section_hint(file_path: str) -> str:
     )
 
 
+# ── CV deterministic pass (Pass 1) — no LLM, plain text heuristics ──
+
+_DET_SKILL_HEADINGS = {
+    "skills", "technical skills", "core skills", "key skills",
+    "competencies", "technical competencies", "areas of expertise",
+}
+_DET_SUMMARY_HEADINGS = {
+    "summary", "profile", "professional summary", "about", "about me",
+    "objective", "personal statement",
+}
+# Any heading that ends a section body. Broad on purpose so a skills block
+# stops at the next section even when that section isn't one we extract.
+_DET_OTHER_HEADINGS = {
+    "experience", "work experience", "employment", "education", "projects",
+    "certifications", "licenses & certifications", "achievements", "awards",
+    "publications", "references", "interests", "languages", "contact",
+    "volunteer experience", "courses",
+}
+_DET_ALL_HEADINGS = _DET_SKILL_HEADINGS | _DET_SUMMARY_HEADINGS | _DET_OTHER_HEADINGS
+
+# Delimiters that separate skills on one line.
+_DET_SKILL_DELIMS = set(",•·|;/")
+# Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
+_DET_PAREN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
+
+
+def _det_split_line(line: str) -> list[str]:
+    """Split a skills line on delimiters, but NOT on commas inside parentheses.
+
+    "Python (Pandas, NumPy) • Docker" → ["Python (Pandas, NumPy)", "Docker"]
+    so the parenthetical survives for ``_det_expand_token`` to expand.
+    """
+    toks: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    for ch in line:
+        if ch == "(":
+            depth += 1
+            cur.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            cur.append(ch)
+        elif depth == 0 and ch in _DET_SKILL_DELIMS:
+            toks.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    toks.append("".join(cur))
+    return [t for t in toks if t.strip()]
+
+
+def _det_expand_token(token: str) -> list[str]:
+    """Expand a skill token that wraps tools in parentheses.
+
+    "OCR (Tesseract)" → ["OCR", "Tesseract"]
+    "Python (Pandas, NumPy, Matplotlib)" → ["Python", "Pandas", "NumPy", "Matplotlib"]
+    "Docker" → ["Docker"]
+    The outer term and each comma-separated inner term become separate skills,
+    so CV lines like "AWS (Bedrock, SageMaker, S3)" surface every tool.
+    """
+    tok = token.strip()
+    if not tok:
+        return []
+    m = _DET_PAREN.match(tok)
+    if not m:
+        return [tok]
+    out: list[str] = []
+    outer = m.group(1).strip()
+    if outer:
+        out.append(outer)
+    for inner in m.group(2).split(","):
+        inner = inner.strip()
+        if inner:
+            out.append(inner)
+    return out or [tok]
+
+
+def _det_heading_key(line: str) -> str:
+    """Normalise a line for heading comparison: lowercase, strip, drop a
+    trailing colon. Returns '' for lines too long to be a heading."""
+    t = line.strip().rstrip(":").strip().lower()
+    # Real headings are short. Guards against a sentence that happens to
+    # start with 'Summary of my work ...' being treated as a heading.
+    if len(t) > 30:
+        return ""
+    return t
+
+
+def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
+    """Return the body lines under the first heading in ``heading_set``,
+    stopping at the next recognised heading. Empty list when absent."""
+    out: list[str] = []
+    capturing = False
+    for line in lines:
+        key = _det_heading_key(line)
+        if not capturing:
+            if key in heading_set:
+                capturing = True
+            continue
+        # capturing
+        if key and key in _DET_ALL_HEADINGS:
+            break  # next section starts
+        if line.strip():
+            out.append(line.strip())
+    return out
+
+
+# NOTE (CLAUDE.md rule #28): the hardcoded prose skill-term + common-tool
+# vocabularies that used to live here were removed. The deterministic pass does
+# NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
+
+
+def deterministic_cv_fields(raw_text: str) -> dict:
+    """Pass 1 for the CV — pull base fields from text with NO LLM.
+
+    Conservative by design: only the clearly-delimited "Skills" and
+    "Summary" sections are read. Returns ``{"skills": [...], "summary": str}``.
+    The LLM pass later enhances this; this pass guarantees *something* lands
+    even when no LLM key is configured, and lets the orchestrator re-run on a
+    later change from the stored ``raw_text``.
+    """
+    if not raw_text or not raw_text.strip():
+        return {"skills": [], "summary": ""}
+    lines = raw_text.splitlines()
+
+    skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS)
+    skills: list[str] = []
+    seen: set[str] = set()
+    for line in skill_lines:
+        for token in _det_split_line(line):
+            # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
+            # yields the real skills, not the category name.
+            if ":" in token:
+                token = token.rsplit(":", 1)[-1]
+            for tok in _det_expand_token(token):
+                if tok and tok.lower() not in seen:
+                    skills.append(tok)
+                    seen.add(tok.lower())
+
+    # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
+    # The deterministic pass reads STRUCTURE only (the Skills section + its
+    # list/parenthesis tokens). Semantic skills stated in prose are the LLM
+    # pass's job — see llm_cv_fields_from_text.
+    summary = " ".join(_det_collect_section(lines, _DET_SUMMARY_HEADINGS)).strip()
+    return {"skills": skills, "summary": summary}
+
+
 async def parse_cv_async(file_path: str) -> CVData:
     """Parse a CV file using LLM analysis. Works for ANY professional domain.
 
@@ -244,10 +392,23 @@ async def parse_cv_async(file_path: str) -> CVData:
             "Only PDF and DOCX files are supported."
         )
 
+    # PDF-only font-size section hint (needs the file). The LLM extraction
+    # itself works purely off text — see ``llm_cv_fields_from_text``.
+    section_hint = _build_section_hint(file_path)
+    return await llm_cv_fields_from_text(raw_text, section_hint=section_hint)
+
+
+async def llm_cv_fields_from_text(raw_text: str, section_hint: str = "") -> CVData:
+    """Pass 2 for the CV — LLM extraction from raw text only (no file needed).
+
+    Factored out of ``parse_cv_async`` so the two-pass orchestrator can re-run
+    the CV LLM pass on a later profile change from the stored ``cv.raw_text``,
+    without the original upload. Same validation + graceful-degradation
+    contract as the file path (Batch 1.1 / review fix #3).
+    """
     from src.services.profile.llm_provider import llm_extract, llm_extract_validated
     from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
 
-    section_hint = _build_section_hint(file_path)
     prompt = _CV_PROMPT.format(cv_text=raw_text) + section_hint
 
     try:

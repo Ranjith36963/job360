@@ -63,8 +63,77 @@ _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.IGNORECASE)
 
 # ── Text extraction (thin wrapper over pdfplumber) ────────────────
 
+# Minimum clear vertical gutter (px) that marks a real two-column layout.
+_COLUMN_GUTTER_MIN = 24
+
+
+def _words_to_lines(words: list[dict]) -> str:
+    """Rebuild text from words: group by ``top`` (3px tolerance), sort lines
+    top→bottom and words left→right within a line."""
+    from collections import defaultdict
+
+    rows: dict = defaultdict(list)
+    for w in words:
+        rows[round(float(w.get("top", 0)) / 3.0)].append(w)
+    out: list[str] = []
+    for key in sorted(rows):
+        ws = sorted(rows[key], key=lambda w: float(w.get("x0", 0)))
+        out.append(" ".join(str(w.get("text", "")) for w in ws))
+    return "\n".join(out)
+
+
+def _dewrap_columns(words: list[dict], page_width: float) -> str | None:
+    """De-interleave a two-column page so each column reads top-to-bottom.
+
+    LinkedIn's "Save to PDF" puts a sidebar (Contact / Top Skills /
+    Certifications) beside the main column. pdfplumber's ``extract_text``
+    reads them in visual-line order, interleaving the two — which orphans the
+    "Top Skills" items under the wrong heading. This finds a clear vertical
+    gutter and emits the left column fully, then the right column.
+
+    Returns ``None`` when there is no genuine two-column structure (no wide
+    empty gutter, or one side is sparse) — the caller then uses flat text, so
+    single-column CVs/LinkedIn exports are unaffected.
+    """
+    if not words or page_width <= 0:
+        return None
+    lo, hi = int(page_width * 0.18), int(page_width * 0.58)
+    if hi <= lo:
+        return None
+    # Mark every x covered by a word within the candidate gutter region.
+    covered = bytearray(hi - lo + 1)
+    for w in words:
+        x0 = int(float(w.get("x0", 0)))
+        x1 = int(float(w.get("x1", x0)))
+        for x in range(max(lo, x0), min(hi, x1) + 1):
+            covered[x - lo] = 1
+    # Longest run of uncovered x in [lo, hi] = the gutter.
+    best_w = best_a = best_b = 0
+    run_start = None
+    for i in range(len(covered) + 1):
+        if i < len(covered) and covered[i] == 0:
+            if run_start is None:
+                run_start = i
+        elif run_start is not None:
+            if i - run_start > best_w:
+                best_w, best_a, best_b = i - run_start, run_start + lo, i + lo
+            run_start = None
+    if best_w < _COLUMN_GUTTER_MIN:
+        return None
+    left = [w for w in words if float(w.get("x1", 0)) <= best_a]
+    right = [w for w in words if float(w.get("x0", 0)) >= best_b]
+    if len(left) < 6 or len(right) < 6:
+        return None
+    return _words_to_lines(left) + "\n" + _words_to_lines(right)
+
+
 def _extract_text(file_path: str) -> str:
-    """Read all pages of a PDF into one newline-joined string. Empty on failure."""
+    """Read all pages of a PDF into one newline-joined string. Empty on failure.
+
+    Two-column pages are de-interleaved (``_dewrap_columns``) so a sidebar
+    reads as a contiguous block; single-column pages fall back to flat
+    ``extract_text`` unchanged.
+    """
     try:
         import pdfplumber
     except ImportError:
@@ -72,7 +141,15 @@ def _extract_text(file_path: str) -> str:
         return ""
     try:
         with pdfplumber.open(file_path) as pdf:
-            parts = [p.extract_text() or "" for p in pdf.pages]
+            parts: list[str] = []
+            for page in pdf.pages:
+                col: str | None = None
+                try:
+                    words = page.extract_words()
+                    col = _dewrap_columns(words, float(page.width or 0))
+                except Exception:  # noqa: BLE001 — fall back to flat text
+                    col = None
+                parts.append(col if col is not None else (page.extract_text() or ""))
         return "\n".join(parts)
     except Exception as e:
         logger.warning("Failed to read LinkedIn PDF %s: %s", file_path, e)
@@ -147,6 +224,52 @@ def _extract_header_fields(header_text: str) -> dict[str, str]:
     if "," in headline:
         industry = headline.rsplit(",", 1)[-1].strip()
     return {"name": name, "headline": headline, "industry": industry}
+
+
+_TECH_LINE = re.compile(
+    r"^\s*(?:technologies|tech stack|tools|skills|continuously learning)\s*:\s*(.*)$",
+    re.IGNORECASE,
+)
+_TECH_SPLIT = re.compile(r"[•·|,]|\s-\s")
+
+
+def _extract_inline_tech_skills(text: str) -> list[str]:
+    """Deterministically pull skills from inline 'Technologies: A • B • C' lines
+    in the experience body (incl. a wrapped continuation line starting '•').
+
+    LinkedIn lists the tech stack per role on these lines; the section-based
+    ``_extract_skills`` only reads the "Top Skills" sidebar, so without this the
+    deterministic pass misses Docker/AWS Bedrock/RAG/etc. that are stated outright.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    seen: set[str] = set()
+    i = 0
+    while i < len(lines):
+        m = _TECH_LINE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        buf = [m.group(1)]
+        j = i + 1
+        # Keep absorbing wrapped continuation lines. A wrap is signalled either
+        # by the previous line ending on a dangling bullet ("OpenAI API •") or
+        # by the next line starting with a bullet ("• Python • ...").
+        while j < len(lines):
+            prev_dangles = buf[-1].rstrip().endswith(("•", "·"))
+            nxt = lines[j].strip()
+            if prev_dangles or nxt[:1] in {"•", "·", "-"}:
+                buf.append(lines[j])
+                j += 1
+            else:
+                break
+        for tok in _TECH_SPLIT.split(" ".join(buf)):
+            t = tok.strip().lstrip("•·-").strip()
+            if t and 1 < len(t) <= 40 and t.lower() not in seen:
+                out.append(t)
+                seen.add(t.lower())
+        i = j
+    return out
 
 
 def _extract_skills(skills_text: str) -> list[str]:
@@ -270,6 +393,67 @@ TEXT:
 ---
 {text}
 ---"""
+
+
+_LINKEDIN_SKILLS_PROMPT = """Below is the raw text of a LinkedIn profile (exported "Save to PDF").
+The two-column layout means the "Top Skills" sidebar is often interleaved with
+other text, so read the WHOLE thing.
+
+List every concrete professional SKILL the person claims — their "Top Skills",
+technologies in their summary/experience, anything in a "Continuously learning"
+or similar line, AND skills named inside summary sentences or "WHAT I DO"-style
+bullets (e.g. "Multimodal AI", "LLM fine-tuning", "prompt engineering", "FAISS",
+"vector databases", "cloud deployment").
+
+Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
+
+Rules:
+- Only skills the text supports. Do not invent.
+- Individual items, not categories. Pull each tool out of a parenthesis list,
+  e.g. "vector databases (ChromaDB, FAISS)" → "Vector Databases", "ChromaDB", "FAISS".
+- Do NOT fabricate "<word> Processing" skills from a modality list like
+  "text, image, speech, audio processing" — emit "Multimodal AI" and
+  "Audio Processing" only if those exact terms appear.
+- Skip bare contact info, company names, and job titles.
+
+LINKEDIN TEXT:
+---
+{text}
+---"""
+
+
+async def llm_infer_linkedin_skills(raw_text: str) -> list[str]:
+    """Two-pass LLM enhance for LinkedIn skills.
+
+    LinkedIn's "Save to PDF" is two-column, so pdfplumber interleaves the
+    "Top Skills" sidebar with the main column and the deterministic heading
+    split loses it. This reads the FULL raw text with an LLM, recovering the
+    Top Skills plus skills mentioned in prose (e.g. "Vector databases • RLHF").
+
+    Returns ``[]`` (never raises) on blank input or provider failure. Blank
+    input never calls the LLM (cost guard).
+    """
+    if not raw_text or not raw_text.strip():
+        return []
+    try:
+        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
+        result = await llm_extract(
+            _LINKEDIN_SKILLS_PROMPT.format(text=raw_text), system=_LINKEDIN_SYSTEM
+        )
+    except Exception as e:  # noqa: BLE001 — never crash the pass
+        logger.warning("LinkedIn LLM skill inference failed: %s", e)
+        return []
+
+    raw = result.get("skills") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in raw:
+        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
+            out.append(s.strip())
+            seen.add(s.strip().lower())
+    return out
 
 
 async def _llm_json(prompt: str) -> dict[str, Any]:
@@ -437,6 +621,8 @@ def _empty_linkedin_data() -> dict:
         "projects": [],
         "volunteer": [],
         "courses": [],
+        # Two-pass — raw text kept for offline LLM re-runs (empty here).
+        "raw_text": "",
     }
 
 
@@ -454,12 +640,35 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
             logger.info("PDF at %s does not look like a LinkedIn export; skipping", file_path)
         return _empty_linkedin_data()
 
+    return await parse_linkedin_from_text(text)
+
+
+async def parse_linkedin_from_text(text: str) -> dict:
+    """Parse already-extracted LinkedIn text into the canonical dict schema.
+
+    Factored out of ``parse_linkedin_pdf_async`` so the two-pass orchestrator
+    can re-run the LinkedIn LLM pass from the stored ``cv.linkedin_raw_text``
+    on a later profile change — no re-upload needed. Returns the empty-data
+    dict when the text doesn't look like a LinkedIn export.
+    """
+    if not text or not _looks_like_linkedin(text):
+        return _empty_linkedin_data()
+
     sections = _split_sections(text)
     header = _extract_header_fields(sections.get("header", ""))
     summary = sections.get("summary", "").strip()
     skills = _extract_skills(
         sections.get("skills", "") or sections.get("top skills", "")
     )
+    # Also harvest the inline "Technologies: A • B • C" lines stated per role —
+    # deterministic, and recovers the tech stack the Top-Skills sidebar omits.
+    seen_sk = {s.lower() for s in skills}
+    for s in _extract_inline_tech_skills(text):
+        if s.lower() not in seen_sk:
+            skills.append(s)
+            seen_sk.add(s.lower())
+    # (No hardcoded prose skill-term scan — CLAUDE.md rule #28. Skills stated in
+    # summary/"WHAT I DO" prose are recovered by the LLM pass, llm_infer_linkedin_skills.)
     experience_text = sections.get("experience", "")
     education_text = sections.get("education", "")
     certs_text = (
@@ -510,6 +719,9 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
         "projects": _coerce_projects(_get(proj_raw, "projects")),
         "volunteer": _coerce_volunteer(_get(vol_raw, "volunteer")),
         "courses": _coerce_courses(_get(course_raw, "courses")),
+        # Two-pass — keep the extracted text so the LLM pass can re-run on a
+        # later profile change without the user re-uploading the PDF.
+        "raw_text": text,
     }
 
 
@@ -571,6 +783,11 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict) -> CVData:
     cv.linkedin_positions = linkedin_data.get("positions", [])
     cv.linkedin_skills = new_linkedin_skills
     cv.linkedin_industry = linkedin_data.get("industry", "")
+    # Two-pass — keep the raw text (if the parser supplied it) so the LLM
+    # pass can re-run offline. Only overwrite when a non-empty value arrives,
+    # so a partial re-enrich never wipes a previously-stored transcript.
+    if linkedin_data.get("raw_text"):
+        cv.linkedin_raw_text = linkedin_data["raw_text"]
 
     # Batch 1.5 — expanded sections. Overwrite rather than merge: LinkedIn
     # is the canonical source for these, and re-parsing a profile should

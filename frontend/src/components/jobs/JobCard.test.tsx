@@ -169,9 +169,11 @@ describe("JobCard", () => {
   it("D-4: renders formatted deadline date when deadline is present", () => {
     const job = makeJob({ deadline: "2026-06-18", deadline_source: "listing" });
     render(<JobCard job={job} onAction={mockOnAction} />);
-    // "18 Jun 2026" is a fixed string — not clock-dependent
-    expect(screen.getByText(/18 Jun 2026/)).toBeInTheDocument();
-    expect(screen.getByText(/Apply by/)).toBeInTheDocument();
+    // The deadline renders inside a Base UI Tooltip trigger whose accessible
+    // name is set via aria-label ("Apply by 18 Jun 2026"); the visible text is
+    // split across the icon + text nodes, so query by the accessible label
+    // (a11y-correct and reliable in jsdom). "18 Jun 2026" is clock-independent.
+    expect(screen.getByLabelText(/Apply by 18 Jun 2026/)).toBeInTheDocument();
   });
 
   // D-5: renders "No deadline listed" when deadline is null

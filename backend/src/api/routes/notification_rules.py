@@ -1,16 +1,10 @@
-"""Step-3 B-02 — per-user per-channel notification rule CRUD.
+"""Channels & Notifications overhaul — single per-user notification rule.
 
-Four endpoints:
-  GET    /settings/notification-rules          list caller's rules
-  POST   /settings/notification-rules          create or upsert (by user+channel)
-  PATCH  /settings/notification-rules/{rule_id} partial update
-  DELETE /settings/notification-rules/{rule_id} delete (IDOR-safe)
+Two endpoints:
+  GET  /settings/notification-rule   get the caller's rule (404 if none exists)
+  PUT  /settings/notification-rule   upsert (create or replace) the rule
 
-All routes:
-  * gate on ``require_user`` — user.id is the only accepted identity source
-    (CLAUDE.md rule #12).
-  * PATCH/DELETE scope their WHERE clause with ``AND user_id = ?`` so a caller
-    cannot read or modify another user's rules (IDOR guard).
+All routes gate on ``require_user`` (CLAUDE.md rule #12).
 """
 
 from __future__ import annotations
@@ -19,12 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
-from src.api.models import (
-    NotificationRule,
-    NotificationRuleCreate,
-    NotificationRuleListResponse,
-    NotificationRuleUpdate,
-)
+from src.api.models import NotificationRule, NotificationRuleUpdate
 from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["notification-rules"])
@@ -33,14 +22,14 @@ router = APIRouter(tags=["notification-rules"])
 def _rule_from_row(row: dict) -> NotificationRule:
     """Convert a DB row dict to a NotificationRule response model."""
     return NotificationRule(
-        id=row["id"],
         user_id=row["user_id"],
-        channel=row["channel"],
         score_threshold=row["score_threshold"],
         notify_mode=row["notify_mode"],
+        interval_hours=row.get("interval_hours", 6),
+        daily_send_time=row.get("daily_send_time", "08:00"),
         quiet_hours_start=row.get("quiet_hours_start"),
         quiet_hours_end=row.get("quiet_hours_end"),
-        digest_send_time=row.get("digest_send_time"),
+        last_sent_at=row.get("last_sent_at"),
         enabled=bool(row["enabled"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -48,53 +37,15 @@ def _rule_from_row(row: dict) -> NotificationRule:
 
 
 @router.get(
-    "/settings/notification-rules",
-    response_model=NotificationRuleListResponse,
-)
-async def list_notification_rules(
-    db: JobDatabase = Depends(get_db),  # noqa: B008
-    user: CurrentUser = Depends(require_user),  # noqa: B008
-) -> NotificationRuleListResponse:
-    """Return all notification rules for the authenticated user."""
-    rows = await db.get_notification_rules(user.id)
-    return NotificationRuleListResponse(rules=[_rule_from_row(r) for r in rows])
-
-
-@router.post(
-    "/settings/notification-rules",
+    "/settings/notification-rule",
     response_model=NotificationRule,
-    status_code=status.HTTP_201_CREATED,
 )
-async def create_notification_rule(
-    body: NotificationRuleCreate,
+async def get_notification_rule(
     db: JobDatabase = Depends(get_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> NotificationRule:
-    """Create or upsert a notification rule for the given channel.
-
-    If a rule already exists for (user, channel), it is replaced in-place
-    with the new settings (upsert semantics via UNIQUE(user_id, channel)).
-    """
-    row = await db.upsert_notification_rule(user.id, body.model_dump())
-    return _rule_from_row(row)
-
-
-@router.patch(
-    "/settings/notification-rules/{rule_id}",
-    response_model=NotificationRule,
-)
-async def update_notification_rule(
-    rule_id: int,
-    body: NotificationRuleUpdate,
-    db: JobDatabase = Depends(get_db),  # noqa: B008
-    user: CurrentUser = Depends(require_user),  # noqa: B008
-) -> NotificationRule:
-    """Partially update a notification rule.
-
-    Only fields supplied in the request body are changed. Returns 404 when
-    the rule does not exist or belongs to a different user.
-    """
-    row = await db.update_notification_rule(rule_id, user.id, body.model_dump())
+    """Return the authenticated user's notification rule, or 404 if none set."""
+    row = await db.get_user_notification_rule(user.id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -103,22 +54,32 @@ async def update_notification_rule(
     return _rule_from_row(row)
 
 
-@router.delete(
-    "/settings/notification-rules/{rule_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+@router.put(
+    "/settings/notification-rule",
+    response_model=NotificationRule,
 )
-async def delete_notification_rule(
-    rule_id: int,
+async def upsert_notification_rule(
+    body: NotificationRuleUpdate,
     db: JobDatabase = Depends(get_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
-) -> None:
-    """Delete a notification rule.
+) -> NotificationRule:
+    """Create or update the authenticated user's single notification rule.
 
-    Returns 404 when the rule does not exist or belongs to a different user.
+    Fields not supplied keep their current value (or schema default on first
+    create). Uses upsert semantics via UNIQUE(user_id).
     """
-    deleted = await db.delete_notification_rule(rule_id, user.id)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="notification rule not found",
-        )
+    # Load existing rule to merge with update fields
+    existing = await db.get_user_notification_rule(user.id) or {}
+    data = {
+        "score_threshold": existing.get("score_threshold", 60),
+        "notify_mode": existing.get("notify_mode", "instant"),
+        "interval_hours": existing.get("interval_hours", 6),
+        "daily_send_time": existing.get("daily_send_time", "08:00"),
+        "quiet_hours_start": existing.get("quiet_hours_start"),
+        "quiet_hours_end": existing.get("quiet_hours_end"),
+        "enabled": bool(existing.get("enabled", True)),
+    }
+    update_dict = body.model_dump(exclude_unset=True)
+    data.update(update_dict)
+    row = await db.save_user_notification_rule(user.id, data)
+    return _rule_from_row(row)

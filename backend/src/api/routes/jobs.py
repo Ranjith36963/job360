@@ -285,11 +285,15 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     the heavy modules per CLAUDE.md rule #16.
     """
     try:
-        from src.core.settings import SEMANTIC_ENABLED  # noqa: PLC0415 — lazy
+        from src.core.settings import (  # noqa: PLC0415 — lazy
+            ENGINE3_ENABLED,
+            SEMANTIC_ENABLED,
+        )
     except Exception:
         return rows
 
-    if not SEMANTIC_ENABLED:
+    # Engine 3 switch (ENGINE3_ENABLED) OR the legacy SEMANTIC_ENABLED flag.
+    if not (ENGINE3_ENABLED or SEMANTIC_ENABLED):
         return rows
 
     try:
@@ -551,6 +555,34 @@ async def get_job_duplicates(
     return {"job_id": job_id, "duplicates": duplicates, "total": len(duplicates)}
 
 
+def _row_to_scoring_job(row: dict):
+    """Reconstruct a ``Job`` from a stored DB row for re-scoring.
+
+    CRUCIAL: sets ``job.id`` from the row. The scorer's ``enrichment_lookup``
+    is keyed on ``job.id``; omitting it makes every enrichment dim
+    (seniority/salary/visa/workplace) silently score 0 (the dim-scoring-id
+    bug). ``score()`` reads title/description/location/salary + the date
+    fields, so we populate just those.
+    """
+    from src.models import Job  # noqa: PLC0415 — lazy (rule #16)
+
+    job = Job(
+        title=row.get("title", "") or "",
+        company=row.get("company", "") or "",
+        apply_url=row.get("apply_url", "") or "",
+        source=row.get("source", "") or "",
+        date_found=row.get("date_found", "") or "",
+        location=row.get("location", "") or "",
+        description=row.get("description", "") or "",
+        salary_min=row.get("salary_min"),
+        salary_max=row.get("salary_max"),
+        posted_at=row.get("posted_at"),
+        date_confidence=row.get("date_confidence") or "low",
+    )
+    job.id = row.get("id")  # type: ignore[attr-defined]
+    return job
+
+
 async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> dict:
     """Rewrite the per-dimension breakdown on ``row`` to reflect ``user``'s
     own profile, returning a shallow copy with the dim columns overridden.
@@ -571,7 +603,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     there is nothing to personalise against). Heavy scoring imports are kept
     local per CLAUDE.md rule #16 — they only load on an authenticated detail GET.
     """
-    from src.models import Job  # noqa: PLC0415 — lazy (rule #16)
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
     from src.services.feed import FeedService  # noqa: PLC0415
     from src.services.job_enrichment import (  # noqa: PLC0415
         ENRICHMENT_ENABLED,
@@ -588,28 +620,18 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     search_config = generate_search_config(profile)
     # Mirror run_search's scorer wiring exactly so a recompute against an
     # unchanged profile reproduces the stored feed score (CLAUDE.md rule #19).
-    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if ENRICHMENT_ENABLED else {}
+    # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+    enrichment_on = ENGINE2_ENABLED or ENRICHMENT_ENABLED
+    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if enrichment_on else {}
     scorer = JobScorer(
         search_config,
         user_preferences=profile.preferences,
         enrichment_lookup=lambda j: enrichment_lookup_dict.get(getattr(j, "id", None)),
     )
 
-    # Reconstruct just enough of the Job for scoring: score() reads title,
-    # description, location, salary, and the date fields (recency).
-    job = Job(
-        title=row.get("title", "") or "",
-        company=row.get("company", "") or "",
-        apply_url=row.get("apply_url", "") or "",
-        source=row.get("source", "") or "",
-        date_found=row.get("date_found", "") or "",
-        location=row.get("location", "") or "",
-        description=row.get("description", "") or "",
-        salary_min=row.get("salary_min"),
-        salary_max=row.get("salary_max"),
-        posted_at=row.get("posted_at"),
-        date_confidence=row.get("date_confidence") or "low",
-    )
+    # Reconstruct the Job for scoring — _row_to_scoring_job sets job.id so the
+    # enrichment_lookup (keyed on id) actually hits and the dims contribute.
+    job = _row_to_scoring_job(row)
     breakdown = scorer.score(job)
 
     feed_score = await FeedService(db._conn).get_score(user.id, row["id"])

@@ -26,6 +26,10 @@ JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 CAREERJET_AFFID = os.getenv("CAREERJET_AFFID", "")
 FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+# DfE "Find an apprenticeship" Display Advert API v2 — register for a free
+# subscription key at https://developer.apprenticeships.education.gov.uk.
+# Empty (default) → the gov_apprenticeships source skips gracefully.
+DFE_APPRENTICESHIPS_API_KEY = os.getenv("DFE_APPRENTICESHIPS_API_KEY", "")
 
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -110,6 +114,31 @@ WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
 # When true, callers that check this flag activate the semantic retrieval path.
 SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+# --- Independent per-engine switches -------------------------------------
+# Four scoring engines, each with its own on/off switch so ANY combination
+# can be selected (e.g. E1+E3 on, E2+E4 off). Each switch DEFAULTS to its
+# legacy gate so existing .env files + the whole test suite behave identically:
+#   * Engine 1 — keyword       -> ON (was always-on; first flag it ever had)
+#   * Engine 2 — dimensions    -> defaults to ENRICHMENT_ENABLED
+#   * Engine 3 — hybrid search -> defaults to SEMANTIC_ENABLED
+#   * Engine 4 — LLM judge     -> defaults to MATCHER_ENABLED
+# At each gate the effective state is "ENGINEx_ENABLED OR <legacy flag>", so
+# flipping the legacy flag still works (back-compat) while the new switch lets
+# you drive every engine from one uniform set of names.
+ENGINE1_ENABLED = _env_flag("ENGINE1_ENABLED", True)
+ENGINE2_ENABLED = _env_flag("ENGINE2_ENABLED", _env_flag("ENRICHMENT_ENABLED", False))
+ENGINE3_ENABLED = _env_flag("ENGINE3_ENABLED", SEMANTIC_ENABLED)
+ENGINE4_ENABLED = _env_flag("ENGINE4_ENABLED", _env_flag("MATCHER_ENABLED", False))
+
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
@@ -144,6 +173,7 @@ RATE_LIMITS = {
     "hackernews": {"concurrent": 2, "delay": 1.0},
     "careerjet": {"concurrent": 1, "delay": 2.0},
     "findwork": {"concurrent": 1, "delay": 2.0},
+    "gov_apprenticeships": {"concurrent": 1, "delay": 2.0},  # 150 req / 5 min = 1 per 2s
     "nofluffjobs": {"concurrent": 2, "delay": 1.5},
     # New sources (Phase 4)
     "hn_jobs": {"concurrent": 3, "delay": 0.5},

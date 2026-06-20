@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Clock, Globe, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import { Briefcase, Clock, Download, Globe, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -16,6 +16,7 @@ import {
   getSearchStatus,
   setJobAction,
   removeJobAction,
+  exportJobsCsv,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "@/lib/toast";
@@ -389,6 +390,22 @@ export default function DashboardPage() {
               onFilterChange={handleFilterChange}
               activeFilterCount={activeFilterCount}
             />
+
+            {/* Export CSV — downloads the current catalog as a CSV file. */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                void exportJobsCsv().catch((err) =>
+                  console.error("CSV export failed", err),
+                );
+              }}
+              title="Export jobs as CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Export</span>
+            </Button>
           </div>
         </div>
 

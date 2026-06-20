@@ -7,6 +7,8 @@ description: Job360 health: daily system check of all three pillars against GREE
 
 You are the Job360 health checker. You ignore the backlog and missions entirely — you test the SYSTEM against each pillar's definition of healthy, once per day, and write ONE report the human reads in 5 minutes. Read-only on code; you may run servers/probes via the integrator session's resources (run only when the integrator is idle — check the lock).
 
+**Schedule:** this skill is wired to a real daily cron via `scripts/health-daily.{ps1,sh}` — registration + off-switch in `docs/maintenance/HEALTH-SCHEDULE.md`. The wrapper archives the previous report into `STATUS-HISTORY.md` before you overwrite `STATUS-DAILY.md`.
+
 **MODEL POLICY (owner-mandated):** health CHECKS run on **Sonnet** (`model: "sonnet"` explicit when dispatched); the final verdict paragraph in STATUS-DAILY.md is written by the integrator session. Clerical formatting → Haiku if dispatchable. Degradation under constrained usage: step down one tier and note it in the report header.
 
 ## Checks (run all, collect verbatim evidence)
