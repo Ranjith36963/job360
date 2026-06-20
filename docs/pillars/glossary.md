@@ -108,7 +108,7 @@ Symmetric encryption format (AES-128-CBC + HMAC-SHA256) from the `cryptography` 
 
 ### FX (Foreign exchange)
 
-Static 21-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
+Static 18-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
 **Code:** `backend/src/core/fx.py` · **Pillar 2**
 
 ### Ghost detection
@@ -211,7 +211,7 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 
 ### Skill synonyms (canonicalize_skill / aliases_for)
 
-529-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
+493-entry static alias dict making `k8s`, `kube`, `kubernetes` interchangeable everywhere skill matching happens.
 **Code:** `backend/src/core/skill_synonyms.py` · **Pillar 2**
 
 ### SOURCE_REGISTRY

@@ -261,13 +261,13 @@ python -m src.cli sources
 
 The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-coded default keyword lists in `core/keywords.py` are empty since 2026-04-09 — a profile is mandatory for the engine to produce meaningful scores. The 4-component formula above runs alongside the **Batch-2.9 multi-dimensional scoring** (seniority + salary + visa + workplace, each weighted via env vars `SENIORITY_WEIGHT`/`SALARY_WEIGHT`/`VISA_WEIGHT`/`WORKPLACE_WEIGHT`) when `ENRICHMENT_ENABLED=true` and the user has filled in preferences. Final 9-field `ScoreBreakdown` documented in `docs/pillars/02-search-and-match-engine.md`.
 
-## Matching engines (keyword funnel → enrichment → semantic → LLM judge)
+## Matching engines (keyword → dimensions → hybrid → LLM judge)
 
-Four engines, all opt-in except the keyword funnel. **Engines 2–4 default OFF.**
+Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.**
 
 **Engine 1 — Keyword funnel** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula, gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), penalties −30/−15. With `user_preferences + enrichment_lookup` adds four dimension scorers (Salary 10 / Seniority 8 / Visa 6 / Workplace 6), clamped to [0, 100].
 
-**Engine 2 — LLM enrichment** (opt-in, `ENRICHMENT_ENABLED=true`): `services/job_enrichment.py`. Jobs scoring >= `ENRICHMENT_THRESHOLD` (default 60) are sent to the Gemini→Groq→Cerebras LLM chain; results stored in the shared `job_enrichment` table (18-field `JobEnrichment` schema, 8 enums). Idempotent per job. Used by engine 1's dimension scorers at read time.
+**Engine 2 — Dimensions** (opt-in, `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py` (wired in `skill_matcher.py`). Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data comes from the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default 60) go to the Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (18-field `JobEnrichment` schema, 8 enums). Same `ENRICHMENT_ENABLED` flag gates both.
 
 **Engine 3 — Semantic retrieval** (opt-in, `SEMANTIC_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in ChromaDB (`services/vector_index.py`). Query path (`services/retrieval.py`) fuses BM25 + vector results via RRF (k=60) and cross-encoder reranks. Surfaced via `GET /api/jobs?mode=hybrid`.
 
@@ -346,7 +346,7 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/              # 20 forward+reverse SQL migration pairs (0000 → 0019) + runner.py
+│   ├── migrations/              # 21 forward+reverse SQL migration pairs (0000 → 0020) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile

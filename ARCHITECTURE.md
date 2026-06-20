@@ -39,7 +39,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 20 forward/reverse SQL migrations (0000 → 0019) + runner.py
+│   ├── migrations/                   # 21 forward/reverse SQL migrations (0000 → 0020) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
@@ -51,8 +51,8 @@ job360/
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
-│   │   │   ├── skill_synonyms.py     # 529-entry alias dict (k8s↔kubernetes, ...)
-│   │   │   ├── fx.py                 # 21-currency → GBP rates
+│   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
+│   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── skill_matcher.py      # JobScorer + score_job; 9-field ScoreBreakdown
@@ -77,7 +77,7 @@ job360/
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 20-migration forward-compat schema
+│   │   │   ├── database.py           # Async SQLite + 21-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
