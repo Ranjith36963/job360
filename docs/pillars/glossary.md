@@ -108,7 +108,7 @@ Symmetric encryption format (AES-128-CBC + HMAC-SHA256) from the `cryptography` 
 
 ### FX (Foreign exchange)
 
-Static 21-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
+Static 18-currency → GBP rate table (Q1 2026 averages) used to roll non-GBP salaries to GBP. Unknown currency → ×1.0 (treated as GBP, safe degraded mode).
 **Code:** `backend/src/core/fx.py` · **Pillar 2**
 
 ### Ghost detection
