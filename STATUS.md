@@ -105,14 +105,14 @@
 
 ## Matching Engines
 
-Four engines are available, stacked funnel→judge. All default OFF except the keyword funnel:
+Four engines are available, stacked **keyword → dimensions → hybrid → LLM judge**. All default OFF except the keyword engine:
 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
-| #1 Keyword funnel | `services/skill_matcher.py` (JobScorer) | always on | ON |
-| #2 Enrichment | `services/job_enrichment.py` | `ENRICHMENT_ENABLED` | false |
-| #3 Semantic | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
-| #4 LLM judge | `services/llm_matcher.py` (MatchVerdict) | `MATCHER_ENABLED` | false |
+| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
+| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace, wired in `skill_matcher.py:519-536`; its data is supplied by the **enrichment** LLM step (`services/job_enrichment.py` → `job_enrichment` table), which the same flag gates | `ENRICHMENT_ENABLED` | false |
+| #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
+| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
 Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
 

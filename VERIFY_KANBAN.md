@@ -34,7 +34,7 @@ Re-ran the live app this session and re-audited every doc against the running co
 
 **Matching engines (this deployment's `.env` enables all 3):**
 - **Engine 1 — Keyword:** ✅ live (801 `user_feed` rows scored).
-- **Engine 2 — Enrichment:** ✅ has run (155 `job_enrichment` rows); *new* LLM calls quota-blocked today.
+- **Engine 2 — Dimensions:** ✅ the +30 scoring (seniority/salary/visa/workplace) in `scoring_dimensions.py` / `skill_matcher.py:519-536`, gated by `ENRICHMENT_ENABLED`. Its data comes from the **Enrichment** LLM step (`job_enrichment.py`) → 155 `job_enrichment` rows exist (proven run); *new* enrichment LLM calls quota-blocked today.
 - **Engine 3 — Semantic/hybrid:** ✅ **live now** — `?mode=hybrid` re-ranked (200, distinct order; 3,536 `job_embeddings`, local model).
 - **Engine 4 — LLM matcher:** ✅ code + prior verdicts proven; *new* LLM calls quota-blocked today.
 
