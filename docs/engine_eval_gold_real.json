@@ -1,0 +1,100 @@
+{
+"eval-real": {
+"3379": {
+"fit": 80,
+"reason": "Fullstack Python, fully remote (anywhere) \u2014 exact stack + remote+visa-friendly; senior slightly above mid"
+},
+"3854": {
+"fit": 75,
+"reason": "Backend Engineer, London, Wise (sponsors) \u2014 core lane; senior just above mid"
+},
+"3903": {
+"fit": 72,
+"reason": "Frontend Engineer London (React-likely); hybrid not remote, frontend subset of his fullstack"
+},
+"4926": {
+"fit": 68,
+"reason": "Fullstack Engineer, Remote-International (great for visa); Web3 domain stretch but skills transfer; senior"
+},
+"1093": {
+"fit": 62,
+"reason": "Software Engineer London, generalist/fullstack; senior overshoots mid"
+},
+"5050": {
+"fit": 58,
+"reason": "GenAI Full Stack but Managing Consultant \u2014 consulting/leadership overshoots mid IC; fullstack relevant"
+},
+"3669": {
+"fit": 58,
+"reason": "Full Stack Tech Lead, Manchester, cloud-native SaaS; lead seniority above mid"
+},
+"5089": {
+"fit": 50,
+"reason": "Front-End but ANGULAR (he uses React/Next); London; framework mismatch"
+},
+"1060": {
+"fit": 42,
+"reason": "AI Deployment Engineer (customer-facing), London; adjacent, not core fullstack dev"
+},
+"357": {
+"fit": 40,
+"reason": "SWE RL-Data at Anthropic London; ML/RL specialization, not fullstack; UK option good"
+},
+"1067": {
+"fit": 35,
+"reason": "Principal SWE backend at OpenAI but Remote-US (visa) + Principal way above mid"
+},
+"2146": {
+"fit": 35,
+"reason": "Principal/Staff SWE \u2014 seniority far above mid; no detail"
+},
+"59": {
+"fit": 30,
+"reason": "AI Engineer (LLMs) London \u2014 AI domain, not fullstack/backend"
+},
+"1762": {
+"fit": 28,
+"reason": "SWE but DV Cleared \u2014 UK security clearance, likely hard blocker for visa-needing candidate"
+},
+"3281": {
+"fit": 28,
+"reason": "Engineers wanted but Java-focused + SF/US; remote ok, wrong stack/location"
+},
+"1611": {
+"fit": 25,
+"reason": "Head of DevOps \u2014 infra skills overlap but leadership + DevOps-focus, not fullstack dev"
+},
+"7": {
+"fit": 20,
+"reason": "Internship \u2014 mid-level candidate, intern seniority hard mismatch; AI/ML focus"
+},
+"24": {
+"fit": 18,
+"reason": "AI Engineer Intern \u2014 intern + AI domain double mismatch; UK ok"
+},
+"2164": {
+"fit": 18,
+"reason": "Linux Engineer \u2014 sysadmin/infra, not fullstack dev"
+},
+"4493": {
+"fit": 15,
+"reason": "Technical Partner Manager \u2014 partnerships/BD, not engineering; Stripe UK-remote"
+},
+"25": {
+"fit": 12,
+"reason": "ML Intern Gen-AI, Berkeley US \u2014 intern + ML + US triple mismatch"
+},
+"396": {
+"fit": 8,
+"reason": "Lead Business Analyst \u2014 not a software engineering role"
+},
+"2717": {
+"fit": 8,
+"reason": "SOC Responder (security ops) \u2014 wrong domain"
+},
+"983": {
+"fit": 3,
+"reason": "International Workplace Manager (facilities/ops), Warsaw \u2014 not engineering, wrong location"
+}
+}
+}
