@@ -92,6 +92,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       retryAfter = ra ? parseInt(ra, 10) : 60;
     }
 
+    // #15: an unverified user hit a verified-only route — send them to the
+    // verify-email page instead of surfacing a raw error (browser only).
+    if (
+      res.status === 403 &&
+      (code === "email_not_verified" || detail === "email_not_verified")
+    ) {
+      if (
+        typeof window !== "undefined" &&
+        !window.location.pathname.startsWith("/verify-email")
+      ) {
+        window.location.href = "/verify-email";
+      }
+    }
+
     throw new ApiError(res.status, detail, code, retryAfter);
   }
 
