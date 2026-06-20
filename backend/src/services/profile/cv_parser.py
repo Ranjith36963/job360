@@ -327,79 +327,9 @@ def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
     return out
 
 
-# Grounded prose-skill vocabulary: notable (mostly multi-word) skills that tend
-# to live in flowing text — coursework, project blurbs, summaries — rather than a
-# clean Skills list. Matched verbatim (word-boundary, case-insensitive), so a
-# skill lands only when its phrase literally appears. Variants map to a canonical
-# label. Domain-agnostic common professional/technical vocabulary.
-_PROSE_SKILL_TERMS: list[tuple[str, str]] = [
-    ("reinforcement learning", "Reinforcement Learning"),
-    ("predictive maintenance", "Predictive Maintenance"),
-    ("hyperparameter optimisation", "Hyperparameter Optimisation"),
-    ("hyperparameter optimization", "Hyperparameter Optimisation"),
-    ("hyperparameter tuning", "Hyperparameter Optimisation"),
-    ("multimodal ai", "Multimodal AI"),
-    ("multimodal", "Multimodal AI"),
-    ("llm fine-tuning", "LLM Fine-Tuning"),
-    ("llm fine tuning", "LLM Fine-Tuning"),
-    ("fine-tuning", "LLM Fine-Tuning"),
-    ("cloud deployment", "Cloud Deployment"),
-    ("cloud deployments", "Cloud Deployment"),
-    ("cloud-scale deployment", "Cloud Deployment"),
-    ("cloud-scale deployments", "Cloud Deployment"),
-    ("internet of things", "IoT"),
-    ("iot", "IoT"),
-    ("regression", "Regression"),
-    ("computer vision", "Computer Vision"),
-    ("deep learning", "Deep Learning"),
-    ("machine learning", "Machine Learning"),
-    ("natural language processing", "NLP"),
-    ("retrieval augmented generation", "RAG"),
-    ("retrieval-augmented generation", "RAG"),
-    ("rag", "RAG"),
-    ("generative ai", "Generative AI"),
-    ("vector databases", "Vector Databases"),
-    ("vector database", "Vector Databases"),
-    ("prompt engineering", "Prompt Engineering"),
-    ("transfer learning", "Transfer Learning"),
-    ("feature engineering", "Feature Engineering"),
-    ("fraud detection", "Fraud Detection"),
-    ("video understanding", "Video Understanding"),
-    ("data preprocessing", "Data Preprocessing"),
-    ("large language models", "Large Language Models"),
-    ("neural networks", "Neural Networks"),
-    ("production genai", "Production GenAI"),
-    ("production gen ai", "Production GenAI"),
-]
-
-# Common infrastructure / named tools that are unambiguous single words — safe to
-# match verbatim in prose (not CV-specific overfitting; universal tech vocabulary).
-_COMMON_TOOL_TERMS: list[tuple[str, str]] = [
-    ("docker", "Docker"), ("kubernetes", "Kubernetes"), ("redis", "Redis"),
-    ("kafka", "Apache Kafka"), ("airflow", "Apache Airflow"), ("spark", "Apache Spark"),
-    ("postgresql", "PostgreSQL"), ("mongodb", "MongoDB"), ("linux", "Linux"),
-    ("kubernetes", "Kubernetes"), ("terraform", "Terraform"),
-]
-
-
-def scan_prose_skills(text: str) -> list[str]:
-    """Grounded scan of free text for known skill phrases present verbatim.
-
-    Catches notable skills stated in prose (coursework, project blurbs, summary
-    bullets) that the Skills-section parser can't see — deterministic, stable,
-    no inference (a skill lands only when its phrase literally appears)."""
-    if not text:
-        return []
-    low = text.lower()
-    out: list[str] = []
-    seen: set[str] = set()
-    for term, skill in _PROSE_SKILL_TERMS:
-        if skill.lower() in seen:
-            continue
-        if re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", low):
-            out.append(skill)
-            seen.add(skill.lower())
-    return out
+# NOTE (CLAUDE.md rule #28): the hardcoded prose skill-term + common-tool
+# vocabularies that used to live here were removed. The deterministic pass does
+# NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
 
 
 def deterministic_cv_fields(raw_text: str) -> dict:
@@ -429,13 +359,10 @@ def deterministic_cv_fields(raw_text: str) -> dict:
                     skills.append(tok)
                     seen.add(tok.lower())
 
-    # Grounded prose scan over the FULL text — catches notable skills stated in
-    # coursework / project / summary prose, not just the Skills section.
-    for s in scan_prose_skills(raw_text):
-        if s.lower() not in seen:
-            skills.append(s)
-            seen.add(s.lower())
-
+    # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
+    # The deterministic pass reads STRUCTURE only (the Skills section + its
+    # list/parenthesis tokens). Semantic skills stated in prose are the LLM
+    # pass's job — see llm_cv_fields_from_text.
     summary = " ".join(_det_collect_section(lines, _DET_SUMMARY_HEADINGS)).strip()
     return {"skills": skills, "summary": summary}
 

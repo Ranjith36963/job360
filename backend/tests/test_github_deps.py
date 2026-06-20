@@ -269,35 +269,9 @@ def test_normalize_github_username_non_string():
     assert github_enricher.normalize_github_username(None) == ""
 
 
-def test_dev_tooling_denylist_filters_noise():
-    """Linters/formatters/config helpers are not recruiter-relevant 'skills' —
-    they're dropped so they don't pollute the profile or tank precision."""
-    raw = ["React", "FastAPI", "ESLint", "Prettier", "Ruff", "mypy",
-           "python-dotenv", "Lucide", "PyTorch"]
-    kept = github_enricher._filter_dev_tooling(raw)
-    assert "React" in kept and "FastAPI" in kept and "PyTorch" in kept
-    for noise in ("ESLint", "Prettier", "Ruff", "mypy", "python-dotenv", "Lucide"):
-        assert noise not in kept
-
-
-def test_infer_skills_from_descriptions_grounded():
-    """Repo descriptions are scanned for verbatim known tech terms only —
-    grounded (no inference), so 'Machine Learning Fraud Detection System' yields
-    Machine Learning + Fraud Detection, and unrelated prose yields nothing."""
-    repos = [
-        {"name": "x", "description": "Machine Learning Fraud Detection System", "topics": []},
-        {"name": "y", "description": "Production GenAI & RAG Systems portfolio", "topics": []},
-        {"name": "z", "description": "AI-powered Cloudflare Worker code generator", "topics": []},
-        {"name": "q", "description": "A cosy recipe blog about soup", "topics": []},
-    ]
-    sk = {s.lower() for s in github_enricher._infer_skills_from_descriptions(repos)}
-    assert "machine learning" in sk
-    assert "fraud detection" in sk
-    assert "rag" in sk or "generative ai" in sk
-    assert "cloudflare workers" in sk
-    assert "code generation" in sk
-    # the recipe blog contributes no tech skill
-    assert "soup" not in sk
+# NOTE (CLAUDE.md rule #28): tests for the hardcoded dev-tooling denylist and the
+# description-term scanner were removed along with those functions — GitHub skill
+# semantics now come from raw API signals + the LLM pass, not hardcoded keyword lists.
 
 
 @pytest.mark.asyncio

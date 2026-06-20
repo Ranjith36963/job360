@@ -59,6 +59,10 @@ Rules are reference material — keep them in one place. Long-form context for e
 20. **Multi-dim scoring requires both `user_preferences` AND `enrichment_lookup`** — pass both or neither. Passing only `user_preferences` produces silent zeros for the new dim scorers; the combined `match_score` looks legacy but the dim columns mislead.
 27. **Multi-dim weights total 30 on top of the legacy 100; the clamp to [0, 100] is load-bearing.** `SALARY_WEIGHT` (10) + `SENIORITY_WEIGHT` (8) + `VISA_WEIGHT` (6) + `WORKPLACE_WEIGHT` (6) are added to the legacy 4-component sum, so the raw max is **130**. The final `match_score` is clamped to `[0, 100]` — never remove the clamp.
 
+### Extraction must be data-driven (no hardcoded keyword lists)
+
+28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** Extraction is **data-driven (ESCO ontology, loaded from `data/esco/`) + LLM** only. Hand-typed skill maps overfit one CV, are brittle (new skill = code edit), and inflate eval scores dishonestly. **Banned in code:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict/denylist. Offenders being removed: `cv_parser._PROSE_SKILL_TERMS` / `_COMMON_TOOL_TERMS`, `github_enricher._DESC_SKILL_TERMS` / `LANGUAGE_TO_SKILL` / `TOPIC_TO_SKILL` / `_DEV_TOOLING_DENYLIST`, `dependency_map.py`, `core/skill_synonyms.py`. Deterministic pass = STRUCTURE only (sections/bullets/exact tokens) + ESCO-vocabulary match; semantic prose→skill mapping belongs to the LLM (prompt-steering is fine, that's not hardcoding). If you find a keyword list in extraction, remove it and route through ESCO data or the LLM.
+
 ### Notifications
 
 23. **Notification dispatch consults `notification_rules` for (user_id, channel) AND converts UTC `now` to the user's `users.timezone` (IANA) via `zoneinfo.ZoneInfo`** before comparing against `quiet_hours_start/end` HH:MM strings. Skipping the timezone conversion silently leaks notifications during BST/DST transitions. Use stdlib `zoneinfo` — not `pytz`.

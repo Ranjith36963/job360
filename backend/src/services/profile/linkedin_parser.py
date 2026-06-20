@@ -411,6 +411,9 @@ Rules:
 - Only skills the text supports. Do not invent.
 - Individual items, not categories. Pull each tool out of a parenthesis list,
   e.g. "vector databases (ChromaDB, FAISS)" → "Vector Databases", "ChromaDB", "FAISS".
+- Do NOT fabricate "<word> Processing" skills from a modality list like
+  "text, image, speech, audio processing" — emit "Multimodal AI" and
+  "Audio Processing" only if those exact terms appear.
 - Skip bare contact info, company names, and job titles.
 
 LINKEDIN TEXT:
@@ -664,14 +667,8 @@ async def parse_linkedin_from_text(text: str) -> dict:
         if s.lower() not in seen_sk:
             skills.append(s)
             seen_sk.add(s.lower())
-    # Grounded prose scan — catches summary/"WHAT I DO" skills (Multimodal AI,
-    # LLM Fine-Tuning, Cloud Deployment, ...) stated in flowing text.
-    from src.services.profile.cv_parser import scan_prose_skills  # noqa: PLC0415
-
-    for s in scan_prose_skills(text):
-        if s.lower() not in seen_sk:
-            skills.append(s)
-            seen_sk.add(s.lower())
+    # (No hardcoded prose skill-term scan — CLAUDE.md rule #28. Skills stated in
+    # summary/"WHAT I DO" prose are recovered by the LLM pass, llm_infer_linkedin_skills.)
     experience_text = sections.get("experience", "")
     education_text = sections.get("education", "")
     certs_text = (

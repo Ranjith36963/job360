@@ -381,8 +381,6 @@ async def fetch_github_profile(
                 if skill.lower() not in seen_framework:
                     frameworks_inferred.append(skill)
                     seen_framework.add(skill.lower())
-        # Drop dev-tooling noise (linters/formatters/config) — not real skills.
-        frameworks_inferred = _filter_dev_tooling(frameworks_inferred)
 
         skills_inferred = _infer_skills(weighted_languages, all_topics)
 
@@ -399,12 +397,6 @@ async def fetch_github_profile(
             if r.get("description") or r.get("topics")
         ][:MAX_REPOS]
 
-        # Grounded description scan — recovers description-derived skills
-        # (RAG, Fraud Detection, ...) deterministically, no LLM/variance.
-        for s in _infer_skills_from_descriptions(repos_brief):
-            if s.lower() not in {x.lower() for x in skills_inferred}:
-                skills_inferred.append(s)
-
         return {
             "repositories": repositories,
             "languages": weighted_languages,
@@ -418,73 +410,10 @@ async def fetch_github_profile(
             await session.close()
 
 
-# Grounded description terms → skill. Matched verbatim (case-insensitive,
-# word-boundary) in repo descriptions, so a skill only lands when the phrase
-# literally appears. Longer phrases are checked first so "machine learning"
-# wins over a bare "learning". Domain-agnostic common tech vocabulary.
-_DESC_SKILL_TERMS: list[tuple[str, str]] = [
-    ("retrieval augmented generation", "RAG"),
-    ("retrieval-augmented generation", "RAG"),
-    ("machine learning", "Machine Learning"),
-    ("deep learning", "Deep Learning"),
-    ("fraud detection", "Fraud Detection"),
-    ("generative ai", "Generative AI"),
-    ("genai", "Generative AI"),
-    ("computer vision", "Computer Vision"),
-    ("natural language processing", "NLP"),
-    ("cloudflare worker", "Cloudflare Workers"),
-    ("code generator", "Code Generation"),
-    ("code generation", "Code Generation"),
-    ("cold outreach", "Cold Outreach"),
-    ("multi-agent", "Multi-agent Systems"),
-    ("multimodal", "Multimodal AI"),
-    ("chatbot", "Chatbots"),
-    ("recommendation", "Recommendation Systems"),
-    ("portfolio", "Web Development"),
-    ("rag", "RAG"),
-    ("llm", "LLM"),
-    ("nlp", "NLP"),
-]
-
-
-def _infer_skills_from_descriptions(repos_brief: list[dict]) -> list[str]:
-    """Grounded scan of repo descriptions for known tech terms present verbatim.
-
-    Deterministic and stable (no LLM, no inference): a skill lands only when its
-    phrase literally appears in a description. Recovers the description-derived
-    skills (RAG, Fraud Detection, Machine Learning, ...) the language/topic
-    lookups can't see, without the variance/hallucination of the LLM pass.
-    """
-    out: list[str] = []
-    seen: set[str] = set()
-    for repo in repos_brief or []:
-        desc = (repo.get("description") or "").lower()
-        if not desc:
-            continue
-        for term, skill in _DESC_SKILL_TERMS:
-            if skill.lower() in seen:
-                continue
-            if re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", desc):
-                out.append(skill)
-                seen.add(skill.lower())
-    return out
-
-
-# Dev tooling that shows up in dep files but isn't a recruiter-relevant "skill"
-# (linters, formatters, type-checkers, config helpers, icon libs). Dropped so it
-# doesn't pollute the profile or tank precision. Matched case-insensitively.
-_DEV_TOOLING_DENYLIST: set[str] = {
-    "eslint", "prettier", "ruff", "mypy", "black", "isort", "flake8", "pylint",
-    "python-dotenv", "dotenv", "lucide", "lucide-react", "clsx", "tailwind-merge",
-    "autoprefixer", "postcss", "husky", "lint-staged", "commitlint", "editorconfig",
-    "nodemon", "concurrently", "rimraf", "cross-env", "ts-node", "tsx",
-}
-
-
-def _filter_dev_tooling(skills: list[str]) -> list[str]:
-    """Drop non-skill dev tooling (linters/formatters/config helpers) so the
-    GitHub skill list stays recruiter-relevant and precise."""
-    return [s for s in skills if s.strip().lower() not in _DEV_TOOLING_DENYLIST]
+# NOTE (CLAUDE.md rule #28): the hardcoded description-term vocabulary and the
+# dev-tooling denylist that used to live here were removed. Repo descriptions are
+# read by the LLM pass (llm_infer_github_skills); the deterministic side only
+# surfaces the raw signals the GitHub API itself returns.
 
 
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
