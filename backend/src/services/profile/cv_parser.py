@@ -67,7 +67,7 @@ Return a JSON object with exactly these fields:
 RULES:
 1. Extract EVERYTHING. If in doubt, include it. A missed skill means a missed job match.
 2. Skills should be individual items, not categories. "Python" not "Programming Languages: Python".
-3. For compound tools, keep them together: "AWS Bedrock" not just "AWS" and "Bedrock" separately.
+3. For a single compound tool keep it whole: "AWS Bedrock". BUT when a skill lists tools in parentheses, extract the parent AND each tool inside as SEPARATE skills — "AWS (Bedrock, SageMaker, S3, CloudWatch)" → "AWS", "AWS Bedrock", "SageMaker", "S3", "CloudWatch"; "Python (Pandas, NumPy, Matplotlib)" → "Python", "Pandas", "NumPy", "Matplotlib"; "OCR (Tesseract)" → "OCR", "Tesseract".
 4. Include achievements with their metrics: "achieving 90% accuracy" not just "90%".
 5. If something appears in both the skills section AND experience bullets, include it once in skills.
 6. Domain-agnostic: whether it's "TensorFlow" or "HIPAA compliance" or "Contract negotiation" — extract it.
@@ -240,8 +240,61 @@ _DET_OTHER_HEADINGS = {
 }
 _DET_ALL_HEADINGS = _DET_SKILL_HEADINGS | _DET_SUMMARY_HEADINGS | _DET_OTHER_HEADINGS
 
-# Split a skills line on commas, pipes, slashes, bullets, semicolons.
-_DET_SKILL_SPLIT = re.compile(r"[,•·|;/]+")
+# Delimiters that separate skills on one line.
+_DET_SKILL_DELIMS = set(",•·|;/")
+# Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
+_DET_PAREN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
+
+
+def _det_split_line(line: str) -> list[str]:
+    """Split a skills line on delimiters, but NOT on commas inside parentheses.
+
+    "Python (Pandas, NumPy) • Docker" → ["Python (Pandas, NumPy)", "Docker"]
+    so the parenthetical survives for ``_det_expand_token`` to expand.
+    """
+    toks: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    for ch in line:
+        if ch == "(":
+            depth += 1
+            cur.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            cur.append(ch)
+        elif depth == 0 and ch in _DET_SKILL_DELIMS:
+            toks.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    toks.append("".join(cur))
+    return [t for t in toks if t.strip()]
+
+
+def _det_expand_token(token: str) -> list[str]:
+    """Expand a skill token that wraps tools in parentheses.
+
+    "OCR (Tesseract)" → ["OCR", "Tesseract"]
+    "Python (Pandas, NumPy, Matplotlib)" → ["Python", "Pandas", "NumPy", "Matplotlib"]
+    "Docker" → ["Docker"]
+    The outer term and each comma-separated inner term become separate skills,
+    so CV lines like "AWS (Bedrock, SageMaker, S3)" surface every tool.
+    """
+    tok = token.strip()
+    if not tok:
+        return []
+    m = _DET_PAREN.match(tok)
+    if not m:
+        return [tok]
+    out: list[str] = []
+    outer = m.group(1).strip()
+    if outer:
+        out.append(outer)
+    for inner in m.group(2).split(","):
+        inner = inner.strip()
+        if inner:
+            out.append(inner)
+    return out or [tok]
 
 
 def _det_heading_key(line: str) -> str:
@@ -274,6 +327,11 @@ def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
     return out
 
 
+# NOTE (CLAUDE.md rule #28): the hardcoded prose skill-term + common-tool
+# vocabularies that used to live here were removed. The deterministic pass does
+# NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
+
+
 def deterministic_cv_fields(raw_text: str) -> dict:
     """Pass 1 for the CV — pull base fields from text with NO LLM.
 
@@ -291,12 +349,20 @@ def deterministic_cv_fields(raw_text: str) -> dict:
     skills: list[str] = []
     seen: set[str] = set()
     for line in skill_lines:
-        for token in _DET_SKILL_SPLIT.split(line):
-            tok = token.strip()
-            if tok and tok.lower() not in seen:
-                skills.append(tok)
-                seen.add(tok.lower())
+        for token in _det_split_line(line):
+            # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
+            # yields the real skills, not the category name.
+            if ":" in token:
+                token = token.rsplit(":", 1)[-1]
+            for tok in _det_expand_token(token):
+                if tok and tok.lower() not in seen:
+                    skills.append(tok)
+                    seen.add(tok.lower())
 
+    # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
+    # The deterministic pass reads STRUCTURE only (the Skills section + its
+    # list/parenthesis tokens). Semantic skills stated in prose are the LLM
+    # pass's job — see llm_cv_fields_from_text.
     summary = " ".join(_det_collect_section(lines, _DET_SUMMARY_HEADINGS)).strip()
     return {"skills": skills, "summary": summary}
 
