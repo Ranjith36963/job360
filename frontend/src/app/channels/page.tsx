@@ -63,7 +63,7 @@ function OAuthReturnToast({ onConnected }: { onConnected: () => void }) {
     }
 
     // Strip the query param so a refresh doesn't re-toast
-    router.replace("/settings/channels");
+    router.replace("/channels");
   }, [searchParams, onConnected, router]);
 
   return null;

@@ -447,7 +447,7 @@ async def callback_slack(
         await db.commit()
 
     settings_url = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/settings/channels?connected=slack"
+        f"{_settings.OAUTH_REDIRECT_BASE}/channels?connected=slack"
     )
     return RedirectResponse(settings_url, status_code=302)
 
@@ -598,7 +598,7 @@ async def callback_discord(
         await db.commit()
 
     settings_url = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/settings/channels?connected=discord"
+        f"{_settings.OAUTH_REDIRECT_BASE}/channels?connected=discord"
     )
     return RedirectResponse(settings_url, status_code=302)
 

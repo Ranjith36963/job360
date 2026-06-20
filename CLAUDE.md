@@ -205,7 +205,7 @@ job360/
 │   └── tests/                 # ~1,409 collected offline (defer to runtime collected count)
 └── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
     └── src/
-        ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, settings/{layout,channels,notifications,account}, notifications
+        ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, channels (top-level), settings/{layout,notifications,account}, notifications (ledger)
         ├── components/        # ui/ (shadcn), jobs/, profile/, pipeline/, layout/
         └── lib/               # api.ts, types.ts, queryKeys.ts, api-error.ts, utils.ts
 ```

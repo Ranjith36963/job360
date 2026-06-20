@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/settings/channels", label: "Channels" },
-  { href: "/settings/notifications", label: "Notification Rules" },
+  { href: "/settings/notifications", label: "Notifications" },
   { href: "/settings/account", label: "Account" },
 ] as const;
 

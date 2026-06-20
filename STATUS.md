@@ -20,8 +20,13 @@
 > `GET`/`PUT /settings/notification-rule`; frontend is one rulebook form. Backend
 > 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests. See
 > `docs/IMPLEMENTATION_LOG.md` for the full entry.
+>
+> **Nav IA restructure (2026-06-20):** Channels is now a top-level page (`/channels`);
+> the Settings gear (top-right) holds only Notifications + Account. Frontend route
+> move + navbar + middleware + Slack/Discord OAuth return path. API path
+> `/api/settings/channels` unchanged (internal URL). See log for details.
 
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-20
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.

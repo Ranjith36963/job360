@@ -13,6 +13,36 @@
 
 ---
 
+## Settings IA restructure — Channels top-level, Settings = Notifications + Account (2026-06-20)
+
+Owner-requested navigation change. Channels is now its own top-level page; the
+Settings gear (top-right) holds only Notifications + Account.
+
+### What changed
+- **Frontend route move:** `app/settings/channels/` → `app/channels/` (standalone,
+  no longer wrapped by the Settings tab layout). Its `useSearchParams` Suspense
+  wrapper is preserved (Next.js 16 build requirement). Internal post-OAuth
+  `router.replace` → `/channels`.
+- **Navbar (`components/layout/Navbar.tsx`):** top-level **Channels** link → `/channels`
+  (Send icon); separate **Settings** gear (top-right, desktop) + a Settings entry in
+  the mobile menu → `/settings`.
+- **Settings tabs (`app/settings/_tabs.tsx`):** Channels tab removed; "Notification
+  Rules" renamed **Notifications**; tabs = Notifications · Account.
+- `app/settings/page.tsx` redirect → `/settings/notifications`. Layout subtitle reworded.
+- **`middleware.ts`:** `/channels` added to `PROTECTED_PATHS` (login-gated).
+- **Backend:** Slack + Discord OAuth success redirects now return the browser to
+  `/channels?connected=...` (`api/routes/channels.py`). The API path prefix
+  `/api/settings/channels` is unchanged — it is an internal endpoint URL; renaming it
+  would churn ~10 frontend bindings + tests + api-types for no user-facing benefit.
+
+### Verification
+- Frontend: type-check + lint clean, 107 unit tests pass (the channels page test moved
+  with the page; its `../page` import + router mock still resolve).
+- Backend OAuth tests assert only the `connected=` query substring, so they still pass.
+- Live browser pass: see notes after the live run.
+
+---
+
 ## Channels & Notifications Overhaul (2026-06-17)
 
 Branch: `worktree-channels-notifications-overhaul`. Spec: `docs/superpowers/specs/2026-06-17-channels-notifications-overhaul-design.md`; plan: `docs/superpowers/plans/2026-06-17-channels-notifications-overhaul.md`.
