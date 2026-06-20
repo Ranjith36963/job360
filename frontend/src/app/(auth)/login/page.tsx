@@ -88,7 +88,11 @@ function LoginForm() {
           <p className="text-sm text-red-400">{errors.password.message}</p>
         )}
       </div>
-      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      {serverError && (
+        <p role="alert" className="text-sm text-red-400">
+          {serverError}
+        </p>
+      )}
       <Button type="submit" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "Signing in..." : "Sign in"}
       </Button>

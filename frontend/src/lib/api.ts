@@ -30,16 +30,27 @@ import type {
   StatusResponse,
 } from "./types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// `fetch` calls default to a RELATIVE base ("") so requests hit the SAME origin
+// as the frontend and are proxied to the backend by the Next rewrite in
+// next.config.ts (`/api/:path*`). Same-origin = the session cookie (host-only,
+// SameSite=Lax) is always sent → the middleware auth gate works in any
+// deployment (fixes the split-host cookie bug). Set NEXT_PUBLIC_API_URL only to
+// force a direct cross-origin backend (e.g. a dev setup without the proxy).
+const API = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+// `channelConnectUrl` is a BROWSER NAVIGATION (window.location.href), not fetch,
+// so it must be an ABSOLUTE backend URL (a relative path would hit the frontend
+// origin). Always resolve to a concrete backend origin.
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
  * Absolute backend URL for a chat-provider OAuth connect. These routes are
  * BROWSER NAVIGATIONS (window.location.href), not fetch — so they must point at
  * the backend origin. A relative "/api/..." path would hit the frontend origin
- * (:3000) and 404; the backend lives at ${API}.
+ * and 404; the backend lives at ${BACKEND}.
  */
 export function channelConnectUrl(provider: "slack" | "discord"): string {
-  return `${API}/api/settings/channels/connect/${provider}`;
+  return `${BACKEND}/api/settings/channels/connect/${provider}`;
 }
 
 // ---------------------------------------------------------------------------

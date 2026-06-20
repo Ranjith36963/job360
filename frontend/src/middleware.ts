@@ -10,6 +10,8 @@ const PROTECTED_PATHS = [
   "/pipeline",
   "/channels",
   "/settings",
+  "/notifications",
+  "/admin",
 ];
 
 export function middleware(request: NextRequest) {
