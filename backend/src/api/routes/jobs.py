@@ -285,11 +285,15 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     the heavy modules per CLAUDE.md rule #16.
     """
     try:
-        from src.core.settings import SEMANTIC_ENABLED  # noqa: PLC0415 — lazy
+        from src.core.settings import (  # noqa: PLC0415 — lazy
+            ENGINE3_ENABLED,
+            SEMANTIC_ENABLED,
+        )
     except Exception:
         return rows
 
-    if not SEMANTIC_ENABLED:
+    # Engine 3 switch (ENGINE3_ENABLED) OR the legacy SEMANTIC_ENABLED flag.
+    if not (ENGINE3_ENABLED or SEMANTIC_ENABLED):
         return rows
 
     try:
@@ -599,6 +603,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     there is nothing to personalise against). Heavy scoring imports are kept
     local per CLAUDE.md rule #16 — they only load on an authenticated detail GET.
     """
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
     from src.services.feed import FeedService  # noqa: PLC0415
     from src.services.job_enrichment import (  # noqa: PLC0415
         ENRICHMENT_ENABLED,
@@ -615,7 +620,9 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     search_config = generate_search_config(profile)
     # Mirror run_search's scorer wiring exactly so a recompute against an
     # unchanged profile reproduces the stored feed score (CLAUDE.md rule #19).
-    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if ENRICHMENT_ENABLED else {}
+    # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+    enrichment_on = ENGINE2_ENABLED or ENRICHMENT_ENABLED
+    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if enrichment_on else {}
     scorer = JobScorer(
         search_config,
         user_preferences=profile.preferences,

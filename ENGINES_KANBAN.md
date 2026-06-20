@@ -7,14 +7,14 @@
 
 ## Scoreboard — what is actually ON in the default running app
 
-| Engine | What it does (plain) | Default state | Proof |
+| Engine | What it does (plain) | Switch (default) | Proof |
 |---|---|---|---|
-| **1 — Keyword** | Scores each job 0–100 from your profile's titles + skills + location + freshness. Custom code, hand-set weights. | **ON** (no flag) | `skill_matcher.py:488` `JobScorer.score()` |
-| **2 — Dimensions** | Adds up to **+30** for seniority/salary/visa/workplace fit, on top of Engine 1. | **OFF** | `skill_matcher.py:519-536` + `ENRICHMENT_ENABLED` default `false` |
-| **3 — Hybrid search** | Re-orders jobs by *meaning* (embeddings) fused with keyword order. | **OFF** | `jobs.py:217` early-return unless `SEMANTIC_ENABLED` (default `false`) |
-| **4 — LLM judge** | A model reads your full profile + each job and scores fit 0–100 with a reason. | **OFF** | `llm_matcher.py:35` `MATCHER_ENABLED` default `false` |
+| **1 — Keyword** | Scores each job 0–100 from your profile's titles + skills + location + freshness. Custom code, hand-set weights. | `ENGINE1_ENABLED` **(on)** | `skill_matcher.py` `JobScorer.__init__` `engine1` + `score()` gate |
+| **2 — Dimensions** | Adds up to **+30** for seniority/salary/visa/workplace fit, on top of Engine 1. | `ENGINE2_ENABLED` **(off)** | gate = `ENGINE2_ENABLED OR ENRICHMENT_ENABLED` (`main.py`, `jobs.py`, `rescore.py`, `workers/tasks.py`) |
+| **3 — Hybrid search** | Re-orders jobs by *meaning* (embeddings) fused with keyword order. | `ENGINE3_ENABLED` **(off)** | gate = `ENGINE3_ENABLED OR SEMANTIC_ENABLED` (`jobs.py:_maybe_apply_hybrid_reorder`) |
+| **4 — LLM judge** | A model reads your full profile + each job and scores fit 0–100 with a reason. | `ENGINE4_ENABLED` **(off)** | gate = `ENGINE4_ENABLED OR MATCHER_ENABLED` (`main.py:_run_matcher_stage`, `rescore.py`) |
 
-**Headline fact:** in the default config, **only Engine 1 scores jobs.** Engines 2, 3, 4 are all behind flags that ship `false`.
+**Headline fact:** every engine now has its **own independent on/off switch** (`ENGINE1..4_ENABLED` in `core/settings.py`), so any combination can be selected. Defaults are unchanged — **only Engine 1 scores jobs by default**; E2/E3/E4 each default to their legacy flag (off). Tests: `tests/test_engine_switches.py`. Note E2/E3/E4 also need their *data* (enrichment rows / vector index / LLM keys) to actually change scores — the switch enables the engine, the data makes it bite.
 
 ---
 

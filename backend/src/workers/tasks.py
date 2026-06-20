@@ -148,7 +148,10 @@ async def score_and_ingest(
         # CLI path's threshold-gated enrich_batch invocation (Agent-Enrichment),
         # but as ARQ enqueue (one task per job, not blocking the worker tick).
         # Default-off via ENRICHMENT_ENABLED (CLAUDE.md rule #18).
-        if ENRICHMENT_ENABLED and not enrichment_enqueued and score >= ENRICHMENT_THRESHOLD:
+        # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if (ENGINE2_ENABLED or ENRICHMENT_ENABLED) and not enrichment_enqueued and score >= ENRICHMENT_THRESHOLD:
             enqueue = ctx.get("enqueue")
             if enqueue is not None:
                 result = enqueue("enrich_job_task", job_id)

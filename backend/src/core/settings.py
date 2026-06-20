@@ -110,6 +110,31 @@ WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
 # When true, callers that check this flag activate the semantic retrieval path.
 SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+# --- Independent per-engine switches -------------------------------------
+# Four scoring engines, each with its own on/off switch so ANY combination
+# can be selected (e.g. E1+E3 on, E2+E4 off). Each switch DEFAULTS to its
+# legacy gate so existing .env files + the whole test suite behave identically:
+#   * Engine 1 — keyword       -> ON (was always-on; first flag it ever had)
+#   * Engine 2 — dimensions    -> defaults to ENRICHMENT_ENABLED
+#   * Engine 3 — hybrid search -> defaults to SEMANTIC_ENABLED
+#   * Engine 4 — LLM judge     -> defaults to MATCHER_ENABLED
+# At each gate the effective state is "ENGINEx_ENABLED OR <legacy flag>", so
+# flipping the legacy flag still works (back-compat) while the new switch lets
+# you drive every engine from one uniform set of names.
+ENGINE1_ENABLED = _env_flag("ENGINE1_ENABLED", True)
+ENGINE2_ENABLED = _env_flag("ENGINE2_ENABLED", _env_flag("ENRICHMENT_ENABLED", False))
+ENGINE3_ENABLED = _env_flag("ENGINE3_ENABLED", SEMANTIC_ENABLED)
+ENGINE4_ENABLED = _env_flag("ENGINE4_ENABLED", _env_flag("MATCHER_ENABLED", False))
+
 # Target salary range (GBP, annual) — used for tiebreaker sorting, not scoring
 TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))

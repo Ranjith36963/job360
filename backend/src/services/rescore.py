@@ -108,6 +108,7 @@ async def rescore_user_feed(
             version = current_profile_version_id(user_id)
 
             # 4. Build scorer exactly like run_search (rules #19 / #20)
+            from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
             from src.services.job_enrichment import (  # noqa: PLC0415
                 ENRICHMENT_ENABLED,
                 _build_enrichment_lookup,
@@ -116,7 +117,8 @@ async def rescore_user_feed(
             from src.services.skill_matcher import JobScorer  # noqa: PLC0415
 
             search_config = generate_search_config(profile)
-            if ENRICHMENT_ENABLED:
+            # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+            if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
                 enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
             else:
                 enrichment_lookup_dict = {}
@@ -164,11 +166,14 @@ async def rescore_user_feed(
             # run the verdict path.  The import is inside the try-block but
             # the clear / shortlist-build / re-judge are fully gated on the
             # flag, matching how main.py::_run_matcher_stage returns early.
+            from src.core.settings import ENGINE4_ENABLED  # noqa: PLC0415
             from src.services.llm_matcher import (  # noqa: PLC0415
                 MATCHER_ENABLED,
                 MATCHER_THRESHOLD,
             )
-            matcher_on = MATCHER_ENABLED
+
+            # Engine 4 switch (ENGINE4_ENABLED) OR the legacy MATCHER_ENABLED flag.
+            matcher_on = ENGINE4_ENABLED or MATCHER_ENABLED
 
             # FIX 1 — only import Job and build the shortlist when the judge
             # will actually run.  When matcher_on is False, shortlist_jobs is

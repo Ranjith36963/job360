@@ -332,6 +332,7 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
     path import-free.
     """
     try:
+        from src.core.settings import ENGINE4_ENABLED  # noqa: PLC0415
         from src.services.llm_matcher import (  # noqa: PLC0415 — lazy by design
             MATCHER_ENABLED,
             MATCHER_MAX_JOBS,
@@ -340,7 +341,8 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             profile_to_matcher_text,
         )
 
-        if not MATCHER_ENABLED:
+        # Engine 4 switch (ENGINE4_ENABLED) OR the legacy MATCHER_ENABLED flag.
+        if not (ENGINE4_ENABLED or MATCHER_ENABLED):
             return
         from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -458,7 +460,10 @@ async def run_search(
         # ENRICHMENT_ENABLED is false we pass an empty dict so the lookup
         # callable always returns None and the multi-dim contribution is 0
         # (CLAUDE.md rule #19 — legacy callers see legacy behaviour).
-        if ENRICHMENT_ENABLED:
+        # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
             enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
         else:
             enrichment_lookup_dict = {}
@@ -678,7 +683,10 @@ async def run_search(
             # which the scorer's enrichment_lookup applies on subsequent runs.
             # Only high-scored jobs go to the LLM, fanned out via a bounded
             # semaphore so a slow provider can't block the pipeline.
-            if ENRICHMENT_ENABLED:
+            # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+            from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+            if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
                 high_scored = [
                     j
                     for j in unique_jobs
