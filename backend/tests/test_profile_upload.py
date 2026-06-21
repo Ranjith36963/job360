@@ -349,6 +349,67 @@ def test_rescore_task_pinned_to_bg_tasks_set(api, monkeypatch):
     )
 
 
+# ---------------------------------------------------------------------------
+# 4 dedicated input routes — one route per input
+# (/profile/cv, /profile/preferences, /profile/linkedin, /profile/github)
+# ---------------------------------------------------------------------------
+
+def _patch_extractor(monkeypatch):
+    """Patch the inline single-extractor so routes don't hit the real LLM."""
+    import src.api.routes.profile as profile_route
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
+
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
+
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
+
+
+def test_dedicated_cv_route_accepts_pdf(api, monkeypatch):
+    """POST /api/profile/cv (CV-only route) accepts a PDF and extracts in one pass."""
+    _patch_extractor(monkeypatch)
+    _register_and_login(api)
+    r = api.post(
+        "/api/profile/cv",
+        files={"cv": ("cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"]["skills_count"] >= 1
+
+
+def test_dedicated_cv_route_enforces_415(api):
+    """The dedicated CV route enforces the same MIME allowlist (415) as combined."""
+    _register_and_login(api)
+    r = api.post(
+        "/api/profile/cv",
+        files={"cv": ("notes.txt", io.BytesIO(b"plain text"), "text/plain")},
+    )
+    assert r.status_code == 415
+
+
+def test_dedicated_preferences_route_accepts_json(api, monkeypatch):
+    """POST /api/profile/preferences (prefs-only route) applies the form and returns 200."""
+    import json as _json
+
+    _patch_extractor(monkeypatch)
+    _register_and_login(api)
+    r = api.post(
+        "/api/profile/preferences",
+        data={"preferences": _json.dumps({
+            "target_job_titles": ["ML Engineer"],
+            "additional_skills": ["PyTorch"],
+            "experience_level": "senior",
+            "about_me": "I build ML systems",
+        })},
+    )
+    assert r.status_code == 200, r.text
+    # The preferences actually landed (experience_level flows to the summary).
+    assert r.json()["summary"]["experience_level"] == "senior"
+
+
 def test_profile_route_logger_is_under_job360_namespace():
     """Regression guard: the profile route logger MUST be under 'job360' so its
     'rescore: background re-score scheduled' INFO line reaches setup_logging's
