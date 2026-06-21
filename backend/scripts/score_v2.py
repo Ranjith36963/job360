@@ -26,8 +26,25 @@ import sys
 logging.disable(logging.WARNING)
 
 GOLD = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_gold.json"
+JUDGE_RUNS = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_judge_runs.json"
 UIDS = ["eval-ranjith", "eval-pavan"]
 SEED = 20260621
+
+
+def _median_judge(uid: str):
+    """Stabilized E4: median of K independent judge runs per job (fix for the
+    LLM judge's run-to-run stochasticity). Returns None if no runs file."""
+    import os
+    import statistics
+    if not os.path.exists(JUDGE_RUNS):
+        return None
+    try:
+        runs = json.load(open(JUDGE_RUNS)).get(uid, {})
+    except Exception:
+        return None
+    if not runs:
+        return None
+    return {int(j): statistics.median(v) for j, v in runs.items() if v}
 
 
 def _ranking_v2(scores: dict, seed: int) -> list:
@@ -94,6 +111,14 @@ def main() -> None:
             conn.close()
         hp = load_profile(uid)
         es = ea.build_engine_scores(pd, fr, hybrid_profile=hp)
+
+        # ---- STABILIZE E4: use median of K judge runs (fix issue #8) ----
+        med = _median_judge(uid)
+        if med is not None:
+            n_runs = max(len(v) for v in json.load(open(JUDGE_RUNS))[uid].values())
+            es["judge"] = {jid: med.get(jid) for jid in es["judge"]}
+            print(f"\n[note] {uid}: E4 stabilized = median of {n_runs} judge runs "
+                  f"(single-run judge is stochastic — see audit #8)")
 
         # ---- validity diagnostics ----
         dims = es.get("dims", {})
