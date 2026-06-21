@@ -183,3 +183,84 @@ async def test_call_cerebras_logs_total_tokens_on_success(caplog):
     records = [r for r in caplog.records if r.getMessage() == "llm_call"]
     assert len(records) == 1
     assert records[0].total_tokens == 99  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# P0 hardening — timeouts, rate-limit taxonomy, smart backoff
+# ---------------------------------------------------------------------------
+
+def test_is_rate_limit_detection():
+    from src.services.profile.llm_provider import _is_rate_limit
+
+    assert _is_rate_limit(Exception("Error code: 429 - rate limit reached"))
+    assert _is_rate_limit(Exception("tokens per day (TPD): Limit 100000"))
+    assert _is_rate_limit(Exception("quota exceeded"))
+
+    class _E(Exception):  # noqa: N818 — local test stub
+        status_code = 429
+
+    assert _is_rate_limit(_E("boom"))
+    assert not _is_rate_limit(Exception("connection refused"))
+    assert not _is_rate_limit(Exception("invalid json output"))
+
+
+@pytest.mark.asyncio
+async def test_all_providers_rate_limited_raises_typed():
+    """Every provider rate-limited -> LLMRateLimited (a Runtimeable), NOT the
+    generic failure -> callers can avoid persisting an empty profile."""
+    import src.services.profile.llm_provider as lp
+
+    with patch.object(lp, "GEMINI_API_KEY", "k"), \
+         patch.object(lp, "GROQ_API_KEY", "k"), \
+         patch.object(lp, "CEREBRAS_API_KEY", ""), \
+         patch.object(lp, "_LLM_RL_RETRIES", 0), \
+         patch.object(lp, "_call_gemini", new_callable=AsyncMock, side_effect=Exception("Error 429 rate limit")), \
+         patch.object(lp, "_call_groq", new_callable=AsyncMock, side_effect=Exception("quota exceeded")):
+        with pytest.raises(lp.LLMRateLimited):
+            await lp.llm_extract("p")
+    assert issubclass(lp.LLMRateLimited, RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_non_rate_limit_raises_all_providers_failed_typed():
+    import src.services.profile.llm_provider as lp
+
+    with patch.object(lp, "GEMINI_API_KEY", "k"), \
+         patch.object(lp, "GROQ_API_KEY", ""), \
+         patch.object(lp, "CEREBRAS_API_KEY", ""), \
+         patch.object(lp, "_call_gemini", new_callable=AsyncMock, side_effect=Exception("connection refused")):
+        with pytest.raises(lp.LLMAllProvidersFailed, match="All LLM providers failed"):
+            await lp.llm_extract("p")
+
+
+@pytest.mark.asyncio
+async def test_short_rate_limit_retries_same_provider_then_succeeds():
+    """A short per-minute limit ('try again in 2s') backs off + retries the SAME
+    provider rather than failing over."""
+    import src.services.profile.llm_provider as lp
+
+    gem = AsyncMock(side_effect=[Exception("rate limit, try again in 2s"), {"ok": 1}])
+    with patch.object(lp, "GEMINI_API_KEY", "k"), \
+         patch.object(lp, "GROQ_API_KEY", ""), \
+         patch.object(lp, "CEREBRAS_API_KEY", ""), \
+         patch.object(lp, "_call_gemini", gem):
+        out = await lp.llm_extract("p")
+    assert out == {"ok": 1}
+    assert gem.call_count == 2  # retried the same provider
+
+
+@pytest.mark.asyncio
+async def test_long_daily_cap_does_not_block_retry_fails_over():
+    """A daily-cap limit ('try again in 24m') must NOT block-retry — fail over now."""
+    import src.services.profile.llm_provider as lp
+
+    gem = AsyncMock(side_effect=Exception("tokens per day exceeded, try again in 24m3s"))
+    groq = AsyncMock(return_value={"ok": 2})
+    with patch.object(lp, "GEMINI_API_KEY", "k"), \
+         patch.object(lp, "GROQ_API_KEY", "k"), \
+         patch.object(lp, "CEREBRAS_API_KEY", ""), \
+         patch.object(lp, "_call_gemini", gem), \
+         patch.object(lp, "_call_groq", groq):
+        out = await lp.llm_extract("p")
+    assert out == {"ok": 2}
+    assert gem.call_count == 1  # no block-retry on a daily cap
