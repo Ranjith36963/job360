@@ -14,8 +14,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.profile.models import CVData
-
 
 @pytest.mark.asyncio
 async def test_storage_db_path_redirected_to_test_db(authenticated_async_context):

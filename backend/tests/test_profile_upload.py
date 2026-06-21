@@ -37,14 +37,14 @@ def api(monkeypatch, tmp_path):
 
     asyncio.run(_bootstrap())
 
-    from pathlib import Path
     import sys as _sys
+    from pathlib import Path
 
     from src.api import auth_deps, dependencies
+    from src.api.main import app
     from src.api.routes import auth as auth_route
     from src.api.routes import channels as channels_route
     from src.core import settings
-    from src.api.main import app
 
     patched = Path(db_path)
     monkeypatch.setattr(settings, "DB_PATH", patched, raising=True)
@@ -196,8 +196,8 @@ def test_rescore_scheduled_when_profile_content_changes(api, monkeypatch):
     return 200 AND the sentinel must have been called.
     """
     import asyncio as _asyncio
+
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
 
     monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
@@ -251,6 +251,7 @@ def test_rescore_not_scheduled_when_profile_unchanged(api, monkeypatch):
     when content is unchanged the function returns early without create_task.
     """
     import asyncio as _asyncio
+
     import src.api.routes.profile as profile_route
     monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
@@ -295,6 +296,7 @@ def test_rescore_task_pinned_to_bg_tasks_set(api, monkeypatch):
     by inspecting the set right after create_task is called.
     """
     import asyncio as _asyncio
+
     import src.api.routes.profile as profile_route
     monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
