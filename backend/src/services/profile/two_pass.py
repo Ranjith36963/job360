@@ -36,6 +36,7 @@ from src.services.profile.models import CVData, UserProfile
 from src.services.profile.preferences import (
     deterministic_about_me_fields,
     llm_infer_from_about_me,
+    merge_cv_and_preferences,
 )
 
 logger = logging.getLogger("job360.profile.two_pass")
@@ -139,6 +140,14 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
             _merge_str_list(cv.about_me_inferred_skills, llm_pr)    # → MERGED PR
         except Exception as e:  # noqa: BLE001 — deterministic result still stands
             logger.warning("two_pass: about_me LLM pass skipped: %s", e)
+
+    # ── Fold the freshly-extracted CV skills/titles into preferences ──
+    # (Was done in the CV upload route; lives here now so the SINGLE extractor
+    # owns the whole job and the route doesn't have to extract anything.)
+    if cv.skills or cv.job_titles:
+        profile.preferences = merge_cv_and_preferences(
+            cv.skills, cv.job_titles, prefs
+        )
 
     return profile
 
