@@ -191,9 +191,9 @@ Status: ✅ wired+working · ⚙️ backend-only (no UI) · 🚪 needs infra · 
 ### SEO surfaces
 - ✅ `sitemap.ts`, `robots.txt`, OG tags + JSON-LD on `/jobs/[id]` (public for unfurl bots — why `/jobs` is intentionally un-gated).
 
-### 🧩 In code but NOT wired (latent — flag for a decision)
-- **Cover-letter generation** — `services/cover_letter.py` exists (LLM chain) but has **NO API route** and no UI. Either wire an endpoint or mark experimental.
-- **JSON-LD harvester** — `services/jsonld_harvest.py` is a ready extractor but is **NOT registered** as a source in SOURCE_REGISTRY.
-- **Company/ATS discovery** — `services/company_discovery.py` validates ATS slugs; utility, not user-facing.
+### 🧩 In code but not wired — REMOVED ✅ (owner decision)
+The three latent unwired modules were **deleted** from the codebase (no live code imported them):
+`services/cover_letter.py`, `services/jsonld_harvest.py`, `services/company_discovery.py` (+ their tests).
+Clean removal — nothing in `src` referenced them.
 
 **Doc-sync corrections:** Part 4 says "21 migrations (0000→0020)" — current head is **0021** (`add_job_deadline`). SOURCE_REGISTRY = **47** keys / 46 instances (code asserts 47 in `test_cli.py`).
