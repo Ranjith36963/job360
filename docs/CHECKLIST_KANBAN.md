@@ -40,7 +40,7 @@ GitHub `Ranjith36963`, demo account loading the real profile.
 | E1–E7 | Pipeline (add/advance/notes/timeline/counts/reminders) | ✅ | all 5 stages (applied→outreach→interview→offer→rejected); add+advance→DB stage+history |
 | F1–F3 | Notifications history/stats | ✅ | 200 (empty ledger) |
 | G1–G10 | Channels (providers/webhook add/test/delete/OAuth-gated) | ✅ | webhook add 201 (Fernet-encrypted); **test-send fired real Apprise POST**; delete works |
-| H1–H5 | Notification rules CRUD | ✅ | create 201 / update 200 / delete 204 |
+| H1–H5 | Notification rules (GET + PUT-upsert) | ✅ | GET 200 / PUT-upsert 200 — **one row per user, NO DELETE route** (UNIQUE(user_id), rule #23) |
 | I1–I3 | Account guards (pw/email change) | ✅ | wrong pw → 401 (rule #26) |
 | I4 | Delete account | ✅ | **now password-gated** (was unguarded — Finding #6 FIXED) |
 | J1–J6 | Admin/Ops (sources/status/health/runs/source-health) | ✅ | all 200 |
@@ -60,8 +60,9 @@ Every feature traced through code (49 routes total). Backend pytest exists for n
 `test_scoring_dimensions`). Frontend vitest covers the major flows (landing, login, dashboard,
 filters, job detail, JobCard, CVUpload, PreferencesForm, KanbanBoard, channels, account).
 
-**Wired-but-unused frontend functions (build exists, no UI caller):** `exportJobsCsv` (no CSV
-button), `getRecentRuns`, `getEmailVerified` (no verify banner), `getActions`/`getActionCounts`.
+**Wired-but-unused frontend functions (build exists, no UI caller):** `getRecentRuns`,
+`getEmailVerified` (no verify banner), `getActions`/`getActionCounts`. (`exportJobsCsv` is now
+wired — Export button at `frontend/src/app/dashboard/page.tsx:400`.)
 **Shell pages:** `/jobs` → redirect to `/dashboard`; `/settings` → tab nav only.
 
 ---
@@ -154,7 +155,7 @@ is the one safe immediate pull (clean FF).
 
 ## Part 5 — Code-real components MISSING from the A–J checklist (code-verified)
 
-A full code inventory (49 routes, 20 pages, 6 CLI cmds, ARQ workers, ~40 service modules, 19 DB
+A full code inventory (**57** routes, 20 pages, 6 CLI cmds, ARQ workers, **46** service modules, 19 DB
 tables, migrations 0000→**0021**, **47** SOURCE_REGISTRY keys) surfaced real features/lifecycle
 pieces the A–J UI checklist above does **not** cover. Listed here so the doc matches the code.
 Status: ✅ wired+working · ⚙️ backend-only (no UI) · 🚪 needs infra · 🧩 in code, NOT wired.
@@ -195,5 +196,25 @@ Status: ✅ wired+working · ⚙️ backend-only (no UI) · 🚪 needs infra · 
 The three latent unwired modules were **deleted** from the codebase (no live code imported them):
 `services/cover_letter.py`, `services/jsonld_harvest.py`, `services/company_discovery.py` (+ their tests).
 Clean removal — nothing in `src` referenced them.
+
+### Additional code-real components (named for completeness — 2026-06-21 code audit)
+Real modules / knobs behind features already listed by *name* but not traced to a *module*:
+- **Engine 2 sub-dimensions** — `scoring_dimensions.py` computes 4 separate scores (salary / seniority / visa / workplace), each with its own env weight (`SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT`, `core/settings.py`). Salary is normalized to GBP/yr first by `salary.py` (`normalize_salary`).
+- **Keyword-generation bridge** — `profile/keyword_generator.py` (`generate_search_config`) turns a parsed profile into the `SearchConfig` (keywords / titles / locations) that every one of the 47 sources reads. The link between “profile” and “search”.
+- **LLM provider cascade** — `profile/llm_provider.py`: Gemini → Groq → Cerebras fallback with Pydantic-validated extraction (`llm_extract_validated`); used by the CV / LinkedIn / preferences passes. `preferences.llm_infer_from_about_me` is a 2nd LLM pass mining the free-text “about me”.
+- **Domain-aware source filtering** — `domain_classifier.py` (`classify_user_domain`, `source_matches_user_domains`) suppresses domain-irrelevant sources at query time.
+- **Per-user feed service** — `feed.py` (`FeedService.upsert_feed_row`, `cascade_stale`) + `rescore.py` (`rescore_user_feed`, wrapped in `db_retry.with_write_retry`) + `vector_index.py` (ChromaDB wrapper).
+- **Auth internals** — `auth/passwords.py` (Argon2), `auth/tokens.py` (reset/verify tokens), `auth/email_sender.py` (`send_system_email` — shared SMTP for reset + verify).
+- **Channel internals** — `channels/dispatcher.py` (`dispatch`, `_is_in_quiet_window`, `_queue_digest`), `channels/crypto.py` (Fernet, `set_test_key` test override).
+- **ATS company manifest** — `core/companies.py`: ~264 hardcoded ATS slugs across 11 platforms (`GREENHOUSE_COMPANIES` … `RIPPLING_COMPANIES` + `COMPANY_NAME_OVERRIDES`). A real maintenance surface.
+- **Pipeline guards (config)** — `SOURCE_FETCH_TIMEOUT` (60s) / `SOURCE_FETCH_TIMEOUT_ATS` (240s) per-source cancel; `MAX_CONCURRENT_SEARCHES_PER_USER` (3 → HTTP 429) in `core/settings.py`.
+- **Observability internals** — `utils/logger.py` (JSON formatter, separate audit logger, `set_run_uuid` / `set_request_id`) + `api/middleware.py` `RequestIdMiddleware` (stamps `X-Request-Id`). `report_generator` also has an HTML variant (`generate_html_report`), not just markdown.
+- **Frontend infra surfaces** — `app/error.tsx` (error boundary), `app/not-found.tsx` (404), `next.config.ts` `/api/:path*` proxy (Finding #12), `middleware.ts` PROTECTED_PATHS gate (Finding #13), `app/settings/layout.tsx` (`SettingsNavTabs`).
+
+### Count + claim corrections (2026-06-21, code-verified)
+- **Routes = 57, not 49** — `grep -E "@router\.(get|post|put|delete|patch)" backend/src/api/routes/*.py` = 57 (old 49 predated the channels-OAuth + auth account-mgmt routes).
+- **Service modules = 46, not ~40** — `backend/src/services/**/*.py` minus `__init__`.
+- **Notification rules have NO DELETE route** — `notification_rules.py` is GET + PUT-upsert only (one row per user, UNIQUE(user_id), rule #23). The earlier H1–H5 “delete 204” claim was wrong (corrected in Part 1).
+- **`exportJobsCsv` is now wired** (`frontend/src/app/dashboard/page.tsx:400`) — removed from the Part 2 “wired-but-unused” list. The four still-unused: `getRecentRuns`, `getEmailVerified`, `getActions`, `getActionCounts`.
 
 **Doc-sync corrections:** Part 4 says "21 migrations (0000→0020)" — current head is **0021** (`add_job_deadline`). SOURCE_REGISTRY = **47** keys / 46 instances (code asserts 47 in `test_cli.py`).
