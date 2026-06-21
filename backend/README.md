@@ -1,6 +1,6 @@
 # Job360 Backend
 
-FastAPI backend for Job360. Async job aggregator across 50 sources + scoring +
+FastAPI backend for Job360. Async job aggregator across 47 sources + scoring +
 semantic retrieval. Serves the Next.js dashboard, runs the scheduled pipeline,
 and hosts the ARQ worker for notifications.
 
@@ -41,7 +41,7 @@ copy ..\.env.example ..\.env   # Windows
 ```
 
 Edit `../.env` to set your API keys, webhook URLs, and `FRONTEND_ORIGIN`.
-Free sources (41 of 50) work without any keys. See [`CLAUDE.md`](../CLAUDE.md)
+Free sources (39 of 47) work without any keys. See [`CLAUDE.md`](../CLAUDE.md)
 for the full env-var table.
 
 ## Run the API
@@ -64,11 +64,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ## Run the pipeline (CLI)
 
 ```bash
-python -m src.cli run                          # all 50 sources
+python -m src.cli run                          # all 47 sources
 python -m src.cli run --source arbeitnow       # single source
 python -m src.cli run --dry-run --log-level DEBUG
 python -m src.cli status                       # last-run summary
-python -m src.cli sources                      # list all 50 sources
+python -m src.cli sources                      # list all 47 sources
 python -m src.cli view --hours 24 --min-score 50
 python -m src.cli setup-profile --cv path/to/cv.pdf
 ```

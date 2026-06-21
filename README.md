@@ -52,7 +52,7 @@ flowchart TD
 
 > The reconciliation: 46 *class files* on disk → 47 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 46 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 47`).
 
-- **7 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork — skip gracefully if no API key set
+- **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
 - **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
 - **11 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
 - **9 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
@@ -335,7 +335,6 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 | Personio | 18 | 10 original + 8 Batch 3 additions |
 | SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
 | Rippling | 5 | Added Batch 3 |
-| Comeet | 5 | Added Batch 3 |
 | **Total** | **~264** | |
 
 ## Project Structure
@@ -381,7 +380,7 @@ job360/
 │       │   └── csv_export.py
 │       ├── sources/             # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY keys
 │       │   ├── base.py
-│       │   ├── apis_keyed/  (7)
+│       │   ├── apis_keyed/  (8)
 │       │   ├── apis_free/   (9 free_json + 2 rss-tier)
 │       │   ├── ats/         (12)
 │       │   ├── feeds/       (8)

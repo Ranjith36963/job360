@@ -1,5 +1,7 @@
 # LAUNCH_PLAN.md — From verified app to live SaaS
 
+> Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/CHECKLIST_KANBAN.md).
+
 > **What this is.** The ordered roadmap from *"the code is written"* (today) to *"the SaaS is operating, serving real users, generating revenue"* (target). Eight phases, with explicit dependencies and exit criteria per phase.
 >
 > **What this is NOT.** A status doc (see `STATUS.md` for what's already merged). A rule book (see `CLAUDE.md` for what you must not break). An architecture reference (see `docs/pillars/`). This document only answers *"what's next, in what order, and why"*.
@@ -50,10 +52,10 @@ Each box assumes the previous one has cleared its exit criterion. Skipping a pha
 
 | # | Item | Effort | Files touched |
 | --- | --- | --- | --- |
-| A | **Password reset flow** — migration + token service + 2 routes + frontend page + email template | ~1 day | `migrations/0015_password_resets.up.sql`, `services/auth/tokens.py`, `services/auth/password_reset.py`, `services/auth/email_sender.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/forgot-password/page.tsx`, `frontend/src/app/(auth)/reset-password/page.tsx`, `tests/test_password_reset.py` |
-| B | **Email verification on registration** — migration + verification service + 2 routes + register-time hook + frontend confirm page | ~1 day | `migrations/0016_email_verification.up.sql`, `services/auth/email_verification.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/verify-email/page.tsx`, `tests/test_email_verification.py` |
-| C | **ARQ worker local-dev runner + docs** — docker-compose for Redis, Makefile target, README updates so a developer can spin up the worker in one command | ~half day | `docker-compose.dev.yml` or equivalent, `Makefile`, `backend/README.md`, `docs/pillars/runbook.md` (worker section) |
-| D | **Per-source health admin page** — backend route reading existing `run_log.per_source_errors` + `per_source_duration` columns (from migration `0010`), frontend admin page | ~1 day | `api/routes/admin.py` or extend `runs.py`, `frontend/src/app/admin/sources/page.tsx`, `tests/test_admin_source_health.py` |
+| A ✅ | **Password reset flow** — migration + token service + 2 routes + frontend page + email template | ~1 day | `migrations/0015_password_resets.up.sql`, `services/auth/tokens.py`, `services/auth/password_reset.py`, `services/auth/email_sender.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/forgot-password/page.tsx`, `frontend/src/app/(auth)/reset-password/page.tsx`, `tests/test_password_reset.py` |
+| B ✅ | **Email verification on registration** — migration + verification service + 2 routes + register-time hook + frontend confirm page | ~1 day | `migrations/0016_email_verification.up.sql`, `services/auth/email_verification.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/verify-email/page.tsx`, `tests/test_email_verification.py` |
+| C ✅ | **ARQ worker local-dev runner + docs** — docker-compose for Redis, Makefile target, README updates so a developer can spin up the worker in one command | ~half day | `docker-compose.dev.yml` or equivalent, `Makefile`, `backend/README.md`, `docs/pillars/runbook.md` (worker section) |
+| D ✅ | **Per-source health admin page** — backend route reading existing `run_log.per_source_errors` + `per_source_duration` columns (from migration `0010`), frontend admin page | ~1 day | `api/routes/admin.py` or extend `runs.py`, `frontend/src/app/admin/sources/page.tsx`, `tests/test_admin_source_health.py` |
 
 ### Optional bundle (cheap to add while in this code)
 
@@ -365,7 +367,7 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 
 > Mark items done as they ship. When all items in a phase are done, mark the phase ✅ and proceed to the next.
 
-- [ ] **Phase −2** — Build the verification-blocker set
+- [x] **Phase −2** — Build the verification-blocker set ✅ DONE (A–D all shipped)
 - [ ] **Phase −1** — Manual verification + bug-fix sprint
 - [ ] **Phase 0**  — ICO + privacy lead-time + repo cleanup
 - [ ] **Phase 1**  — Email backbone (SES)

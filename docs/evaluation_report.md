@@ -1,5 +1,7 @@
 # Job360 — Production Readiness Evaluation Report
 
+> ⚠️ **Stale score (2026-06-21):** the 5.4/10 below predates Step 3, the LLM matcher (engine #4), two-pass profile extraction, and the #10–#15 audit fixes. The 10-gate rubric is still valid; the score needs re-evaluation.
+
 > **Living document.** Read end-to-end once; update the score history (§II.A) after every batch merges. Written 2026-04-26 against `main @ 106768f` (post-Step-1.6).
 >
 > **Author's stance.** Job360 is a **UK startup** that will accept CVs (PII) from real users and be shared on LinkedIn — not a portfolio piece. Every gate threshold is calibrated to *"can we accept user #1 without legal, security, or reputational damage,"* not *"is the code clean."*

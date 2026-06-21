@@ -37,7 +37,7 @@ plan, a status snapshot, a reference, or an architectural decision.
   source expansion.
 - `plans/batch-3.5*.md` — stabilisation sub-batches (IDOR fix,
   multi-user profile storage, conditional-cache pilot, test cleanup).
-- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed). **Current step.**
+- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed). **Completed** (closed at origin/main `7194d0e`).
 - [`evaluation_report.md`](evaluation_report.md) — production-readiness evaluation; updated post-Step-3.
 - Completed step plans (Step 0/1/1.5/2) and the historical `CurrentStatus.md`
   re-audit live under [`_archive/`](_archive/).

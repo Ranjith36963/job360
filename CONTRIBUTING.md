@@ -56,7 +56,7 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
 
 ## Test-before-merge gate
 
-**Invariant baseline: 1,154+ passing, 0 failing.**
+**Invariant baseline: ~1,409 collected (2 live deselected), 0 failing.**
 
 A PR is mergeable only when:
 
