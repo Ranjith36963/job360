@@ -1,70 +1,117 @@
-# Job360 Docs Index
+# Job360 — Documentation Index
 
-Landing page for everything in `docs/`. Start here when you need to find a
-plan, a status snapshot, a reference, or an architectural decision.
+The map of everything under `docs/` (plus the load-bearing docs at the repo root).
+Start here to find the right doc fast.
 
-## Getting started
+> **Regenerated 2026-06-21** after a docs audit (dead/stale files removed, drift fixed).
+> **Legend:** 🟢 current ground truth · 📘 stable reference · 🗄️ historical (append-only / not kept current)
 
-- [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — branch naming, commit
-  convention, PR flow, test-before-merge gate.
-- [`../backend/README.md`](../backend/README.md) — install, run API, CLI,
-  tests, migrations, ARQ worker.
-- [`../frontend/README.md`](../frontend/README.md) — install, dev server,
-  build, backend wiring.
+---
 
-## Current state
+## Start here — pick your intent
 
-- [`../STATUS.md`](../STATUS.md) — project phase summary, what's done, what's
-  next, known issues. **This is the current ground truth.**
-- [`IMPLEMENTATION_LOG.md`](IMPLEMENTATION_LOG.md) — batch-by-batch completion
-  log for Pillars 1–3. Read this first if you are picking up a thread.
+| I want to… | Read |
+|---|---|
+| **Understand the project fast** | [`../CLAUDE.md`](../CLAUDE.md) → [`../STATUS.md`](../STATUS.md) |
+| **Pick up where work left off** | [`IMPLEMENTATION_LOG.md`](IMPLEMENTATION_LOG.md) (read first) → [`../STATUS.md`](../STATUS.md) |
+| **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
+| **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| **Debug a runtime problem** | [`troubleshooting.md`](troubleshooting.md) → [`pillars/runbook.md`](pillars/runbook.md) |
+| **Understand the architecture deeply** | [`pillars/`](pillars/README.md) (authoritative) → [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
+| **Know what's verified working** | [`CHECKLIST_KANBAN.md`](CHECKLIST_KANBAN.md) |
 
-## Product / strategy
+---
 
-- [`PRD.md`](PRD.md) — product requirements + vision.
-- [`References.md`](References.md) — source-of-truth list of external
-  references and research links.
+## 🟢 Current state — ground truth
 
-## Execution plans
+| Doc | What it is |
+|---|---|
+| [`../STATUS.md`](../STATUS.md) | Project phase, what's done/next, known issues. **The single current ground truth.** |
+| [`IMPLEMENTATION_LOG.md`](IMPLEMENTATION_LOG.md) | Append-only batch-by-batch completion log (Pillars 1–3 + steps). Read first when resuming. |
+| [`CHECKLIST_KANBAN.md`](CHECKLIST_KANBAN.md) | End-to-end live verification + structural audit — what's proven working, with evidence. |
 
-- [`plans/batch-1-plan.md`](plans/batch-1-plan.md) — Pillar 3 Batch 1
-  (date-model rebuild, fabricator fixes, ghost detection, KPI exporter).
-- [`plans/batch-2-plan.md`](plans/batch-2-plan.md) — Pillar 3 Batch 2 TDD
-  plan for the multi-user delivery layer.
-- [`plans/batch-2-decisions.md`](plans/batch-2-decisions.md) — irreversible
-  architectural choices (ARQ, Apprise, polling, session cookies).
-- [`plans/batch-3-plan.md`](plans/batch-3-plan.md) — tiered polling +
-  source expansion.
-- `plans/batch-3.5*.md` — stabilisation sub-batches (IDOR fix,
-  multi-user profile storage, conditional-cache pilot, test cleanup).
-- [`step_3_plan.md`](step_3_plan.md) — Step 3 new endpoints + Settings UI (28 deliverables, 5 cohorts, reviewer R-1..R-7 closed). **Completed** (closed at origin/main `7194d0e`).
-- [`evaluation_report.md`](evaluation_report.md) — production-readiness evaluation; updated post-Step-3.
-- Completed step plans (Step 0/1/1.5/2) and the historical `CurrentStatus.md`
-  re-audit live under [`_archive/`](_archive/).
+## 📘 Architecture & operations
 
-## Architecture
+| Doc | What it is |
+|---|---|
+| [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
+| [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
+| [`pillars/`](pillars/README.md) | **Authoritative** per-pillar deep reference (code-verified). See below. |
+| [`troubleshooting.md`](troubleshooting.md) | Dev-environment FAQ: port conflicts, SQLite locks, missing LLM keys, Redis on Windows. |
+| [`pillars/runbook.md`](pillars/runbook.md) | "I see a problem at 2am" operational guide — SQL queries + CLI commands. |
+| [`pillars/glossary.md`](pillars/glossary.md) | Plain-English definitions of every domain term. |
 
-- [`../CLAUDE.md`](../CLAUDE.md) — the load-bearing architecture doc. Data
-  flow, module map, hard rules (27 of them), scoring algorithm, env vars,
-  Batch 2 + Batch 3 + Pillar 2 + Step 3 additions.
-- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — deeper technical reference with
-  diagrams, DB schema, config variables, dependency list.
+### The three pillars (`pillars/`)
 
-## Archive
+| Doc | Covers |
+|---|---|
+| [`pillars/README.md`](pillars/README.md) | Pillar overview + connection diagram (entry point). |
+| [`pillars/01-user-pillar.md`](pillars/01-user-pillar.md) | Auth, profile, feed, dashboard, notifications. |
+| [`pillars/02-search-and-match-engine.md`](pillars/02-search-and-match-engine.md) | The 6-stage pipeline: prefilter → scoring → dedup → enrich → store. |
+| [`pillars/03-job-providers.md`](pillars/03-job-providers.md) | 46 source classes / 47 registry keys, `BaseJobSource`, ATS catalog. |
 
-- [`_archive/`](_archive/) — pillar 1 + pillar 2 plans and progress logs,
-  and any superseded status diffs.
+## 📘 Product & strategy
 
-**Warning:** Files here reflect the state of a past pillar; they have not
-been kept current.
+| Doc | What it is |
+|---|---|
+| [`PRD.md`](PRD.md) | Product requirements + vision. |
+| [`References.md`](References.md) | Source-of-truth list of external references and research links. |
 
-## Research
+## 📘 Engine evaluation
 
-- [`research/`](research/) — pillar-level research reports
-  (`pillar_1_report.md`, `pillar_2_report.md`, `pillar_3_report.md`, and
-  per-batch Pillar-3 reports).
+| Doc | What it is |
+|---|---|
+| [`engine_eval_report.md`](engine_eval_report.md) | Canonical ablation results (Run 8, n=100, bootstrap CIs) — drives engine selection. |
+| [`evaluation_report.md`](evaluation_report.md) | 10-gate production-readiness rubric (score banner notes it predates Step 3 — needs re-eval). |
 
-## Superpowers workflows
+## Roadmap & plans
 
-- [`superpowers/`](superpowers/) — skill-driven plan artefacts produced by
-  the `superpowers:*` workflows (brainstorming, plan writing, plan execution).
+| Doc | Status | What it is |
+|---|---|---|
+| [`ExecutionOrder.md`](ExecutionOrder.md) | 🟢 | Seam-by-seam integration order; **Steps 4–6 (ops hardening) still pending.** |
+| [`plans/batch-2-decisions.md`](plans/batch-2-decisions.md) | 📘 | **Irreversible architectural choices** (ARQ, Apprise, polling, SQLite, session cookies). |
+| [`plans/batch-1-plan.md`](plans/batch-1-plan.md) · [`batch-2-plan.md`](plans/batch-2-plan.md) · [`batch-3-plan.md`](plans/batch-3-plan.md) | 🗄️ | Pillar 3 batch plans (shipped — kept as the log's linked history). |
+| `plans/batch-3.5*.md` | 🗄️ | Stabilisation sub-batches (IDOR fix, profile storage, conditional-cache pilot, test cleanup). |
+| [`step_3_plan.md`](step_3_plan.md) | 🗄️ | Step 3 endpoints + Settings UI — **completed** (closed at `origin/main 7194d0e`). |
+| [`superpowers/`](superpowers/) | 🗄️ | Skill-driven plan + spec artefacts (channels/notifications overhaul). |
+
+## 🗄️ Reviews (`reviews/`)
+
+Permanent reviewer verdicts for merged Pillar-3 batches — cited by `IMPLEMENTATION_LOG.md`:
+[`batch-1-review.md`](reviews/batch-1-review.md) · [`batch-2-review.md`](reviews/batch-2-review.md) · [`batch-3-review.md`](reviews/batch-3-review.md) · [`batch-3.5-review.md`](reviews/batch-3.5-review.md)
+
+## 🗄️ Research (`research/`)
+
+Background research that `IMPLEMENTATION_LOG.md` bridges to the shipped code (kept as canonical source material):
+[`pillar_1_report.md`](research/pillar_1_report.md) · [`pillar_2_report.md`](research/pillar_2_report.md) · [`pillar_3_report.md`](research/pillar_3_report.md) · [`pillar_3_batch_1`](research/pillar_3_batch_1.md)–[`4`](research/pillar_3_batch_4.md)
+
+## 🤖 Autonomous maintenance loop (`maintenance/`)
+
+**Live working files** for the worker/integrator/scout/health agent loop — not historical, actively read/written:
+
+| Doc | Role |
+|---|---|
+| [`maintenance/MISSIONS.md`](maintenance/MISSIONS.md) | **Canonical** mission list (the loop's task queue). |
+| [`maintenance/BACKLOG.md`](maintenance/BACKLOG.md) | Deferred work. |
+| [`maintenance/JOURNAL.md`](maintenance/JOURNAL.md) | Running activity log. |
+| [`maintenance/STATUS-DAILY.md`](maintenance/STATUS-DAILY.md) | Daily health report (GREEN/AMBER/RED). |
+| [`maintenance/HEALTH-SCHEDULE.md`](maintenance/HEALTH-SCHEDULE.md) | Health-check cadence. |
+| [`maintenance/REVIEW-PACKET.md`](maintenance/REVIEW-PACKET.md) | Integrator review bundle. |
+| [`maintenance/M7-codegen-research.md`](maintenance/M7-codegen-research.md) | OpenAPI→TS codegen research (decision pending). |
+
+## 🛠️ Known debt
+
+- [`mypy_backlog.md`](mypy_backlog.md) — catalogued mypy strict-mode errors + chip-away order.
+
+## 🗄️ Archive (`_archive/`)
+
+Superseded plans/progress logs from past pillars — **not kept current**, retained only because
+`IMPLEMENTATION_LOG.md` and a few tests link them: completed step plans (Step 0/1/1.5/2),
+Pillar 1/2 plans + progress, the `CurrentStatus.md` re-audit, and `batch_prompts.md`.
+
+---
+
+> **Conventions.** `IMPLEMENTATION_LOG.md` is **append-only** — never edit past entries; append a
+> revert note instead. `pillars/` is the authoritative architecture reference (supersedes the older
+> `ARCHITECTURE.md` where they differ). Code is the proof, not docs — verify counts/claims against
+> source before trusting any doc.
