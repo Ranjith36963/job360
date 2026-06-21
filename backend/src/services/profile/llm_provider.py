@@ -2,49 +2,146 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 import time as _time
 from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from src.core.settings import GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY
+from src.core.settings import CEREBRAS_API_KEY, GEMINI_API_KEY, GROQ_API_KEY
 
 logger = logging.getLogger("job360.profile.llm_provider")
 
 _S = TypeVar("_S", bound=BaseModel)
 
 
+# ── Failure taxonomy + resilience knobs (env-overridable) ───────────────────
+# Per-call hard timeout so a hung provider can't block the request (and, in the
+# LinkedIn path, all 8 gathered calls). 60s is long enough for Gemini on a big
+# CV, short enough to fail over.
+_LLM_TIMEOUT_S = float(os.getenv("LLM_CALL_TIMEOUT_S", "60"))
+# On a SHORT per-minute rate-limit, back off + retry the same provider. On a
+# LONG / daily cap (minutes), don't wait — fail over to the next provider now.
+_LLM_RL_RETRIES = int(os.getenv("LLM_RATE_LIMIT_RETRIES", "2"))
+_LLM_RL_BASE_DELAY_S = float(os.getenv("LLM_RATE_LIMIT_BASE_DELAY_S", "2"))
+_LLM_RL_MAX_WAIT_S = float(os.getenv("LLM_RATE_LIMIT_MAX_WAIT_S", "8"))
+
+
+class LLMError(RuntimeError):
+    """Base for LLM provider failures. Subclasses ``RuntimeError`` so existing
+    callers that catch ``RuntimeError``/``Exception`` keep working unchanged."""
+
+
+class LLMRateLimited(LLMError):  # noqa: N818 — reads better than ...Error
+    """Every provider failed AND at least one was rate-limited / quota-exhausted.
+
+    Callers MUST treat this as 'retry later', NOT as 'the user has no data'.
+    Persisting an empty result on this error is the silent-data-loss bug — the
+    correct response is to surface a degraded / try-again state.
+    """
+
+
+class LLMAllProvidersFailed(LLMError):  # noqa: N818 — reads better than ...Error
+    """Every provider failed for non-rate-limit reasons (bad key, outage, bug)."""
+
+
+_RATE_LIMIT_MARKERS = (
+    "rate limit", "rate_limit", "ratelimit", "429", "too many requests",
+    "quota", "resource_exhausted", "resource exhausted", "tokens per day",
+)
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    """True if the exception looks like a provider rate-limit / quota error."""
+    status = (
+        getattr(exc, "status_code", None)
+        or getattr(exc, "status", None)
+        or getattr(exc, "code", None)
+    )
+    if status in (429, "429"):
+        return True
+    msg = str(exc).lower()
+    return any(m in msg for m in _RATE_LIMIT_MARKERS)
+
+
+def _retry_after_seconds(exc: BaseException, default: float) -> float:
+    """Best-effort parse of a provider's retry hint (e.g. 'try again in 24m3s'
+    or a Retry-After value). Returns a LARGE number for long/daily caps so the
+    caller fails over instead of blocking the request."""
+    s = str(exc)
+    m = re.search(r"try again in\s+([0-9.]+)\s*m", s)
+    if m:
+        return float(m.group(1)) * 60.0
+    m = re.search(r"try again in\s+([0-9.]+)\s*s", s)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"retry[-_ ]?after['\"]?\s*[:=]?\s*([0-9.]+)", s, re.I)
+    if m:
+        return float(m.group(1))
+    return default
+
+
+async def _attempt(call, prompt: str, system: str, provider: str) -> dict[str, Any]:
+    """Run ONE provider with a hard timeout + bounded backoff on SHORT rate-limits.
+
+    - Hard timeout (``_LLM_TIMEOUT_S``) so a hung call can't block the request.
+    - Short per-minute rate-limit → sleep the hinted (capped) delay and retry the
+      same provider, up to ``_LLM_RL_RETRIES`` times.
+    - Long/daily cap or any non-rate-limit error → raise immediately so the
+      caller fails over to the next provider.
+    """
+    delay = _LLM_RL_BASE_DELAY_S
+    for i in range(_LLM_RL_RETRIES + 1):
+        try:
+            return await asyncio.wait_for(call(prompt, system), timeout=_LLM_TIMEOUT_S)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(f"{provider} timed out after {_LLM_TIMEOUT_S}s") from e
+        except Exception as e:  # noqa: BLE001
+            if _is_rate_limit(e) and i < _LLM_RL_RETRIES:
+                wait = _retry_after_seconds(e, delay)
+                if wait <= _LLM_RL_MAX_WAIT_S:
+                    logger.warning(
+                        "%s short rate-limit; backing off %.1fs (retry %d/%d)",
+                        provider, wait, i + 1, _LLM_RL_RETRIES,
+                    )
+                    await asyncio.sleep(wait)
+                    delay *= 2
+                    continue
+            raise
+
+
 async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     """CV parsing — Gemini (best JSON) → Groq → Cerebras fallback.
 
-    Provider priority optimised for JSON quality and daily quota.
-    Raises RuntimeError if no provider is available or all fail.
+    Provider priority optimised for JSON quality and daily quota. Each call has
+    a hard timeout + smart 429 backoff (see ``_attempt``).
+
+    Raises:
+        RuntimeError: no provider key configured.
+        LLMRateLimited: all providers failed AND >=1 was rate-limited — retry
+            later; callers MUST NOT persist an empty result on this.
+        LLMAllProvidersFailed: all providers failed for non-rate-limit reasons.
     """
-    errors = []
+    errors: list[str] = []
+    rate_limited = False
 
-    if GEMINI_API_KEY:
+    for key, call, name in (
+        (GEMINI_API_KEY, _call_gemini, "gemini"),
+        (GROQ_API_KEY, _call_groq, "groq"),
+        (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
+    ):
+        if not key:
+            continue
         try:
-            return await _call_gemini(prompt, system)
-        except Exception as e:
-            errors.append(f"Gemini: {e}")
-            logger.warning("Gemini failed, trying next provider: %s", e)
-
-    if GROQ_API_KEY:
-        try:
-            return await _call_groq(prompt, system)
-        except Exception as e:
-            errors.append(f"Groq: {e}")
-            logger.warning("Groq failed, trying next provider: %s", e)
-
-    if CEREBRAS_API_KEY:
-        try:
-            return await _call_cerebras(prompt, system)
-        except Exception as e:
-            errors.append(f"Cerebras: {e}")
-            logger.warning("Cerebras failed: %s", e)
+            return await _attempt(call, prompt, system, name)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}: {e}")
+            rate_limited = rate_limited or _is_rate_limit(e)
+            logger.warning("%s failed, trying next provider: %s", name, e)
 
     if not (GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
@@ -52,44 +149,48 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
             "All offer free tiers — see https://ai.google.dev, https://console.groq.com, https://cloud.cerebras.ai"
         )
 
-    raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
+    detail = "; ".join(errors)
+    if rate_limited:
+        raise LLMRateLimited(f"All LLM providers failed (rate-limited): {detail}")
+    raise LLMAllProvidersFailed(f"All LLM providers failed: {detail}")
 
 
 async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
     """Fast scoring — Cerebras (fastest ~2000 tok/sec) → Groq → Gemini fallback.
 
     Use this for bulk job scoring where latency matters more than daily quota.
-    Raises RuntimeError if no provider is available or all fail.
+    Same timeout + backoff + failure taxonomy as ``llm_extract``.
+
+    Raises:
+        RuntimeError: no provider key configured.
+        LLMRateLimited / LLMAllProvidersFailed: as in ``llm_extract``.
     """
-    errors = []
+    errors: list[str] = []
+    rate_limited = False
 
-    if CEREBRAS_API_KEY:
+    for key, call, name in (
+        (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
+        (GROQ_API_KEY, _call_groq, "groq"),
+        (GEMINI_API_KEY, _call_gemini, "gemini"),
+    ):
+        if not key:
+            continue
         try:
-            return await _call_cerebras(prompt, system)
-        except Exception as e:
-            errors.append(f"Cerebras: {e}")
-            logger.warning("Cerebras failed, trying next provider: %s", e)
-
-    if GROQ_API_KEY:
-        try:
-            return await _call_groq(prompt, system)
-        except Exception as e:
-            errors.append(f"Groq: {e}")
-            logger.warning("Groq failed, trying next provider: %s", e)
-
-    if GEMINI_API_KEY:
-        try:
-            return await _call_gemini(prompt, system)
-        except Exception as e:
-            errors.append(f"Gemini: {e}")
-            logger.warning("Gemini failed: %s", e)
+            return await _attempt(call, prompt, system, name)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}: {e}")
+            rate_limited = rate_limited or _is_rate_limit(e)
+            logger.warning("%s failed, trying next provider: %s", name, e)
 
     if not (GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
             "No LLM API key configured. Set GEMINI_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY in .env."
         )
 
-    raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
+    detail = "; ".join(errors)
+    if rate_limited:
+        raise LLMRateLimited(f"All LLM providers failed (rate-limited): {detail}")
+    raise LLMAllProvidersFailed(f"All LLM providers failed: {detail}")
 
 
 async def llm_extract_validated(
