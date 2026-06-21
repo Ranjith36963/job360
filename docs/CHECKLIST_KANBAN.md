@@ -130,9 +130,27 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
 
 ---
 
-## Part 4 — Worktree / branch consolidation status (re-checked 2026-06-19 vs `origin/main` = `fe9935a`)
+## Part 4 — Worktree / branch consolidation status (re-verified 2026-06-21 vs `origin/main` = `9c88d11`)
 
-**✅ Resolved (2026-06-21).** All worktree/feature branches listed in earlier revisions were merged into `main` and deleted; any unmerged work is preserved on `origin/backup/*`. Current `origin/main` canonical counts: **47 source keys / 46 instances / 46 classes**, **22 migrations** (0000→0021), 8 keyed APIs. The earlier 47-vs-46 / `gov_apprenticeships` open decisions are closed (gov_apprenticeships restored; count is 47).
+**✅ Resolved + cleaned (2026-06-21).** Local checkout is down to a single branch: **`main`** (the only worktree is the main checkout). What changed today:
+- **Two-pass profile extraction MERGED** — `worktree-tp-final`'s 6 commits (symmetric two-pass for all 4 inputs; Stage1+Stage2 → one extraction per upload; 4 dedicated `/api/profile/{cv,linkedin,github,preferences}` routes; dead-code removal) cherry-picked onto `main` with **zero file overlap**; full gate **PASS** (backend suite + 132 frontend tests + api-types drift). `api-types.ts` regenerated for the new routes.
+- **Deleted (fully merged):** `worktree-checklist-part5`, `backup/profile-extras-scripts`; the `tp-final` worktree + branch removed after merge.
+- **Deleted (redundant local copies):** 6 `backup/*` branches whose commits are byte-identical to `origin/backup/*` — nothing lost.
+
+**Safety net on `origin/backup/*` — unmerged WIP snapshots, NOT in main:**
+
+| Branch | Unique commit | Note |
+|---|---|---|
+| `backup/account-error-messages` | `apiErrorMessage()` helper for account errors | real small fix, **not on main** — worth merging later |
+| `backup/main-engine-eval` | real-profile engine eval (16 combos) | eval scripts |
+| `backup/github-url-input-wip` | github-url-input snapshot | wip |
+| `backup/integration-wip` | integration worktree snapshot | wip |
+| `backup/two-pass-symmetric-wip` | two-pass snapshot | **superseded** by the merged work |
+| `backup/worktree-tp-final-snap` | snapshot of the merged two-pass branch | redundant (now in main) |
+| `backup/worktree-profile-wip` | profile worktree snapshot | wip |
+
+> Local `main` is **ahead of `origin/main`** (this two-pass merge + earlier docs) — needs `git push origin main`. Canonical counts unchanged: 47 source keys / 46 instances, 22 migrations (0000→0021), 8 keyed APIs.
+
 
 ---
 
