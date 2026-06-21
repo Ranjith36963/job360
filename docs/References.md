@@ -181,7 +181,7 @@ NOT a competitor. Solves application speed, not discovery. Relevant only for Git
 4. **Self-host / data-sovereign** — no cloud-locked competitor offers this; Job360's architecture supports it
 5. **Open inventory** — HiringCafe blocks scrapers (403 confirmed 2026-04-25); a Job360 public API would invert that posture
 
-**Suggested elevator pitch (replaces current README opener):** "*HiringCafe scores you for UK roles and tells you when to apply — works while you sleep, across 50 sources, every domain.*"
+**Suggested elevator pitch (replaces current README opener):** "*HiringCafe scores you for UK roles and tells you when to apply — works while you sleep, across 47 sources, every domain.*"
 
 ### 1.4 career-ops — https://github.com/santifer/career-ops
 

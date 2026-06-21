@@ -190,7 +190,7 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 
 ## 3. Ring 2 — Profile (CV + LinkedIn + GitHub + Preferences)
 
-The profile is what turns Job360 from "show me all 50 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
+The profile is what turns Job360 from "show me all 47 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
 
 ### 3.1 What the user experiences
 
@@ -414,7 +414,7 @@ Backed by the `applications` table (also rebuilt in `0002_multi_tenant`) and a s
 
 | URL | File | Server/Client | What the user sees |
 | --- | --- | --- | --- |
-| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "50 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
+| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "47 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
 | `/(auth)/login` | `frontend/src/app/(auth)/login/page.tsx` | Client | Email + password form, `?next` honoured via `safeNext()` |
 | `/(auth)/register` | `frontend/src/app/(auth)/register/page.tsx` | Client | Same shape, redirects to `/profile` on success |
 | `/dashboard` | `frontend/src/app/dashboard/page.tsx` | Client | Job browser. Time-bucket pills (24h / 48h / 3d / 5d / 7d / all), min-score slider, source dropdown, visa toggle, async "Run search" button polling `getSearchStatus()`. Renders `<JobList>` of `<JobCard>`s. |
@@ -660,7 +660,7 @@ frontend/
 For completeness — these belong in the other two pillars and you won't find them here:
 
 - **How a job actually gets scored** — that's `JobScorer` in `src/services/skill_matcher.py` and the 8-dimension scoring stack. → see `02-search-and-match-engine.md` (next document).
-- **Where the 50 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
+- **Where the 47 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
 - **The shared `jobs` catalog table itself** — Pillar 3 (providers) writes it, Pillar 1 (this doc) reads it via `user_feed`.
 
 ---

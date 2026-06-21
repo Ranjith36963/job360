@@ -30,7 +30,7 @@
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `824879d` on `origin/main` — includes the full channels & notifications overhaul + nav IA restructure (this worktree) plus the audit-fix rounds. Everything from `worktree-channels-notifications-overhaul` is merged and in sync. Pillar-2/-3 + Step 0/1/1.5/1.6/2/3 + matcher batch all merged.
+**Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---

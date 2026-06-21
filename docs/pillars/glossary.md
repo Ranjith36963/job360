@@ -216,7 +216,7 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 
 ### SOURCE_REGISTRY
 
-The 46-key dict in `main.py` mapping source-name to class. Builds 45 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 46` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
+The 47-key dict in `main.py` mapping source-name to class. Builds 46 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 47` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
 **Code:** `backend/src/main.py:106-159` · **Pillar 3**
 
 ### Stale (vs Confirmed Expired)

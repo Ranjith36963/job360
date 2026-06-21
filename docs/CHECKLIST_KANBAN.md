@@ -132,24 +132,7 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
 
 ## Part 4 — Worktree / branch consolidation status (re-checked 2026-06-19 vs `origin/main` = `fe9935a`)
 
-Main codebase verified at `fe9935a`: **47 sources** / 46 instances, **21 migrations** (0000→0020),
-**493** skill-synonym aliases, **18-currency** FX, all 4 engines present, `gov_apprenticeships` restored.
-
-**✅ Already on main** (pulled in): `main` (`fe9935a`), `worktree-channels-notifications-overhaul`,
-`worktree-github-url-input`, `worktree-safe-fixes`.
-
-**☐ NOT on main yet — need pulling:**
-| Branch | Ahead / Behind | What's unique | Merge ease |
-|---|---|---|---|
-| `worktree-harness-hardening` | 1 / 0 | channels/notif fixes + worker DLQ + health schedule | ✅ clean fast-forward |
-| `feat/two-pass-on-main` | 10 / 22 | deterministic profile skill mining (no hardcoded keywords) | ⚠️ behind → conflicts |
-| `feat/two-pass-profile-extraction` | 14 / 31 | GitHub-URL input + engine 3/4 + eval scripts | ⚠️ behind → conflicts |
-| `fix/per-user-search-and-scoring-gate` | 27 / 31 | per-engine on/off switches + ablation eval (**drops gov_app → 46**) | ⚠️ 47/46 conflict |
-| `sync/docs-path-fix` | 23 / 31 | superseded doc branch (its fixes re-applied on `fe9935a` directly) | — skip |
-
-**Open decisions before a full merge:** (1) `gov_apprenticeships` keep 47 / drop 46; (2) which two-pass
-version wins (`feat/two-pass-profile-extraction` vs `feat/two-pass-on-main`). `worktree-harness-hardening`
-is the one safe immediate pull (clean FF).
+**✅ Resolved (2026-06-21).** All worktree/feature branches listed in earlier revisions were merged into `main` and deleted; any unmerged work is preserved on `origin/backup/*`. Current `origin/main` canonical counts: **47 source keys / 46 instances / 46 classes**, **22 migrations** (0000→0021), 8 keyed APIs. The earlier 47-vs-46 / `gov_apprenticeships` open decisions are closed (gov_apprenticeships restored; count is 47).
 
 ---
 

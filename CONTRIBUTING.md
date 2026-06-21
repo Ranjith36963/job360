@@ -61,9 +61,9 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= 1,154 passing**. (The suite expands with every new source / feature;
+  **>= ~1,409 collected**. (The suite expands with every new source / feature;
   the floor only moves up — Step-0 baseline was 600; Step-3 close-out at
-  1,154.)
+  ~1,409.)
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
 - At least one reviewer has approved (or owner self-approval on

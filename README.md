@@ -345,7 +345,7 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/              # 20 forward+reverse SQL migration pairs (0000 → 0019) + runner.py
+│   ├── migrations/              # 22 forward+reverse SQL migration pairs (0000 → 0021) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile

@@ -204,7 +204,7 @@ The 6 stages live inside one async function (`main.py:321-690`). Walking it from
 - **Instantiate the scorer once**: `scorer = JobScorer(search_config, user_preferences, enrichment_lookup)` (`main.py:389`). All three kwargs — satisfies rule #20.
 - **Build sources** via `_build_sources(search_config, ...)` (`main.py:230-318`):
   - Domain-filtered: `classify_user_domain(profile)` returns a set like `{"tech"}` or `{"healthcare", "academia"}`; sources whose `DOMAINS` don't overlap are skipped. Sources marked `"general"` are always included.
-  - Yields **45 instances** from a 46-key `SOURCE_REGISTRY` (indeed/glassdoor share the `JobSpySource` class). (Was 49/50 before the M6 rotation dropped jobtensor, comeet, gov_apprenticeships, aijobs_global.)
+  - Yields **46 instances** from a 47-key `SOURCE_REGISTRY` (indeed/glassdoor share the `JobSpySource` class). (Was 49/50 before the M6 rotation dropped jobtensor, comeet, gov_apprenticeships, aijobs_global; gov_apprenticeships was later restored.)
 - **Snapshot the breaker registry** before dispatch so the run log can show which breakers opened.
 - **Dispatch** via `TieredScheduler.tick(force=True)` — the `force=True` bypasses per-source interval timers (the CLI is a one-shot, not a long-running poller).
 - **Per-result handling**: each source's outcome is either a `list[Job]` (call `breaker.record_success()`) or an `Exception` (call `breaker.record_failure()`).
@@ -619,7 +619,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | `run_search()` 6-stage pipeline | ✅ | `main.py:321-690` |
 | Domain-filtered source build | ✅ | `classify_user_domain` × source `.DOMAINS` |
-| 45 source instances from 46-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 45` |
+| 46 source instances from 47-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 46` |
 | `TieredScheduler.tick(force=True)` one-shot dispatch | ✅ | CLI path |
 | `TieredScheduler.run_forever()` long-running poller | 🟡 | written but not wired to systemd (Batch 4 scope) |
 | `CircuitBreaker` 5-fail/300s state machine | ✅ | per-source registry |
