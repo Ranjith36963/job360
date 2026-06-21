@@ -359,6 +359,33 @@ def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
     return skills
 
 
+def deterministic_github_fields(repos_brief: list[dict]) -> list[str]:
+    """Pass 1 for GitHub over the STORED repo briefs — STRUCTURE only, NO LLM.
+
+    Surfaces the repo *topics* the GitHub API attached to each repo (cosmetic
+    hyphen→space cleanup), deduped. No skill map and no prose mining
+    (CLAUDE.md rule #28) — reading repo descriptions for meaning is the LLM
+    pass's job (``llm_infer_github_skills``).
+
+    Exists so the two-pass GitHub lane has a real deterministic half that reads
+    the SAME stored raw (``cv.github_repos_brief``) the LLM half reads — mirroring
+    the CV/LinkedIn/preferences deterministic passes.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for repo in repos_brief or []:
+        if not isinstance(repo, dict):
+            continue
+        for topic in repo.get("topics", []) or []:
+            if not isinstance(topic, str):
+                continue
+            t = topic.replace("-", " ").strip()
+            if t and t.lower() not in seen:
+                out.append(t)
+                seen.add(t.lower())
+    return out
+
+
 # ── GitHub LLM pass (Pass 2) — read repo prose for extra skills ─────
 
 _GITHUB_LLM_SYSTEM = (

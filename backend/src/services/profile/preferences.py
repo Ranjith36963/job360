@@ -3,10 +3,58 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from src.services.profile.models import UserPreferences
 
 logger = logging.getLogger("job360.profile.preferences")
+
+
+# ── Preferences deterministic pass (Pass 1) — STRUCTURE only, NO LLM ─
+#
+# Structural label words a user might type in their free-text blurb to introduce
+# an explicit list (e.g. "Skills: X, Y" / "Tech stack: A, B"). These are
+# DOCUMENT-STRUCTURE markers — the same kind the CV deterministic pass keys off
+# ("Skills"/"Summary" headings) — NOT a skill vocabulary. CLAUDE.md rule #28 bans
+# hardcoded *skill* lists, not section labels. Free prose with no such marker
+# yields nothing here; the LLM pass (llm_infer_from_about_me) handles prose.
+_ABOUT_ME_SKILL_MARKERS = (
+    "skills", "technical skills", "core skills", "key skills",
+    "technologies", "tech stack", "stack", "tools", "tooling",
+    "proficient in", "experienced with", "expertise", "specialties",
+    "specialities", "competencies", "core competencies",
+)
+_ABOUT_ME_SPLIT_RE = re.compile(r"[,;|/•·‧]+|\s+and\s+")
+
+
+def deterministic_about_me_fields(about_me: str) -> list[str]:
+    """Pass 1 for preferences over ``about_me`` — STRUCTURE only, NO LLM.
+
+    Pulls items the user explicitly listed after a structural label such as
+    ``"Skills:"`` / ``"Technologies:"``. No skill vocabulary and no semantic
+    guessing (CLAUDE.md rule #28) — a free-prose blurb with no such marker
+    returns ``[]``; the LLM pass (``llm_infer_from_about_me``) mines prose.
+
+    Mirrors the CV/LinkedIn deterministic passes so every input has a real,
+    independent deterministic half that feeds the same merge.
+    """
+    if not about_me or not about_me.strip():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw_line in about_me.splitlines():
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        label, _, rest = line.partition(":")
+        if label.strip().lower() not in _ABOUT_ME_SKILL_MARKERS:
+            continue
+        for tok in _ABOUT_ME_SPLIT_RE.split(rest):
+            t = tok.strip().strip(".").strip()
+            if t and len(t) <= 40 and t.lower() not in seen:
+                out.append(t)
+                seen.add(t.lower())
+    return out
 
 
 # ── Preferences LLM pass (Pass 2) — mine free-text about_me ─────────

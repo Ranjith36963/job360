@@ -22,14 +22,21 @@ from src.services.profile.cv_parser import (
     deterministic_cv_fields,
     llm_cv_fields_from_text,
 )
-from src.services.profile.github_enricher import llm_infer_github_skills
+from src.services.profile.github_enricher import (
+    deterministic_github_fields,
+    llm_infer_github_skills,
+)
 from src.services.profile.linkedin_parser import (
+    deterministic_linkedin_fields,
     enrich_cv_from_linkedin,
-    llm_infer_linkedin_skills,
-    parse_linkedin_from_text,
+    llm_linkedin_fields,
+    merge_linkedin_fields,
 )
 from src.services.profile.models import CVData, UserProfile
-from src.services.profile.preferences import llm_infer_from_about_me
+from src.services.profile.preferences import (
+    deterministic_about_me_fields,
+    llm_infer_from_about_me,
+)
 
 logger = logging.getLogger("job360.profile.two_pass")
 
@@ -82,49 +89,55 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     cv = profile.cv_data
     prefs = profile.preferences
 
-    # ── CV: deterministic pass first, then LLM enhance ──
+    # Every input below follows the SAME shape (the user's diagram):
+    #     raw ──┬─ deterministic_X(raw) ─▶ det-output ──┐
+    #           └─ await llm_X(raw) ──────▶ llm-output ──┴─▶ merge into the
+    #                                                        ONE shared CVData
+    # The two passes are INDEPENDENT — both read the same raw input, neither
+    # feeds the other — so whatever one pass misses the other can still catch.
+    # Deterministic = STRUCTURE only (CLAUDE.md rule #28); LLM = meaning.
+
+    # ── ① CV ── raw = cv.raw_text ──────────────────────────────────────
     if cv.raw_text:
-        det = deterministic_cv_fields(cv.raw_text)
-        _merge_str_list(cv.skills, det.get("skills", []))
-        if not cv.summary and det.get("summary"):
-            cv.summary = det["summary"]
+        det_cv = deterministic_cv_fields(cv.raw_text)           # det-CV-output
+        _merge_str_list(cv.skills, det_cv.get("skills", []))
+        if not cv.summary and det_cv.get("summary"):
+            cv.summary = det_cv["summary"]
         try:
-            llm_cv = await llm_cv_fields_from_text(cv.raw_text)
-            _merge_cv_llm_into(cv, llm_cv)
+            llm_cv = await llm_cv_fields_from_text(cv.raw_text)  # llm-CV-output
+            _merge_cv_llm_into(cv, llm_cv)                       # → MERGED CV
         except Exception as e:  # noqa: BLE001 — deterministic result still stands
             logger.warning("two_pass: CV LLM pass skipped: %s", e)
 
-    # ── LinkedIn: re-run the (hybrid) parse from stored text ──
+    # ── ② LinkedIn ── raw = cv.linkedin_raw_text ───────────────────────
     if cv.linkedin_raw_text:
+        det_li = deterministic_linkedin_fields(cv.linkedin_raw_text)  # det-LI-output
+        llm_li: dict = {}
         try:
-            ld = await parse_linkedin_from_text(cv.linkedin_raw_text)
-            enrich_cv_from_linkedin(cv, ld)
-            # LLM skills pass — recovers the two-column "Top Skills" sidebar
-            # (LangGraph, Systems Design, …) the deterministic split loses, plus
-            # prose skills. Merge into linkedin_skills (dedup vs all known).
-            li_llm = await llm_infer_linkedin_skills(cv.linkedin_raw_text)
-            known = {s.lower() for s in cv.skills} | {s.lower() for s in cv.linkedin_skills}
-            for s in li_llm:
-                if s.lower() not in known:
-                    cv.linkedin_skills.append(s)
-                    known.add(s.lower())
-        except Exception as e:  # noqa: BLE001
-            logger.warning("two_pass: LinkedIn pass skipped: %s", e)
+            llm_li = await llm_linkedin_fields(cv.linkedin_raw_text)  # llm-LI-output
+        except Exception as e:  # noqa: BLE001 — deterministic result still stands
+            logger.warning("two_pass: LinkedIn LLM pass skipped: %s", e)
+        merged_li = merge_linkedin_fields(det_li, llm_li)            # → MERGED LI
+        enrich_cv_from_linkedin(cv, merged_li)
 
-    # ── GitHub: LLM pass over stored repo briefs (deterministic skills kept) ──
+    # ── ③ GitHub ── raw = cv.github_repos_brief ────────────────────────
     if cv.github_repos_brief:
+        det_gh = deterministic_github_fields(cv.github_repos_brief)  # det-GH-output
+        _merge_str_list(cv.github_skills_inferred, det_gh)
         try:
-            cv.github_llm_skills = await llm_infer_github_skills(cv.github_repos_brief)
-        except Exception as e:  # noqa: BLE001
+            llm_gh = await llm_infer_github_skills(cv.github_repos_brief)  # llm-GH-output
+            _merge_str_list(cv.github_llm_skills, llm_gh)                  # → MERGED GH
+        except Exception as e:  # noqa: BLE001 — deterministic result still stands
             logger.warning("two_pass: GitHub LLM pass skipped: %s", e)
 
-    # ── Preferences: LLM mine of the free-text about_me ──
-    # (No deterministic skill scan — mining prose for skills is the LLM's job,
-    # CLAUDE.md rule #28.)
+    # ── ④ Preferences ── raw = prefs.about_me ──────────────────────────
     if prefs.about_me:
+        det_pr = deterministic_about_me_fields(prefs.about_me)   # det-PR-output
+        _merge_str_list(cv.about_me_inferred_skills, det_pr)
         try:
-            cv.about_me_inferred_skills = await llm_infer_from_about_me(prefs.about_me)
-        except Exception as e:  # noqa: BLE001
+            llm_pr = await llm_infer_from_about_me(prefs.about_me)  # llm-PR-output
+            _merge_str_list(cv.about_me_inferred_skills, llm_pr)    # → MERGED PR
+        except Exception as e:  # noqa: BLE001 — deterministic result still stands
             logger.warning("two_pass: about_me LLM pass skipped: %s", e)
 
     return profile

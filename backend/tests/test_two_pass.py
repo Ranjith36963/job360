@@ -184,6 +184,92 @@ class TestCvDeterministicPass:
         assert out["summary"] == ""
 
 
+# ── Preferences deterministic pass (Pass 1) — structure-only, no LLM ─
+
+
+class TestAboutMeDeterministicPass:
+    def test_extracts_explicitly_listed_skills_after_marker(self):
+        from src.services.profile.preferences import deterministic_about_me_fields
+
+        text = "AI engineer.\nSkills: Python, Docker, LangChain\nLooking for remote roles."
+        out = deterministic_about_me_fields(text)
+        assert {"Python", "Docker", "LangChain"}.issubset(set(out))
+
+    def test_handles_technologies_and_bullet_markers(self):
+        from src.services.profile.preferences import deterministic_about_me_fields
+
+        text = "Technologies: PyTorch • TensorFlow • Kubernetes"
+        out = deterministic_about_me_fields(text)
+        assert {"PyTorch", "TensorFlow", "Kubernetes"}.issubset(set(out))
+
+    def test_pure_prose_with_no_marker_returns_empty(self):
+        """No skill vocabulary — free prose yields nothing (the LLM pass mines it)."""
+        from src.services.profile.preferences import deterministic_about_me_fields
+
+        out = deterministic_about_me_fields(
+            "I love building production GenAI systems and shipping fast."
+        )
+        assert out == []
+
+    def test_blank_returns_empty(self):
+        from src.services.profile.preferences import deterministic_about_me_fields
+
+        assert deterministic_about_me_fields("") == []
+        assert deterministic_about_me_fields("   ") == []
+
+
+# ── GitHub deterministic pass (Pass 1) — topics from stored briefs ──
+
+
+class TestGithubDeterministicPass:
+    def test_surfaces_topics_cleaned(self):
+        from src.services.profile.github_enricher import deterministic_github_fields
+
+        briefs = [
+            {"name": "a", "description": "x", "topics": ["machine-learning", "rag"]},
+            {"name": "b", "description": "y", "topics": ["rag", "fraud-detection"]},
+        ]
+        out = deterministic_github_fields(briefs)
+        assert "machine learning" in out  # hyphen → space
+        assert "rag" in out and out.count("rag") == 1  # deduped across repos
+        assert "fraud detection" in out
+
+    def test_empty_or_topicless_returns_empty(self):
+        from src.services.profile.github_enricher import deterministic_github_fields
+
+        assert deterministic_github_fields([]) == []
+        assert deterministic_github_fields([{"name": "a", "description": "x", "topics": []}]) == []
+
+
+# ── LinkedIn deterministic pass (Pass 1) — structure-only, no LLM ───
+
+
+class TestLinkedInDeterministicPass:
+    def test_extracts_top_skills_without_calling_llm(self):
+        from src.services.profile import linkedin_parser
+
+        text = _linkedin_text()  # defined below
+        called = False
+
+        async def boom(prompt, system=""):
+            nonlocal called
+            called = True
+            return {}
+
+        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
+            out = linkedin_parser.deterministic_linkedin_fields(text)
+
+        assert called is False  # deterministic pass must NOT touch the LLM
+        assert "Kubernetes" in out["skills"]
+        assert out["raw_text"] == text
+
+    def test_non_linkedin_text_returns_empty_skills(self):
+        from src.services.profile.linkedin_parser import deterministic_linkedin_fields
+
+        out = deterministic_linkedin_fields("just some random text, not a profile")
+        assert out["skills"] == []
+
+
 # ── Skill tiering — new two-pass sources contribute evidence ────────
 
 
@@ -239,8 +325,16 @@ class TestTwoPassOrchestrator:
         async def fake_cv(text, section_hint=""):
             return CVData(raw_text=text, skills=["FastAPI"], job_titles=["Engineer"])
 
-        async def fake_linkedin(text):
-            return {"skills": ["Kubernetes"], "positions": [{"title": "SRE"}], "raw_text": text}
+        # LinkedIn now forks into two independent halves: a pure-deterministic
+        # dict and an LLM dict. Both go through enrich_cv_from_linkedin.
+        def fake_li_det(text):
+            return {"skills": ["Kubernetes"], "summary": "", "industry": "",
+                    "headline": "", "raw_text": text}
+
+        async def fake_li_llm(text):
+            return {"positions": [{"title": "SRE"}], "education": [], "certifications": [],
+                    "languages": [], "projects": [], "volunteer": [], "courses": [],
+                    "skills": ["LangGraph", "Systems Design"]}
 
         async def fake_gh(brief):
             return ["LangChain"]
@@ -248,12 +342,9 @@ class TestTwoPassOrchestrator:
         async def fake_about(text):
             return ["Stakeholder Management"]
 
-        async def fake_li_skills(text):
-            return ["LangGraph", "Systems Design"]
-
         monkeypatch.setattr(two_pass, "llm_cv_fields_from_text", fake_cv)
-        monkeypatch.setattr(two_pass, "parse_linkedin_from_text", fake_linkedin)
-        monkeypatch.setattr(two_pass, "llm_infer_linkedin_skills", fake_li_skills)
+        monkeypatch.setattr(two_pass, "deterministic_linkedin_fields", fake_li_det)
+        monkeypatch.setattr(two_pass, "llm_linkedin_fields", fake_li_llm)
         monkeypatch.setattr(two_pass, "llm_infer_github_skills", fake_gh)
         monkeypatch.setattr(two_pass, "llm_infer_from_about_me", fake_about)
 
@@ -265,13 +356,17 @@ class TestTwoPassOrchestrator:
         # LLM CV pass enhanced.
         assert "FastAPI" in c.skills
         assert "Engineer" in c.job_titles
-        # LinkedIn pass merged (deterministic + LLM skills).
+        # LinkedIn lane merged BOTH halves: deterministic (Kubernetes) + LLM
+        # (LangGraph, Systems Design) skills, and the LLM position title.
         assert "Kubernetes" in c.linkedin_skills
         assert "LangGraph" in c.linkedin_skills and "Systems Design" in c.linkedin_skills
-        # GitHub LLM pass.
-        assert c.github_llm_skills == ["LangChain"]
+        assert "SRE" in c.job_titles
+        # GitHub LLM pass merged.
+        assert "LangChain" in c.github_llm_skills
+        # GitHub deterministic pass merged the repo topic ("llm").
+        assert "llm" in c.github_skills_inferred
         # Preferences LLM pass.
-        assert c.about_me_inferred_skills == ["Stakeholder Management"]
+        assert "Stakeholder Management" in c.about_me_inferred_skills
 
     @pytest.mark.asyncio
     async def test_cv_llm_failure_keeps_deterministic_skills(self, monkeypatch):

@@ -643,16 +643,19 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
     return await parse_linkedin_from_text(text)
 
 
-async def parse_linkedin_from_text(text: str) -> dict:
-    """Parse already-extracted LinkedIn text into the canonical dict schema.
+def deterministic_linkedin_fields(text: str) -> dict:
+    """Pass 1 for LinkedIn — STRUCTURE only, NO LLM.
 
-    Factored out of ``parse_linkedin_pdf_async`` so the two-pass orchestrator
-    can re-run the LinkedIn LLM pass from the stored ``cv.linkedin_raw_text``
-    on a later profile change — no re-upload needed. Returns the empty-data
-    dict when the text doesn't look like a LinkedIn export.
+    Splits sections, reads the header (name/headline/industry), the "Top Skills"
+    sidebar + inline "Technologies: A • B • C" lines, and the summary. Section
+    bodies that need semantic parsing (experience/education/…) are LEFT to the
+    LLM pass (``llm_linkedin_fields``). No prose skill-term scan (CLAUDE.md
+    rule #28). Mirrors the CV deterministic pass so the LinkedIn lane has a real,
+    independent deterministic half — the deterministic and LLM passes never feed
+    each other; both read the same raw text and merge afterwards.
     """
     if not text or not _looks_like_linkedin(text):
-        return _empty_linkedin_data()
+        return {"skills": [], "summary": "", "industry": "", "headline": "", "raw_text": text or ""}
 
     sections = _split_sections(text)
     header = _extract_header_fields(sections.get("header", ""))
@@ -667,8 +670,33 @@ async def parse_linkedin_from_text(text: str) -> dict:
         if s.lower() not in seen_sk:
             skills.append(s)
             seen_sk.add(s.lower())
-    # (No hardcoded prose skill-term scan — CLAUDE.md rule #28. Skills stated in
-    # summary/"WHAT I DO" prose are recovered by the LLM pass, llm_infer_linkedin_skills.)
+    return {
+        "skills": skills,
+        "summary": summary,
+        "industry": header.get("industry", ""),
+        "headline": header.get("headline", ""),
+        # Keep the extracted text so the passes can re-run on a later profile
+        # change without the user re-uploading the PDF.
+        "raw_text": text,
+    }
+
+
+async def llm_linkedin_fields(text: str) -> dict:
+    """Pass 2 for LinkedIn — LLM ONLY.
+
+    Runs the seven per-section LLM extractions (experience/education/…) PLUS the
+    prose-skills pass (``llm_infer_linkedin_skills``) over the same raw text the
+    deterministic pass read. Returns the LLM-owned fields; the orchestrator (and
+    ``parse_linkedin_from_text``) merge this with the deterministic dict.
+    """
+    empty = {
+        "positions": [], "education": [], "certifications": [],
+        "languages": [], "projects": [], "volunteer": [], "courses": [], "skills": [],
+    }
+    if not text or not _looks_like_linkedin(text):
+        return empty
+
+    sections = _split_sections(text)
     experience_text = sections.get("experience", "")
     education_text = sections.get("education", "")
     certs_text = (
@@ -681,26 +709,25 @@ async def parse_linkedin_from_text(text: str) -> dict:
     volunteer_text = sections.get("volunteer experience", "")
     courses_text = sections.get("courses", "")
 
-    # Seven LLM calls in parallel — only the ones with text.
+    # Seven section LLM calls + the prose-skills pass, in parallel — only the
+    # ones with text actually hit a provider (``_maybe`` short-circuits blanks).
     async def _maybe(prompt_template: str, text: str, key: str):
         if not text.strip():
             return {key: []}
         return await _llm_json(prompt_template.format(text=text))
 
-    exp_task = _maybe(_EXPERIENCE_PROMPT, experience_text, "positions")
-    edu_task = _maybe(_EDUCATION_PROMPT, education_text, "education")
-    cert_task = _maybe(_CERTIFICATIONS_PROMPT, certs_text, "certifications")
-    lang_task = _maybe(_LANGUAGES_PROMPT, languages_text, "languages")
-    proj_task = _maybe(_PROJECTS_PROMPT, projects_text, "projects")
-    vol_task = _maybe(_VOLUNTEER_PROMPT, volunteer_text, "volunteer")
-    course_task = _maybe(_COURSES_PROMPT, courses_text, "courses")
-
     (
         exp_raw, edu_raw, cert_raw,
-        lang_raw, proj_raw, vol_raw, course_raw,
+        lang_raw, proj_raw, vol_raw, course_raw, prose_skills,
     ) = await asyncio.gather(
-        exp_task, edu_task, cert_task,
-        lang_task, proj_task, vol_task, course_task,
+        _maybe(_EXPERIENCE_PROMPT, experience_text, "positions"),
+        _maybe(_EDUCATION_PROMPT, education_text, "education"),
+        _maybe(_CERTIFICATIONS_PROMPT, certs_text, "certifications"),
+        _maybe(_LANGUAGES_PROMPT, languages_text, "languages"),
+        _maybe(_PROJECTS_PROMPT, projects_text, "projects"),
+        _maybe(_VOLUNTEER_PROMPT, volunteer_text, "volunteer"),
+        _maybe(_COURSES_PROMPT, courses_text, "courses"),
+        llm_infer_linkedin_skills(text),
     )
 
     def _get(r: Any, key: str) -> Any:
@@ -708,21 +735,66 @@ async def parse_linkedin_from_text(text: str) -> dict:
 
     return {
         "positions": _coerce_positions(_get(exp_raw, "positions")),
-        "skills": skills,
         "education": _coerce_education(_get(edu_raw, "education")),
         "certifications": _coerce_certifications(_get(cert_raw, "certifications")),
-        "summary": summary,
-        "industry": header.get("industry", ""),
-        "headline": header.get("headline", ""),
-        # Batch 1.5 — expanded sections
         "languages": _coerce_languages(_get(lang_raw, "languages")),
         "projects": _coerce_projects(_get(proj_raw, "projects")),
         "volunteer": _coerce_volunteer(_get(vol_raw, "volunteer")),
         "courses": _coerce_courses(_get(course_raw, "courses")),
-        # Two-pass — keep the extracted text so the LLM pass can re-run on a
-        # later profile change without the user re-uploading the PDF.
-        "raw_text": text,
+        "skills": list(prose_skills) if isinstance(prose_skills, list) else [],
     }
+
+
+def merge_linkedin_fields(det: dict, llm: dict) -> dict:
+    """Merge the two independent LinkedIn passes into ONE canonical dict.
+
+    ``det`` (structure: skills/summary/header) + ``llm`` (LLM: positions/
+    education/…/prose-skills) → one dict ready for ``enrich_cv_from_linkedin``.
+    Skills are unioned (deterministic Top-Skills/inline first, then LLM prose),
+    so neither pass can clobber the other. Used by both ``parse_linkedin_from_text``
+    and the two-pass orchestrator so the merge logic lives in exactly one place.
+    """
+    det = det or {}
+    llm = llm or {}
+    skills = list(det.get("skills", []))
+    seen = {s.lower() for s in skills}
+    for s in llm.get("skills", []):
+        if s.lower() not in seen:
+            skills.append(s)
+            seen.add(s.lower())
+    return {
+        "positions": llm.get("positions", []),
+        "skills": skills,
+        "education": llm.get("education", []),
+        "certifications": llm.get("certifications", []),
+        "summary": det.get("summary", ""),
+        "industry": det.get("industry", ""),
+        "headline": det.get("headline", ""),
+        "languages": llm.get("languages", []),
+        "projects": llm.get("projects", []),
+        "volunteer": llm.get("volunteer", []),
+        "courses": llm.get("courses", []),
+        "raw_text": det.get("raw_text", "") or llm.get("raw_text", ""),
+    }
+
+
+async def parse_linkedin_from_text(text: str) -> dict:
+    """Parse already-extracted LinkedIn text into the canonical dict schema.
+
+    Thin merge of the two independent passes — ``deterministic_linkedin_fields``
+    (structure) and ``llm_linkedin_fields`` (LLM). Factored this way so the
+    two-pass orchestrator can call each half separately on a later profile change
+    from the stored ``cv.linkedin_raw_text`` (no re-upload). Returns the
+    empty-data dict when the text doesn't look like a LinkedIn export.
+    """
+    if not text or not _looks_like_linkedin(text):
+        return _empty_linkedin_data()
+
+    det = deterministic_linkedin_fields(text)
+    llm = await llm_linkedin_fields(text)
+    merged = merge_linkedin_fields(det, llm)
+    merged["raw_text"] = text
+    return merged
 
 
 def parse_linkedin_pdf(file_path: str) -> dict:
