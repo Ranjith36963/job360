@@ -92,12 +92,14 @@ def test_cv_upload_accepts_file_at_size_boundary(api, monkeypatch):
     """POST /api/profile with a file exactly at 10 MB must not 413 on size check.
     (We can't fully parse it without an LLM, so we mock parse_cv_async.)"""
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="test", skills=["python"], job_titles=["Engineer"])
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
 
     _register_and_login(api)
     exactly_10mb = b"%PDF-1.4 " + b"X" * (10 * 1024 * 1024 - 9)
@@ -136,12 +138,14 @@ def test_cv_upload_rejects_no_extension(api):
 def test_cv_upload_accepts_pdf(api, monkeypatch):
     """POST /api/profile with a valid PDF (small, mocked parser) must return 200."""
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="test", skills=["python"], job_titles=["Engineer"])
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
 
     _register_and_login(api)
     minimal_pdf = b"%PDF-1.4\n%%EOF"
@@ -155,12 +159,14 @@ def test_cv_upload_accepts_pdf(api, monkeypatch):
 def test_cv_upload_accepts_docx(api, monkeypatch):
     """POST /api/profile with a valid DOCX must return 200."""
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="test", skills=["python"], job_titles=["Engineer"])
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
 
     _register_and_login(api)
     # Minimal DOCX magic bytes (PK zip header)
@@ -193,11 +199,14 @@ def test_rescore_scheduled_when_profile_content_changes(api, monkeypatch):
     import src.api.routes.profile as profile_route
     from src.services.profile.models import CVData
 
-    # Fake CV parser so the route doesn't call LLM
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="updated cv", skills=["python"], job_titles=["Engineer"])
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
+
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
 
     # Make storage think the content changed
     monkeypatch.setattr(
@@ -243,12 +252,14 @@ def test_rescore_not_scheduled_when_profile_unchanged(api, monkeypatch):
     """
     import asyncio as _asyncio
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="same as before", skills=["python"], job_titles=["Engineer"])
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
 
     monkeypatch.setattr(
         "src.services.profile.storage.profile_content_changed_since_previous",
@@ -285,12 +296,14 @@ def test_rescore_task_pinned_to_bg_tasks_set(api, monkeypatch):
     """
     import asyncio as _asyncio
     import src.api.routes.profile as profile_route
-    from src.services.profile.models import CVData
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
 
-    async def _fake_parse(path: str) -> CVData:
-        return CVData(raw_text="changed cv content", skills=["python"], job_titles=["Engineer"])
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
 
-    monkeypatch.setattr(profile_route, "parse_cv_async", _fake_parse)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
     monkeypatch.setattr(
         "src.services.profile.storage.profile_content_changed_since_previous",
         lambda uid: True,
