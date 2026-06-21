@@ -151,11 +151,12 @@ async def test_cv_upload_rejects_wrong_mime(authenticated_async_context):
 @pytest.mark.asyncio
 async def test_cv_upload_accepts_valid_pdf(authenticated_async_context):
     """A small valid PDF passes the size+MIME gate and reaches the parser."""
-    fake_cv = CVData(raw_text="Software Engineer with 5 years Python experience.")
-
     with patch(
-        "src.api.routes.profile.parse_cv_async",
-        new=AsyncMock(return_value=fake_cv),
+        "src.api.routes.profile.extract_text",
+        new=lambda path: "Software Engineer with 5 years Python experience.",
+    ), patch(
+        "src.api.routes.profile.run_two_pass_extraction",
+        new=AsyncMock(return_value=None),
     ):
         async with authenticated_async_context() as client:
             resp = await client.post(
