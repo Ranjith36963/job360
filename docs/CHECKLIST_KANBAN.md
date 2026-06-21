@@ -87,7 +87,7 @@ wired — Export button at `frontend/src/app/dashboard/page.tsx:400`.)
 | 10 | Broken footer links — `/privacy`, `/terms`, `/contact` → 404 | Med | ✅ added the 3 pages (`824879d`) |
 | 11 | SQLite "database is locked" under concurrent writes — dropped rows | HIGH | ✅ busy_timeout 5s→30s + `with_write_retry` wrapping rescore/judge writes (`db_retry.py`); Postgres still the long-term scale plan |
 | 12 | Same-origin auth requirement (split-host cookie breaks the gate) | HIGH | ✅ next.config `/api` proxy + relative fetch base (`824879d`) |
-| 13 | `/admin` + `/notifications` shown to logged-out users; no role gate | Med | ✅ middleware now gates `/admin` + `/notifications` (`824879d`). *Note: true admin-only RBAC not added (no role system yet).* |
+| 13 | `/admin` + `/notifications` shown to logged-out users; no gate | Med | ✅ middleware now gates `/admin` + `/notifications` (`824879d`). *Decision (2026-06-21): **no admin/RBAC model** — access tiers will be **Free / Premium subscription plans** instead. Deferred — see `docs/plans/2026-06-21-free-premium-plans.md`.* |
 | 14 | Login error not in `role="alert"` (a11y) | Low | ✅ wrapped in `role=alert` (`824879d`) |
 | 15 | Email verification not enforced | Low→ | ✅ enforced — `require_verified_user` → 403 on `POST /search`; frontend redirects to `/verify-email` (`fc10921` + frontend) |
 | — | CSV export had no UI button (endpoint worked) | Low | ✅ added an Export button to the dashboard (`824879d`) |
@@ -115,7 +115,7 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
 1. **SQLite write contention (#11)** — stop dropping rows under load; plan Postgres.
 2. **Same-origin / `/api` proxy (#12)** — browser auth won't work split.
 3. **Broken footer links (#10)** — add or remove.
-4. **Admin role gate (#13)**.
+4. ~~Admin role gate (#13)~~ — **dropped**. No admin model; access tiers will be **Free / Premium plans** (deferred — see `docs/plans/2026-06-21-free-premium-plans.md`).
 5. **Redis + ARQ worker** — enable + test real notification delivery (currently 🚪 gated).
 6. a11y: login error `role=alert` (#14); decide email-verification enforcement (#15); CSV button.
 
@@ -126,7 +126,7 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
   #12 (same-origin auth) are resolved in code.
 - **Remaining = infra/scale, not bugs:** install **Redis + ARQ worker** to enable + test
   real notification delivery; migrate to **Postgres** for true write concurrency (behind
-  the #11 mitigation). True admin-only RBAC (#13) is a future feature (no role system yet).
+  the #11 mitigation). **No admin/RBAC is planned** — instead access will be split into **Free / Premium subscription tiers** (deferred — see `docs/plans/2026-06-21-free-premium-plans.md`).
 
 ---
 
