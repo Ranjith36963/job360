@@ -150,36 +150,3 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         )
 
     return profile
-
-
-async def reextract_and_rescore(user_id: str, db_path: str | None = None) -> dict:
-    """Background entry point fired when a user changes any profile input.
-
-    Loads the profile, re-runs both extraction passes over all inputs, saves a
-    new profile version (the new id the change produces), then re-scores the
-    user's feed against the refreshed profile. Never raises — returns a small
-    status dict. Storage/rescore imports are local to keep this import-cheap.
-    """
-    from src.services.profile.storage import load_profile, save_profile  # noqa: PLC0415
-
-    profile = load_profile(user_id)
-    if profile is None:
-        return {"reextracted": False, "reason": "no_profile"}
-
-    try:
-        await run_two_pass_extraction(profile)
-        save_profile(profile, user_id, source_action="two_pass_reextract")
-    except Exception as e:  # noqa: BLE001 — must never break the change flow
-        logger.warning("two_pass: reextract failed for user %s: %s", user_id, e)
-        return {"reextracted": False, "reason": "error"}
-
-    # Re-score the feed against the freshly enhanced profile.
-    try:
-        from src.services.rescore import rescore_user_feed  # noqa: PLC0415
-
-        result = await rescore_user_feed(user_id, db_path=db_path)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("two_pass: rescore after reextract failed for %s: %s", user_id, e)
-        result = {"rescored": 0, "reason": "rescore_error"}
-
-    return {"reextracted": True, "rescore": result}
