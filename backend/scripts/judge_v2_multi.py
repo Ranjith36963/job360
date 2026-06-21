@@ -14,6 +14,7 @@ logging.disable(logging.WARNING)
 
 POOL = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"
 OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_judge_runs.json"
+TARGET_TOTAL = 4  # append rounds until each job has this many judge runs
 K = 3
 
 
@@ -50,16 +51,25 @@ async def _main() -> None:
 
     from src.core.settings import DB_PATH
 
+    import os
     pool = json.load(open(POOL))
     conn = await aiosqlite.connect(str(DB_PATH))
     conn.row_factory = aiosqlite.Row
-    runs: dict = {uid: {} for uid in pool}
-    for k in range(K):
+    # APPEND to existing runs (don't waste the rounds already done).
+    if os.path.exists(OUT):
+        runs = json.load(open(OUT))
+        have = min((max((len(v) for v in g.values()), default=0)) for g in runs.values()) if runs else 0
+    else:
+        runs = {uid: {} for uid in pool}
+        have = 0
+    rounds_needed = max(0, TARGET_TOTAL - have)
+    print(f"have {have} rounds, appending {rounds_needed} more", flush=True)
+    for k in range(rounds_needed):
         for uid, d in pool.items():
             scores = await _judge_once(conn, uid, d["ids"])
             for jid, s in scores.items():
                 runs[uid].setdefault(jid, []).append(s)
-            print(f"run {k+1}/{K} {uid}: {len(scores)} judged", flush=True)
+            print(f"append {k+1}/{rounds_needed} (total {have+k+1}) {uid}: {len(scores)} judged", flush=True)
         # Save after each COMPLETE round so an interrupt never loses a round.
         json.dump(runs, open(OUT, "w"))
         print(f"saved {k+1} round(s) -> {OUT}", flush=True)

@@ -60,5 +60,38 @@ A judge round sometimes returns 53/54 (one provider timeout/parse fail). The med
 
 ---
 
+## Iteration 3 — hunt for bias INSIDE the eval (ran each profile repeatedly). Found 2 real biases.
+
+### Issue #10 — NO STABLE GROUND TRUTH for the Ranjith profile 🔴 (the big one)
+Two independent expert graders — **my Opus gold vs the Gemini judge** — were compared:
+- **Ranjith: inter-rater Spearman = 0.070** (53 jobs). The two graders **barely agree.**
+- **Pavan: inter-rater Spearman = 0.662** (43 jobs). The two graders **agree well.**
+
+Meaning: for Ranjith the candidates (54 near-identical *mid-level AI/ML* jobs) are so similar that **there is no agreed "right" ranking** — even two strong models disagree. So *every* engine's correlation with the Ranjith gold is near zero (keyword 0.02, dims 0.16, bm25 −0.20, hybrid −0.13, judge 0.07). **The eval was measuring NOISE for Ranjith, not engine quality.** This is why Ranjith's winner flipped and correlations were ~0 — *not* the engines' fault, and *not* fixable by better engines; the task itself has no ground truth at that granularity.
+**Fix:** the tool now computes inter-rater agreement and **declares the profile's ranking INVALID when it's < 0.3** — it refuses to report an engine winner when there's no reliable gold to rank against. (A bad tool would have crowned a random winner.)
+
+### Issue #11 — POOLING SELF-SELECTION (home-field) bias 🟠
+Even with the fair union pool, each retriever predicts the gold **better on the jobs it itself contributed** than on jobs other engines found. On the *reliable* profile (Pavan):
+| Engine | corr-with-gold on its OWN jobs | on OTHER engines' jobs |
+|---|---|---|
+| keyword | **0.520** | 0.183 |
+| bm25 | 0.250 | 0.043 |
+| hybrid | 0.448 | **0.751** |
+
+So **keyword is INFLATED by the pool** (0.52 home vs 0.18 away) and **hybrid is UNDER-rated** (0.45 home vs 0.75 away). The unbiased (away-jobs) view *flips the read*: on Pavan, **hybrid (E3) is actually the strongest retriever, not keyword.** The earlier "keyword is fine / E3 is weak" was partly this bias.
+**Fix:** the tool now reports per-engine OWN-vs-OTHER correlation and treats the **OTHER-jobs (held-out) correlation as the less-biased engine-quality estimate.** Full de-biasing (decoy jobs / leave-own-out scoring) is the next hardening step.
+
+---
+
+## Bottom line after 3 iterations
+The measurement tool is now honest about its own limits:
+- It **refuses to rank engines when graders don't agree** (#10) — so it can't hand you a false winner.
+- It **flags and corrects its own pooling bias** (#11) — so keyword's home-field inflation no longer fools it.
+- It **averages the stochastic judge** (#8) and is otherwise deterministic (#seed-stable).
+
+**For your two profiles specifically:** Pavan's eval is trustworthy (graders agree 0.66) and there the de-biased order is **hybrid ≈ judge > dims > keyword > bm25**. **Your (Ranjith) eval is NOT trustworthy** — no ground truth (0.07) — so *no* engine verdict can be drawn from it. Neither result justifies removing an engine.
+
+---
+
 ## Standing limitation (honest, not a bug)
 Both test profiles are **AI/ML** → the fair pool is one uniform domain → low statistical power even with a perfect tool (overlapping CIs). To separate engines *confidently* needs **diverse profiles (different fields) + a larger graded pool**. The v2 harness is built to scale to that.
