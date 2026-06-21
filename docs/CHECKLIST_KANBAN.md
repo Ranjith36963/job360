@@ -149,3 +149,51 @@ Main codebase verified at `fe9935a`: **47 sources** / 46 instances, **21 migrati
 **Open decisions before a full merge:** (1) `gov_apprenticeships` keep 47 / drop 46; (2) which two-pass
 version wins (`feat/two-pass-profile-extraction` vs `feat/two-pass-on-main`). `worktree-harness-hardening`
 is the one safe immediate pull (clean FF).
+
+---
+
+## Part 5 — Code-real components MISSING from the A–J checklist (code-verified)
+
+A full code inventory (49 routes, 20 pages, 6 CLI cmds, ARQ workers, ~40 service modules, 19 DB
+tables, migrations 0000→**0021**, **47** SOURCE_REGISTRY keys) surfaced real features/lifecycle
+pieces the A–J UI checklist above does **not** cover. Listed here so the doc matches the code.
+Status: ✅ wired+working · ⚙️ backend-only (no UI) · 🚪 needs infra · 🧩 in code, NOT wired.
+
+### Interfaces
+- **CLI** ⚙️ `src/cli.py` — 6 commands: `run`, `api`, `status`, `view`, `sources`, `setup-profile`. A whole non-web interface the checklist never mentions.
+
+### Background worker layer (ARQ) — `src/workers/`
+- 🚪 `score_and_ingest`, `send_notification`, `enrich_job_task`, `send_bundle`, `notification_tick`, `nightly_ghost_sweep`, `mark_ledger_sent/failed`. Crons: `nightly_ghost_sweep` @02:00 UTC, `notification_tick` @every 5min. **Needs Redis to actually run** (the standing delivery gate).
+
+### Lifecycle / engine components beyond the 4 scoring engines
+- **Application deadlines** ✅ `deadline.py` + `jobs.deadline` (migration **0021**); pipeline refuses confirmed-expired jobs (410).
+- **Ghost / staleness detection** ✅ `ghost_detection.py` state machine (active → possibly_stale → likely_stale → confirmed_expired) + nightly sweep + per-source absence marking.
+- **Two-pass profile extraction** ✅ `profile/two_pass.py` — deterministic + LLM pass over stored inputs, re-run on every profile change → new version → feed rescore.
+- **Pre-filter cascade** ⚙️ `prefilter.py` — 3-stage (~99%) elimination (location, experience, skill-overlap) before scoring.
+- **Retrieval internals (Engine 3)** ⚙️ `retrieval.py` — RRF fusion of keyword + BM25 + ChromaDB ANN + cross-encoder rerank.
+- **Per-engine on/off flags** ⚙️ `ENGINE1..4_ENABLED` (independent of the legacy `ENRICHMENT/SEMANTIC/MATCHER` flags).
+
+### Profile depth (beyond "CV parsed")
+- ⚙️ **ESCO skill normalization** (`profile/skill_normalizer.py`, ~13,900 concept embeddings), **evidence-based skill tiering** (`skill_tiering.py`), **dependency-file skill parsing** (`dep_file_parser.py`), **skill provenance** tracking.
+
+### Notification depth (beyond "rules CRUD")
+- ✅ **Digest modes** instant / daily (tz-aware) / every_N_hours; **digest queue** (`user_notification_digests`), **DLQ** after 5 retries, **ledger** lifecycle (queued/sent/failed/dlq).
+
+### Source reliability infra
+- ⚙️ **TieredScheduler** (60s ATS → 60min scrapers), **CircuitBreaker** per source, **ConditionalCache** (ETag/Last-Modified), **domain-aware source filtering** (tech/healthcare/academia/education/climate).
+
+### Observability
+- ✅ Run history (`/api/runs/recent`), **source-health** traffic-light (`/api/runs/source-health` + `/admin/sources`), **metrics_exporter** (JSON), **report_generator** (markdown run report), per-run UUID correlation id.
+
+### Security infra
+- ✅ Argon2 hashing, HMAC sessions, **rate limiting** (pw-reset, email-resend), **OAuth CSRF state** (`oauth_states`, 10-min TTL).
+
+### SEO surfaces
+- ✅ `sitemap.ts`, `robots.txt`, OG tags + JSON-LD on `/jobs/[id]` (public for unfurl bots — why `/jobs` is intentionally un-gated).
+
+### 🧩 In code but NOT wired (latent — flag for a decision)
+- **Cover-letter generation** — `services/cover_letter.py` exists (LLM chain) but has **NO API route** and no UI. Either wire an endpoint or mark experimental.
+- **JSON-LD harvester** — `services/jsonld_harvest.py` is a ready extractor but is **NOT registered** as a source in SOURCE_REGISTRY.
+- **Company/ATS discovery** — `services/company_discovery.py` validates ATS slugs; utility, not user-facing.
+
+**Doc-sync corrections:** Part 4 says "21 migrations (0000→0020)" — current head is **0021** (`add_job_deadline`). SOURCE_REGISTRY = **47** keys / 46 instances (code asserts 47 in `test_cli.py`).
