@@ -223,76 +223,120 @@ async def get_profile(user: CurrentUser = Depends(require_user)):  # noqa: B008 
     return _build_profile_response(profile)
 
 
+# ── Shared profile-input helpers — the upload pipeline in ONE place ──
+# Each of the four inputs has its OWN route (CV / Preferences / LinkedIn /
+# GitHub). CV + Preferences ALSO share the combined /profile route for backward
+# compatibility with the existing frontend form. Every route funnels through
+# _extract_save_trigger so the single-extraction pipeline
+# (run_two_pass_extraction -> save one version -> schedule re-score) lives in
+# exactly one spot and can never drift between routes.
+
+def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) -> None:
+    """Validate the upload and store the RAW CV text on the profile.
+
+    Skill extraction is NOT done here — that happens once, later, in
+    run_two_pass_extraction. Raises HTTPException on size (413) / type (415) /
+    empty-text (503).
+    """
+    # V-04 — size cap (10 MB)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
+    # V-04 — allowlist by filename extension. The client-supplied content_type
+    # is unreliable (browsers send application/octet-stream for PDFs), so the
+    # extension is the signal we trust.
+    suffix = os.path.splitext(filename or "")[1].lower()
+    if suffix not in {".pdf", ".docx"}:
+        raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
+    tmp_path = save_upload_to_temp(content, suffix)
+    try:
+        raw_text = extract_text(tmp_path)
+        if not raw_text or not raw_text.strip():
+            raise HTTPException(
+                status_code=503,
+                detail="Could not extract any text from the CV file",
+            )
+        profile.cv_data.raw_text = raw_text
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
+    """Parse the preferences JSON form and set it on the profile."""
+    pref_dict = json.loads(preferences_json)
+    profile.preferences = UserPreferences(
+        target_job_titles=pref_dict.get("target_job_titles", []),
+        additional_skills=pref_dict.get("additional_skills", []),
+        excluded_skills=pref_dict.get("excluded_skills", []),
+        preferred_locations=pref_dict.get("preferred_locations", []),
+        industries=pref_dict.get("industries", []),
+        salary_min=pref_dict.get("salary_min"),
+        salary_max=pref_dict.get("salary_max"),
+        work_arrangement=pref_dict.get("work_arrangement", ""),
+        experience_level=pref_dict.get("experience_level", ""),
+        negative_keywords=pref_dict.get("negative_keywords", []),
+        about_me=pref_dict.get("about_me", ""),
+        github_username=pref_dict.get("github_username", ""),
+    )
+
+
+async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
+    """Shared pipeline tail: ONE extraction, save one version, schedule re-score.
+
+    Used by every profile-input route so the merged single-extraction flow is
+    defined once.
+    """
+    await run_two_pass_extraction(profile)
+    save_profile(profile, user_id)
+    await _maybe_trigger_rescore(user_id)
+
+
+@router.post("/profile/cv", response_model=ProfileResponse)
+async def upload_cv(
+    cv: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+):
+    """Set the caller's CV (PDF/DOCX) — one input, one dedicated route."""
+    profile = load_profile(user.id) or UserProfile()
+    # Bounded read: cap memory even for a malicious oversized upload.
+    content = await cv.read(10 * 1024 * 1024 + 1)
+    _capture_cv_raw(content, cv.filename, profile)
+    await _extract_save_trigger(profile, user.id)
+    return _build_profile_response(profile)
+
+
+@router.post("/profile/preferences", response_model=ProfileResponse)
+async def upsert_preferences(
+    preferences: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+):
+    """Set the caller's preferences form — one input, one dedicated route."""
+    profile = load_profile(user.id) or UserProfile()
+    _apply_preferences(preferences, profile)
+    await _extract_save_trigger(profile, user.id)
+    return _build_profile_response(profile)
+
+
 @router.post("/profile", response_model=ProfileResponse)
 async def upsert_profile(
     cv: UploadFile = File(None),  # noqa: B008 — FastAPI dependency-injection idiom
     preferences: str = Form(None),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
-    """Create or update the caller's profile with CV and/or preferences."""
+    """Combined CV + preferences (backward-compatible with the frontend form).
+
+    The dedicated single-input routes are POST /profile/cv and
+    POST /profile/preferences; this endpoint accepts both together.
+    """
     profile = load_profile(user.id) or UserProfile()
-
-    # Parse CV if provided
     if cv is not None:
-        # Bounded read: cap memory even for a malicious oversized upload —
-        # read at most 10MB+1 so a 1GB body can't be materialised before the
-        # size check rejects it. Valid files (<=10MB) are read in full.
         content = await cv.read(10 * 1024 * 1024 + 1)
-
-        # V-04 — size cap (10 MB)
-        if len(content) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
-
-        # V-04 — allowlist by filename extension. The client-supplied
-        # content_type is unreliable (browsers send application/octet-stream
-        # for PDFs), so the extension is the signal we trust.
-        suffix = os.path.splitext(cv.filename or "")[1].lower()
-        if suffix not in {".pdf", ".docx"}:
-            raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
-        tmp_path = save_upload_to_temp(content, suffix)
-        try:
-            # Capture RAW text only — skill extraction happens once, below, in
-            # run_two_pass_extraction (the single extractor). The route's only
-            # irreplaceable job is reading the file.
-            raw_text = extract_text(tmp_path)
-            if not raw_text or not raw_text.strip():
-                raise HTTPException(
-                    status_code=503,
-                    detail="Could not extract any text from the CV file",
-                )
-            profile.cv_data.raw_text = raw_text
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    # Parse preferences if provided
+        _capture_cv_raw(content, cv.filename, profile)
     if preferences is not None:
-        pref_dict = json.loads(preferences)
-        prefs = UserPreferences(
-            target_job_titles=pref_dict.get("target_job_titles", []),
-            additional_skills=pref_dict.get("additional_skills", []),
-            excluded_skills=pref_dict.get("excluded_skills", []),
-            preferred_locations=pref_dict.get("preferred_locations", []),
-            industries=pref_dict.get("industries", []),
-            salary_min=pref_dict.get("salary_min"),
-            salary_max=pref_dict.get("salary_max"),
-            work_arrangement=pref_dict.get("work_arrangement", ""),
-            experience_level=pref_dict.get("experience_level", ""),
-            negative_keywords=pref_dict.get("negative_keywords", []),
-            about_me=pref_dict.get("about_me", ""),
-            github_username=pref_dict.get("github_username", ""),
-        )
-        profile.preferences = prefs
-
-    # ONE combined extraction: deterministic + LLM over every input that has
-    # raw data, then fold CV skills into preferences — all inside the single
-    # extractor. No separate background re-extraction; this is the only pass.
-    await run_two_pass_extraction(profile)
-
-    save_profile(profile, user.id)
-    await _maybe_trigger_rescore(user.id)
+        _apply_preferences(preferences, profile)
+    await _extract_save_trigger(profile, user.id)
     return _build_profile_response(profile)
 
 
@@ -323,9 +367,7 @@ async def upload_linkedin(
         if merged:
             profile = load_profile(user.id) or UserProfile()
             profile.cv_data.linkedin_raw_text = text
-            await run_two_pass_extraction(profile)
-            save_profile(profile, user.id)
-            await _maybe_trigger_rescore(user.id)
+            await _extract_save_trigger(profile, user.id)
     finally:
         try:
             os.unlink(tmp_path)
@@ -352,9 +394,7 @@ async def upload_github(
     # the GitHub LLM pass and re-runs the others from stored raw.
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
-    await run_two_pass_extraction(profile)
-    save_profile(profile, user.id)
-    await _maybe_trigger_rescore(user.id)
+    await _extract_save_trigger(profile, user.id)
     return GitHubResponse(ok=True, merged=True)
 
 
