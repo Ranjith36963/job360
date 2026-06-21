@@ -21,21 +21,26 @@ from src.api.models import (
     ProfileVersionsListResponse,
     ProfileVersionSummary,
 )
-from src.services.profile.cv_parser import parse_cv_async
+from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
     fetch_github_profile,
     normalize_github_username,
 )
-from src.services.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_pdf
+from src.services.profile.linkedin_parser import (
+    _extract_text as extract_linkedin_text,
+)
+from src.services.profile.linkedin_parser import (
+    _looks_like_linkedin,
+)
 from src.services.profile.models import UserPreferences, UserProfile
-from src.services.profile.preferences import merge_cv_and_preferences
 from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
     restore_profile_version,
     save_profile,
 )
+from src.services.profile.two_pass import run_two_pass_extraction
 
 router = APIRouter(tags=["profile"])
 
@@ -71,15 +76,16 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
 
         import asyncio  # noqa: PLC0415
 
-        # Two-pass: a profile change re-runs the deterministic + LLM passes over
-        # ALL inputs from stored data, saves a new profile version (new id),
-        # THEN re-scores the feed against the refreshed profile.
-        from src.services.profile.two_pass import reextract_and_rescore  # noqa: PLC0415
+        # Extraction now happens INLINE in the upload routes (one combined pass),
+        # so the background job only needs to re-SCORE the feed against the
+        # already-extracted profile — it must NOT re-extract, or we'd be doing
+        # the work twice again (the very redundancy this merge removed).
+        from src.services.rescore import rescore_user_feed  # noqa: PLC0415
 
-        task = asyncio.create_task(reextract_and_rescore(user_id))
+        task = asyncio.create_task(rescore_user_feed(user_id))
         _rescore_bg_tasks.add(task)
         task.add_done_callback(_rescore_bg_tasks.discard)
-        logger.info("two_pass: background re-extract + re-score scheduled for user %s", user_id)
+        logger.info("rescore: background re-score scheduled for user %s", user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "rescore: failed to schedule background re-score for user %s: %s",
@@ -245,11 +251,16 @@ async def upsert_profile(
             raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
         tmp_path = save_upload_to_temp(content, suffix)
         try:
-            try:
-                cv_data = await parse_cv_async(tmp_path)
-            except RuntimeError as e:
-                raise HTTPException(status_code=503, detail=str(e)) from e
-            profile.cv_data = cv_data
+            # Capture RAW text only — skill extraction happens once, below, in
+            # run_two_pass_extraction (the single extractor). The route's only
+            # irreplaceable job is reading the file.
+            raw_text = extract_text(tmp_path)
+            if not raw_text or not raw_text.strip():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Could not extract any text from the CV file",
+                )
+            profile.cv_data.raw_text = raw_text
         finally:
             try:
                 os.unlink(tmp_path)
@@ -275,14 +286,10 @@ async def upsert_profile(
         )
         profile.preferences = prefs
 
-    # Merge CV skills/titles into preferences if CV has data
-    if profile.cv_data.skills or profile.cv_data.job_titles:
-        merged_prefs = merge_cv_and_preferences(
-            profile.cv_data.skills,
-            profile.cv_data.job_titles,
-            profile.preferences,
-        )
-        profile.preferences = merged_prefs
+    # ONE combined extraction: deterministic + LLM over every input that has
+    # raw data, then fold CV skills into preferences — all inside the single
+    # extractor. No separate background re-extraction; this is the only pass.
+    await run_two_pass_extraction(profile)
 
     save_profile(profile, user.id)
     await _maybe_trigger_rescore(user.id)
@@ -309,11 +316,14 @@ async def upload_linkedin(
         raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
-        linkedin_data = parse_linkedin_pdf(tmp_path)
-        merged = bool(linkedin_data.get("skills") or linkedin_data.get("positions"))
+        # Capture RAW LinkedIn text only; the single extractor below turns it
+        # into skills/positions (deterministic + LLM).
+        text = extract_linkedin_text(tmp_path)
+        merged = bool(text) and _looks_like_linkedin(text)
         if merged:
             profile = load_profile(user.id) or UserProfile()
-            profile.cv_data = enrich_cv_from_linkedin(profile.cv_data, linkedin_data)
+            profile.cv_data.linkedin_raw_text = text
+            await run_two_pass_extraction(profile)
             save_profile(profile, user.id)
             await _maybe_trigger_rescore(user.id)
     finally:
@@ -337,8 +347,12 @@ async def upload_github(
     clean_username = normalize_github_username(username)
     github_data = await fetch_github_profile(clean_username)
     profile = load_profile(user.id) or UserProfile()
+    # enrich_cv_from_github captures the RAW GitHub signals (repos_brief,
+    # languages, deterministic frameworks). The single extractor below then adds
+    # the GitHub LLM pass and re-runs the others from stored raw.
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
+    await run_two_pass_extraction(profile)
     save_profile(profile, user.id)
     await _maybe_trigger_rescore(user.id)
     return GitHubResponse(ok=True, merged=True)
