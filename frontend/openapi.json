@@ -92,6 +92,20 @@
         "title": "ApplicationTimelineResponse",
         "type": "object"
       },
+      "Body_upload_cv_api_profile_cv_post": {
+        "properties": {
+          "cv": {
+            "format": "binary",
+            "title": "Cv",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cv"
+        ],
+        "title": "Body_upload_cv_api_profile_cv_post",
+        "type": "object"
+      },
       "Body_upload_github_api_profile_github_post": {
         "properties": {
           "username": {
@@ -117,6 +131,19 @@
           "file"
         ],
         "title": "Body_upload_linkedin_api_profile_linkedin_post",
+        "type": "object"
+      },
+      "Body_upsert_preferences_api_profile_preferences_post": {
+        "properties": {
+          "preferences": {
+            "title": "Preferences",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preferences"
+        ],
+        "title": "Body_upsert_preferences_api_profile_preferences_post",
         "type": "object"
       },
       "Body_upsert_profile_api_profile_post": {
@@ -3941,7 +3968,7 @@
         ]
       },
       "post": {
-        "description": "Create or update the caller's profile with CV and/or preferences.",
+        "description": "Combined CV + preferences (backward-compatible with the frontend form).\n\nThe dedicated single-input routes are POST /profile/cv and\nPOST /profile/preferences; this endpoint accepts both together.",
         "operationId": "upsert_profile_api_profile_post",
         "parameters": [
           {
@@ -3993,6 +4020,66 @@
           }
         },
         "summary": "Upsert Profile",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/cv": {
+      "post": {
+        "description": "Set the caller's CV (PDF/DOCX) \u2014 one input, one dedicated route.",
+        "operationId": "upload_cv_api_profile_cv_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_cv_api_profile_cv_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Cv",
         "tags": [
           "profile"
         ]
@@ -4163,6 +4250,66 @@
           }
         },
         "summary": "Upload Linkedin",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/preferences": {
+      "post": {
+        "description": "Set the caller's preferences form \u2014 one input, one dedicated route.",
+        "operationId": "upsert_preferences_api_profile_preferences_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upsert_preferences_api_profile_preferences_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Preferences",
         "tags": [
           "profile"
         ]

@@ -630,9 +630,32 @@ export interface paths {
         put?: never;
         /**
          * Upsert Profile
-         * @description Create or update the caller's profile with CV and/or preferences.
+         * @description Combined CV + preferences (backward-compatible with the frontend form).
+         *
+         *     The dedicated single-input routes are POST /profile/cv and
+         *     POST /profile/preferences; this endpoint accepts both together.
          */
         post: operations["upsert_profile_api_profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/cv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Cv
+         * @description Set the caller's CV (PDF/DOCX) — one input, one dedicated route.
+         */
+        post: operations["upload_cv_api_profile_cv_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -700,6 +723,26 @@ export interface paths {
          * @description Enrich user profile with a LinkedIn 'Save to PDF' profile export.
          */
         post: operations["upload_linkedin_api_profile_linkedin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upsert Preferences
+         * @description Set the caller's preferences form — one input, one dedicated route.
+         */
+        post: operations["upsert_preferences_api_profile_preferences_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1127,6 +1170,14 @@ export interface components {
             /** Timeline */
             timeline: components["schemas"]["TimelineEntry"][];
         };
+        /** Body_upload_cv_api_profile_cv_post */
+        Body_upload_cv_api_profile_cv_post: {
+            /**
+             * Cv
+             * Format: binary
+             */
+            cv: string;
+        };
         /** Body_upload_github_api_profile_github_post */
         Body_upload_github_api_profile_github_post: {
             /** Username */
@@ -1139,6 +1190,11 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /** Body_upsert_preferences_api_profile_preferences_post */
+        Body_upsert_preferences_api_profile_preferences_post: {
+            /** Preferences */
+            preferences: string;
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
@@ -3005,6 +3061,41 @@ export interface operations {
             };
         };
     };
+    upload_cv_api_profile_cv_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_cv_api_profile_cv_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_github_api_profile_github_post: {
         parameters: {
             query?: never;
@@ -3093,6 +3184,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkedInResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_preferences_api_profile_preferences_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_upsert_preferences_api_profile_preferences_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
             /** @description Validation Error */
