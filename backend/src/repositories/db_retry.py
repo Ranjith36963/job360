@@ -14,6 +14,10 @@ import asyncio
 import sqlite3
 from typing import Awaitable, Callable, TypeVar
 
+from src.utils.logger import get_logger
+
+_log = get_logger("db")  # "job360.db" → main job360 handlers (data/logs/)
+
 T = TypeVar("T")
 
 
@@ -39,7 +43,16 @@ async def with_write_retry(
             return await fn()
         except sqlite3.OperationalError as exc:
             if _is_locked(exc) and i < attempts - 1:
+                _log.warning(
+                    "db_write_retry",
+                    extra={"event": "db_write_retry", "attempt": i + 1, "max_attempts": attempts, "error": str(exc)},
+                )
                 await asyncio.sleep(base_delay * (2**i))
                 continue
+            if _is_locked(exc):
+                _log.error(
+                    "db_write_failed",
+                    extra={"event": "db_write_failed", "attempts": attempts, "error": str(exc)},
+                )
             raise
     raise RuntimeError("unreachable")  # pragma: no cover

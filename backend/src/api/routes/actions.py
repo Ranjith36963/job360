@@ -5,6 +5,7 @@ from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
 from src.api.models import ActionRequest, ActionResponse, ActionsListResponse
 from src.repositories.database import JobDatabase
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["actions"])
 
@@ -27,6 +28,10 @@ async def set_action(
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
     await db.insert_action(job_id, body.action, user.id, body.notes)
+    get_audit_logger().info(
+        "job_action",
+        extra={"event": "job_action", "action": body.action, "job_id": job_id, "user_id": user.id, "status": "ok"},
+    )
     return ActionResponse(ok=True, job_id=job_id, action=body.action)
 
 
@@ -37,6 +42,10 @@ async def delete_action(
     user: CurrentUser = Depends(require_user),
 ):
     await db.delete_action(job_id, user.id)
+    get_audit_logger().info(
+        "job_action_delete",
+        extra={"event": "job_action_delete", "job_id": job_id, "user_id": user.id, "status": "ok"},
+    )
     return ActionResponse(ok=True, job_id=job_id, action="")
 
 

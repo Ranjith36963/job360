@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
+from src.utils.logger import get_audit_logger
 from src.api.models import (
     ApplicationTimelineResponse,
     PipelineAdvanceRequest,
@@ -95,6 +96,10 @@ async def create_application(
             detail=f"Job {job_id} is no longer accepting applications",
         )
     row = await db.create_application(job_id, user.id)
+    get_audit_logger().info(
+        "pipeline_create",
+        extra={"event": "pipeline_create", "job_id": job_id, "user_id": user.id, "stage": "applied", "status": "ok"},
+    )
     return _to_pipeline_application(row)
 
 
@@ -114,6 +119,10 @@ async def advance_application(
     row = await db.advance_application(job_id, body.stage, user.id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Application for job {job_id} not found")
+    get_audit_logger().info(
+        "pipeline_advance",
+        extra={"event": "pipeline_advance", "job_id": job_id, "user_id": user.id, "stage": body.stage, "status": "ok"},
+    )
     return _to_pipeline_application(row)
 
 
