@@ -678,7 +678,6 @@ def test_metrics_export_uses_resolved_path_not_none_string():
     import os
     import tempfile
 
-    from src.core.settings import DB_PATH as REAL_DB_PATH
 
     async def _test():
         # Use a real temp file so DB_PATH resolution has a valid target.

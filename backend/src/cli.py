@@ -122,7 +122,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
     from src.services.profile.models import CVData, UserPreferences, UserProfile
     from src.services.profile.cv_parser import parse_cv
     from src.services.profile.preferences import merge_cv_and_preferences
-    from src.services.profile.storage import save_profile, profile_exists
+    from src.services.profile.storage import save_profile
 
     click.echo("Job360 Profile Setup")
     click.echo("=" * 40)

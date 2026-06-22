@@ -3,9 +3,6 @@
 Uses TestClient with a temporary DB path patched via ``DB_PATH`` env override.
 HTTP responses are exercised end-to-end through the real session flow.
 """
-import os
-import tempfile
-from unittest.mock import patch
 
 import aiosqlite
 import pytest

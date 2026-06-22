@@ -8,7 +8,6 @@ fresh cooldown on failure. Per pillar_3_batch_3.md §Circuit breakers.
 Uses an injectable `clock` function (no freezegun) — the breaker does
 not read `time.monotonic()` directly, so tests are deterministic.
 """
-import pytest
 
 from src.services.circuit_breaker import (
     CircuitBreaker,

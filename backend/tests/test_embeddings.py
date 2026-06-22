@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from src.models import Job
 from src.services.embeddings import (
@@ -20,7 +19,6 @@ from src.services.embeddings import (
 from src.services.job_enrichment_schema import (
     JobCategory,
     JobEnrichment,
-    SalaryBand,
 )
 from src.services.vector_index import VectorIndex
 

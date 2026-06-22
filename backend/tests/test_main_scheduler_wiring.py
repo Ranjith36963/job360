@@ -11,11 +11,7 @@ HTTP. They do not touch test_main.py's --ignore'd integration path.
 """
 from __future__ import annotations
 
-import asyncio
-import os
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 import pytest

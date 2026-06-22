@@ -1,8 +1,6 @@
 """Tests for RequestIdMiddleware and request_id contextvar helpers."""
-import json
 import re
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

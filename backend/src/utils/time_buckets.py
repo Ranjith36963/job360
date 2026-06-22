@@ -1,7 +1,6 @@
 """Shared time-bucketing utilities for CLI and email views."""
 
-import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 import humanize

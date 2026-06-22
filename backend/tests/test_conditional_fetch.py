@@ -12,7 +12,6 @@ returns the cached body on subsequent 304 responses.
 import asyncio
 
 import aiohttp
-import pytest
 from aioresponses import aioresponses
 
 from src.sources.base import BaseJobSource

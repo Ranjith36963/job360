@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote

@@ -7,9 +7,7 @@ the index build is a dev-time step, not a pytest path.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 
 from src.services.profile.skill_normalizer import (
     is_available,

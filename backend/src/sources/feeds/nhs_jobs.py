@@ -2,7 +2,6 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-import aiohttp
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _sanitize_xml, _is_uk_or_remote

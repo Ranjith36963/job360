@@ -3,7 +3,6 @@ import asyncio
 import json
 import sqlite3
 
-import pytest
 
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
 

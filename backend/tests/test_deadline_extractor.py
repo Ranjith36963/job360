@@ -4,7 +4,6 @@ All tests inject `today_iso` so results are deterministic and never depend on
 the real system clock.  The reference today is 2026-06-14.
 """
 
-import pytest
 
 from src.services.deadline import extract_deadline
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict
-from pathlib import Path
 
 import aiosqlite
 import pytest
@@ -389,7 +388,6 @@ def test_profile_changed_true_when_two_different_cv_data(storage_db):
 
 def test_profile_changed_true_when_two_different_preferences(storage_db):
     """Different preferences alone should trigger changed=True."""
-    import sqlite3 as _sqlite3
     from src.services.profile.storage import profile_content_changed_since_previous, save_profile
     from src.services.profile.models import UserPreferences
 

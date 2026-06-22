@@ -6,7 +6,7 @@ merge_skill_entries conflict resolution + build_skill_entries_from_profile.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.skill_entry import (

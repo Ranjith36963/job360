@@ -156,7 +156,7 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
 
 ## Part 5 — Code-real components MISSING from the A–J checklist (code-verified)
 
-A full code inventory (**57** routes, 20 pages, 6 CLI cmds, ARQ workers, **46** service modules, 19 DB
+A full code inventory (**59** routes, 20 pages, 6 CLI cmds, ARQ workers, **46** service modules, 19 DB
 tables, migrations 0000→**0021**, **47** SOURCE_REGISTRY keys) surfaced real features/lifecycle
 pieces the A–J UI checklist above does **not** cover. Listed here so the doc matches the code.
 Status: ✅ wired+working · ⚙️ backend-only (no UI) · 🚪 needs infra · 🧩 in code, NOT wired.
@@ -213,7 +213,7 @@ Real modules / knobs behind features already listed by *name* but not traced to 
 - **Frontend infra surfaces** — `app/error.tsx` (error boundary), `app/not-found.tsx` (404), `next.config.ts` `/api/:path*` proxy (Finding #12), `middleware.ts` PROTECTED_PATHS gate (Finding #13), `app/settings/layout.tsx` (`SettingsNavTabs`).
 
 ### Count + claim corrections (2026-06-21, code-verified)
-- **Routes = 57, not 49** — `grep -E "@router\.(get|post|put|delete|patch)" backend/src/api/routes/*.py` = 57 (old 49 predated the channels-OAuth + auth account-mgmt routes).
+- **Routes = 59** — `grep -E "@router\.(get|post|put|delete|patch)" backend/src/api/routes/*.py` = 59 (was 57; the two-pass merge added 2 profile routes — `/api/profile/cv` + `/api/profile/preferences`. The old 49 predated channels-OAuth + auth account-mgmt routes).
 - **Service modules = 46, not ~40** — `backend/src/services/**/*.py` minus `__init__`.
 - **Notification rules have NO DELETE route** — `notification_rules.py` is GET + PUT-upsert only (one row per user, UNIQUE(user_id), rule #23). The earlier H1–H5 “delete 204” claim was wrong (corrected in Part 1).
 - **`exportJobsCsv` is now wired** (`frontend/src/app/dashboard/page.tsx:400`) — removed from the Part 2 “wired-but-unused” list. The four still-unused: `getRecentRuns`, `getEmailVerified`, `getActions`, `getActionCounts`.

@@ -5,10 +5,8 @@ Tests import directly from scripts.engine_health (pure functions only).
 """
 from __future__ import annotations
 
-import math
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-import pytest
 
 from scripts.engine_health import (
     actions_precision,

@@ -1,5 +1,4 @@
 """Tests for signed-cookie session management."""
-import asyncio
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone

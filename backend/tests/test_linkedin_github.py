@@ -7,13 +7,12 @@ signature are preserved, so downstream tests (``TestEnrichCVFromLinkedIn``,
 """
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 
-from src.services.profile.models import CVData, UserPreferences, UserProfile, SearchConfig
+from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.linkedin_parser import (
     parse_linkedin_pdf,
     parse_linkedin_pdf_async,
@@ -97,7 +96,6 @@ from src.services.profile.github_enricher import (
     _infer_skills,
 )
 from src.services.profile.keyword_generator import generate_search_config
-from src.services.profile.storage import save_profile, load_profile
 
 
 # ---------------------------------------------------------------------------
