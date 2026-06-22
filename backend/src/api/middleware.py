@@ -31,6 +31,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         raw = request.headers.get("X-Request-Id", "").strip()
         rid = raw[: self._MAX_RID_LEN] if raw else uuid.uuid4().hex[:16]
+        # Stash on request.state too: the contextvar is reset in `finally`
+        # before the outermost exception handler runs, so errors.py reads it here.
+        request.state.request_id = rid
         token = set_request_id(rid)
         try:
             response = await call_next(request)

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
+from src.api.errors import register_exception_logging
 from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware
 from src.api.routes import (
     actions,
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
+
+# Gap E — log every unhandled exception (traceback + request_id) into data/logs/.
+register_exception_logging(app)
 
 # CORS — env-driven so dev / staging / prod can differ without a rebuild.
 # Default keeps Batch 1 behaviour (localhost:3000) so existing dev flows work.

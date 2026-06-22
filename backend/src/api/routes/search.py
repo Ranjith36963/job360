@@ -18,6 +18,7 @@ from src.api.auth_deps import CurrentUser, require_user, require_verified_user
 from src.api.models import SearchStartResponse, SearchStatusResponse
 from src.core import settings
 from src.main import run_search
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["search"])
 
@@ -73,10 +74,22 @@ async def start_search(
             # profile, not the default tenant's (E2E_TEST_REPORT #1).
             result = await run_search(source_filter=source, no_notify=True, user_id=user.id)
             _runs[run_id].update(status="completed", progress="Done", result=result)
+            get_audit_logger().info(
+                "search_completed",
+                extra={"event": "search_completed", "run_id": run_id, "user_id": user.id, "status": "ok"},
+            )
         except Exception as e:
             _runs[run_id].update(status="failed", progress=str(e))
+            get_audit_logger().warning(
+                "search_failed",
+                extra={"event": "search_failed", "run_id": run_id, "user_id": user.id, "error": str(e)},
+            )
 
     asyncio.create_task(_run())
+    get_audit_logger().info(
+        "search_started",
+        extra={"event": "search_started", "run_id": run_id, "user_id": user.id, "source": source},
+    )
     return SearchStartResponse(run_id=run_id, status="running")
 
 
