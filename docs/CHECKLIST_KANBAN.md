@@ -228,3 +228,28 @@ Real modules / knobs behind features already listed by *name* but not traced to 
 - **`exportJobsCsv` is now wired** (`frontend/src/app/dashboard/page.tsx:400`) — removed from the Part 2 “wired-but-unused” list. The four still-unused: `getRecentRuns`, `getEmailVerified`, `getActions`, `getActionCounts`.
 
 **Doc-sync corrections:** Part 4 says "21 migrations (0000→0020)" — current head is **0021** (`add_job_deadline`). SOURCE_REGISTRY = **47** keys / 46 instances (code asserts 47 in `test_cli.py`).
+
+
+---
+
+## Part 6 — How to audit the full lifecycle (every lens)
+
+"Code + docs" are only 2 of the truth-sources. Use ALL of these — each catches
+what the others miss:
+
+1. **Code** — routes / services / CLI / frontend = what's *built*. (Parts 2 + 5.)
+2. **Docs** — this file + ARCHITECTURE / STATUS / LAUNCH_PLAN = what's *described*.
+3. **Run it live** ⭐ — Playwright + curl + DB queries (the `/verify-job360` skill, "Loop 2"). Proves it *works*, not just exists — the only lens that catches built-but-broken.
+4. **Test suite** — 1,484 backend + ~132 frontend test fns; each names a behavior/edge case = a guarantee map (`grep "def test_"`).
+5. **OpenAPI schema** — `frontend/openapi.json` (machine-truth of every route + request/response model) → `api-types.ts`. Definitive API surface.
+6. **DB schema** — 19 tables + migrations 0000→0021; the data model reveals features (digests, application_stage_history, deadline, profile_version).
+7. **Background layer** — ARQ tasks + crons (`score_and_ingest`, `send_bundle`, `notification_tick`, `nightly_ghost_sweep`): the lifecycle with NO user click.
+8. **Config / flags** — `ENGINE1-4` / `ENRICHMENT` / `SEMANTIC` / `MATCHER` / `LOGIN_*` = optional/gated capabilities.
+9. **Git history** — commit log = what shipped, in order.
+10. **Logs / run_log / telemetry** — runtime evidence of what actually executes.
+
+### Found via the extra lenses (was NOT listed anywhere above)
+- **Dev/ops + eval tool surface** ⚙️ — `backend/scripts/` (**39 scripts**): ESCO-index + job-embeddings builders, `backfill_deadlines`, `dump_db`, engine **ablation / accuracy / bias** eval harness, log/worker health checks, company discovery, conditional-cache preflight. A whole non-product toolset the product checklist never mentions.
+- **The search pipeline as an ordered flow** — `run_search()`: build sources → fetch → enrich → score (4 engines) → dedup → per-user feed → `_run_matcher_stage` (LLM judge). Part 5 lists the *components*; this is the *ordered pipeline*.
+- **OpenAPI schema + test suite as audit lenses** — the machine-truth API map and the behavior map; neither was referenced as a way to check the lifecycle.
+
