@@ -90,6 +90,13 @@ ENRICHMENT_THRESHOLD = int(os.getenv("ENRICHMENT_THRESHOLD", "60"))
 # burst dispatch.
 MAX_CONCURRENT_SEARCHES_PER_USER = int(os.getenv("MAX_CONCURRENT_SEARCHES_PER_USER", "3"))
 
+# Brute-force login lockout (LAUNCH_PLAN Phase 2 #10). After this many FAILED
+# logins for one email within the window, /api/auth/login returns HTTP 429
+# until the burst ages out. In-memory (services/auth/rate_limit.py); Redis swap
+# is Phase 3.
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
+
 # Pillar 2 Batch 2.2 — gate-pass scoring
 # A job must clear BOTH the title gate AND the skill gate to receive a linear
 # score; otherwise the score is suppressed to max(10, (title+skill)*0.25) so

@@ -26,6 +26,10 @@ from typing import Deque, Dict
 
 _LOCK = Lock()
 _BUCKETS: Dict[str, Deque[datetime]] = {}
+# Separate store for login brute-force lockout. Unlike _BUCKETS (which records
+# *every* request), this counts only FAILED logins and is cleared on success —
+# so a legitimate user who mistypes a few times then logs in is never locked.
+_FAILURES: Dict[str, Deque[datetime]] = {}
 
 
 def check_and_record(
@@ -67,6 +71,62 @@ def check_and_record(
         return True
 
 
+def record_failure(key: str, *, now: datetime | None = None) -> int:
+    """Record one failed login for ``key`` and return the failures now tracked.
+
+    Args:
+        key: Stable identifier for the account, e.g. ``"login:<email>"``.
+        now: Injectable clock for tests; defaults to UTC now.
+
+    Note:
+        Append-only here; the window is pruned in :func:`is_locked`, which the
+        login route always calls first, so the bucket stays bounded in practice.
+    """
+    now = now or datetime.now(timezone.utc)
+    with _LOCK:
+        bucket = _FAILURES.setdefault(key, deque())
+        bucket.append(now)
+        return len(bucket)
+
+
+def is_locked(
+    key: str,
+    *,
+    max_failures: int = 5,
+    window_seconds: int = 900,
+    now: datetime | None = None,
+) -> bool:
+    """Return True if ``key`` has >= ``max_failures`` failures inside the window.
+
+    Prunes failures older than ``window_seconds`` on each call, so the lock
+    naturally lifts once the burst ages out (sliding window).
+
+    Note:
+        Keying on the email protects the *account* from password-guessing. The
+        trade-off is a nuisance lock-out DoS (an attacker can keep a victim's
+        account locked). Acceptable for the in-memory phase; the Phase-3 Redis
+        swap can add an IP dimension. See module docstring.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=window_seconds)
+    with _LOCK:
+        bucket = _FAILURES.get(key)
+        if not bucket:
+            return False
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if not bucket:
+            _FAILURES.pop(key, None)
+            return False
+        return len(bucket) >= max_failures
+
+
+def clear_failures(key: str) -> None:
+    """Drop all recorded failures for ``key`` — call on a successful login."""
+    with _LOCK:
+        _FAILURES.pop(key, None)
+
+
 def reset_for_tests() -> None:
     """Clear all buckets — call between tests to prevent cross-pollination.
 
@@ -75,3 +135,4 @@ def reset_for_tests() -> None:
     """
     with _LOCK:
         _BUCKETS.clear()
+        _FAILURES.clear()

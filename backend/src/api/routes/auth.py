@@ -19,7 +19,7 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_db
-from src.core.settings import DB_PATH
+from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
 from src.repositories.database import JobDatabase
 from src.services.auth import email_verification as auth_email_verification
 from src.services.auth import password_reset as auth_password_reset
@@ -157,6 +157,25 @@ async def register(
 
 @router.post("/login", response_model=UserResponse)
 async def login(req: LoginRequest, response: Response, request: Request) -> UserResponse:
+    # Brute-force lockout (LAUNCH_PLAN Phase 2 #10). Key on the email so an
+    # attacker guessing one account's password gets locked out after
+    # LOGIN_MAX_ATTEMPTS failures within the window — checked BEFORE we touch
+    # the DB or verify the hash.
+    throttle_key = f"login:{str(req.email).lower()}"
+    if auth_rate_limit.is_locked(
+        throttle_key,
+        max_failures=LOGIN_MAX_ATTEMPTS,
+        window_seconds=LOGIN_LOCKOUT_WINDOW_SECONDS,
+    ):
+        get_audit_logger().warning(
+            "auth",
+            extra={"event": "login", "status": "locked", "email": req.email, **_client_meta(request)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many failed login attempts; try again later",
+            headers={"Retry-After": str(LOGIN_LOCKOUT_WINDOW_SECONDS)},
+        )
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -165,6 +184,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
         )
         row = await cur.fetchone()
     if row is None or not verify_password(row["password_hash"], req.password):
+        auth_rate_limit.record_failure(throttle_key)
         get_audit_logger().warning(
             "auth",
             extra={"event": "login", "status": "fail", "email": req.email, **_client_meta(request)},
@@ -173,6 +193,8 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
+    # Success — clear the failure counter so earlier typos don't accumulate.
+    auth_rate_limit.clear_failures(throttle_key)
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=row["id"], secret=_secret())
     _set_session_cookie(response, cookie)
     get_audit_logger().info(
