@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { reportClientLog } from "@/lib/clientLog";
 import { toast } from "@/lib/toast";
 
 export default function GlobalError({
@@ -12,6 +13,11 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     toast.error(error.message || "An unexpected error occurred");
+    reportClientLog({
+      message: error.message || "render error boundary",
+      stack: error.stack,
+      context: error.digest ? `error-boundary digest=${error.digest}` : "error-boundary",
+    });
   }, [error]);
 
   return (

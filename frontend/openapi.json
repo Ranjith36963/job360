@@ -325,6 +325,62 @@
         "title": "ChannelOut",
         "type": "object"
       },
+      "ClientLogRequest": {
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "level": {
+            "default": "error",
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "stack": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ClientLogRequest",
+        "type": "object"
+      },
       "EmailChangeRequest": {
         "properties": {
           "current_password": {
@@ -2789,6 +2845,59 @@
         "summary": "Verify Email Request",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/client-log": {
+      "post": {
+        "description": "Record a browser-side log event into the server's data/logs/ stream.",
+        "operationId": "client_log_api_client_log_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientLogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Log",
+        "tags": [
+          "client-log"
         ]
       }
     },

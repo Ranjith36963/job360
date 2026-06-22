@@ -304,6 +304,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/client-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Log
+         * @description Record a browser-side log event into the server's data/logs/ stream.
+         */
+        post: operations["client_log_api_client_log_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -1303,6 +1323,22 @@ export interface components {
             id: number;
             /** Target Label */
             target_label?: string | null;
+        };
+        /** ClientLogRequest */
+        ClientLogRequest: {
+            /** Context */
+            context?: string | null;
+            /**
+             * Level
+             * @default error
+             */
+            level: string;
+            /** Message */
+            message: string;
+            /** Stack */
+            stack?: string | null;
+            /** Url */
+            url?: string | null;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -2435,6 +2471,39 @@ export interface operations {
             };
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_log_api_client_log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientLogRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

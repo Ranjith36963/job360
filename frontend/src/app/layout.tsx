@@ -7,6 +7,7 @@ import { FloatingIcons } from "@/components/layout/FloatingIcons";
 import { AuthProvider } from "@/components/layout/AuthProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -56,6 +57,7 @@ export default function RootLayout({
       className={`dark ${sora.variable} ${plusJakarta.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <ClientErrorReporter />
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>

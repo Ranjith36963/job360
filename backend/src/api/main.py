@@ -13,6 +13,7 @@ from src.api.routes import (
     actions,
     auth,
     channels,
+    client_log,
     health,
     jobs,
     notification_rules,
@@ -62,6 +63,7 @@ app.add_middleware(AccessLogMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health.router, prefix="/api")
+app.include_router(client_log.router, prefix="/api")  # frontend → server log bridge (D)
 app.include_router(jobs.router, prefix="/api")
 app.include_router(actions.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
