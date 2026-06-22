@@ -176,6 +176,13 @@ These cost real time the first time. Reading them here saves the next run.
   `applications` row). The new tab can swallow the *next* Playwright click — close it or
   re-navigate before asserting the following interaction, or you'll get a false negative.
 
+- **Per-input profile routes need the EXACT multipart/form field names.** `POST /api/profile/cv` wants `cv=@file.pdf` (NOT `file=`); `POST /api/profile/preferences` wants a `preferences` form field; `/profile/linkedin` + `/profile/github` likewise; the combined `POST /api/profile` takes `cv` + `preferences`. Wrong field → **422**, which looks like a route bug but is a *driver* bug. (Caught a false 422 this way 2026-06-22.)
+- **CV extraction is ASYNC (~60–90 s).** The upload returns **200 immediately**, then the two-pass LLM extraction runs in the background and saves the profile ~1 min later. Reading `/api/profile` right after the 200 shows **empty skills/titles** — that's timing, NOT a bug. Poll the profile (or the DB `user_profiles.cv_data` blob) until skills appear before asserting populated.
+- **`user_profiles` stores the CV under the `cv_data` JSON column** (siblings: `preferences`, `linkedin_data`, `github_data`) — there is NO `profile_json` column. Use `cv_data` for direct DB skill/title checks.
+- **Login is now brute-force-locked.** 5 failed logins for one email → **HTTP 429** (Retry-After) for ~15 min, even with the correct password. When sweeping: use a **throwaway email** for the lockout test, and never reuse an email you've intentionally failed — the lock turns a later legit login into a false 429.
+- **Search is gated on a verified email.** A fresh registered user is unverified, so `POST /api/search` returns **403 `email_not_verified`** (`require_verified_user`). To exercise search, first verify: walk the verify-email token, or `UPDATE users SET email_verified_at=datetime('now') WHERE email=?`.
+- **Gemini free tier returns 429 (quota 0); the Groq/Cerebras fallback handles it.** Don't flag the Gemini 429 as a failure — the fallback chain saving the profile ("Profile saved for user …") is the success signal.
+
 ## Tools this skill uses
 
 Playwright MCP (`browser_navigate`, `browser_snapshot`, `browser_fill_form`, `browser_click`,
