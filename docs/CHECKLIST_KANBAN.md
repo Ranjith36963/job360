@@ -33,10 +33,13 @@ GitHub `Ranjith36963`, demo account loading the real profile.
 | A6 | Forgot password | ✅ | 204 + success state (**was 422 — Finding #8 FIXED**) |
 | A7 | Reset password confirm | ✅ | same fixed JSON path; unit-tested (no live token walk) |
 | A8 | Verify-email confirm | ✅ | minted token → `email_verified_at` set (live) |
+| A9 | Login lockout (brute-force) | ✅ | 5 failed logins for an email → **429 + Retry-After**, even with correct pw; success clears (d2ac884, 8 tests) |
 | B1–B9 | Profile (CV/LinkedIn/GitHub/versions/diff/restore/json-resume) | ✅ | CV 200 (64 skills parsed real CV); LinkedIn `merged:true`; versions diff/restore live; json-resume 200 |
+| B10 | Per-input routes + two-pass | ✅ | **4 dedicated routes** `/api/profile/{cv,linkedin,github,preferences}`; each input runs deterministic + LLM pass → new version → rescore |
 | ★ | Profile-version re-score (M2) | ✅ | profile change → new version → feed re-scored 35→97 rows, 30 re-judged |
 | C1–C5 | Search + Dashboard | ✅ | full pipeline live (6089 raw→dedup→4 new, 40 sources); hybrid re-rank; COALESCE AI sort |
-| D1–D7 | Jobs (detail/like/remove/duplicates/CSV/actions) | ✅ | like→DB row; un-like 200; CSV 15.9KB (⚠️ no UI button) |
+| C6 | Search gates | ✅ | **403 `email_not_verified`** until verified (#15, `require_verified_user`); **429** when user already has `MAX_CONCURRENT_SEARCHES_PER_USER` (3) runs active |
+| D1–D7 | Jobs (detail/like/remove/duplicates/CSV/actions) | ✅ | like→DB row; un-like 200; CSV 15.9KB; **Export button wired** (`dashboard/page.tsx:400`) |
 | E1–E7 | Pipeline (add/advance/notes/timeline/counts/reminders) | ✅ | all 5 stages (applied→outreach→interview→offer→rejected); add+advance→DB stage+history |
 | F1–F3 | Notifications history/stats | ✅ | 200 (empty ledger) |
 | G1–G10 | Channels (providers/webhook add/test/delete/OAuth-gated) | ✅ | webhook add 201 (Fernet-encrypted); **test-send fired real Apprise POST**; delete works |
@@ -48,6 +51,12 @@ GitHub `Ranjith36963`, demo account loading the real profile.
 **Matching engines (all 3 + judge enabled in this `.env`):** Keyword ✅ live · Dimensions ✅ (155 enrichment rows; new LLM quota-blocked) · Semantic/hybrid ✅ live (3,536 embeddings) · LLM judge ✅ (verdicts proven; new calls quota-blocked).
 
 **Engine internals present in code (not UI):** 4-layer dedup, TieredScheduler, CircuitBreaker, ghost-detection, conditional ETag fetch, ARQ crons, timezone-aware quiet hours.
+
+**Lifecycle gaps (real, code-verified — NOT yet built):**
+- **Data export / portability (GDPR Art. 15 & 20)** — only *delete* (Art. 17 soft-delete) exists; there is **no "download my data" route**. A real compliance gap before launch.
+- **Session rolling renewal** — sessions don't extend on activity; an active user is logged out at `expires_at` (LAUNCH_PLAN Phase 2 #11, not built).
+- **Plans / billing lifecycle** — no Free/Premium tier yet (deferred; `docs/plans/2026-06-21-free-premium-plans.md`). The whole subscribe → upgrade → downgrade → cancel arc is absent.
+- **Onboarding / empty states** — no first-run guidance after register, and no defined empty-state for "no jobs yet / no profile yet".
 
 ---
 
