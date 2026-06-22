@@ -55,6 +55,8 @@ Start here to find the right doc fast.
 | Doc | What it is |
 |---|---|
 | [`PRD.md`](PRD.md) | Product requirements + vision. |
+| [`MONETIZATION_GAPS.md`](MONETIZATION_GAPS.md) | What's missing to charge money — payments, paywall, hosting, legal (code-verified gap analysis). |
+| [`plans/2026-06-21-free-premium-plans.md`](plans/2026-06-21-free-premium-plans.md) | Free/Premium tier design (not yet built). |
 | [`References.md`](References.md) | Source-of-truth list of external references and research links. |
 
 ## 📘 Engine evaluation
