@@ -1,13 +1,16 @@
 """HTTP middleware for Job360 FastAPI app."""
 from __future__ import annotations
 
+import time
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from src.utils.logger import _request_id_var, set_request_id
+from src.utils.logger import _request_id_var, get_logger, get_request_id, set_request_id
+
+_access_log = get_logger("access")  # "job360.access" → main job360 handlers (jsonl + log file)
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -35,3 +38,38 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             _request_id_var.reset(token)
         response.headers["X-Request-Id"] = rid
         return response
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """Emit one structured access-log line per HTTP request.
+
+    The backbone of full-lifecycle logging: *every* request gets a line —
+    method / path / status / duration_ms / request_id — even routes that log
+    nothing themselves. Logged on `job360.access` so it lands in the same
+    `data/logs/` JSON + text streams as everything else.
+
+    Must run INSIDE ``RequestIdMiddleware`` (add it BEFORE RequestId so RequestId
+    is outermost) so ``request_id`` is already set when this logs. The ``finally``
+    guarantees a line even when the route raises (recorded as status 500).
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            _access_log.info(
+                "http_request",
+                extra={
+                    "event": "http_request",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status,
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "request_id": get_request_id(),
+                    "client": request.client.host if request.client else None,
+                },
+            )

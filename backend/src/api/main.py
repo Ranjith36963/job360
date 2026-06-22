@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
-from src.api.middleware import RequestIdMiddleware
+from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware
 from src.api.routes import (
     actions,
     auth,
@@ -53,7 +53,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-Id"],
 )
-# RequestIdMiddleware is added AFTER CORSMiddleware so it executes FIRST
+# AccessLogMiddleware logs one line per request. Added BEFORE RequestIdMiddleware
+# so RequestId stays OUTERMOST (LIFO) — that way request_id is already set when
+# the access line is emitted.
+app.add_middleware(AccessLogMiddleware)
+# RequestIdMiddleware is added LAST so it executes FIRST
 # (Starlette processes middleware in LIFO order).
 app.add_middleware(RequestIdMiddleware)
 
