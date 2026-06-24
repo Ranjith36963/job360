@@ -405,6 +405,42 @@ async def test_matcher_stage_swallows_total_failure(stage_db, monkeypatch):
     await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job80])  # must not raise
 
 
+@pytest.mark.asyncio
+async def test_matcher_stage_caches_verdict_no_rejudge(stage_db, monkeypatch):
+    """FUNNEL CACHE / speed guarantee (eval verdict B): a job already judged is
+    NOT re-judged on a second run — skip_existing via has_verdict means zero
+    extra LLM calls. This is what makes the judge-led funnel affordable: the
+    expensive engine runs once per (user, job), then is cached."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    calls = []
+
+    async def fake(prompt, schema, system):
+        calls.append(1)
+        return MatchVerdict(fit_score=77, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    job = await _seed_job(conn, "Cache Job", "CorpC", 80, _UID)
+
+    # First run: the job is judged exactly once.
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job])
+    assert len(calls) == 1
+    cur = await conn.execute(
+        "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?", (_UID, job.id)
+    )
+    assert (await cur.fetchone())["llm_fit_score"] == 77
+
+    # Second run with the SAME job: the cached verdict must short-circuit the
+    # LLM — no extra call. (This is the funnel's speed win.)
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[job])
+    assert len(calls) == 1, "cached verdict must not trigger a second LLM call"
+
+
 # ---------------------------------------------------------------------------
 # Task 4 — clear_user_verdicts
 # ---------------------------------------------------------------------------
