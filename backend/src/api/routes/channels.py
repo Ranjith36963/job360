@@ -231,6 +231,16 @@ async def test_send_channel(
                 detail="channel not found",
             )
         result = await dispatcher.test_send(db, channel_id, user_id=user.id)
+    get_audit_logger().info(
+        "channel_test_send",
+        extra={
+            "event": "channel_test_send",
+            "user_id": user.id,
+            "channel_id": channel_id,
+            "ok": result.ok,
+            "reason": result.error or "",
+        },
+    )
     return TestSendResult(
         ok=result.ok,
         error=result.error or None,
