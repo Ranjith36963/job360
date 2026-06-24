@@ -14,7 +14,9 @@ logging.disable(logging.WARNING)
 
 POOL = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"
 OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_judge_runs.json"
-TARGET_TOTAL = 4  # append rounds until each job has this many judge runs
+# Only judge these uids (leave already-judged profiles untouched). Empty = all.
+ONLY = ["eval-crajappa", "eval-rohith", "eval-sofia"]
+TARGET_TOTAL = 3  # append rounds until each judged uid has this many runs
 K = 3
 
 
@@ -53,15 +55,19 @@ async def _main() -> None:
 
     import os
     pool = json.load(open(POOL))
+    if ONLY:
+        pool = {u: pool[u] for u in ONLY if u in pool}
     conn = await aiosqlite.connect(str(DB_PATH))
     conn.row_factory = aiosqlite.Row
     # APPEND to existing runs (don't waste the rounds already done).
     if os.path.exists(OUT):
         runs = json.load(open(OUT))
-        have = min((max((len(v) for v in g.values()), default=0)) for g in runs.values()) if runs else 0
     else:
-        runs = {uid: {} for uid in pool}
-        have = 0
+        runs = {}
+    for uid in pool:
+        runs.setdefault(uid, {})
+    # 'have' counts only the uids we're judging now.
+    have = min((max((len(v) for v in runs[u].values()), default=0)) for u in pool) if pool else 0
     rounds_needed = max(0, TARGET_TOTAL - have)
     print(f"have {have} rounds, appending {rounds_needed} more", flush=True)
     for k in range(rounds_needed):

@@ -27,7 +27,7 @@ logging.disable(logging.WARNING)
 
 GOLD = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_gold.json"
 JUDGE_RUNS = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_judge_runs.json"
-UIDS = ["eval-ranjith", "eval-pavan"]
+UIDS = ["eval-ranjith", "eval-pavan", "eval-crajappa", "eval-rohith", "eval-sofia"]
 SEED = 20260621
 
 

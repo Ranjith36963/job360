@@ -25,10 +25,10 @@ import sqlite3
 
 logging.disable(logging.WARNING)
 
-UIDS = ["eval-ranjith", "eval-pavan"]
-TOP_PER_ENGINE = 22  # union of 3 retrievers' top-22 -> ~40-55 unique
-SHEET = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_blind_sheet.txt"
-POOL_OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"
+UIDS = ["eval-crajappa", "eval-rohith", "eval-sofia"]
+TOP_PER_ENGINE = 12  # union of 3 retrievers' top-12 -> ~25-32 unique (free-LLM budget)
+SHEET = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2b_blind_sheet.txt"
+POOL_OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"  # merged (loads existing)
 
 
 def _query_text(profile) -> str:
@@ -181,7 +181,16 @@ def main() -> None:
             desc = (r["description"] or "").replace("\n", " ")[:300]
             sheet.write(f"== {jid} == {r['title']} | {r['company']} | {r['location']}\n{desc}\n\n")
     sheet.close()
-    json.dump(pool_out, open(POOL_OUT, "w"))
+    # MERGE into existing pool file (keep prior profiles' pools).
+    import os
+    existing = {}
+    if os.path.exists(POOL_OUT):
+        try:
+            existing = json.load(open(POOL_OUT))
+        except Exception:
+            existing = {}
+    existing.update(pool_out)
+    json.dump(existing, open(POOL_OUT, "w"))
     sconn.close()
     print(f"\nBLIND sheet -> {SHEET}\npool -> {POOL_OUT}")
 
