@@ -9,6 +9,9 @@ _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
 
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
+from src.utils.logger import get_logger  # noqa: E402
+
+_log = get_logger("db.repo")  # job360.db.repo → data/logs/
 
 
 class JobDatabase:
@@ -502,6 +505,10 @@ class JobDatabase:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = await self._conn.execute("DELETE FROM jobs WHERE first_seen < ?", (cutoff,))
         await self._conn.commit()
+        _log.info(
+            "purge_old_jobs",
+            extra={"event": "purge_old_jobs", "deleted": cursor.rowcount, "days": days, "cutoff": cutoff},
+        )
         return cursor.rowcount
 
     async def get_recent_jobs(self, days: int = 7, min_score: int = 0) -> list[dict]:

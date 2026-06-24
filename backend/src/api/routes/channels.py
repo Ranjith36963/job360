@@ -23,6 +23,7 @@ from src.api.auth_deps import CurrentUser, require_user
 from src.core import settings as _settings
 from src.core.settings import DB_PATH
 from src.services.channels import crypto, dispatcher
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(prefix="/settings/channels", tags=["channels"])
 
@@ -178,6 +179,10 @@ async def create_channel(
         )
         await db.commit()
         channel_id = cur.lastrowid
+    get_audit_logger().info(
+        "channel_created",
+        extra={"event": "channel_created", "user_id": user.id, "channel_type": body.channel_type, "channel_id": channel_id},
+    )
     return ChannelOut(
         id=int(channel_id or 0),
         channel_type=body.channel_type,
@@ -201,6 +206,10 @@ async def delete_channel(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="channel not found",
             )
+    get_audit_logger().info(
+        "channel_deleted",
+        extra={"event": "channel_deleted", "user_id": user.id, "channel_id": channel_id},
+    )
 
 
 @router.post("/{channel_id}/test", response_model=TestSendResult)

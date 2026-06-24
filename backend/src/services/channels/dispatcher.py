@@ -27,7 +27,6 @@ Quiet-hours use ``zoneinfo.ZoneInfo`` (stdlib 3.9+) — no pytz required.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any, Optional
@@ -35,8 +34,9 @@ from typing import Any, Optional
 import aiosqlite
 
 from src.services.channels.crypto import decrypt
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("channels.dispatcher")  # job360.channels.dispatcher → data/logs/
 
 # Deferred import so tests for crypto alone don't pay for Apprise.
 _apprise = None
@@ -162,6 +162,31 @@ async def _queue_digest(db: aiosqlite.Connection, user_id: str, channel: str, jo
         logger.debug("Could not queue digest for user %s channel %s: %s", user_id, channel, exc)
 
 
+def _log_dispatch(user_id: str, job_id: int | None, results: list["ChannelSendResult"]) -> None:
+    """Gap I — one structured line per channel: did it send / queue / skip, and why."""
+    for r in results:
+        if r.queued_digest:
+            outcome = "queued"
+        elif r.skipped:
+            outcome = "skipped"
+        elif r.ok:
+            outcome = "sent"
+        else:
+            outcome = "failed"
+        logger.info(
+            "notification_dispatch",
+            extra={
+                "event": "notification_dispatch",
+                "user_id": user_id,
+                "job_id": job_id,
+                "channel": r.channel_type,
+                "channel_id": r.channel_id,
+                "outcome": outcome,
+                "reason": r.error or "",
+            },
+        )
+
+
 async def dispatch(
     db: aiosqlite.Connection,
     *,
@@ -214,7 +239,7 @@ async def dispatch(
 
     # Gate 1: rule disabled
     if not rule_enabled:
-        return [
+        results = [
             ChannelSendResult(
                 channel_id=ch["id"],
                 channel_type=ch["channel_type"],
@@ -224,10 +249,12 @@ async def dispatch(
             )
             for ch in channels
         ]
+        _log_dispatch(user_id, job_id, results)
+        return results
 
     # Gate 2: score threshold
     if match_score is not None and match_score < threshold:
-        return [
+        results = [
             ChannelSendResult(
                 channel_id=ch["id"],
                 channel_type=ch["channel_type"],
@@ -237,6 +264,8 @@ async def dispatch(
             )
             for ch in channels
         ]
+        _log_dispatch(user_id, job_id, results)
+        return results
 
     for ch in channels:
         ch_type = ch["channel_type"]
@@ -279,6 +308,7 @@ async def dispatch(
                     error=str(e)[:500],
                 )
             )
+    _log_dispatch(user_id, job_id, results)
     return results
 
 

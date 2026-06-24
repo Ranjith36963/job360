@@ -19,6 +19,8 @@ from typing import Optional
 import aiosqlite
 from itsdangerous import BadSignature, TimestampSigner
 
+from src.utils.logger import get_audit_logger
+
 SESSION_MAX_AGE_DAYS = 30
 
 
@@ -48,6 +50,7 @@ async def create_session(
         )
         await db.commit()
     signed = _signer(secret).sign(sid.encode("ascii")).decode("ascii")
+    get_audit_logger().info("session_created", extra={"event": "session_created", "user_id": user_id})
     return signed
 
 
@@ -96,6 +99,7 @@ async def revoke_session(db_path: str, cookie: str, *, secret: str) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.execute("DELETE FROM sessions WHERE id = ?", (sid,))
         await db.commit()
+    get_audit_logger().info("session_revoked", extra={"event": "session_revoked", "session_id": sid[:8]})
 
 
 async def revoke_all_for_user(db_path: str, user_id: str) -> int:
@@ -107,4 +111,8 @@ async def revoke_all_for_user(db_path: str, user_id: str) -> int:
     async with aiosqlite.connect(db_path) as db:
         cur = await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         await db.commit()
+        get_audit_logger().info(
+            "sessions_revoked_all",
+            extra={"event": "sessions_revoked_all", "user_id": user_id, "count": cur.rowcount},
+        )
         return cur.rowcount

@@ -15,6 +15,7 @@ from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
 from src.api.models import NotificationRule, NotificationRuleUpdate
 from src.repositories.database import JobDatabase
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["notification-rules"])
 
@@ -82,4 +83,14 @@ async def upsert_notification_rule(
     update_dict = body.model_dump(exclude_unset=True)
     data.update(update_dict)
     row = await db.save_user_notification_rule(user.id, data)
+    get_audit_logger().info(
+        "notification_rule_saved",
+        extra={
+            "event": "notification_rule_saved",
+            "user_id": user.id,
+            "notify_mode": data.get("notify_mode"),
+            "score_threshold": data.get("score_threshold"),
+            "enabled": data.get("enabled"),
+        },
+    )
     return _rule_from_row(row)

@@ -10,7 +10,9 @@ These are plain ``async def`` — they can be called directly from tests
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -23,6 +25,44 @@ from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lo
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import JobScorer
+from src.utils.logger import get_logger
+
+_log = get_logger("worker")  # "job360.worker" → data/logs/
+
+
+def _logged_task(fn):
+    """Wrap an ARQ task with start / done(+duration) / error(+traceback) logging.
+
+    Gap H — the background worker layer ran completely dark. Every task now
+    emits a structured line so "why didn't my notification fire / cron run?" is
+    answerable. ``functools.wraps`` keeps ``__name__`` so ARQ's registry and the
+    direct-call test usage are unaffected.
+    """
+
+    @functools.wraps(fn)
+    async def _wrapped(ctx, *args, **kwargs):
+        start = time.perf_counter()
+        _log.info("task_start", extra={"event": "task_start", "task": fn.__name__})
+        try:
+            result = await fn(ctx, *args, **kwargs)
+            _log.info(
+                "task_done",
+                extra={
+                    "event": "task_done",
+                    "task": fn.__name__,
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                },
+            )
+            return result
+        except Exception as e:
+            _log.error(
+                "task_error",
+                extra={"event": "task_error", "task": fn.__name__, "error": str(e)},
+                exc_info=True,
+            )
+            raise
+
+    return _wrapped
 
 
 def idempotency_key(user_id: str, job_id: int, channel: str) -> str:
@@ -43,6 +83,7 @@ async def _load_users(db: aiosqlite.Connection) -> list[dict[str, Any]]:
     return [dict(r) for r in await cur.fetchall()]
 
 
+@_logged_task
 async def score_and_ingest(
     ctx: dict,
     job_id: int,
@@ -223,6 +264,7 @@ async def mark_ledger_failed(
 # is `ctx: dict` with 'db' (aiosqlite.Connection) and optionally 'enqueue'.
 
 
+@_logged_task
 async def send_notification(
     ctx: dict,
     user_id: str,
@@ -303,11 +345,13 @@ async def send_notification(
     return {"sent": sent, "failed": failed}
 
 
+@_logged_task
 async def mark_ledger_sent_task(ctx: dict, user_id: str, job_id: int, channel: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_sent`."""
     await mark_ledger_sent(ctx["db"], user_id=user_id, job_id=job_id, channel=channel)
 
 
+@_logged_task
 async def mark_ledger_failed_task(ctx: dict, user_id: str, job_id: int, channel: str, error: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_failed`."""
     await mark_ledger_failed(
@@ -405,6 +449,7 @@ def _bucket_for_row(row: aiosqlite.Row) -> str:
 # ---------- Step-3 B-14 — nightly ghost sweep periodic task ------------
 
 
+@_logged_task
 async def nightly_ghost_sweep(ctx: dict) -> dict:
     """ARQ periodic task: advance ghost detection state for stale jobs.
 
@@ -467,6 +512,7 @@ async def nightly_ghost_sweep(ctx: dict) -> dict:
 MAX_BUNDLE_RETRIES = 5
 
 
+@_logged_task
 async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     """ARQ task: send all queued digest notifications for user_id across all channels.
 
@@ -655,6 +701,7 @@ def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
     return False
 
 
+@_logged_task
 async def notification_tick(ctx: dict) -> dict[str, int]:
     """ARQ cron task: check all users with notification rules, enqueue send_bundle when due.
 
@@ -693,6 +740,7 @@ async def notification_tick(ctx: dict) -> dict[str, int]:
     return {"checked": len(rules), "enqueued": enqueued}
 
 
+@_logged_task
 async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:
     """Produce a :class:`JobEnrichment` row for ``job_id``.
 
