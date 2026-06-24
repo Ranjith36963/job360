@@ -20,7 +20,7 @@ from src.services.profile.models import CVData
 # ── dep_file_parser — per-format ────────────────────────────────────
 
 
-def test_parse_package_json_all_sections():
+def test_parse_package_json_runtime_only():
     content = """
     {
       "name": "demo",
@@ -29,9 +29,8 @@ def test_parse_package_json_all_sections():
       "peerDependencies": {"react-dom": "^18.2.0"}
     }
     """
-    assert dep_file_parser.parse_package_json(content) == {
-        "react", "next", "typescript", "vitest", "react-dom"
-    }
+    # RUNTIME deps only — devDependencies + peerDependencies are tooling, excluded.
+    assert dep_file_parser.parse_package_json(content) == {"react", "next"}
 
 
 def test_parse_package_json_malformed_returns_empty():
@@ -80,8 +79,9 @@ dev = ["pytest>=8.0", "ruff"]
     assert "fastapi" in names
     assert "pydantic" in names
     assert "httpx" in names
-    assert "pytest" in names
-    assert "ruff" in names
+    # optional-dependencies (dev/test groups) are excluded — runtime only
+    assert "pytest" not in names
+    assert "ruff" not in names
 
 
 def test_parse_pyproject_toml_poetry():
@@ -97,7 +97,7 @@ pytest = "^8.0"
     names = dep_file_parser.parse_pyproject_toml(content)
     assert "django" in names
     assert "celery" in names
-    assert "pytest" in names
+    assert "pytest" not in names  # dev group excluded — runtime only
     assert "python" not in names  # we exclude the python floor
 
 
@@ -115,7 +115,8 @@ axum = "0.7"
 mockall = "0.12"
 """
     names = dep_file_parser.parse_cargo_toml(content)
-    assert {"tokio", "serde", "axum", "mockall"} <= names
+    assert {"tokio", "serde", "axum"} <= names
+    assert "mockall" not in names  # dev-dependencies excluded — runtime only
 
 
 def test_parse_gemfile():
