@@ -240,6 +240,25 @@ _DET_OTHER_HEADINGS = {
 }
 _DET_ALL_HEADINGS = _DET_SKILL_HEADINGS | _DET_SUMMARY_HEADINGS | _DET_OTHER_HEADINGS
 
+# Structural STEMS that mark a skills/tools section heading. These are
+# section-LABEL word-stems (e.g. "Core Technical Skills", "TOOLS & TECHNOLOGIES",
+# "Tech Stack"), NOT a skill vocabulary — so a CV using any heading containing
+# one is recognised without hardcoding skill names (CLAUDE.md rule #28).
+_DET_SKILL_HEADING_STEMS = (
+    "skill", "tool", "technolog", "tech stack", "competenc", "expertise", "proficien",
+)
+
+
+def _is_skill_heading(key: str) -> bool:
+    """A short heading line whose label contains a skills/tools section stem."""
+    return bool(key) and any(stem in key for stem in _DET_SKILL_HEADING_STEMS)
+
+
+def _is_section_heading(key: str) -> bool:
+    """True if ``key`` is any recognised section heading (fixed set OR a
+    skills-section stem) — used to stop a captured body at the next section."""
+    return bool(key) and (key in _DET_ALL_HEADINGS or _is_skill_heading(key))
+
 # Delimiters that separate skills on one line.
 _DET_SKILL_DELIMS = set(",•·|;/")
 # Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
@@ -299,29 +318,43 @@ def _det_expand_token(token: str) -> list[str]:
 
 def _det_heading_key(line: str) -> str:
     """Normalise a line for heading comparison: lowercase, strip, drop a
-    trailing colon. Returns '' for lines too long to be a heading."""
-    t = line.strip().rstrip(":").strip().lower()
-    # Real headings are short. Guards against a sentence that happens to
-    # start with 'Summary of my work ...' being treated as a heading.
+    trailing colon. Returns '' for lines that aren't heading-shaped."""
+    s = line.strip()
+    # Prose sentences end with a period — headings don't. Guards against a
+    # wrapped summary line ("...within a UK technology organisation.") being
+    # mistaken for a skills heading just because it contains a stem ("technolog").
+    if s.endswith("."):
+        return ""
+    t = s.rstrip(":").strip().lower()
+    # Real headings are short. Guards against a long sentence being treated
+    # as a heading.
     if len(t) > 30:
         return ""
     return t
 
 
-def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
-    """Return the body lines under the first heading in ``heading_set``,
-    stopping at the next recognised heading. Empty list when absent."""
+def _det_collect_section(
+    lines: list[str], heading_set: set, *, stem_skills: bool = False
+) -> list[str]:
+    """Return the body lines under the first matching heading, stopping at the
+    next recognised section heading. Empty list when absent.
+
+    With ``stem_skills=True`` the start heading is matched STRUCTURALLY — any
+    short heading line whose label contains a skills/tools stem (``_is_skill_
+    heading``) — so non-standard headings like "Core Technical Skills" or
+    "TOOLS & TECHNOLOGIES" are captured, not just the exact ``heading_set``.
+    """
     out: list[str] = []
     capturing = False
     for line in lines:
         key = _det_heading_key(line)
         if not capturing:
-            if key in heading_set:
+            if key in heading_set or (stem_skills and _is_skill_heading(key)):
                 capturing = True
             continue
-        # capturing
-        if key and key in _DET_ALL_HEADINGS:
-            break  # next section starts
+        # capturing — stop at the next recognised section heading
+        if _is_section_heading(key):
+            break
         if line.strip():
             out.append(line.strip())
     return out
@@ -345,7 +378,7 @@ def deterministic_cv_fields(raw_text: str) -> dict:
         return {"skills": [], "summary": ""}
     lines = raw_text.splitlines()
 
-    skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS)
+    skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS, stem_skills=True)
     skills: list[str] = []
     seen: set[str] = set()
     for line in skill_lines:
@@ -355,7 +388,14 @@ def deterministic_cv_fields(raw_text: str) -> dict:
             if ":" in token:
                 token = token.rsplit(":", 1)[-1]
             for tok in _det_expand_token(token):
-                if tok and tok.lower() not in seen:
+                tok = tok.strip()
+                # Structural noise guard: real skills are short. A token with
+                # >5 words or >45 chars is prose (common on CVs that state skills
+                # in sentences, not lists), not a skill — drop it. This keeps
+                # precision when stem-matched headings pull in prose bodies.
+                if not tok or len(tok) > 45 or len(tok.split()) > 5:
+                    continue
+                if tok.lower() not in seen:
                     skills.append(tok)
                     seen.add(tok.lower())
 
