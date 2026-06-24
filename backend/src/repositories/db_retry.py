@@ -12,13 +12,32 @@ re-raises if the lock never clears.
 """
 import asyncio
 import sqlite3
+from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, TypeVar
+
+import aiosqlite
 
 from src.utils.logger import get_logger
 
 _log = get_logger("db")  # "job360.db" → main job360 handlers (data/logs/)
 
 T = TypeVar("T")
+
+
+@asynccontextmanager
+async def open_db(db_path: str, *, busy_timeout_ms: int = 30000):
+    """Open an aiosqlite connection with ``busy_timeout`` already set.
+
+    Finding #11 set ``busy_timeout=30000`` on the long-lived ``JobDatabase``
+    connection, but the auth/channels request path opened raw
+    ``aiosqlite.connect()`` connections with NO timeout — so under concurrent
+    writes (e.g. a search pipeline running) a session/logout write hit
+    ``database is locked`` and 500'd instead of waiting. This drop-in replacement
+    makes every short-lived connection wait for the lock like the main one does.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+        yield db
 
 
 def _is_locked(exc: sqlite3.OperationalError) -> bool:

@@ -21,6 +21,7 @@ from src.api.auth_deps import (
 from src.api.dependencies import get_db
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
 from src.repositories.database import JobDatabase
+from src.repositories.db_retry import open_db
 from src.services.auth import email_verification as auth_email_verification
 from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
@@ -124,7 +125,7 @@ async def register(
 ) -> UserResponse:
     user_id = uuid.uuid4().hex
     pw_hash = hash_password(req.password)
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         try:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
@@ -176,7 +177,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             detail="too many failed login attempts; try again later",
             headers={"Retry-After": str(LOGIN_LOCKOUT_WINDOW_SECONDS)},
         )
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT id, email, password_hash FROM users " "WHERE email = ? AND deleted_at IS NULL",
@@ -239,7 +240,7 @@ async def delete_account(
 ) -> Response:
     """Soft-delete the caller's account (GDPR Article 17). Requires current-password
     verification (hard rule #26), then clears the session cookie."""
-    async with aiosqlite.connect(str(DB_PATH)) as adb:
+    async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
@@ -274,7 +275,7 @@ async def change_password(
     """Authenticated password change. Requires current password verification,
     then invalidates the session cookie to force re-login (hard rule #26 —
     matches the email-change path)."""
-    async with aiosqlite.connect(str(DB_PATH)) as adb:
+    async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
@@ -311,7 +312,7 @@ async def change_email(
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""
-    async with aiosqlite.connect(str(DB_PATH)) as adb:
+    async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
@@ -321,7 +322,7 @@ async def change_email(
     if not row or not verify_password(row["password_hash"], req.current_password):
         raise HTTPException(status_code=401, detail="current password is incorrect")
     # Check new email is not already taken by another user
-    async with aiosqlite.connect(str(DB_PATH)) as adb:
+    async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
             "SELECT id FROM users WHERE email = ? AND id != ?",

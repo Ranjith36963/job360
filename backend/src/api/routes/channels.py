@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import CurrentUser, require_user
 from src.core import settings as _settings
 from src.core.settings import DB_PATH
+from src.repositories.db_retry import open_db
 from src.services.channels import crypto, dispatcher
 from src.utils.logger import get_audit_logger
 
@@ -80,7 +81,7 @@ class TelegramPollOut(BaseModel):
 
 @router.get("", response_model=list[ChannelOut])
 async def list_channels(user: CurrentUser = Depends(require_user)) -> list[ChannelOut]:
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT id, channel_type, display_name, enabled, "
@@ -168,7 +169,7 @@ async def create_channel(
             detail=f"unsupported channel type: {ct_type}",
         )
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         cur = await db.execute(
             """
             INSERT INTO user_channels(user_id, channel_type, display_name,
@@ -195,7 +196,7 @@ async def create_channel(
 async def delete_channel(
     channel_id: int, user: CurrentUser = Depends(require_user)
 ) -> None:
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         cur = await db.execute(
             "DELETE FROM user_channels WHERE id = ? AND user_id = ?",
             (channel_id, user.id),
@@ -218,7 +219,7 @@ async def test_send_channel(
 ) -> TestSendResult:
     # Two-layer ownership check: HTTP SELECT here AND dispatcher filters
     # internally on user_id. Either layer rejects a cross-user attempt.
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT id FROM user_channels WHERE id = ? AND user_id = ?",
@@ -382,7 +383,7 @@ async def connect_slack(user: CurrentUser = Depends(require_user)) -> RedirectRe
     state = secrets.token_urlsafe(32)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         await db.execute(
             "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
             "VALUES(?, ?, 'slack', ?)",
@@ -420,7 +421,7 @@ async def callback_slack(
     4. State is not older than ``_STATE_TTL_MINUTES``.
     State is always consumed (deleted) on first use past validation.
     """
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
 
         await _consume_oauth_state(db, state, user.id, "slack")
@@ -532,7 +533,7 @@ async def connect_discord(user: CurrentUser = Depends(require_user)) -> Redirect
     state = secrets.token_urlsafe(32)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         await db.execute(
             "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
             "VALUES(?, ?, 'discord', ?)",
@@ -571,7 +572,7 @@ async def callback_discord(
     4. State is not older than ``_STATE_TTL_MINUTES``.
     State is always consumed (deleted) on first use past validation.
     """
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
 
         await _consume_oauth_state(db, state, user.id, "discord")
@@ -668,7 +669,7 @@ async def connect_telegram(
     state = secrets.token_urlsafe(32)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         await db.execute(
             "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
             "VALUES(?, ?, 'telegram', ?)",
@@ -702,7 +703,7 @@ async def poll_telegram(
     ``{connected: true, target_label: ...}``.  Otherwise returns
     ``{connected: false}`` with the state still alive.
     """
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with open_db(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT user_id, channel_type, created_at FROM oauth_states WHERE state = ?",

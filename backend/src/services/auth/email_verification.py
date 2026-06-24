@@ -35,6 +35,7 @@ from urllib.parse import quote as urlquote
 
 import aiosqlite
 
+from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 
@@ -101,7 +102,7 @@ async def request_email_verification(
     expires = (
         datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_TTL_HOURS)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         await db.execute(
             "INSERT INTO email_verifications(user_id, token_hash, email, expires_at) "
             "VALUES (?, ?, ?, ?)",
@@ -125,7 +126,7 @@ async def confirm_email_verification(
     """Validate the token, mark verified, return user_id (or None on failure)."""
     h = tokens.hash_token(raw_token)
     now = _now_iso()
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """
@@ -185,7 +186,7 @@ async def confirm_email_verification(
 
 async def is_email_verified(*, db_path: str, user_id: str) -> bool:
     """True iff the user has ever completed email verification."""
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT email_verified_at FROM users WHERE id = ?", (user_id,)

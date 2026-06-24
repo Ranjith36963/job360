@@ -19,6 +19,7 @@ from typing import Optional
 import aiosqlite
 from itsdangerous import BadSignature, TimestampSigner
 
+from src.repositories.db_retry import open_db
 from src.utils.logger import get_audit_logger
 
 SESSION_MAX_AGE_DAYS = 30
@@ -40,7 +41,7 @@ async def create_session(
     sid = uuid.uuid4().hex
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=SESSION_MAX_AGE_DAYS)
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         await db.execute(
             """
             INSERT INTO sessions(id, user_id, expires_at, user_agent, ip_hash)
@@ -74,7 +75,7 @@ async def resolve_session(
     if sid is None:
         return None
     now = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT user_id, expires_at FROM sessions WHERE id = ?", (sid,)
@@ -96,7 +97,7 @@ async def revoke_session(db_path: str, cookie: str, *, secret: str) -> None:
     sid = _unsign(cookie, secret)
     if sid is None:
         return
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         await db.execute("DELETE FROM sessions WHERE id = ?", (sid,))
         await db.commit()
     get_audit_logger().info("session_revoked", extra={"event": "session_revoked", "session_id": sid[:8]})
@@ -108,7 +109,7 @@ async def revoke_all_for_user(db_path: str, user_id: str) -> int:
     elsewhere (other device, stolen cookie) cannot survive a credential change.
     Returns the number of sessions removed.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         cur = await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         await db.commit()
         get_audit_logger().info(

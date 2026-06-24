@@ -26,6 +26,7 @@ from urllib.parse import quote as urlquote
 
 import aiosqlite
 
+from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
@@ -96,7 +97,7 @@ async def request_password_reset(
     Returns True if an email was actually sent, False otherwise. The caller
     (route) ignores the return value to keep the no-enumeration contract.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL",
@@ -140,7 +141,7 @@ async def confirm_password_reset(
     """
     h = tokens.hash_token(raw_token)
     now = _now_iso()
-    async with aiosqlite.connect(db_path) as db:
+    async with open_db(db_path) as db:
         db.row_factory = aiosqlite.Row
         # Single read to validate everything atomically. SQLite's
         # transaction default ensures this is consistent with the UPDATE
