@@ -183,6 +183,39 @@ class TestCvDeterministicPass:
         assert out["skills"] == []
         assert out["summary"] == ""
 
+    def test_non_standard_skill_heading_is_captured(self):
+        """Headings are matched by STEM, not exact string — so 'TOOLS &
+        TECHNOLOGIES' / 'Core Technical Skills' work, not just 'Skills'."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = "TOOLS & TECHNOLOGIES\nNmap, Burp Suite, Wireshark\n\nExperience\nx"
+        out = deterministic_cv_fields(text)
+        assert {"Nmap", "Burp Suite", "Wireshark"}.issubset(set(out["skills"]))
+        text2 = "Core Technical Skills\nPython, FastAPI, Snowflake\n\nEducation\nBSc"
+        out2 = deterministic_cv_fields(text2)
+        assert {"Python", "FastAPI", "Snowflake"}.issubset(set(out2["skills"]))
+
+    def test_prose_ending_in_period_is_not_a_skill_heading(self):
+        """A wrapped summary line containing a stem word ('...technology
+        organisation.') must NOT be mistaken for a skills heading."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "Summary\nSeeking a role within a UK technology organisation.\n"
+            "TECHNICAL SKILLS\nPython, PyTorch, Docker\n\nExperience\nx"
+        )
+        out = deterministic_cv_fields(text)
+        assert {"Python", "PyTorch", "Docker"}.issubset(set(out["skills"]))
+
+    def test_long_prose_token_is_dropped(self):
+        """Structural guard: a >5-word phrase is prose, not a skill."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = "Skills\nProduction Python for data engineering and analytics, Docker\n\nExperience\nx"
+        out = deterministic_cv_fields(text)
+        assert "Docker" in out["skills"]
+        assert "Production Python for data engineering and analytics" not in out["skills"]
+
 
 # ── Preferences deterministic pass (Pass 1) — structure-only, no LLM ─
 
