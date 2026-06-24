@@ -99,7 +99,16 @@ def save_profile(
             else:
                 raise
         conn.commit()
-    logger.info("Profile saved for user %s (action=%s)", user_id, source_action)
+    # Gap G — extraction summary: log how much was actually extracted, so a
+    # sparse/empty profile is explainable from the logs (not just inferred).
+    _cv = profile.cv_data
+    logger.info(
+        "Profile saved for user %s (action=%s) — %d skills, %d titles",
+        user_id,
+        source_action,
+        len(getattr(_cv, "skills", None) or []),
+        len(getattr(_cv, "job_titles", None) or []),
+    )
 
 
 VERSION_RETENTION = 10

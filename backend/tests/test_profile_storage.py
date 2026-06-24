@@ -118,6 +118,24 @@ def _make_profile(skill: str = "python") -> UserProfile:
 
 
 # ---------------------------------------------------------------------------
+# Gap G — extraction summary log
+# ---------------------------------------------------------------------------
+
+
+def test_save_logs_extraction_summary(storage_db, caplog):
+    """save_profile logs how many skills/titles were extracted (gap G)."""
+    import logging
+
+    from src.services.profile.storage import save_profile
+
+    with caplog.at_level(logging.INFO, logger="job360.profile.storage"):
+        save_profile(_make_profile("python"), USER_ALICE)  # 1 skill, 1 title
+
+    msgs = [r.getMessage() for r in caplog.records if r.name == "job360.profile.storage"]
+    assert any("1 skills, 1 titles" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
 # save + load round-trip
 # ---------------------------------------------------------------------------
 
