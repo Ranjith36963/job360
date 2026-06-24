@@ -25,7 +25,7 @@ import sqlite3
 
 logging.disable(logging.WARNING)
 
-UIDS = ["eval-crajappa", "eval-rohith", "eval-sofia"]
+UIDS = ["eval-sofia"]
 TOP_PER_ENGINE = 12  # union of 3 retrievers' top-12 -> ~25-32 unique (free-LLM budget)
 SHEET = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2b_blind_sheet.txt"
 POOL_OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"  # merged (loads existing)
