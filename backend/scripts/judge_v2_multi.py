@@ -15,8 +15,8 @@ logging.disable(logging.WARNING)
 POOL = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"
 OUT = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_judge_runs.json"
 # Only judge these uids (leave already-judged profiles untouched). Empty = all.
-ONLY = ["eval-sofia"]
-TARGET_TOTAL = 2  # append rounds until each judged uid has this many runs
+ONLY = ["eval-crajappa", "eval-rohith", "eval-sofia"]
+TARGET_TOTAL = 3  # append rounds until each judged uid has this many runs
 K = 3
 
 

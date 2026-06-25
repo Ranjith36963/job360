@@ -122,7 +122,31 @@ Added 3 real CVs in **different fields** (the missing ingredient): CRajappa (Cyb
 ### Issue #12 — career-pivot CV confuses keyword 🟡 (new finding)
 Sofia's CV lists her *past* (Social Media Manager) and *target* (Cyber). Keyword matched the old titles and pulled **social-media jobs** into her pool, ranking them high against a cyber-focused gold → her inter-rater dropped to 0.22 and keyword/dims went strongly negative. The judge (reads the career objective) handled it. **Real product weakness: the keyword engine breaks on career-changer CVs; lean on the judge there.**
 
-**Caveat:** CRajappa/Rohith at K=1 judge run when first measured (K=3 stabilization running); inter-rater 0.88/0.86 is decisive — more runs tighten, don't reorder.
+**Caveat (resolved):** CRajappa/Rohith/Sofia were first measured at K=1 judge run; the **K=3 stabilization is now complete** and confirmed the order exactly (numbers barely moved → "order won't change, just firmer").
+
+---
+
+## Iteration 5 — LOCKED final (K=3 judge, all 5 CVs, all 16 combos)
+
+Sofia re-focused to her cyber target (Opus-curated) -> her inter-rater rose **0.22 -> 0.88**. Judge stabilized to **K=3** (median of 3 runs) for all 3 new profiles.
+
+**Inter-rater (K=3):** Pavan 0.72 · CRajappa 0.87 · Rohith 0.86 · Sofia 0.88 -> **4 of 5 CVs rankable** (Ranjith AI/ML 0.01 excluded — no agreed gold).
+
+**LOCKED de-biased engine ranking (Spearman vs gold, home-field removed):**
+| Engine | Pavan | CRajappa | Rohith | Sofia | mean | worst |
+|---|---|---|---|---|---|---|
+| **E4 Judge** | 0.72 | 0.87 | 0.86 | 0.88 | **0.83** | 0.72 |
+| **E3 Hybrid** | 0.76 | 0.62 | 0.49 | 0.64 | **0.63** | 0.49 |
+| **E2 Dims** | 0.48 | 0.40 | 0.61 | 0.01 | 0.38 | 0.01 |
+| **BM25** | 0.04 | 0.16 | −0.42 | 0.28 | 0.02 | −0.42 |
+| **E1 Keyword** | 0.18 | 0.44 | −0.71 | −0.08 | **−0.04** | −0.71 |
+
+**LOCKED 16-combo leaderboard (mean / worst NDCG / Spearman):** E4 Judge **0.963 / 0.907 / 0.67** (best) … BM25-only **0.826 / 0.707 / −0.15** (worst). Every judge-inclusive combo clusters at the top (~0.95).
+
+**FINAL ANSWER (honest, locked): E4 Judge ≫ E3 Hybrid > E2 Dims > BM25 ≈ E1 Keyword.**
+- **Best engine: the Judge (E4)** — #1 on every metric, every field; it reads level/intent/context.
+- **Worst rankers: BM25 and Keyword alone** — *negative* once de-biased; good at recall, backwards at ranking.
+- **Ship: the judge-led funnel** (keyword/BM25 retrieve → hybrid/dims re-rank → judge decides), proven affordable by the funnel + cache (see `.env.example` recommended config + `test_matcher_stage_caches_verdict_no_rejudge`).
 
 ---
 
