@@ -1,0 +1,55 @@
+name: CI — offline suite (automated Loop 2 + full backend)
+
+# Runs the offline test suite (rule #4 — no network) on every push/PR AND on a
+# daily schedule. This is the AUTOMATED form of "Loop 2": tests/test_e2e_lifecycle.py
+# drives the full register→CV→search→jobs→pipeline→channels→logout journey with
+# deterministic mocks and asserts every log stream filled — so the whole lifecycle
+# is re-verified automatically, not only when a human runs /verify-job360.
+#
+# To enable: just turn on GitHub Actions for the repo (Settings → Actions). No
+# secrets needed — tests inject SESSION_SECRET / channel key themselves.
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  offline-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend (with dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run offline suite (full backend + automated Loop 2 E2E)
+        working-directory: backend
+        run: python -m pytest -q -p no:randomly
+
+  loop2-e2e-spotlight:
+    # A fast, focused run of just the automated Loop 2 lifecycle test, so a
+    # lifecycle/log-fill regression is obvious in the Actions summary without
+    # scanning the whole suite.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend (with dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Automated Loop 2 (E2E lifecycle + log-fill assertions)
+        working-directory: backend
+        run: python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly
