@@ -12,9 +12,19 @@ from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from src.core.settings import CEREBRAS_API_KEY, GEMINI_API_KEY, GROQ_API_KEY
+from src.core.settings import (
+    CEREBRAS_API_KEY,
+    GEMINI_API_KEY,
+    GROQ_API_KEY,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+)
 
 logger = logging.getLogger("job360.profile.llm_provider")
+
+# Decision #6 — deterministic extraction: temperature 0 so the same CV yields
+# the same skills every run. Env-overridable.
+_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
 
 _S = TypeVar("_S", bound=BaseModel)
 
@@ -115,10 +125,12 @@ async def _attempt(call, prompt: str, system: str, provider: str) -> dict[str, A
 
 
 async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
-    """CV parsing — Gemini (best JSON) → Groq → Cerebras fallback.
+    """CV parsing — OpenAI (paid, primary) → Gemini → Groq → Cerebras fallback.
 
-    Provider priority optimised for JSON quality and daily quota. Each call has
-    a hard timeout + smart 429 backoff (see ``_attempt``).
+    OpenAI ``gpt-4o-mini`` leads: paid quota removes the silent-empty / 429
+    failures the free tiers hit, and temp-0 JSON mode is deterministic. The free
+    tiers stay as zero-cost fallbacks. Each call has a hard timeout + smart 429
+    backoff (see ``_attempt``).
 
     Raises:
         RuntimeError: no provider key configured.
@@ -130,6 +142,7 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     rate_limited = False
 
     for key, call, name in (
+        (OPENAI_API_KEY, _call_openai, "openai"),
         (GEMINI_API_KEY, _call_gemini, "gemini"),
         (GROQ_API_KEY, _call_groq, "groq"),
         (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
@@ -143,10 +156,10 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
             rate_limited = rate_limited or _is_rate_limit(e)
             logger.warning("%s failed, trying next provider: %s", name, e)
 
-    if not (GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
+    if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
-            "No LLM API key configured. Set GEMINI_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY in .env. "
-            "All offer free tiers — see https://ai.google.dev, https://console.groq.com, https://cloud.cerebras.ai"
+            "No LLM API key configured. Set OPENAI_API_KEY (recommended), or a free tier "
+            "GEMINI_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY in .env."
         )
 
     detail = "; ".join(errors)
@@ -156,10 +169,12 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
 
 
 async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
-    """Fast scoring — Cerebras (fastest ~2000 tok/sec) → Groq → Gemini fallback.
+    """Fast scoring — OpenAI → Cerebras (fastest ~2000 tok/sec) → Groq → Gemini.
 
-    Use this for bulk job scoring where latency matters more than daily quota.
-    Same timeout + backoff + failure taxonomy as ``llm_extract``.
+    OpenAI leads for determinism + reliable quota; Cerebras stays second for its
+    raw speed when the paid key is absent. Use this for bulk job scoring where
+    latency matters more than daily quota. Same timeout + backoff + failure
+    taxonomy as ``llm_extract``.
 
     Raises:
         RuntimeError: no provider key configured.
@@ -169,6 +184,7 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
     rate_limited = False
 
     for key, call, name in (
+        (OPENAI_API_KEY, _call_openai, "openai"),
         (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
         (GROQ_API_KEY, _call_groq, "groq"),
         (GEMINI_API_KEY, _call_gemini, "gemini"),
@@ -182,9 +198,9 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
             rate_limited = rate_limited or _is_rate_limit(e)
             logger.warning("%s failed, trying next provider: %s", name, e)
 
-    if not (GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
+    if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
-            "No LLM API key configured. Set GEMINI_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY in .env."
+            "No LLM API key configured. Set OPENAI_API_KEY (recommended) or a free tier key in .env."
         )
 
     detail = "; ".join(errors)
@@ -271,6 +287,48 @@ async def llm_extract_validated(
     )
 
 
+async def _call_openai(prompt: str, system: str) -> dict[str, Any]:
+    """Call OpenAI (paid, PRIMARY). Deterministic (temp 0) JSON-mode extraction.
+
+    Model is env-overridable via ``OPENAI_MODEL`` (default ``gpt-4o-mini`` —
+    cheap, fast, strong JSON). Reliable paid quota removes the silent-empty /
+    rate-limit failure the free tiers hit.
+    """
+    from openai import AsyncOpenAI
+
+    _model = OPENAI_MODEL
+    t0 = _time.monotonic()
+    try:
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        response = await client.chat.completions.create(
+            model=_model,
+            messages=messages,
+            temperature=_LLM_TEMPERATURE,
+            response_format={"type": "json_object"},
+        )
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        total_tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
+        logger.info(
+            "llm_call",
+            extra={"provider": "openai", "model": _model, "latency_ms": latency_ms,
+                   "total_tokens": total_tokens, "outcome": "ok"},
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as exc:
+        latency_ms = round((_time.monotonic() - t0) * 1000)
+        logger.warning(
+            "llm_call_error",
+            extra={"provider": "openai", "model": _model, "latency_ms": latency_ms,
+                   "outcome": "error", "error_type": type(exc).__name__},
+        )
+        raise
+
+
 async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
     """Call Google Gemini API (free tier: 15 RPM, 1M tokens/day)."""
     import google.generativeai as genai
@@ -284,7 +342,7 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
             system_instruction=system or None,
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
-                temperature=0.1,
+                temperature=_LLM_TEMPERATURE,
             ),
         )
         response = await model.generate_content_async(prompt)
@@ -322,7 +380,7 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
         response = await client.chat.completions.create(
             model=_model,
             messages=messages,
-            temperature=0.1,
+            temperature=_LLM_TEMPERATURE,
             response_format={"type": "json_object"},
         )
         latency_ms = round((_time.monotonic() - t0) * 1000)
@@ -365,7 +423,7 @@ async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
         response = await client.chat.completions.create(
             model=_model,
             messages=messages,
-            temperature=0.1,
+            temperature=_LLM_TEMPERATURE,
             response_format={"type": "json_object"},
         )
         latency_ms = round((_time.monotonic() - t0) * 1000)
