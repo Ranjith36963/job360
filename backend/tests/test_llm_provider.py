@@ -67,6 +67,43 @@ async def test_llm_extract_cerebras_success():
 
 
 @pytest.mark.asyncio
+async def test_llm_extract_prefers_openai():
+    """OpenAI (paid) is now the PRIMARY provider — when its key is set it runs
+    first and the free tiers are never touched."""
+    import src.services.profile.llm_provider as lp
+
+    mock_result = {"skills": ["Python", "FastAPI"]}
+    with patch.object(lp, "OPENAI_API_KEY", "sk-fake"), \
+         patch.object(lp, "GEMINI_API_KEY", "fake"), \
+         patch.object(lp, "GROQ_API_KEY", "fake"), \
+         patch.object(lp, "CEREBRAS_API_KEY", "fake"), \
+         patch.object(lp, "_call_openai", new_callable=AsyncMock, return_value=mock_result) as openai_mock, \
+         patch.object(lp, "_call_gemini", new_callable=AsyncMock) as gemini_mock, \
+         patch.object(lp, "_call_groq", new_callable=AsyncMock) as groq_mock, \
+         patch.object(lp, "_call_cerebras", new_callable=AsyncMock) as cerebras_mock:
+        result = await lp.llm_extract("test prompt")
+    assert result == mock_result
+    openai_mock.assert_called_once()
+    gemini_mock.assert_not_called()
+    groq_mock.assert_not_called()
+    cerebras_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_llm_extract_openai_fails_falls_back_to_gemini():
+    """When OpenAI errors, the chain falls through to the free Gemini tier."""
+    import src.services.profile.llm_provider as lp
+
+    mock_result = {"skills": ["Kubernetes"]}
+    with patch.object(lp, "OPENAI_API_KEY", "sk-fake"), \
+         patch.object(lp, "GEMINI_API_KEY", "fake"), \
+         patch.object(lp, "_call_openai", new_callable=AsyncMock, side_effect=Exception("openai 500")), \
+         patch.object(lp, "_call_gemini", new_callable=AsyncMock, return_value=mock_result):
+        result = await lp.llm_extract("test prompt")
+    assert result == mock_result
+
+
+@pytest.mark.asyncio
 async def test_llm_extract_fast_prefers_cerebras():
     """llm_extract_fast should try Cerebras FIRST (fastest for bulk scoring)."""
     mock_result = {"score": 85}
