@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import aiosqlite
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from src.core.settings import DB_PATH
 from src.services.auth import sessions as auth_sessions
@@ -77,6 +77,7 @@ async def _current_user_from_cookie(
 
 
 async def require_user(
+    request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> CurrentUser:
     user = await _current_user_from_cookie(job360_session)
@@ -85,13 +86,20 @@ async def require_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="authentication required",
         )
+    # Stash user_id on request.state so the access-log middleware can record WHO
+    # made the request (request.state is shared across the middleware boundary).
+    request.state.user_id = user.id
     return user
 
 
 async def optional_user(
+    request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Optional[CurrentUser]:
-    return await _current_user_from_cookie(job360_session)
+    user = await _current_user_from_cookie(job360_session)
+    if user is not None:
+        request.state.user_id = user.id
+    return user
 
 
 async def require_verified_user(

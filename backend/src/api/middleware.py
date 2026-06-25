@@ -73,6 +73,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                     "status_code": status,
                     "duration_ms": round((time.perf_counter() - start) * 1000, 1),
                     "request_id": get_request_id(),
+                    # WHO made the request — set on request.state by require_user /
+                    # optional_user (None for anonymous routes).
+                    "user_id": getattr(request.state, "user_id", None),
                     "client": request.client.host if request.client else None,
                 },
             )
