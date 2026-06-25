@@ -34,6 +34,28 @@ jobs:
         working-directory: backend
         run: python -m pytest -q -p no:randomly
 
+  frontend-e2e:
+    # The browser-side of Loop 2: runs the committed Playwright UI specs
+    # (frontend/tests/e2e/*) in a clean environment. The specs are self-contained
+    # (they set a fake session cookie + mock the API via page.route), so no backend
+    # is needed — Playwright's webServer starts `npm run dev` itself.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright UI specs
+        working-directory: frontend
+        run: npx playwright test
+
   loop2-e2e-spotlight:
     # A fast, focused run of just the automated Loop 2 lifecycle test, so a
     # lifecycle/log-fill regression is obvious in the Actions summary without
