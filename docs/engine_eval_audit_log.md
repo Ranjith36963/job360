@@ -150,5 +150,38 @@ Sofia re-focused to her cyber target (Opus-curated) -> her inter-rater rose **0.
 
 ---
 
+## Iteration 6 — break the E4 circularity with an independent rater PANEL (Opus gold + GPT + Gemini).
+
+### Issue #13 — the validity gate was CIRCULAR with E4 🔴 → BROKEN (answer held)
+Confirmed by computation: `judge-vs-gold` Spearman was **identical** to the `inter-rater` gate value (Pavan 0.723=0.723, CRajappa 0.868=0.868, Rohith 0.861=0.861, Sofia 0.879=0.879). Because the in-app judge (E4) **is** Gemini, and the gate kept only profiles where Opus-gold agrees with the Gemini-judge, scoring E4 against that gold was tautological — E4's #1 was partly manufactured by the gate.
+
+**Fix:** add an INDEPENDENT rater from a DIFFERENT lab — **gpt-4o-mini** (`scripts/rater_panel.py`) — rating every pooled job with the same rubric. Now score E4 against a consensus that **EXCLUDES Gemini** (Opus + GPT only). `scripts/panel_analysis.py`.
+
+**[A] Three labs agree (real, model-independent ground truth):**
+| Profile | Opus~Gemini | Opus~GPT | Gemini~GPT | 3-way |
+|---|---|---|---|---|
+| Ranjith | 0.01 | 0.09 | 0.14 | 0.08 (excluded) |
+| Pavan | 0.72 | 0.61 | 0.64 | 0.66 |
+| CRajappa | 0.87 | 0.79 | 0.72 | 0.79 |
+| Rohith | 0.86 | 0.89 | 0.76 | 0.83 |
+| Sofia | 0.88 | 0.82 | 0.73 | 0.81 |
+
+GPT (a totally separate lab, NOT in E4's provider chain) agrees with Opus at 0.61–0.89 → the gold is **not just one model's opinion**.
+
+**[B] NON-CIRCULAR engine ranking (judge scored vs Opus+GPT, its own Gemini votes excluded):**
+| Engine | mean | worst |
+|---|---|---|
+| **judge** | **0.82** (was 0.83 circular — barely moved!) | 0.76 |
+| hybrid | 0.64 | 0.56 |
+| dims | 0.41 | 0.06 |
+| keyword | 0.10 | −0.25 |
+| bm25 | −0.15 | −0.48 |
+
+**The circularity did NOT inflate the verdict.** Scoring the judge against models that aren't itself, it STILL leads at 0.82. Order unchanged: **Judge > Hybrid > Dims > Keyword > BM25.**
+
+**Irreducible remaining flaw (honest):** this is still **LLMs grading LLMs** — 3 independent labs, but zero humans. The judge wins because reading context is the right approach and 3 labs confirm it *looks* right; a human might still disagree. The only fix is real human labels (deferred to real-user feedback per product plan).
+
+---
+
 ## Standing limitation (honest, not a bug)
 Both test profiles are **AI/ML** → the fair pool is one uniform domain → low statistical power even with a perfect tool (overlapping CIs). To separate engines *confidently* needs **diverse profiles (different fields) + a larger graded pool**. The v2 harness is built to scale to that.
