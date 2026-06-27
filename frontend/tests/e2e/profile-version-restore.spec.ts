@@ -98,7 +98,8 @@ test.describe("Profile page", () => {
       timeout: 10_000,
     });
 
-    // Version history button exists
-    await expect(page.getByRole("button", { name: /version history/i })).toBeVisible();
+    // Version history button — the profile page labels it "History" (opens the
+    // VersionHistoryDrawer). Match /history/i, not the stale /version history/i.
+    await expect(page.getByRole("button", { name: /history/i })).toBeVisible();
   });
 });

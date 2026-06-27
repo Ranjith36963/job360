@@ -74,18 +74,25 @@ test.describe("Pipeline page", () => {
       },
     ]);
 
+    // The page fetches THREE endpoints (applications + counts + reminders) via
+    // Promise.all. Mock each with its correct shape — register the specific ones
+    // AFTER the general one so they win (Playwright: most-recently-added wins).
     await page.route("**/api/pipeline**", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(MOCK_APPLICATIONS),
-      })
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_APPLICATIONS) })
+    );
+    await page.route("**/api/pipeline/counts**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ applied: 1, outreach: 0, interview: 0, offer: 0, rejected: 0 }) })
+    );
+    await page.route("**/api/pipeline/reminders**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ reminders: [] }) })
     );
 
     await page.goto("/pipeline");
 
-    // The mocked job title should appear in the board
-    await expect(page.getByText("ML Engineer")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("TechCo")).toBeVisible();
+    // The mocked job title appears in the board. KanbanBoard renders BOTH a
+    // desktop and a mobile layout (one hidden via CSS), so the text resolves to
+    // 2 nodes — use .first() to avoid a strict-mode "2 elements" failure.
+    await expect(page.getByText("ML Engineer").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("TechCo").first()).toBeVisible();
   });
 });
