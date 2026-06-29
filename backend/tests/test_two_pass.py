@@ -273,6 +273,32 @@ class TestGithubDeterministicPass:
         assert deterministic_github_fields([]) == []
         assert deterministic_github_fields([{"name": "a", "description": "x", "topics": []}]) == []
 
+    def test_surfaces_repo_language(self):
+        """Diagnosis fix: the repo's primary language is a structural GitHub API
+        field (not a keyword list, rule #28) and MUST surface as a deterministic
+        skill — previously the brief dropped it, starving both passes."""
+        from src.services.profile.github_enricher import deterministic_github_fields
+
+        briefs = [
+            {"name": "a", "language": "Python", "description": "x", "topics": ["rag"]},
+            {"name": "b", "language": "TypeScript", "description": "y", "topics": []},
+        ]
+        out = deterministic_github_fields(briefs)
+        assert "Python" in out
+        assert "TypeScript" in out
+        assert "rag" in out  # topics still surface alongside language
+
+    def test_language_deduped_against_topics_and_case(self):
+        """A language already present as a topic isn't emitted twice."""
+        from src.services.profile.github_enricher import deterministic_github_fields
+
+        briefs = [
+            {"name": "a", "language": "Python", "description": "", "topics": ["python"]},
+            {"name": "b", "language": "Python", "description": "", "topics": []},
+        ]
+        out = deterministic_github_fields(briefs)
+        assert sum(1 for s in out if s.lower() == "python") == 1
+
 
 # ── LinkedIn deterministic pass (Pass 1) — structure-only, no LLM ───
 
@@ -301,6 +327,68 @@ class TestLinkedInDeterministicPass:
 
         out = deterministic_linkedin_fields("just some random text, not a profile")
         assert out["skills"] == []
+
+    def test_header_lines_do_not_leak_into_skills(self):
+        """Diagnosis fix: LinkedIn's 2-column PDF de-wrap bleeds the header
+        (name / headline / location) into the Top-Skills sidebar body. Those are
+        already captured structurally as header fields, so they MUST NOT appear as
+        skills. Structural filter (drop verbatim header lines), not a keyword
+        denylist — rule #28 safe."""
+        from src.services.profile.linkedin_parser import deterministic_linkedin_fields
+
+        text = (
+            "Jane Dev\n"
+            "Student at Hertfordshire University\n"
+            "Luton, England, United Kingdom\n"
+            "linkedin.com/in/janedev\n"
+            "Summary\nI build things.\n"
+            "Experience\nSenior Engineer at Acme\n"
+            "Top Skills\n"
+            "Kubernetes\n"
+            "Docker\n"
+            # --- de-wrap bleed: the header repeats inside the sidebar body ---
+            "Jane Dev\n"
+            "Student at Hertfordshire University\n"
+            "Luton, England, United Kingdom\n"
+        )
+        out = deterministic_linkedin_fields(text)
+        skills_lower = {s.lower() for s in out["skills"]}
+        assert "kubernetes" in skills_lower
+        assert "docker" in skills_lower
+        assert "jane dev" not in skills_lower
+        assert "student at hertfordshire university" not in skills_lower
+        assert "luton, england, united kingdom" not in skills_lower
+
+    def test_identity_block_bled_into_top_skills_is_dropped(self):
+        """REAL LinkedIn layout (the actual Pavan bug): the 'header' section is
+        EMPTY and the column de-wrap appends name/headline/location to the END of
+        the Top-Skills body. Detect the name via the person's OWN email + profile
+        URL (structural identity, never a skill vocabulary — rule #28 safe) and
+        drop that trailing identity block."""
+        from src.services.profile.linkedin_parser import deterministic_linkedin_fields
+
+        text = (
+            "Contact\n"
+            "pavanalakunta58@gmail.com\n"
+            "www.linkedin.com/in/pavan-\nalakunta (LinkedIn)\n"
+            "Top Skills\n"
+            "Pandas (Software)\n"
+            "AWS SageMaker\n"
+            "Applied Machine Learning\n"
+            "Pavan Alakunta\n"
+            "Student at University of Hertfordshire\n"
+            "Luton, England, United Kingdom\n"
+            "Experience\n"
+            "Mathematics Tutor\n"
+        )
+        out = deterministic_linkedin_fields(text)
+        sl = {s.lower() for s in out["skills"]}
+        assert "pandas (software)" in sl
+        assert "aws sagemaker" in sl
+        assert "applied machine learning" in sl
+        assert "pavan alakunta" not in sl
+        assert "student at university of hertfordshire" not in sl
+        assert "luton, england, united kingdom" not in sl
 
 
 # ── Skill tiering — new two-pass sources contribute evidence ────────

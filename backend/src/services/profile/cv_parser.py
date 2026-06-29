@@ -80,6 +80,17 @@ RULES:
 8. Skills are concrete and transferable. Do NOT turn a vague job DUTY into a skill — skip
    generic activities like "reporting", "teamwork", "collaboration", "documentation",
    "communication" UNLESS stated as a named competency, framework, or methodology.
+9. MINE THE PROSE — not just the skills section. A skill counts even when it appears ONLY
+   inside a project, an experience bullet, or an education detail and is never listed in the
+   skills section. When a sentence shows a technique, architecture, method, model, algorithm,
+   or concept being used, built, trained, or applied, extract that technique/method/concept
+   ITSELF as a skill (e.g. a bullet describing a system built with a convolutional network
+   demonstrates that architecture; a bullet saying transfer learning was applied demonstrates
+   that method; a bullet about a trained forecasting model demonstrates that modelling skill).
+   This applies to EVERY domain, not just software (e.g. a clinical audit, a litigation
+   strategy, a structural load calculation are skills demonstrated in prose). Do NOT limit
+   skills to the items already written in the skills section — the strongest signal often
+   hides in what the person actually DID.
 
 CV TEXT:
 ---
