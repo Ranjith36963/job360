@@ -14,17 +14,41 @@ const PROTECTED_PATHS = [
   "/admin",
 ];
 
-export function middleware(request: NextRequest) {
+// Backend origin used to VERIFY the session (same value the /api proxy forwards to).
+const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p));
 
   if (!isProtected) return NextResponse.next();
 
-  const session = request.cookies.get("job360_session");
-  if (!session?.value) {
+  // Send to /login, and DELETE the (stale) cookie so we don't loop back here.
+  const bounceToLogin = () => {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl, { status: 307 });
+    const res = NextResponse.redirect(loginUrl, { status: 307 });
+    res.cookies.delete("job360_session");
+    return res;
+  };
+
+  const session = request.cookies.get("job360_session");
+  if (!session?.value) return bounceToLogin();
+
+  // VERIFY the cookie is real, not just present: ask the backend who it belongs to.
+  // A stale/expired cookie -> 401 -> bounce to login (and clear it). This fixes the
+  // bug where a leftover cookie slipped past the gate, then the API 401'd on the page.
+  try {
+    const verify = await fetch(`${BACKEND_ORIGIN}/api/auth/me`, {
+      headers: { cookie: `job360_session=${session.value}` },
+      // never cache an auth check
+      cache: "no-store",
+    });
+    if (!verify.ok) return bounceToLogin();
+  } catch {
+    // Backend unreachable: fail OPEN (let the page load; its API calls surface the
+    // error) rather than locking everyone out if the backend is briefly down.
+    return NextResponse.next();
   }
 
   return NextResponse.next();
