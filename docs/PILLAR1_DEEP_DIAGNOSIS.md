@@ -200,3 +200,22 @@ prompt-steering (allowed) or plumbing more structural signal through the brief.
 *Evidence: `eval_multi.py`, `miss.py`, `dump_pavan.py`, `gh_li_live.py` (job scratch
 dir). All runs used OpenAI `gpt-4o-mini` temp 0. Reproduce from `backend/` with
 `PYTHONPATH=D:/dev/job360-tprun/backend`.*
+
+---
+
+## 7. Fixes landed (TDD, no hardcoded keyword lists)
+
+Three of the five "not solid" items fixed test-first (RED→GREEN→gate). +8 tests,
+full gate **1632 passed / 0 failed**. Zero hallucination preserved.
+
+| Flaw | Fix | Rule-#28 status | Result (measured) |
+|------|-----|-----------------|-------------------|
+| **#1 CV prose recall** | `cv_parser` RULE 9 — steer the LLM to mine techniques/methods/concepts from project & experience PROSE, not just the Skills section | prompt-steering (allowed) | pavan **69→78%**, crajappa **81→86%**, mean COMB recall **80→83%**, F1 **88→89%**, precision 98%, fp **0** |
+| **#2 GitHub signal-starved** | `repos_brief` now carries `language`; `deterministic_github_fields` surfaces it; LLM prompt shows `[language: …]` | structural API field, not a map | Ranjith DET **10→16** skills; Pavan DET **0→1** (was empty) |
+| **#3 LinkedIn header leak** | `deterministic_linkedin_fields` drops the de-wrapped identity block — name recognised via the user's own email/URL slug, then the trailing name/headline/location truncated | structural identity match, not a denylist | real Pavan DET went from `[…, 'Pavan Alakunta', 'Student at University of Hertfordshire', 'Luton, England, United Kingdom']` → `['Pandas (Software)', 'AWS SageMaker', 'Applied Machine Learning']` |
+
+**Still open (honest):** #4 LinkedIn DET layout fragility (thin exports → few
+deterministic skills; LLM carries the lane — acceptable), #5 thin-source floor
+(sparse GitHub/LinkedIn yields few skills — no cross-source backfill yet). Sofia
+CV recall (62%) is dominated by a marketing side-section + CTF prose; further
+prompt pushes risk overfitting these 5 profiles, so deferred pending a larger set.

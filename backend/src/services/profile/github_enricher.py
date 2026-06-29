@@ -311,11 +311,12 @@ async def fetch_github_profile(
         repos_brief = [
             {
                 "name": r["name"],
+                "language": r.get("language", "") or "",
                 "description": r.get("description", ""),
                 "topics": list(r.get("topics", []) or []),
             }
             for r in repositories
-            if r.get("description") or r.get("topics")
+            if r.get("description") or r.get("topics") or r.get("language")
         ][:MAX_REPOS]
 
         return {
@@ -376,6 +377,12 @@ def deterministic_github_fields(repos_brief: list[dict]) -> list[str]:
     for repo in repos_brief or []:
         if not isinstance(repo, dict):
             continue
+        # Primary language first — the strongest structural GitHub signal (an API
+        # field, not a keyword map: rule #28 safe). Then repo topics.
+        lang = repo.get("language")
+        if isinstance(lang, str) and lang.strip() and lang.strip().lower() not in seen:
+            out.append(lang.strip())
+            seen.add(lang.strip().lower())
         for topic in repo.get("topics", []) or []:
             if not isinstance(topic, str):
                 continue
@@ -431,11 +438,13 @@ async def llm_infer_github_skills(repos_brief: list[dict]) -> list[str]:
     lines: list[str] = []
     for r in repos_brief:
         name = (r.get("name") or "").strip()
+        lang = (r.get("language") or "").strip()
         desc = (r.get("description") or "").strip()
         topics = ", ".join(t for t in (r.get("topics") or []) if t)
-        if not (name or desc or topics):
+        if not (name or desc or topics or lang):
             continue
-        lines.append(f"- {name}: {desc} [topics: {topics}]")
+        lang_tag = f" [language: {lang}]" if lang else ""
+        lines.append(f"- {name}:{lang_tag} {desc} [topics: {topics}]")
     if not lines:
         return []
 

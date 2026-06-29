@@ -438,6 +438,50 @@ async def test_llm_infer_github_skills_parses_skills():
 
 
 @pytest.mark.asyncio
+async def test_llm_infer_github_skills_includes_language_in_prompt():
+    """Diagnosis fix: the repo's primary language must reach the LLM prompt so
+    the model can reason about the stack (a TypeScript repo ≠ a Python repo)."""
+    seen = {}
+
+    async def fake_llm(prompt, system=""):
+        seen["prompt"] = prompt
+        return {"skills": ["React"]}
+
+    repos_brief = [
+        {"name": "site", "language": "TypeScript", "description": "portfolio", "topics": []},
+    ]
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert "TypeScript" in seen["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_brief_carries_language():
+    """Diagnosis fix: the persisted repos_brief must keep each repo's language,
+    so the two-pass re-extraction (stored-only, no re-fetch) still sees it."""
+    repos = [
+        {"name": "site", "language": "TypeScript", "description": "my portfolio",
+         "stargazers_count": 0, "topics": [], "pushed_at": "2025-01-01T00:00:00Z", "fork": False},
+    ]
+
+    async def fake_get_json(session, url):
+        if url.endswith("/repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            return {"TypeScript": 5000}
+        return []
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks",
+                      new=AsyncMock(return_value=[])):
+        result = await github_enricher.fetch_github_profile("alice", session=_make_async_session())
+
+    brief = result["repos_brief"]
+    assert brief and brief[0].get("language") == "TypeScript"
+
+
+@pytest.mark.asyncio
 async def test_llm_infer_github_skills_empty_input_skips_llm():
     """No repos → return [] without ever calling the LLM (cost guard)."""
     called = False
