@@ -35,7 +35,8 @@ Start here to find the right doc fast.
 | Doc | What it is |
 |---|---|
 | [`STACK.md`](STACK.md) | Tech stack layer-by-layer: what we have vs what to add (Postgres, Docker, Stripe, etc.) + costs. |
-| [`STACK_checklist.md`](STACK_checklist.md) | Code-audited checklist: 23 built ✅ (with file proof) vs 18 to build ❌. |
+| [`STACK_checklist.md`](STACK_checklist.md) | Code-audited checklist: 27 built ✅ (with file proof) vs 21 to build ❌. |
+| [`UPGRADE_PLAN.md`](UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
 | [`pillars/`](pillars/README.md) | **Authoritative** per-pillar deep reference (code-verified). See below. |
