@@ -4,7 +4,7 @@
 >
 > **Companion to** `STACK.md` (the have-vs-add overview). This file is the *evidence*.
 
-**Score: 27 implemented ✅ · 21 to build ❌** (build/ops + business layers).
+**Score: 31 implemented ✅ · 17 to build ❌** (build/ops + business layers). *Phase 1 (Postgres + Docker + prod compose + backup + full CI gate) landed 2026-07-01 — verified: 1608 tests green on Postgres.*
 
 ---
 
@@ -21,7 +21,7 @@
 | ✅ | SQLite (async) | `backend/src/repositories/database.py` |
 | ✅ | 22 migrations (0000→0021) | `backend/migrations/0021_add_job_deadline.up.sql` |
 | ✅ | ChromaDB vector store | `backend/src/services/retrieval.py`, `vector_index.py` |
-| ❌ | **PostgreSQL** | *to build — replace SQLite for concurrent writes* |
+| ✅ | **PostgreSQL** (psycopg3) | `backend/src/repositories/pg.py` — SQLite→PG shim; **1608 tests green on Postgres**, app boots + register persists to `public.users` |
 | ❌ | pgvector (optional) | *to build — fold vectors into Postgres* |
 
 ## 🎨 Frontend
@@ -75,12 +75,12 @@
 | ✅ | docker-compose (dev) | `docker-compose.dev.yml` |
 | ✅ | CI (offline suite + e2e) | `.github/workflows/ci-offline.yml`, `live-e2e.yml` |
 | ✅ | `/health` route | `backend/src/api/routes/health.py` |
-| ❌ | **Dockerfile** | *to build — no container image* |
-| ❌ | **docker-compose (prod)** | *to build* |
-| ❌ | **Deploy config (Railway)** | *to build — local only* |
-| ❌ | `/livez` + `/readyz` split | *to build* |
-| ❌ | Env validation at boot | *to build — no fail-fast on missing secrets* |
-| ❌ | DB backup script | *to build* |
+| ✅ | **Dockerfile** | `backend/Dockerfile` + `frontend/Dockerfile` (non-root, healthcheck) |
+| ✅ | **docker-compose (prod)** | `docker-compose.prod.yml` — 5 services, healthchecks, `service_healthy` gates |
+| ❌ | **Deploy config (Railway)** | *Phase 2 — logged in, not yet deployed* |
+| ❌ | `/livez` + `/readyz` split | *Phase 2* |
+| ❌ | Env validation at boot | *Phase 2* |
+| ✅ | DB backup script | `backend/scripts/backup_db.py` (pg_dump + gzip + retention) |
 | ❌ | Domain | *to buy* |
 
 ## ⚖️ Legal / Product

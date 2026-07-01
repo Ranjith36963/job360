@@ -25,6 +25,8 @@
 **Exit:** full suite green on Postgres · `docker compose up` boots the whole app · CI green.
 **💰 Cost: $0** (all local/free).
 
+> ✅ **DONE 2026-07-01.** psycopg3 shim (`repositories/pg.py`), **1608 tests green on Postgres** (verified locally, 12m24s), app boots + register persists to `public.users`, backend+frontend Dockerfiles + `docker-compose.prod.yml` (5 services), full CI gate (`.github/workflows/ci.yml`), `arq` dep bug fixed, backup script. Branch `phase-1-postgres`.
+
 ## 🚀 Phase 2 — Go live (needs YOUR keys)
 **Build:** Railway deploy · Domain · `/livez`+`/readyz` · env-validation-at-boot · DB backup script · worker+Redis live.
 
