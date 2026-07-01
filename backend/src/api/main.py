@@ -13,12 +13,13 @@ from contextlib import asynccontextmanager
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
 from src.api.errors import register_exception_logging
-from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware
+from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
 from src.api.routes import (
     actions,
     auth,
@@ -37,8 +38,36 @@ from src.core.settings import LOG_LEVEL, validate_required_env
 from src.utils.logger import setup_audit_logger, setup_logging
 
 
+def _init_sentry() -> None:
+    """Initialise Sentry error tracking + performance monitoring.
+
+    Guards on ``SENTRY_DSN`` being non-empty so local dev and the test
+    suite are completely unaffected (no network calls, no patching).
+    ``traces_sample_rate`` is set to 0.1 in production (10 % of requests
+    are traced) and 1.0 elsewhere so every request is traced in staging/dev.
+    FastAPI / Starlette integration is automatic once ``sentry_sdk.init``
+    is called — no extra wiring required.
+    """
+    import src.core.settings as _settings  # read module attr so monkeypatch works in tests
+
+    dsn = _settings.SENTRY_DSN
+    if not dsn:
+        return
+    is_prod = (
+        os.environ.get("APP_ENV", "").lower() == "production"
+        or bool(os.environ.get("RAILWAY_ENVIRONMENT", ""))
+    )
+    sentry_sdk.init(
+        dsn=dsn,
+        send_default_pii=True,
+        traces_sample_rate=0.1 if is_prod else 1.0,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Phase 3 — Sentry must be up before anything else so boot errors are captured.
+    _init_sentry()
     # Tier-A Step-0 #9 — honour LOG_LEVEL env var at process boot.
     # setup_logging() configures the "job360" subtree; we also set the root
     # logger so libraries (uvicorn, fastapi, httpx) inherit the same level
@@ -69,6 +98,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-Id"],
 )
+# SecurityHeadersMiddleware is added FIRST (innermost in LIFO) so it stamps
+# security headers on the final response — after routing and all other
+# middleware have finished. This guarantees headers appear on every response
+# including CORS pre-flight and error responses.
+app.add_middleware(SecurityHeadersMiddleware)
 # AccessLogMiddleware logs one line per request. Added BEFORE RequestIdMiddleware
 # so RequestId stays OUTERMOST (LIFO) — that way request_id is already set when
 # the access line is emitted.

@@ -248,6 +248,10 @@ SOURCE_FETCH_TIMEOUT_ATS = int(os.getenv("SOURCE_FETCH_TIMEOUT_ATS", "240"))
 SESSION_SECRET = os.getenv("SESSION_SECRET", "")
 CHANNEL_ENCRYPTION_KEY = os.getenv("CHANNEL_ENCRYPTION_KEY", "")
 
+# Sentry error tracking (Phase 3). Empty string → Sentry is disabled (no-op
+# at init time). Populate in production via the SENTRY_DSN env var.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+
 # --- Production env validation --------------------------------------------
 # These vars must be non-empty when running in production.
 _REQUIRED_PROD_VARS = ["SESSION_SECRET", "CHANNEL_ENCRYPTION_KEY", "DATABASE_URL"]

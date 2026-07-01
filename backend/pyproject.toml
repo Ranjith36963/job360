@@ -35,6 +35,7 @@ dependencies = [
     "rapidfuzz>=3.0",
     "scikit-learn>=1.4",
     "arq>=0.25",                    # async task queue (worker process); was used but undeclared
+    "sentry-sdk>=1.40.0",           # error tracking + performance monitoring (Phase 3)
 ]
 
 [project.optional-dependencies]
@@ -113,14 +114,15 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "S", "B", "G"]
-# UP007 (Optional → X | None) requires py3.10+ at runtime; project supports
-# py3.9 so keep the explicit Optional[] form in source.
+# UP007/UP045 (Optional → X | None) and UP035 (collections.abc imports) require
+# py3.10+ syntax; project supports py3.9 so keep the explicit Optional[] and
+# typing.* forms in source. UP045 is the newer equivalent of UP007 — same intent.
 # B008: FastAPI's `Depends()` in argument defaults is the canonical DI
 #       pattern — every route function uses it. Suppressing globally so we
 #       don't litter every signature with `# noqa: B008`.
 # B904: FastAPI uses HTTPException as a response (not an error); raising it
 #       inside `except` clauses without `from err` is intentional.
-ignore = ["S101", "UP007", "B008", "B904"]
+ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 
 [tool.ruff.lint.per-file-ignores]
 # Dev CLI helpers: subprocess + SQL-string concat are expected; input comes

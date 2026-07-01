@@ -1,6 +1,7 @@
 """HTTP middleware for Job360 FastAPI app."""
 from __future__ import annotations
 
+import os
 import time
 import uuid
 
@@ -11,6 +12,30 @@ from starlette.responses import Response
 from src.utils.logger import _request_id_var, get_logger, get_request_id, set_request_id
 
 _access_log = get_logger("access")  # "job360.access" → main job360 handlers (jsonl + log file)
+
+# Content-Security-Policy for a JSON API that also serves FastAPI's Swagger UI.
+# cdn.jsdelivr.net hosts swagger-ui-bundle.js + swagger-ui.css.
+# 'unsafe-inline' is required for Swagger UI's inline event handlers / styles;
+# the API endpoints themselves return JSON so the script/style directives are
+# only reachable via the /docs page.
+_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
+    "style-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
+# HSTS: 1 year, include subdomains. Only sent in production (needs HTTPS).
+_HSTS = "max-age=31536000; includeSubDomains"
+
+
+def _is_production() -> bool:
+    return (
+        os.environ.get("APP_ENV", "").lower() == "production"
+        or bool(os.environ.get("RAILWAY_ENVIRONMENT", ""))
+    )
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -79,3 +104,30 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                     "client": request.client.host if request.client else None,
                 },
             )
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to every HTTP response (Phase 3 observability).
+
+    Headers set on every response:
+      * ``X-Content-Type-Options: nosniff`` — prevent MIME sniffing.
+      * ``X-Frame-Options: DENY`` — block framing (legacy browsers).
+      * ``Referrer-Policy: strict-origin-when-cross-origin`` — limit referer leakage.
+      * ``Content-Security-Policy`` — lock down resource loading; allow what
+        Swagger UI needs (cdn.jsdelivr.net + unsafe-inline) while keeping the
+        default to 'none' for non-UI endpoints.
+
+    HSTS is only emitted in production (``APP_ENV=production`` or
+    ``RAILWAY_ENVIRONMENT`` set), because HSTS pins HTTPS in the browser and
+    would break plain-HTTP local development.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = _CSP
+        if _is_production():
+            response.headers["Strict-Transport-Security"] = _HSTS
+        return response

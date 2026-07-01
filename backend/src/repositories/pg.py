@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import re
 import sys
@@ -48,6 +49,8 @@ from typing import Any, Iterable, Optional, Sequence
 
 import psycopg
 from psycopg.rows import RowMaker
+
+_log = logging.getLogger("job360.db")
 
 # psycopg async cannot run on Windows' default ProactorEventLoop (libpq socket
 # readiness is never signalled -> connect hangs). Set the selector policy at
@@ -313,8 +316,20 @@ def _is_dsn(path: Optional[str]) -> bool:
 
 
 async def _open_raw(schema: str) -> psycopg.AsyncConnection:
-    conn = await psycopg.AsyncConnection.connect(
-        DEFAULT_DSN, autocommit=True, row_factory=_row_factory
+    try:
+        conn = await psycopg.AsyncConnection.connect(
+            DEFAULT_DSN, autocommit=True, row_factory=_row_factory
+        )
+    except psycopg.Error as exc:
+        _log.error(
+            "db_connect_failed",
+            extra={"event": "db_connect_failed", "schema": schema, "error": str(exc)},
+            exc_info=True,
+        )
+        raise
+    _log.debug(
+        "db_connect_ok",
+        extra={"event": "db_connect_ok", "schema": schema},
     )
     if schema != "public":
         async with conn.cursor() as cur:

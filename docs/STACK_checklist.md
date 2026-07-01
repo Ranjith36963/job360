@@ -4,7 +4,7 @@
 >
 > **Companion to** `STACK.md` (the have-vs-add overview). This file is the *evidence*.
 
-**Score: 31 implemented ✅ · 17 to build ❌** (build/ops + business layers). *Phase 1 (Postgres + Docker + prod compose + backup + full CI gate) landed 2026-07-01 — verified: 1608 tests green on Postgres.*
+**Score: 36 implemented ✅ · 12 to build ❌** (build/ops + business layers). *Phases 1–3 landed 2026-07-01 — Postgres (1608 green) + Docker + CI + health probes + env validation + Sentry + PostHog + security headers + logging. **1625 tests green on Postgres.** Only the live Railway deploy remains (blocked on expired trial — see `docs/DEPLOY.md`). Business layer (Stripe/paywall/email) is Phase 4+.*
 
 ---
 
@@ -65,9 +65,9 @@
 | ✓ | Item | Proof / To build |
 |---|---|---|
 | ✅ | Logger + correlation IDs + `audit.log` | `backend/src/utils/logger.py` |
-| ⚠️ | Full log coverage | *dark zones: workers, DB, auth, notifications = 0 logs* |
-| ❌ | **Sentry** (error tracking) | *to build — no code* |
-| ❌ | **PostHog** (product analytics) | *to build — no code* |
+| ✅ | Full log coverage | dark zones filled: `pg.py` (DB conn errors), `workers/tasks.py`, auth login/failure |
+| ✅ | **Sentry** (error tracking) | backend `sentry-sdk` (`api/main.py` `_init_sentry`, DSN-guarded) + frontend `@sentry/nextjs` |
+| ✅ | **PostHog** (product analytics) | frontend `posthog-js` (`PostHogProviderWrapper`, pageview + identify) |
 
 ## 🚀 Infra / Deploy
 | ✓ | Item | Proof / To build |
@@ -77,9 +77,9 @@
 | ✅ | `/health` route | `backend/src/api/routes/health.py` |
 | ✅ | **Dockerfile** | `backend/Dockerfile` + `frontend/Dockerfile` (non-root, healthcheck) |
 | ✅ | **docker-compose (prod)** | `docker-compose.prod.yml` — 5 services, healthchecks, `service_healthy` gates |
-| ❌ | **Deploy config (Railway)** | *Phase 2 — logged in, not yet deployed* |
-| ❌ | `/livez` + `/readyz` split | *Phase 2* |
-| ❌ | Env validation at boot | *Phase 2* |
+| ⏸ | **Deploy config (Railway)** | *ready (`docs/DEPLOY.md`) — BLOCKED on user: Railway trial expired, needs a plan* |
+| ✅ | `/livez` + `/readyz` split | `backend/src/api/routes/health.py` (readyz checks Postgres + Redis) |
+| ✅ | Env validation at boot | `settings.validate_required_env()` — fail-fast in production |
 | ✅ | DB backup script | `backend/scripts/backup_db.py` (pg_dump + gzip + retention) |
 | ❌ | Domain | *to buy* |
 
@@ -100,7 +100,7 @@
 | ✅ | Redis broker (for ARQ) | `backend/src/workers/settings.py` (`REDIS_URL`) |
 | ✅ | Feature flags (env toggles) | `backend/src/core/settings.py` (`SEMANTIC_/ENRICHMENT_/MATCHER_ENABLED`) |
 | ✅ | CORS | `backend/src/api/main.py` (CORSMiddleware) |
-| ❌ | **Security headers** (CSP/HSTS/X-Frame) | *to build — no code* |
+| ✅ | **Security headers** (CSP/HSTS/X-Frame) | `backend/src/api/middleware.py` `SecurityHeadersMiddleware` (HSTS prod-only) |
 | ❌ | **API-wide rate limiting** | *to build — auth-only today* |
 | ⚠️ | File storage for CV uploads | *CVs go to a temp file (`save_upload_to_temp` in `api/dependencies.py`), parsed, then discarded — not persisted; add S3/R2 only if keeping raw files* |
 
