@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-import aiosqlite
+from src.repositories import pg as aiosqlite
 
 
 @dataclass(frozen=True)
@@ -187,7 +187,7 @@ class FeedService:
             ON CONFLICT(user_id, job_id)
             DO UPDATE SET
                 score = CASE
-                    WHEN user_feed.profile_version IS excluded.profile_version THEN user_feed.score
+                    WHEN user_feed.profile_version IS NOT DISTINCT FROM excluded.profile_version THEN user_feed.score
                     ELSE excluded.score
                 END,
                 bucket = excluded.bucket,

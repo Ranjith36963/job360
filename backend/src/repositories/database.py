@@ -1,9 +1,8 @@
 import json
-import os
 import re
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
+from src.repositories import pg as aiosqlite
 
 _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
@@ -20,18 +19,11 @@ class JobDatabase:
         self._conn: aiosqlite.Connection | None = None
 
     async def init_db(self):
-        # Ensure parent directory exists for fresh clones where data/ isn't yet created.
-        parent = os.path.dirname(os.path.abspath(self._path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
+        # Postgres connection (schema selected from self._path in test mode;
+        # always ``public`` in production). No PRAGMAs / WAL / busy_timeout —
+        # Postgres handles concurrency natively (no "database is locked").
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
-        await self._conn.execute("PRAGMA journal_mode=WAL")
-        # 30s (was 5s): under concurrent writes (search pipeline + per-user
-        # re-score + LLM judge) the 5s wait expired and raised 'database is
-        # locked', which callers then dropped. Longer wait + with_write_retry
-        # (Finding #11) stops rows being lost. See src/repositories/db_retry.py.
-        await self._conn.execute("PRAGMA busy_timeout=30000")
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

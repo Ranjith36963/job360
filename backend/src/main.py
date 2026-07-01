@@ -811,7 +811,8 @@ async def run_search(
                                 metadata={"title": j.title, "company": j.company},
                             )
                             await db._conn.execute(
-                                "INSERT OR REPLACE INTO job_embeddings(job_id, model_version) VALUES (?, ?)",
+                                "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, ?) "
+                                "ON CONFLICT(job_id) DO UPDATE SET model_version = EXCLUDED.model_version",
                                 (job_id, MODEL_NAME),
                             )
                         except Exception as e:

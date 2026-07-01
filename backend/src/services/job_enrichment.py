@@ -21,9 +21,8 @@ import os
 from collections.abc import Awaitable
 from typing import Callable, Optional
 
-import aiosqlite
-
 from src.models import Job
+from src.repositories import pg as aiosqlite
 from src.services.job_enrichment_schema import JobEnrichment
 from src.services.profile.llm_provider import llm_extract_validated
 
@@ -240,13 +239,33 @@ async def save_enrichment(
     """
     await conn.execute(
         """
-        INSERT OR REPLACE INTO job_enrichment (
+        INSERT INTO job_enrichment (
             job_id, title_canonical, category, employment_type, workplace_type,
             locations, salary, required_skills, preferred_skills,
             experience_min_years, experience_level, requirements_summary,
             language, employer_type, visa_sponsorship, seniority,
             remote_region, apply_instructions, red_flags, enriched_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(job_id) DO UPDATE SET
+            title_canonical = EXCLUDED.title_canonical,
+            category = EXCLUDED.category,
+            employment_type = EXCLUDED.employment_type,
+            workplace_type = EXCLUDED.workplace_type,
+            locations = EXCLUDED.locations,
+            salary = EXCLUDED.salary,
+            required_skills = EXCLUDED.required_skills,
+            preferred_skills = EXCLUDED.preferred_skills,
+            experience_min_years = EXCLUDED.experience_min_years,
+            experience_level = EXCLUDED.experience_level,
+            requirements_summary = EXCLUDED.requirements_summary,
+            language = EXCLUDED.language,
+            employer_type = EXCLUDED.employer_type,
+            visa_sponsorship = EXCLUDED.visa_sponsorship,
+            seniority = EXCLUDED.seniority,
+            remote_region = EXCLUDED.remote_region,
+            apply_instructions = EXCLUDED.apply_instructions,
+            red_flags = EXCLUDED.red_flags,
+            enriched_at = EXCLUDED.enriched_at
         """,
         (
             job_id,

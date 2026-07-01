@@ -31,8 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any, Optional
 
-import aiosqlite
-
+from src.repositories import pg as aiosqlite
 from src.services.channels.crypto import decrypt
 from src.utils.logger import get_logger
 

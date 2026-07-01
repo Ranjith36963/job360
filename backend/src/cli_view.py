@@ -2,15 +2,16 @@
 
 import argparse
 import logging
-import sqlite3
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+
+from src.repositories import pgsync as sqlite3
 
 logger = logging.getLogger("job360.cli_view")
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
 from src.core.settings import DB_PATH, MIN_MATCH_SCORE
 from src.utils.time_buckets import (
     BUCKETS,
@@ -26,8 +27,6 @@ console = Console()
 def _load_jobs_sync(db_path: str | None = None, days: int = 7, min_score: int = 30) -> list[dict]:
     """Load recent jobs from SQLite synchronously."""
     path = db_path or str(DB_PATH)
-    if not Path(path).exists():
-        return []
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:

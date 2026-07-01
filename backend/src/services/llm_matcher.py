@@ -24,10 +24,10 @@ import os
 from collections.abc import Awaitable
 from typing import Callable
 
-import aiosqlite
 from pydantic import BaseModel, Field
 
 from src.models import Job
+from src.repositories import pg as aiosqlite
 from src.repositories.db_retry import with_write_retry
 from src.services.profile.llm_provider import llm_extract_validated
 

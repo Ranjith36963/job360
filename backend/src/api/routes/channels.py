@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, urlencode
 
-import aiosqlite
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
@@ -22,6 +21,7 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import CurrentUser, require_user
 from src.core import settings as _settings
 from src.core.settings import DB_PATH
+from src.repositories import pg as aiosqlite
 from src.repositories.db_retry import open_db
 from src.services.channels import crypto, dispatcher
 from src.utils.logger import get_audit_logger

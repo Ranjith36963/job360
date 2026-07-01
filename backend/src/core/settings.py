@@ -11,7 +11,25 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
+# DB_PATH is retained as the single "connection selector" the codebase passes
+# around. Post-Postgres migration it no longer points at a real file — it is a
+# schema selector (production always resolves to the ``public`` schema). Kept as
+# a Path so every ``from src.core.settings import DB_PATH`` importer and every
+# conftest ``monkeypatch.setattr(mod, "DB_PATH", ...)`` keeps working unchanged.
 DB_PATH = DATA_DIR / "jobs.db"
+
+# PostgreSQL connection string (psycopg3). Single source of truth for the DB
+# connection. Defaults to the local dev Postgres (docker-compose.dev.yml, host
+# port 5433). Override via the DATABASE_URL env var in prod.
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://job360:job360dev@localhost:5433/job360"
+)
+
+# Point the psycopg helper at the configured DSN (import kept local to avoid a
+# heavy import at settings load; pg only depends on psycopg).
+from src.repositories import pg as _pg  # noqa: E402
+
+_pg.configure(DATABASE_URL)
 EXPORTS_DIR = DATA_DIR / "exports"
 REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"

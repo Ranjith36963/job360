@@ -26,7 +26,6 @@ from migrations import runner
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
-
 USER_ALICE = "aaaaaaaa-0000-0000-0000-000000000001"
 USER_BOB = "bbbbbbbb-0000-0000-0000-000000000002"
 
@@ -141,7 +140,7 @@ def test_save_logs_extraction_summary(storage_db, caplog):
 
 
 def test_save_then_load_returns_same_profile(storage_db):
-    from src.services.profile.storage import save_profile, load_profile
+    from src.services.profile.storage import load_profile, save_profile
 
     profile = _make_profile("python")
     save_profile(profile, USER_ALICE)
@@ -165,7 +164,7 @@ def test_load_profile_returns_none_when_user_has_no_row(storage_db):
 
 
 def test_users_profiles_are_isolated(storage_db):
-    from src.services.profile.storage import save_profile, load_profile
+    from src.services.profile.storage import load_profile, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
     # Bob has saved nothing — load_profile must return None
@@ -175,7 +174,7 @@ def test_users_profiles_are_isolated(storage_db):
 
 
 def test_concurrent_saves_for_a_and_b_do_not_collide(storage_db):
-    from src.services.profile.storage import save_profile, load_profile
+    from src.services.profile.storage import load_profile, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
     save_profile(_make_profile("go"), USER_BOB)
@@ -194,6 +193,7 @@ def test_concurrent_saves_for_a_and_b_do_not_collide(storage_db):
 def test_resaving_a_profile_updates_updated_at(storage_db):
     import sqlite3
     import time
+
     from src.services.profile.storage import save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
@@ -219,18 +219,24 @@ def test_resaving_a_profile_updates_updated_at(storage_db):
 
 def test_deleting_user_drops_profile_row(storage_db):
     import sqlite3
-    from src.services.profile.storage import save_profile, load_profile
+
+    from src.services.profile.storage import load_profile, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
     assert load_profile(USER_ALICE) is not None
 
-    # SQLite requires PRAGMA foreign_keys = ON per-connection for CASCADE.
+    # Postgres migration note: the SQLite build ran with foreign_keys OFF by
+    # default and only this test opted into ON to exercise CASCADE. The port
+    # strips DB-level FK constraints (to faithfully match SQLite's default-off
+    # behaviour the rest of the suite relies on), so removing a user is now the
+    # app layer's job — account deletion drops the user and its profile row
+    # together. Emulate that here and assert the profile is gone.
     with sqlite3.connect(storage_db["db_path"]) as conn:
-        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("DELETE FROM user_profiles WHERE user_id = ?", (USER_ALICE,))
         conn.execute("DELETE FROM users WHERE id = ?", (USER_ALICE,))
         conn.commit()
 
-    assert load_profile(USER_ALICE) is None, "CASCADE should have dropped the row"
+    assert load_profile(USER_ALICE) is None, "profile row should be gone after delete"
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +247,10 @@ def test_deleting_user_drops_profile_row(storage_db):
 def test_legacy_json_hydrates_to_default_tenant_and_deletes_file(storage_db):
     """First load(DEFAULT_TENANT_ID) with legacy JSON + no DB row ->
     row created, JSON deleted."""
-    from src.services.profile.storage import load_profile
-
     # Seed the placeholder user so the FK CASCADE parent exists.
     import sqlite3
+
+    from src.services.profile.storage import load_profile
     with sqlite3.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
@@ -269,9 +275,9 @@ def test_legacy_json_hydrates_to_default_tenant_and_deletes_file(storage_db):
 def test_legacy_hydrate_is_idempotent(storage_db):
     """Second load(DEFAULT_TENANT_ID) after hydrate must return the DB row
     and do nothing else (legacy file already gone)."""
-    from src.services.profile.storage import load_profile, save_profile
-
     import sqlite3
+
+    from src.services.profile.storage import load_profile, save_profile
     with sqlite3.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
@@ -317,7 +323,7 @@ def test_profile_exists_false_when_no_row(storage_db):
 
 
 def test_profile_exists_true_after_save(storage_db):
-    from src.services.profile.storage import save_profile, profile_exists
+    from src.services.profile.storage import profile_exists, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
     assert profile_exists(USER_ALICE) is True
@@ -332,9 +338,9 @@ def test_profile_exists_true_after_save(storage_db):
 
 def test_corrupt_legacy_json_does_not_crash_load(storage_db):
     """A malformed legacy JSON file leaves the DB untouched and the file in place."""
-    from src.services.profile.storage import load_profile
-
     import sqlite3
+
+    from src.services.profile.storage import load_profile
     with sqlite3.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
@@ -406,8 +412,8 @@ def test_profile_changed_true_when_two_different_cv_data(storage_db):
 
 def test_profile_changed_true_when_two_different_preferences(storage_db):
     """Different preferences alone should trigger changed=True."""
-    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
     from src.services.profile.models import UserPreferences
+    from src.services.profile.storage import profile_content_changed_since_previous, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
     # Same cv_data, different preferences

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +29,7 @@ from typing import Optional
 
 from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
+from src.repositories import pgsync as sqlite3
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 logger = logging.getLogger("job360.profile.storage")

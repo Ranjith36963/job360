@@ -106,10 +106,17 @@ async def _insert_notification_rule(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            "INSERT OR REPLACE INTO notification_rules"
+            "INSERT INTO notification_rules"
             "(user_id, score_threshold, notify_mode, enabled, "
             " quiet_hours_start, quiet_hours_end, created_at, updated_at)"
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            " score_threshold = EXCLUDED.score_threshold, "
+            " notify_mode = EXCLUDED.notify_mode, "
+            " enabled = EXCLUDED.enabled, "
+            " quiet_hours_start = EXCLUDED.quiet_hours_start, "
+            " quiet_hours_end = EXCLUDED.quiet_hours_end, "
+            " updated_at = EXCLUDED.updated_at",
             (user_id, score_threshold, notify_mode, enabled,
              quiet_hours_start, quiet_hours_end, now, now),
         )

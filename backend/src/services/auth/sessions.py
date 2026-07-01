@@ -16,9 +16,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import aiosqlite
 from itsdangerous import BadSignature, TimestampSigner
 
+from src.repositories import pg as aiosqlite
 from src.repositories.db_retry import open_db
 from src.utils.logger import get_audit_logger
 

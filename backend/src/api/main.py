@@ -1,8 +1,17 @@
 """FastAPI application for Job360 backend."""
 
+import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+
+# psycopg async requires the selector event loop on Windows (the default
+# ProactorEventLoop never signals socket readiness for libpq -> the DB lifespan
+# would hang on boot). Set it here so every entry point that imports the app
+# (``uvicorn main:app``, ``python main.py``, ``python -m src.cli api``) is safe.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

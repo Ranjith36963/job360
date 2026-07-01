@@ -8,7 +8,6 @@ import os
 import uuid
 from typing import Optional
 
-import aiosqlite
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
@@ -20,6 +19,7 @@ from src.api.auth_deps import (
 )
 from src.api.dependencies import get_db
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
+from src.repositories import pg as aiosqlite
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
 from src.services.auth import email_verification as auth_email_verification
