@@ -15,17 +15,39 @@ os.environ.setdefault("ENRICHMENT_ENABLED", "false")
 os.environ.setdefault("MATCHER_ENABLED", "false")
 
 import asyncio
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+import contextlib
+import sys
 
-import pytest
-from cryptography.fernet import Fernet
-from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
+# --- Windows selector event loop (psycopg async requires it) ---------------
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from migrations import runner
-from src.models import Job
-from src.services.channels import crypto
+# --- Postgres migration shims ----------------------------------------------
+# The backend moved from aiosqlite/SQLite to psycopg3/Postgres. Production code
+# imports the async helper directly (``from src.repositories import pg``), but
+# the ~40 test files still do ``import aiosqlite`` / ``import sqlite3`` and pass
+# file paths around. We register the shims under those module names so those
+# imports transparently hit Postgres, and enable schema-per-path isolation so
+# each distinct ``db_path`` (tmp file or ``:memory:``) gets its own fresh schema
+# — the same "fresh DB per test" the old tmp ``.db`` files gave.
+from src.repositories import pg as _pg  # noqa: E402
+from src.repositories import pgsync as _pgsync  # noqa: E402
+
+_pg.TEST_MODE = True
+sys.modules["aiosqlite"] = _pg
+sys.modules["sqlite3"] = _pgsync
+
+from contextlib import asynccontextmanager  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+
+import pytest  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
+from migrations import runner  # noqa: E402
+from src.models import Job  # noqa: E402
+from src.services.channels import crypto  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -121,8 +143,6 @@ def authenticated_async_context(monkeypatch, tmp_path):
     crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "z" * 40)
 
-    from src.api.main import app
-
     # Redirect DB_PATH on EVERY module that captured it at import time. A
     # ``from src.core.settings import DB_PATH`` binds the *value*, so patching
     # ``settings`` alone leaves importers (e.g. ``services/profile/storage.py``)
@@ -132,6 +152,8 @@ def authenticated_async_context(monkeypatch, tmp_path):
     # bound to first). Done AFTER the app import so all route/service modules
     # are loaded and patchable.
     import sys as _sys
+
+    from src.api.main import app
 
     for _mod in list(_sys.modules.values()):
         _name = getattr(_mod, "__name__", "")
@@ -198,6 +220,10 @@ def authenticated_async_context(monkeypatch, tmp_path):
             asyncio.run(dependencies.close_db())
         except Exception:
             dependencies._db = None
+
+    # Drop this test's Postgres schema so schemas don't accumulate.
+    with contextlib.suppress(Exception):
+        asyncio.run(_pg.drop_schema(str(db_path)))
 
 
 @pytest.fixture
@@ -315,3 +341,28 @@ def sample_empty_description_job():
         source="greenhouse",
         date_found=_TEST_NOW_ISO,
     )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop every per-test Postgres schema created during the run.
+
+    Test-local fixtures that build their own tmp DB don't always drop their
+    schema; sweep them all at session end so the shared Postgres stays clean.
+    """
+    import psycopg
+
+    try:
+        conn = psycopg.connect(_pg.DEFAULT_DSN, autocommit=True)
+    except psycopg.Error:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT schema_name FROM information_schema.schemata "
+                "WHERE schema_name LIKE 't\\_%' OR schema_name LIKE 'mem\\_%'"
+            )
+            schemas = [r[0] for r in cur.fetchall()]
+            for s in schemas:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{s}" CASCADE')
+    finally:
+        conn.close()

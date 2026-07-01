@@ -6,9 +6,8 @@ import os
 import tempfile
 from pathlib import Path
 
-import aiosqlite
-
 from src.core.settings import METRICS_DIR
+from src.repositories import pg as aiosqlite
 
 _DEFAULT_METRICS_DIR = METRICS_DIR
 

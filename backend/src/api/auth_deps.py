@@ -14,10 +14,10 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-import aiosqlite
 from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from src.core.settings import DB_PATH
+from src.repositories import pg as aiosqlite
 from src.services.auth import sessions as auth_sessions
 
 SESSION_COOKIE_NAME = "job360_session"

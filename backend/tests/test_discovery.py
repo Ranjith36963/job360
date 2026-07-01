@@ -58,11 +58,14 @@ async def test_get_duplicate_jobs_returns_same_key_matches():
     # different integer id (bypasses UNIQUE on the ORM level)
     await db._conn.execute(
         """
-        INSERT OR REPLACE INTO jobs
+        INSERT INTO jobs
           (id, title, company, location, description, apply_url, source,
            date_found, match_score, normalized_company, normalized_title,
            first_seen, first_seen_at, last_seen_at)
         VALUES (999, ?, ?, '', '', ?, ?, ?, 40, ?, ?, ?, ?, ?)
+        ON CONFLICT (normalized_company, normalized_title) DO UPDATE SET
+           id = EXCLUDED.id, title = EXCLUDED.title, company = EXCLUDED.company,
+           apply_url = EXCLUDED.apply_url, source = EXCLUDED.source
         """,
         (
             "ML Engineer",

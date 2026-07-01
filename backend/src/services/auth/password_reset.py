@@ -24,8 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote as urlquote
 
-import aiosqlite
-
+from src.repositories import pg as aiosqlite
 from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email

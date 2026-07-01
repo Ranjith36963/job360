@@ -10,21 +10,25 @@ from src.repositories.db_retry import open_db
 
 
 @pytest.mark.asyncio
-async def test_open_db_sets_busy_timeout(tmp_path):
+async def test_open_db_accepts_busy_timeout_param(tmp_path):
+    # Post-Postgres: busy_timeout is a SQLite concept and no longer exists
+    # (Postgres serialises writers natively — no "database is locked"). The
+    # busy_timeout_ms kwarg is still accepted for signature compatibility and
+    # yields a usable connection.
     p = str(tmp_path / "t.db")
     async with open_db(p, busy_timeout_ms=12345) as db:
-        cur = await db.execute("PRAGMA busy_timeout")
+        cur = await db.execute("SELECT 1")
         row = await cur.fetchone()
-    assert row[0] == 12345
+    assert row[0] == 1
 
 
 @pytest.mark.asyncio
-async def test_open_db_default_timeout_is_30s(tmp_path):
+async def test_open_db_default_is_usable(tmp_path):
     p = str(tmp_path / "t.db")
     async with open_db(p) as db:
-        cur = await db.execute("PRAGMA busy_timeout")
+        cur = await db.execute("SELECT 1")
         row = await cur.fetchone()
-    assert row[0] == 30000
+    assert row[0] == 1
 
 
 @pytest.mark.asyncio

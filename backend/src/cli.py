@@ -4,7 +4,7 @@ import asyncio
 
 import click
 
-from src.main import run_search, SOURCE_REGISTRY
+from src.main import SOURCE_REGISTRY, run_search
 
 
 @click.group()
@@ -47,17 +47,17 @@ def run(source, dry_run, log_level, db_path, no_email):
 @cli.command()
 def status():
     """Show the last run stats from the database."""
-    import sqlite3
     from src.core.settings import DB_PATH
-
-    if not DB_PATH.exists():
-        click.echo("No database found. Run 'job360 run' first.")
-        return
+    from src.repositories import pgsync as sqlite3
 
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
+        try:
+            row = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
+        except sqlite3.Error:
+            click.echo("No database found. Run 'job360 run' first.")
+            return
         if not row:
             click.echo("No runs recorded yet.")
             return
@@ -119,8 +119,8 @@ def setup_profile(cv_path, linkedin_path, github_username):
     leaves this contract in place (Deliverable E).
     """
     from src.core.tenancy import DEFAULT_TENANT_ID
-    from src.services.profile.models import CVData, UserPreferences, UserProfile
     from src.services.profile.cv_parser import parse_cv
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
     from src.services.profile.preferences import merge_cv_and_preferences
     from src.services.profile.storage import save_profile
 
@@ -148,7 +148,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
 
     # Parse LinkedIn PDF if provided
     if linkedin_path:
-        from src.services.profile.linkedin_parser import parse_linkedin_pdf, enrich_cv_from_linkedin
+        from src.services.profile.linkedin_parser import enrich_cv_from_linkedin, parse_linkedin_pdf
         click.echo(f"\nParsing LinkedIn PDF: {linkedin_path}")
         linkedin_data = parse_linkedin_pdf(linkedin_path)
         cv_data = enrich_cv_from_linkedin(cv_data, linkedin_data)
@@ -161,7 +161,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
 
     # Fetch GitHub data if username provided
     if github_username:
-        from src.services.profile.github_enricher import fetch_github_profile, enrich_cv_from_github
+        from src.services.profile.github_enricher import enrich_cv_from_github, fetch_github_profile
         click.echo(f"\nFetching GitHub repos for: {github_username}")
         github_data = asyncio.run(fetch_github_profile(github_username))
         cv_data = enrich_cv_from_github(cv_data, github_data)

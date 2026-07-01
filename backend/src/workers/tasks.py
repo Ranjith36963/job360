@@ -16,10 +16,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-import aiosqlite
-
 from src.core.settings import ENRICHMENT_THRESHOLD
 from src.models import Job
+from src.repositories import pg as aiosqlite
 from src.services.feed import FeedService
 from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter

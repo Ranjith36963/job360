@@ -42,7 +42,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import aiosqlite
+import psycopg
+
+from src.repositories import pg as aiosqlite
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
 
@@ -134,11 +136,14 @@ async def _apply_up_sql(db: aiosqlite.Connection, sql: str) -> None:
     for stmt in _split_sql_statements(sql):
         try:
             await db.execute(stmt)
-        except Exception as exc:  # aiosqlite wraps sqlite3.OperationalError
+        except Exception as exc:
             msg = str(exc).lower()
             is_add_column = "alter table" in stmt.lower() and "add column" in stmt.lower()
-            if is_add_column and "duplicate column name" in msg:
-                # _migrate() already added this column; no-op.
+            # ADD COLUMN is translated to ADD COLUMN IF NOT EXISTS, so a
+            # duplicate no longer errors; the guard stays as belt-and-braces
+            # for both the SQLite ("duplicate column name") and Postgres
+            # ("already exists") wordings.
+            if is_add_column and ("duplicate column name" in msg or "already exists" in msg):
                 continue
             raise
 
@@ -172,59 +177,49 @@ async def up(
     slips through the re-check we log-and-continue rather than crash the
     second booting process.
     """
-    import sqlite3  # stdlib; keeps import local for lazy-import discipline.
-
     mdir = migrations_dir or MIGRATIONS_DIR
     applied_now: list[str] = []
+    # Advisory-lock key: a fixed constant so all concurrent booters (FastAPI
+    # lifespan + ARQ worker) serialize on the same lock. Postgres has no
+    # "database is locked" — this just prevents two processes running the same
+    # migration body at once. Autocommit connections mean each statement
+    # commits immediately; idempotency comes from the ON CONFLICT DO NOTHING on
+    # the _schema_migrations INSERT plus the re-read under the lock.
+    lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
     async with aiosqlite.connect(db_path) as db:
-        # Honour SQLite's internal busy-wait instead of failing fast when
-        # the other writer is mid-transaction. 5 s matches the database
-        # module's default (``PRAGMA busy_timeout = 5000``).
-        await db.execute("PRAGMA busy_timeout = 5000")
-        await _ensure_table(db)
-        for stem in _discover_pairs(mdir):
-            # Cheap check before we bother taking the write lock.
-            if stem in set(await _applied_ids(db)):
-                if target is not None and stem == target:
-                    break
-                continue
-            sql = (mdir / f"{stem}.up.sql").read_text()
-            # BEGIN IMMEDIATE grabs a RESERVED lock; concurrent writers will
-            # busy-wait up to busy_timeout. Re-check inside the transaction
-            # to catch the race where two coroutines both saw "pending"
-            # before either took the lock.
-            await db.execute("BEGIN IMMEDIATE")
-            try:
-                if stem in set(await _applied_ids(db)):
-                    # A concurrent writer applied it while we waited; back out.
-                    await db.rollback()
+        # Acquire the lock BEFORE creating the migrations table so concurrent
+        # booters don't race on CREATE TABLE (also non-atomic in Postgres).
+        await db.execute("SELECT pg_advisory_lock(?)", (lock_key,))
+        try:
+            await _ensure_table(db)
+            applied_set = set(await _applied_ids(db))
+            for stem in _discover_pairs(mdir):
+                if stem in applied_set:
                     if target is not None and stem == target:
                         break
                     continue
-                await _apply_up_sql(db, sql)
+                sql = (mdir / f"{stem}.up.sql").read_text()
                 try:
+                    await _apply_up_sql(db, sql)
                     await db.execute(
-                        "INSERT INTO _schema_migrations(id, applied_at) VALUES (?, ?)",
+                        "INSERT INTO _schema_migrations(id, applied_at) "
+                        "VALUES (?, ?) ON CONFLICT DO NOTHING",
                         (stem, datetime.now(timezone.utc).isoformat()),
                     )
-                except sqlite3.IntegrityError:
-                    # Belt-and-braces: if a racing writer already recorded
-                    # the same stem (shouldn't happen after the re-check
-                    # above, but costs nothing to guard), swallow and move
-                    # on — the migration's net effect is already applied.
-                    await db.rollback()
-                    if target is not None and stem == target:
-                        break
-                    continue
-                await db.commit()
-                applied_now.append(stem)
-            except BaseException:
-                # Any other failure (bad SQL, missing table) — roll back and
-                # surface loudly.
-                await db.rollback()
-                raise
-            if target is not None and stem == target:
-                break
+                    applied_set.add(stem)
+                    applied_now.append(stem)
+                except psycopg.errors.DuplicateTable:
+                    # A concurrent booter created the object; treat as applied.
+                    await db.execute(
+                        "INSERT INTO _schema_migrations(id, applied_at) "
+                        "VALUES (?, ?) ON CONFLICT DO NOTHING",
+                        (stem, datetime.now(timezone.utc).isoformat()),
+                    )
+                    applied_set.add(stem)
+                if target is not None and stem == target:
+                    break
+        finally:
+            await db.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
     return applied_now
 
 
