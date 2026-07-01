@@ -37,6 +37,8 @@
 Then I deploy, wire the domain, run a live smoke test, and continue.
 **💰 Cost: ~$5–20/mo hosting + ~$12/yr domain** (Postgres+Redis on free tier).
 
+> 🟡 **CODE DONE 2026-07-01, DEPLOY BLOCKED.** `/livez`+`/readyz` + boot env-validation + backup script all built, tested, live-verified. **Deploy blocked:** Railway trial expired — user must add a plan (see `docs/DEPLOY.md`). All deploy commands are ready; one `railway up` sequence once the plan is active.
+
 ## 📊 Phase 3 — Visibility (needs YOUR keys)
 **Build:** Sentry · PostHog · uptime monitor · fill logging dark zones (workers/DB/auth) · security headers.
 
@@ -45,6 +47,8 @@ Then I deploy, wire the domain, run a live smoke test, and continue.
 
 Then I verify errors + events flow in, and finish.
 **💰 Cost: $0** (all free tiers).
+
+> ✅ **DONE 2026-07-01.** Backend `sentry-sdk` (DSN-guarded) + frontend `@sentry/nextjs`; frontend `posthog-js` (pageview + identify); `SecurityHeadersMiddleware` (CSP/HSTS/X-Frame — live-verified); logging dark zones filled (DB/workers/auth). **1625 tests green on Postgres**, frontend build green. Keys staged in `.env`/`.env.local`; events will flow once deployed. Uptime monitor set up post-deploy.
 
 ---
 
