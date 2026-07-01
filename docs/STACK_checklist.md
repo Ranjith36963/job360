@@ -102,7 +102,7 @@
 | ✅ | CORS | `backend/src/api/main.py` (CORSMiddleware) |
 | ❌ | **Security headers** (CSP/HSTS/X-Frame) | *to build — no code* |
 | ❌ | **API-wide rate limiting** | *to build — auth-only today* |
-| ⚠️ | File storage for CV uploads | *CVs parsed in-memory, not persisted; add S3/R2 only if keeping raw files* |
+| ⚠️ | File storage for CV uploads | *CVs go to a temp file (`save_upload_to_temp` in `api/dependencies.py`), parsed, then discarded — not persisted; add S3/R2 only if keeping raw files* |
 
 ---
 

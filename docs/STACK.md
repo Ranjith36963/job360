@@ -46,7 +46,7 @@
 | **Feature flags** | env toggles (`ENRICHMENT_/SEMANTIC_/MATCHER_ENABLED`) | optional: a flags dashboard later | free |
 | **Security — CORS** | ✅ CORSMiddleware (`FRONTEND_ORIGIN` allow-list) | — | free |
 | **Security — headers** | ❌ none | add CSP / HSTS / X-Frame-Options middleware | free |
-| **File storage (CV uploads)** | parsed in-memory; raw file **not** persisted | add object storage (S3/R2) only if you keep raw CVs | ~free |
+| **File storage (CV uploads)** | temp file (`save_upload_to_temp`), parsed, then discarded — **not** persisted | add object storage (S3/R2) only if you keep raw CVs | ~free |
 | **API rate limiting** | auth only (sliding-window) | add a global limit for abuse protection | free |
 
 ## Priority order to launch + charge
