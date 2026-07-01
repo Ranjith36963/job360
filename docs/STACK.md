@@ -37,6 +37,18 @@
 
 ---
 
+## Additional layers (added 2026-06-30 after deeper code audit)
+
+| Section | ✅ Have now | ➕ To add | Cost |
+|---|---|---|---|
+| **Testing** | pytest (111 files / 1,571 tests) + vitest + Playwright e2e | wire full suite into the CI gate | free |
+| **Redis (broker/cache)** | used by ARQ (`REDIS_URL`) | deploy a managed Redis alongside the app | free tier |
+| **Feature flags** | env toggles (`ENRICHMENT_/SEMANTIC_/MATCHER_ENABLED`) | optional: a flags dashboard later | free |
+| **Security — CORS** | ✅ CORSMiddleware (`FRONTEND_ORIGIN` allow-list) | — | free |
+| **Security — headers** | ❌ none | add CSP / HSTS / X-Frame-Options middleware | free |
+| **File storage (CV uploads)** | parsed in-memory; raw file **not** persisted | add object storage (S3/R2) only if you keep raw CVs | ~free |
+| **API rate limiting** | auth only (sliding-window) | add a global limit for abuse protection | free |
+
 ## Priority order to launch + charge
 
 1. **PostgreSQL** — replace SQLite so many users can write at once.

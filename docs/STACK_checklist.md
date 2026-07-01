@@ -4,7 +4,7 @@
 >
 > **Companion to** `STACK.md` (the have-vs-add overview). This file is the *evidence*.
 
-**Score: 23 implemented ✅ · 18 to build ❌** (build/ops + business layers).
+**Score: 27 implemented ✅ · 21 to build ❌** (build/ops + business layers).
 
 ---
 
@@ -91,6 +91,18 @@
 | ❌ | ICO registration | *your action (£40)* |
 | ❌ | Guided onboarding flow | *to build — basic register→CV→search only* |
 | ❌ | Support / contact + help | *to build* |
+
+## 🧪 Testing & cross-cutting (added after deeper audit)
+| ✓ | Item | Proof / To build |
+|---|---|---|
+| ✅ | pytest suite (1,571 tests, 111 files) | `backend/tests/` |
+| ✅ | Frontend unit + Playwright e2e | `frontend/` vitest + Playwright specs |
+| ✅ | Redis broker (for ARQ) | `backend/src/workers/settings.py` (`REDIS_URL`) |
+| ✅ | Feature flags (env toggles) | `backend/src/core/settings.py` (`SEMANTIC_/ENRICHMENT_/MATCHER_ENABLED`) |
+| ✅ | CORS | `backend/src/api/main.py` (CORSMiddleware) |
+| ❌ | **Security headers** (CSP/HSTS/X-Frame) | *to build — no code* |
+| ❌ | **API-wide rate limiting** | *to build — auth-only today* |
+| ⚠️ | File storage for CV uploads | *CVs parsed in-memory, not persisted; add S3/R2 only if keeping raw files* |
 
 ---
 
