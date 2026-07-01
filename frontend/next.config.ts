@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Backend origin the `/api/*` proxy forwards to. Set BACKEND_ORIGIN in the
 // deploy env; defaults to the local dev backend.
@@ -19,4 +20,11 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Suppress Sentry build-time logs unless we are in CI (where we want to see them).
+  silent: !process.env.CI,
+
+  // Source-map upload is opt-in: set SENTRY_ORG + SENTRY_PROJECT + SENTRY_AUTH_TOKEN
+  // in CI to enable it. Without them the build still works — errors are captured but
+  // stack traces show minified names.
+});

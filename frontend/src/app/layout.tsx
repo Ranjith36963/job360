@@ -7,6 +7,7 @@ import { FloatingIcons } from "@/components/layout/FloatingIcons";
 import { AuthProvider } from "@/components/layout/AuthProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { PostHogProviderWrapper } from "@/components/providers/PostHogProviderWrapper";
 import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 import { Toaster } from "sonner";
 import "./globals.css";
@@ -58,6 +59,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ClientErrorReporter />
+        <PostHogProviderWrapper>
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>
@@ -71,6 +73,7 @@ export default function RootLayout({
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>
+        </PostHogProviderWrapper>
       </body>
     </html>
   );

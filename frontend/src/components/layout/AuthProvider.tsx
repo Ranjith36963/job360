@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import { me, logout as apiLogout } from "@/lib/api";
 import type { User } from "@/lib/api";
 
@@ -40,6 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await me();
       setUser(data);
+      // Identify the user in PostHog so events are linked to their account.
+      if (data && posthog.__loaded) {
+        posthog.identify(data.id, { email: data.email });
+      }
     } finally {
       fetchingRef.current = false;
       setLoading(false);
@@ -60,6 +65,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiLogout();
+    // Disassociate the PostHog session from the logged-out user.
+    if (posthog.__loaded) {
+      posthog.reset();
+    }
     setUser(null);
     router.push("/login");
   }, [router]);
