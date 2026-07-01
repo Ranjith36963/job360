@@ -30,3 +30,27 @@ services:
       --maxmemory-policy allkeys-lru
     # In-memory only is fine for dev — restart wipes queued jobs, which is
     # what we usually want anyway.
+
+  # Postgres 16 for the SQLite -> Postgres migration (Phase 1).
+  # Host port 5433 (5432 is reserved/blocked on this Windows box).
+  # DATABASE_URL=postgresql://job360:job360dev@localhost:5433/job360
+  postgres:
+    image: postgres:16-alpine
+    container_name: job360-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: job360
+      POSTGRES_PASSWORD: job360dev
+      POSTGRES_DB: job360
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - job360_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job360 -d job360"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  job360_pgdata:
