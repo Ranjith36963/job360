@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { User, CheckCircle, AlertCircle, History, Search } from "lucide-react";
+
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { CVUpload } from "@/components/profile/CVUpload";
@@ -196,26 +198,17 @@ export default function ProfilePage() {
 
       <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
         {/* ── Header + Completeness ───────────────────── */}
-        <div className="animate-fade-in-up stagger-1 mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-                <User className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
-                  <span className="text-gradient-lime">Profile</span>
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  {profile?.summary.is_complete
-                    ? "Your profile is ready for job matching"
-                    : "Upload your CV and set preferences to get started"}
-                </p>
-              </div>
-            </div>
-
-            {/* Actions row */}
-            <div className="flex flex-wrap items-center gap-2">
+        <PageHeader
+          className="animate-fade-in-up stagger-1 mb-8 sm:items-center"
+          icon={User}
+          title="Profile"
+          subtitle={
+            profile?.summary.is_complete
+              ? "Your profile is ready for job matching"
+              : "Upload your CV and set preferences to get started"
+          }
+          actions={
+            <>
               <JsonResumeExportButton />
               <Button
                 variant="outline"
@@ -226,42 +219,42 @@ export default function ProfilePage() {
                 <History className="h-3.5 w-3.5" />
                 History
               </Button>
-            </div>
 
-            {/* Completeness badge */}
-            <div className="flex items-center gap-3">
-              {percent >= 100 ? (
-                <CheckCircle className="h-5 w-5 text-score-high" />
-              ) : (
-                <AlertCircle className="h-5 w-5 text-muted-foreground" />
-              )}
-              <div className="min-w-[160px]">
-                <div className="flex items-baseline justify-between mb-1">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {label}
-                  </span>
-                  <span className="font-mono text-xs font-bold text-foreground">
-                    {percent}%
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-700 ease-out"
-                    style={{
-                      width: `${percent}%`,
-                      background:
-                        percent >= 70
-                          ? "oklch(0.89 0.29 128)"
-                          : percent >= 40
-                            ? "oklch(0.78 0.25 130)"
-                            : "oklch(0.75 0.15 85)",
-                    }}
-                  />
+              {/* Completeness badge */}
+              <div className="flex items-center gap-3">
+                {percent >= 100 ? (
+                  <CheckCircle className="h-5 w-5 text-score-high" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-muted-foreground" />
+                )}
+                <div className="min-w-[160px]">
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {label}
+                    </span>
+                    <span className="font-mono text-xs font-bold text-foreground">
+                      {percent}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{
+                        width: `${percent}%`,
+                        background:
+                          percent >= 70
+                            ? "oklch(0.89 0.29 128)"
+                            : percent >= 40
+                              ? "oklch(0.78 0.25 130)"
+                              : "oklch(0.75 0.15 85)",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {/* ── Error banner ────────────────────────────── */}
         {error && (

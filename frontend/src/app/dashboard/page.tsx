@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Clock, Download, Globe, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import { Briefcase, Clock, Download, Globe, LayoutDashboard, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -325,12 +327,12 @@ export default function DashboardPage() {
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
         {/* ---- Header ---- */}
-        <div className="animate-fade-in-up flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="font-heading text-3xl font-bold tracking-tight">
-              <span className="text-gradient-lime">Dashboard</span>
-            </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+        <PageHeader
+          className="animate-fade-in-up mb-0 sm:items-center"
+          icon={LayoutDashboard}
+          title="Dashboard"
+          subtitle={
+            <>
               {total > 0 ? (
                 <>
                   <span className="font-mono text-foreground">{total}</span> jobs
@@ -341,73 +343,71 @@ export default function DashboardPage() {
               ) : (
                 "No jobs found yet"
               )}
-            </p>
-            {statusData?.last_run && (() => {
-              const ts = (statusData.last_run as { timestamp?: string }).timestamp;
-              if (!ts) return null;
-              const d = new Date(ts);
-              if (Number.isNaN(d.getTime())) return null;
-              return (
-                <p className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-1">
-                  <Clock className="h-3 w-3" aria-hidden />
-                  Last run: {d.toLocaleString()}
-                </p>
-              );
-            })()}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Search progress */}
-            {searchProgress && (
-              <Badge variant="secondary" className="gap-1.5 animate-fade-in-up">
-                {searching && <Loader2 className="h-3 w-3 animate-spin" />}
-                {searchProgress}
-              </Badge>
-            )}
-
-            {/* Refresh — now runs a real search: fetches new jobs from the
-                internet (the per-user POST /api/search pipeline), so the list
-                picks up anything that appeared since the last run. The full
-                "Search Latest Jobs" entry point lives on the Profile page.
-                Disabled while a search runs or when rate-limited (O2). */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={handleSearch}
-              disabled={searching || searchRateLimited}
-              title={searchRateLimited ? "Rate limited — please wait" : "Fetch the latest jobs"}
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${searching ? "animate-spin" : ""}`}
-              />
-              <span className="hidden sm:inline">{searching ? "Refreshing..." : "Refresh"}</span>
-            </Button>
-
-            {/* Filters */}
-            <FilterPanel
-              filters={filters}
-              onFilterChange={handleFilterChange}
-              activeFilterCount={activeFilterCount}
-            />
-
-            {/* Export CSV — downloads the current catalog as a CSV file. */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => {
-                void exportJobsCsv().catch((err) =>
-                  console.error("CSV export failed", err),
+              {statusData?.last_run && (() => {
+                const ts = (statusData.last_run as { timestamp?: string }).timestamp;
+                if (!ts) return null;
+                const d = new Date(ts);
+                if (Number.isNaN(d.getTime())) return null;
+                return (
+                  <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/60">
+                    <Clock className="h-3 w-3" aria-hidden />
+                    Last run: {d.toLocaleString()}
+                  </span>
                 );
-              }}
-              title="Export jobs as CSV"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Export</span>
-            </Button>
-          </div>
-        </div>
+              })()}
+            </>
+          }
+          actions={
+            <>
+              {/* Search progress */}
+              {searchProgress && (
+                <Badge variant="secondary" className="gap-1.5 animate-fade-in-up">
+                  {searching && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {searchProgress}
+                </Badge>
+              )}
+
+              {/* Refresh — runs a real search (per-user POST /api/search),
+                  picking up anything new since the last run. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleSearch}
+                disabled={searching || searchRateLimited}
+                title={searchRateLimited ? "Rate limited — please wait" : "Fetch the latest jobs"}
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${searching ? "animate-spin" : ""}`}
+                />
+                <span className="hidden sm:inline">{searching ? "Refreshing..." : "Refresh"}</span>
+              </Button>
+
+              {/* Filters */}
+              <FilterPanel
+                filters={filters}
+                onFilterChange={handleFilterChange}
+                activeFilterCount={activeFilterCount}
+              />
+
+              {/* Export CSV — downloads the current catalog as a CSV file. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  void exportJobsCsv().catch((err) =>
+                    console.error("CSV export failed", err),
+                  );
+                }}
+                title="Export jobs as CSV"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Export</span>
+              </Button>
+            </>
+          }
+        />
 
         {/* Stats summary */}
         <div className="animate-fade-in-up stagger-1 glass-card rounded-xl p-4">

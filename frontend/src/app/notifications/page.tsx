@@ -3,6 +3,15 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
+
+import { PageHeader } from "@/components/layout/PageHeader";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getNotificationLedger, getNotificationStats } from "@/lib/api";
@@ -121,15 +130,11 @@ export default function NotificationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="animate-fade-in-up stagger-1 mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          <Bell className="h-5 w-5 text-primary" aria-hidden="true" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold">Notification History</h1>
-          <p className="text-sm text-muted-foreground">Recent notifications sent across all channels</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={Bell}
+        title="Notification History"
+        subtitle="Recent notifications sent across all channels"
+      />
 
       {error && (
         <div className="mb-6 rounded-xl border border-destructive/20 bg-destructive/[0.06] p-4">
@@ -142,33 +147,37 @@ export default function NotificationsPage() {
           <label htmlFor="channel-filter" className="whitespace-nowrap text-sm text-muted-foreground">
             Channel
           </label>
-          <select
-            id="channel-filter"
-            value={channelFilter}
-            onChange={(e) => setChannelFilter(e.target.value)}
-            className="rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            <option value="all">All channels</option>
-            {allChannels.map((ch) => (
-              <option key={ch} value={ch}>{ch}</option>
-            ))}
-          </select>
+          <Select value={channelFilter} onValueChange={(val) => setChannelFilter(val ?? "all")}>
+            <SelectTrigger id="channel-filter" size="sm" className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All channels</SelectItem>
+              {allChannels.map((ch) => (
+                <SelectItem key={ch} value={ch}>
+                  {ch}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex items-center gap-2">
           <label htmlFor="status-filter" className="whitespace-nowrap text-sm text-muted-foreground">
             Status
           </label>
-          <select
-            id="status-filter"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          <Select value={statusFilter} onValueChange={(val) => { if (val !== null) setStatusFilter(val); }}>
+            <SelectTrigger id="status-filter" size="sm" className="w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {data && (

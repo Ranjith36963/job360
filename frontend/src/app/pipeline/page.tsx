@@ -11,6 +11,7 @@ import {
   XCircle,
   AlertTriangle,
 } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
@@ -176,21 +177,18 @@ export default function PipelinePage() {
       {/* ═══════════════════════════════════════════════════
           HEADER
           ═══════════════════════════════════════════════════ */}
-      <div className="animate-fade-in-up stagger-1 mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-            <Kanban className="h-5 w-5 text-primary" />
-          </div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
-            <span className="text-gradient-lime">Application Pipeline</span>
-          </h1>
-        </div>
-        <p className="text-muted-foreground text-sm sm:text-base ml-[52px]">
-          Track every opportunity from application to offer.{" "}
-          <span className="font-mono text-foreground/80">{total}</span>{" "}
-          {total === 1 ? "application" : "applications"} in your pipeline.
-        </p>
-      </div>
+      <PageHeader
+        className="animate-fade-in-up stagger-1 mb-8"
+        icon={Kanban}
+        title="Application Pipeline"
+        subtitle={
+          <>
+            Track every opportunity from application to offer.{" "}
+            <span className="font-mono text-foreground/80">{total}</span>{" "}
+            {total === 1 ? "application" : "applications"} in your pipeline.
+          </>
+        }
+      />
 
       {/* ═══════════════════════════════════════════════════
           STATS ROW — count per stage

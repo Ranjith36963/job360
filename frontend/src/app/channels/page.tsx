@@ -2,7 +2,10 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { Send } from "lucide-react";
 import { toast } from "sonner";
+
+import { PageHeader } from "@/components/layout/PageHeader";
 
 import {
   Channel,
@@ -410,14 +413,11 @@ export default function ChannelsSettingsPage() {
         <OAuthReturnToast onConnected={refresh} />
       </Suspense>
 
-      <div>
-        <h1 className="text-3xl font-semibold">Notification channels</h1>
-        <p className="mt-2 text-muted-foreground">
-          Send matching jobs to Slack, Discord, Telegram, email, or a webhook.
-          High-score matches (&ge;80) arrive instantly; the rest roll into your
-          daily digest.
-        </p>
-      </div>
+      <PageHeader
+        icon={Send}
+        title="Notification channels"
+        subtitle="Send matching jobs to Slack, Discord, Telegram, email, or a webhook. High-score matches (≥80) arrive instantly; the rest roll into your daily digest."
+      />
 
       {/* ----------------------------------------------------------------- */}
       {/* Connect chat providers                                             */}

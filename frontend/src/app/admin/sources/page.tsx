@@ -12,11 +12,20 @@
 // effectively unlisted in the nav by default.
 
 import { useEffect, useState } from "react";
+import { Activity } from "lucide-react";
 
 import { getSourceHealth, SourceHealthEntry, SourceHealthResponse } from "@/lib/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const HEALTH_COLOR: Record<SourceHealthEntry["health"], string> = {
   ok: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
@@ -69,18 +78,23 @@ export default function AdminSourcesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 py-12">
+      <PageHeader
+        className="mb-0"
+        icon={Activity}
+        title="Source Health"
+        subtitle="How your job sources are performing across recent runs."
+        actions={
+          summary ? (
+            <span className="flex items-center gap-2 text-sm font-normal">
+              <Badge variant="secondary">{summary.critical} critical</Badge>
+              <Badge variant="secondary">{summary.warning} warning</Badge>
+              <Badge variant="secondary">{summary.ok} ok</Badge>
+            </span>
+          ) : null
+        }
+      />
       <Card>
         <CardHeader>
-          <CardTitle className="flex flex-wrap items-center justify-between gap-3">
-            <span>Source health</span>
-            {summary ? (
-              <span className="flex items-center gap-2 text-sm font-normal">
-                <Badge variant="secondary">{summary.critical} critical</Badge>
-                <Badge variant="secondary">{summary.warning} warning</Badge>
-                <Badge variant="secondary">{summary.ok} ok</Badge>
-              </span>
-            ) : null}
-          </CardTitle>
           <CardDescription>
             Aggregated across the last {runs} pipeline runs you triggered.
             Sources that return 0 jobs three runs in a row are flagged
@@ -94,22 +108,25 @@ export default function AdminSourcesPage() {
             <label className="text-sm text-muted-foreground" htmlFor="runs">
               Aggregate window:
             </label>
-            <select
-              id="runs"
-              className="rounded-md border bg-background px-2 py-1 text-sm"
-              value={runs}
-              onChange={(e) => {
-                const n = Number(e.target.value);
+            <Select
+              value={String(runs)}
+              onValueChange={(val) => {
+                const n = Number(val);
                 setRuns(n);
                 void refresh(n);
               }}
             >
-              {[5, 10, 20, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  last {n} runs
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="runs" size="sm" className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[5, 10, 20, 50, 100].map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    last {n} runs
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               size="sm"
               variant="ghost"
