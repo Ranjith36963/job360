@@ -33,7 +33,7 @@ from src.api.routes import (
     runs,
     search,
 )
-from src.core.settings import LOG_LEVEL
+from src.core.settings import LOG_LEVEL, validate_required_env
 from src.utils.logger import setup_audit_logger, setup_logging
 
 
@@ -46,6 +46,8 @@ async def lifespan(app: FastAPI):
     setup_logging(LOG_LEVEL)
     setup_audit_logger()
     logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    # Fail fast in production when required env vars are absent (no-op in dev).
+    validate_required_env()
     await init_db()
     yield
     await close_db()

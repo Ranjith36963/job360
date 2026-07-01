@@ -243,3 +243,30 @@ SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))
 # The generic 60s cap was cancelling those sweeps mid-flight and silently
 # discarding their results, so the "ats" category gets its own ceiling.
 SOURCE_FETCH_TIMEOUT_ATS = int(os.getenv("SOURCE_FETCH_TIMEOUT_ATS", "240"))
+
+# Auth / encryption secrets (required in production only).
+SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+CHANNEL_ENCRYPTION_KEY = os.getenv("CHANNEL_ENCRYPTION_KEY", "")
+
+# --- Production env validation --------------------------------------------
+# These vars must be non-empty when running in production.
+_REQUIRED_PROD_VARS = ["SESSION_SECRET", "CHANNEL_ENCRYPTION_KEY", "DATABASE_URL"]
+
+
+def validate_required_env() -> None:
+    """Raise ``RuntimeError`` if required env vars are missing in production.
+
+    Checks only when ``APP_ENV=production`` OR ``RAILWAY_ENVIRONMENT`` is set.
+    In dev/test it is a no-op, so the 1600+ test suite is unaffected.
+    """
+    is_prod = os.getenv("APP_ENV", "").lower() == "production" or bool(
+        os.getenv("RAILWAY_ENVIRONMENT", "")
+    )
+    if not is_prod:
+        return
+    missing = [name for name in _REQUIRED_PROD_VARS if not os.getenv(name, "").strip()]
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variables for production: "
+            + ", ".join(missing)
+        )

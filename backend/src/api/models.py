@@ -12,6 +12,20 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class LivezResponse(BaseModel):
+    status: str
+
+
+class ReadyzChecks(BaseModel):
+    db: str
+    redis: str
+
+
+class ReadyzResponse(BaseModel):
+    status: str
+    checks: ReadyzChecks
+
+
 class SourceInfo(BaseModel):
     name: str
     type: str
