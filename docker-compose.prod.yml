@@ -1,0 +1,131 @@
+# Production compose file.
+# For local dev (Redis + Postgres only) use docker-compose.dev.yml instead.
+#
+# Usage:
+#   cp .env.example .env          # fill in secrets
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Required env vars (set in .env or your deploy platform):
+#   SESSION_SECRET, CHANNEL_ENCRYPTION_KEY
+# Optional LLM keys: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, etc.
+# See .env.example for the full list.
+
+services:
+
+  # ─── Infrastructure ─────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: job360
+      POSTGRES_PASSWORD: job360dev
+      POSTGRES_DB: job360
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job360 -d job360"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ─── Application ────────────────────────────────────────────────────────
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://job360:job360dev@postgres:5432/job360
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: ${SESSION_SECRET}
+      CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      # LLM provider keys (all optional — sources skip gracefully when empty)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Keyed job-source API keys (optional — sources skip gracefully when empty)
+      REED_API_KEY: ${REED_API_KEY:-}
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      JSEARCH_API_KEY: ${JSEARCH_API_KEY:-}
+      JOOBLE_API_KEY: ${JOOBLE_API_KEY:-}
+      SERPAPI_KEY: ${SERPAPI_KEY:-}
+      CAREERJET_AFFID: ${CAREERJET_AFFID:-}
+      FINDWORK_API_KEY: ${FINDWORK_API_KEY:-}
+      DFE_APPRENTICESHIPS_API_KEY: ${DFE_APPRENTICESHIPS_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    # ARQ worker — confirmed entry point: arq src.workers.settings.WorkerSettings
+    command: ["arq", "src.workers.settings.WorkerSettings"]
+    environment:
+      DATABASE_URL: postgresql://job360:job360dev@postgres:5432/job360
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: ${SESSION_SECRET}
+      CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MATCHER_ENABLED: ${MATCHER_ENABLED:-false}
+      MATCHER_THRESHOLD: ${MATCHER_THRESHOLD:-30}
+      MATCHER_MAX_JOBS: ${MATCHER_MAX_JOBS:-30}
+      ENRICHMENT_ENABLED: ${ENRICHMENT_ENABLED:-false}
+      SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # The frontend proxies /api/* to the backend via next.config.ts rewrites.
+      # Inside the compose network the backend is reachable by service name.
+      BACKEND_ORIGIN: http://backend:8000
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:

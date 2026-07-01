@@ -1,0 +1,33 @@
+# Runtime data — never bake into the image; mount as a volume.
+data/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tests (optional — kept out to slim the image; the test suite is offline only)
+tests/
+
+# Version control
+.git/
+.gitignore
+
+# Editor / IDE artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local env overrides
+.env
+.env.*
