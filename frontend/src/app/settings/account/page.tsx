@@ -28,6 +28,7 @@ import {
   changeEmail,
   deleteAccount,
   logout,
+  resendVerificationEmail,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -340,6 +341,53 @@ function DeleteAccountCard() {
 // Page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Verify email — resend the verification link
+// ---------------------------------------------------------------------------
+
+function VerifyEmailCard() {
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function onResend() {
+    setServerError(null);
+    setSuccess(null);
+    setSending(true);
+    try {
+      await resendVerificationEmail();
+      setSuccess("Verification email sent. Check your inbox (and Spam), then click the link.");
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : "Failed to send verification email.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Verify your email</CardTitle>
+        <CardDescription>
+          Some features (like running a job search) need a verified email. Resend the
+          verification link if you didn&apos;t get it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={onResend} disabled={sending}>
+          {sending ? "Sending..." : "Resend verification email"}
+        </Button>
+        {success && (
+          <p className="mt-3 text-xs text-green-400" role="status">
+            {success}
+          </p>
+        )}
+        <FieldError message={serverError ?? undefined} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AccountSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 py-12">
@@ -349,6 +397,7 @@ export default function AccountSettingsPage() {
           Manage your password, email address, and account lifecycle.
         </p>
       </div>
+      <VerifyEmailCard />
       <ChangePasswordCard />
       <ChangeEmailCard />
       <DeleteAccountCard />
