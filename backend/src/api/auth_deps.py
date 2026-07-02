@@ -113,6 +113,13 @@ async def require_verified_user(
     verify, manage their account, and sign out. Returns HTTP 403 with detail
     ``email_not_verified`` (distinct from the 401 'authentication required').
     """
+    # Escape hatch for testing: REQUIRE_EMAIL_VERIFICATION=false disables this
+    # gate (e.g. while Resend is in sandbox mode and verification emails only
+    # reach the account owner). Defaults to ON — set back to true before launch.
+    import os
+
+    if os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").strip().lower() in ("false", "0", "no", "off"):
+        return user
     if not user.email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
