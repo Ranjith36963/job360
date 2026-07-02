@@ -3,6 +3,8 @@
 > **What this is.** The current technology stack, layer by layer, with what's already built and what's still missing to ship + monetize. Code-verified 2026-06-30.
 >
 > **How to read it.** The "Add" column splits into two jobs: **build/ops** (makes it shippable) and **business** (makes it a paying product).
+>
+> **⚠️ Re-synced 2026-07-02.** This file had drifted out of sync with its own companion `STACK_checklist.md` — several rows below marked shipped infra (Postgres, Sentry, PostHog, Docker, Resend, Railway) as "to add" when the checklist already had them as ✅ done. Fixed below; see `docs/maintenance/DOCSYNC.md` for the audit.
 
 ---
 
@@ -12,24 +14,24 @@
 |---|---|---|---|
 | **Backend** | Python 3.9+, FastAPI, uvicorn, httpx, aiohttp | — (solid) | free |
 | **Background jobs** | ARQ (async task queue, Redis-backed) | Deploy the ARQ worker live (built, not running in prod) | free |
-| **Database** | SQLite (aiosqlite) | **PostgreSQL** — many users writing at once without locking | free tier |
+| **Database** | **PostgreSQL** (psycopg3) — `backend/src/repositories/pg.py`, `database.py` imports it as the SQLite shim replacement | — (done) | free tier |
 | **Vector store** | ChromaDB | Optional: **pgvector** (fold vectors into Postgres) | free |
 | **Frontend** | Next.js 16, React 19, Tailwind 4, shadcn/ui | — (ahead of typical stacks) | free |
 | **AI / LLM** | Claude, OpenAI, Gemini, Groq, Cerebras (direct, multi-provider fallback) | **LLM cost tracking**; optional gateway (LiteLLM/OpenRouter) | ⚠️ pay-per-use |
 | **Auth** | Custom: argon2 passwords + signed cookies + sessions | — (fine; swap to Supabase/Clerk later if desired) | free |
 | **Payments** | ❌ none | **Stripe** — the money switch | ~2–3% of sales |
 | **Plans / paywall** | ❌ none (design only) | **Free/Premium tiers + usage quota + pricing page** | free |
-| **Email** | Gmail SMTP + apprise | **Resend or AWS SES** — reliable transactional email | ~free at low volume |
+| **Email** | Resend (HTTP API) + apprise — `backend/src/services/auth/email_sender.py` posts to `api.resend.com` | — (done) | ~free at low volume |
 | **Notifications** | apprise multi-channel (email/Slack/Discord) | Deploy Redis + worker so they fire in prod | free |
 | **Encryption / secrets** | Fernet (cryptography), env vars | Secrets manager + boot-time env validation | free |
 | **Logging** | File logs + correlation IDs + `audit.log` | Fill dark zones (workers, DB, auth, notifications) | free |
-| **Error monitoring** | ❌ none | **Sentry** | free tier |
-| **Product analytics** | ❌ none | **PostHog** — signup → activation → paid → churn | free tier |
-| **Containers** | `docker-compose.dev.yml` only | **Dockerfile + prod docker-compose** | free |
-| **Deployment / hosting** | ❌ local only | **Railway** (then Hetzner VPS later) | ~$5–20/mo |
+| **Error monitoring** | **Sentry** — `backend/src/api/main.py` `sentry_sdk.init` + frontend `@sentry/nextjs` | — (done) | free tier |
+| **Product analytics** | **PostHog** — `frontend/src/components/providers/PostHogProviderWrapper.tsx` | — (done) | free tier |
+| **Containers** | `docker-compose.dev.yml` + **Dockerfile (backend/frontend) + `docker-compose.prod.yml`** | — (done) | free |
+| **Deployment / hosting** | **Railway** — see `docs/DEPLOY.md` (then Hetzner VPS later if needed) | — (done) | ~$5–20/mo |
 | **Domain** | ❌ none | Buy a domain | ~$12/yr |
 | **CI/CD** | GitHub Actions (`ci-offline`, `live-e2e`) | Full gate (pytest + ruff + mypy + build) + enable on GitHub | free |
-| **Scaling / reliability** | SQLite + busy-timeout retry | Postgres + DB backups + uptime monitor | free tier |
+| **Scaling / reliability** | Postgres + DB backup script (`backend/scripts/backup_db.py`) | uptime monitor | free tier |
 | **Legal / compliance** | `/privacy` + `/terms` pages, GDPR delete | **ICO registration** + lawyer review of privacy/LIA | £40 once |
 | **Job data sources** | 47 free/keyed sources | Optional: paid aggregator (Fantastic Jobs) for LinkedIn/Indeed | ~$1/1k |
 | **Onboarding** | basic register → CV → search | Guided first-run flow (drives activation → paid) | free |

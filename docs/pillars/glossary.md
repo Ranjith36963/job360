@@ -172,7 +172,7 @@ Composite of `CVData` (from CV/LinkedIn/GitHub) + `UserPreferences` (form fields
 
 ### Rate limiter
 
-Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (46 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
+Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (47 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
 **Code:** `backend/src/utils/rate_limiter.py` · **Pillar 3**
 
 ### Recency scoring
@@ -191,7 +191,7 @@ The four concentric layers of the User pillar: Identity → Profile → Delivery
 
 ### Run (run_search / run_log)
 
-A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs`.
+A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs/recent` and `GET /api/runs/source-health`.
 **Code:** `backend/src/main.py:run_search()` · **Pillar 2**
 
 ### ScoreBreakdown

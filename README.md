@@ -19,9 +19,9 @@ flowchart TD
 
     subgraph Sources["47 Job Sources (46 live instances)"]
         direction LR
-        KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
+        KeyedAPIs["Keyed APIs (8)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork\nGov Apprenticeships (DfE)"]
         FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
-        ATSBoards["ATS Boards (11, ~264 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling"]
+        ATSBoards["ATS Boards (11, ~256 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling"]
         RSSFeeds["RSS/XML Feeds (9)\njobs.ac.uk, NHS Jobs, NHS Jobs XML\nWorkAnywhere, WeWorkRemotely\nRealWorkFromAnywhere, BioSpace\nUniversity Jobs, Teaching Vacancies"]
         HTMLScrapers["HTML Scrapers (5)\nLinkedIn, Climatebase\n80000Hours, BCS Jobs, AIJobs AI"]
         OtherSources["Other (4 classes / 5 keys)\nIndeed+Glassdoor (JobSpySource)\nHackerNews, TheMuse, NoFluffJobs"]
@@ -54,7 +54,7 @@ flowchart TD
 
 - **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
 - **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
-- **11 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
+- **11 ATS boards** over ~256 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
 - **9 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
 - **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
 - **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
@@ -101,10 +101,18 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 25 routes (health, jobs, actions, profile, search, pipeline)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 64 endpoints across 12 route modules (actions, auth, channels, client_log, health, jobs, notification_rules, notifications, pipeline, profile, runs, search)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
+
+### Auth (passwordless + traditional)
+- **Magic-link login** — passwordless email link, requested then consumed via `/auth/magic` on the frontend
+- **Email/password** — register, login, logout with signed session cookies
+- **Password reset** — request/confirm flow with expiring reset tokens
+- **Email verification** — request/confirm flow
+- **Account management** — change password/email (current password required first), delete account
+- 14 endpoints in `backend/src/api/routes/auth.py`; frontend pages under `src/app/(auth)/{login,register,forgot-password,reset-password,verify-email}/` plus `src/app/auth/magic/`
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
@@ -121,7 +129,7 @@ flowchart TD
 
 ### Testing (~1,409 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
 
-> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly --ignore=tests/test_main.py 2>nul` for live per-file counts.
+> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly 2>nul` for live per-file counts (`test_main.py` is included — it runs offline since the M8 batch).
 
 | Test file | Approx. count | What it covers |
 |-----------|-------|----------------|
@@ -133,7 +141,7 @@ flowchart TD
 | `test_models.py` | 21+ | Job dataclass, normalisation, company cleaning |
 | `test_notifications.py` | 19+ | Email, Slack, Discord sending |
 | `test_deduplicator.py` | 29+ | Cross-source dedup (incl. marketing-suffix B-4 tests) |
-| `test_main.py` | 12 | Orchestrator (excluded from canonical run — hits live Indeed) |
+| `test_main.py` | 15 | Orchestrator (in the canonical run — JobSpy stubbed via autouse fixture, offline since M8) |
 | `test_cli.py` | 11+ | CLI commands + SOURCE_REGISTRY assertions |
 | `test_database.py` | 9+ | SQLite operations, migrations, source history |
 | `test_api.py` | 9+ | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
@@ -324,9 +332,9 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 
 | Platform | Slugs | Notes |
 |----------|-------|-------|
-| Greenhouse | 80 | 25 original + 55 Batch 3 additions |
+| Greenhouse | 82 | 25 original + 57 Batch 3 additions |
 | Lever | 35 | 12 original + 23 Batch 3 additions |
-| Workable | 25 | 8 original + 17 Batch 3 additions |
+| Workable | 18 | 8 original + 10 Batch 3 additions |
 | Ashby | 25 | 9 original + 16 Batch 3 additions |
 | SmartRecruiters | 15 | 6 original + 9 Batch 3 additions |
 | Pinpoint | 15 | 8 original + 7 Batch 3 additions |
@@ -335,7 +343,7 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 | Personio | 18 | 10 original + 8 Batch 3 additions |
 | SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
 | Rippling | 5 | Added Batch 3 |
-| **Total** | **~264** | |
+| **Total** | **256** | |
 
 ## Project Structure
 
@@ -350,12 +358,12 @@ job360/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 11 route modules (46+ endpoints)
-│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│       ├── api/                 # FastAPI app + 12 route modules (64 endpoints)
+│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, client_log, notifications, notification_rules, runs
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
-│       │   ├── companies.py     # ATS company slugs (~264 across 11 platforms)
+│       │   ├── companies.py     # ATS company slugs (~256 across 11 platforms)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py
 │       │   └── tenancy.py

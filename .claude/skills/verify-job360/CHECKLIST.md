@@ -34,6 +34,8 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 8. Logout → `POST /logout` 204, cookie cleared, old cookie → `/me` 401
 - [ ] 9. Route guard — gated route with no cookie → 401
 - [ ] 10. Session persists — 30-day cookie max-age (`auth.py`)
+- [ ] 10a. Magic-link **request** → `POST /api/auth/magic-link/request` 204 (rate-limited per email; send is Resend-conditional)
+- [ ] 10b. Magic-link **consume** → `POST /api/auth/magic-link/consume` with a token — signs in (find-or-create), cookie issued, `GET /me` resolves the user
 
 ## C. Profile
 - [ ] 11. CV upload + LLM parse → `POST /api/profile` 200, skills+titles returned, `user_profiles` row lands

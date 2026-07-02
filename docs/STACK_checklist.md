@@ -4,7 +4,7 @@
 >
 > **Companion to** `STACK.md` (the have-vs-add overview). This file is the *evidence*.
 
-**Score: 36 implemented ✅ · 12 to build ❌** (build/ops + business layers). *Phases 1–3 landed 2026-07-01 — Postgres (1608 green) + Docker + CI + health probes + env validation + Sentry + PostHog + security headers + logging. **1625 tests green on Postgres.** Only the live Railway deploy remains (blocked on expired trial — see `docs/DEPLOY.md`). Business layer (Stripe/paywall/email) is Phase 4+.*
+**Score: 41 implemented ✅ · 10 to build ❌** (build/ops + business layers; updated 2026-07-02 — Resend email + magic-link auth confirmed shipped, see `docs/maintenance/DOCSYNC.md`). *Phases 1–3 landed 2026-07-01 — Postgres (1608 green) + Docker + CI + health probes + env validation + Sentry + PostHog + security headers + logging. **1625 tests green on Postgres.** Railway deploy is now LIVE — see `docs/DEPLOY.md`. Business layer (Stripe/paywall) is Phase 4+.*
 
 ---
 
@@ -44,6 +44,7 @@
 | ✅ | Sessions | `backend/src/services/auth/sessions.py` |
 | ✅ | Signed cookies (itsdangerous) | `backend/src/services/auth/sessions.py` |
 | ✅ | Auth rate-limit (sliding-window) | `backend/src/services/auth/rate_limit.py` |
+| ✅ | Magic-link passwordless login | `backend/src/services/auth/magic_link.py` + `backend/src/api/routes/auth.py` (request/consume) + migration `0022_magic_link_tokens` |
 
 ## 💳 Payments / Plans
 | ✓ | Item | Proof / To build |
@@ -58,7 +59,7 @@
 | ✅ | SMTP email sender | `backend/src/services/auth/email_sender.py` |
 | ✅ | apprise multi-channel dispatcher | `backend/src/services/channels/dispatcher.py` |
 | ✅ | Fernet channel-credential encryption | `backend/src/services/channels/crypto.py` |
-| ❌ | **SES / Resend** (prod transactional email) | *to build — still Gmail SMTP* |
+| ✅ | **Resend** (prod transactional email) | `backend/src/services/auth/email_sender.py` posts to `api.resend.com` (falls back to SMTP if `RESEND_API_KEY` unset) |
 | ⚠️ | Notifications firing in prod | *code done; needs Redis+worker deployed* |
 
 ## 📊 Logging / Monitoring

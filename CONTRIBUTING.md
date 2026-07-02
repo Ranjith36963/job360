@@ -49,22 +49,34 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
    ```bash
    pre-commit run --all-files
    ```
-6. Commit with a conventional message (see above). Use one logical commit per
+6. Run the commit gate — `scripts/agent-gate.sh` is the only way to earn a
+   commit. It re-runs the backend suite (if backend files changed), checks
+   `frontend/openapi.json` + `frontend/src/lib/api-types.ts` haven't drifted
+   from the live FastAPI schema (regenerates via `scripts/gen-api-types.sh`
+   and fails the diff if they're stale), and runs the frontend gates (if
+   frontend files changed). It stamps a PASS bound to the exact tree state,
+   so no edits after a green gate can sneak into the commit unchecked.
+   ```bash
+   bash scripts/agent-gate.sh
+   ```
+7. Commit with a conventional message (see above). Use one logical commit per
    concern; avoid mixing refactors and features.
-7. Open the PR against `main`. Fill the template. Link the issue.
-8. Request review. Do not self-merge unless explicitly authorised.
+8. Open the PR against `main`. Fill the template. Link the issue.
+9. Request review. Do not self-merge unless explicitly authorised.
 
 ## Test-before-merge gate
 
-**Invariant baseline: ~1,409 collected (2 live deselected), 0 failing.**
+**Invariant baseline: ~1,636 collected (2 live deselected), 0 failing.**
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= ~1,409 collected**. (The suite expands with every new source / feature;
+  **>= ~1,636 collected**. (The suite expands with every new source / feature;
   the floor only moves up — Step-0 baseline was 600; Step-3 close-out at
-  ~1,409.)
+  ~1,409; current at ~1,636.)
 - `pre-commit run --all-files` is clean.
+- `scripts/agent-gate.sh` passes (backend suite + api-types drift check +
+  frontend gates, as applicable).
 - CI is green on the PR branch.
 - At least one reviewer has approved (or owner self-approval on
   trivial `docs/*` / `chore/*`).
@@ -102,7 +114,7 @@ either live `scripts/` directory.
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
-It documents the 26 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
+It documents the 28 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
 imports, mandatory five-surface updates when adding sources, timezone-aware
 quiet-hours dispatch, account-mgmt session invalidation, etc.) plus the
 scoring algorithm and data-flow.

@@ -128,8 +128,9 @@ Run **both** servers, then walk the real journey with the browser and watch the 
 5. Spot-check downstream: job detail (`/jobs/[id]`), bookmark/apply → pipeline, notifications.
 
 A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+and the DB/log evidence), severity, and the fix. See `backend/tests/test_e2e_lifecycle.py`
+for the automated version of this same journey (register → CV → search → jobs, offline/CI),
+and [`CHECKLIST.md`](CHECKLIST.md) for the full manual report format (PASS/FAIL/GATED table).
 
 ---
 

@@ -1,6 +1,6 @@
 # Job360 Project Status
 
-## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
+## Current State: Live on Railway (Postgres backend); Post-Step-3 matcher batch merged; Step 4 (ops hardening) mostly done; autonomous maintenance loop paused
 
 > **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
 > profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
@@ -26,8 +26,26 @@
 > Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
-**Last updated:** 2026-06-20
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
+> **✅ SHIPPED — Postgres migration + Railway launch + magic-link auth (2026-07-02):**
+> the DB backend moved from SQLite to Postgres (`backend/src/repositories/pg.py`,
+> psycopg3; `database.py:5` now does `from src.repositories import pg as aiosqlite`
+> so callers are unchanged). Job360 is **live on Railway**
+> (frontend-production-c608f.up.railway.app) — see `docs/DEPLOY.md`. Auth gained a
+> passwordless **magic-link** flow (request/consume in `api/routes/auth.py`,
+> `services/auth/magic_link.py`, migration `0022_magic_link_tokens`), plus a full
+> **password-reset** flow (`services/auth/password_reset.py`, migration
+> `0015_password_resets`) and **email verification** (`services/auth/email_verification.py`,
+> migration `0016_email_verification`). Email delivery is Resend
+> (`services/auth/email_sender.py`), not SES. A structured logging/ops layer landed:
+> `api/middleware.py` (request-id + access-log + security-headers middleware),
+> `api/errors.py` (500/4xx/422 handlers), `repositories/db_retry.py`
+> (`with_write_retry`/`open_db`), `api/routes/client_log.py`
+> (`POST /api/client-log`), `utils/logger.py` (jsonl + audit streams). **Loop 2**
+> (full-lifecycle E2E) is automated in CI: `backend/tests/test_e2e_lifecycle.py` +
+> `.github/workflows/{ci-offline,ci,live-e2e,uptime}.yml`.
+
+**Last updated:** 2026-07-02
+**Total tests:** defer to the runtime collected count (~1,636 collected, 1,638 total, 2 deselected; 0 failing)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
@@ -154,11 +172,11 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Step 2 (API→UI seam) closed at `5cf60ea` with all 5 cohorts (foundations + components + page surfaces + SEO + TanStack Query + run-surface + E2E smokes) + reviewer R-1..R-4 fixes + sentinel.
 - **Step 3 (new endpoints + Settings UI) closed at origin/main `7194d0e` PR #9 merge** — 8 new backend endpoints, migrations 0012/0013/0014, dispatcher rule consultation with timezone-aware quiet hours, ARQ digest + ghost-sweep periodic tasks, 5 new frontend pages, KanbanBoard polish, Cohort D toasts/a11y/loading skeletons, reviewer R-1..R-7 closed, sentinel `337fbda`.
 - **Matcher batch (funnel→judge) merged post-Step-3** on `fix/per-user-search-and-scoring-gate` — `services/llm_matcher.py`, migration 0017 (`user_feed` llm_* columns), `_run_matcher_stage` in pipeline, API llm_* fields, dashboard AI-verdict badge + COALESCE sort, MATCHER_ENABLED/THRESHOLD/MAX_JOBS flags (all default off). Measured: 18/18 in 89.8 s, judge spread 20–92, 10/10 fit accuracy.
-- **Autonomous maintenance loop** running — worker/integrator/scout/health agents processing missions from `docs/maintenance/MISSIONS.md`.
+- **Autonomous maintenance loop** — **paused** since 2026-06-13 (owner-confirmed, M1–M8 all complete; no active cron). See `docs/maintenance/MISSIONS.md`.
 
-**Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
+**Step 4 — ops hardening: mostly DONE.** Shipped: GitHub Actions CI (`.github/workflows/{ci-offline,ci,live-e2e,uptime}.yml`), Dockerfile + docker-compose (`backend/Dockerfile`, `docker-compose.prod.yml`), deploy platform config + Railway launch (`docs/DEPLOY.md`), security-headers middleware (`api/middleware.py:109-132` — CSP + HSTS), `/livez` + `/readyz` split (`api/routes/health.py`), structured logging (`api/middleware.py`, `api/errors.py`, `repositories/db_retry.py`, `utils/logger.py`), `/admin/runs` UI consuming `GET /api/runs/recent`. Still genuinely open: secret manager integration, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI (confirmed absent from all four workflow files), FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill.
 
-**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
+**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, friend dogfood, prod-Redis smoke. Magic-link email + full password-reset (forgot-password) flow are **DONE** (`services/auth/{magic_link,password_reset}.py`, migrations 0022/0015) — email is wired via Resend (`services/auth/email_sender.py`), not Amazon SES.
 
 **Step 3 carry-overs — ALL SHIPPED (closed):**
 - V-01..V-03 form-validation library (RHF + zod) — DONE; forms now use RHF + zod validation.
@@ -181,11 +199,11 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
 - Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + ChromaDB)
-- SQLite database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
+- Postgres database (`backend/src/repositories/pg.py`, psycopg3 — migrated from SQLite) with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
+- Tests: defer to the runtime collected count (~1,636 collected, 1,638 total, 2 deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
 
 ---
 
@@ -245,7 +263,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+| **Total (current green baseline)** | | defer to runtime count (~1,636 collected, 1,638 total, 2 deselected) / 0 failing / 3 skipped on Windows |
 
 ### Not covered or lightly covered
 

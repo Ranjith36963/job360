@@ -18,7 +18,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Markdown report
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
-                                                  Store -> SQLite catalog (jobs table)
+                                                  Store -> Postgres catalog (jobs table)
                                                   Embed (opt-in) -> ChromaDB
 ```
 
@@ -39,14 +39,14 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 22 forward/reverse SQL migrations (0000 → 0021) + runner.py
+│   ├── migrations/                   # 23 forward/reverse SQL migrations (0000 → 0022) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 11 route modules
-│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, middleware, errors, 12 route modules (64 endpoints)
+│   │   │   └── routes/               # health, client_log, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
@@ -73,11 +73,11 @@ job360/
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
-│   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
+│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy — the only send path, see Notification System below)
+│   │   │   ├── notifications/        # report_generator only (legacy CLI markdown/CSV summaries) — no more per-channel classes
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 22-migration forward-compat schema
+│   │   │   ├── database.py           # Async Postgres (psycopg3 via pg.py; `aiosqlite` name kept as a compat alias) + 23-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -90,10 +90,11 @@ job360/
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)
 │   │   │   └── tasks.py              # score_and_ingest, send_notification, send_daily_digest, nightly_ghost_sweep, enrich_job_task
 │   │   └── utils/
-│   │       ├── logger.py             # Rotating file + console logging
+│   │       ├── logger.py             # Structured logging: console + data/logs/job360.log + job360.jsonl (JSON) + audit.log; run_uuid + request_id correlation ids
 │   │       ├── rate_limiter.py       # Async semaphore + delay
+│   │       ├── telemetry.py          # MatcherTelemetry counters (Engine 4)
 │   │       └── time_buckets.py
-│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+│   └── tests/                        # 1,636 collected / 1,638 total (2 deselected) across 100+ files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -168,7 +169,7 @@ class BaseJobSource:
         return []  # Sources use their own fallback lists
 ```
 
-Sources that use `self.search_queries` with their own fallback lists: JSearch, LinkedIn, FindAJob, NHS Jobs.
+Sources that use `self.search_queries` with their own fallback lists: JSearch, LinkedIn, NHS Jobs.
 
 ### 5. Fetch (async, concurrent)
 
@@ -541,37 +542,38 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 
 ## Notification System
 
-### Auto-Discovery
+> **The old `NotificationChannel` ABC + `get_all_channels() -> [EmailChannel, SlackChannel, DiscordChannel]` hierarchy no longer exists** (no `class NotificationChannel` anywhere in the codebase). The real, current path is the Apprise-backed dispatcher below. `src/services/notifications/` today holds only `report_generator.py` (legacy CLI markdown/CSV report generation, unrelated to per-user delivery).
+
+### Apprise Dispatcher (`src/services/channels/dispatcher.py`)
+
+Channels are **per-user rows** in `user_channels` (migration 0005; `channel_type` one of `email`/`slack`/`discord`/`telegram`/`webhook`), each holding a Fernet-encrypted Apprise URL (e.g. `slack://tokenA/tokenB/tokenC`). There is no static "auto-discovery" list — every user configures their own channels via `POST /api/channels` or the OAuth connect flow (`channels.py` — Slack/Discord OAuth, migration 0019 `oauth_states`).
 
 ```python
-def get_all_channels():
-    return [EmailChannel(), SlackChannel(), DiscordChannel()]
-
-def get_configured_channels():
-    return [ch for ch in get_all_channels() if ch.is_configured()]
+async def dispatch(db, *, user_id, title, body, job_id=None, match_score=None, force=False) -> list[ChannelSendResult]:
+    channels = await load_user_channels(db, user_id)      # user_channels WHERE enabled=1
+    rule = await _load_notification_rule(db, user_id)     # single notification_rules row (rule #23)
+    # Gate 1: rule.enabled=0 -> skip all channels
+    # Gate 2: match_score < rule.score_threshold -> skip all channels
+    # Gate 3: notify_mode in (daily, every_n_hours) OR quiet-hours active (zoneinfo, user's IANA tz)
+    #         -> queue into user_notification_digests, unless force=True
+    # Gate 4: otherwise decrypt the channel's Apprise URL and notify() now
 ```
 
-Each channel implements:
-- `is_configured() -> bool` — checks if required env vars are set
-- `send(jobs, stats, csv_path=None)` — sends the notification
-
-### Channel Details
-
-```
-NotificationChannel (ABC)
-├── EmailChannel      — configured if SMTP_EMAIL + SMTP_PASSWORD + NOTIFY_EMAIL set
-│   Uses: Gmail SMTP (smtp.gmail.com:587), HTML template, CSV attachment
-├── SlackChannel      — configured if SLACK_WEBHOOK_URL set
-│   Uses: Block Kit message format, top 10 jobs, webhook POST
-└── DiscordChannel    — configured if DISCORD_WEBHOOK_URL set
-    Uses: Embed message format, top 10 jobs, webhook POST
-```
+- `load_user_channels()` reads `user_channels` for the user (optionally filtered to `enabled=1`).
+- `format_payload(channel_type, title, body)` shapes the message per channel type before Apprise sends it.
+- Quiet hours: `_is_in_quiet_window()` converts UTC `now` to the user's `users.timezone` (stdlib `zoneinfo`, not pytz) and compares against `quiet_hours_start`/`quiet_hours_end`.
+- `force=True` (used by `send_bundle` when the `notification_tick` ARQ cron flushes a digest) bypasses the mode/quiet-hours gate — see CLAUDE.md rule #24.
+- Delivery itself is one line: `apprise.Apprise(); ap.add(decrypted_url); await ap.async_notify(title, body)` — Apprise handles the actual per-channel-type protocol (SMTP, Slack webhook, Discord webhook, Telegram bot API, generic webhook).
+- Every call to `dispatch()` returns one `ChannelSendResult(channel_id, channel_type, ok, error, skipped, queued_digest)` per channel, logged via `_log_dispatch()` and (for the worker path) persisted to `notification_ledger` (migration 0004) for idempotency — `UNIQUE(user_id, job_id, channel)` guarantees the same job is never sent twice on the same channel.
+- Credentials are Fernet-encrypted at rest (`services/channels/crypto.py`, key from `CHANNEL_ENCRYPTION_KEY`); Apprise itself is lazy-imported (`_get_apprise_cls()`) so importing `dispatcher.py` doesn't pull in the ~30 MB Apprise dependency tree unless a send actually happens (CLAUDE.md rule #11).
 
 ---
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 22 forward-migrations (0000–0021). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> **Postgres, not SQLite.** The engine is Postgres via psycopg3 (`src/repositories/pg.py`); `database.py:5` does `from src.repositories import pg as aiosqlite` so the rest of the codebase keeps calling the aiosqlite-shaped API, but no SQLite file is ever opened in production. `DATABASE_URL` (default `postgresql://job360:job360dev@localhost:5433/job360`, `settings.py:24-26`) is the single source of truth for the connection. The full schema is built by 23 forward-migrations (0000–0022) plus `JobDatabase._migrate()` in `database.py`, which mirrors the same columns forward so a bare `init_db()` (no external runner) still produces the current shape — see `database.py:91-203`.
+
+### Shared catalog tables (no `user_id` — rules #1/#10/#17)
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -591,8 +593,36 @@ CREATE TABLE IF NOT EXISTS jobs (
     normalized_company TEXT NOT NULL,
     normalized_title TEXT NOT NULL,
     first_seen TEXT NOT NULL,
+    -- Pillar 3 Batch 1 — 5-column date model + ghost-detection lifecycle
+    posted_at TEXT,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    last_updated_at TEXT,
+    date_confidence TEXT DEFAULT 'low',
+    date_posted_raw TEXT,
+    consecutive_misses INTEGER DEFAULT 0,
+    staleness_state TEXT DEFAULT 'active',
+    -- Step-1.5 S1.1 — 9 per-dimension score columns (migration 0011)
+    role INTEGER DEFAULT 0,
+    skill INTEGER DEFAULT 0,
+    seniority_score INTEGER DEFAULT 0,
+    experience INTEGER DEFAULT 0,
+    credentials INTEGER DEFAULT 0,
+    location_score INTEGER DEFAULT 0,
+    recency INTEGER DEFAULT 0,
+    semantic INTEGER DEFAULT 0,
+    penalty INTEGER DEFAULT 0,
+    -- migration 0021 — application deadline
+    deadline TEXT,
+    deadline_source TEXT,
     UNIQUE(normalized_company, normalized_title)
 );
+
+CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
+CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
+CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
+CREATE INDEX IF NOT EXISTS idx_jobs_staleness_state ON jobs(staleness_state);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at);
 
 CREATE TABLE IF NOT EXISTS run_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -600,38 +630,42 @@ CREATE TABLE IF NOT EXISTS run_log (
     total_found INTEGER DEFAULT 0,
     new_jobs INTEGER DEFAULT 0,
     sources_queried INTEGER DEFAULT 0,
-    per_source TEXT DEFAULT '{}'  -- JSON string
+    per_source TEXT DEFAULT '{}',      -- JSON string
+    -- migration 0010 — observability columns
+    run_uuid TEXT,
+    per_source_errors TEXT DEFAULT '{}',
+    per_source_duration TEXT DEFAULT '{}',
+    total_duration REAL,
+    user_id TEXT
 );
-
-CREATE TABLE IF NOT EXISTS user_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    action TEXT NOT NULL,            -- save, dismiss, applied, etc.
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE TABLE IF NOT EXISTS applications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    stage TEXT NOT NULL DEFAULT 'applied',  -- applied, interview, offer, rejected
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
-CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
-CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
-
-**Pragmas:** `journal_mode=WAL`, `busy_timeout=5000`
 
 **Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
 
-**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a SQLite DEFAULT).
+**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a schema-level DEFAULT).
+
+**No PRAGMAs.** SQLite's `journal_mode=WAL` / `busy_timeout=5000` no longer apply — Postgres handles concurrent readers/writers natively via row/table locking, so there is no "database is locked" failure mode to guard against. `src/repositories/db_retry.py` ("Postgres edition") is kept for callers (rescore loop, LLM judge) that still route writes through `with_write_retry()`, but it now retries only transient `psycopg.OperationalError` connection blips, not lock contention.
+
+### Per-user tables (all scoped by `user_id`, rules #10/#12/#25)
+
+| Table | Migration | Key columns |
+|-------|-----------|--------------|
+| `users` | 0001 | `id, email UNIQUE, password_hash, created_at, deleted_at`; `+email_verified_at` (0016), `+timezone` (0012, default `'UTC'`) |
+| `sessions` | 0001 | `id, user_id, created_at, expires_at, last_seen, user_agent, ip_hash` |
+| `user_feed` | 0003 | `id, user_id, job_id, score CHECK 0-100, bucket, status, notified_at, UNIQUE(user_id, job_id)`; `+llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (0017); `+profile_version INTEGER` (0018 — stamps the `user_profile_versions` snapshot that produced the row) |
+| `notification_ledger` | 0004 | `id, user_id, job_id, channel, status ('queued'/'sent'/'failed'/'dlq'), sent_at, error_message, retry_count, UNIQUE(user_id, job_id, channel)` — per-channel send idempotency |
+| `user_channels` | 0005 | `id, user_id, channel_type, display_name, credential_encrypted BLOB (Fernet), key_version, enabled`; `+connection_status, +target_label` (0019) |
+| `user_profiles` | 0006 | `user_id PK, cv_data, preferences, linkedin_data, github_data, created_at, updated_at` — mutable "tip" row |
+| `user_profile_versions` | 0007 | `id, user_id, created_at, source_action, cv_data, preferences` — append-only snapshot history |
+| `notification_rules` | 0012, collapsed to one row per user by 0020 | `id, user_id UNIQUE, score_threshold, notify_mode CHECK ('instant'/'daily'/'every_n_hours'), interval_hours, daily_send_time, quiet_hours_start, quiet_hours_end, last_sent_at, enabled` — rule #23: ONE row governs all of a user's channels |
+| `user_notification_digests` | 0013 | `id, user_id, channel, job_id, queued_at, sent, sent_at` — queue drained by the `notification_tick` ARQ cron |
+| `application_stage_history` | 0014 | `id, job_id, user_id, from_stage, to_stage, transitioned_at, notes` |
+| `password_resets` | 0015 | `id, user_id, token_hash UNIQUE (SHA256), created_at, expires_at, used_at` — 1-hour expiry, single-use |
+| `email_verifications` | 0016 | `id, user_id, token_hash UNIQUE, email, created_at, expires_at, used_at` |
+| `oauth_states` | 0019 | `state PK, user_id, channel_type, created_at` — one-time nonce for the Slack/Discord channel-connect OAuth redirect |
+| `magic_link_tokens` | 0022 | `id, email, token_hash, expires_at, used_at, created_at` — keyed on email (not `user_id`) since the account may not exist yet; consuming a valid token both authenticates AND verifies the email in one step |
+
+`user_actions` and `applications` predate multi-tenancy (baseline `UNIQUE(job_id)`) but migration 0002 rebuilt both with a `user_id` column and widened the constraint to `UNIQUE(user_id, job_id)`, so two users can independently save/apply to the same shared-catalog job. `applications` also gained `last_advanced_at, interview_dates, notes_history` in migration 0014.
 
 ---
 
@@ -639,22 +673,48 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 ### Environment Variables (.env)
 
+Source: `backend/src/core/settings.py`.
+
 | Variable | Required | Used by |
 |----------|----------|---------|
-| `REED_API_KEY` | No | ReedSource |
-| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | No | AdzunaSource |
-| `JSEARCH_API_KEY` | No | JSearchSource |
-| `JOOBLE_API_KEY` | No | JoobleSource |
-| `SERPAPI_KEY` | No | GoogleJobsSource |
-| `CAREERJET_AFFID` | No | CareerjetSource |
-| `FINDWORK_API_KEY` | No | FindworkSource |
-| `GITHUB_TOKEN` | No | GitHub profile enrichment (higher rate limits) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` | No | Email notifications |
-| `SLACK_WEBHOOK_URL` | No | Slack notifications |
-| `DISCORD_WEBHOOK_URL` | No | Discord notifications |
-| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range sorting (default 40k-120k) |
+| `REED_API_KEY` | No | ReedSource (`settings.py:39`) |
+| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | No | AdzunaSource (`settings.py:40-41`) |
+| `JSEARCH_API_KEY` | No | JSearchSource (`settings.py:42`) |
+| `JOOBLE_API_KEY` | No | JoobleSource (`settings.py:43`) |
+| `SERPAPI_KEY` | No | GoogleJobsSource (`settings.py:44`) |
+| `CAREERJET_AFFID` | No | CareerjetSource (`settings.py:45`) |
+| `FINDWORK_API_KEY` | No | FindworkSource (`settings.py:46`) |
+| `DFE_APPRENTICESHIPS_API_KEY` | No | GovApprenticeships (DfE Display Advert API v2; `settings.py:47-50`) |
+| `GITHUB_TOKEN` | No | GitHub profile enrichment — higher rate limit, 5000/hr vs 60/hr (`settings.py:53`) |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` / `CEREBRAS_API_KEY` | No | LLM provider fallback chain for CV/LinkedIn/GitHub parsing + the Engine-4 judge (`settings.py:56-58`) |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` | No | Legacy CLI email report (`settings.py:63-65`) |
+| `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Legacy CLI webhook report (`settings.py:68-69`); per-user channels now go through `user_channels` + the Apprise dispatcher instead |
+| `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` / `DISCORD_CLIENT_ID` + `DISCORD_CLIENT_SECRET` | No | One-click Slack/Discord channel-connect OAuth (`settings.py:75-87`); blank disables the `/connect/{slack,discord}` endpoints |
+| `OAUTH_REDIRECT_BASE` | No | Public base URL used to build the OAuth `redirect_uri` (`settings.py:77-79`) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` | No | Telegram channel-connect flow (`settings.py:92-93`) |
+| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker sort, default 40k-120k (`settings.py:168-169`) |
+| `ENRICHMENT_THRESHOLD` | No (default `60`) | Min `match_score` to send a job to LLM enrichment (`settings.py:103`) |
+| `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user concurrent-search cap, HTTP 429 once exceeded (`settings.py:109`) |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout window (`settings.py:115-116`) |
+| `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No (default `0.15` / `0.15`) | Pillar 2.2 gate-pass score thresholds (`settings.py:124-125`) |
+| `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No (default `10`/`8`/`6`/`6`) | Pillar 2.9 multi-dim scoring weights, added on top of the legacy 100 then clamped (`settings.py:132-135`) |
+| `SEMANTIC_ENABLED` | No (default `false`) | Embeddings + ChromaDB + ESCO normalisation opt-in (`settings.py:140`) |
+| `ENGINE1_ENABLED`..`ENGINE4_ENABLED` | No | Independent per-engine switches; each defaults to its legacy flag (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`) (`settings.py:162-165`) |
+| `ENRICHMENT_ENABLED` | No (default `false`) | Legacy gate for Engine 2 — LLM enrichment + multi-dim scoring (`src/services/job_enrichment.py:33`) |
+| `MATCHER_ENABLED` | No (default `false`) | Legacy gate for Engine 4 — the LLM judge (`src/services/llm_matcher.py:36`) |
+| `MATCHER_THRESHOLD` | No (default `30`) | Min keyword `match_score` for a job to be judged (`llm_matcher.py:39`) |
+| `MATCHER_MAX_JOBS` | No (default `30`) | Max jobs per user per run sent to the judge (`llm_matcher.py:40`) |
+| `SOURCE_FETCH_TIMEOUT` | No (default `60`) | Per-source fetch ceiling in seconds, non-ATS categories (`settings.py:239`) |
+| `SOURCE_FETCH_TIMEOUT_ATS` | No (default `240`) | Per-source fetch ceiling for ATS-category sources (`settings.py:245`) |
+| `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC session cookie signing (`settings.py:248`) |
+| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of `user_channels` credentials (`settings.py:249`) |
+| `DATABASE_URL` | Yes in prod | Postgres connection string, psycopg3 (`settings.py:24-26`; default points at local dev Postgres on port 5433) |
+| `SENTRY_DSN` | No | Error tracking + performance monitoring; empty = Sentry disabled no-op (`settings.py:253`) |
+| `LOG_LEVEL` | No (default `INFO`) | Root logging level read once at import (`settings.py:10`) |
 
-All API keys are optional — 39 of 47 sources work without any keys.
+`validate_required_env()` (`settings.py:260-277`) raises at boot if `SESSION_SECRET` / `CHANNEL_ENCRYPTION_KEY` / `DATABASE_URL` are missing, but only when `APP_ENV=production` or `RAILWAY_ENVIRONMENT` is set — a no-op in dev/test.
+
+All source API keys are optional — 39 of 47 sources work without any keys.
 
 ### Constants (`settings.py`)
 
@@ -679,7 +739,49 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | Arbeitnow/Jobicy | 2 | 1.0s |
 | Greenhouse/Lever | 2 | 1.5s |
 | HN Jobs | 3 | 0.5s |
-| WorkAnywhere/Nomis | 1 | 5.0s |
+| WorkAnywhere | 1 | 5.0s |
+
+---
+
+## Structured Logging
+
+Full-lifecycle logging so "why did X happen" is answerable from `data/logs/` without re-running anything. All pieces write through `src/utils/logger.py`'s `get_logger("job360.<name>")`.
+
+### Output streams (`src/utils/logger.py`)
+
+- `data/logs/job360.log` — human-readable text, rotating (5 MB × 3 backups).
+- `data/logs/job360.jsonl` — the same events as structured JSON lines (`JSONFormatter`), rotating (5 MB × 3 backups) — the machine-consumable stream.
+- `data/logs/audit.log` — a separate, `propagate=False` logger (`job360.audit`, `setup_audit_logger()`) so audit records never mix into the main streams; rotating (5 MB × 5 backups).
+- Console (stdout) mirrors the text stream.
+
+### Correlation ids
+
+Two independent context-local ids get stamped onto every log line automatically via `JSONFormatter`:
+
+- **`run_uuid`** — set once per pipeline run (`set_run_uuid()`), ties every log line emitted during one `run_search()` invocation together. `None` outside a pipeline run (e.g. plain CLI subcommands).
+- **`request_id`** — set per HTTP request by `RequestIdMiddleware` (`src/api/middleware.py:41-68`). Honours an incoming `X-Request-Id` header (load-balancer/upstream chains) or generates a fresh 16-hex-char id; echoed back in the `X-Request-Id` response header.
+
+### HTTP middleware (`src/api/middleware.py`)
+
+- `RequestIdMiddleware` — stamps the correlation id described above (outermost middleware).
+- `AccessLogMiddleware` — logs one `http_request` line per HTTP request on `job360.access`, unconditionally (even routes that log nothing themselves): method, path, status_code, duration_ms, request_id, user_id (from `request.state`), client IP. The `finally` block guarantees a line even when the route raises (recorded as status 500).
+- `SecurityHeadersMiddleware` — adds `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, a `Content-Security-Policy` (locked to `'none'` by default, `cdn.jsdelivr.net` + `'unsafe-inline'` allowed for the Swagger `/docs` UI), and `Strict-Transport-Security` in production only.
+
+### Exception + error logging (`src/api/errors.py`)
+
+`register_exception_logging(app)` attaches three handlers, each reproducing FastAPI's default response so client behaviour is unchanged:
+
+- `log_unhandled_exception` — any unhandled `Exception` logs with full traceback + `request_id` on `job360.error`, then returns a clean 500.
+- `log_http_exception` — 4xx/5xx `HTTPException`s log their `detail` (why, not just the status code) on `job360.error`; routine 401s (logged-out `/me` checks) are skipped as high-volume/low-value.
+- `log_validation_error` — 422 `RequestValidationError`s log which field(s) failed (first 10 errors) on `job360.error`.
+
+### Client-side error bridge (`src/api/routes/client_log.py`)
+
+`POST /api/client-log` — the browser POSTs UI errors/events here so they land in `data/logs/` instead of vanishing when the tab closes. Per-IP rate-limited (60/min via `services/auth/rate_limit.py`), optional-user (captures pre-login errors too), always returns 204 (logging must never break the client, even when rate-limited or malformed).
+
+### Write-retry (`src/repositories/db_retry.py`)
+
+`with_write_retry(fn)` retries a DB write up to 5 times with exponential backoff, but only on a `psycopg.OperationalError` whose message looks like a lock/busy condition (the SQLite-era heuristic, kept because Postgres callers still route through it — see Database Schema above). Every retry attempt and final failure logs on `job360.db`.
 
 ---
 
@@ -705,8 +807,9 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 | Package | Purpose |
 |---------|---------|
-| aiohttp >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite >=0.19.0 | Async SQLite for job storage |
+| aiohttp >=3.9.0,<3.14 | Async HTTP client for source fetching (pinned below 3.14 — breaks aioresponses 0.7.8 test mocking) |
+| psycopg[binary] >=3.2 | Async Postgres driver — the real DB engine (Phase 1 migration; `src/repositories/pg.py`) |
+| aiosqlite >=0.19.0 | Kept only as the import name `database.py` binds to (`from src.repositories import pg as aiosqlite`) — no SQLite file is opened in production |
 | python-dotenv >=1.0.0 | .env file loading |
 | jinja2 >=3.1.0 | HTML report templates |
 | click >=8.1.0 | CLI framework |
@@ -722,6 +825,9 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | google-generativeai >=0.8.0 | Gemini LLM provider for CV parsing |
 | groq >=0.11.0 | Groq LLM provider for CV parsing |
 | cerebras-cloud-sdk >=1.0.0 | Cerebras LLM provider for CV parsing |
+| apprise >=1.7.0 | Multi-channel notification dispatch (Batch 2; lazy-imported — see Notification System above) |
+| sentry-sdk >=1.40.0 | Error tracking + performance monitoring (Phase 3) |
+| argon2-cffi / itsdangerous / cryptography | Password hashing (argon2id) / signed session cookies / Fernet channel-credential encryption |
 
 ### Dev (requirements-dev.txt)
 

@@ -165,13 +165,16 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 | Change password | `PATCH /api/auth/users/me/password` | Requires current password |
 | Change email | `PATCH /api/auth/users/me/email` | Requires current password; clears session (must re-login) |
 | Delete account | `DELETE /api/auth/users/me` | Soft-delete (`deleted_at` is set; row preserved for audit) |
+| Log in without a password | `POST /api/auth/magic-link/request` + `POST /api/auth/magic-link/consume` (UI: `/auth/magic`) | Emails a one-time link; consuming it creates a session like login |
+| Request password reset | `POST /api/auth/password-reset/request` + `/confirm` | Token SHA256-hashed, 1 h TTL, revokes all sessions on reset |
+| Verify email | `POST /api/auth/verify-email/request` + `/confirm`, `GET /api/auth/me/email-verified` | Sets `users.email_verified_at`; not enforced at login today |
 
 ### 2.2 How it works under the hood
 
 - **Password hashing — `backend/src/services/auth/passwords.py`.** Argon2id with OWASP-recommended params (`time_cost=3`, `memory_cost=64 MiB`, `parallelism=4`). Salt is unique per password; verification is constant-time.
 - **Sessions — `backend/src/services/auth/sessions.py`.** Cookie format `<session_id>.<hmac>` signed with `itsdangerous.TimestampSigner` using `SESSION_SECRET`. Signature is verified *before* any DB lookup, so a tampered cookie is rejected for zero cost. 30-day absolute TTL.
 - **FastAPI guards — `backend/src/api/auth_deps.py`.** Two dependencies: `require_user` (401 on missing/invalid/expired cookie) and `optional_user` (returns `None`). Both populate a frozen `CurrentUser` dataclass with `{id, email}`.
-- **Routes — `backend/src/api/routes/auth.py`.** All seven endpoints in the table above. There is **no** rate-limit or lockout on login today. Email-verification and password-reset endpoints **do** exist (verify-email is not enforced at login; password-reset is fully wired) — see Status table at the end.
+- **Routes — `backend/src/api/routes/auth.py`.** 14 endpoints total: the seven core ones in the table above, plus password-reset (`request`/`confirm`), email-verification (`request`/`confirm`/`GET /me/email-verified`), and passwordless magic-link login (`request`/`consume`). Login **is** rate-limited: `auth_rate_limit.is_locked()` returns `429 Too Many Requests` after repeated failures (`auth.py:170-180`, `services/auth/rate_limit.py`). Email-verification is not enforced at login; password-reset is fully wired — see Status table at the end.
 - **DB schema — `backend/migrations/0001_auth.up.sql`.** Two tables: `users(id, email UNIQUE, password_hash, created_at, deleted_at)` and `sessions(id, user_id FK, created_at, expires_at, last_seen, user_agent, ip_hash)`.
 - **Multi-tenant placeholder — `backend/src/core/tenancy.py`.** Constant `DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001"`. Used as the owner for any row created by the *CLI* (pre-auth) or migrated from the pre-Batch-2 single-tenant world. Its `password_hash` is literally `"!"` so it can never be logged into. This is how migration `0002_multi_tenant` backfilled legacy data without throwing it away.
 
@@ -208,11 +211,14 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 
 - `GET /api/profile` — returns the caller's profile, 404 if none yet
 - `POST /api/profile` — accepts a CV file + a preferences JSON body; parses asynchronously
+- `POST /api/profile/cv` — granular CV-only upload (no preferences body required)
+- `POST /api/profile/preferences` — granular preferences-only upsert (no CV re-upload)
 - `POST /api/profile/linkedin` — accepts a LinkedIn "Save to PDF" upload
 - `POST /api/profile/github` — accepts `{username}`
 - `GET /api/profile/versions` — returns the last 10 snapshots
 - `POST /api/profile/versions/{id}/restore` — atomic rollback to a snapshot
-- `GET /api/profile/jsonresume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema
+- `GET /api/profile/versions/{a}/diff/{b}` — field-level diff between two snapshots
+- `GET /api/profile/json-resume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema
 
 ### 3.2 The four data sources
 
@@ -340,6 +346,11 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
   - `POST /api/settings/channels` — create (encrypts credential server-side)
   - `DELETE /api/settings/channels/{id}` — delete (two-layer ownership check: SELECT in route + dispatcher re-checks `user_id`)
   - `POST /api/settings/channels/{id}/test` — send a "test" message, return ok/error
+  - `GET /api/settings/channels/providers` — which OAuth providers (Slack/Discord) are configured
+- **Channel OAuth connect flows** (migration `0019_channel_oauth`, `oauth_states` table) — lets a user link Slack/Discord/Telegram without hand-typing a webhook URL:
+  - `GET /api/settings/channels/connect/slack` → redirect to Slack OAuth; `GET /api/settings/channels/callback/slack` completes the exchange and stores the channel
+  - `GET /api/settings/channels/connect/discord` → redirect to Discord OAuth; `GET /api/settings/channels/callback/discord` completes it
+  - `GET /api/settings/channels/connect/telegram` — returns a bot deep-link; `GET /api/settings/channels/connect/telegram/poll` polls `getUpdates` to capture the chat id (Telegram has no redirect-based OAuth)
 
 ### 4.5 Notification rules — `backend/migrations/0012_notification_rules.up.sql`
 
@@ -599,18 +610,24 @@ backend/
 │   ├── 0007_user_profile_versions.up.sql      — 10-version history
 │   ├── 0012_notification_rules.up.sql         — per-channel preferences + users.timezone
 │   ├── 0013_user_notification_digests.up.sql  — digest queue
-│   └── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   ├── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   ├── 0015_password_resets.up.sql            — password_resets table (SHA256 token, 1h TTL)
+│   ├── 0016_email_verification.up.sql         — email_verifications table + users.email_verified_at
+│   ├── 0019_channel_oauth.up.sql              — oauth_states table (Slack/Discord/Telegram connect)
+│   ├── 0020_notification_rule_single.up.sql   — collapses notification_rules to one row per user
+│   ├── 0021_add_job_deadline.up.sql           — jobs.deadline (shared catalog — Pillar 3, not User pillar)
+│   └── 0022_magic_link_tokens.up.sql          — magic_link_tokens table (passwordless login)
 ├── src/
 │   ├── api/
 │   │   ├── auth_deps.py                       — require_user / optional_user / CurrentUser
 │   │   ├── main.py                            — lifespan + CORS allow-list
 │   │   └── routes/
-│   │       ├── auth.py                        — register / login / logout / me / password / email / delete
-│   │       ├── profile.py                     — get / upload / linkedin / github / versions / restore / jsonresume
+│   │       ├── auth.py                        — register / login / logout / me / password / email / delete / magic-link / password-reset / verify-email
+│   │       ├── profile.py                     — get / upload / cv / preferences / linkedin / github / versions / restore / json-resume
 │   │       ├── jobs.py                        — list / get / export
 │   │       ├── actions.py                     — like / apply / not_interested
 │   │       ├── pipeline.py                    — 5-stage Kanban API
-│   │       ├── channels.py                    — channel CRUD + test
+│   │       ├── channels.py                    — channel CRUD + test + Slack/Discord/Telegram OAuth connect
 │   │       ├── notification_rules.py          — per-channel rule CRUD
 │   │       └── notifications.py               — ledger pagination + stats
 │   ├── core/

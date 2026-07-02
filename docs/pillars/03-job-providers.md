@@ -163,7 +163,7 @@ If LinkedIn's HTML regex breaks because they changed markup:
 
 ## 2. The base class — `backend/src/sources/base.py`
 
-Every source extends `BaseJobSource`. **Never change this class without checking all 49 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
+Every source extends `BaseJobSource`. **Never change this class without checking all 46 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
 
 ### 2.1 Constructor (`base.py:64-69`)
 
@@ -355,23 +355,23 @@ Indeed/Glassdoor (`JobSpySource` wrapping `python-jobspy`, optional dep — skip
 
 ## 5. The ATS company-slug catalog — `backend/src/core/companies.py`
 
-ATS sources don't search — they poll a *known list of companies'* boards. The catalog holds ~266 companies across 12 platforms:
+ATS sources don't search — they poll a *known list of companies'* boards. The catalog holds 256 companies across 11 platforms:
 
 | Platform | Companies | Shape |
 | --- | --- | --- |
-| Greenhouse | ~80 | list of slug strings |
-| Lever | ~35 | slug strings |
-| Workable | ~25 | slug strings |
-| Ashby | ~25 | slug strings |
-| Recruitee | ~20 | slug strings |
-| Workday | ~20 | **dicts** `{tenant, wd, site, name}` (multi-tenant URL construction) |
-| Personio | ~18 | slug strings |
-| Pinpoint | ~15 | slug strings |
-| SmartRecruiters | ~15 | slug strings |
+| Greenhouse | 82 | list of slug strings |
+| Lever | 35 | slug strings |
+| Workable | 18 | slug strings |
+| Ashby | 25 | slug strings |
+| Recruitee | 20 | slug strings |
+| Workday | 20 | **dicts** `{tenant, wd, site, name}` (multi-tenant URL construction) |
+| Personio | 18 | slug strings |
+| Pinpoint | 15 | slug strings |
+| SmartRecruiters | 15 | slug strings |
 | Rippling | 5 | slug strings (Batch 3 starter) |
 | SuccessFactors | 3 | **dicts** `{name, sitemap_url}` (sitemap crawl) |
 
-A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited`) to display names (`Darktrace`) for the UI. Most platforms take simple slug lists; Workday and SuccessFactors need structured dicts because their URLs aren't derivable from a slug alone.
+A `COMPANY_NAME_OVERRIDES` dict (67 entries) maps ugly slugs (`darktracelimited`) to display names (`Darktrace`) for the UI. Most platforms take simple slug lists; Workday and SuccessFactors need structured dicts because their URLs aren't derivable from a slug alone.
 
 ---
 
@@ -447,7 +447,7 @@ All five are currently aligned at **47**.
 
 ## 8. Testing — `backend/tests/test_sources.py` + friends
 
-- **`test_sources.py`** — 81 test functions covering all 47 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
+- **`test_sources.py`** — 78 test functions covering all 47 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
 - **`test_conditional_fetch.py`** — 11 tests for the shared ETag/Last-Modified/304 machinery, FIFO eviction at 256 entries, and the `nhs_jobs_xml` pilot proving `If-None-Match` is sent on the second call.
 - **`test_cli.py`** — `len(SOURCE_REGISTRY) == 47` + exact expected set.
 - **`test_api.py`** — the three hardcoded `== 47` assertions.
@@ -576,7 +576,7 @@ backend/src/
 └── utils/rate_limiter.py           — async semaphore + delay
 
 backend/tests/
-├── test_sources.py                 — 81 tests, all sources, aioresponses-mocked
+├── test_sources.py                 — 78 tests, all sources, aioresponses-mocked
 ├── test_conditional_fetch.py       — 11 tests, ETag/304/FIFO + nhs_jobs_xml pilot
 ├── test_cli.py                     — len(SOURCE_REGISTRY) == 47
 └── test_api.py                     — three == 47 assertions
@@ -595,7 +595,7 @@ backend/tests/
 ## 12. Architectural rules touched by this pillar
 
 - **#1** — never touch `normalized_key()` without verifying deduplicator + DB UNIQUE.
-- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 49 subclasses.
+- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 46 subclasses.
 - **#4** — always mock HTTP in tests (`aioresponses`); the suite runs offline.
 - **#8 / #13** — adding/removing a source touches FIVE surfaces (registry, build list, rate limits, `test_cli.py`, `test_api.py`) plus CLAUDE.md.
 - **#14** — conditional fetch (`_get_json_conditional`) only for upstreams that honour ETag/Last-Modified.

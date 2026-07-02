@@ -22,7 +22,7 @@ sqlite3 data/jobs.db \
    FROM run_log ORDER BY timestamp DESC LIMIT 20;"
 ```
 
-Same data is exposed at `GET /api/runs` (auth-gated).
+Same data is exposed at `GET /api/runs/recent` (paginated run history, auth-gated). A per-source rollup across recent runs (spotting silent provider failures) is at `GET /api/runs/source-health`.
 
 ### List configured sources
 

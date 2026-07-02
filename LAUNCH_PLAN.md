@@ -369,14 +369,16 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 
 - [x] **Phase −2** — Build the verification-blocker set ✅ DONE (A–D all shipped)
 - [ ] **Phase −1** — Manual verification + bug-fix sprint
-- [ ] **Phase 0**  — ICO + privacy lead-time + repo cleanup
-- [ ] **Phase 1**  — Email backbone (SES)
-- [ ] **Phase 2**  — Auth loop closure
-- [ ] **Phase 3**  — Production notifications
-- [ ] **Phase 4**  — Soft launch
+- [ ] **Phase 0**  — ICO + privacy lead-time + repo cleanup (repo cleanup done; ICO/legal still owner to-dos)
+- [x] **Phase 1**  — Email backbone ✅ DONE — Resend (not SES), `backend/src/services/auth/email_sender.py:60-85` (`RESEND_API_KEY`, `api.resend.com/emails`)
+- [x] **Phase 2**  — Auth loop closure ✅ DONE — password reset (migration 0015), email verification (migration 0016), login lockout (`api/routes/auth.py:165-182`, `LOGIN_MAX_ATTEMPTS`/`LOGIN_LOCKOUT_WINDOW_SECONDS` in `core/settings.py:115-116`), magic-link auth (migration 0022) added since this plan was written
+- [x] **Phase 3**  — Production notifications ✅ DONE — ARQ worker + Redis deployed on Railway (`backend/src/workers/settings.py`, `Dockerfile.worker`), Postgres backend live (`database.py:5`, `repositories/pg.py`)
+- [ ] **Phase 4**  — Soft launch (app is live on Railway per project memory, but privacy/terms lawyer review + formal soft-launch invite batch not confirmed here — verify against STATUS.md)
 - [ ] **Phase 5**  — Engineering hygiene (rolling)
 - [ ] **Phase 6**  — Feature-flag rollouts (post-launch)
 - [ ] **Phase 7**  — Growth features (post-launch)
+
+> Note (2026-07-02 DocSync pass): Phases 1–3 above shipped with different tech than originally planned — Resend instead of SES, Postgres instead of SQLite, Railway instead of a generic host. See `docs/maintenance/DOCSYNC.md` for the full code-verified ledger. Docker (`backend/Dockerfile`, `Dockerfile.worker`, `frontend/Dockerfile`, `docker-compose.prod.yml`) and Sentry (`api/main.py`) also landed, ahead of where Phase 5 placed them.
 
 ---
 

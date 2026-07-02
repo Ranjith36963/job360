@@ -1,5 +1,7 @@
 # Job360 — Product Requirements Document (PRD)
 
+> ⚠️ **Superseded snapshot (v1.0, 15 Apr 2026)** — predates Pillar 2, multi-tenant Postgres, and magic-link auth. For current state see `STATUS.md` and `docs/maintenance/DOCSYNC.md`.
+
 > **Version:** 1.0  
 > **Date:** 15 April 2026  
 > **Author:** Ranjith (Founder & Engineer)  

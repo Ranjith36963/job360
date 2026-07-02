@@ -16,7 +16,7 @@ Aging: every round increments `skipped: N` on items it passes over; at `skipped:
 4. **DONE (1e709f7, M6) — gov_apprenticeships** removed entirely in the source rotation (was: non-JSON / v1 API retired). Gone from the registry. (NEEDS-HUMAN #2 still tracks the optional DfE-key revival if you ever want it back.)
 5. **DONE (1e709f7, M6) — aijobs_global** removed entirely in the source rotation (was: non-JSON / board abandoned). Gone from the registry.
 6. **DONE (fc55fb8, M1) — JobSpy/Glassdoor 400** resolved by disabling glassdoor querying (JobSpySource default sites = ["indeed"]); the anti-bot 403 was term-independent. Live-confirmed: no glassdoor error lines in run b0250268211a. Re-enable path documented in indeed.py.
-7. **TODO `skipped: 1` — enrichment accuracy: L1 merge prefers a weak rules seniority over LLM "unknown"** (measured: costs L1 10 points, 80%→90% if fixed). Fix `merge_rules_llm` in `backend/scripts/compare_enrichment_levels.py` to prefer "unknown"-tolerant merge (LLM unknown → keep rules ONLY if rules confidence is word-boundary-exact; else unknown), re-run the scorer, journal the new numbers. If the merged logic ships anywhere in `src/`, port the same fix there.
+7. **DONE — enrichment accuracy: L1 merge prefers a weak rules seniority over LLM "unknown".** done: `merge_rules_llm()` in `backend/scripts/compare_enrichment_levels.py:133-153` now prefers the LLM for `seniority`/`workplace` (`pick(llm.get(...), rules.get(..., "unknown"))`), keeps rules-first for `salary`/`visa` where rules are more reliable — matches the fix description.
 
 ## P3 — M3 / M8 follow-ons
 
@@ -34,25 +34,25 @@ M7a. ~~**DONE (2026-06-13, 56c8c76)** — `lib/api.ts` no longer hand-mirrors th
 ## P2 — matcher (funnel→judge) follow-ons
 
 8. **DONE (2026-06-13, migration 0018 + rescore.py + profile.py trigger) — re-judge policy:** re-score on profile-version change implemented. When a user saves a new profile, the system detects the content change, clears all LLM verdicts (`clear_user_verdicts`), and re-scores the full 30-day catalog in the background (`rescore_user_feed`). `user_feed` rows are now stamped with `profile_version`. LLM re-judge fires only if `MATCHER_ENABLED=true`; keyword re-score always runs.
-9. **TODO — matcher telemetry:** count judged/skipped/failed per run into `run_log` extras (mirrors enrichment telemetry) so morning review can see judge health without grepping logs.
+9. **DONE (counters) / UNVERIFIED (persistence) — matcher telemetry:** done: `MatcherTelemetry` (`backend/src/utils/telemetry.py:81-107`) tracks judged/skipped/failed/fit-spread, and `llm_matcher.py:200-234` calls `matcher_telemetry().record_verdict(...)` per verdict. **Still open:** no confirmed write of these counters into `run_log` (or any other sink) — a repo-wide grep for `MatcherTelemetry`/`record_verdict` finds only the in-memory singleton being populated, no persistence call site. "Morning review without grepping logs" is not yet satisfied; leave this sub-point open until a `run_log` write (or similar) is added.
 10. **TODO — Level 6 experiment:** one combined LLM call returning facts + fit (salary still from source), measured head-to-head against L1+L4 in the harness; journal accuracy + latency + calls saved. Decision input for replacing two calls with one.
 
 ## P3 — Step-3 carry-overs (known tech debt)
 
-11. **TODO — V-04: CV upload size cap + MIME allowlist** on `POST /api/profile` (and LinkedIn upload). Reject >10MB and non-PDF/DOCX with 422 + tests.
-12. **TODO — V-01..V-03: RHF + zod form validation** on settings + profile forms (frontend). Split per page when picked.
-13. **TODO — C-07: @dnd-kit keyboard a11y** on KanbanBoard.
-14. **TODO — V-05: OpenAPI → TS codegen** so `lib/types.ts` stops drifting from `api/models.py` (the llm_* fields were mirrored by hand again).
+11. **DONE — V-04: CV upload size cap + MIME allowlist** on `POST /api/profile` (and LinkedIn upload). done: `backend/src/api/routes/profile.py:243` raises 413 over the 10MB limit, `:249` raises 415 for non-PDF/DOCX (CV upload); `:354`/`:360` repeat the same 413/415 pair for the LinkedIn upload.
+12. **DONE — V-01..V-03: RHF + zod form validation** on settings + profile forms (frontend). done: `zodResolver` is wired in `frontend/src/app/settings/account/page.tsx` plus the auth forms (`(auth)/login`, `register`, `forgot-password`, `reset-password`).
+13. **DONE — C-07: @dnd-kit keyboard a11y** on KanbanBoard. done: `frontend/src/components/pipeline/KanbanBoard.tsx` imports `DndContext`/sensors from `@dnd-kit/core` and `CSS` from `@dnd-kit/utilities`, wraps the board in `<DndContext sensors={sensors} onDragEnd={handleDragEnd}>`.
+14. **DONE — V-05: OpenAPI → TS codegen** so `lib/types.ts` stops drifting from `api/models.py`. done: `frontend/package.json` `"gen:types": "bash ../scripts/gen-api-types.sh"`, output committed at `frontend/src/lib/api-types.ts`; the drift check also runs inside `scripts/agent-gate.sh`.
 
 ## P4 — docs and hygiene
 
-15. **TODO — document the matcher batch:** STATUS.md (current phase + new flag), docs/IMPLEMENTATION_LOG.md (batch entry: migration 0017, llm_matcher service, pipeline stage, API fields, badge, measured 18/18 in 89.8s), CLAUDE.md phase summary + `MATCHER_ENABLED`/`MATCHER_THRESHOLD`/`MATCHER_MAX_JOBS` in the env-var table.
-16. **TODO — README/ARCHITECTURE sweep:** ensure the three-engine + judge picture (keyword funnel → enrichment facts → semantic → LLM judge) is described once, correctly, with the measured accuracy numbers; remove stale references.
+15. **DONE — document the matcher batch:** done: `STATUS.md` has a "Matching Engines" section (`STATUS.md:148`); `CLAUDE.md`'s "Matcher batch (funnel → judge, post-Step-3)" phase summary covers migration 0017, `llm_matcher.py`, the pipeline stage, API fields, badge, and the measured 18/18-in-89.8s numbers; `MATCHER_ENABLED`/`MATCHER_THRESHOLD`/`MATCHER_MAX_JOBS` are in CLAUDE.md's env-var table.
+16. **DONE — README/ARCHITECTURE sweep:** done: `README.md:264-274` has a single "Matching engines (keyword → dimensions → hybrid → LLM judge)" section describing all four engines once, correctly, with the measured accuracy numbers (18/18 in 89.8s, judge spread 20-92 vs keyword 30-43, 10/10 fit accuracy).
 16b. **DONE (1e709f7) — bundled source rotation 50→46.** Removed jobtensor + comeet + gov_apprenticeships + aijobs_global (owner expanded scope from jobtensor-only). 5 surfaces + docs + 4 file deletions; gate 1272; live /api/sources=46. Superseded the original jobtensor-only plan below.
 
 16b-orig. ~~remove jobtensor for real (5-surface rotation)~~ Quarantined in b7b2c60; upstream is gone for good. Full removal per rules #8/#13: SOURCE_REGISTRY, _build_sources, RATE_LIMITS, test_cli count/set, test_api == N checks (50→49), plus CLAUDE.md/STATUS.md/ARCHITECTURE.md count references. Do as ONE deliberate iteration; consider bundling with any other dead-source removals found by then.
 
-17. **TODO — repo tidy:** `test-artifacts/` screenshots accumulate at root; ensure gitignored and pruned. Check for stray experiment outputs outside `backend/data/`.
+17. **DONE — repo tidy:** `test-artifacts/` screenshots gitignored. done: `.gitignore:43` has `test-artifacts/*.png`.
 
 ## Done
 

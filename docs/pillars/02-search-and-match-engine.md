@@ -694,10 +694,9 @@ tests/
 ├── test_skill_tiering.py                       — primary/secondary/tertiary tiering
 ├── test_skill_normalizer.py                    — ESCO path (SEMANTIC_ENABLED)
 ├── test_job_enrichment.py                      — enrich_batch + DB helpers + mocked LLM
-├── test_embeddings.py                          — encode_job + chunking + fake encoder factory
-├── test_vector_index.py                        — upsert/query/delete + fake ChromaDB client
+├── test_embeddings.py                          — encode_job + chunking + fake encoder factory + VectorIndex upsert/query/delete (fake ChromaDB client)
 ├── test_retrieval.py                           — RRF + retrieve_for_user + rerank + fallback
-├── test_retrieval_integration.py               — real scorer + semantics
+├── test_retrieval_integration.py               — real scorer + semantics + VectorIndex integration
 ├── test_deduplicator.py                        — all 4 layers + graceful degradation
 ├── test_llm_provider.py                        — provider chain + retry/validation loop
 ├── test_prefilter.py                           — 3-stage cascade rules
