@@ -158,10 +158,13 @@ async def consume_magic_link(
             (now, row["id"]),
         )
 
-        # Find-or-create the user by email.
+        # Find-or-create the user by email. NOTE: do NOT filter on
+        # `deleted_at IS NULL` here — the users.email UNIQUE constraint ignores
+        # deleted_at, so a soft-deleted row still owns the email. Filtering it
+        # out made this miss the existing row and try to INSERT a duplicate
+        # (UniqueViolation). Match on email alone, then reuse the row.
         cur = await db.execute(
-            "SELECT id, email_verified_at FROM users "
-            "WHERE email = ? AND deleted_at IS NULL",
+            "SELECT id, email_verified_at FROM users WHERE email = ?",
             (email,),
         )
         user = await cur.fetchone()
@@ -179,13 +182,14 @@ async def consume_magic_link(
             )
         else:
             user_id = user["id"]
-            # Existing user: clicking the link proves ownership, so verify if
-            # not already verified.
-            if user["email_verified_at"] is None:
-                await db.execute(
-                    "UPDATE users SET email_verified_at = ? WHERE id = ?",
-                    (now, user_id),
-                )
+            # Existing row (active OR soft-deleted). Clicking the link proves
+            # ownership: verify (keep an existing timestamp) AND reactivate a
+            # soft-deleted account — magic-link sign-in brings you back in.
+            await db.execute(
+                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?), "
+                "deleted_at = NULL WHERE id = ?",
+                (now, user_id),
+            )
         await db.commit()
 
     cookie = await auth_sessions.create_session(db_path, user_id=user_id, secret=secret)
