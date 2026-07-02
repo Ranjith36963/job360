@@ -1,0 +1,20 @@
+# ARQ background worker — same image as the API, different start command.
+# Selected on Railway via the service var RAILWAY_DOCKERFILE_PATH=Dockerfile.worker.
+# No EXPOSE / HEALTHCHECK: the worker does not serve HTTP (it drains the Redis queue).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY . .
+
+# Runtime deps only (no [dev], no [semantic]); arq is declared in pyproject now.
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir .
+
+RUN addgroup --system job360 \
+ && adduser --system --ingroup job360 --no-create-home job360 \
+ && chown -R job360:job360 /app
+USER job360
+
+# Drains the ARQ queue + runs the crons (notification_tick, nightly_ghost_sweep).
+CMD ["arq", "src.workers.settings.WorkerSettings"]

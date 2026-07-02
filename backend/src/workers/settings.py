@@ -104,31 +104,24 @@ class WorkerSettings:
     ]
 
     # Periodic / cron jobs — Step-3 B-14.
-    # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``
-    # Daily at 02:00 UTC is a safe time window (low activity, fresh staleness data).
-    # The list is consumed by ARQ at boot; tests never hit this path.
-    @staticmethod
-    def get_cron_jobs():  # noqa: D401
-        """Return cron_jobs list lazily so arq import stays deferred (rule #11)."""
-        from arq.cron import cron  # noqa: PLC0415 — lazy import per CLAUDE.md rule #11
+    # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``.
+    # IMPORTANT: newer arq reads ``WorkerSettings.__dict__['cron_jobs']`` directly
+    # and does NOT trigger descriptors — so cron_jobs must be a REAL list in the
+    # class body (the old _CronJobsDescriptor returned itself and crashed the
+    # worker with "'_CronJobsDescriptor' object is not iterable"). Build it
+    # eagerly; fall back to [] if arq is somehow absent so importing this module
+    # never fails in a minimal env. (arq is a declared dependency; not in the
+    # lazy-import rule list, so a top-level import here is fine.)
+    try:
+        from arq.cron import cron as _cron  # noqa: PLC0415
 
-        return [
-            cron(nightly_ghost_sweep, hour=2, minute=0),
-            cron(notification_tick, minute=set(range(0, 60, 5))),
+        cron_jobs = [
+            _cron(nightly_ghost_sweep, hour=2, minute=0),
+            _cron(notification_tick, minute=set(range(0, 60, 5))),
         ]
-
-    # ARQ reads WorkerSettings.cron_jobs as an attribute (list[CronJob]).
-    # We can't call get_cron_jobs() at class-definition time because arq
-    # may not be installed in the test environment. Instead, expose a
-    # property-compatible descriptor that only resolves when ARQ accesses it.
-    class _CronJobsDescriptor:
-        def __get__(self, obj, objtype=None):  # noqa: D105
-            try:
-                return objtype.get_cron_jobs()
-            except Exception:  # noqa: BLE001 — arq not installed (test env)
-                return []
-
-    cron_jobs = _CronJobsDescriptor()
+        del _cron
+    except Exception:  # noqa: BLE001 — arq absent in a minimal env
+        cron_jobs = []
 
     # At test time this is the stand-in shim. At runtime ARQ reads the
     # attribute via `getattr(WorkerSettings, 'redis_settings', None)`;

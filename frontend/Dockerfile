@@ -7,8 +7,18 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-# next.config.ts uses BACKEND_ORIGIN at rewrite-config time.
-# In production, set BACKEND_ORIGIN in the compose env or deploy platform.
+# next.config.ts reads BACKEND_ORIGIN when it builds the /api proxy rewrite, and
+# NEXT_PUBLIC_* are inlined into the client bundle — BOTH happen at BUILD time, so
+# they must be present here, not just at runtime. Railway passes service variables
+# to Dockerfile builds as --build-arg, so declaring the ARGs picks them up.
+ARG BACKEND_ORIGIN
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_POSTHOG_KEY
+ARG NEXT_PUBLIC_POSTHOG_HOST
+ENV BACKEND_ORIGIN=$BACKEND_ORIGIN
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
+ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
