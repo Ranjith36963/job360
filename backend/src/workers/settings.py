@@ -123,12 +123,22 @@ class WorkerSettings:
     except Exception:  # noqa: BLE001 — arq absent in a minimal env
         cron_jobs = []
 
-    # At test time this is the stand-in shim. At runtime ARQ reads the
-    # attribute via `getattr(WorkerSettings, 'redis_settings', None)`;
-    # when it's a _RedisSettings, ARQ accepts it (RedisSettings is a
-    # pydantic-ish dataclass with the same field names). For callers
-    # who want the real arq.RedisSettings, call load_arq_redis_settings().
-    redis_settings = _parse_redis_url(os.environ.get("REDIS_URL"))
+    # ARQ reads redis_settings from the class __dict__ and needs the REAL arq
+    # RedisSettings surface (.sentinel/.ssl/.password/...). The minimal
+    # _RedisSettings shim lacks those (crashed create_pool with "no attribute
+    # 'sentinel'") AND drops the password from a redis://user:pass@host URL.
+    # Use arq's RedisSettings.from_dsn (parses auth/ssl too); fall back to the
+    # shim only if arq is absent (minimal test env).
+    try:
+        from arq.connections import RedisSettings as _ArqRedisSettings  # noqa: PLC0415
+
+        _redis_url = os.environ.get("REDIS_URL")
+        redis_settings = (
+            _ArqRedisSettings.from_dsn(_redis_url) if _redis_url else _ArqRedisSettings()
+        )
+        del _ArqRedisSettings, _redis_url
+    except Exception:  # noqa: BLE001 — arq absent in a minimal env
+        redis_settings = _parse_redis_url(os.environ.get("REDIS_URL"))
 
 
 # Re-export for legacy import paths some callers may expect
