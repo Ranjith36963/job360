@@ -221,6 +221,41 @@ def test_consume_existing_user_verifies_no_duplicate(client, monkeypatch, temp_d
     assert user["email_verified_at"] is not None
 
 
+def test_consume_reuses_soft_deleted_user(client, monkeypatch, temp_db):
+    # Regression: a soft-deleted row still owns the email (users.email UNIQUE
+    # ignores deleted_at). consume must REUSE + reactivate it, not INSERT a
+    # duplicate — that was a 500 UniqueViolation in prod.
+    async def _seed():
+        async with aiosqlite.connect(temp_db) as db:
+            await db.execute(
+                "INSERT INTO users(id, email, password_hash, deleted_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("deleted-id", "gone@example.com", "!", "2026-01-01T00:00:00Z"),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    raw = _request_capture_token(client, monkeypatch, "gone@example.com")
+    r = client.post("/api/auth/magic-link/consume", json={"token": raw})
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == "deleted-id"  # reused, not a duplicate
+    assert "job360_session" in r.cookies
+
+    async def _deleted_at():
+        async with aiosqlite.connect(temp_db) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT email_verified_at, deleted_at FROM users WHERE id = ?",
+                ("deleted-id",),
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_deleted_at())
+    assert row["email_verified_at"] is not None  # verified
+    assert row["deleted_at"] is None  # reactivated
+
+
 def test_consume_is_single_use(client, monkeypatch, temp_db):
     raw = _request_capture_token(client, monkeypatch, "once@example.com")
     r1 = client.post("/api/auth/magic-link/consume", json={"token": raw})
