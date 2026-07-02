@@ -28,8 +28,11 @@ USER job360
 
 EXPOSE 8000
 
-# Hit the existing /health endpoint (backend/src/api/routes/health.py).
+# Hit the /api/health endpoint. $PORT is injected by Railway (dynamic); fall
+# back to 8000 for local `docker run`. Shell-form so ${PORT} expands.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD curl -fsS http://localhost:8000/health || exit 1
+  CMD curl -fsS http://localhost:${PORT:-8000}/api/health || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec) so ${PORT} is expanded by the shell. Railway assigns a
+# dynamic port and routes to it; the app MUST listen on $PORT or it's unreachable.
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
