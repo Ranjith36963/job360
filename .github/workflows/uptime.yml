@@ -1,0 +1,33 @@
+name: Uptime
+
+# Free uptime monitor — no third-party account. Pings the live backend's
+# dependency-free liveness probe on a schedule. If it's not 200, the job FAILS,
+# and GitHub emails the repo owner (default notification on scheduled-workflow
+# failure). Scheduled workflows only run on the default branch (main).
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every ~10 minutes
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend /api/livez
+        run: |
+          URL="https://backend-production-80e8e.up.railway.app/api/livez"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL")
+          echo "GET $URL -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Backend liveness check failed (HTTP $code)"
+            exit 1
+          fi
+      - name: Ping frontend
+        run: |
+          URL="https://frontend-production-c608f.up.railway.app/"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL")
+          echo "GET $URL -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Frontend check failed (HTTP $code)"
+            exit 1
+          fi
