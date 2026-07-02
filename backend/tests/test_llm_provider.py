@@ -1,7 +1,8 @@
 """Tests for LLM provider pool."""
 import logging
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 
 
 @pytest.mark.asyncio
@@ -16,23 +17,23 @@ async def test_llm_extract_no_keys_raises():
 
 
 @pytest.mark.asyncio
-async def test_llm_extract_gemini_success():
-    """Should call Gemini when key is available and return parsed JSON."""
+async def test_llm_extract_cerebras_first_success():
+    """Cerebras is tried FIRST (fast, not quota-capped); its result is returned."""
     mock_result = {"skills": ["Python", "Docker"]}
-    with patch("src.services.profile.llm_provider.GEMINI_API_KEY", "fake-key"), \
-         patch("src.services.profile.llm_provider._call_gemini", new_callable=AsyncMock, return_value=mock_result):
+    with patch("src.services.profile.llm_provider.CEREBRAS_API_KEY", "fake-key"), \
+         patch("src.services.profile.llm_provider._call_cerebras", new_callable=AsyncMock, return_value=mock_result):
         from src.services.profile.llm_provider import llm_extract
         result = await llm_extract("test prompt")
     assert result == {"skills": ["Python", "Docker"]}
 
 
 @pytest.mark.asyncio
-async def test_llm_extract_gemini_fails_groq_succeeds():
-    """Should fallback to Groq when Gemini fails."""
+async def test_llm_extract_cerebras_fails_groq_succeeds():
+    """Falls back to Groq when Cerebras fails (Gemini stays last-resort)."""
     mock_result = {"skills": ["Nursing", "Patient Care"]}
-    with patch("src.services.profile.llm_provider.GEMINI_API_KEY", "fake-key"), \
+    with patch("src.services.profile.llm_provider.CEREBRAS_API_KEY", "fake-key"), \
          patch("src.services.profile.llm_provider.GROQ_API_KEY", "fake-key"), \
-         patch("src.services.profile.llm_provider._call_gemini", new_callable=AsyncMock, side_effect=Exception("Gemini down")), \
+         patch("src.services.profile.llm_provider._call_cerebras", new_callable=AsyncMock, side_effect=Exception("Cerebras down")), \
          patch("src.services.profile.llm_provider._call_groq", new_callable=AsyncMock, return_value=mock_result):
         from src.services.profile.llm_provider import llm_extract
         result = await llm_extract("test prompt")

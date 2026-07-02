@@ -10,7 +10,7 @@ from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from src.core.settings import GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY
+from src.core.settings import CEREBRAS_API_KEY, GEMINI_API_KEY, GROQ_API_KEY
 
 logger = logging.getLogger("job360.profile.llm_provider")
 
@@ -18,19 +18,21 @@ _S = TypeVar("_S", bound=BaseModel)
 
 
 async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
-    """CV parsing — Gemini (best JSON) → Groq → Cerebras fallback.
+    """LLM JSON extraction — Cerebras → Groq → Gemini fallback.
 
-    Provider priority optimised for JSON quality and daily quota.
-    Raises RuntimeError if no provider is available or all fail.
+    Cerebras/Groq go FIRST: they're fast and their keys aren't quota-capped
+    like the Gemini FREE tier, which 429s once exhausted and taxes every call
+    with a retry-then-fallback (this froze bulk enrichment + the judge). Gemini
+    stays as a last-resort fallback. Raises RuntimeError if all fail.
     """
     errors = []
 
-    if GEMINI_API_KEY:
+    if CEREBRAS_API_KEY:
         try:
-            return await _call_gemini(prompt, system)
+            return await _call_cerebras(prompt, system)
         except Exception as e:
-            errors.append(f"Gemini: {e}")
-            logger.warning("Gemini failed, trying next provider: %s", e)
+            errors.append(f"Cerebras: {e}")
+            logger.warning("Cerebras failed, trying next provider: %s", e)
 
     if GROQ_API_KEY:
         try:
@@ -39,12 +41,12 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
             errors.append(f"Groq: {e}")
             logger.warning("Groq failed, trying next provider: %s", e)
 
-    if CEREBRAS_API_KEY:
+    if GEMINI_API_KEY:
         try:
-            return await _call_cerebras(prompt, system)
+            return await _call_gemini(prompt, system)
         except Exception as e:
-            errors.append(f"Cerebras: {e}")
-            logger.warning("Cerebras failed: %s", e)
+            errors.append(f"Gemini: {e}")
+            logger.warning("Gemini failed: %s", e)
 
     if not (GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(

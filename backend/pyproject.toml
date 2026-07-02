@@ -133,7 +133,7 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 "scripts/bootstrap_dev.py" = ["S105", "S603", "S607"]
 # Test files use hardcoded fixture passwords (S105/S107) and import-at-
 # bottom patterns (E402). These are expected and benign in test context.
-"tests/*" = ["S105", "S107"]
+"tests/*" = ["S105", "S107", "E501"]
 "migrations/runner.py" = ["S603", "S607"]
 # cv_parser.py contains the multi-line LLM prompt — single-string lines
 # inside the system / user prompt cannot be split without breaking the

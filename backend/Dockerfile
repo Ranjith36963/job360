@@ -19,10 +19,18 @@ RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir ".[semantic]" arq
 
-# Drop privileges — never run the app as root in production.
+# Drop privileges — never run the app as root in production. Also create the
+# writable dirs Engine 3 (semantic) needs: /data/chroma (ChromaDB's persist path
+# resolves to /data/chroma in this image) + the HF model cache under $HOME.
 RUN addgroup --system job360 \
  && adduser --system --ingroup job360 --no-create-home job360 \
- && chown -R job360:job360 /app
+ && mkdir -p /data/chroma /app/.cache \
+ && chown -R job360:job360 /app /data
+# A --no-create-home user gets HOME=/nonexistent (not writable) — the cause of the
+# "Permission denied: '/nonexistent'" model-cache error. Point HOME + the HF cache
+# at writable dirs so sentence-transformers + ChromaDB can persist.
+ENV HOME=/app
+ENV HF_HOME=/app/.cache
 USER job360
 
 EXPOSE 8000
