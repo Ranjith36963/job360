@@ -77,7 +77,7 @@
 | ✅ | `/health` route | `backend/src/api/routes/health.py` |
 | ✅ | **Dockerfile** | `backend/Dockerfile` + `frontend/Dockerfile` (non-root, healthcheck) |
 | ✅ | **docker-compose (prod)** | `docker-compose.prod.yml` — 5 services, healthchecks, `service_healthy` gates |
-| ⏸ | **Deploy config (Railway)** | *ready (`docs/DEPLOY.md`) — BLOCKED on user: Railway trial expired, needs a plan* |
+| ✅ | **Deploy config (Railway)** | **LIVE** — project `job360`, 5 services (backend+worker+frontend+Postgres+Redis) all Online; frontend `https://frontend-production-c608f.up.railway.app` |
 | ✅ | `/livez` + `/readyz` split | `backend/src/api/routes/health.py` (readyz checks Postgres + Redis) |
 | ✅ | Env validation at boot | `settings.validate_required_env()` — fail-fast in production |
 | ✅ | DB backup script | `backend/scripts/backup_db.py` (pg_dump + gzip + retention) |

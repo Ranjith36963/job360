@@ -37,7 +37,7 @@
 Then I deploy, wire the domain, run a live smoke test, and continue.
 **💰 Cost: ~$5–20/mo hosting + ~$12/yr domain** (Postgres+Redis on free tier).
 
-> 🟡 **CODE DONE 2026-07-01, DEPLOY BLOCKED.** `/livez`+`/readyz` + boot env-validation + backup script all built, tested, live-verified. **Deploy blocked:** Railway trial expired — user must add a plan (see `docs/DEPLOY.md`). All deploy commands are ready; one `railway up` sequence once the plan is active.
+> ✅ **DONE + DEPLOYED 2026-07-02.** Railway Hobby active. Project `job360` with 5 services (backend + worker + frontend + managed Postgres + managed Redis) — **all Online**. Live: **frontend `https://frontend-production-c608f.up.railway.app`**, backend `https://backend-production-80e8e.up.railway.app`. Verified live: `/readyz` → `{db:ok, redis:ok}`, HSTS/CSP headers, and the **full auth flow (register → login → cookie → /me)** end-to-end through the frontend proxy. Worker running 10 functions + 2 crons. Deploy fixes: `$PORT` in Dockerfile, frontend build-args for the `/api` proxy, arq `cron_jobs`/`RedisSettings` compat. Custom domain still optional (on the free `*.up.railway.app` URL).
 
 ## 📊 Phase 3 — Visibility (needs YOUR keys)
 **Build:** Sentry · PostHog · uptime monitor · fill logging dark zones (workers/DB/auth) · security headers.

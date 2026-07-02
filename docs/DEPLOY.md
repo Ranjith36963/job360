@@ -1,6 +1,12 @@
 # Job360 — Deploy Runbook (Railway)
 
-> **Status: BLOCKED on one user action** — Railway trial expired. Everything else for deploy is prepared and tested; the deploy itself is a few commands once the plan is active.
+> **Status: ✅ LIVE (2026-07-02).** Railway Hobby active. Project `job360`, 5 services all Online.
+> - **Frontend (the site):** https://frontend-production-c608f.up.railway.app
+> - **Backend API:** https://backend-production-80e8e.up.railway.app
+> - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
+> - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
+>
+> To redeploy after code changes: `cd backend && railway up --service backend --detach` (and `--service worker`), `cd frontend && railway up --service frontend --detach`. Env vars already set per-service in Railway.
 
 ## 🔴 What YOU must do (one time, ~2 min)
 The Railway **free trial has expired**. To deploy, activate a plan + payment:
