@@ -68,7 +68,10 @@ async def send_system_email(
 
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = smtp_email
+        # From address can differ from the SMTP login user (Resend/SES: login
+        # user is a service name, From is a verified sender). SMTP_FROM overrides;
+        # falls back to SMTP_EMAIL so Gmail (login == from) keeps working.
+        msg["From"] = os.environ.get("SMTP_FROM") or smtp_email
         msg["To"] = to_email
         msg.set_content(body_text)
         if body_html:
@@ -81,7 +84,9 @@ async def send_system_email(
 
         with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
             smtp.starttls()
-            smtp.login(smtp_email, smtp_password)
+            # Login user can differ from the From address (Resend: "resend").
+            # SMTP_USER overrides; falls back to SMTP_EMAIL (Gmail).
+            smtp.login(os.environ.get("SMTP_USER") or smtp_email, smtp_password)
             smtp.send_message(msg)
     except Exception as exc:  # noqa: BLE001 — intentionally broad
         logger.warning(
