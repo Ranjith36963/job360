@@ -12,13 +12,12 @@ WORKDIR /app
 # .dockerignore excludes data/, tests/, __pycache__, .venv, etc.
 COPY . .
 
-# Install runtime deps only.
-# - No [dev] extras (pytest, mypy, aioresponses …).
-# - No [semantic] extra (~300 MB sentence-transformers/chromadb).
-# - arq is the ARQ task-queue runner used by the worker process; it is NOT
-#   declared in pyproject.toml yet, so we install it alongside the package.
+# Install runtime deps + the [semantic] extra (sentence-transformers / chromadb)
+# so Engine 3 (semantic search) can run. Install CPU-only torch FIRST so pip
+# doesn't pull the ~2.5 GB CUDA build (there's no GPU on Railway). No [dev].
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir . arq
+ && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir ".[semantic]" arq
 
 # Drop privileges — never run the app as root in production.
 RUN addgroup --system job360 \
