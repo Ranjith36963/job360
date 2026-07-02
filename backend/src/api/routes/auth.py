@@ -23,6 +23,7 @@ from src.repositories import pg as aiosqlite
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
 from src.services.auth import email_verification as auth_email_verification
+from src.services.auth import magic_link as auth_magic_link
 from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
@@ -139,7 +140,10 @@ async def register(
             )
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=user_id, secret=_secret())
     _set_session_cookie(response, cookie)
-    get_audit_logger().info("auth", extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)})
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)},
+    )
     # Phase −2 item B + post-review fix #1 + #2: schedule the verification
     # email as a FastAPI BackgroundTask. The task runs AFTER the response
     # is queued so register isn't blocked on SMTP I/O (300ms–30s), and the
@@ -482,6 +486,91 @@ async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response
             detail="invalid or expired verification token",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Passwordless magic-link login ────────────────────────────────────────────
+
+
+class MagicLinkRequest(BaseModel):
+    email: EmailStr
+
+
+class MagicLinkConsumeRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/magic-link/request", status_code=status.HTTP_204_NO_CONTENT)
+async def magic_link_request(
+    req: MagicLinkRequest,
+    request: Request,
+) -> Response:
+    """Email a passwordless sign-in link.
+
+    Always returns 204 regardless of whether the email is registered — the
+    account is created lazily on consume, so there's nothing to enumerate.
+    Rate-limited to 3 requests per 5 minutes per email so an attacker can't
+    spam any address with sign-in emails. When limited we still return 204
+    (indistinguishable) but issue no token and send no email.
+    """
+    key = f"magic-link:{str(req.email).lower()}"
+    if not auth_rate_limit.check_and_record(key, max_in_window=3, window_seconds=300):
+        logger.info("magic-link rate-limited email=%s", req.email)
+        get_audit_logger().warning(
+            "auth",
+            extra={
+                "event": "magic_link_request",
+                "status": "rate_limited",
+                "email": req.email,
+                **_client_meta(request),
+            },
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await auth_magic_link.request_magic_link(
+        db_path=str(DB_PATH),
+        email=str(req.email),
+        frontend_origin=_frontend_origin(),
+    )
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "magic_link_request", "status": "ok", "email": req.email, **_client_meta(request)},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/magic-link/consume", response_model=UserResponse)
+async def magic_link_consume(
+    req: MagicLinkConsumeRequest,
+    response: Response,
+    request: Request,
+) -> UserResponse:
+    """Validate a magic-link token, sign the user in (find-or-create + verify).
+
+    On success sets the session cookie and returns the user. On any failure
+    (unknown / expired / already-used token) raises 400 with a generic
+    message so token existence can't be probed.
+    """
+    result = await auth_magic_link.consume_magic_link(
+        db_path=str(DB_PATH),
+        raw_token=req.token,
+        secret=_secret(),
+    )
+    if result is None:
+        get_audit_logger().warning(
+            "auth",
+            extra={"event": "magic_link_consume", "status": "fail", **_client_meta(request)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired link",
+        )
+    cookie, user_id, email = result
+    _set_session_cookie(response, cookie)
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "magic_link_consume", "user_id": user_id, "status": "ok", **_client_meta(request)},
+    )
+    return UserResponse(id=user_id, email=email)
 
 
 @router.get("/me/email-verified")

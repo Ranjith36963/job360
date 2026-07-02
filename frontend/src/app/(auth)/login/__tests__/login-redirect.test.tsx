@@ -26,6 +26,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   login: vi.fn().mockResolvedValue({}),
+  requestMagicLink: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,8 @@ function renderPage() {
 }
 
 async function fillAndSubmit() {
+  // Magic-link is the default view; switch to the password form first.
+  fireEvent.click(screen.getByRole("button", { name: /use password instead/i }));
   fireEvent.change(screen.getByLabelText(/email/i), {
     target: { value: "user@example.com" },
   });

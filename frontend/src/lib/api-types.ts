@@ -72,6 +72,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/magic-link/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Magic Link Consume
+         * @description Validate a magic-link token, sign the user in (find-or-create + verify).
+         *
+         *     On success sets the session cookie and returns the user. On any failure
+         *     (unknown / expired / already-used token) raises 400 with a generic
+         *     message so token existence can't be probed.
+         */
+        post: operations["magic_link_consume_api_auth_magic_link_consume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/magic-link/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Magic Link Request
+         * @description Email a passwordless sign-in link.
+         *
+         *     Always returns 204 regardless of whether the email is registered — the
+         *     account is created lazily on consume, so there's nothing to enumerate.
+         *     Rate-limited to 3 requests per 5 minutes per email so an attacker can't
+         *     spam any address with sign-in emails. When limited we still return 204
+         *     (indistinguishable) but issue no token and send no email.
+         */
+        post: operations["magic_link_request_api_auth_magic_link_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -428,6 +478,29 @@ export interface paths {
          *     are considered duplicates. Public endpoint — same auth policy as GET /jobs/{id}.
          */
         get: operations["get_job_duplicates_api_jobs__job_id__duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Livez
+         * @description Liveness probe — returns 200 as long as the process is running.
+         *
+         *     No dependency checks. Kubernetes/Railway liveness must not fail because
+         *     the DB momentarily blipped; that is what /readyz is for.
+         */
+        get: operations["livez_api_livez_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -839,6 +912,33 @@ export interface paths {
          *     similar cross-tenant lookups.
          */
         post: operations["restore_version_api_profile_versions__version_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readyz
+         * @description Readiness probe — checks real dependencies before accepting traffic.
+         *
+         *     Checks:
+         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
+         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *
+         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
+         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         */
+        get: operations["readyz_api_readyz_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1552,6 +1652,11 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** LivezResponse */
+        LivezResponse: {
+            /** Status */
+            status: string;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -1561,6 +1666,19 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MagicLinkConsumeRequest */
+        MagicLinkConsumeRequest: {
+            /** Token */
+            token: string;
+        };
+        /** MagicLinkRequest */
+        MagicLinkRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /** NotesUpdateRequest */
         NotesUpdateRequest: {
@@ -2172,6 +2290,70 @@ export interface operations {
             };
         };
     };
+    magic_link_consume_api_auth_magic_link_consume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MagicLinkConsumeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    magic_link_request_api_auth_magic_link_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MagicLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_api_auth_me_get: {
         parameters: {
             query?: never;
@@ -2748,6 +2930,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    livez_api_livez_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LivezResponse"];
                 };
             };
         };
@@ -3397,6 +3599,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readyz_api_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

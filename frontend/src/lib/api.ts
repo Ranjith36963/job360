@@ -365,6 +365,28 @@ export async function me(): Promise<User | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Passwordless magic-link login
+// ---------------------------------------------------------------------------
+//
+// request always returns 204 — no enumeration (the account is created lazily
+// on consume). consume returns the signed-in user (and sets the session
+// cookie) on success, or throws on an invalid / expired / used token.
+
+export async function requestMagicLink(email: string): Promise<void> {
+  await request<void>("/api/auth/magic-link/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function consumeMagicLink(token: string): Promise<User> {
+  return request<User>("/api/auth/magic-link/consume", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Password reset (Phase −2 item A)
 // ---------------------------------------------------------------------------
 //
