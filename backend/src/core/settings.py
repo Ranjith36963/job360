@@ -134,6 +134,12 @@ SENIORITY_WEIGHT = int(os.getenv("SENIORITY_WEIGHT", "8"))
 VISA_WEIGHT = int(os.getenv("VISA_WEIGHT", "6"))
 WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
 
+# Per-User AI CV & Cover Letter (docs/peruser_cv_coverletter.md) — guardrail #1:
+# each generation is a paid LLM call, so cap free usage. One generation = one CV +
+# cover letter for one job. When a real premium plan lands, premium users bypass this
+# cap (no plan column exists yet — everyone is on the free cap for now).
+TAILOR_FREE_PER_MONTH = int(os.getenv("TAILOR_FREE_PER_MONTH", "10"))
+
 # Pillar 2 Batch 2.6 — semantic stack feature flag.
 # When false (default), embeddings + ChromaDB + ESCO normalisation all skip.
 # When true, callers that check this flag activate the semantic retrieval path.

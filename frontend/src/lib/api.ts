@@ -28,6 +28,9 @@ import type {
   SearchStatusResponse,
   SourceInfo,
   StatusResponse,
+  TailorBundle,
+  TailorDocKind,
+  TailoredDocOut,
 } from "./types";
 
 // `fetch` calls default to a RELATIVE base ("") so requests hit the SAME origin
@@ -638,4 +641,77 @@ export type SourceHealthResponse = Omit<_Schemas["SourceHealthResponse"], "sourc
 
 export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {
   return request<SourceHealthResponse>(`/api/runs/source-health?runs=${runs}`);
+}
+
+// ---- Tailored docs ----
+//
+// Per-user AI CV + cover letter (docs/peruser_cv_coverletter.md). Generation is
+// quota-gated (402 when the monthly free limit is reached) and requires a CV on
+// file (400 when none). Every write here is a plain async function + toast +
+// queryClient.invalidateQueries at the call site — no useMutation in this codebase.
+
+export async function generateTailored(jobId: number): Promise<TailorBundle> {
+  return request<TailorBundle>(`/api/tailor/${jobId}/generate`, {
+    method: "POST",
+  });
+}
+
+export async function getTailored(jobId: number): Promise<TailorBundle> {
+  return request<TailorBundle>(`/api/tailor/${jobId}`);
+}
+
+export async function saveTailored(
+  jobId: number,
+  kind: TailorDocKind,
+  text: string
+): Promise<TailoredDocOut> {
+  return request<TailoredDocOut>(`/api/tailor/${jobId}/${kind}`, {
+    method: "PATCH",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function keepTailored(
+  jobId: number,
+  kind: TailorDocKind
+): Promise<TailoredDocOut> {
+  return request<TailoredDocOut>(`/api/tailor/${jobId}/${kind}/keep`, {
+    method: "POST",
+  });
+}
+
+/** Relative path for the PDF download endpoint (GET also marks the doc kept). */
+export function tailorDownloadUrl(jobId: number, kind: TailorDocKind): string {
+  return `/api/tailor/${jobId}/${kind}/download`;
+}
+
+/**
+ * Fetch the tailored doc as a PDF and trigger a browser download — same
+ * fetch-blob-anchor pattern as `exportJobsCsv`. credentials:'include' so the
+ * session cookie rides on the request.
+ */
+export async function downloadTailoredPdf(
+  jobId: number,
+  kind: TailorDocKind
+): Promise<void> {
+  const res = await fetch(`${API}${tailorDownloadUrl(jobId, kind)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let detail = "Download failed";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body — keep the fallback detail
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${kind}_${jobId}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

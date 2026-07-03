@@ -26,6 +26,7 @@ import { createPipelineApplication } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { safeUrl } from "@/lib/utils";
 import type { JobResponse } from "@/lib/types";
+import { TailorButton } from "@/components/tailor/TailorButton";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -421,6 +422,9 @@ export function JobCard({ job, onAction }: JobCardProps) {
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
           Apply
         </Button>
+
+        {/* Compact "Tailor my CV" — dashboard card doesn't need to open the job first */}
+        <TailorButton jobId={job.id} variant="ghost" size="sm" />
 
         <Button
           size="sm"

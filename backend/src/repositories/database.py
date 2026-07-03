@@ -194,6 +194,48 @@ class JobDatabase:
                 ON user_notification_digests(user_id, channel, sent);
         """)
 
+        # Ensure tailored-document tables exist (migration 0023 — Per-User AI CV &
+        # Cover Letter). Mirrors 0023_tailored_documents.up.sql so init_db()-only
+        # tests see the full schema. tailoring_patterns has NO user_id/content by
+        # design (universal layer = patterns only, spec §7 privacy).
+        await self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS tailored_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                doc_kind TEXT NOT NULL,
+                ai_draft TEXT NOT NULL DEFAULT '',
+                polished TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                model TEXT,
+                profile_version INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                kept_at TEXT,
+                UNIQUE(user_id, job_id, doc_kind)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tailored_user_kind_status
+                ON tailored_documents(user_id, doc_kind, status);
+            CREATE INDEX IF NOT EXISTS idx_tailored_user_job
+                ON tailored_documents(user_id, job_id);
+            CREATE TABLE IF NOT EXISTS tailored_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_tailored_usage_user_time
+                ON tailored_usage(user_id, created_at);
+            CREATE TABLE IF NOT EXISTS tailoring_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_kind TEXT NOT NULL,
+                features TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_tailoring_patterns_kind
+                ON tailoring_patterns(doc_kind);
+        """)
+
         # Add timezone column to users table if it was created before migration 0012.
         # users table may not exist in all test DB instances (auth tests create it;
         # non-auth tests skip it).  Guard with table existence check.
@@ -608,6 +650,176 @@ class JobDatabase:
     # --- Applications (Pipeline) ---
     #
     # Batch 3.5 Deliverable C: same user_id-scoping treatment as actions.
+
+    # ── Tailored CV / cover letter (migration 0023) ──────────────────────────
+
+    def _tailored_row_to_dict(self, row) -> dict:
+        return {
+            "user_id": row[0], "job_id": row[1], "doc_kind": row[2],
+            "ai_draft": row[3] or "", "polished": row[4], "status": row[5],
+            "model": row[6], "profile_version": row[7],
+            "created_at": row[8], "updated_at": row[9], "kept_at": row[10],
+        }
+
+    async def upsert_tailored_doc(
+        self, user_id: str, job_id: int, doc_kind: str, ai_draft: str,
+        *, model: str | None = None, profile_version: int | None = None,
+    ) -> dict:
+        """Insert/replace the AI draft for (user, job, kind); resets it to 'draft'.
+
+        Regenerating a doc is a fresh draft — old polished/kept state for THIS
+        (user, job, kind) is superseded. KEPT docs for OTHER jobs stay intact, so the
+        per-user learning signal is preserved.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        # DELETE + INSERT (not `INSERT OR REPLACE` — the Postgres shim doesn't
+        # translate `OR REPLACE`, only `OR IGNORE`). A regenerate is a fresh draft.
+        await self._conn.execute(
+            "DELETE FROM tailored_documents WHERE user_id = ? AND job_id = ? AND doc_kind = ?",
+            (user_id, job_id, doc_kind),
+        )
+        await self._conn.execute(
+            """INSERT INTO tailored_documents
+               (user_id, job_id, doc_kind, ai_draft, polished, status, model,
+                profile_version, created_at, updated_at, kept_at)
+               VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, ?, NULL)""",
+            (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now),
+        )
+        await self._conn.commit()
+        doc = await self.get_tailored_doc(user_id, job_id, doc_kind)
+        return doc or {}
+
+    async def get_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict | None:
+        cursor = await self._conn.execute(
+            """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
+                      profile_version, created_at, updated_at, kept_at
+               FROM tailored_documents
+               WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
+            (user_id, job_id, doc_kind),
+        )
+        row = await cursor.fetchone()
+        return self._tailored_row_to_dict(row) if row else None
+
+    async def get_tailored_docs(self, user_id: str, job_id: int) -> list[dict]:
+        cursor = await self._conn.execute(
+            """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
+                      profile_version, created_at, updated_at, kept_at
+               FROM tailored_documents
+               WHERE user_id = ? AND job_id = ? ORDER BY doc_kind""",
+            (user_id, job_id),
+        )
+        return [self._tailored_row_to_dict(r) for r in await cursor.fetchall()]
+
+    async def save_tailored_polished(
+        self, user_id: str, job_id: int, doc_kind: str, polished: str
+    ) -> dict | None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            """UPDATE tailored_documents SET polished = ?, updated_at = ?
+               WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
+            (polished, now, user_id, job_id, doc_kind),
+        )
+        await self._conn.commit()
+        return await self.get_tailored_doc(user_id, job_id, doc_kind)
+
+    async def keep_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict | None:
+        """Mark KEPT (finalized/downloaded/used) — the only status we learn from (§5)."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            """UPDATE tailored_documents SET status = 'kept', kept_at = ?, updated_at = ?
+               WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
+            (now, now, user_id, job_id, doc_kind),
+        )
+        await self._conn.commit()
+        return await self.get_tailored_doc(user_id, job_id, doc_kind)
+
+    async def count_tailored_usage_month(self, user_id: str) -> int:
+        """Generations this calendar month — the quota gate counter (guardrail #1)."""
+        start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM tailored_usage WHERE user_id = ? AND created_at >= ?",
+            (user_id, start),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    async def record_tailored_usage(self, user_id: str, job_id: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "INSERT INTO tailored_usage (user_id, job_id, created_at) VALUES (?, ?, ?)",
+            (user_id, job_id, now),
+        )
+        await self._conn.commit()
+
+    async def get_user_kept_docs(self, user_id: str, doc_kind: str, limit: int = 3) -> list[str]:
+        """Layer 2 (per-user, §6): the user's recent KEPT polished docs of this kind —
+        few-shot 'write like me' examples. Only KEPT docs (§5 learn-from-kept-only)."""
+        cursor = await self._conn.execute(
+            """SELECT polished FROM tailored_documents
+               WHERE user_id = ? AND doc_kind = ? AND status = 'kept'
+                 AND polished IS NOT NULL AND polished != ''
+               ORDER BY kept_at DESC LIMIT ?""",
+            (user_id, doc_kind, limit),
+        )
+        return [r[0] for r in await cursor.fetchall() if r[0]]
+
+    async def record_tailoring_pattern(self, doc_kind: str, features_json: str) -> None:
+        """Layer 1 (universal, §6): store a privacy-scrubbed pattern — NO user_id/content."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self._conn.execute(
+            "INSERT INTO tailoring_patterns (doc_kind, features, created_at) VALUES (?, ?, ?)",
+            (doc_kind, features_json, now),
+        )
+        await self._conn.commit()
+
+    async def get_tailoring_patterns(self, doc_kind: str, limit: int = 200) -> list[dict]:
+        import json as _json
+        cursor = await self._conn.execute(
+            "SELECT features FROM tailoring_patterns WHERE doc_kind = ? ORDER BY id DESC LIMIT ?",
+            (doc_kind, limit),
+        )
+        out: list[dict] = []
+        for r in await cursor.fetchall():
+            try:
+                out.append(_json.loads(r[0]))
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    async def get_tailored_summary_for_jobs(
+        self, user_id: str, job_ids: list[int]
+    ) -> dict[int, dict]:
+        """For the Kanban attach: {job_id: {doc_kind: status}} for the given jobs."""
+        if not job_ids:
+            return {}
+        placeholders = ",".join("?" for _ in job_ids)
+        cursor = await self._conn.execute(
+            f"""SELECT job_id, doc_kind, status FROM tailored_documents
+                WHERE user_id = ? AND job_id IN ({placeholders})""",
+            (user_id, *job_ids),
+        )
+        result: dict[int, dict] = {}
+        for jid, kind, status in await cursor.fetchall():
+            result.setdefault(jid, {})[kind] = status
+        return result
+
+    async def get_fit_reason(self, user_id: str, job_id: int) -> str:
+        """The judge's (E4) 'why it fits' reason for (user, job); '' if none computed.
+
+        Tells the tailoring prompt what to emphasise. Tolerates a missing user_feed
+        row (returns '') so tailoring works even before the judge has run.
+        """
+        try:
+            cursor = await self._conn.execute(
+                "SELECT llm_reason FROM user_feed WHERE user_id = ? AND job_id = ?",
+                (user_id, job_id),
+            )
+        except Exception:  # noqa: BLE001 — user_feed may not exist in minimal test DBs
+            return ""
+        row = await cursor.fetchone()
+        return (row[0] or "") if row else ""
 
     async def create_application(self, job_id: int, user_id: str) -> dict:
         now = datetime.now(timezone.utc).isoformat()

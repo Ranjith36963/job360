@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRadar } from "@/components/jobs/ScoreRadar";
 import { ScoreCounter } from "@/components/jobs/ScoreCounter";
 import { ApplyButton } from "@/components/jobs/ApplyButton";
+import { TailorButton } from "@/components/tailor/TailorButton";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -593,6 +594,9 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
             <div className="glass-card flex flex-col gap-3 rounded-2xl p-6 animate-fade-in-up stagger-4">
               {/* Apply Now — opens URL + tracks in pipeline */}
               <ApplyButton job={job} fullWidth />
+
+              {/* Tailor my CV — AI CV + cover letter for this job (spec §3.5) */}
+              <TailorButton jobId={job.id} fullWidth />
 
               <div className="flex gap-3">
                 {/* Like toggle */}
