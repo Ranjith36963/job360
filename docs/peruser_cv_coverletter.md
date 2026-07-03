@@ -43,6 +43,20 @@ It's a *helper*, not an auto-submitter. Every application gets a custom CV + cov
 
 ---
 
+## 3.5 Where it shows in the frontend
+
+Plugs into **3 existing screens** — no new top-level page needed. The only new UI is the generated-doc editor/preview panel.
+
+| Screen | What appears |
+|---|---|
+| **Job detail** (`frontend/src/app/jobs/[id]`) | Main spot: a **"Tailor my CV"** button next to Apply → opens the generated **CV + cover letter** in an **editable preview** → edit → **download** |
+| **Dashboard** (`frontend/src/app/dashboard`) | A quick **"Tailor"** action on each job card (alongside Apply / Like / Skip) — no need to open the job first |
+| **Pipeline / Kanban** (`frontend/src/app/pipeline`) | Once you apply, the **tailored CV + cover letter attach to that application card** so you can find them again |
+
+**In one line:** button on the *job* (dashboard card + job page) → new *editor/preview* view for the output → saved copies live on the *Kanban application*.
+
+---
+
 ## 4. Guardrails — the things NOT to miss (or it backfires)
 
 1. **Paid / capped.** Each generation = an AI call = money. Free users spamming it explodes the LLM bill. Make it **premium (or X free/month)** → ties into the paywall (Phase 4).
