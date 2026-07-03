@@ -59,6 +59,7 @@ Start here to find the right doc fast.
 |---|---|
 | [`PRD.md`](PRD.md) | Product requirements + vision. |
 | [`MONETIZATION_GAPS.md`](MONETIZATION_GAPS.md) | What's missing to charge money — payments, paywall, hosting, legal (code-verified gap analysis). |
+| [`feedback_loops_map.md`](feedback_loops_map.md) | The whole-tool map: 15 honest places to add feedback loops (signal + gate), across Pillars 1–3 + features, all answering to the master outcome loop. |
 | [`raw_feedback_loop.md`](raw_feedback_loop.md) | Design: turn the hardcoded skill/company/domain/location lists into self-growing data via a gated LLM feedback loop (kills the tech/UK ceiling). |
 | [`peruser_cv_coverletter.md`](peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits (per-user 2-layer learning + guardrails). ~80% built. |
 | [`post_application.md`](post_application.md) | Design: the "after you apply" co-pilot — interview prep, mock interview, skill-gap, follow-up email, outreach (offer/salary deliberately out). |
