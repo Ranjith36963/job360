@@ -60,6 +60,7 @@ Start here to find the right doc fast.
 | [`PRD.md`](PRD.md) | Product requirements + vision. |
 | [`MONETIZATION_GAPS.md`](MONETIZATION_GAPS.md) | What's missing to charge money — payments, paywall, hosting, legal (code-verified gap analysis). |
 | [`raw_feedback_loop.md`](raw_feedback_loop.md) | Design: turn the hardcoded skill/company/domain/location lists into self-growing data via a gated LLM feedback loop (kills the tech/UK ceiling). |
+| [`peruser_cv_coverletter.md`](peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits (per-user 2-layer learning + guardrails). ~80% built. |
 | [`plans/2026-06-21-free-premium-plans.md`](plans/2026-06-21-free-premium-plans.md) | Free/Premium tier design (not yet built). |
 | [`References.md`](References.md) | Source-of-truth list of external references and research links. |
 
