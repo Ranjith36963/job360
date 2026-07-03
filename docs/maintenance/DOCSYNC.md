@@ -56,7 +56,7 @@ Ground truth verified from code:
 | Migrations | 0000 → **0022** (`0022_magic_link_tokens`); 0015 password_resets, 0016 email_verification, 0019 channel_oauth, 0020 notification_rule_single, 0021 add_job_deadline |
 | Tests | **1636/1638** collected (2 deselected) |
 | Deps | `apprise>=1.7.0`, `psycopg[binary]>=3.2`, `sentry-sdk>=1.40.0` (pyproject) |
-| Category enum | code uses `"scraper"` (singular), not `"scrapers"` |
+| Category enum | code uses `"scrapers"` (plural) — matches the scheduler tier key (fixed in `33768b9`; was singular `"scraper"` at audit time, see resolved flag #2) |
 | Infra shipped | Sentry (`api/main.py`), PostHog (`PostHogProviderWrapper.tsx`), Resend (`auth/email_sender.py`), Docker + `docker-compose.prod.yml`, Railway, magic-link auth |
 | Frontend routes | 21 pages incl. `/channels /admin/sources /contact /privacy /terms /auth/magic /jobs /sentry-test` |
 
@@ -129,12 +129,16 @@ does not touch code, so these are flagged for a human, not silently papered over
    contradicts **Hard Rule #28** ("ZERO hardcoded skill/keyword lists") and CLAUDE.md's
    own claim that this file is "being removed". Either the code should be removed or
    rule #28 amended. (Not a doc-only fix.)
-2. **Scheduler `"scrapers"` tier key unreachable.** `scheduler.py` `TIER_INTERVALS_SECONDS`
-   has a `"scrapers"` key, but sources set `category="scraper"` (singular), so the lookup
-   falls through to `"default"` (same value → accidentally correct). Latent bug.
-3. **Matcher telemetry may not persist.** `utils/telemetry.py::MatcherTelemetry` counters
-   increment but no confirmed sink to `run_log`/logs — "morning review without grepping"
-   goal may be partially open (BACKLOG item 9). Verify a persistence call site.
+2. ✅ **RESOLVED (33768b9).** Scheduler `"scrapers"` tier key was unreachable — sources set
+   `category="scraper"` (singular) while `scheduler.py` `TIER_INTERVALS_SECONDS` keyed `"scrapers"`.
+   Fixed by flipping all 5 HTML scrapers to `category = "scrapers"` (verified: `bcs_jobs.py:21`);
+   `bcs_jobs` now hits the correct 3600s tier. Scheduler tests green (8/8). Docs updated (rule #15).
+3. ✅ **RESOLVED (33768b9).** Matcher telemetry now persists. `MatcherTelemetry.as_dict()`
+   (`telemetry.py:109`) is snapshotted into the new `run_log.matcher_stats` TEXT column
+   (`database.py:133`, auto-adds on boot) via `log_run(matcher_stats=...)` (`database.py:437`),
+   with a per-run reset. Round-trip verified by owner:
+   `run_log.matcher_stats = {"judged":10,"avg_fit":45.5,"fit_min":12,"fit_max":90}`. Docs updated
+   (ARCHITECTURE.md run_log schema, BACKLOG #9).
 
 ## Clean (no drift found)
 

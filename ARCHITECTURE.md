@@ -636,7 +636,11 @@ CREATE TABLE IF NOT EXISTS run_log (
     per_source_errors TEXT DEFAULT '{}',
     per_source_duration TEXT DEFAULT '{}',
     total_duration REAL,
-    user_id TEXT
+    user_id TEXT,
+    matcher_stats TEXT DEFAULT '{}'    -- backlog #9 (33768b9) — per-run LLM-judge telemetry
+                                       -- (judged/skipped/failed/avg_fit/fit_min/fit_max),
+                                       -- snapshotted from MatcherTelemetry.as_dict() in log_run();
+                                       -- auto-adds on boot (database.py:133)
 );
 ```
 
