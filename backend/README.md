@@ -81,8 +81,8 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing. (Live count is **1000+ test functions**
-across 30+ files — run `python -m pytest --collect-only -q | tail -1` for the
+Invariant: full suite passes, 0 failing. (Live count is **~1,636 tests**
+across **~114 test files** — run `python -m pytest --collect-only -q | tail -1` for the
 exact number; the 600 baseline you'll see referenced in older docs was the
 post-3.5.4 figure before Step 1 → Step 3 added their tests.) The
 `-p no:randomly` flag keeps the default order deterministic (pytest-randomly is

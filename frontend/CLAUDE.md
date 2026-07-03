@@ -60,12 +60,17 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
-- `src/app/` — App Router pages: `(auth)/`, `dashboard/`, `jobs/[id]/`, `pipeline/`,
-  `profile/`, `settings/{layout,channels,notifications,account}/`, `notifications/`.
+- `src/app/` — App Router pages: `/` (root), `(auth)/{login,register,forgot-password,
+  reset-password,verify-email}/`, `auth/magic/`, `dashboard/`, `jobs/` (list) +
+  `jobs/[id]/`, `pipeline/`, `profile/`, `channels/`, `admin/sources/`,
+  `settings/{layout,notifications,account}/`, `notifications/`, `contact/`,
+  `privacy/`, `terms/`, `sentry-test/`. (`channels/` is a top-level route, not
+  nested under `settings/`.)
 - `src/components/` — `ui/` (shadcn primitives), `jobs/`, `pipeline/` (KanbanBoard),
   `profile/`, `layout/`, `providers/`.
 - `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `queryKeys.ts`
-  (TanStack Query keys), `api-error.ts`, `types.ts`, `utils.ts`.
+  (TanStack Query keys), `api-error.ts`, `types.ts`, `utils.ts`, `clientLog.ts`
+  (posts to `POST /api/client-log`), `toast.ts` (sonner wrapper).
 - `src/middleware.ts` — session-cookie auth guard (redirects unauthed → login).
 
 ## Verify, don't assume (root rule + verify-job360 skill)
