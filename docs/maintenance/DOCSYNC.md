@@ -124,11 +124,14 @@ Ground truth verified from code:
 These are places where the **code** looks wrong or contradicts a STRICT rule. DocSync
 does not touch code, so these are flagged for a human, not silently papered over:
 
-1. **`core/skill_synonyms.py` still live + imported** by `skill_matcher.py` and
-   `profile/keyword_generator.py` — a 600+-line static skill alias dict. This
-   contradicts **Hard Rule #28** ("ZERO hardcoded skill/keyword lists") and CLAUDE.md's
-   own claim that this file is "being removed". Either the code should be removed or
-   rule #28 amended. (Not a doc-only fix.)
+1. ✅ **RESOLVED (Option B — rule amended, file kept).** `core/skill_synonyms.py`
+   (616-line static alias dict, imported by `skill_matcher.py` +
+   `profile/keyword_generator.py`) contradicted **Rule #28** ("ZERO hardcoded
+   skill/keyword lists") and CLAUDE.md's claim it was "being removed". Owner decision:
+   **keep it** as a sanctioned exception — it only canonicalizes skill *spellings*
+   (`js`→`javascript`, `k8s`→`kubernetes`) at scoring time, doesn't infer skills from
+   prose, and is offline / O(1) / no API cost. Rule #28 amended to carve it out and it
+   was removed from the "offenders being removed" list. Code unchanged (owner's call).
 2. ✅ **RESOLVED (33768b9).** Scheduler `"scrapers"` tier key was unreachable — sources set
    `category="scraper"` (singular) while `scheduler.py` `TIER_INTERVALS_SECONDS` keyed `"scrapers"`.
    Fixed by flipping all 5 HTML scrapers to `category = "scrapers"` (verified: `bcs_jobs.py:21`);
