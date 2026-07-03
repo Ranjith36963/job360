@@ -411,6 +411,13 @@ async def run_search(
     run_uuid = str(uuid.uuid4())
     set_run_uuid(run_uuid)
     run_started_at = time.perf_counter()
+    # Backlog #9 — zero the process-wide engine telemetry so the counters we
+    # persist to run_log reflect THIS run, not a cumulative total. (Note: the
+    # telemetry singletons are process-global, so tightly-overlapping concurrent
+    # runs can still mix — acceptable for now; a per-run context is future work.)
+    from src.utils.telemetry import reset_for_testing as _reset_run_telemetry  # noqa: PLC0415
+
+    _reset_run_telemetry()
     logger.info("=" * 60)
     logger.info("Job360 - Starting job search run")
     if source_filter:
@@ -853,6 +860,10 @@ async def run_search(
             # Log run — Step-1 S1+S2: persist run_uuid + per-source timing/errors
             # + total wall-clock duration into the run_log row.
             total_duration = time.perf_counter() - run_started_at
+            # Backlog #9 — persist the LLM judge telemetry (judged/skipped/avg/spread)
+            # into run_log so it survives the process, not just the in-memory singleton.
+            from src.utils.telemetry import matcher_telemetry  # noqa: PLC0415
+
             await db.log_run(
                 stats,
                 run_uuid=run_uuid,
@@ -860,6 +871,7 @@ async def run_search(
                 per_source_duration=per_source_duration,
                 total_duration=total_duration,
                 user_id=user_id,
+                matcher_stats=matcher_telemetry().as_dict(),
             )
 
             # Step-5 — export metrics snapshots after every run (non-fatal).
@@ -918,7 +930,7 @@ def _print_bucketed_summary(jobs: list, label: str = "Results"):
                 if j.get("salary_min") and j.get("salary_max"):
                     salary = f" | {int(j['salary_min']):,}-{int(j['salary_max']):,}"
                 posted = f" | {_format_date(j.get('date_found', ''))}"
-                src = " [%s]" % j.get("source", "")
+                src = f" [{j.get('source', '')}]"
                 logger.info(
                     "    %s. [%s] %s @ %s%s%s%s%s",
                     i,

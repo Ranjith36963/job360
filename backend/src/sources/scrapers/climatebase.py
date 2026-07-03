@@ -16,7 +16,7 @@ _NEXT_DATA_RE = re.compile(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>'
 class ClimatebaseSource(BaseJobSource):
     """Climatebase — climate tech jobs. Extracts from Next.js embedded JSON."""
     name = "climatebase"
-    category = "scraper"
+    category = "scrapers"
     DOMAINS = {"climate"}
 
     async def fetch_jobs(self) -> list[Job]:

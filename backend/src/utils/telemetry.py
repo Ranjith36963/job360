@@ -106,6 +106,18 @@ class MatcherTelemetry:
         """Mean fit_score across judged jobs (0.0 when none judged)."""
         return (self.fit_sum / self.judged) if self.judged else 0.0
 
+    def as_dict(self) -> dict:
+        """Serialize for persistence into the ``run_log.matcher_stats`` column
+        (backlog #9 — judge telemetry). Empty-run friendly (all zeros)."""
+        return {
+            "judged": self.judged,
+            "skipped_existing": self.skipped_existing,
+            "failed": self.failed,
+            "avg_fit": round(self.avg_fit, 1),
+            "fit_min": self.fit_min,
+            "fit_max": self.fit_max,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Module-level singletons (process-wide; reset between test runs as needed)

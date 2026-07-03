@@ -48,7 +48,7 @@ def _run(coro):
 def test_resolve_tier_by_category_and_name():
     ats = _FakeSource("greenhouse", "ats")
     rss = _FakeSource("jobs_ac_uk", "rss")
-    scraper = _FakeSource("linkedin", "scraper")
+    scraper = _FakeSource("linkedin", "scrapers")
     reed = _FakeSource("reed", "keyed_api")
 
     assert resolve_tier_seconds(ats) == TIER_INTERVALS_SECONDS["ats"]
@@ -88,7 +88,7 @@ def test_ats_source_polled_every_60s():
 
 def test_scrapers_polled_every_3600s():
     now = [1000.0]
-    src = _FakeSource("linkedin", "scraper")
+    src = _FakeSource("linkedin", "scrapers")
     sched = TieredScheduler([src], BreakerRegistry(), clock=lambda: now[0])
 
     _run(sched.tick())
@@ -112,7 +112,7 @@ def test_multiple_tiers_do_not_starve():
     """One slow-tier source should not delay another fast-tier source's tick."""
     now = [1000.0]
     ats = _FakeSource("lever", "ats")
-    scraper = _FakeSource("linkedin", "scraper")
+    scraper = _FakeSource("linkedin", "scrapers")
     sched = TieredScheduler([ats, scraper], BreakerRegistry(), clock=lambda: now[0])
 
     _run(sched.tick())
@@ -160,7 +160,7 @@ def test_scheduler_respects_circuit_breaker_open():
 def test_scheduler_honors_manual_source_filter():
     """CLI `--source` single-run path bypasses tier windows (run_once=True)."""
     now = [1000.0]
-    src = _FakeSource("scrapy", "scraper")  # normally 3600s interval
+    src = _FakeSource("scrapy", "scrapers")  # normally 3600s interval
     sched = TieredScheduler([src], BreakerRegistry(), clock=lambda: now[0])
 
     _run(sched.tick(force=True))

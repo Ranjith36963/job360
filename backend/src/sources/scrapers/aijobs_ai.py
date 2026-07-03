@@ -18,7 +18,7 @@ _JOB_LINK_RE = re.compile(
 class AIJobsAISource(BaseJobSource):
     """aijobs.ai — dedicated AI job board with server-rendered listings."""
     name = "aijobs_ai"
-    category = "scraper"
+    category = "scrapers"
     DOMAINS = {"tech"}
 
     async def fetch_jobs(self) -> list[Job]:

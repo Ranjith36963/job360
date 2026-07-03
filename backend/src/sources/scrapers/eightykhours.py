@@ -18,7 +18,7 @@ _ALGOLIA_URL = f"https://{_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{_ALGOLIA_I
 class EightyKHoursSource(BaseJobSource):
     """80,000 Hours — high-impact AI safety jobs via Algolia API."""
     name = "eightykhours"
-    category = "scraper"
+    category = "scrapers"
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []

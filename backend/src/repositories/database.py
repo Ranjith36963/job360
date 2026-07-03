@@ -130,6 +130,7 @@ class JobDatabase:
             ("per_source_duration", "TEXT DEFAULT '{}'"),
             ("total_duration", "REAL"),
             ("user_id", "TEXT"),
+            ("matcher_stats", "TEXT DEFAULT '{}'"),  # backlog #9 — LLM judge telemetry
         ]
 
         applications_migrations = [
@@ -433,6 +434,7 @@ class JobDatabase:
         per_source_duration: dict | None = None,
         total_duration: float | None = None,
         user_id: str | None = None,
+        matcher_stats: dict | None = None,
     ):
         """Insert a run-log row.
 
@@ -446,12 +448,13 @@ class JobDatabase:
         now = datetime.now(timezone.utc).isoformat()
         errors_json = json.dumps(per_source_errors) if per_source_errors is not None else None
         duration_json = json.dumps(per_source_duration) if per_source_duration is not None else None
+        matcher_json = json.dumps(matcher_stats) if matcher_stats is not None else None
         await self._conn.execute(
             "INSERT INTO run_log ("
             " timestamp, total_found, new_jobs, sources_queried, per_source,"
             " run_uuid, per_source_errors, per_source_duration,"
-            " total_duration, user_id"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " total_duration, user_id, matcher_stats"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now,
                 stats.get("total_found", 0),
@@ -463,6 +466,7 @@ class JobDatabase:
                 duration_json,
                 total_duration,
                 user_id,
+                matcher_json,
             ),
         )
         await self._conn.commit()
