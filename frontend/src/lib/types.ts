@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
 // Job360 Frontend — TypeScript types
 //
-// Generated aliases: 26 names aliased from the backend OpenAPI schema.
+// Generated aliases: 28 names aliased from the backend OpenAPI schema
+// (TailoredDocOut / TailorBundle narrow doc_kind/status to literal unions).
 // Frontend-only: JobFilters, DuplicateJobsResponse, DuplicateJobSummary,
 //                ProfileVersionDiff, PreferencesRequest, SkillProvenance,
-//                SkillTiers
+//                SkillTiers, TailorDocKind
 // ---------------------------------------------------------------------------
 
 import type { components } from "./api-types";
@@ -37,6 +38,20 @@ export type SearchStatusResponse = Schemas["SearchStatusResponse"];
 export type SourceInfo = Schemas["SourceInfo"];
 export type StatusResponse = Schemas["StatusResponse"];
 export type TimelineEntry = Schemas["TimelineEntry"];
+
+// `doc_kind`/`status` are narrowed from `string` to literal unions — the
+// backend OpenAPI declares them as string but only these values are valid
+// (docs/peruser_cv_coverletter.md). Same pattern as `Channel` in api.ts.
+export type TailorDocKind = "cv" | "cover_letter";
+
+export type TailoredDocOut = Omit<Schemas["TailoredDocOut"], "doc_kind" | "status"> & {
+  doc_kind: TailorDocKind;
+  status: "draft" | "kept";
+};
+
+export type TailorBundle = Omit<Schemas["TailorBundle"], "documents"> & {
+  documents: TailoredDocOut[];
+};
 
 // ---- Name bridge: frontend name differs from schema name ----
 

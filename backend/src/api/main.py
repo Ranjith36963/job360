@@ -33,6 +33,7 @@ from src.api.routes import (
     profile,
     runs,
     search,
+    tailor,
 )
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.utils.logger import setup_audit_logger, setup_logging
@@ -127,3 +128,5 @@ app.include_router(notifications.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
 # Step-3 B-15 — run history
 app.include_router(runs.router, prefix="/api")
+# Per-User AI CV & Cover Letter (docs/peruser_cv_coverletter.md)
+app.include_router(tailor.router, prefix="/api")

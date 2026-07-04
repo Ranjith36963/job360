@@ -1250,6 +1250,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tailor/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tailored
+         * @description Return the caller's tailored docs for a job (empty list if none generated).
+         */
+        get: operations["get_tailored_api_tailor__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tailor/{job_id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate
+         * @description Generate a tailored CV + cover letter for (caller, job). Quota-gated.
+         */
+        post: operations["generate_api_tailor__job_id__generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tailor/{job_id}/{doc_kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Save Edit
+         * @description Save the user's edited/polished version (guardrail #3 — always editable).
+         */
+        patch: operations["save_edit_api_tailor__job_id___doc_kind__patch"];
+        trace?: never;
+    };
+    "/api/tailor/{job_id}/{doc_kind}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download
+         * @description Download the polished (or draft) doc as an ATS-friendly PDF. Marks it KEPT.
+         */
+        get: operations["download_api_tailor__job_id___doc_kind__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tailor/{job_id}/{doc_kind}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep
+         * @description Mark KEPT → the learning trigger (§5 learn-from-kept-only).
+         */
+        post: operations["keep_api_tailor__job_id___doc_kind__keep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2092,6 +2192,45 @@ export interface components {
             sources_active: number;
             /** Sources Total */
             sources_total: number;
+        };
+        /** TailorBundle */
+        TailorBundle: {
+            /** Documents */
+            documents: components["schemas"]["TailoredDocOut"][];
+            /** Job Id */
+            job_id: number;
+            /** Quota Limit */
+            quota_limit: number;
+            /** Quota Used */
+            quota_used: number;
+        };
+        /** TailorSaveRequest */
+        TailorSaveRequest: {
+            /** Text */
+            text: string;
+        };
+        /** TailoredDocOut */
+        TailoredDocOut: {
+            /** Ai Draft */
+            ai_draft: string;
+            /** Doc Kind */
+            doc_kind: string;
+            /**
+             * Flagged Terms
+             * @default []
+             */
+            flagged_terms: string[];
+            /** Model */
+            model?: string | null;
+            /** Polished */
+            polished?: string | null;
+            /**
+             * Status
+             * @default draft
+             */
+            status: string;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * TelegramConnectOut
@@ -4084,6 +4223,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+        };
+    };
+    get_tailored_api_tailor__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TailorBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_api_tailor__job_id__generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TailorBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_edit_api_tailor__job_id___doc_kind__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+                doc_kind: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TailorSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TailoredDocOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_api_tailor__job_id___doc_kind__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+                doc_kind: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    keep_api_tailor__job_id___doc_kind__keep_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+                doc_kind: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TailoredDocOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

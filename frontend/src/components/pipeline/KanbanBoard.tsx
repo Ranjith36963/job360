@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   ArrowRight,
   History,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ import {
 } from "@/components/ui/sheet";
 import { NotesEditor } from "./NotesEditor";
 import { PipelineFilterPanel } from "./PipelineFilterPanel";
+import { TailorPanel } from "@/components/tailor/TailorPanel";
 import { getApplicationTimeline } from "@/lib/api";
 import type {
   PipelineApplication,
@@ -161,6 +163,7 @@ function ApplicationCard({
   onAdvance,
   onRequestConfirm,
   onOpenTimeline,
+  onOpenTailor,
   onNotesaved,
 }: {
   app: PipelineApplication;
@@ -168,6 +171,7 @@ function ApplicationCard({
   onAdvance: (jobId: number, nextStage: string) => void;
   onRequestConfirm: (jobId: number, targetStage: string) => void;
   onOpenTimeline: (jobId: number) => void;
+  onOpenTailor: (jobId: number) => void;
   onNotesaved: () => void;
 }) {
   const next = nextStage(app.stage);
@@ -265,6 +269,18 @@ function ApplicationCard({
           History
         </Button>
 
+        {/* Tailored CV + cover letter for this application (spec §3.5) */}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground px-2"
+          aria-label={`View tailored CV and cover letter for ${jobLabel}`}
+          onClick={() => onOpenTailor(app.job_id)}
+        >
+          <FileText className="h-3 w-3" aria-hidden="true" />
+          CV/Letter
+        </Button>
+
         {/* Advance button — push to right */}
         {next && (
           <Button
@@ -292,6 +308,7 @@ function KanbanColumn({
   onAdvance,
   onRequestConfirm,
   onOpenTimeline,
+  onOpenTailor,
   onNotesSaved,
   stagger,
 }: {
@@ -300,6 +317,7 @@ function KanbanColumn({
   onAdvance: (jobId: number, nextStage: string) => void;
   onRequestConfirm: (jobId: number, targetStage: string) => void;
   onOpenTimeline: (jobId: number) => void;
+  onOpenTailor: (jobId: number) => void;
   onNotesSaved: () => void;
   stagger: number;
 }) {
@@ -372,6 +390,7 @@ function KanbanColumn({
               onAdvance={onAdvance}
               onRequestConfirm={onRequestConfirm}
               onOpenTimeline={onOpenTimeline}
+              onOpenTailor={onOpenTailor}
               onNotesaved={onNotesSaved}
             />
           ))
@@ -414,6 +433,15 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
   const [timelineEntries, setTimelineEntries] = useState<TimelineEntry[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+
+  // Tailored CV/cover letter panel (spec §3.5 — reachable from the Kanban card)
+  const [tailorOpen, setTailorOpen] = useState(false);
+  const [tailorJobId, setTailorJobId] = useState<number | null>(null);
+
+  const handleOpenTailor = useCallback((jobId: number) => {
+    setTailorJobId(jobId);
+    setTailorOpen(true);
+  }, []);
 
   // Keep filteredApps in sync when applications prop changes (e.g. after refresh)
   // The PipelineFilterPanel's useEffect will re-run and call setFilteredApps.
@@ -509,6 +537,7 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
             onAdvance={onAdvance}
             onRequestConfirm={handleRequestConfirm}
             onOpenTimeline={handleOpenTimeline}
+            onOpenTailor={handleOpenTailor}
             onNotesSaved={handleNotesSaved}
             stagger={i + 1}
           />
@@ -525,6 +554,7 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
             onAdvance={onAdvance}
             onRequestConfirm={handleRequestConfirm}
             onOpenTimeline={handleOpenTimeline}
+            onOpenTailor={handleOpenTailor}
             onNotesSaved={handleNotesSaved}
             stagger={i + 1}
           />
@@ -622,6 +652,11 @@ export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardP
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Tailored CV + cover letter panel — reachable from any application card */}
+      {tailorJobId !== null && (
+        <TailorPanel jobId={tailorJobId} open={tailorOpen} onOpenChange={setTailorOpen} />
+      )}
     </DndContext>
   );
 }

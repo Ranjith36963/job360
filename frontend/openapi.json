@@ -957,6 +957,19 @@
         "title": "LinkedInResponse",
         "type": "object"
       },
+      "LivezResponse": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LivezResponse",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -974,6 +987,35 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MagicLinkConsumeRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "MagicLinkConsumeRequest",
+        "type": "object"
+      },
+      "MagicLinkRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "MagicLinkRequest",
         "type": "object"
       },
       "NotesUpdateRequest": {
@@ -2029,6 +2071,114 @@
         "title": "StatusResponse",
         "type": "object"
       },
+      "TailorBundle": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/TailoredDocOut"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "quota_limit": {
+            "title": "Quota Limit",
+            "type": "integer"
+          },
+          "quota_used": {
+            "title": "Quota Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "documents",
+          "quota_used",
+          "quota_limit"
+        ],
+        "title": "TailorBundle",
+        "type": "object"
+      },
+      "TailorSaveRequest": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TailorSaveRequest",
+        "type": "object"
+      },
+      "TailoredDocOut": {
+        "properties": {
+          "ai_draft": {
+            "title": "Ai Draft",
+            "type": "string"
+          },
+          "doc_kind": {
+            "title": "Doc Kind",
+            "type": "string"
+          },
+          "flagged_terms": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Flagged Terms",
+            "type": "array"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "polished": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Polished"
+          },
+          "status": {
+            "default": "draft",
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "doc_kind",
+          "ai_draft"
+        ],
+        "title": "TailoredDocOut",
+        "type": "object"
+      },
       "TelegramConnectOut": {
         "description": "Response from GET /connect/telegram.",
         "properties": {
@@ -2394,6 +2544,83 @@
           }
         },
         "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/magic-link/consume": {
+      "post": {
+        "description": "Validate a magic-link token, sign the user in (find-or-create + verify).\n\nOn success sets the session cookie and returns the user. On any failure\n(unknown / expired / already-used token) raises 400 with a generic\nmessage so token existence can't be probed.",
+        "operationId": "magic_link_consume_api_auth_magic_link_consume_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkConsumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Magic Link Consume",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/magic-link/request": {
+      "post": {
+        "description": "Email a passwordless sign-in link.\n\nAlways returns 204 regardless of whether the email is registered \u2014 the\naccount is created lazily on consume, so there's nothing to enumerate.\nRate-limited to 3 requests per 5 minutes per email so an attacker can't\nspam any address with sign-in emails. When limited we still return 204\n(indistinguishable) but issue no token and send no email.",
+        "operationId": "magic_link_request_api_auth_magic_link_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Magic Link Request",
         "tags": [
           "auth"
         ]
@@ -3389,6 +3616,28 @@
         "summary": "Get Job Duplicates",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/api/livez": {
+      "get": {
+        "description": "Liveness probe \u2014 returns 200 as long as the process is running.\n\nNo dependency checks. Kubernetes/Railway liveness must not fail because\nthe DB momentarily blipped; that is what /readyz is for.",
+        "operationId": "livez_api_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivezResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Livez",
+        "tags": [
+          "health"
         ]
       }
     },
@@ -4609,6 +4858,26 @@
         ]
       }
     },
+    "/api/readyz": {
+      "get": {
+        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "operationId": "readyz_api_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readyz",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/runs/recent": {
       "get": {
         "description": "Return paginated pipeline run history from run_log, newest first.\n\nStep-3 B-15.  Requires authentication (rule #12) \u2014 the run log is\noperational metadata, not a public catalog surface.",
@@ -5397,6 +5666,336 @@
         "summary": "Status",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}": {
+      "get": {
+        "description": "Return the caller's tailored docs for a job (empty list if none generated).",
+        "operationId": "get_tailored_api_tailor__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TailorBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tailored",
+        "tags": [
+          "tailor"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}/generate": {
+      "post": {
+        "description": "Generate a tailored CV + cover letter for (caller, job). Quota-gated.",
+        "operationId": "generate_api_tailor__job_id__generate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TailorBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate",
+        "tags": [
+          "tailor"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}/{doc_kind}": {
+      "patch": {
+        "description": "Save the user's edited/polished version (guardrail #3 \u2014 always editable).",
+        "operationId": "save_edit_api_tailor__job_id___doc_kind__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_kind",
+            "required": true,
+            "schema": {
+              "title": "Doc Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TailorSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TailoredDocOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Edit",
+        "tags": [
+          "tailor"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}/{doc_kind}/download": {
+      "get": {
+        "description": "Download the polished (or draft) doc as an ATS-friendly PDF. Marks it KEPT.",
+        "operationId": "download_api_tailor__job_id___doc_kind__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_kind",
+            "required": true,
+            "schema": {
+              "title": "Doc Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download",
+        "tags": [
+          "tailor"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}/{doc_kind}/keep": {
+      "post": {
+        "description": "Mark KEPT \u2192 the learning trigger (\u00a75 learn-from-kept-only).",
+        "operationId": "keep_api_tailor__job_id___doc_kind__keep_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_kind",
+            "required": true,
+            "schema": {
+              "title": "Doc Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TailoredDocOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Keep",
+        "tags": [
+          "tailor"
         ]
       }
     }
