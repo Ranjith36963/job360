@@ -1352,6 +1352,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tailor/{job_id}/{doc_kind}/provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provenance
+         * @description Per-line provenance for the doc: which lines are the user's OWN facts (grounded
+         *     in their CV + the job) vs lines the AI added. Deterministic, no LLM — shown before
+         *     download so the user can verify what's real (user request / guardrail #2).
+         */
+        get: operations["provenance_api_tailor__job_id___doc_kind__provenance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2049,6 +2071,13 @@ export interface components {
             total: number;
             /** Versions */
             versions: components["schemas"]["ProfileVersionSummary"][];
+        };
+        /** ProvenanceSegment */
+        ProvenanceSegment: {
+            /** Grounded */
+            grounded: boolean;
+            /** Text */
+            text: string;
         };
         /**
          * ProvidersOut
@@ -4390,6 +4419,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TailoredDocOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    provenance_api_tailor__job_id___doc_kind__provenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+                doc_kind: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvenanceSegment"][];
                 };
             };
             /** @description Validation Error */

@@ -660,6 +660,20 @@ export async function getTailored(jobId: number): Promise<TailorBundle> {
   return request<TailorBundle>(`/api/tailor/${jobId}`);
 }
 
+/** One line of the doc + whether it's grounded in the user's CV (their fact) or AI-added. */
+export interface ProvenanceSegment {
+  text: string;
+  grounded: boolean;
+}
+
+/** Per-line provenance for a tailored doc — your facts vs what the AI added. */
+export async function getTailoredProvenance(
+  jobId: number,
+  kind: TailorDocKind
+): Promise<ProvenanceSegment[]> {
+  return request<ProvenanceSegment[]>(`/api/tailor/${jobId}/${kind}/provenance`);
+}
+
 export async function saveTailored(
   jobId: number,
   kind: TailorDocKind,

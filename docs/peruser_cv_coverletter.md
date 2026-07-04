@@ -60,7 +60,7 @@ Plugs into **3 existing screens** — no new top-level page needed. The only new
 ## 4. Guardrails — the things NOT to miss (or it backfires)
 
 1. **Paid / capped.** Each generation = an AI call = money. Free users spamming it explodes the LLM bill. Make it **premium (or X free/month)** → ties into the paywall (Phase 4).
-2. **Never lie.** The AI may only **reorder / reword / highlight what's TRUE** in your CV — it must **never invent** skills or jobs. A fabricated CV gets you rejected or fired. Lock the prompt to "reshape, don't fabricate."
+2. **Never lie.** The AI may only **reorder / reword / highlight what's TRUE** in your CV — it must **never invent** skills or jobs. A fabricated CV gets you rejected or fired. Lock the prompt to "reshape, don't fabricate." ✅ **BUILT + ENFORCED, 3 layers:** (a) locked system prompt, (b) deterministic proper-noun repair (`integrity.py` — re-spells near-misses like Monox→Monzo, flags absent brand names), (c) **fact-provenance highlighting** (`provenance.py` + `GET .../provenance` + the "Highlight my facts" toggle) — the user sees per-line what's *their fact* (green) vs *AI-added* (amber) before download.
 3. **Always editable.** Nobody sends raw AI output. Flow is **generate → you review/edit → then use.**
 4. **We can't auto-apply.** "Apply" opens the company's site; we generate the docs, **you** submit them there. Set that expectation.
 5. **ATS-friendly output.** Companies scan CVs with software → output clean, plain, machine-readable format.

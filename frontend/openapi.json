@@ -1655,6 +1655,24 @@
         "title": "ProfileVersionsListResponse",
         "type": "object"
       },
+      "ProvenanceSegment": {
+        "properties": {
+          "grounded": {
+            "title": "Grounded",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "grounded"
+        ],
+        "title": "ProvenanceSegment",
+        "type": "object"
+      },
       "ProvidersOut": {
         "description": "Which OAuth/connect buttons the frontend should display.",
         "properties": {
@@ -6004,6 +6022,78 @@
           }
         },
         "summary": "Keep",
+        "tags": [
+          "tailor"
+        ]
+      }
+    },
+    "/api/tailor/{job_id}/{doc_kind}/provenance": {
+      "get": {
+        "description": "Per-line provenance for the doc: which lines are the user's OWN facts (grounded\nin their CV + the job) vs lines the AI added. Deterministic, no LLM \u2014 shown before\ndownload so the user can verify what's real (user request / guardrail #2).",
+        "operationId": "provenance_api_tailor__job_id___doc_kind__provenance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_kind",
+            "required": true,
+            "schema": {
+              "title": "Doc Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProvenanceSegment"
+                  },
+                  "title": "Response Provenance Api Tailor  Job Id   Doc Kind  Provenance Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Provenance",
         "tags": [
           "tailor"
         ]

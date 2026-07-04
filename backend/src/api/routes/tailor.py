@@ -25,6 +25,7 @@ from src.services.tailoring.docx import render_docx
 from src.services.tailoring.generator import EmptyCVError
 from src.services.tailoring.patterns import derive_patterns, summarize_patterns
 from src.services.tailoring.pdf import render_pdf
+from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["tailor"])
@@ -53,6 +54,11 @@ class TailorBundle(BaseModel):
 
 class TailorSaveRequest(BaseModel):
     text: str
+
+
+class ProvenanceSegment(BaseModel):
+    text: str
+    grounded: bool  # True = grounded in the user's CV/job (their fact); False = AI-added
 
 
 def _doc_out(row: dict) -> TailoredDocOut:
@@ -172,6 +178,26 @@ async def get_tailored(
 ):
     """Return the caller's tailored docs for a job (empty list if none generated)."""
     return await _bundle(db, user.id, job_id)
+
+
+@router.get("/tailor/{job_id}/{doc_kind}/provenance", response_model=list[ProvenanceSegment])
+async def provenance(
+    job_id: int,
+    doc_kind: str,
+    db: JobDatabase = Depends(get_db),
+    user: CurrentUser = Depends(require_verified_user),
+):
+    """Per-line provenance for the doc: which lines are the user's OWN facts (grounded
+    in their CV + the job) vs lines the AI added. Deterministic, no LLM — shown before
+    download so the user can verify what's real (user request / guardrail #2)."""
+    _check_kind(doc_kind)
+    row = await db.get_tailored_doc(user.id, job_id, doc_kind)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Nothing to check — generate first.")
+    text = row.get("polished") or row.get("ai_draft") or ""
+    job = await db.get_job_by_id(job_id)
+    source = _load_cv_text(user.id) + "\n" + (job.get("description", "") if job else "")
+    return annotate_provenance(text, source)
 
 
 @router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut)

@@ -14,11 +14,14 @@ const mockGenerateTailored = vi.fn();
 const mockSaveTailored = vi.fn();
 const mockDownloadTailored = vi.fn();
 
+const mockGetProvenance = vi.fn();
+
 vi.mock("@/lib/api", () => ({
   getTailored: (...args: unknown[]) => mockGetTailored(...args),
   generateTailored: (...args: unknown[]) => mockGenerateTailored(...args),
   saveTailored: (...args: unknown[]) => mockSaveTailored(...args),
   downloadTailored: (...args: unknown[]) => mockDownloadTailored(...args),
+  getTailoredProvenance: (...args: unknown[]) => mockGetProvenance(...args),
 }));
 
 const mockToastSuccess = vi.fn();
@@ -136,6 +139,28 @@ describe("TailorPanel", () => {
     await waitFor(() => {
       expect(mockDownloadTailored).toHaveBeenCalledWith(42, "cv", "docx");
     });
+  });
+
+  it("Highlight my facts fetches provenance and shows grounded + AI-added lines", async () => {
+    mockGetProvenance.mockResolvedValue([
+      { text: "Senior ML Engineer at Monzo", grounded: true },
+      { text: "Led a team of fifty across three continents", grounded: false },
+    ]);
+    render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
+
+    await screen.findByDisplayValue("AI CV draft text");
+    await userEvent.click(
+      screen.getByRole("button", { name: /highlight my facts/i })
+    );
+
+    await waitFor(() =>
+      expect(mockGetProvenance).toHaveBeenCalledWith(42, "cv")
+    );
+    expect(
+      await screen.findByText(/senior ml engineer at monzo/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/led a team of fifty/i)).toBeInTheDocument();
+    expect(screen.getByText(/ai-added/i)).toBeInTheDocument(); // legend present
   });
 
   it("shows a limit-reached toast on 402 from Generate", async () => {
