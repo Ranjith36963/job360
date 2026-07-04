@@ -182,7 +182,9 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
         name = name.strip()
         if not name or not _looks_like_skill(name):
             return
-        key = name.casefold()
+        # Whitespace-insensitive identity so "Chroma DB" and "ChromaDB" (and
+        # "MLOps" / "ML Ops") collapse to one skill instead of showing twice.
+        key = re.sub(r"\s+", "", name).casefold()
         if key not in evidence:
             evidence[key] = SkillEvidence(name=name)
         if source not in evidence[key].sources:

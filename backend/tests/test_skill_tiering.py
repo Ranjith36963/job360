@@ -190,6 +190,20 @@ def test_collect_evidence_merges_sources_on_same_skill():
     assert by_name["react"].sources == ["github_llm"]
 
 
+def test_collect_evidence_dedups_spacing_variants():
+    """TRUST: 'ChromaDB' and 'Chroma DB' both showed as separate skills — a pure
+    spacing difference. Skill identity ignores whitespace (and case), so they
+    collapse to one entry carrying both sources."""
+    prefs = UserPreferences()
+    cv = CVData(skills=["ChromaDB"], linkedin_skills=["Chroma DB"])
+    profile = UserProfile(cv_data=cv, preferences=prefs)
+    ev = collect_evidence_from_profile(profile)
+    names = [e.name for e in ev]
+    assert len(names) == 1
+    # both sources merged onto the single entry
+    assert set(ev[0].sources) == {"cv_explicit", "linkedin"}
+
+
 def test_collect_evidence_first_sighting_casing_wins():
     """If ``Python`` comes before ``python``, the first casing is kept."""
     prefs = UserPreferences(additional_skills=["Python"])

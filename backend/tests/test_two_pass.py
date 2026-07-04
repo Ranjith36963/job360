@@ -113,6 +113,36 @@ class TestLinkedInLlmSkills:
 # ── CV deterministic pass (Pass 1) — no-LLM field grab ──────────────
 
 
+class TestCertEducationDedup:
+    def test_dedup_by_containment_drops_fragments_and_exact_dupes(self):
+        """TRUST: certifications showed the same cert three times — the full form
+        plus two line-wrap fragments ('The Complete Python Bootcamp' + 'From Zero
+        to Hero in Python'). Drop any entry that is a normalized substring of a
+        longer one, and collapse exact dupes. Structural, no keyword list."""
+        from src.services.profile.two_pass import dedup_by_containment
+
+        items = [
+            "The Complete Python Bootcamp from Zero to Hero in Python (Udemy, March 2024)",
+            "The Complete Python Bootcamp",
+            "From Zero to Hero in Python",
+            "AWS Certified AI Practitioner",
+            "AWS Certified AI Practitioner",  # exact dup
+        ]
+        out = dedup_by_containment(items)
+        assert "The Complete Python Bootcamp from Zero to Hero in Python (Udemy, March 2024)" in out
+        assert "The Complete Python Bootcamp" not in out
+        assert "From Zero to Hero in Python" not in out
+        assert out.count("AWS Certified AI Practitioner") == 1
+
+    def test_dedup_by_containment_keeps_distinct_entries(self):
+        """Distinct certs/degrees must all survive — dedup only removes fragments
+        and exact dupes, never genuinely different entries."""
+        from src.services.profile.two_pass import dedup_by_containment
+
+        items = ["MSc Artificial Intelligence", "BEng Computer Science", "AWS Certified"]
+        assert dedup_by_containment(items) == items
+
+
 class TestMergeCvAndPreferences:
     def test_cv_skills_do_not_pollute_additional_skills(self):
         """BUG (empty tiers + stuffed preferences box): merge folded ALL cv skills
