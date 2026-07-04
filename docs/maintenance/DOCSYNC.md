@@ -8,38 +8,63 @@ honest against the code.
 > disagree, the doc is wrong (unless the code is a genuine bug — then flag it,
 > don't edit code). DocSync **never touches a line of code** — MD files only.
 
+## Why docs drift — and the two permanent fixes
+
+Drift exists for exactly one reason: **a doc holds a *copy* of a fact** — a count,
+a version, a route number, a behaviour. The moment the code changes, the copy is
+wrong and nothing complains. So Loop 3's job is not to re-sync copies forever; it is
+to **remove the copy**. Two permanent fixes, applied on every run — not just re-typing
+the new number:
+
+1. **Point to code, don't copy it — the real cure.** Every drift-prone *fact* in a
+   living doc (a number, count, exact version, or file/behaviour claim) should be
+   replaced with a `file:line`/symbol pointer. Not "47 sources" → "see
+   `SOURCE_REGISTRY` in `src/main.py`". Not "~1,636 tests" → "the runtime collected
+   count (`pytest --collect-only`)". Code can't drift from itself. **Prose stays;
+   only the copied facts become pointers.** Do this and there is nothing left to
+   drift — `/sync` then just mops up prose.
+2. **Guard the load-bearing numbers with a test — drift that can't hide.** If a
+   number genuinely must be asserted somewhere, there should be a test that goes
+   **red** when it changes (like the "five surfaces == 47" tests). A red test is
+   loud; a doc that "reads fine" is silent — exactly how the `scraper`/`scrapers`
+   mismatch slipped past a passing suite. Loop 3 doesn't write the test (that's
+   code), it **flags the missing guard** as a code-side task.
+
 ## How to run Loop 3
 
-1. **Extract code facts** (the ground truth). Source count, test count, route
-   modules + endpoints, migrations + tables, engine flags, DB backend, deps,
-   frontend routes, CLI commands. Verify from code, never from another doc.
-2. **Fan out the audit** — one reader per living-doc cluster, each verifying its
-   doc's claims against code, citing `file:line`, classifying every finding:
-   - `CONTRADICTS` — doc says X, code says Y.
-   - `BEHIND` — code has something the doc omits/undercounts.
-   - `AHEAD` — doc describes something not in the code (documented-but-not-built).
-   - `UNDOCUMENTED` — code exists, no doc covers it.
-   - `STALE-OPEN` — listed as a TODO but already done in code.
-   - `UNVERIFIED` — could not confirm from code (say what to check).
-3. **Ledger** the findings (the dated section below).
-4. **Fix the living docs** — MD only, cite the code proof, keep each doc's tone.
-5. **Flag code-side issues** separately (things where the *code* looks wrong, so a
-   doc fix would launder a bug). The owner decides.
-6. **Do NOT rewrite historical docs** (plans, research, reviews, `_archive/`,
-   `IMPLEMENTATION_LOG.md`, dated reports). They are point-in-time records.
+Run it **before every commit** that touches code or docs — a step in the flow, not
+an occasional hope. `/sync` is the tool; this is its checklist.
 
-## Which docs are "living" (synced) vs "historical" (left alone)
+1. **Extract code facts** (the ground truth). Verify from code, never another doc.
+2. **Fan out the audit** — one reader per live doc, verifying claims against code,
+   citing `file:line`, classifying each finding: `CONTRADICTS` / `BEHIND` / `AHEAD` /
+   `UNDOCUMENTED` / `STALE-OPEN` / `UNVERIFIED`.
+3. **Fix — prefer a pointer over a fresh copy (fix #1).** When a finding is a stale
+   *fact*, don't just update the number — replace it with a `file:line` pointer so it
+   can't drift again. Keep a literal number only when a doc truly needs one, and then
+   flag it for a guard test (fix #2). MD only, keep each doc's tone.
+4. **Ledger** the findings (the dated sections below).
+5. **Flag code-side issues** separately — bugs a doc fix would launder, AND
+   drift-prone numbers with no guard test. The owner decides.
+6. **Do NOT rewrite historical docs** — they are point-in-time records.
 
-- **Living (sync):** `CLAUDE.md`, `backend/CLAUDE.md`, `frontend/CLAUDE.md`,
-  `ARCHITECTURE.md`, `STATUS.md`, `README.md`, `backend/README.md`,
-  `frontend/README.md`, `docs/README.md`, `docs/STACK.md`, `docs/STACK_checklist.md`,
-  `docs/pillars/*`, `CONTRIBUTING.md`, `docs/troubleshooting.md`, `docs/DEPLOY.md`,
-  `.claude/skills/*` (they cite live code facts), `docs/maintenance/{BACKLOG,MISSIONS,STATUS-DAILY}.md`.
-- **Roadmap (update status lines only):** `LAUNCH_PLAN.md`, `docs/MONETIZATION_GAPS.md`,
-  `ENGINES_KANBAN.md`, `docs/PRD.md`.
-- **Historical (leave):** `docs/plans/*`, `docs/research/*`, `docs/reviews/*`,
-  `docs/_archive/*`, `docs/IMPLEMENTATION_LOG.md`, `docs/engine_eval_*`,
-  `docs/evaluation_report.md`, `docs/maintenance/JOURNAL.md`.
+## Keep the live set tiny (less to keep fresh)
+
+Drift tax scales with how many docs claim to be **current**. Keep the 🟢 set small;
+demote the rest — a historical doc is *allowed* to be stale, so it costs nothing.
+
+- 🟢 **Ground truth — must always match code, synced every run:** `CLAUDE.md`,
+  `STATUS.md`. These two are the contract. Keep them true and pointer-based.
+- 📎 **Reference — sync only when their own area changes, prefer pointers:**
+  `ARCHITECTURE.md`, the three `README.md`s, `frontend/CLAUDE.md`, `backend/CLAUDE.md`,
+  `docs/README.md`, `docs/STACK_checklist.md`, `docs/pillars/*`, `CONTRIBUTING.md`,
+  `docs/DEPLOY.md`, `docs/troubleshooting.md`, `.claude/skills/*`.
+- 🗄️ **Historical / roadmap — allowed to be stale, do NOT sync:** `docs/plans/*`,
+  `docs/research/*`, `docs/reviews/*`, `docs/_archive/*`, `IMPLEMENTATION_LOG.md`,
+  `PRD.md`, `LAUNCH_PLAN.md`, `MONETIZATION_GAPS.md`, `ENGINES_KANBAN.md`,
+  `docs/STACK.md`, `engine_eval_*`, `evaluation_report.md`, `JOURNAL.md`,
+  `STATUS-DAILY.md`. **Archive ruthlessly** — if a "live" doc isn't needed, move it
+  to `docs/_archive/` and stop paying for it.
 
 ---
 
