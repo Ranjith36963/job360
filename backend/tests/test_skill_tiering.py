@@ -21,6 +21,36 @@ from src.services.profile.skill_tiering import (
 )
 
 
+def test_github_raw_deps_topics_and_filetypes_do_not_become_skills():
+    """TRUST: the live profile page was flooded with raw GitHub build-metadata —
+    dependency package names (pytest, @capacitor/core, workbox-window), repo
+    topics (gmail, slack, hitl), and config-file 'languages' (Makefile, Procfile,
+    Batchfile). None are skills. The tiers must use SIGNIFICANT languages +
+    LLM-read repo skills only. Source-quality decision, not a keyword denylist
+    (rule #28)."""
+    cv = CVData(
+        github_frameworks=["pytest", "@capacitor/core", "ruff", "FastAPI"],  # raw deps
+        github_topics=["gmail", "slack", "hitl"],                             # raw topics
+        github_languages={"Python": 1_000_000, "TypeScript": 800_000,
+                          "Makefile": 500, "Procfile": 150, "Dockerfile": 300},
+        github_skills_inferred=["Python", "Makefile", "gmail", "Procfile"],   # raw langs+topics
+        github_llm_skills=["React", "RAG"],                                   # clean LLM
+    )
+    profile = UserProfile(cv_data=cv, preferences=UserPreferences())
+    names = {e.name for e in collect_evidence_from_profile(profile)}
+    # significant languages survive
+    assert "Python" in names and "TypeScript" in names
+    # LLM-read repo skills survive
+    assert "React" in names and "RAG" in names
+    # raw dependency names are GONE
+    assert "pytest" not in names and "ruff" not in names
+    assert "@capacitor/core" not in names
+    # raw topics are GONE
+    assert "gmail" not in names and "hitl" not in names
+    # config-file 'languages' are GONE
+    assert "Makefile" not in names and "Procfile" not in names and "Dockerfile" not in names
+
+
 def test_collect_evidence_drops_non_skill_shaped_junk():
     """Defense-in-depth: whatever the source, a token that is a sentence, a date,
     or a section header is NOT a skill and must never enter the evidence stream
@@ -145,8 +175,8 @@ def test_collect_evidence_merges_sources_on_same_skill():
     cv = CVData(
         skills=["Python", "Docker"],
         linkedin_skills=["Python"],
-        github_frameworks=["FastAPI"],
-        github_skills_inferred=["Rust"],
+        github_languages={"Rust": 500_000},   # significant language → github_lang
+        github_llm_skills=["React"],           # LLM-read repo skill → github_llm
     )
     profile = UserProfile(cv_data=cv, preferences=prefs)
 
@@ -156,8 +186,8 @@ def test_collect_evidence_merges_sources_on_same_skill():
     # Python appears in user_declared + cv_explicit + linkedin — all three
     assert set(by_name["python"].sources) == {"user_declared", "cv_explicit", "linkedin"}
     assert by_name["docker"].sources == ["cv_explicit"]
-    assert by_name["fastapi"].sources == ["github_dep"]
     assert by_name["rust"].sources == ["github_lang"]
+    assert by_name["react"].sources == ["github_llm"]
 
 
 def test_collect_evidence_first_sighting_casing_wins():
@@ -192,9 +222,9 @@ def test_keyword_generator_user_declared_lands_in_primary():
 
 
 def test_keyword_generator_lone_github_lang_lands_in_tertiary():
-    # Batch 2.3 — canonical (lower-case) skill assertion.
+    # A lone significant GitHub language = github_lang (1.0) → tertiary.
     prefs = UserPreferences()
-    cv = CVData(github_skills_inferred=["Haskell"])
+    cv = CVData(github_languages={"Haskell": 200_000})
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
     assert "haskell" in cfg.tertiary_skills
@@ -222,14 +252,19 @@ def test_keyword_generator_no_skills_yields_empty_tiers():
     assert cfg.tertiary_skills == []
 
 
-def test_keyword_generator_includes_github_frameworks_in_relevance():
-    """Frameworks from Batch 1.2 should flow through tiering just like other skills.
-
-    Batch 2.3 — canonical (lower-case) skill assertion.
-    """
+def test_keyword_generator_excludes_raw_github_frameworks():
+    """TRUST fix: raw dependency package names (github_frameworks) are build
+    metadata, NOT skills, and must NOT flow into the search config. The meaningful
+    frameworks are recovered via the LLM repo-skills pass instead."""
     prefs = UserPreferences()
-    cv = CVData(github_frameworks=["Django", "React"])
+    cv = CVData(
+        github_frameworks=["pytest", "@capacitor/core", "django"],  # raw deps → excluded
+        github_llm_skills=["Django", "React"],                       # LLM-read → included
+    )
     profile = UserProfile(cv_data=cv, preferences=prefs)
     cfg = generate_search_config(profile)
-    # github_dep alone = 1.5 → secondary
-    assert set(cfg.secondary_skills) >= {"django", "react"}
+    all_skills = set(cfg.primary_skills) | set(cfg.secondary_skills) | set(cfg.tertiary_skills)
+    assert "pytest" not in all_skills
+    assert "@capacitor/core" not in all_skills
+    # the LLM-read frameworks ARE present (github_llm = 1.5 → secondary)
+    assert {"django", "react"} <= all_skills

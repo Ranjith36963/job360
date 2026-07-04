@@ -158,10 +158,15 @@ def merge_cv_and_preferences(
     prefs: UserPreferences,
 ) -> UserPreferences:
     """Merge CV-extracted data with user preferences. Preferences take priority."""
-    # Combine titles: user prefs first, then CV-extracted
-    merged_titles = list(prefs.target_job_titles)
-    seen_titles = {t.lower() for t in merged_titles}
-    for title in cv_titles:
+    # target_job_titles = the ROLES THE USER WANTS, their own typed list only. It
+    # must NOT absorb past CV job titles — folding them in surfaced things like
+    # "AI Solutions Engineer – R&D Department" and near-duplicate intern titles
+    # ("AI/ML Engineer Intern" vs "AI / ML intern") as "Roles you're targeting",
+    # which is wrong and erodes trust. Past titles live on cv.job_titles and inform
+    # search separately. (cv_titles stays in the signature for API stability.)
+    merged_titles = []
+    seen_titles = set()
+    for title in prefs.target_job_titles:
         if title.lower() not in seen_titles:
             merged_titles.append(title)
             seen_titles.add(title.lower())

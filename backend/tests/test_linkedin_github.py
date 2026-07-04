@@ -736,9 +736,12 @@ class TestKeywordGeneratorWithEnrichedData:
         assert "docker" in all_skills
 
     def test_github_skills_in_search_config(self):
-        # Batch 2.3 — canonical (lower-case) skill assertion.
+        # GitHub now contributes via significant languages (github_languages) +
+        # LLM-read repo skills (github_llm_skills), not the raw inferred dump.
         profile = UserProfile(
-            cv_data=CVData(raw_text="test", skills=["Python"], github_skills_inferred=["TypeScript", "React"]),
+            cv_data=CVData(raw_text="test", skills=["Python"],
+                           github_languages={"TypeScript": 500_000},
+                           github_llm_skills=["React"]),
             preferences=UserPreferences(target_job_titles=["Full Stack Developer"]),
         )
         config = generate_search_config(profile)
@@ -778,7 +781,8 @@ class TestKeywordGeneratorWithEnrichedData:
                 raw_text="test",
                 skills=["Python", "SQL"],
                 linkedin_skills=["Python", "Docker"],
-                github_skills_inferred=["Python", "SQL", "Go"],
+                github_languages={"Python": 500_000, "Go": 300_000},
+                github_llm_skills=["SQL"],
             ),
             preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["Python"]),
         )
@@ -883,7 +887,8 @@ class TestCombinedEnrichment:
                 raw_text="test",
                 skills=["Python", "SQL"],
                 linkedin_skills=["Python", "Docker"],
-                github_skills_inferred=["Python", "SQL", "Go"],
+                github_languages={"Python": 500_000, "Go": 300_000},
+                github_llm_skills=["SQL"],
             ),
             preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["Python"]),
         )

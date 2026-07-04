@@ -54,6 +54,30 @@ _SECTION_HEADERS = {
 }
 
 
+def significant_github_languages(languages: dict) -> list[str]:
+    """The user's real programming languages from the GitHub language-byte map.
+
+    GitHub reports config-file 'languages' (Makefile, Dockerfile, Procfile,
+    Batchfile, PowerShell, Just…) alongside real ones, but those are always a
+    tiny fraction of the bytes. Keep the top few by bytes plus anything ≥0.5% of
+    the total — that drops the config-file noise structurally (by proportion, not
+    a name denylist: rule #28) while keeping real secondary languages."""
+    if not isinstance(languages, dict) or not languages:
+        return []
+    ranked = sorted(
+        ((k, v) for k, v in languages.items()
+         if isinstance(k, str) and isinstance(v, (int, float)) and v > 0),
+        key=lambda kv: -kv[1],
+    )
+    total = sum(v for _, v in ranked) or 1
+    out: list[str] = []
+    for i, (lang, byts) in enumerate(ranked):
+        # The #1 language always shows; everything else must be ≥0.5% of bytes.
+        if i == 0 or byts / total >= 0.005:
+            out.append(lang)
+    return out
+
+
 def _looks_like_skill(name: str) -> bool:
     """True if ``name`` is skill-shaped: a short phrase, not prose/date/header."""
     s = name.strip()
@@ -176,9 +200,13 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
             _add(s, "cv_explicit")
         for s in getattr(cv, "linkedin_skills", []) or []:
             _add(s, "linkedin")
-        for s in getattr(cv, "github_frameworks", []) or []:
-            _add(s, "github_dep")
-        for s in getattr(cv, "github_skills_inferred", []) or []:
+        # GitHub contributes ONLY: (1) significant programming languages (byte-
+        # thresholded) and (2) the LLM-read repo skills. Raw dependency package
+        # names (github_frameworks: pytest, @capacitor/core, workbox-window) and
+        # raw repo topics (github_topics: gmail, slack, hitl) are build metadata,
+        # NOT user skills — surfacing them floods the profile and destroys trust.
+        # The meaningful frameworks (React, FastAPI) are recovered by the LLM pass.
+        for s in significant_github_languages(getattr(cv, "github_languages", {}) or {}):
             _add(s, "github_lang")
         # Two-pass LLM enhance sources.
         for s in getattr(cv, "github_llm_skills", []) or []:

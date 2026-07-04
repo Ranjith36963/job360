@@ -200,6 +200,11 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     for e in schema.experience:
         experience_lines.extend(e.bullets)
 
+    # ONE-two lines per degree: the degree, then "institution | dates". The
+    # per-degree DETAILS (coursework, thesis, project bullets) are deliberately
+    # NOT flattened in — each was becoming its own "education entry", inflating the
+    # "Education: N" stat to a meaningless number (28 for a 2-degree CV) and
+    # dumping full sentences into the education list. Details stay in raw_text.
     education_lines: list[str] = []
     for edu in schema.education:
         if edu.degree:
@@ -209,7 +214,6 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
             if edu.dates:
                 line += f" | {edu.dates}"
             education_lines.append(line)
-        education_lines.extend(edu.details)
 
     return CVData(
         raw_text=raw_text,
