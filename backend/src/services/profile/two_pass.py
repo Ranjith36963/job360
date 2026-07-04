@@ -17,6 +17,7 @@ imported at module top so tests can monkeypatch them by name.
 from __future__ import annotations
 
 import logging
+import re
 
 from src.services.profile.cv_parser import (
     deterministic_cv_fields,
@@ -50,6 +51,42 @@ def _merge_str_list(dst: list[str], src: list[str]) -> None:
         if isinstance(s, str) and s.strip() and s.lower() not in seen:
             dst.append(s)
             seen.add(s.lower())
+
+
+def _norm_for_dedup(s: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace — so 'The Complete
+    Python Bootcamp' and 'the complete python bootcamp!' compare equal."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def dedup_by_containment(items: list[str]) -> list[str]:
+    """Collapse fragments + exact duplicates in a free-text list (certifications,
+    education) while preserving order.
+
+    An entry is dropped when its normalized form equals (a later exact dup) or is
+    a proper substring of another entry's normalized form — i.e. it's a line-wrap
+    fragment of a more complete entry ('The Complete Python Bootcamp' inside 'The
+    Complete Python Bootcamp from Zero to Hero in Python (Udemy, 2024)'). Distinct
+    entries are always kept. Structural (containment), never a keyword list.
+    """
+    cleaned = [it for it in items if it and it.strip()]
+    norms = [_norm_for_dedup(it) for it in cleaned]
+    drop: set[int] = set()
+    for i, na in enumerate(norms):
+        if not na:
+            drop.add(i)
+            continue
+        for j, nb in enumerate(norms):
+            if i == j or j in drop:
+                continue
+            if na == nb:
+                if i > j:          # exact dup — keep the earlier
+                    drop.add(i)
+                    break
+            elif na in nb:         # a fragment of a more complete entry
+                drop.add(i)
+                break
+    return [it for k, it in enumerate(cleaned) if k not in drop]
 
 
 def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
@@ -140,6 +177,13 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
             _merge_str_list(cv.about_me_inferred_skills, llm_pr)    # → MERGED PR
         except Exception as e:  # noqa: BLE001 — deterministic result still stands
             logger.warning("two_pass: about_me LLM pass skipped: %s", e)
+
+    # Collapse line-wrap fragments + cross-source duplicates in the free-text
+    # lists so the profile shows each certification / qualification ONCE (a CV +
+    # LinkedIn both list the same cert in slightly different words, and PDF wraps
+    # split one cert across two lines — both inflated the counts and read as junk).
+    cv.certifications = dedup_by_containment(cv.certifications)
+    cv.education = dedup_by_containment(cv.education)
 
     # ── Fold the freshly-extracted CV skills/titles into preferences ──
     # (Was done in the CV upload route; lives here now so the SINGLE extractor
