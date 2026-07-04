@@ -42,6 +42,8 @@ interface TailorPanelProps {
   jobId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Which doc to focus when the panel opens (default "cv"). */
+  initialKind?: TailorDocKind;
 }
 
 function docFor(
@@ -56,7 +58,7 @@ function seedText(bundle: TailorBundle | null, kind: TailorDocKind): string {
   return doc?.polished ?? doc?.ai_draft ?? "";
 }
 
-export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
+export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: TailorPanelProps) {
   const [bundle, setBundle] = useState<TailorBundle | null>(null);
   const [texts, setTexts] = useState<Record<TailorDocKind, string>>({
     cv: "",
@@ -80,7 +82,7 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setActiveTab("cv");
+    setActiveTab(initialKind);
     getTailored(jobId)
       .then((b) => {
         if (!cancelled) applyBundle(b);
@@ -98,7 +100,7 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [open, jobId, applyBundle]);
+  }, [open, jobId, applyBundle, initialKind]);
 
   async function handleGenerate() {
     setGenerating(true);
