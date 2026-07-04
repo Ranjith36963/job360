@@ -166,11 +166,18 @@ def merge_cv_and_preferences(
             merged_titles.append(title)
             seen_titles.add(title.lower())
 
-    # Combine skills: user prefs first, then CV skills, minus excluded
+    # additional_skills = the user's OWN extras only ("Skills beyond what your CV
+    # contains"). It must NOT absorb cv_skills: the tiering scores every
+    # additional_skills item as user_declared (3.0), so folding the whole CV in
+    # here forced every skill into the Primary tier (Secondary/Tertiary always
+    # empty) and stuffed the preferences box with the entire CV. cv_skills already
+    # live on cv.skills and are read independently by the tiering
+    # (collect_evidence_from_profile) and domain_classifier. Dedup the user's own
+    # list, minus excluded. (cv_skills stays in the signature for API stability.)
     excluded = {s.lower() for s in prefs.excluded_skills}
     merged_skills = []
     seen_skills = set()
-    for skill in list(prefs.additional_skills) + cv_skills:
+    for skill in list(prefs.additional_skills):
         key = skill.lower()
         if key not in seen_skills and key not in excluded:
             merged_skills.append(skill)
