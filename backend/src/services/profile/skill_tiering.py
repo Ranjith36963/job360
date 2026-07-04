@@ -78,6 +78,45 @@ def significant_github_languages(languages: dict) -> list[str]:
     return out
 
 
+def _acronym_of(short: str, long: str) -> bool:
+    """True if ``short`` is the initialism of the multi-word ``long`` — 'RAG' of
+    'Retrieval Augmented Generation', 'NLP' of 'Natural Language Processing'. A
+    general algorithm (first letters), NOT a synonym vocabulary (rule #28).
+
+    Guards keep it safe for ALL profiles: the acronym is 3-6 alphanumerics (2-char
+    ones like 'AI'/'ML' are too ambiguous — 'AI' also initials 'Adobe
+    Illustrator'), and the expansion is a 2-6 word phrase whose word-initials
+    match EXACTLY. So 'RAG Pipelines' (initials 'RP') and 'Go' vs 'Google' never
+    merge."""
+    s = re.sub(r"[^a-z0-9]", "", short.lower())
+    if not (3 <= len(s) <= 6):
+        return False
+    words = [w for w in long.split() if w and w[0].isalnum()]
+    if not (2 <= len(words) <= 6):
+        return False
+    return s == "".join(w[0].lower() for w in words)
+
+
+def _merge_acronym_expansions(ev_list: list[SkillEvidence]) -> list[SkillEvidence]:
+    """Collapse acronym↔expansion pairs, keeping the acronym form and unioning
+    sources. Order-preserving; only exact initialism pairs merge."""
+    consumed: set[int] = set()
+    for i in range(len(ev_list)):
+        if i in consumed:
+            continue
+        for j in range(len(ev_list)):
+            if i == j or j in consumed or i in consumed:
+                continue
+            a, b = ev_list[i], ev_list[j]
+            if _acronym_of(a.name, b.name):        # a = acronym, b = expansion
+                a.sources = list(dict.fromkeys(a.sources + b.sources))
+                consumed.add(j)
+            elif _acronym_of(b.name, a.name):      # b = acronym, a = expansion
+                b.sources = list(dict.fromkeys(b.sources + a.sources))
+                consumed.add(i)
+    return [e for k, e in enumerate(ev_list) if k not in consumed]
+
+
 def _looks_like_skill(name: str) -> bool:
     """True if ``name`` is skill-shaped: a short phrase, not prose/date/header."""
     s = name.strip()
@@ -216,4 +255,6 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
         for s in getattr(cv, "about_me_inferred_skills", []) or []:
             _add(s, "about_me_llm")
 
-    return list(evidence.values())
+    # Collapse acronym↔expansion pairs (RAG ⇄ Retrieval Augmented Generation) so
+    # the same skill isn't shown under two names.
+    return _merge_acronym_expansions(list(evidence.values()))

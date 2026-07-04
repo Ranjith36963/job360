@@ -134,6 +134,35 @@ class TestCertEducationDedup:
         assert "From Zero to Hero in Python" not in out
         assert out.count("AWS Certified AI Practitioner") == 1
 
+    def test_dedup_fuzzy_collapses_spelling_variants(self):
+        """GENERAL (all profiles): near-identical certs that differ only by
+        spelling / punctuation / an extra date suffix collapse to one — e.g. the
+        Accenture cert in British vs American spelling. Fuzzy token similarity,
+        not a synonym list."""
+        from src.services.profile.two_pass import dedup_fuzzy
+
+        items = [
+            "Accenture North America – Data Analytics and Visualisation Job Simulation (Forage, March 2024)",
+            "Accenture North America - Data Analytics and Visualization Job Simulation",
+        ]
+        out = dedup_fuzzy(items, threshold=85)
+        assert len(out) == 1
+        # keeps the longer / more complete form
+        assert "Forage" in out[0]
+
+    def test_dedup_fuzzy_keeps_genuinely_different_entries(self):
+        """GUARD (must hold for all profiles): distinct certs that merely share an
+        issuer/word must NOT be merged — the threshold sits safely above them."""
+        from src.services.profile.two_pass import dedup_fuzzy
+
+        items = [
+            "AWS Certified AI Practitioner",
+            "AWS Certified Solutions Architect",
+            "The Complete Python Bootcamp",
+            "Python for Data Science Bootcamp",
+        ]
+        assert dedup_fuzzy(items, threshold=85) == items
+
     def test_dedup_by_containment_keeps_distinct_entries(self):
         """Distinct certs/degrees must all survive — dedup only removes fragments
         and exact dupes, never genuinely different entries."""
