@@ -140,7 +140,7 @@ class TestMergeCvAndPreferences:
         )
 
         profile = UserProfile(
-            cv_data=CVData(skills=["CvOnlySkill"], github_skills_inferred=["GhLangSkill"]),
+            cv_data=CVData(skills=["CvOnlySkill"], github_languages={"GhLangSkill": 100_000}),
             preferences=UserPreferences(additional_skills=["UserExtra"]),
         )
         primary, secondary, tertiary = tier_skills_by_evidence(
