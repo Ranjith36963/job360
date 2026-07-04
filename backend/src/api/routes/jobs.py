@@ -651,6 +651,25 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     return out
 
 
+def _user_skill_names(profile) -> list[str]:
+    """All of the user's skill names, deduped case-insensitively (CV + LinkedIn +
+    GitHub-inferred + about-me-inferred). Empty when there's no profile."""
+    cv = getattr(profile, "cv_data", None) if profile is not None else None
+    if cv is None:
+        return []
+    names: list[str] = []
+    for attr in ("skills", "linkedin_skills", "github_llm_skills", "about_me_inferred_skills"):
+        names.extend(getattr(cv, attr, None) or [])
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        key = (n or "").strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(n)
+    return out
+
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
@@ -666,4 +685,19 @@ async def get_job(
     # the 8-D breakdown is theirs, not the shared last-writer-wins jobs row.
     if user is not None:
         row = await _personalize_dims(dict(row), db, user)
-    return _row_to_job_response(row, job_action)
+    resp = _row_to_job_response(row, job_action)
+
+    # Skill Analysis: split the job's required skills into matched / missing /
+    # transferable against the user's profile skills (read-time; empty when the job
+    # has no enrichment-derived required_skills or the user has no profile).
+    if user is not None and resp.required_skills:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+        from src.services.skill_gap import compute_skill_gap  # noqa: PLC0415
+
+        gap = compute_skill_gap(
+            _user_skill_names(load_profile(user.id)), resp.required_skills
+        )
+        resp.matched_skills = gap["matched"]
+        resp.missing_required = gap["missing"]
+        resp.transferable_skills = gap["transferable"]
+    return resp
