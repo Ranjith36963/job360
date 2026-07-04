@@ -5867,7 +5867,7 @@
     },
     "/api/tailor/{job_id}/{doc_kind}/download": {
       "get": {
-        "description": "Download the polished (or draft) doc as an ATS-friendly PDF. Marks it KEPT.",
+        "description": "Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.\n\n``fmt`` = ``pdf`` (default) | ``docx``.",
         "operationId": "download_api_tailor__job_id___doc_kind__download_get",
         "parameters": [
           {
@@ -5885,6 +5885,16 @@
             "required": true,
             "schema": {
               "title": "Doc Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": false,
+            "schema": {
+              "default": "pdf",
+              "title": "Fmt",
               "type": "string"
             }
           },

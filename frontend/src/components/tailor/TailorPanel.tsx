@@ -17,7 +17,8 @@ import {
   generateTailored,
   getTailored,
   saveTailored,
-  downloadTailoredPdf,
+  downloadTailored,
+  type TailorFormat,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
@@ -138,11 +139,11 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
     }
   }
 
-  async function handleDownload(kind: TailorDocKind) {
+  async function handleDownload(kind: TailorDocKind, fmt: TailorFormat) {
     setDownloading(true);
     try {
-      await downloadTailoredPdf(jobId, kind);
-      toast.success("Download started");
+      await downloadTailored(jobId, kind, fmt);
+      toast.success(`${fmt.toUpperCase()} download started`);
     } catch (err) {
       toast.apiError(err, "Download failed");
     } finally {
@@ -243,11 +244,21 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
                         size="sm"
                         variant="outline"
                         className="gap-1.5"
-                        onClick={() => handleDownload(t.key)}
+                        onClick={() => handleDownload(t.key, "pdf")}
                         disabled={downloading}
                       >
                         <Download className="h-3.5 w-3.5" aria-hidden="true" />
                         {downloading ? "Downloading…" : "Download PDF"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5"
+                        onClick={() => handleDownload(t.key, "docx")}
+                        disabled={downloading}
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        {downloading ? "Downloading…" : "Download DOCX"}
                       </Button>
                     </div>
                   </TabsContent>

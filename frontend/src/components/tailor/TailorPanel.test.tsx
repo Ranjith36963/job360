@@ -12,13 +12,13 @@ import type { TailorBundle, TailoredDocOut } from "@/lib/types";
 const mockGetTailored = vi.fn();
 const mockGenerateTailored = vi.fn();
 const mockSaveTailored = vi.fn();
-const mockDownloadTailoredPdf = vi.fn();
+const mockDownloadTailored = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getTailored: (...args: unknown[]) => mockGetTailored(...args),
   generateTailored: (...args: unknown[]) => mockGenerateTailored(...args),
   saveTailored: (...args: unknown[]) => mockSaveTailored(...args),
-  downloadTailoredPdf: (...args: unknown[]) => mockDownloadTailoredPdf(...args),
+  downloadTailored: (...args: unknown[]) => mockDownloadTailored(...args),
 }));
 
 const mockToastSuccess = vi.fn();
@@ -114,15 +114,27 @@ describe("TailorPanel", () => {
     expect(mockToastSuccess).toHaveBeenCalled();
   });
 
-  it("Download triggers downloadTailoredPdf for the active tab", async () => {
-    mockDownloadTailoredPdf.mockResolvedValue(undefined);
+  it("Download PDF triggers downloadTailored with pdf format for the active tab", async () => {
+    mockDownloadTailored.mockResolvedValue(undefined);
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
     await screen.findByDisplayValue("AI CV draft text");
     await userEvent.click(screen.getByRole("button", { name: /download pdf/i }));
 
     await waitFor(() => {
-      expect(mockDownloadTailoredPdf).toHaveBeenCalledWith(42, "cv");
+      expect(mockDownloadTailored).toHaveBeenCalledWith(42, "cv", "pdf");
+    });
+  });
+
+  it("Download DOCX triggers downloadTailored with docx format", async () => {
+    mockDownloadTailored.mockResolvedValue(undefined);
+    render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
+
+    await screen.findByDisplayValue("AI CV draft text");
+    await userEvent.click(screen.getByRole("button", { name: /download docx/i }));
+
+    await waitFor(() => {
+      expect(mockDownloadTailored).toHaveBeenCalledWith(42, "cv", "docx");
     });
   });
 

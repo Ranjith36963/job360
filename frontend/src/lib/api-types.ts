@@ -1319,7 +1319,9 @@ export interface paths {
         };
         /**
          * Download
-         * @description Download the polished (or draft) doc as an ATS-friendly PDF. Marks it KEPT.
+         * @description Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
+         *
+         *     ``fmt`` = ``pdf`` (default) | ``docx``.
          */
         get: operations["download_api_tailor__job_id___doc_kind__download_get"];
         put?: never;
@@ -4333,7 +4335,9 @@ export interface operations {
     };
     download_api_tailor__job_id___doc_kind__download_get: {
         parameters: {
-            query?: never;
+            query?: {
+                fmt?: string;
+            };
             header?: never;
             path: {
                 job_id: number;

@@ -37,7 +37,7 @@ It's a *helper*, not an auto-submitter. Every application gets a custom CV + cov
 
 ## 3. What we ADD (~20% gap)
 1. A **"tailor CV + cover letter"** LLM prompt (input: your CV text + job description + judge's fit reason).
-2. **Templates** (jinja2 → HTML → PDF via fpdf2), **ATS-friendly** (plain, machine-readable — fancy layouts get auto-rejected).
+2. **ATS-friendly renderers** — **PDF** (`tailoring/pdf.py`, fpdf2) *and* **DOCX** (`tailoring/docx.py`, python-docx). Both are single-column, standard-font, real selectable text so applicant-tracking software parses them. Download route: `GET /api/tailor/{job_id}/{doc_kind}/download?fmt=pdf|docx` (default pdf). ✅ **BUILT** — both formats for both CV and cover letter.
 3. A **table** to store generated + polished docs per `(user, job)`.
 4. **Frontend:** "Tailor my CV" button on each job → view, **edit**, download the CV + cover letter.
 

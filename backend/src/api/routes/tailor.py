@@ -21,6 +21,7 @@ from src.repositories.database import JobDatabase
 from src.services.profile.llm_provider import llm_extract
 from src.services.profile.storage import load_profile
 from src.services.tailoring import DOC_KINDS, generate_document
+from src.services.tailoring.docx import render_docx
 from src.services.tailoring.generator import EmptyCVError
 from src.services.tailoring.patterns import derive_patterns, summarize_patterns
 from src.services.tailoring.pdf import render_pdf
@@ -214,26 +215,38 @@ async def keep(
 async def download(
     job_id: int,
     doc_kind: str,
+    fmt: str = "pdf",
     db: JobDatabase = Depends(get_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
-    """Download the polished (or draft) doc as an ATS-friendly PDF. Marks it KEPT."""
+    """Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
+
+    ``fmt`` = ``pdf`` (default) | ``docx``.
+    """
     _check_kind(doc_kind)
+    if fmt not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
     row = await db.get_tailored_doc(user.id, job_id, doc_kind)
     if row is None:
         raise HTTPException(status_code=404, detail="Nothing to download — generate first.")
     text = row.get("polished") or row.get("ai_draft") or ""
     title = "Curriculum Vitae" if doc_kind == "cv" else "Cover Letter"
-    pdf_bytes = render_pdf(text, title=title)
+
+    if fmt == "docx":
+        content = render_docx(text, title=title)
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        content = render_pdf(text, title=title)
+        media_type = "application/pdf"
 
     # Downloading counts as 'used' → keep it + learn from it (§5).
     kept = await db.keep_tailored_doc(user.id, job_id, doc_kind)
     await _learn_universal(db, doc_kind, kept or row)
 
-    filename = f"{doc_kind}_{job_id}.pdf"
+    filename = f"{doc_kind}_{job_id}.{fmt}"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=content,
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

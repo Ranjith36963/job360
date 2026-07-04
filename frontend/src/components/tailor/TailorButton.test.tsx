@@ -15,7 +15,7 @@ vi.mock("@/lib/api", () => ({
   }),
   generateTailored: vi.fn(),
   saveTailored: vi.fn(),
-  downloadTailoredPdf: vi.fn(),
+  downloadTailored: vi.fn(),
 }));
 
 describe("TailorButton", () => {

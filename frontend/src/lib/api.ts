@@ -680,21 +680,28 @@ export async function keepTailored(
   });
 }
 
-/** Relative path for the PDF download endpoint (GET also marks the doc kept). */
-export function tailorDownloadUrl(jobId: number, kind: TailorDocKind): string {
-  return `/api/tailor/${jobId}/${kind}/download`;
+export type TailorFormat = "pdf" | "docx";
+
+/** Relative path for the download endpoint (GET also marks the doc kept). */
+export function tailorDownloadUrl(
+  jobId: number,
+  kind: TailorDocKind,
+  fmt: TailorFormat = "pdf"
+): string {
+  return `/api/tailor/${jobId}/${kind}/download?fmt=${fmt}`;
 }
 
 /**
- * Fetch the tailored doc as a PDF and trigger a browser download — same
+ * Fetch the tailored doc as a PDF or DOCX and trigger a browser download — same
  * fetch-blob-anchor pattern as `exportJobsCsv`. credentials:'include' so the
  * session cookie rides on the request.
  */
-export async function downloadTailoredPdf(
+export async function downloadTailored(
   jobId: number,
-  kind: TailorDocKind
+  kind: TailorDocKind,
+  fmt: TailorFormat = "pdf"
 ): Promise<void> {
-  const res = await fetch(`${API}${tailorDownloadUrl(jobId, kind)}`, {
+  const res = await fetch(`${API}${tailorDownloadUrl(jobId, kind, fmt)}`, {
     credentials: "include",
   });
   if (!res.ok) {
@@ -711,7 +718,7 @@ export async function downloadTailoredPdf(
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${kind}_${jobId}.pdf`;
+  a.download = `${kind}_${jobId}.${fmt}`;
   a.click();
   URL.revokeObjectURL(url);
 }
