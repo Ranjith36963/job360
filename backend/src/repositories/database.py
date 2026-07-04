@@ -212,6 +212,7 @@ class JobDatabase:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 kept_at TEXT,
+                flagged_terms TEXT DEFAULT '[]',
                 UNIQUE(user_id, job_id, doc_kind)
             );
             CREATE INDEX IF NOT EXISTS idx_tailored_user_kind_status
@@ -235,6 +236,11 @@ class JobDatabase:
             CREATE INDEX IF NOT EXISTS idx_tailoring_patterns_kind
                 ON tailoring_patterns(doc_kind);
         """)
+        # flagged_terms (migration 0024) — possible-fabrication warnings surfaced to
+        # the user. Added here too so DBs created before 0024 pick it up on boot.
+        await self._add_missing_columns(
+            "tailored_documents", [("flagged_terms", "TEXT DEFAULT '[]'")]
+        )
 
         # Add timezone column to users table if it was created before migration 0012.
         # users table may not exist in all test DB instances (auth tests create it;
@@ -654,16 +660,23 @@ class JobDatabase:
     # ── Tailored CV / cover letter (migration 0023) ──────────────────────────
 
     def _tailored_row_to_dict(self, row) -> dict:
+        import json as _json
+        try:
+            flagged = _json.loads(row[11]) if len(row) > 11 and row[11] else []
+        except Exception:  # noqa: BLE001
+            flagged = []
         return {
             "user_id": row[0], "job_id": row[1], "doc_kind": row[2],
             "ai_draft": row[3] or "", "polished": row[4], "status": row[5],
             "model": row[6], "profile_version": row[7],
             "created_at": row[8], "updated_at": row[9], "kept_at": row[10],
+            "flagged_terms": flagged,
         }
 
     async def upsert_tailored_doc(
         self, user_id: str, job_id: int, doc_kind: str, ai_draft: str,
         *, model: str | None = None, profile_version: int | None = None,
+        flagged_terms: list[str] | None = None,
     ) -> dict:
         """Insert/replace the AI draft for (user, job, kind); resets it to 'draft'.
 
@@ -678,12 +691,14 @@ class JobDatabase:
             "DELETE FROM tailored_documents WHERE user_id = ? AND job_id = ? AND doc_kind = ?",
             (user_id, job_id, doc_kind),
         )
+        import json as _json
         await self._conn.execute(
             """INSERT INTO tailored_documents
                (user_id, job_id, doc_kind, ai_draft, polished, status, model,
-                profile_version, created_at, updated_at, kept_at)
-               VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, ?, NULL)""",
-            (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now),
+                profile_version, created_at, updated_at, kept_at, flagged_terms)
+               VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, ?, NULL, ?)""",
+            (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now,
+             _json.dumps(flagged_terms or [])),
         )
         await self._conn.commit()
         doc = await self.get_tailored_doc(user_id, job_id, doc_kind)
@@ -692,7 +707,7 @@ class JobDatabase:
     async def get_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict | None:
         cursor = await self._conn.execute(
             """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
-                      profile_version, created_at, updated_at, kept_at
+                      profile_version, created_at, updated_at, kept_at, flagged_terms
                FROM tailored_documents
                WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
             (user_id, job_id, doc_kind),
@@ -703,7 +718,7 @@ class JobDatabase:
     async def get_tailored_docs(self, user_id: str, job_id: int) -> list[dict]:
         cursor = await self._conn.execute(
             """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
-                      profile_version, created_at, updated_at, kept_at
+                      profile_version, created_at, updated_at, kept_at, flagged_terms
                FROM tailored_documents
                WHERE user_id = ? AND job_id = ? ORDER BY doc_kind""",
             (user_id, job_id),

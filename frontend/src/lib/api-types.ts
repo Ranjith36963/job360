@@ -2215,6 +2215,11 @@ export interface components {
             ai_draft: string;
             /** Doc Kind */
             doc_kind: string;
+            /**
+             * Flagged Terms
+             * @default []
+             */
+            flagged_terms: string[];
             /** Model */
             model?: string | null;
             /** Polished */

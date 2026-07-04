@@ -38,6 +38,9 @@ class TailoredDocOut(BaseModel):
     status: str = "draft"
     model: str | None = None
     updated_at: str | None = None
+    # Proper nouns in the draft that match nothing in the source CV/job — possible
+    # fabrications for the user to review before applying (guardrail #2). Usually empty.
+    flagged_terms: list[str] = []
 
 
 class TailorBundle(BaseModel):
@@ -59,6 +62,7 @@ def _doc_out(row: dict) -> TailoredDocOut:
         status=row.get("status", "draft"),
         model=row.get("model"),
         updated_at=row.get("updated_at"),
+        flagged_terms=row.get("flagged_terms", []) or [],
     )
 
 
@@ -146,7 +150,10 @@ async def generate(
             raise HTTPException(status_code=400, detail="No CV text to reshape.")
         except Exception as exc:  # noqa: BLE001 — surface LLM failure clearly, don't 500 silently
             raise HTTPException(status_code=503, detail=f"Generation failed: {exc}")
-        await db.upsert_tailored_doc(user.id, job_id, kind, doc.document, model=doc.model)
+        await db.upsert_tailored_doc(
+            user.id, job_id, kind, doc.document,
+            model=doc.model, flagged_terms=doc.flagged_terms,
+        )
 
     await db.record_tailored_usage(user.id, job_id)
     get_audit_logger().info(

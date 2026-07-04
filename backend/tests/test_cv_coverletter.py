@@ -314,3 +314,22 @@ async def test_generate_requires_auth(authenticated_async_context, monkeypatch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
             resp = await anon.post(f"/api/tailor/{job_id}/generate")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_fabrication_flag_surfaces_not_section_headers(authenticated_async_context, fixture_user_id, monkeypatch):
+    """Guardrail #2 integrity pass: an invented proper noun is flagged + surfaced to the
+    user through the API; a normal CV section header (SUMMARY) is not a false positive."""
+    fake_doc = "SUMMARY\nData engineer who worked at FabricatedCorpXQ using Python."
+    _patch_route(monkeypatch, [], document=fake_doc)
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+    async with authenticated_async_context() as client:
+        resp = await client.post(f"/api/tailor/{job_id}/generate")
+    assert resp.status_code == 200, resp.text
+    cv = [d for d in resp.json()["documents"] if d["doc_kind"] == "cv"][0]
+    assert "FabricatedCorpXQ" in cv["flagged_terms"]   # real fabrication surfaced
+    assert "SUMMARY" not in cv["flagged_terms"]         # section header not flagged
+    # persists to the DB so the warning is still there on reopen
+    row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
+    assert "FabricatedCorpXQ" in row["flagged_terms"]

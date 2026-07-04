@@ -215,6 +215,13 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
                 </TabsList>
                 {TABS.map((t) => (
                   <TabsContent key={t.key} value={t.key} className="space-y-3">
+                    {(docFor(bundle, t.key)?.flagged_terms?.length ?? 0) > 0 && (
+                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        <span className="font-semibold">⚠ Review — these may be invented:</span>{" "}
+                        {(docFor(bundle, t.key)?.flagged_terms ?? []).join(", ")}. Check
+                        them against your real CV before you apply.
+                      </div>
+                    )}
                     <Textarea
                       value={texts[t.key]}
                       onChange={(e) =>

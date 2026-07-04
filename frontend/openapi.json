@@ -2125,6 +2125,14 @@
             "title": "Doc Kind",
             "type": "string"
           },
+          "flagged_terms": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Flagged Terms",
+            "type": "array"
+          },
           "model": {
             "anyOf": [
               {

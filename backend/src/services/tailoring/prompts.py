@@ -26,7 +26,10 @@ _NEVER_FABRICATE = (
     "MUST NOT invent, add, or exaggerate any skill, employer, job title, date, "
     "degree, certification, metric, or achievement. If the job wants something the "
     "candidate does not have, DO NOT add it — leave it out. Reshape the truth to fit "
-    "the job; never manufacture it."
+    "the job; never manufacture it. "
+    "Copy every company, product, person, and place name EXACTLY as it is spelled in "
+    "the source — never change a single letter of a name (a deterministic check runs "
+    "after you and will correct or flag any name that doesn't match the source)."
 )
 
 CV_SYSTEM = (

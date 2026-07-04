@@ -32,6 +32,18 @@ _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[.&+\-][A-Za-z0-9]+)*")
 _FUZZY_MIN = 80          # >= this  -> treat as a typo of the source spelling, auto-correct
 _FABRICATION_MAX = 55    # <= this  -> matches nothing in source, flag as possible fabrication
 
+# Standard CV section headers — ALLCAPS words the model adds for STRUCTURE, not
+# content. They're not in the source CV, so without this they'd be flagged as
+# fabrications (noisy false positives, e.g. "SUMMARY"). Excluded from flagging only;
+# auto-correction is unaffected. (Not profile extraction, so rule #28 doesn't apply.)
+_SECTION_HEADERS = frozenset({
+    "SUMMARY", "PROFILE", "OBJECTIVE", "EXPERIENCE", "EDUCATION", "SKILLS",
+    "PROJECTS", "CERTIFICATIONS", "CERTIFICATION", "REFERENCES", "CONTACT",
+    "LANGUAGES", "INTERESTS", "ACHIEVEMENTS", "EMPLOYMENT", "WORK", "VOLUNTEER",
+    "AWARDS", "PUBLICATIONS", "QUALIFICATIONS", "TECHNICAL", "PROFESSIONAL",
+    "PERSONAL", "HIGHLIGHTS", "COMPETENCIES", "ACCOMPLISHMENTS",
+})
+
 
 def _is_proper(tok: str) -> bool:
     """A proper-noun-like token: ALLCAPS acronym (AWS), camelCase brand (PyTorch),
@@ -76,7 +88,11 @@ def repair_proper_nouns(output: str, source_text: str) -> tuple[str, list[str]]:
         if score >= _FUZZY_MIN and match[:1] == tok[:1] and abs(len(match) - len(tok)) <= 2:
             # near-miss of a real source name -> re-spell it ("Monox" -> "Monzo")
             repaired = re.sub(rf"\b{re.escape(tok)}\b", match, repaired)
-        elif score <= _FABRICATION_MAX and (tok.isupper() or any(c.isupper() for c in tok[1:])):
+        elif (
+            score <= _FABRICATION_MAX
+            and (tok.isupper() or any(c.isupper() for c in tok[1:]))
+            and tok.upper() not in _SECTION_HEADERS  # not a structural section header
+        ):
             # a brand/tech token that resembles nothing in the source -> surface it
             flagged.append(tok)
     return repaired, flagged
