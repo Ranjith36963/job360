@@ -129,15 +129,14 @@ def test_adapter_flattens_education_lines():
         ]
     })
     cv = cv_schema_to_cvdata(schema, raw_text="")
-    assert "BSc CS" in cv.education
-    assert any("MIT" in line and "2018-2022" in line for line in cv.education)
-    # TRUST fix: coursework + thesis DETAILS must NOT be flattened into the
-    # education list — each detail became a separate "education entry" and blew
-    # the "Education: N" stat up to a meaningless number (28 for a 2-degree CV).
-    assert "Thesis: NN" not in cv.education
+    # ONE entry per degree, combining degree + institution + dates so the
+    # "Education: N" stat counts qualifications, not lines. Coursework/thesis
+    # details are NOT flattened in (each was a separate fake "education entry").
+    assert len(cv.education) == 1
+    entry = cv.education[0]
+    assert "BSc CS" in entry and "MIT" in entry and "2018-2022" in entry
+    assert "Thesis: NN" not in entry
     assert "Neural Networks" not in cv.education
-    # one degree in → at most 2 lines out (degree + institution), not 5.
-    assert len(cv.education) <= 2
 
 
 def test_adapter_surfaces_career_domain_string():

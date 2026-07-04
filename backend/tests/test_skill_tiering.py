@@ -190,6 +190,41 @@ def test_collect_evidence_merges_sources_on_same_skill():
     assert by_name["react"].sources == ["github_llm"]
 
 
+def test_collect_evidence_merges_acronym_with_expansion():
+    """GENERAL (all profiles): an acronym and its spelled-out expansion are the
+    same skill — 'RAG' ⇄ 'Retrieval Augmented Generation', 'NLP' ⇄ 'Natural
+    Language Processing'. Merge via an initials-matching ALGORITHM (keeps the
+    acronym form), not a hardcoded synonym map (rule #28)."""
+    prefs = UserPreferences()
+    cv = CVData(
+        skills=["RAG", "Retrieval Augmented Generation", "NLP", "Natural Language Processing"],
+    )
+    profile = UserProfile(cv_data=cv, preferences=prefs)
+    names = [e.name for e in collect_evidence_from_profile(profile)]
+    assert "RAG" in names
+    assert "Retrieval Augmented Generation" not in names   # merged into RAG
+    assert "NLP" in names
+    assert "Natural Language Processing" not in names
+
+    def _count(n):
+        return sum(1 for x in names if x == n)
+    assert _count("RAG") == 1 and _count("NLP") == 1
+
+
+def test_acronym_merge_does_not_touch_distinct_or_more_specific_skills():
+    """GUARD (must hold for all profiles): only a TRUE acronym↔expansion pair
+    merges. A more specific compound ('RAG Pipelines') and unrelated skills stay
+    separate; a coincidental leading-letter match ('Go' vs 'Google') does not
+    merge."""
+    prefs = UserPreferences()
+    cv = CVData(skills=["RAG", "RAG Pipelines", "Go", "Google", "Python", "Java"])
+    profile = UserProfile(cv_data=cv, preferences=prefs)
+    names = {e.name for e in collect_evidence_from_profile(profile)}
+    assert "RAG" in names and "RAG Pipelines" in names   # distinct granularity
+    assert "Go" in names and "Google" in names            # not an acronym match
+    assert "Python" in names and "Java" in names
+
+
 def test_collect_evidence_dedups_spacing_variants():
     """TRUST: 'ChromaDB' and 'Chroma DB' both showed as separate skills — a pure
     spacing difference. Skill identity ignores whitespace (and case), so they
