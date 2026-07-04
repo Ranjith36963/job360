@@ -90,6 +90,7 @@ def repair_proper_nouns(output: str, source_text: str) -> tuple[str, list[str]]:
             repaired = re.sub(rf"\b{re.escape(tok)}\b", match, repaired)
         elif (
             score <= _FABRICATION_MAX
+            and len(tok) >= 4  # skip 2-3 char abbreviations (MSc, F1, PhD, MBA) — almost always legit credentials, not fabricated brands
             and (tok.isupper() or any(c.isupper() for c in tok[1:]))
             and tok.upper() not in _SECTION_HEADERS  # not a structural section header
         ):

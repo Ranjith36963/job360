@@ -154,7 +154,7 @@ export function TailorPanel({ jobId, open, onOpenChange }: TailorPanelProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Tailor my CV</DialogTitle>
         </DialogHeader>
