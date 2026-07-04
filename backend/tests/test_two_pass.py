@@ -113,6 +113,44 @@ class TestLinkedInLlmSkills:
 # ── CV deterministic pass (Pass 1) — no-LLM field grab ──────────────
 
 
+class TestMergeCvAndPreferences:
+    def test_cv_skills_do_not_pollute_additional_skills(self):
+        """BUG (empty tiers + stuffed preferences box): merge folded ALL cv skills
+        into preferences.additional_skills, which the tiering scores as
+        user_declared (3.0) → every skill hits Primary and Secondary/Tertiary stay
+        empty; and the 'Skills beyond your CV' box shows the whole CV. additional_
+        skills must stay the USER's extras only — cv skills live on cv.skills."""
+        from src.services.profile.models import UserPreferences
+        from src.services.profile.preferences import merge_cv_and_preferences
+
+        prefs = UserPreferences(additional_skills=["Terraform"])
+        merged = merge_cv_and_preferences(["Python", "Docker", "RAG"], [], prefs)
+        assert merged.additional_skills == ["Terraform"]
+        assert "Python" not in merged.additional_skills
+        assert "Docker" not in merged.additional_skills
+
+    def test_tiers_populate_when_sources_differ(self):
+        """End-to-end: with additional_skills = user extras only, the three tiers
+        actually split — a user-declared extra → Primary, a CV-only skill →
+        Secondary, a GitHub-language-only skill → Tertiary."""
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+        from src.services.profile.skill_tiering import (
+            collect_evidence_from_profile,
+            tier_skills_by_evidence,
+        )
+
+        profile = UserProfile(
+            cv_data=CVData(skills=["CvOnlySkill"], github_skills_inferred=["GhLangSkill"]),
+            preferences=UserPreferences(additional_skills=["UserExtra"]),
+        )
+        primary, secondary, tertiary = tier_skills_by_evidence(
+            collect_evidence_from_profile(profile)
+        )
+        assert "UserExtra" in primary
+        assert "CvOnlySkill" in secondary
+        assert "GhLangSkill" in tertiary
+
+
 class TestCvDeterministicPass:
     def test_splits_parenthetical_tools(self):
         """'OCR (Tesseract)' and 'Python (Pandas, NumPy)' should yield the outer
@@ -168,6 +206,74 @@ class TestCvDeterministicPass:
 
         out = deterministic_cv_fields("John Doe\nSome prose, no skills header.\n")
         assert out["skills"] == []
+
+    # ── Live-profile bug repro (Ranjith CV): experience/company/dates/
+    #    sentences/fragments leaking into the skills list ───────────────
+
+    def test_stops_at_professional_experience_heading(self):
+        """BUG: 'PROFESSIONAL EXPERIENCE' is not an exact heading in the stop set,
+        so the skills capture never stopped and swallowed the whole experience
+        section — company names, dates, and full sentences became 'skills'."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "CORE SKILLS\n"
+            "Python • Docker • RAG\n"
+            "PROFESSIONAL EXPERIENCE\n"
+            "Calnex Solutions | June 2025 – September 2025 | Stevenage\n"
+            "AI Solutions Engineer\n"
+            "Architected containerised assistant achieving 95% response accuracy.\n"
+        )
+        s = deterministic_cv_fields(text)["skills"]
+        assert {"Python", "Docker", "RAG"}.issubset(set(s))
+        # None of the experience junk may appear as a skill.
+        assert "PROFESSIONAL EXPERIENCE" not in s
+        assert "Calnex Solutions" not in s
+        assert not any("2025" in x for x in s)          # dates
+        assert not any(x.endswith(".") for x in s)       # sentence fragments
+        assert not any("Stevenage" in x for x in s)      # location
+
+    def test_rejoins_wrapped_bulleted_skill(self):
+        """BUG: a PDF line-wrap inside a bulleted skills line split one skill in
+        two — a long line wrapping mid-item ('… • Audio\\nProcessing • …') produced
+        'Audio' and 'Processing' as separate skills. Real wraps happen on long
+        lines (page margin), which is what the merge heuristic keys on."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = (
+            "CORE SKILLS\n"
+            "Generative AI • Computer Vision • Speech Recognition • Audio\n"  # long → wraps
+            "Processing • Deep Learning • Transfer\n"
+            "Learning • NLP\n"
+            "Education\nBSc\n"
+        )
+        s = deterministic_cv_fields(text)["skills"]
+        assert "Audio Processing" in s
+        assert "Transfer Learning" in s
+        assert "Audio" not in s and "Processing" not in s
+        assert "Transfer" not in s and "Learning" not in s
+
+    def test_one_skill_per_line_not_merged(self):
+        """Guard: a one-per-line skills list (short lines, no bullets/labels) must
+        NOT be merged by the wrap heuristic — each short line stays its own skill."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = "Skills\nPython\nDjango\nAWS\nDocker\n\nExperience\nx\n"
+        s = deterministic_cv_fields(text)["skills"]
+        assert {"Python", "Django", "AWS", "Docker"}.issubset(set(s))
+        assert "Python Django" not in s
+
+    def test_does_not_split_compound_slash_skills(self):
+        """BUG: '/' was a delimiter, so 'CI/CD Pipelines' and 'AI/ML' were split
+        into 'CI'+'CD Pipelines' and 'AI'+'ML'. Slash-compounds stay whole."""
+        from src.services.profile.cv_parser import deterministic_cv_fields
+
+        text = "CORE SKILLS\nCI/CD Pipelines • AI/ML • TCP/IP\n\nEducation\nBSc\n"
+        s = deterministic_cv_fields(text)["skills"]
+        assert "CI/CD Pipelines" in s
+        assert "AI/ML" in s
+        assert "TCP/IP" in s
+        assert "CI" not in s and "CD Pipelines" not in s
 
     def test_captures_summary_section(self):
         from src.services.profile.cv_parser import deterministic_cv_fields

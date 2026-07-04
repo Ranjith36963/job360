@@ -23,6 +23,32 @@ from src.services.profile.skill_tiering import (
 )
 
 
+def test_collect_evidence_drops_non_skill_shaped_junk():
+    """Defense-in-depth: whatever the source, a token that is a sentence, a date,
+    or a section header is NOT a skill and must never enter the evidence stream
+    (and thus never the tiers or search). Structural shape check, not a keyword
+    list (rule #28)."""
+    profile = UserProfile(
+        cv_data=CVData(
+            skills=[
+                "Python",                      # keep
+                "CI/CD Pipelines",             # keep (compound)
+                "Accelerated data retrieval performance through Redis caching.",  # sentence
+                "June 2025 – September 2025",  # date range
+                "PROFESSIONAL EXPERIENCE",     # section header
+                "Calnex Solutions",            # (kept — can't tell a company from a skill structurally)
+            ]
+        ),
+        preferences=UserPreferences(),
+    )
+    names = {e.name for e in collect_evidence_from_profile(profile)}
+    assert "Python" in names
+    assert "CI/CD Pipelines" in names
+    assert not any(n.endswith(".") for n in names)         # no sentences
+    assert "June 2025 – September 2025" not in names        # no dates
+    assert "PROFESSIONAL EXPERIENCE" not in names           # no section headers
+
+
 # ── SkillEvidence.weight ────────────────────────────────────────────
 
 

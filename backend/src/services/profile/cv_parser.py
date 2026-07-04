@@ -274,13 +274,36 @@ def _is_skill_heading(key: str) -> bool:
     return bool(key) and any(stem in key for stem in _DET_SKILL_HEADING_STEMS)
 
 
-def _is_section_heading(key: str) -> bool:
-    """True if ``key`` is any recognised section heading (fixed set OR a
-    skills-section stem) — used to stop a captured body at the next section."""
-    return bool(key) and (key in _DET_ALL_HEADINGS or _is_skill_heading(key))
+# Last-word markers of a section heading. A short heading whose FINAL word is one
+# of these ends the preceding section — so "PROFESSIONAL EXPERIENCE", "WORK
+# HISTORY", "TECHNICAL PROJECTS" all stop a skills block even though they aren't
+# in the exact heading set. Structural section labels, NOT a skill vocabulary
+# (rule #28).
+_DET_SECTION_LAST_WORDS = {
+    "experience", "employment", "education", "projects", "project",
+    "certifications", "certification", "achievements", "awards", "publications",
+    "references", "interests", "languages", "contact", "history",
+    "qualifications", "training", "courses", "summary", "profile", "objective",
+    "volunteering", "accomplishments",
+}
 
-# Delimiters that separate skills on one line.
-_DET_SKILL_DELIMS = set(",•·|;/")
+
+def _is_section_heading(key: str) -> bool:
+    """True if ``key`` is any recognised section heading — used to stop a captured
+    body at the next section. Matches the fixed set, a skills-section stem, OR a
+    short heading whose LAST word is a section marker ('professional experience',
+    'work history') so non-exact headings still end the block."""
+    if not key:
+        return False
+    if key in _DET_ALL_HEADINGS or _is_skill_heading(key):
+        return True
+    words = key.split()
+    return 1 <= len(words) <= 4 and words[-1] in _DET_SECTION_LAST_WORDS
+
+# Delimiters that separate skills on one line. NOTE: "/" is intentionally NOT a
+# delimiter — it binds compound skills ("CI/CD", "AI/ML", "TCP/IP") that must
+# stay whole; splitting on it shattered them into meaningless halves.
+_DET_SKILL_DELIMS = set(",•·|;")
 # Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
 _DET_PAREN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
 
@@ -385,6 +408,50 @@ def _det_collect_section(
 # NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
 
 
+_DET_WRAP_MIN_LEN = 40  # a line shorter than this didn't hit the page margin,
+#                         so the next line is a NEW item, not a wrap continuation.
+
+
+def _det_label_prefix_len(line: str) -> int:
+    """Length of a leading 'Category Label:' on a skills line, else 0. Structural
+    (a short title-like run before a colon), not a keyword list — rule #28."""
+    i = line.find(":")
+    if i == -1:
+        return 0
+    label = line[:i].strip()
+    # A label is short and few words ("Cloud & MLOps:", "AI Automation Tools:").
+    if label and len(label) <= 30 and len(label.split()) <= 5:
+        return i + 1
+    return 0
+
+
+def _det_merge_wrapped_lines(skill_lines: list[str]) -> list[str]:
+    """Rebuild logical skill lines from physically-wrapped PDF lines.
+
+    A PDF wraps a long skills line at the page margin, splitting one skill across
+    two physical lines ("… • Audio" / "Processing • …") — so "Audio Processing"
+    must rejoin. But a genuinely NEW item (a line starting with a bullet, a line
+    with its own "Category:" label, or any line following a SHORT line that could
+    not have wrapped) must stay separate. Only true margin-wraps are merged.
+    """
+    logical: list[str] = []
+    for raw in skill_lines:
+        s = raw.strip()
+        if not s:
+            continue
+        starts_bullet = s[0] in "•·"
+        has_label = _det_label_prefix_len(s) > 0
+        prev_could_wrap = bool(logical) and len(logical[-1]) >= _DET_WRAP_MIN_LEN
+        is_continuation = (
+            bool(logical) and not starts_bullet and not has_label and prev_could_wrap
+        )
+        if is_continuation:
+            logical[-1] = f"{logical[-1]} {s}"
+        else:
+            logical.append(s)
+    return logical
+
+
 def deterministic_cv_fields(raw_text: str) -> dict:
     """Pass 1 for the CV — pull base fields from text with NO LLM.
 
@@ -399,25 +466,27 @@ def deterministic_cv_fields(raw_text: str) -> dict:
     lines = raw_text.splitlines()
 
     skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS, stem_skills=True)
+    units: list[str] = []
+    for logical in _det_merge_wrapped_lines(skill_lines):
+        units.extend(_det_split_line(logical))
     skills: list[str] = []
     seen: set[str] = set()
-    for line in skill_lines:
-        for token in _det_split_line(line):
-            # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
-            # yields the real skills, not the category name.
-            if ":" in token:
-                token = token.rsplit(":", 1)[-1]
-            for tok in _det_expand_token(token):
-                tok = tok.strip()
-                # Structural noise guard: real skills are short. A token with
-                # >5 words or >45 chars is prose (common on CVs that state skills
-                # in sentences, not lists), not a skill — drop it. This keeps
-                # precision when stem-matched headings pull in prose bodies.
-                if not tok or len(tok) > 45 or len(tok.split()) > 5:
-                    continue
-                if tok.lower() not in seen:
-                    skills.append(tok)
-                    seen.add(tok.lower())
+    for token in units:
+        # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
+        # yields the real skills, not the category name.
+        if ":" in token:
+            token = token.rsplit(":", 1)[-1]
+        for tok in _det_expand_token(token):
+            tok = tok.strip()
+            # Structural noise guard: real skills are short. A token with
+            # >5 words or >45 chars is prose (common on CVs that state skills
+            # in sentences, not lists), not a skill — drop it. This keeps
+            # precision when stem-matched headings pull in prose bodies.
+            if not tok or len(tok) > 45 or len(tok.split()) > 5:
+                continue
+            if tok.lower() not in seen:
+                skills.append(tok)
+                seen.add(tok.lower())
 
     # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
     # The deterministic pass reads STRUCTURE only (the Skills section + its

@@ -115,6 +115,10 @@ class TestPreferences:
         assert prefs.target_job_titles == ["Engineer", "Scientist"]
 
     def test_merge_deduplicates(self):
+        # BEHAVIOUR CHANGE (skill-quality fix): additional_skills is the USER's
+        # extras only and no longer absorbs cv_skills — folding the CV in here
+        # collapsed the skill tiers (everything scored user_declared) and stuffed
+        # the preferences box. Titles still merge (prefs first, CV appended).
         cv_skills = ["Python", "SQL", "Java"]
         cv_titles = ["Software Engineer"]
         prefs = UserPreferences(
@@ -124,24 +128,22 @@ class TestPreferences:
         merged = merge_cv_and_preferences(cv_skills, cv_titles, prefs)
         # Titles: prefs first, CV deduped
         assert merged.target_job_titles == ["Software Engineer", "Data Analyst"]
-        # Skills: prefs first, CV minus excluded, deduped
-        assert "Python" in merged.additional_skills
-        assert "React" in merged.additional_skills
-        assert "SQL" in merged.additional_skills
-        assert "Java" in merged.additional_skills
-        # No duplicates
-        assert len([s for s in merged.additional_skills if s == "Python"]) == 1
+        # Skills: the user's own extras, deduped — NOT the CV skills.
+        assert merged.additional_skills == ["Python", "React"]
+        assert "SQL" not in merged.additional_skills
+        assert "Java" not in merged.additional_skills
 
     def test_merge_excludes_skills(self):
-        cv_skills = ["Python", "SQL", "Java"]
+        # excluded_skills now filters the user's OWN additional_skills (cv skills
+        # are not merged in at all).
         prefs = UserPreferences(
-            additional_skills=["React"],
+            additional_skills=["React", "Java"],
             excluded_skills=["Java"],
         )
-        merged = merge_cv_and_preferences(cv_skills, [], prefs)
-        assert "Java" not in merged.additional_skills
-        assert "Python" in merged.additional_skills
-        assert "React" in merged.additional_skills
+        merged = merge_cv_and_preferences(["Python", "SQL"], [], prefs)
+        assert "Java" not in merged.additional_skills   # excluded
+        assert "React" in merged.additional_skills       # user extra kept
+        assert "Python" not in merged.additional_skills  # cv skill not folded in
 
     def test_merge_preserves_github_username(self):
         """BUG-1 regression: github_username must survive merge."""

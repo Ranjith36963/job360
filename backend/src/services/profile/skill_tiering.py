@@ -37,8 +37,37 @@ financial analyst) to avoid over-packing the primary tier.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterable
+
+# Structural skill-shape guard (rule #28: shape, NOT a skill vocabulary). A skill
+# is a short noun phrase — not a sentence, a date, or a section header. This is
+# the last line of defence so junk from ANY source (a mis-parsed CV line, a stray
+# LLM output) never reaches the tiers or search.
+_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+_SECTION_HEADERS = {
+    "professional experience", "work experience", "experience", "employment",
+    "education", "professional summary", "summary", "certifications",
+    "licenses & certifications", "projects", "achievements", "awards",
+    "publications", "references", "interests", "contact", "profile",
+}
+
+
+def _looks_like_skill(name: str) -> bool:
+    """True if ``name`` is skill-shaped: a short phrase, not prose/date/header."""
+    s = name.strip()
+    if not s:
+        return False
+    if s.endswith("."):                       # a sentence, not a skill
+        return False
+    if len(s) > 50 or len(s.split()) > 6:      # prose, not a skill
+        return False
+    if _YEAR_RE.search(s):                     # a date range, not a skill
+        return False
+    if s.lower() in _SECTION_HEADERS:          # a CV section header, not a skill
+        return False
+    return True
 
 # Source identifier literals. Kept loose (plain strings) rather than
 # enums so future additions (``github_topic``, ``esco_expansion``) can
@@ -127,7 +156,7 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
         if not name or not isinstance(name, str):
             return
         name = name.strip()
-        if not name:
+        if not name or not _looks_like_skill(name):
             return
         key = name.casefold()
         if key not in evidence:
