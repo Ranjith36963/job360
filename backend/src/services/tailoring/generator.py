@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 from pydantic import BaseModel
 
 from src.services.profile.llm_provider import llm_extract
+from src.services.tailoring.integrity import repair_proper_nouns
 from src.services.tailoring.prompts import SYSTEM_BY_KIND, build_user_prompt
 
 DOC_KINDS = ("cv", "cover_letter")
@@ -26,6 +27,9 @@ class GeneratedDoc(BaseModel):
     doc_kind: str
     document: str
     model: str = "auto"
+    # Proper nouns in the output that match nothing in the source — a possible
+    # fabrication for the user to review (guardrail #2). Empty on a clean run.
+    flagged_terms: list[str] = []
 
 
 class EmptyCVError(ValueError):
@@ -73,5 +77,11 @@ async def generate_document(
     if not document:
         raise RuntimeError("LLM returned an empty tailored document")
 
+    # Guardrail #2 (deterministic enforcement): the model can misspell a real name
+    # while rewriting ("Monzo" -> "Monox"). Re-spell near-misses back to the source
+    # spelling and flag any proper noun that matches nothing in the source at all.
+    source_text = "\n".join(p for p in (cv_text, job_title, company, job_description) if p)
+    document, flagged = repair_proper_nouns(document, source_text)
+
     model = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
-    return GeneratedDoc(doc_kind=doc_kind, document=document, model=model)
+    return GeneratedDoc(doc_kind=doc_kind, document=document, model=model, flagged_terms=flagged)
