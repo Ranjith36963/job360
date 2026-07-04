@@ -836,6 +836,29 @@ class JobDatabase:
         row = await cursor.fetchone()
         return (row[0] or "") if row else ""
 
+    async def get_user_feed_verdict(self, user_id: str, job_id: int) -> dict:
+        """The judge's (E4) per-user verdict for (user, job): ``llm_fit_score``,
+        ``llm_verdict``, ``llm_reason``. Returns an empty dict when the job isn't in
+        this user's feed or the judge hasn't run — so the single-job read stays
+        None-safe (mirrors the list read's ``get_user_feed_jobs`` llm columns).
+        """
+        try:
+            cursor = await self._conn.execute(
+                "SELECT llm_fit_score, llm_verdict, llm_reason FROM user_feed "
+                "WHERE user_id = ? AND job_id = ?",
+                (user_id, job_id),
+            )
+        except Exception:  # noqa: BLE001 — user_feed may not exist in minimal test DBs
+            return {}
+        row = await cursor.fetchone()
+        if not row:
+            return {}
+        return {
+            "llm_fit_score": row[0],
+            "llm_verdict": row[1],
+            "llm_reason": row[2],
+        }
+
     async def create_application(self, job_id: int, user_id: str) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(

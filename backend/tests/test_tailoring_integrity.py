@@ -38,6 +38,15 @@ def test_unrelated_real_word_not_corrupted():
     assert "Monzo" not in out
 
 
+def test_dotted_credentials_not_flagged():
+    # Real credentials with dots (M.Sc, B.Sc, Ph.D) have <4 LETTERS — must not be
+    # flagged as fabrications even though "M.Sc" is 4 characters. (Found via live verify.)
+    src = "Education: Master of Science. Skills: Python, AWS."
+    for cred in ("M.Sc", "B.Sc", "Ph.D"):
+        _out, flagged = repair_proper_nouns(f"Holds an {cred} degree.", src)
+        assert cred not in flagged, f"{cred} should not be flagged"
+
+
 def test_fabricated_brand_is_flagged():
     # A camelCase brand that resembles nothing in the source -> surfaced for review.
     out, flagged = repair_proper_nouns(

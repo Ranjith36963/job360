@@ -685,6 +685,10 @@ async def get_job(
     # the 8-D breakdown is theirs, not the shared last-writer-wins jobs row.
     if user is not None:
         row = await _personalize_dims(dict(row), db, user)
+        # Surface THIS user's judge (E4) verdict so the detail page leads with the
+        # same AI fit score the dashboard ranks by (the list read already joins
+        # these; the single-job read didn't, so llm_* came back null here).
+        row.update(await db.get_user_feed_verdict(user.id, job_id))
     resp = _row_to_job_response(row, job_action)
 
     # Skill Analysis: split the job's required skills into matched / missing /

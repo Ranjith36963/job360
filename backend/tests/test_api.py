@@ -562,6 +562,58 @@ async def test_jobs_response_includes_llm_verdict_values(authenticated_async_con
     )
 
 
+@pytest.mark.asyncio
+async def test_single_job_response_includes_llm_verdict_values(authenticated_async_context):
+    """Rule #21 value-presence: GET /jobs/{id} (single-job read) must surface the
+    SAME per-user judge verdict the list read does. Regression guard for the gap
+    where the detail page led with the keyword score because llm_* came back null
+    from the single-job endpoint (it didn't join user_feed).
+    """
+    from src.core.tenancy import DEFAULT_TENANT_ID
+
+    db = await api_deps.get_db()
+
+    job_a_id = await _insert_job_row(
+        db, match_score=80, apply_url="https://example.com/jobs/sllm-a",
+        normalized_company="acme sllm a", normalized_title="ml engineer sllm a",
+    )
+    job_b_id = await _insert_job_row(
+        db, match_score=60, apply_url="https://example.com/jobs/sllm-b",
+        normalized_company="acme sllm b", normalized_title="ml engineer sllm b",
+    )
+
+    u = await db._conn.execute(
+        "SELECT id FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY rowid DESC LIMIT 1",
+        (DEFAULT_TENANT_ID,),
+    )
+    uid = (await u.fetchone())[0]
+    await db._conn.execute(
+        """UPDATE user_feed
+           SET llm_fit_score = 91, llm_verdict = 'strong fit',
+               llm_reason = 'skills overlap', llm_matched_at = datetime('now')
+           WHERE user_id = ? AND job_id = ?""",
+        (uid, job_b_id),
+    )
+    await db._conn.commit()
+
+    async with authenticated_async_context() as client:
+        judged = await client.get(f"/api/jobs/{job_b_id}")
+        unjudged = await client.get(f"/api/jobs/{job_a_id}")
+
+    assert judged.status_code == 200
+    jb = judged.json()
+    # Value-presence: the exact seeded judge values must appear on the single read.
+    assert jb["llm_fit_score"] == 91
+    assert jb["llm_verdict"] == "strong fit"
+    assert jb["llm_reason"] == "skills overlap"
+
+    # The unjudged job must return nulls, not 0 / "".
+    ja = unjudged.json()
+    assert ja["llm_fit_score"] is None
+    assert ja["llm_verdict"] is None
+    assert ja["llm_reason"] is None
+
+
 # ---------------------------------------------------------------------------
 # Rule #21 value-presence: deadline round-trip
 # ---------------------------------------------------------------------------

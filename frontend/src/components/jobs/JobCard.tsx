@@ -33,10 +33,14 @@ import { TailorButton } from "@/components/tailor/TailorButton";
 // ---------------------------------------------------------------------------
 
 function scoreClass(score: number): string {
-  if (score >= 70) return "score-high";
-  if (score >= 50) return "score-good";
-  if (score >= 30) return "score-mid";
-  return "score-low";
+  // 3-tier bands (70 / 40) matched to the AI-verdict pill's colours (emerald /
+  // amber / red) so the big badge and the pill never show a different colour for
+  // the SAME score. The old extra "good" band coloured 50-69 green while the pill
+  // called it amber "moderate"; score-good stays in CSS but is intentionally
+  // unused now.
+  if (score >= 70) return "score-high"; // green  — strong
+  if (score >= 40) return "score-mid"; // amber  — moderate
+  return "score-low"; // red    — weak
 }
 
 function timeAgo(dateStr: string): string {
@@ -102,6 +106,15 @@ export function JobCard({ job, onAction }: JobCardProps) {
   const isSkipped = job.action === "not_interested";
 
   const salaryRange = formatSalaryRange(job.salary_min_gbp, job.salary_max_gbp);
+
+  // ── Primary score ────────────────────────────────────────────────────────────
+  // The big badge must show the SAME number the list is sorted by. The dashboard
+  // orders rows by COALESCE(llm_fit_score, match_score) — the LLM judge (E4) wins
+  // when it has scored the job, else the keyword engine (E1). Showing match_score
+  // while sorting by the judge made the badges look scrambled (they were never the
+  // sort key). isJudged mirrors the AI-verdict-badge guard further down.
+  const isJudged = job.llm_fit_score != null && job.llm_verdict != null;
+  const primaryScore = isJudged ? (job.llm_fit_score as number) : job.match_score;
 
   // ── Date freshness ──────────────────────────────────────────────────────────
   // crawlerTime: the timestamp our crawler last/first saw the listing.
@@ -173,12 +186,29 @@ export function JobCard({ job, onAction }: JobCardProps) {
     >
       {/* ---- Top row: Score + Title ---- */}
       <div className="flex items-start gap-3">
-        {/* Score badge */}
-        <div
-          className={`score-badge ${scoreClass(job.match_score)} flex-shrink-0 flex items-center justify-center rounded-lg w-11 h-11 text-lg font-bold`}
-          aria-label={`Match score: ${job.match_score}`}
-        >
-          {job.match_score}
+        {/* Score badge — shows the SAME score the list is sorted by (judge fit
+            when judged, else keyword match), colour-matched to that number, with
+            a label so its meaning is explicit and it can't be mistaken for the
+            other engine's score. */}
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <div
+            className={`score-badge ${scoreClass(primaryScore)} flex items-center justify-center rounded-lg w-11 h-11 text-lg font-bold`}
+            aria-label={`${isJudged ? "AI fit" : "Keyword match"} score: ${primaryScore}`}
+            title={
+              isJudged
+                ? "AI judge fit — this is the score the list is ranked by"
+                : "Keyword match — not yet AI-ranked"
+            }
+          >
+            {primaryScore}
+          </div>
+          <span
+            className={`text-[10px] font-semibold uppercase tracking-wide leading-none ${
+              isJudged ? "text-primary" : "text-muted-foreground"
+            }`}
+          >
+            {isJudged ? "AI fit" : "match"}
+          </span>
         </div>
 
         <div className="min-w-0 flex-1">
@@ -297,6 +327,18 @@ export function JobCard({ job, onAction }: JobCardProps) {
 
       {/* ---- Salary + type + seniority + workplace + visa ---- */}
       <div className="flex flex-wrap items-center gap-2">
+        {/* Keyword (recall) score — kept visible but clearly secondary, shown only
+            when the judge produced the primary score, so the keyword number the
+            badge used to display isn't lost. */}
+        {isJudged && (
+          <Badge
+            variant="outline"
+            className="text-xs text-muted-foreground/70"
+            title="Keyword match score — a recall signal, not the ranking score"
+          >
+            kw {job.match_score}
+          </Badge>
+        )}
         {/* Structured salary range (preferred) */}
         {salaryRange && (
           <span className="flex items-center gap-1 text-sm text-foreground/80">
@@ -373,7 +415,7 @@ export function JobCard({ job, onAction }: JobCardProps) {
                 : "text-xs border-red-500 text-red-600"
             }
           >
-            AI: {job.llm_verdict} · {job.llm_fit_score}
+            AI: {job.llm_verdict}
           </Badge>
         </div>
       )}

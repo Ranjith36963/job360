@@ -38,10 +38,11 @@ import { TailorSection } from "@/components/tailor/TailorSection";
 // ---------------------------------------------------------------------------
 
 function scoreBucket(score: number): string {
-  if (score >= 70) return "score-high";
-  if (score >= 50) return "score-good";
-  if (score >= 30) return "score-mid";
-  return "score-low";
+  // 70 / 40 bands — kept in lock-step with JobCard's scoreClass and the AI-verdict
+  // pill so the SAME score never shows a different colour on the dashboard vs here.
+  if (score >= 70) return "score-high"; // green  — strong
+  if (score >= 40) return "score-mid"; // amber  — moderate
+  return "score-low"; // red    — weak
 }
 
 function relativeDate(iso: string): string {
@@ -208,7 +209,12 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
     );
   }
 
-  const bucket = scoreBucket(job.match_score);
+  // Primary score = the AI judge fit when the job has been judged, else the
+  // keyword match — the same rule the dashboard sorts and displays by, so the big
+  // number doesn't change meaning when you click from a card into its detail page.
+  const isJudged = job.llm_fit_score != null && job.llm_verdict != null;
+  const primaryScore = isJudged ? (job.llm_fit_score as number) : job.match_score;
+  const bucket = scoreBucket(primaryScore);
 
   // Deadline derived values
   const deadlineDays = job.deadline ? daysUntil(job.deadline) : null;
@@ -398,19 +404,34 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
 
             <Separator />
 
-            {/* Match score — large display */}
+            {/* Primary score — large display. Shows the AI judge fit when judged
+                (the number the list is ranked by), else the keyword match. */}
             <div className="space-y-2">
               <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
-                Match Score
+                {isJudged ? "AI Fit Score" : "Match Score"}
               </h2>
               <div
                 className={`score-badge ${bucket} inline-flex items-center gap-2 rounded-xl px-5 py-3`}
               >
                 <span className="font-mono text-3xl font-bold tabular-nums">
-                  <ScoreCounter value={job.match_score} />
+                  <ScoreCounter value={primaryScore} />
                 </span>
                 <span className="text-sm opacity-70">/ 100</span>
               </div>
+              {isJudged && (
+                <div className="space-y-1 pt-1">
+                  {job.llm_verdict && (
+                    <p className="text-sm text-foreground/80">
+                      <span className="font-medium text-foreground">AI verdict:</span>{" "}
+                      {job.llm_verdict}
+                      {job.llm_reason ? ` — ${job.llm_reason}` : ""}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Keyword match score: {job.match_score}/100 — a recall signal, not the ranking score
+                  </p>
+                </div>
+              )}
             </div>
 
             <Separator />

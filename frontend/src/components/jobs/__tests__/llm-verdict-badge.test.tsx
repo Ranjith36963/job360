@@ -2,10 +2,12 @@
  * AI verdict badge on JobCard.
  *
  * The LLM judge emits three nullable fields: llm_fit_score, llm_verdict,
- * llm_reason. The card shows a coloured "AI: <verdict> · <score>" badge
- * only when both verdict and score are non-null; reason surfaces as the
- * native title tooltip. This pins the contract so future card refactors
- * can't silently drop the badge.
+ * llm_reason. The card shows a coloured "AI: <verdict>" pill only when both
+ * verdict and score are non-null; reason surfaces as the native title tooltip.
+ * The fit SCORE itself is shown on the big score badge (which now carries the
+ * judge fit when judged — the same number the list is sorted by). This pins the
+ * contract so future card refactors can't silently drop the badge or regress the
+ * badge back to showing the keyword score under a judged row.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -147,5 +149,32 @@ describe("JobCard — AI verdict badge", () => {
     // baseJob has no llm_* fields — simulates legacy job rows
     render(<JobCard job={baseJob} onAction={mockOnAction} />);
     expect(screen.queryByText(/AI:/i)).not.toBeInTheDocument();
+  });
+
+  // ── The actual bug fix: badge number must equal the sort key ────────────────
+  it("big badge shows the JUDGE fit score (not the keyword score) when judged", () => {
+    // Keyword 30 vs judge 88: the dashboard sorts by the judge, so the badge
+    // must show 88 (else the badges look scrambled vs the row order).
+    render(
+      <JobCard
+        job={jobWith({ match_score: 30, llm_fit_score: 88, llm_verdict: "strong fit", llm_reason: "x" })}
+        onAction={mockOnAction}
+      />
+    );
+    expect(screen.getByLabelText(/AI fit score: 88/)).toHaveTextContent("88");
+    // Keyword score is kept, but as a clearly-labelled secondary chip.
+    expect(screen.getByText(/kw 30/)).toBeInTheDocument();
+  });
+
+  it("big badge shows the keyword score labelled 'match' when unjudged", () => {
+    render(
+      <JobCard
+        job={jobWith({ match_score: 44, llm_fit_score: null, llm_verdict: null, llm_reason: null })}
+        onAction={mockOnAction}
+      />
+    );
+    expect(screen.getByLabelText(/Keyword match score: 44/)).toHaveTextContent("44");
+    // No secondary kw chip when there is no judge score to be primary.
+    expect(screen.queryByText(/kw 44/)).not.toBeInTheDocument();
   });
 });
