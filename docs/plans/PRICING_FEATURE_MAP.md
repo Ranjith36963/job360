@@ -9,6 +9,36 @@ fields of the two paid providers to concrete Pro/Max features. Companion to
 - **TheirStack enriches the COMPANY** (tech stack, funding, size, hiring manager) → **Max**.
 - Story: Pro = *smarter jobs*; Max = *smarter about the companies behind them*.
 
+## CUMULATIVE RULE (important — 2026-06-25 correction)
+Tiers stack: **Max = Free + Pro + TheirStack**, NOT "TheirStack instead of Fantastic
+Jobs." Max users still get all Fantastic Jobs data + features (incl. one-click direct
+apply). Nobody loses a feature by paying more. Direct-apply therefore lives in **both
+Pro and Max**.
+
+## Verified corrections (be honest about these)
+- **AI CV tailoring is NOT built** (backend audit confirmed — no route exists). Do not
+  list it as a real tier feature until built.
+- **Fantastic Jobs boards = LinkedIn / Wellfound / Y Combinator — Indeed NOT confirmed
+  in it.** TheirStack is the one carrying Indeed + Glassdoor. So Pro gets LinkedIn;
+  Max adds Indeed/Glassdoor. [verify FJ Indeed coverage before marketing it]
+- **Direct/easy apply exists in BOTH APIs** (FJ `direct_apply`, TS `easy_apply` +
+  resolved apply URL) — it is not a unique FJ moat.
+
+## Full Free/Pro/Max feature allocation (code-audited)
+See the two tables in this session's summary; canonical allocation:
+- **Free (all $0-cost):** 47 free boards, keyword score (E1), CV upload+parse+prefs,
+  like/apply, capped feed (top-20/day), basic tracker (≤50 jobs), duplicates view,
+  ghost filter, 1 weekly digest email, full account mgmt.
+- **Pro (+ Fantastic Jobs):** live LinkedIn + 200k career sites, all AI scoring
+  (E2/E3/E4 verdicts), 8-D radar, one-click direct apply, smart filters (salary/
+  seniority/remote/visa), hide agencies, AI summary + skill-match %, LinkedIn+GitHub
+  profile enrichment, version history/diff/restore, full Kanban tracker (unlimited),
+  all notification channels + rules + digests, CSV/JSON-Resume export.
+- **Max (+ TheirStack, cumulative):** Indeed+Glassdoor+344k sources, minute-fresh
+  instant alerts, company tech-stack match, funding/size/revenue/industry filters,
+  hiring-manager contact card, "company scaling" alerts, tech-stack explorer,
+  direct-employer-only, unlimited + priority ranking.
+
 ## FREE (no paid data)
 46 free boards, keyword scoring, capped daily matches, no notifications. $0 cost.
 
