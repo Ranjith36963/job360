@@ -175,6 +175,14 @@ class ProfileResponse(BaseModel):
     # ``user_declared``). Computed from the SkillEntry merge — empty
     # when the profile has no skills.
     skill_provenance: dict[str, list[str]] = {}
+    # Skills grouped by WHERE they came from — for the source-based profile view
+    # (From CV / From LinkedIn / From GitHub / From Preferences). Derived from
+    # provenance; a skill seen in >1 source appears under each. Empty when no
+    # skills.
+    skills_by_source: dict[str, list[str]] = {}
+    # AI-SUGGESTED adjacent skills (neighbours of what the user has). SUGGESTIONS
+    # only — the user opts in; never counted in tiering/scoring/matching.
+    ai_suggestions: list[str] = []
     # Step-1.5 S3-E — LinkedIn sub-sections for the profile detail UI.
     # Each value is the raw list of dicts as parsed by
     # ``services.profile.linkedin_parser`` — see CVData fields with the

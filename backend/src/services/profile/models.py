@@ -82,6 +82,10 @@ class CVData:
     # skill-tiering can weight this "user's own words" signal. Empty when
     # about_me is blank or the LLM pass is unavailable.
     about_me_inferred_skills: list[str] = field(default_factory=list)
+    # LLM-suggested ADJACENT skills (neighbours of what the user already has, e.g.
+    # PyTorch → TensorFlow/Keras). These are SUGGESTIONS the user opts into — they
+    # are NEVER counted in tiering/scoring, so matching only uses real skills.
+    suggested_skills: list[str] = field(default_factory=list)
 
     @classmethod
     def from_json_resume(cls, data: dict) -> CVData:

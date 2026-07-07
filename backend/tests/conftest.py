@@ -30,18 +30,20 @@ from src.services.channels import crypto
 
 @pytest.fixture(autouse=True)
 def _offline_openai(monkeypatch):
-    """Keep the suite offline for the paid PRIMARY provider.
+    """Keep the WHOLE suite offline for LLMs (rule #4).
 
-    OpenAI (``gpt-4o-mini``) is now first in the provider chain, and the repo
-    ``.env`` carries a real key that ``settings.py`` reads at import. Tests that
-    don't patch a provider would otherwise hit the live OpenAI API. Blank the
-    module-level key here; tests that genuinely exercise the OpenAI path set it
-    back with their own ``patch.object``. Mirrors rule #18's hermeticity intent.
+    The repo ``.env`` carries real keys for OpenAI + the free tiers, and
+    ``settings.py`` reads them at import. Any un-mocked ``llm_extract`` /
+    ``llm_extract_fast`` call would otherwise hit a live provider — slow, flaky,
+    and non-deterministic. Blank ALL provider keys here; a test that genuinely
+    exercises a provider patches its key back with ``patch.object``. Un-mocked
+    LLM calls then raise the no-key error, which every caller handles gracefully.
     """
     try:
         import src.services.profile.llm_provider as _lp
 
-        monkeypatch.setattr(_lp, "OPENAI_API_KEY", "", raising=False)
+        for _k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
+            monkeypatch.setattr(_lp, _k, "", raising=False)
     except Exception:
         pass
 

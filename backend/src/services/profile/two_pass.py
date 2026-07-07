@@ -226,6 +226,34 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     cv.certifications = dedup_fuzzy(dedup_by_containment(cv.certifications))
     cv.education = dedup_by_containment(cv.education)
 
+    # LLM curation — the reasoning layer. The deterministic + fuzzy passes can't
+    # safely merge entries that mean the same thing but are worded very
+    # differently ("Master of Science…" vs "Master's degree…"; "AI/ML Engineer
+    # Intern" vs "AI / ML intern"). The LLM reasons about meaning and returns ONE
+    # clean title per real qualification/role. Each no-ops on <2 items and keeps
+    # the original on any failure, so this never loses data.
+    from src.services.profile.llm_curate import (  # noqa: PLC0415
+        llm_merge_duplicates,
+        llm_suggest_adjacent_skills,
+    )
+
+    cv.education = await llm_merge_duplicates(cv.education, "education")
+    cv.job_titles = await llm_merge_duplicates(cv.job_titles, "roles")
+    cv.certifications = await llm_merge_duplicates(cv.certifications, "certifications")
+
+    # Adjacent-skill SUGGESTIONS (opt-in, never auto-counted) from the full set of
+    # skills the user actually has across all sources.
+    _all_skills = list(
+        dict.fromkeys(
+            (cv.skills or [])
+            + (cv.linkedin_skills or [])
+            + (cv.github_llm_skills or [])
+            + list((cv.github_languages or {}).keys())
+            + (prefs.additional_skills or [])
+        )
+    )
+    cv.suggested_skills = await llm_suggest_adjacent_skills(_all_skills)
+
     # ── Fold the freshly-extracted CV skills/titles into preferences ──
     # (Was done in the CV upload route; lives here now so the SINGLE extractor
     # owns the whole job and the route doesn't have to extract anything.)

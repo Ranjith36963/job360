@@ -53,16 +53,25 @@ function buildHighlightedCV(
 
   // Sort longest-first so "Machine Learning" matches before "Machine"
   const sorted = [...terms]
-    .filter((t) => t.text.length > 2)
+    .filter((t) => t.text.trim().length > 2)
     .sort((a, b) => b.text.length - a.text.length);
 
-  // Build regex from all terms
+  // Build regex from all terms. A skill can WRAP across a line in the PDF text
+  // ("Machine" ending one line, "Learning" starting the next), so the space
+  // inside a term must match ANY whitespace incl. a newline: escape regex
+  // specials, then turn each run of spaces into \s+.
   const escaped = sorted.map((t) => ({
-    pattern: t.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    pattern: t.text
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+"),
     category: t.category,
   }));
 
   if (!escaped.length) return [rawText];
+
+  // Compare on whitespace-collapsed, lower-cased forms so a wrapped match
+  // ("Machine\nLearning") still equals its term ("Machine Learning").
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
   const regex = new RegExp(
     `(${escaped.map((e) => e.pattern).join("|")})`,
@@ -71,9 +80,7 @@ function buildHighlightedCV(
   const parts = rawText.split(regex);
 
   return parts.map((part, i) => {
-    const match = sorted.find(
-      (t) => t.text.toLowerCase() === part.toLowerCase()
-    );
+    const match = sorted.find((t) => norm(t.text) === norm(part));
     if (match) {
       return (
         <mark key={i} className={CATEGORY_STYLES[match.category]}>
