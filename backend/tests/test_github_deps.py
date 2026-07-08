@@ -21,7 +21,7 @@ from src.services.profile.models import CVData
 # ── dep_file_parser — per-format ────────────────────────────────────
 
 
-def test_parse_package_json_all_sections():
+def test_parse_package_json_runtime_only():
     content = """
     {
       "name": "demo",
@@ -30,9 +30,8 @@ def test_parse_package_json_all_sections():
       "peerDependencies": {"react-dom": "^18.2.0"}
     }
     """
-    assert dep_file_parser.parse_package_json(content) == {
-        "react", "next", "typescript", "vitest", "react-dom"
-    }
+    # RUNTIME deps only — devDependencies + peerDependencies are tooling, excluded.
+    assert dep_file_parser.parse_package_json(content) == {"react", "next"}
 
 
 def test_parse_package_json_malformed_returns_empty():
@@ -81,8 +80,9 @@ dev = ["pytest>=8.0", "ruff"]
     assert "fastapi" in names
     assert "pydantic" in names
     assert "httpx" in names
-    assert "pytest" in names
-    assert "ruff" in names
+    # optional-dependencies (dev/test groups) are excluded — runtime only
+    assert "pytest" not in names
+    assert "ruff" not in names
 
 
 def test_parse_pyproject_toml_poetry():
@@ -98,7 +98,7 @@ pytest = "^8.0"
     names = dep_file_parser.parse_pyproject_toml(content)
     assert "django" in names
     assert "celery" in names
-    assert "pytest" in names
+    assert "pytest" not in names  # dev group excluded — runtime only
     assert "python" not in names  # we exclude the python floor
 
 
@@ -116,7 +116,8 @@ axum = "0.7"
 mockall = "0.12"
 """
     names = dep_file_parser.parse_cargo_toml(content)
-    assert {"tokio", "serde", "axum", "mockall"} <= names
+    assert {"tokio", "serde", "axum"} <= names
+    assert "mockall" not in names  # dev-dependencies excluded — runtime only
 
 
 def test_parse_gemfile():
@@ -434,6 +435,50 @@ async def test_llm_infer_github_skills_parses_skills():
 
     assert "rag-bot" in seen["prompt"]  # repo data reached the prompt
     assert "LangChain" in skills and "RAG" in skills
+
+
+@pytest.mark.asyncio
+async def test_llm_infer_github_skills_includes_language_in_prompt():
+    """Diagnosis fix: the repo's primary language must reach the LLM prompt so
+    the model can reason about the stack (a TypeScript repo ≠ a Python repo)."""
+    seen = {}
+
+    async def fake_llm(prompt, system=""):
+        seen["prompt"] = prompt
+        return {"skills": ["React"]}
+
+    repos_brief = [
+        {"name": "site", "language": "TypeScript", "description": "portfolio", "topics": []},
+    ]
+    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
+        await github_enricher.llm_infer_github_skills(repos_brief)
+
+    assert "TypeScript" in seen["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_profile_brief_carries_language():
+    """Diagnosis fix: the persisted repos_brief must keep each repo's language,
+    so the two-pass re-extraction (stored-only, no re-fetch) still sees it."""
+    repos = [
+        {"name": "site", "language": "TypeScript", "description": "my portfolio",
+         "stargazers_count": 0, "topics": [], "pushed_at": "2025-01-01T00:00:00Z", "fork": False},
+    ]
+
+    async def fake_get_json(session, url):
+        if url.endswith("/repos?per_page=30&sort=pushed"):
+            return repos
+        if "/languages" in url:
+            return {"TypeScript": 5000}
+        return []
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks",
+                      new=AsyncMock(return_value=[])):
+        result = await github_enricher.fetch_github_profile("alice", session=_make_async_session())
+
+    brief = result["repos_brief"]
+    assert brief and brief[0].get("language") == "TypeScript"
 
 
 @pytest.mark.asyncio

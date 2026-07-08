@@ -161,6 +161,31 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         skill_tiers = {}
         skill_provenance = {}
 
+    # Skills grouped by SOURCE for the source-based profile view. Maps each
+    # provenance source label to a user-facing bucket; a skill with multiple
+    # sources appears under each of its buckets.
+    _SOURCE_BUCKET = {
+        "cv_explicit": "cv",
+        "linkedin": "linkedin",
+        "github_llm": "github",
+        "github_lang": "github",
+        "github_dep": "github",
+        "user_declared": "preferences",
+        "about_me_llm": "preferences",
+    }
+    skills_by_source: dict[str, list[str]] = {
+        "cv": [], "linkedin": [], "github": [], "preferences": [],
+    }
+    _seen_in_bucket: dict[str, set[str]] = {k: set() for k in skills_by_source}
+    for skill, sources in skill_provenance.items():
+        for src in sources:
+            bucket = _SOURCE_BUCKET.get(src)
+            if bucket and skill.lower() not in _seen_in_bucket[bucket]:
+                skills_by_source[bucket].append(skill)
+                _seen_in_bucket[bucket].add(skill.lower())
+    # AI suggestions — computed once at extraction, stored on CVData.
+    ai_suggestions: list[str] = list(getattr(cv, "suggested_skills", []) or [])
+
     # Step-1.5 S3-E — LinkedIn sub-sections + GitHub temporal map.
     linkedin_subsections: dict[str, list[dict]] = {
         "languages": list(getattr(cv, "linkedin_languages", []) or []),
@@ -191,6 +216,8 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         skill_tiers=skill_tiers,
         skill_esco=getattr(cv, "cv_skills_esco", {}) or {},
         skill_provenance=skill_provenance,
+        skills_by_source=skills_by_source,
+        ai_suggestions=ai_suggestions,
         linkedin_subsections=linkedin_subsections,
         github_temporal=github_temporal,
         current_version_id=current_version_id,
@@ -264,8 +291,14 @@ def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) 
 
 
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
-    """Parse the preferences JSON form and set it on the profile."""
+    """Parse the preferences JSON form and set it on the profile.
+
+    Fields the form does NOT carry (``github_username`` — set by the separate
+    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
+    EXISTING preferences so a routine preferences save never silently wipes them.
+    """
     pref_dict = json.loads(preferences_json)
+    existing = profile.preferences or UserPreferences()
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -278,7 +311,9 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         experience_level=pref_dict.get("experience_level", ""),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
-        github_username=pref_dict.get("github_username", ""),
+        github_username=pref_dict.get("github_username", existing.github_username),
+        preferred_workplace=pref_dict.get("preferred_workplace", existing.preferred_workplace),
+        needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
 
 
