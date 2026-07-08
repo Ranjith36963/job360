@@ -25,8 +25,9 @@ def _read_script() -> str:
 @needs_bash
 def test_cron_script_syntax_valid():
     """bash -n validates the script has no syntax errors."""
-    result = subprocess.run(
-        ["bash", "-n", str(CRON_SCRIPT)],
+    bash_path = shutil.which("bash")
+    result = subprocess.run(  # noqa: S603  # fixed args + tracked repo script, no untrusted input
+        [bash_path, "-n", str(CRON_SCRIPT)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0, f"Syntax error: {result.stderr}"
@@ -39,8 +40,9 @@ def test_cron_script_fails_without_venv():
         # Copy cron_setup.sh into temp dir (so PROJECT_DIR resolves there)
         tmp_script = Path(tmpdir) / "cron_setup.sh"
         tmp_script.write_text(_read_script())
-        result = subprocess.run(
-            ["bash", str(tmp_script)],
+        bash_path = shutil.which("bash")
+        result = subprocess.run(  # noqa: S603  # fixed args + generated temp script, no untrusted input
+            [bash_path, str(tmp_script)],
             capture_output=True, text=True,
             cwd=tmpdir,
         )

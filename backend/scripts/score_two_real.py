@@ -16,8 +16,8 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
     from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts.engine_ablation import run_leaderboard_strong
@@ -42,7 +42,7 @@ def main() -> None:
         print("-" * 72)
         for r in rows:
             s = r["strong"]
-            def g(m):
+            def g(m, s=s):
                 try:
                     return f"{s[m]['point']:.3f}"
                 except Exception:

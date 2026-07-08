@@ -4,7 +4,6 @@ import tempfile
 
 from src.models import Job
 
-
 HEADERS = [
     "job_title", "company", "location", "salary",
     "match_score", "apply_url", "source", "date_found", "visa_flag",

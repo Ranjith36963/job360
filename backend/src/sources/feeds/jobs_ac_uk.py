@@ -2,9 +2,8 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-
 from src.models import Job
-from src.sources.base import BaseJobSource, _sanitize_xml, _is_uk_or_remote
+from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
 logger = logging.getLogger("job360.sources.jobs_ac_uk")
 
@@ -37,7 +36,7 @@ class JobsAcUkSource(BaseJobSource):
     def _parse_feed(self, xml_text: str) -> list[Job]:
         jobs = []
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = ET.fromstring(_sanitize_xml(xml_text))  # noqa: S314  # trusted feed XML, pre-sanitized via _sanitize_xml
         except ET.ParseError as e:
             logger.warning("jobs.ac.uk: XML parse error: %s", e)
             return []

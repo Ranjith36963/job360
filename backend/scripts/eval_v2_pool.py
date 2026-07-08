@@ -17,7 +17,6 @@ Then: grade the blind sheet -> eval_v2_gold.json, judge, score.
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import logging
 import random
@@ -119,8 +118,8 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
     from src.core.settings import DB_PATH
     from src.services.vector_index import VectorIndex
 
@@ -147,7 +146,7 @@ def main() -> None:
 
     by_id = {r["id"]: r for r in catalog}
     pool_out = {}
-    sheet = io.open(SHEET, "w", encoding="utf-8")
+    sheet = open(SHEET, "w", encoding="utf-8")
     from src.services.profile.storage import current_profile_version_id
 
     for uid in UIDS:
@@ -168,7 +167,7 @@ def main() -> None:
         cv = profile.cv_data
         p = profile.preferences
         order = list(pool_ids)
-        random.Random(hash(uid) & 0xFFFF).shuffle(order)
+        random.Random(hash(uid) & 0xFFFF).shuffle(order)  # noqa: S311  # deterministic shuffle, not crypto
         sheet.write(f"\n########## {cv.name} ({uid}) — BLIND ##########\n")
         sheet.write(f"Titles: {', '.join((cv.job_titles or [])[:6])}\n")
         sheet.write(f"Skills: {', '.join((cv.skills or [])[:18])}\n")

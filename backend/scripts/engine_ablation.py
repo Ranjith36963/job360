@@ -267,7 +267,7 @@ def evaluate_ranking_strong(ranking: list, golds: dict, *, n_resamples: int = 20
         return {"n": 0, **{m: {"point": None, "ci": (None, None)} for m in _STRONG_METRICS}}
 
     point = {m: _metric_from_pairs(m, pairs) for m in _STRONG_METRICS}
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311  # statistical bootstrap resampling, not crypto
     samples = {m: [] for m in _STRONG_METRICS}
     for _ in range(n_resamples):
         rs = [pairs[rng.randrange(n)] for _ in range(n)]
@@ -315,7 +315,7 @@ def compare_configs(
         return _metric_from_pairs(metric, [(pb, gold) for _pa, pb, gold in tr]) or 0.0
 
     point_diff = _a(triples) - _b(triples)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311  # statistical bootstrap resampling, not crypto
     diffs = []
     for _ in range(n_resamples):
         rs = [triples[rng.randrange(n)] for _ in range(n)]

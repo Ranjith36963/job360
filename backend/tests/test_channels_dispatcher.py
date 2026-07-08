@@ -77,8 +77,8 @@ async def test_dispatch_sends_to_each_enabled_channel(channel_db):
     await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
     await _insert_channel(channel_db, "alice", "discord", "discord://w/t")
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.add.return_value = None
         instance.notify.return_value = True
         # Remove async_notify so dispatcher falls back to sync notify.
@@ -99,8 +99,8 @@ async def test_dispatch_sends_to_each_enabled_channel(channel_db):
 async def test_dispatch_returns_error_on_apprise_false(channel_db):
     await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.return_value = False
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -120,8 +120,8 @@ async def test_dispatch_skips_disabled(channel_db):
     await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c", enabled=0)
     await _insert_channel(channel_db, "alice", "discord", "discord://w/t", enabled=1)
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -138,8 +138,8 @@ async def test_dispatch_skips_disabled(channel_db):
 async def test_test_send_returns_ok_true_on_success(channel_db):
     cid = await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -155,8 +155,8 @@ async def test_test_send_returns_ok_true_on_success(channel_db):
 async def test_test_send_returns_error_on_exception(channel_db):
     cid = await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.side_effect = RuntimeError("boom")
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -186,8 +186,8 @@ async def test_test_send_rejects_cross_user_channel_id(channel_db):
         await db.commit()
     alice_cid = await _insert_channel(channel_db, "alice", "slack", "slack://a/b/c")
 
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -199,4 +199,4 @@ async def test_test_send_rejects_cross_user_channel_id(channel_db):
     assert result.ok is False
     assert "not found" in result.error
     # Apprise was never called — ownership check rejected before dispatch.
-    assert MockApp.return_value.notify.call_count == 0
+    assert mock_app.return_value.notify.call_count == 0

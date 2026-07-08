@@ -27,12 +27,11 @@ port 9310. Grafana reads via Prometheus federation.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from src.repositories.database import JobDatabase
 from src.core.settings import DB_PATH
-
+from src.repositories.database import JobDatabase
 
 KPI_PORT = 9310
 REFRESH_SECONDS = 300  # 5 minutes
@@ -201,7 +200,7 @@ async def _refresh_loop(gauges):
                 gauges["crawl_freshness_lag"].labels(source=source).set(lag)
             for channel, rate in kpis.get("notification_delivery_success_rate", {}).items():
                 gauges["notification_delivery"].labels(channel=channel).set(rate)
-        except Exception:
+        except Exception:  # noqa: S110  # observability must never crash the exporter
             # Never let observability kill itself — skip this tick and retry
             pass
         await asyncio.sleep(REFRESH_SECONDS)

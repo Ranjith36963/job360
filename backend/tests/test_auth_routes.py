@@ -4,6 +4,8 @@ Uses TestClient with a temporary DB path patched via ``DB_PATH`` env override.
 HTTP responses are exercised end-to-end through the real session flow.
 """
 
+from contextlib import asynccontextmanager
+
 import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
@@ -81,9 +83,6 @@ def client(temp_db):
     app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
     with TestClient(app) as c:
         yield c
-
-
-from contextlib import asynccontextmanager
 
 
 @asynccontextmanager

@@ -237,7 +237,7 @@ def test_get_text_conditional_no_validator_does_not_cache():
 
 def test_cache_eviction_at_fifo_boundary():
     """Evicted entry must re-fetch 200, not 304."""
-    from src.services.conditional_cache import ConditionalCache, CachedEntry
+    from src.services.conditional_cache import CachedEntry, ConditionalCache
 
     cache = ConditionalCache(max_entries=3)
     cache.set(("a", ()), CachedEntry(body="A", etag='"a"'))
@@ -259,7 +259,7 @@ def test_cache_eviction_at_fifo_boundary():
 def test_cache_metrics_count_hits_and_misses():
     """get() bumps hit_count on success and miss_count on miss;
     get_metrics() exposes {hits, misses, size}."""
-    from src.services.conditional_cache import ConditionalCache, CachedEntry
+    from src.services.conditional_cache import CachedEntry, ConditionalCache
 
     cache = ConditionalCache(max_entries=256)
     # 5 lookups: 1 miss, then set, then 4 hits
@@ -278,7 +278,7 @@ def test_cache_metrics_count_hits_and_misses():
 
 def test_cache_reset_metrics():
     """reset_metrics() zeroes the counters for test isolation."""
-    from src.services.conditional_cache import ConditionalCache, CachedEntry
+    from src.services.conditional_cache import CachedEntry, ConditionalCache
 
     cache = ConditionalCache()
     cache.get(("k", ()))  # miss

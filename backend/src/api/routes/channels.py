@@ -182,7 +182,12 @@ async def create_channel(
         channel_id = cur.lastrowid
     get_audit_logger().info(
         "channel_created",
-        extra={"event": "channel_created", "user_id": user.id, "channel_type": body.channel_type, "channel_id": channel_id},
+        extra={
+            "event": "channel_created",
+            "user_id": user.id,
+            "channel_type": body.channel_type,
+            "channel_id": channel_id,
+        },
     )
     return ChannelOut(
         id=int(channel_id or 0),
@@ -331,7 +336,7 @@ async def _consume_oauth_state(
 # ---------------------------------------------------------------------------
 
 _SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
-_SLACK_TOKEN_URL = "https://slack.com/api/oauth.v2.access"
+_SLACK_TOKEN_URL = "https://slack.com/api/oauth.v2.access"  # noqa: S105  # OAuth endpoint URL, not a secret
 
 
 def _slack_oauth_enabled() -> bool:
@@ -477,7 +482,7 @@ async def callback_slack(
 # ---------------------------------------------------------------------------
 
 _DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
-_DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
+_DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"  # noqa: S105  # OAuth endpoint URL, not a secret
 
 
 def _discord_oauth_enabled() -> bool:

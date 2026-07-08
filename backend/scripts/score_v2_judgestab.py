@@ -43,11 +43,11 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts.score_v2 import _ranking_v2
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
@@ -58,12 +58,12 @@ def main() -> None:
     for uid in UIDS:
         gold = golds_all[uid]
         runs = runs_all[uid]  # {job_id: [s1,s2,...]}
-        K = max(len(v) for v in runs.values())
+        k_runs = max(len(v) for v in runs.values())
 
         # --- per-job judge variance ---
         stds = [statistics.pstdev(v) for v in runs.values() if len(v) > 1]
         ranges = [max(v) - min(v) for v in runs.values() if len(v) > 1]
-        print(f"\n{'='*78}\n{uid} — JUDGE (E4) VARIANCE over {K} runs\n{'='*78}")
+        print(f"\n{'='*78}\n{uid} — JUDGE (E4) VARIANCE over {k_runs} runs\n{'='*78}")
         print(f"per-job score std: mean={statistics.mean(stds):.1f} max={max(stds):.1f} "
               f"| per-job range: mean={statistics.mean(ranges):.1f} max={max(ranges):.1f}")
 
@@ -78,16 +78,18 @@ def main() -> None:
 
         # --- leaderboard per single run + per median ---
         boards = []  # list of {config: ndcg}
-        for k in range(K):
+        for k in range(k_runs):
             judge_k = {int(j): (v[k] if k < len(v) else None) for j, v in runs.items()}
-            es = dict(es_base); es["judge"] = judge_k
+            es = dict(es_base)
+            es["judge"] = judge_k
             boards.append(_leaderboard(es, gold, ea, _ranking_v2))
         median_judge = {int(j): statistics.median(v) for j, v in runs.items()}
-        es_med = dict(es_base); es_med["judge"] = median_judge
+        es_med = dict(es_base)
+        es_med["judge"] = median_judge
         board_med = _leaderboard(es_med, gold, ea, _ranking_v2)
 
         configs = list(board_med.keys())
-        print(f"\n{uid} — NDCG per config: single-run swing vs MEDIAN-of-{K} (the fix)")
+        print(f"\n{uid} — NDCG per config: single-run swing vs MEDIAN-of-{k_runs} (the fix)")
         print(f"{'CONFIG':<18}{'run mean':>9}{'±std':>7}{'[min,max]':>16}{'MEDIAN-fix':>12}")
         print("-" * 78)
         rows = []

@@ -70,8 +70,16 @@ _SEN_RULES = [
     ("junior", re.compile(r"\b(junior|jr\.?|graduate|entry[\s-]level|trainee)\b", re.I)),
     ("intern", re.compile(r"\b(intern|internship)\b", re.I)),
 ]
-_VISA_NEG = re.compile(r"\b(no|not|cannot|can't|unable to|won't|do not|are not able to)\b[^.]{0,40}\b(sponsor|sponsorship|visa)", re.I)
-_VISA_POS = re.compile(r"\b(visa sponsorship|sponsorship (is )?available|will sponsor|can sponsor|sponsor(ed)? visa|tier 2|skilled worker visa)\b", re.I)
+_VISA_NEG = re.compile(
+    r"\b(no|not|cannot|can't|unable to|won't|do not|are not able to)\b"
+    r"[^.]{0,40}\b(sponsor|sponsorship|visa)",
+    re.I,
+)
+_VISA_POS = re.compile(
+    r"\b(visa sponsorship|sponsorship (is )?available|will sponsor|can sponsor|"
+    r"sponsor(ed)? visa|tier 2|skilled worker visa)\b",
+    re.I,
+)
 _SALARY = re.compile(r"[£$€]\s?(\d{2,3})(?:,?(\d{3}))?\s?(k|,000)?", re.I)
 
 
@@ -126,7 +134,11 @@ def llm_facts(enr) -> dict:
         "seniority": getattr(enr, "seniority", None) or "unknown",
         "workplace": getattr(enr, "workplace_type", None) or "unknown",
         "visa": getattr(enr, "visa_sponsorship", None) or "unknown",
-        "salary": {"min": getattr(sal, "min", None), "max": getattr(sal, "max", None)} if sal else {"min": None, "max": None},
+        "salary": (
+            {"min": getattr(sal, "min", None), "max": getattr(sal, "max", None)}
+            if sal
+            else {"min": None, "max": None}
+        ),
     }
 
 
@@ -224,7 +236,10 @@ async def fetch_sample(session, sc) -> list[tuple[str, Job]]:
 
     sources = [
         ("reed (keyed/structured)", ReedSource(session, api_key=REED_API_KEY, search_config=sc)),
-        ("adzuna (keyed/structured)", AdzunaSource(session, app_id=ADZUNA_APP_ID, app_key=ADZUNA_APP_KEY, search_config=sc)),
+        (
+            "adzuna (keyed/structured)",
+            AdzunaSource(session, app_id=ADZUNA_APP_ID, app_key=ADZUNA_APP_KEY, search_config=sc),
+        ),
         ("remotive (free-json)", RemotiveSource(session, search_config=sc)),
         ("arbeitnow (free-json)", ArbeitnowSource(session, search_config=sc)),
         ("himalayas (free-json)", HimalayasSource(session, search_config=sc)),
@@ -289,7 +304,8 @@ async def main() -> None:
         if run_llm:
             enr, lat, err = await timed_llm(enrich_job(job))
             for lv in ("L5", "L1"):
-                agg[lv]["latency"] += lat; agg[lv]["calls"] += 1
+                agg[lv]["latency"] += lat
+                agg[lv]["calls"] += 1
                 agg[lv]["tokens"] += est_tokens(job.title, job.description or "")
             if err:
                 print(f"  L5 llm-only          (FAILED {lat:.1f}s): {err}")
@@ -304,15 +320,25 @@ async def main() -> None:
 
             p4 = matcher_prompt(prof_txt, job, None)
             out4, lat4, err4 = await timed_llm(llm_extract(p4))
-            agg["L4"]["latency"] += lat4; agg["L4"]["calls"] += 1; agg["L4"]["tokens"] += est_tokens(p4)
+            agg["L4"]["latency"] += lat4
+            agg["L4"]["calls"] += 1
+            agg["L4"]["tokens"] += est_tokens(p4)
             l4 = None if err4 else out4
-            print(f"  L4 matcher-only      ({lat4:.1f}s, ~{est_tokens(p4)}tok): {err4 or json.dumps(out4, default=str)[:200]}")
+            print(
+                f"  L4 matcher-only      ({lat4:.1f}s, ~{est_tokens(p4)}tok): "
+                f"{err4 or json.dumps(out4, default=str)[:200]}"
+            )
 
             p3 = matcher_prompt(prof_txt, job, rules)
             out3, lat3, err3 = await timed_llm(llm_extract(p3))
-            agg["L3"]["latency"] += lat3; agg["L3"]["calls"] += 1; agg["L3"]["tokens"] += est_tokens(p3)
+            agg["L3"]["latency"] += lat3
+            agg["L3"]["calls"] += 1
+            agg["L3"]["tokens"] += est_tokens(p3)
             l3 = None if err3 else out3
-            print(f"  L3 rules+matcher     ({lat3:.1f}s, ~{est_tokens(p3)}tok): {err3 or json.dumps(out3, default=str)[:200]}")
+            print(
+                f"  L3 rules+matcher     ({lat3:.1f}s, ~{est_tokens(p3)}tok): "
+                f"{err3 or json.dumps(out3, default=str)[:200]}"
+            )
         else:
             print("  (LLM levels skipped — past quota cap)")
 

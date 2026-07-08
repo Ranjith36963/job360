@@ -20,11 +20,11 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts.score_v2 import _ranking_v2
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
@@ -53,10 +53,10 @@ def main() -> None:
                     ranking = _ranking_v2(es.get(engines[0], {}), seed)
                 else:
                     ranking = ea.combine_rrf([_ranking_v2(es.get(e, {}), seed) for e in engines], k=60)
-                m = ea.evaluate_ranking(ranking, gold) if hasattr(ea, "evaluate_ranking") else None
                 # use the strong evaluator's point estimate (no bootstrap -> n_resamples=1)
                 strong = ea.evaluate_ranking_strong(ranking, gold, n_resamples=1, seed=seed)
-                nd = strong["ndcg"]["point"]; sp = strong["spearman"]["point"]
+                nd = strong["ndcg"]["point"]
+                sp = strong["spearman"]["point"]
                 ndcg[c["name"]].append(nd)
                 if sp is not None:
                     spear[c["name"]].append(sp)
@@ -69,7 +69,8 @@ def main() -> None:
         print("-" * 78)
         order = sorted(ea.DEFAULT_CONFIGS, key=lambda c: -statistics.mean(ndcg[c["name"]]))
         for c in order:
-            n = c["name"]; nd = ndcg[n]
+            n = c["name"]
+            nd = ndcg[n]
             sd = statistics.pstdev(nd) if len(nd) > 1 else 0.0
             sp = statistics.mean(spear[n]) if spear[n] else float("nan")
             print(f"{n:<18}{statistics.mean(nd):>10.3f}{sd:>8.3f}"

@@ -21,7 +21,6 @@ are public.
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -106,7 +105,7 @@ async def probe(client: httpx.AsyncClient, name: str, url: str) -> Verdict:
 
 
 async def main() -> int:
-    print(f"# Batch 3.5.3 — conditional-fetch pre-flight\n")
+    print("# Batch 3.5.3 — conditional-fetch pre-flight\n")
     print(f"Probing {len(CANDIDATES)} candidates.\n")
     verdicts: list[Verdict] = []
     async with httpx.AsyncClient(

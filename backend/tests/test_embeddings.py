@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.services.embeddings import (
     EMBEDDING_DIM,
@@ -21,7 +20,6 @@ from src.services.job_enrichment_schema import (
     JobEnrichment,
 )
 from src.services.vector_index import VectorIndex
-
 
 # ---------------------------------------------------------------------------
 # Fake encoder — deterministic, fast, no downloads.

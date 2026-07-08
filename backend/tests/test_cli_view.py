@@ -2,7 +2,7 @@
 
 import sqlite3
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.cli_view import _load_jobs_sync, display_jobs
@@ -124,15 +124,33 @@ def test_load_jobs_sync_min_score_filter():
         Path(db_path).unlink(missing_ok=True)
 
 
-def test_load_jobs_sync_nonexistent_db():
-    """_load_jobs_sync should return empty list for missing DB."""
-    jobs = _load_jobs_sync(db_path="/tmp/nonexistent_job360_test.db")
-    assert jobs == []
+def test_load_jobs_sync_returns_empty_on_db_error(monkeypatch):
+    """_load_jobs_sync degrades to an empty list when the query raises.
+
+    Under SQLite a missing file made ``SELECT * FROM jobs`` raise "no such
+    table", so the old test pointed at a nonexistent path and expected ``[]``.
+    Under Postgres the path is advisory and the shared catalog is always
+    present, so we instead force the query to fail — exercising the same
+    graceful-degradation branch (``except Exception: return []``).
+    """
+    import src.cli_view as cli_view
+
+    class _BadConn:
+        row_factory = None
+
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("database unavailable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cli_view.sqlite3, "connect", lambda *a, **k: _BadConn())
+    assert _load_jobs_sync(db_path="unused-path.db") == []
 
 
-def test_display_jobs_runs_without_error(capsys):
+def test_display_jobs_runs_without_error(capsys, tmp_path):
     """display_jobs should run without error even with no DB."""
-    display_jobs(db_path="/tmp/nonexistent_job360_test.db")
+    display_jobs(db_path=str(tmp_path / "nonexistent_job360_test.db"))
     captured = capsys.readouterr()
     assert "No jobs found" in captured.out or "Job360" in captured.out
 

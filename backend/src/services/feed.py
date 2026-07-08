@@ -126,7 +126,7 @@ class FeedService:
         placeholders = ",".join("?" for _ in feed_ids)
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
-            f"UPDATE user_feed SET notified_at = ? WHERE id IN ({placeholders})",
+            f"UPDATE user_feed SET notified_at = ? WHERE id IN ({placeholders})",  # noqa: S608  # placeholders are bound '?' params, not user input
             [now, *feed_ids],
         )
         await self._db.commit()

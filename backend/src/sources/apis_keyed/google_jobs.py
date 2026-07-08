@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime, timezone, timedelta
 import re
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -66,7 +66,6 @@ class GoogleJobsSource(BaseJobSource):
                 title = item.get("title", "")
                 company = item.get("company_name", "")
                 description = item.get("description", "")
-                text = f"{title} {description}".lower()
 
                 # Deduplicate within this source
                 dedup_key = (company.lower(), title.lower())

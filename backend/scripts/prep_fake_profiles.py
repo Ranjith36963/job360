@@ -8,7 +8,6 @@ Then: grade each sheet -> golds, judge each feed, run scripts/score_fake_profile
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import logging
 import sqlite3
@@ -36,7 +35,7 @@ async def _main() -> None:
     )]
 
     all_ids: dict = {}
-    sheet = io.open(SHEET, "w", encoding="utf-8")
+    sheet = open(SHEET, "w", encoding="utf-8")
     for spec in PROFILES:
         uid = f"fake-{spec['id']}"
         profile = build_user_profile(spec)

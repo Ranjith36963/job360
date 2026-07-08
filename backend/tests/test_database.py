@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -321,5 +322,5 @@ def test_notification_rules_unique_user(db):
         )
         await db._conn.commit()
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         asyncio.run(_insert_twice())

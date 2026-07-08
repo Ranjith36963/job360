@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import COMPANY_NAME_OVERRIDES, PERSONIO_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
-from src.core.companies import PERSONIO_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.personio")
 
@@ -48,7 +48,7 @@ class PersonioSource(BaseJobSource):
     def _parse_feed(self, xml_text: str, company_name: str, slug: str) -> list[Job]:
         jobs = []
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = ET.fromstring(_sanitize_xml(xml_text))  # noqa: S314  # trusted feed XML, pre-sanitized via _sanitize_xml
         except ET.ParseError as e:
             logger.warning("Personio [%s]: XML parse error: %s", slug, e)
             return []
@@ -56,7 +56,6 @@ class PersonioSource(BaseJobSource):
         for position in root.iter("position"):
             title = (position.findtext("name") or "").strip()
             office = (position.findtext("office") or "").strip()
-            department = (position.findtext("department") or "").strip()
             pos_id = (position.findtext("id") or "").strip()
 
             # Get job descriptions

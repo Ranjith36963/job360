@@ -49,11 +49,11 @@ async def _judge_once(conn, uid, ids):
 
 
 async def _main() -> None:
+    import os
+
     import aiosqlite
 
     from src.core.settings import DB_PATH
-
-    import os
     pool = json.load(open(POOL))
     if ONLY:
         pool = {u: pool[u] for u in ONLY if u in pool}

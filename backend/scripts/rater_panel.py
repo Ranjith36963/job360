@@ -16,6 +16,7 @@ Run: python -m scripts.rater_panel gpt
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 
@@ -37,10 +38,13 @@ RUBRIC = (
 
 def _profile_text(uid):
     import sqlite3
+
     from src.core.settings import DB_PATH
-    c = sqlite3.connect(str(DB_PATH)); c.row_factory = sqlite3.Row
+    c = sqlite3.connect(str(DB_PATH))
+    c.row_factory = sqlite3.Row
     r = c.execute("SELECT cv_data, preferences FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
-    cv = json.loads(r["cv_data"]); p = json.loads(r["preferences"])
+    cv = json.loads(r["cv_data"])
+    p = json.loads(r["preferences"])
     titles = ", ".join((cv.get("job_titles") or [])[:6])
     skills = ", ".join((cv.get("skills") or [])[:25])
     return (f"CANDIDATE: {cv.get('name')}\nTarget titles: {titles}\n"
@@ -51,8 +55,10 @@ def _profile_text(uid):
 
 def _jobs_for(uid, ids):
     import sqlite3
+
     from src.core.settings import DB_PATH
-    c = sqlite3.connect(str(DB_PATH)); c.row_factory = sqlite3.Row
+    c = sqlite3.connect(str(DB_PATH))
+    c.row_factory = sqlite3.Row
     out = []
     for jid in ids:
         r = c.execute("SELECT id,title,company,location,description FROM jobs WHERE id=?", (jid,)).fetchone()
@@ -83,8 +89,8 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
     provider = sys.argv[1] if len(sys.argv) > 1 else "gpt"
     env = dotenv_values("../.env")
     gold = json.load(open(GOLD))

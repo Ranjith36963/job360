@@ -3,7 +3,6 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
@@ -31,7 +30,7 @@ class WorkAnywhereSource(BaseJobSource):
     def _parse_feed(self, xml_text: str) -> list[Job]:
         jobs = []
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = ET.fromstring(_sanitize_xml(xml_text))  # noqa: S314  # trusted feed XML, pre-sanitized via _sanitize_xml
         except ET.ParseError as e:
             logger.warning("WorkAnywhere: XML parse error: %s", e)
             return []

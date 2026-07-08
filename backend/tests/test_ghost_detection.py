@@ -8,11 +8,10 @@ import pytest
 
 from src.services.ghost_detection import (
     StalenessState,
-    transition,
-    should_exclude_from_24h,
     evaluate_job_state,
+    should_exclude_from_24h,
+    transition,
 )
-
 
 # ---- transition() — pure state function ----
 
@@ -54,7 +53,7 @@ def test_does_not_exclude_active_or_possibly_stale():
 
 
 def test_evaluate_job_state_uses_misses_and_last_seen():
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
 
     # 3 misses, last_seen 25h ago → LIKELY_STALE

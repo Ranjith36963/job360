@@ -799,7 +799,7 @@ class JobDatabase:
         for r in await cursor.fetchall():
             try:
                 out.append(_json.loads(r[0]))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110  # skip malformed stored JSON rows
                 pass
         return out
 
@@ -812,7 +812,7 @@ class JobDatabase:
         placeholders = ",".join("?" for _ in job_ids)
         cursor = await self._conn.execute(
             f"""SELECT job_id, doc_kind, status FROM tailored_documents
-                WHERE user_id = ? AND job_id IN ({placeholders})""",
+                WHERE user_id = ? AND job_id IN ({placeholders})""",  # noqa: S608  # placeholders are bound '?' params, not user input
             (user_id, *job_ids),
         )
         result: dict[int, dict] = {}

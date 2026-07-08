@@ -194,8 +194,8 @@ def test_test_send_invokes_apprise(api):
         },
     )
     cid = r.json()["id"]
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.return_value = True
         if hasattr(instance, "async_notify"):
             del instance.async_notify
@@ -215,8 +215,8 @@ def test_test_send_returns_error_on_apprise_fail(api):
         },
     )
     cid = r.json()["id"]
-    with patch("apprise.Apprise") as MockApp:
-        instance = MockApp.return_value
+    with patch("apprise.Apprise") as mock_app:
+        instance = mock_app.return_value
         instance.notify.side_effect = RuntimeError("boom")
         if hasattr(instance, "async_notify"):
             del instance.async_notify

@@ -33,7 +33,9 @@ def _spearman(a, b):
     if n < 4:
         return None
     def ranks(v):
-        order = sorted(range(len(v)), key=lambda i: v[i]); r = [0.0] * len(v); i = 0
+        order = sorted(range(len(v)), key=lambda i: v[i])
+        r = [0.0] * len(v)
+        i = 0
         while i < len(v):
             j = i
             while j + 1 < len(v) and v[order[j + 1]] == v[order[i]]:
@@ -42,10 +44,14 @@ def _spearman(a, b):
                 r[order[k]] = (i + j) / 2.0
             i = j + 1
         return r
-    av = [float(a[j]) for j in common]; bv = [float(b[j]) for j in common]
-    ra, rb = ranks(av), ranks(bv); m1 = sum(ra) / n; m2 = sum(rb) / n
+    av = [float(a[j]) for j in common]
+    bv = [float(b[j]) for j in common]
+    ra, rb = ranks(av), ranks(bv)
+    m1 = sum(ra) / n
+    m2 = sum(rb) / n
     cov = sum((x - m1) * (y - m2) for x, y in zip(ra, rb))
-    s1 = sum((x - m1) ** 2 for x in ra) ** 0.5; s2 = sum((y - m2) ** 2 for y in rb) ** 0.5
+    s1 = sum((x - m1) ** 2 for x in ra) ** 0.5
+    s2 = sum((y - m2) ** 2 for y in rb) ** 0.5
     return cov / (s1 * s2) if s1 * s2 else None
 
 
@@ -53,14 +59,16 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
-    golds = json.load(open(GOLD)); pools = json.load(open(POOL)); runs = json.load(open(RUNS))
+    golds = json.load(open(GOLD))
+    pools = json.load(open(POOL))
+    runs = json.load(open(RUNS))
 
     rankable = {}      # uid -> {engine: debiased_corr}
     interrater = {}
@@ -69,48 +77,53 @@ def main():
             continue
         gold = {str(k): v["fit"] for k, v in golds[uid].items()}
         med = {str(j): statistics.median(v) for j, v in runs[uid].items() if v}
-        K = max((len(v) for v in runs[uid].values()), default=0)
+        k_runs = max((len(v) for v in runs[uid].values()), default=0)
         ir = _spearman(gold, med)
-        interrater[uid] = (ir, K)
+        interrater[uid] = (ir, k_runs)
         if ir is None or ir < GATE:
             continue
 
         conn = _open_db_ro(str(DB_PATH))
         try:
-            pd = _fetch_profile(conn, uid); fr = _fetch_feed_rows(conn, uid)
+            pd = _fetch_profile(conn, uid)
+            fr = _fetch_feed_rows(conn, uid)
         finally:
             conn.close()
         es = ea.build_engine_scores(pd, fr, hybrid_profile=load_profile(uid))
-        S = {n: {str(j): s for j, s in es[n].items()} for n in es}
-        S["judge"] = med
+        eng_scores = {n: {str(j): s for j, s in es[n].items()} for n in es}
+        eng_scores["judge"] = med
         prov = {int(k): v for k, v in pools[uid]["prov"].items()}
 
         eng = {}
         for e in ENGINES:
             if e in PROV:  # retriever -> de-biased = correlation on OTHER engines' jobs
-                oth = {k: S[e][k] for k in S[e] if PROV[e] not in prov.get(int(k), []) and k in gold}
+                oth = {
+                    k: eng_scores[e][k]
+                    for k in eng_scores[e]
+                    if PROV[e] not in prov.get(int(k), []) and k in gold
+                }
                 g = {k: gold[k] for k in oth}
                 eng[e] = _spearman(oth, g)
                 if eng[e] is None:  # fallback to raw if too few held-out
-                    eng[e] = _spearman({k: S[e][k] for k in S[e] if k in gold}, gold)
+                    eng[e] = _spearman({k: eng_scores[e][k] for k in eng_scores[e] if k in gold}, gold)
             else:  # judge/dims are re-rankers, not retrievers -> raw
-                eng[e] = _spearman({k: S[e][k] for k in S[e] if k in gold}, gold)
+                eng[e] = _spearman({k: eng_scores[e][k] for k in eng_scores[e] if k in gold}, gold)
         rankable[uid] = eng
 
     print("=" * 78)
     print("CONVERGENCE — trustworthy engine ranking (de-biased; rankable profiles only)")
     print("=" * 78)
-    print("Inter-rater gate (Opus gold vs Gemini judge, >= %.2f to count):" % GATE)
-    for uid, (ir, K) in interrater.items():
+    print(f"Inter-rater gate (Opus gold vs Gemini judge, >= {GATE:.2f} to count):")
+    for uid, (ir, k_runs) in interrater.items():
         tag = "USED" if uid in rankable else "excluded (no agreed gold)"
         irs = f"{ir:.3f}" if ir is not None else "n/a"
-        print(f"   {uid:<16} inter-rater={irs} (K={K})  -> {tag}")
+        print(f"   {uid:<16} inter-rater={irs} (K={k_runs})  -> {tag}")
 
     if not rankable:
         print("\nNo rankable profiles yet (judge runs may still be accruing).")
         return
 
-    print(f"\nDe-biased engine-vs-gold Spearman per rankable profile:")
+    print("\nDe-biased engine-vs-gold Spearman per rankable profile:")
     hdr = "ENGINE".ljust(10) + "".join(u.replace("eval-", "")[:9].rjust(11) for u in rankable)
     print(hdr + "   MEAN   WORST")
     print("-" * 78)
@@ -120,7 +133,9 @@ def main():
         mean = statistics.mean(vals) if vals else float("nan")
         worst = min(vals) if vals else float("nan")
         agg.append((e, mean, worst))
-        row = e.ljust(10) + "".join((f"{rankable[u][e]:.3f}" if rankable[u][e] is not None else " - ").rjust(11) for u in rankable)
+        row = e.ljust(10) + "".join(
+            (f"{rankable[u][e]:.3f}" if rankable[u][e] is not None else " - ").rjust(11) for u in rankable
+        )
         print(f"{row}  {mean:6.3f} {worst:6.3f}")
     print("-" * 78)
     order = sorted(agg, key=lambda x: -x[1])

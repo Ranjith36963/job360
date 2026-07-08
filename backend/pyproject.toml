@@ -142,6 +142,12 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 # Step-1.5 added _maybe_normalise_skills_via_esco below the LLM prompt;
 # the late-bound `_coerce_str` imports keep their explicit `noqa: E402`.
 "src/services/profile/cv_parser.py" = ["E501"]
+# linkedin_parser.py holds the multi-line LLM section prompts (_LANGUAGES_PROMPT,
+# _VOLUNTEER_PROMPT, ...). A few prompt/JSON-schema lines exceed 120 chars and
+# sit INSIDE triple-quoted strings — they cannot carry a `# noqa` (it would be
+# string content, not a comment) and cannot be wrapped without changing the exact
+# literal the LLM reads. Same rationale as cv_parser.py above; scoped to E501 only.
+"src/services/profile/linkedin_parser.py" = ["E501"]
 
 [tool.mypy]
 # Step-0 pre-flight (Tier C) — mypy strict gate. We set python_version to

@@ -9,7 +9,6 @@ import pytest
 from migrations import runner
 from src.services.auth import sessions as auth_sessions
 
-
 SESSION_SECRET = "test-secret-" + "x" * 32
 
 
@@ -98,5 +97,5 @@ async def test_wrong_secret_rejected(session_db):
         session_db, user_id="user-1", secret=SESSION_SECRET
     )
     assert await auth_sessions.resolve_session(
-        session_db, cookie, secret="a-different-secret-that-is-long-enough"
+        session_db, cookie, secret="a-different-secret-that-is-long-enough"  # noqa: S106  # test-only dummy secret, not a real credential
     ) is None

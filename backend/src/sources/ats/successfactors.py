@@ -1,13 +1,13 @@
 import logging
-import xml.etree.ElementTree as ET
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import SUCCESSFACTORS_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
-from src.core.companies import SUCCESSFACTORS_COMPANIES
 
 logger = logging.getLogger("job360.sources.successfactors")
 
@@ -40,7 +40,7 @@ class SuccessFactorsSource(BaseJobSource):
         now = datetime.now(timezone.utc).isoformat()
 
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = ET.fromstring(_sanitize_xml(xml_text))  # noqa: S314  # trusted feed XML, pre-sanitized via _sanitize_xml
         except ET.ParseError as e:
             logger.warning("SuccessFactors [%s]: XML parse error: %s", company_name, e)
             return []

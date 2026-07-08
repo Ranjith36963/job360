@@ -9,9 +9,9 @@ Pass --db to point at a different SQLite file.
 import argparse
 import asyncio
 
-from src.repositories.database import JobDatabase
-from src.core.settings import DB_PATH
 from ops.exporter import compute_kpis
+from src.core.settings import DB_PATH
+from src.repositories.database import JobDatabase
 
 
 async def run(db_path: str) -> None:

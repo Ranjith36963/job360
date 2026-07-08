@@ -181,12 +181,12 @@ async def rescore_user_feed(
             # will actually run.  When matcher_on is False, shortlist_jobs is
             # never allocated and clear_user_verdicts is never called.
             if matcher_on:
-                from src.services.llm_matcher import clear_user_verdicts  # noqa: PLC0415
                 from src.models import Job as _Job  # noqa: PLC0415
+                from src.services.llm_matcher import clear_user_verdicts  # noqa: PLC0415
                 await clear_user_verdicts(db._conn, user_id)
                 shortlist_jobs = []
             else:
-                _Job = None  # type: ignore[assignment,misc]  # unused branch
+                _Job = None  # type: ignore[assignment,misc]  # noqa: N806  # holds the Job class alias, mirrors CapWords import
                 shortlist_jobs = None  # type: ignore[assignment]  # unused branch
 
             for row in rows:
@@ -204,7 +204,7 @@ async def rescore_user_feed(
                         # transient lock under concurrent writes doesn't drop
                         # this scored row (the except below used to swallow it).
                         await with_write_retry(
-                            lambda: feed.upsert_feed_row(
+                            lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(
                                 user_id=user_id,
                                 job_id=jid,
                                 score=int(ms),

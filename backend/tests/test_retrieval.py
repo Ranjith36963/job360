@@ -4,11 +4,14 @@ from __future__ import annotations
 import pytest
 
 from src.services.retrieval import (
+    CROSS_ENCODER_MODEL,
+    bm25_rank,
+    cross_encoder_rerank,
     is_hybrid_available,
     reciprocal_rank_fusion,
+    reset_cross_encoder_for_testing,
     retrieve_for_user,
 )
-
 
 # ---------------------------------------------------------------------------
 # RRF — pure helper
@@ -178,13 +181,6 @@ def test_is_hybrid_available_handles_negative_defensively():
 # ---------------------------------------------------------------------------
 
 
-from src.services.retrieval import (
-    CROSS_ENCODER_MODEL,
-    cross_encoder_rerank,
-    reset_cross_encoder_for_testing,
-)
-
-
 class _FakeCrossEncoder:
     """Returns a deterministic score per (query, text) pair — scores are
     the *negative* length of the text so shorter texts score higher. This
@@ -282,9 +278,6 @@ def test_cross_encoder_rerank_scores_are_float():
 # ---------------------------------------------------------------------------
 # Engine 3 enhancement — BM25 lexical ranking (pure function)
 # ---------------------------------------------------------------------------
-
-
-from src.services.retrieval import bm25_rank
 
 
 def test_bm25_ranks_doc_containing_query_term_first():

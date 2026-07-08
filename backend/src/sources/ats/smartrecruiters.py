@@ -1,12 +1,12 @@
-import re
 import logging
+import re
 from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import COMPANY_NAME_OVERRIDES, SMARTRECRUITERS_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.core.companies import SMARTRECRUITERS_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.smartrecruiters")
 
@@ -39,7 +39,11 @@ class SmartRecruitersSource(BaseJobSource):
                 else:
                     location = str(loc)
                 ref = item.get("ref", "")
-                apply_url = ref if ref.startswith("http") else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
+                apply_url = (
+                    ref
+                    if ref.startswith("http")
+                    else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
+                )
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_released = item.get("releasedDate")
                 posted_at = raw_released if raw_released else None

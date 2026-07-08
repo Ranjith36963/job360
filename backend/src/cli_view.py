@@ -4,15 +4,12 @@ import argparse
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src.repositories import pgsync as sqlite3
-
-logger = logging.getLogger("job360.cli_view")
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from src.core.settings import DB_PATH, MIN_MATCH_SCORE
+from src.repositories import pgsync as sqlite3
 from src.utils.time_buckets import (
     BUCKETS,
     bucket_jobs,
@@ -21,6 +18,7 @@ from src.utils.time_buckets import (
     score_color_name,
 )
 
+logger = logging.getLogger("job360.cli_view")
 console = Console()
 
 

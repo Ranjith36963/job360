@@ -4,6 +4,7 @@ Goal: tenant A cannot read/write tenant B's user_actions or applications.
 Jobs remain a shared catalog (CLAUDE.md rule #1 + decisions doc D6).
 """
 import os
+import sqlite3
 import tempfile
 from datetime import datetime, timezone
 
@@ -167,7 +168,7 @@ class TestTenantIsolation:
                 ("tenant-a", 7, "liked", now),
             )
             await db.commit()
-            with pytest.raises(Exception):  # IntegrityError
+            with pytest.raises(sqlite3.IntegrityError):
                 await db.execute(
                     "INSERT INTO user_actions(user_id, job_id, action, created_at) VALUES(?, ?, ?, ?)",
                     ("tenant-a", 7, "applied", now),

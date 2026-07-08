@@ -1,17 +1,19 @@
 name: CI — offline suite (automated Loop 2 + full backend)
 
-# Runs the offline test suite (rule #4 — no network) on every push/PR AND on a
-# daily schedule. This is the AUTOMATED form of "Loop 2": tests/test_e2e_lifecycle.py
+# NOTE: the "offline" name is historical (pre-dates the SQLite→Postgres
+# migration) and is kept so workflow history/badges stay attached. "Offline"
+# still means no EXTERNAL network (rule #4 — all HTTP mocked); the suite now
+# needs a local Postgres service container, same as ci.yml.
+#
+# Runs the offline test suite on a daily schedule (per-push/PR coverage moved
+# to ci.yml, which runs the same pytest suite — no point running it twice).
+# This is the AUTOMATED form of "Loop 2": tests/test_e2e_lifecycle.py
 # drives the full register→CV→search→jobs→pipeline→channels→logout journey with
 # deterministic mocks and asserts every log stream filled — so the whole lifecycle
 # is re-verified automatically, not only when a human runs /verify-job360.
-#
-# To enable: just turn on GitHub Actions for the repo (Settings → Actions). No
-# secrets needed — tests inject SESSION_SECRET / channel key themselves.
+# It also runs the Playwright UI specs, which ci.yml does NOT run.
 
 on:
-  push:
-  pull_request:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC daily
   workflow_dispatch: {}
@@ -20,6 +22,43 @@ jobs:
   offline-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      # Exported so tests CAN use Postgres once the migration lands.
+      # Existing tests use SQLite via conftest.py fixtures and are unaffected
+      # by this env var being present.
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      # Minimal secrets for auth tests (injected by conftest.py too, but set
+      # here so any integration smoke-tests that read .env also have them).
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,6 +101,38 @@ jobs:
     # scanning the whole suite.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

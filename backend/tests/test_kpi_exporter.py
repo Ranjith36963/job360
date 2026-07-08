@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
+from ops.exporter import compute_kpis
 from src.models import Job
 from src.repositories.database import JobDatabase
-from ops.exporter import compute_kpis
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def test_bucket_accuracy_mixed_confidence_measures_trustworthy_only(db):
 
 
 def test_crawl_freshness_lag_per_source(db):
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     async def _run():
         await db.insert_job(Job(

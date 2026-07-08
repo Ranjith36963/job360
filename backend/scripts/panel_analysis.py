@@ -35,7 +35,9 @@ def spear(a, b):
     if n < 4:
         return None
     def rk(v):
-        o = sorted(range(len(v)), key=lambda i: v[i]); r = [0.0] * len(v); i = 0
+        o = sorted(range(len(v)), key=lambda i: v[i])
+        r = [0.0] * len(v)
+        i = 0
         while i < len(v):
             j = i
             while j + 1 < len(v) and v[o[j + 1]] == v[o[i]]:
@@ -44,10 +46,14 @@ def spear(a, b):
                 r[o[k]] = (i + j) / 2.0
             i = j + 1
         return r
-    av = [float(a[k]) for k in c]; bv = [float(b[k]) for k in c]
-    ra, rb = rk(av), rk(bv); m1 = sum(ra) / n; m2 = sum(rb) / n
+    av = [float(a[k]) for k in c]
+    bv = [float(b[k]) for k in c]
+    ra, rb = rk(av), rk(bv)
+    m1 = sum(ra) / n
+    m2 = sum(rb) / n
     cov = sum((x - m1) * (y - m2) for x, y in zip(ra, rb))
-    s1 = sum((x - m1) ** 2 for x in ra) ** 0.5; s2 = sum((y - m2) ** 2 for y in rb) ** 0.5
+    s1 = sum((x - m1) ** 2 for x in ra) ** 0.5
+    s2 = sum((y - m2) ** 2 for y in rb) ** 0.5
     return cov / (s1 * s2) if s1 * s2 else None
 
 
@@ -69,10 +75,10 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -91,7 +97,9 @@ def main():
         gem = {k: statistics.median(v) for k, v in runs.get(uid, {}).items() if v}
         gpt = {k: float(v) for k, v in panel.get("gpt", {}).get(uid, {}).items()}
         rater_by_uid[uid] = {"opus": opus, "gemini": gem, "gpt": gpt}
-        og = spear(opus, gem); op = spear(opus, gpt); gg = spear(gem, gpt)
+        og = spear(opus, gem)
+        op = spear(opus, gpt)
+        gg = spear(gem, gpt)
         vals = [x for x in (og, op, gg) if x is not None]
         mean = statistics.mean(vals) if vals else None
         def f(x):
@@ -100,7 +108,7 @@ def main():
 
     print("\n" + "=" * 80)
     print("[B] NON-CIRCULAR ENGINE SCORES (each engine vs consensus EXCLUDING its own model)")
-    print("    rankable = profiles whose 3-way panel agreement >= %.2f" % GATE)
+    print(f"    rankable = profiles whose 3-way panel agreement >= {GATE:.2f}")
     print("=" * 80)
 
     rankable = {}
@@ -112,19 +120,20 @@ def main():
             continue
         conn = _open_db_ro(str(DB_PATH))
         try:
-            pd = _fetch_profile(conn, uid); fr = _fetch_feed_rows(conn, uid)
+            pd = _fetch_profile(conn, uid)
+            fr = _fetch_feed_rows(conn, uid)
         finally:
             conn.close()
         es = ea.build_engine_scores(pd, fr, hybrid_profile=load_profile(uid))
-        S = {n: {str(j): s for j, s in es[n].items()} for n in es}
-        S["judge"] = r["gemini"]  # E4 = the gemini judge
+        eng_scores = {n: {str(j): s for j, s in es[n].items()} for n in es}
+        eng_scores["judge"] = r["gemini"]  # E4 = the gemini judge
 
         cons_no_gem = consensus(r, exclude=("gemini",))   # opus + gpt
         cons_full = consensus(r)                           # opus + gemini + gpt
         eng = {}
-        eng["judge"] = spear(S["judge"], cons_no_gem)      # NON-CIRCULAR: judge vs opus+gpt
+        eng["judge"] = spear(eng_scores["judge"], cons_no_gem)      # NON-CIRCULAR: judge vs opus+gpt
         for e in ("hybrid", "dims", "keyword", "bm25"):
-            eng[e] = spear({k: S[e][k] for k in S[e] if k in cons_full}, cons_full)
+            eng[e] = spear({k: eng_scores[e][k] for k in eng_scores[e] if k in cons_full}, cons_full)
         rankable[uid] = eng
 
     if not rankable:
@@ -139,7 +148,9 @@ def main():
         mean = statistics.mean(vals) if vals else float("nan")
         worst = min(vals) if vals else float("nan")
         order.append((e, mean, worst))
-        row = e.ljust(10) + "".join((f"{rankable[c][e]:.3f}" if rankable[c][e] is not None else " - ").rjust(11) for c in cols)
+        row = e.ljust(10) + "".join(
+            (f"{rankable[c][e]:.3f}" if rankable[c][e] is not None else " - ").rjust(11) for c in cols
+        )
         print(f"{row}  {mean:6.3f} {worst:6.3f}")
     print("-" * 80)
     order.sort(key=lambda x: -x[1])

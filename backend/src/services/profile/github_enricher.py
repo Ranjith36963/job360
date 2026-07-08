@@ -27,6 +27,10 @@ from typing import Any
 
 import aiohttp
 
+from src.core.settings import GITHUB_TOKEN
+from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
+from src.services.profile.models import CVData
+
 _GITHUB_USERNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
 
 
@@ -62,10 +66,6 @@ def normalize_github_username(raw: str) -> str:
     # stray path/query so "torvalds/repo" -> "torvalds".
     return re.split(r"[/?#\s]", s, maxsplit=1)[0]
 
-
-from src.core.settings import GITHUB_TOKEN
-from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
-from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.github")
 

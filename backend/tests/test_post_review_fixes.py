@@ -274,7 +274,7 @@ def test_password_reset_request_rate_limit_skips_token_issue(
 def test_password_reset_html_body_escapes_email():
     subject, text, html_body = password_reset._build_reset_email(
         to_email="<script>alert(1)</script>@example.com",
-        raw_token="abc123",
+        raw_token="abc123",  # noqa: S106  # dummy test token, not a real credential
         frontend_origin="https://job360.app",
     )
     # The HTML body must NOT contain the raw script tag.
@@ -288,7 +288,7 @@ def test_password_reset_html_body_escapes_email():
 def test_password_reset_html_body_escapes_frontend_origin_with_injection():
     subject, text, html_body = password_reset._build_reset_email(
         to_email="alice@example.com",
-        raw_token="abc",
+        raw_token="abc",  # noqa: S106  # dummy test token, not a real credential
         frontend_origin='https://job360.app/"><script>alert(1)</script>',
     )
     # The raw injection must NOT survive into the href.
@@ -298,7 +298,7 @@ def test_password_reset_html_body_escapes_frontend_origin_with_injection():
 def test_email_verification_html_body_escapes_email():
     subject, text, html_body = email_verification._build_verification_email(
         to_email="<img src=x onerror=alert(1)>@example.com",
-        raw_token="xyz",
+        raw_token="xyz",  # noqa: S106  # dummy test token, not a real credential
         frontend_origin="https://job360.app",
     )
     assert "<img src=x onerror=alert(1)>" not in html_body
@@ -310,7 +310,7 @@ def test_password_reset_url_token_is_percent_encoded():
     break the query string parsing."""
     subject, text, html_body = password_reset._build_reset_email(
         to_email="alice@example.com",
-        raw_token="raw&token=evil",
+        raw_token="raw&token=evil",  # noqa: S106  # dummy test token, not a real credential
         frontend_origin="https://job360.app",
     )
     # Both bodies should contain percent-encoded version.

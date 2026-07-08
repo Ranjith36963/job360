@@ -35,7 +35,8 @@ def _spearman(a: dict, b: dict):
         return None, n
     def ranks(vals):
         order = sorted(range(len(vals)), key=lambda i: vals[i])
-        r = [0.0] * len(vals); i = 0
+        r = [0.0] * len(vals)
+        i = 0
         while i < len(vals):
             j = i
             while j + 1 < len(vals) and vals[order[j + 1]] == vals[order[i]]:
@@ -45,9 +46,11 @@ def _spearman(a: dict, b: dict):
                 r[order[k]] = avg
             i = j + 1
         return r
-    av = [float(a[j]) for j in common]; bv = [float(b[j]) for j in common]
+    av = [float(a[j]) for j in common]
+    bv = [float(b[j]) for j in common]
     ra, rb = ranks(av), ranks(bv)
-    mra = sum(ra) / n; mrb = sum(rb) / n
+    mra = sum(ra) / n
+    mrb = sum(rb) / n
     cov = sum((x - mra) * (y - mrb) for x, y in zip(ra, rb))
     sa = sum((x - mra) ** 2 for x in ra) ** 0.5
     sb = sum((y - mrb) ** 2 for y in rb) ** 0.5
@@ -58,11 +61,11 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -74,23 +77,24 @@ def main() -> None:
         gold = {str(k): v["fit"] for k, v in golds_all[uid].items()}
         prov = {int(k): v for k, v in pools[uid]["prov"].items()}
         runs = runs_all[uid]
-        K = max(len(v) for v in runs.values())
+        k_runs = max(len(v) for v in runs.values())
         med_judge = {str(j): statistics.median(v) for j, v in runs.items() if v}
 
         conn = _open_db_ro(str(DB_PATH))
         try:
-            pd = _fetch_profile(conn, uid); fr = _fetch_feed_rows(conn, uid)
+            pd = _fetch_profile(conn, uid)
+            fr = _fetch_feed_rows(conn, uid)
         finally:
             conn.close()
         hp = load_profile(uid)
         es = ea.build_engine_scores(pd, fr, hybrid_profile=hp)
-        S = {name: {str(j): s for j, s in es[name].items()} for name in es}
+        eng_scores = {name: {str(j): s for j, s in es[name].items()} for name in es}
 
         print(f"\n{'='*76}\n{uid}  —  BIAS HUNT\n{'='*76}")
 
         # 1) inter-rater agreement (Opus gold vs Gemini judge) + engine vs gold
         ir, n = _spearman(gold, med_judge)
-        print(f"[1] INTER-RATER (Opus gold vs Gemini judge, median of {K}): "
+        print(f"[1] INTER-RATER (Opus gold vs Gemini judge, median of {k_runs}): "
               f"Spearman = {ir:.3f} over {n} jobs")
         verdict = ("STRONG ground truth — eval is meaningful" if ir and ir >= 0.5 else
                    "WEAK/EMPTY ground truth — even 2 expert graders disagree; "
@@ -99,18 +103,27 @@ def main() -> None:
         print(f"    -> {verdict}")
         print("    each engine vs the gold (Spearman):")
         for name in ("keyword", "dims", "bm25", "hybrid"):
-            sp, _ = _spearman(gold, S[name]); print(f"        {name:<9}: {sp:.3f}" if sp is not None else f"        {name:<9}: -")
-        spj, _ = _spearman(gold, med_judge); print(f"        judge(med): {spj:.3f}" if spj is not None else "        judge: -")
+            sp, _ = _spearman(gold, eng_scores[name])
+            print(
+                f"        {name:<9}: {sp:.3f}" if sp is not None else f"        {name:<9}: -"
+            )
+        spj, _ = _spearman(gold, med_judge)
+        print(f"        judge(med): {spj:.3f}" if spj is not None else "        judge: -")
 
         # 2) self-selection / home-field
         print("[2] POOLING SELF-SELECTION (engine predicts gold on OWN vs OTHER jobs):")
         eng_to_prov = {"keyword": "keyword", "bm25": "bm25", "hybrid": "vector"}
         for eng, pname in eng_to_prov.items():
-            own = {str(j): S[eng][str(j)] for j in prov if pname in prov[j] and str(j) in S[eng]}
-            oth = {str(j): S[eng][str(j)] for j in prov if pname not in prov[j] and str(j) in S[eng]}
+            own = {str(j): eng_scores[eng][str(j)] for j in prov if pname in prov[j] and str(j) in eng_scores[eng]}
+            oth = {
+                str(j): eng_scores[eng][str(j)]
+                for j in prov
+                if pname not in prov[j] and str(j) in eng_scores[eng]
+            }
             g_own = {k: gold[k] for k in own if k in gold}
             g_oth = {k: gold[k] for k in oth if k in gold}
-            so, no_ = _spearman(own, g_own); st, nt = _spearman(oth, g_oth)
+            so, no_ = _spearman(own, g_own)
+            st, nt = _spearman(oth, g_oth)
             so_s = f"{so:.3f}" if so is not None else " - "
             st_s = f"{st:.3f}" if st is not None else " - "
             flag = ""

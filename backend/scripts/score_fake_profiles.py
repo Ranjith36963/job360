@@ -20,12 +20,12 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
     from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
-    from scripts.eval_fake_profiles import aggregate, results_from_strong
     from scripts.engine_ablation import run_leaderboard_strong
+    from scripts.eval_fake_profiles import aggregate, results_from_strong
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 

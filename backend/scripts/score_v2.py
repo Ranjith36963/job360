@@ -50,7 +50,7 @@ def _median_judge(uid: str):
 def _ranking_v2(scores: dict, seed: int) -> list:
     """Order job ids by score desc; DROP None (no signal); break ties by a
     seeded random jitter (NOT feed order)."""
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311  # deterministic tie-break jitter, not crypto
     items = [(jid, s) for jid, s in scores.items() if s is not None]
     jitter = {jid: rng.random() for jid, _ in items}
     items.sort(key=lambda x: (-float(x[1]), jitter[x[0]]))
@@ -90,11 +90,11 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("stdout reconfigure failed: %s", exc)
 
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -124,9 +124,13 @@ def main() -> None:
         dims = es.get("dims", {})
         dvals = [round(v, 3) for v in dims.values() if v is not None]
         n_distinct = len(set(dvals))
-        kw = es["keyword"]; hyb = es["hybrid"]; judge = es["judge"]
-        kr = _ranking_v2(kw, SEED); hr = _ranking_v2(hyb, SEED)
-        posk = {j: i for i, j in enumerate(kr)}; posh = {j: i for i, j in enumerate(hr)}
+        kw = es["keyword"]
+        hyb = es["hybrid"]
+        judge = es["judge"]
+        kr = _ranking_v2(kw, SEED)
+        hr = _ranking_v2(hyb, SEED)
+        posk = {j: i for i, j in enumerate(kr)}
+        posh = {j: i for i, j in enumerate(hr)}
         common = [j for j in kr if j in posh]
         e3_corr = _spearman({j: -posk[j] for j in common}, {j: -posh[j] for j in common})
         cov = {k: sum(1 for v in m.values() if v is not None) for k, m in es.items()}
@@ -142,7 +146,7 @@ def main() -> None:
               f"({'OK — discriminating' if n_distinct >= 6 else 'DEGENERATE'})")
         print(f"E3 vs keyword order corr: {e3_corr:.3f} "
               f"({'independent enough' if e3_corr is not None and e3_corr < 0.9 else 'near-clone'})")
-        print(f"coverage (jobs with signal): " + ", ".join(f"{k}={v}" for k, v in cov.items()))
+        print("coverage (jobs with signal): " + ", ".join(f"{k}={v}" for k, v in cov.items()))
         print("LEAK-CHECK (Spearman):")
         print(f"  gold vs keyword : {leak_gold_kw:.3f}   (how much the gold agrees with E1)")
         print(f"  gold vs judge   : {leak_gold_judge:.3f}   (how much the gold agrees with E4)")
@@ -169,8 +173,10 @@ def main() -> None:
         print("-" * 74)
         for r in rows:
             s = r["strong"]
-            nd = s["ndcg"]["point"]; ci = s["ndcg"].get("ci")
-            n5 = s.get("ndcg@5", {}).get("point"); sp = s.get("spearman", {}).get("point")
+            nd = s["ndcg"]["point"]
+            ci = s["ndcg"].get("ci")
+            n5 = s.get("ndcg@5", {}).get("point")
+            sp = s.get("spearman", {}).get("point")
             cis = f"[{ci[0]:.2f},{ci[1]:.2f}]" if ci else ""
             if r["name"] == best:
                 sig = "(best)"

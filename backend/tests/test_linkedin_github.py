@@ -8,26 +8,31 @@ signature are preserved, so downstream tests (``TestEnrichCVFromLinkedIn``,
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.github_enricher import (
+    _infer_skills,
+    enrich_cv_from_github,
+    fetch_github_profile,
+)
+from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.linkedin_parser import (
-    parse_linkedin_pdf,
-    parse_linkedin_pdf_async,
-    enrich_cv_from_linkedin,
-    is_linkedin_pdf,
-    _split_sections,
+    _coerce_certifications,
+    _coerce_education,
+    _coerce_positions,
+    _dewrap_columns,
     _extract_header_fields,
     _extract_skills,
     _looks_like_linkedin,
-    _coerce_positions,
-    _coerce_education,
-    _coerce_certifications,
-    _dewrap_columns,
+    _split_sections,
+    enrich_cv_from_linkedin,
+    is_linkedin_pdf,
+    parse_linkedin_pdf,
+    parse_linkedin_pdf_async,
 )
-
+from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 # ---------------------------------------------------------------------------
 # Two-column de-interleaving (LinkedIn "Save to PDF" sidebar fix)
@@ -90,13 +95,6 @@ class TestInlineTechSkills:
         text = "Continuously learning: Prompt engineering • Vector databases • RLHF • AI evaluation frameworks\n"
         sk = set(_extract_inline_tech_skills(text))
         assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
-from src.services.profile.github_enricher import (
-    fetch_github_profile,
-    enrich_cv_from_github,
-    _infer_skills,
-)
-from src.services.profile.keyword_generator import generate_search_config
-
 
 # ---------------------------------------------------------------------------
 # Helpers — build LinkedIn-shaped PDFs in memory
@@ -621,7 +619,7 @@ class TestFetchGitHubProfile:
             return resp
 
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
 
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 2
@@ -646,7 +644,7 @@ class TestFetchGitHubProfile:
             return resp
 
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
 
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 1
@@ -660,7 +658,7 @@ class TestFetchGitHubProfile:
             return resp
 
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
 
         result = await fetch_github_profile("nonexistent", session=session)
         assert result["repositories"] == []
@@ -674,7 +672,7 @@ class TestFetchGitHubProfile:
             return resp
 
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
 
         result = await fetch_github_profile("testuser", session=session)
         assert result["repositories"] == []
@@ -812,7 +810,7 @@ class TestGitHubErrors:
         async def mock_get(url, **kwargs):
             raise asyncio.TimeoutError("Timed out")
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
         result = await fetch_github_profile("testuser", session=session)
         assert result["repositories"] == []
         assert result["skills_inferred"] == []
@@ -838,7 +836,7 @@ class TestGitHubErrors:
             return resp
 
         session = AsyncMock()
-        session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.get = MagicMock(side_effect=lambda url, **kw: _AsyncContext(mock_get(url, **kw)))
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 2
         assert "Python" in result["skills_inferred"]
@@ -901,7 +899,7 @@ class TestCombinedEnrichment:
 # Async context manager helper for mocking aiohttp
 # ---------------------------------------------------------------------------
 
-class _async_context:
+class _AsyncContext:
     """Wrap a coroutine as an async context manager for aiohttp mocking."""
     def __init__(self, coro):
         self._coro = coro

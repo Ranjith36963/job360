@@ -19,7 +19,6 @@ import pytest
 
 from src.api import dependencies as api_deps
 
-
 # ── Fakes: never touch a real LLM or the sync profile store ───────────────────
 
 class _CV:
@@ -78,7 +77,7 @@ async def _insert_job(db, *, title="ML Engineer", company="Acme AI",
 def test_prompts_forbid_fabrication():
     """Guardrail #2 is the whole trust of the feature — the system prompts must
     forbid inventing anything."""
-    from src.services.tailoring.prompts import CV_SYSTEM, COVER_LETTER_SYSTEM
+    from src.services.tailoring.prompts import COVER_LETTER_SYSTEM, CV_SYSTEM
     for sys_prompt in (CV_SYSTEM, COVER_LETTER_SYSTEM):
         assert "NEVER FABRICATE" in sys_prompt
         assert "never" in sys_prompt.lower() and "invent" in sys_prompt.lower()
@@ -272,7 +271,6 @@ async def test_layer2_uses_kept_docs_as_examples(authenticated_async_context, mo
         await client.post(f"/api/tailor/{job1}/cv/keep")
         captured.clear()
         await client.post(f"/api/tailor/{job2}/generate")  # new job → should reuse my style
-    cv_prompts = [c["prompt"] for c in captured if "SUMMARY" in c["prompt"] or "CV" in c["system"]]
     assert any("MY_UNIQUE_VOICE_ZZ" in c["prompt"] for c in captured)
 
 
@@ -309,6 +307,7 @@ async def test_generate_requires_auth(authenticated_async_context, monkeypatch):
     db = await api_deps.get_db()
     job_id = await _insert_job(db)
     from httpx import ASGITransport, AsyncClient
+
     from src.api.main import app
     async with authenticated_async_context():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:

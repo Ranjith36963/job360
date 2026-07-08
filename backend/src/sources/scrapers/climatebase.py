@@ -3,7 +3,6 @@ import logging
 import re
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -72,7 +71,7 @@ class ClimatebaseSource(BaseJobSource):
 
                 locations = item.get("locations", [])
                 if isinstance(locations, list):
-                    location = ", ".join(str(l) for l in locations) if locations else "United Kingdom"
+                    location = ", ".join(str(loc) for loc in locations) if locations else "United Kingdom"
                 else:
                     location = str(locations) if locations else "United Kingdom"
 

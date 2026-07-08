@@ -16,6 +16,42 @@ jobs:
   live-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    # The pipeline test writes through JobDatabase, which since the
+    # SQLite→Postgres migration needs a real Postgres (default DSN port 5433 —
+    # overridden here via DATABASE_URL). Without this service block the test
+    # failed at connect, before ever reaching a live job board.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+
     steps:
       - uses: actions/checkout@v4
 
