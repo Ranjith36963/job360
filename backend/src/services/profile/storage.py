@@ -91,7 +91,7 @@ def save_profile(
             )
             _prune_old_versions(conn, user_id)
         except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
+            if "no such table" in str(e).lower() or "does not exist" in str(e).lower():
                 logger.info(
                     "user_profile_versions table absent — skipping snapshot "
                     "(run ``python -m migrations.runner up``). Tip still saved."
@@ -236,7 +236,7 @@ def current_profile_version_id(user_id: str) -> Optional[int]:
             return None
         return int(row[0])
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
+        if "no such table" in str(e).lower() or "does not exist" in str(e).lower():
             return None
         raise
 
@@ -267,7 +267,7 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
             )
             rows = cur.fetchall()
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
+        if "no such table" in str(e).lower() or "does not exist" in str(e).lower():
             return False
         raise
 
