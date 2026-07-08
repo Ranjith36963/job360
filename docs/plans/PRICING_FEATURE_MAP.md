@@ -18,9 +18,15 @@ Pro and Max**.
 ## Verified corrections (be honest about these)
 - **AI CV tailoring is NOT built** (backend audit confirmed — no route exists). Do not
   list it as a real tier feature until built.
-- **Fantastic Jobs boards = LinkedIn / Wellfound / Y Combinator — Indeed NOT confirmed
-  in it.** TheirStack is the one carrying Indeed + Glassdoor. So Pro gets LinkedIn;
-  Max adds Indeed/Glassdoor. [verify FJ Indeed coverage before marketing it]
+- **VERIFIED 2026-07-05: Fantastic Jobs does NOT have Indeed.** Confirmed from
+  fantastic.jobs/about + its RapidAPI listing. Its job boards are ONLY **LinkedIn,
+  Wellfound, Y Combinator** (+ 200k ATS career sites across 54 platforms). Indeed,
+  Glassdoor, ZipRecruiter are absent. **Indeed/Glassdoor come only from TheirStack
+  (Max).** ⇒ Pro promise must say "live LinkedIn + company career sites", NOT "Indeed".
+- **Overlap caveat (Fable):** FJ's ATS list (Greenhouse, Lever, Ashby, Workable,
+  SmartRecruiters, Personio, Recruitee, Rippling…) overlaps Job360's existing 47 free
+  sources. FJ's UNIQUE add = LinkedIn + Wellfound + YC + a bigger company list on the
+  same ATS. Run a dedup trial before buying — true cost is per-UNIQUE-job, not $1/1k.
 - **Direct/easy apply exists in BOTH APIs** (FJ `direct_apply`, TS `easy_apply` +
   resolved apply URL) — it is not a unique FJ moat.
 
