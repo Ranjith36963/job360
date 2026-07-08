@@ -1,7 +1,7 @@
 """Channels & Notifications overhaul — single per-user notification rule.
 
 Two endpoints:
-  GET  /settings/notification-rule   get the caller's rule (404 if none exists)
+  GET  /settings/notification-rule   get the caller's rule (null if none exists)
   PUT  /settings/notification-rule   upsert (create or replace) the rule
 
 All routes gate on ``require_user`` (CLAUDE.md rule #12).
@@ -9,7 +9,9 @@ All routes gate on ``require_user`` (CLAUDE.md rule #12).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
@@ -39,19 +41,22 @@ def _rule_from_row(row: dict) -> NotificationRule:
 
 @router.get(
     "/settings/notification-rule",
-    response_model=NotificationRule,
+    response_model=Optional[NotificationRule],
 )
 async def get_notification_rule(
     db: JobDatabase = Depends(get_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
-) -> NotificationRule:
-    """Return the authenticated user's notification rule, or 404 if none set."""
+) -> Optional[NotificationRule]:
+    """Return the authenticated user's notification rule.
+
+    Returns ``null`` (HTTP 200) when the user has not saved one yet — the client
+    treats that as "no rule, use defaults". Settings is a per-user singleton, so
+    "not set" is a normal empty-state, not a 404 error (a 404 would surface as a
+    console error in the browser even though the client handles it fine).
+    """
     row = await db.get_user_notification_rule(user.id)
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="notification rule not found",
-        )
+        return None
     return _rule_from_row(row)
 
 
