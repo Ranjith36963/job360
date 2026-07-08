@@ -20,6 +20,33 @@ jobs:
   offline-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
+    # Mirrors ci.yml's service setup — without it, tests hit the dev-default
+    # :5433 and fail with "connection refused".
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 5
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,6 +89,31 @@ jobs:
     # scanning the whole suite.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Postgres-backed backend needs a DB + Redis (see offline-suite note above).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 5
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
