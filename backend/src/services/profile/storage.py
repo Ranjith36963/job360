@@ -34,6 +34,19 @@ from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 logger = logging.getLogger("job360.profile.storage")
 
+
+def _is_missing_table(exc: Exception) -> bool:
+    """True when a DB error means the table/relation is absent.
+
+    Tolerant of BOTH backends' wording: SQLite says ``no such table`` while
+    Postgres says ``relation "..." does not exist``. The profile-version helpers
+    below degrade gracefully on a pre-migration schema — but only if they
+    recognise the error. The old check matched SQLite wording only, so on
+    Postgres the "tolerated" error re-raised instead (crashing run_search).
+    """
+    msg = str(exc).lower()
+    return "no such table" in msg or "does not exist" in msg
+
 LEGACY_PROFILE_PATH: Path = DATA_DIR / "user_profile.json"
 """Pre-Batch-3.5.2 single-file store. Hydrated into the DB on first load
 of ``DEFAULT_TENANT_ID`` then deleted. Monkey-patchable in tests."""
@@ -91,7 +104,7 @@ def save_profile(
             )
             _prune_old_versions(conn, user_id)
         except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
+            if _is_missing_table(e):
                 logger.info(
                     "user_profile_versions table absent — skipping snapshot "
                     "(run ``python -m migrations.runner up``). Tip still saved."
@@ -236,7 +249,7 @@ def current_profile_version_id(user_id: str) -> Optional[int]:
             return None
         return int(row[0])
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
+        if _is_missing_table(e):
             return None
         raise
 
@@ -251,7 +264,8 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
     - 1 row   → True  (first-ever save is always "changed")
     - 2+ rows → True if the two most-recent rows differ, else False
 
-    Tolerates missing table (returns False on OperationalError "no such table").
+    Tolerates a missing table (returns False) via _is_missing_table — recognising
+    both SQLite ("no such table") and Postgres ("does not exist") wording.
     """
     try:
         with sqlite3.connect(str(DB_PATH)) as conn:
@@ -267,7 +281,7 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
             )
             rows = cur.fetchall()
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
+        if _is_missing_table(e):
             return False
         raise
 
