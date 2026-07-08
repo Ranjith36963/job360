@@ -1,7 +1,7 @@
 
 from click.testing import CliRunner
-from src.cli import cli, SOURCE_REGISTRY
 
+from src.cli import SOURCE_REGISTRY, cli
 
 runner = CliRunner()
 

@@ -21,15 +21,13 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Deque, Dict
-
 
 _LOCK = Lock()
-_BUCKETS: Dict[str, Deque[datetime]] = {}
+_BUCKETS: dict[str, deque[datetime]] = {}
 # Separate store for login brute-force lockout. Unlike _BUCKETS (which records
 # *every* request), this counts only FAILED logins and is cleared on success —
 # so a legitimate user who mistypes a few times then logs in is never locked.
-_FAILURES: Dict[str, Deque[datetime]] = {}
+_FAILURES: dict[str, deque[datetime]] = {}
 
 
 def check_and_record(

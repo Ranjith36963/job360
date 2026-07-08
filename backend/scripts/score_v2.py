@@ -93,8 +93,8 @@ def main() -> None:
         except Exception:
             pass
 
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -142,7 +142,7 @@ def main() -> None:
               f"({'OK — discriminating' if n_distinct >= 6 else 'DEGENERATE'})")
         print(f"E3 vs keyword order corr: {e3_corr:.3f} "
               f"({'independent enough' if e3_corr is not None and e3_corr < 0.9 else 'near-clone'})")
-        print(f"coverage (jobs with signal): " + ", ".join(f"{k}={v}" for k, v in cov.items()))
+        print("coverage (jobs with signal): " + ", ".join(f"{k}={v}" for k, v in cov.items()))
         print("LEAK-CHECK (Spearman):")
         print(f"  gold vs keyword : {leak_gold_kw:.3f}   (how much the gold agrees with E1)")
         print(f"  gold vs judge   : {leak_gold_judge:.3f}   (how much the gold agrees with E4)")

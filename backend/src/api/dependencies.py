@@ -1,9 +1,9 @@
 """Shared dependencies for FastAPI routes."""
-import tempfile
 import os
+import tempfile
 
-from src.repositories.database import JobDatabase
 from src.core.settings import DB_PATH
+from src.repositories.database import JobDatabase
 
 _db: JobDatabase | None = None
 

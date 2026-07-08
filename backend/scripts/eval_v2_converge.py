@@ -55,8 +55,8 @@ def main():
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -100,7 +100,7 @@ def main():
     print("=" * 78)
     print("CONVERGENCE — trustworthy engine ranking (de-biased; rankable profiles only)")
     print("=" * 78)
-    print("Inter-rater gate (Opus gold vs Gemini judge, >= %.2f to count):" % GATE)
+    print(f"Inter-rater gate (Opus gold vs Gemini judge, >= {GATE:.2f} to count):")
     for uid, (ir, K) in interrater.items():
         tag = "USED" if uid in rankable else "excluded (no agreed gold)"
         irs = f"{ir:.3f}" if ir is not None else "n/a"
@@ -110,7 +110,7 @@ def main():
         print("\nNo rankable profiles yet (judge runs may still be accruing).")
         return
 
-    print(f"\nDe-biased engine-vs-gold Spearman per rankable profile:")
+    print("\nDe-biased engine-vs-gold Spearman per rankable profile:")
     hdr = "ENGINE".ljust(10) + "".join(u.replace("eval-", "")[:9].rjust(11) for u in rankable)
     print(hdr + "   MEAN   WORST")
     print("-" * 78)

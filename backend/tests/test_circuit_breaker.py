@@ -10,9 +10,9 @@ not read `time.monotonic()` directly, so tests are deterministic.
 """
 
 from src.services.circuit_breaker import (
-    CircuitBreaker,
     BreakerRegistry,
     BreakerState,
+    CircuitBreaker,
 )
 
 

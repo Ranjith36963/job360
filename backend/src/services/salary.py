@@ -14,7 +14,6 @@ from typing import Any, Optional
 
 from src.core.fx import to_gbp
 
-
 # Annualisation factors — simple workplace averages, not payroll-precise.
 _FREQUENCY_ANNUAL: dict[str, int] = {
     "hourly": 2080,     # 40 h × 52 weeks

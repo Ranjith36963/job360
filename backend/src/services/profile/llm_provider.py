@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import time as _time
-from typing import Any, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -96,7 +96,7 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
 
 async def llm_extract_validated(
     prompt: str,
-    schema_cls: Type[_S],
+    schema_cls: type[_S],
     system: str = "",
     max_retries: int = 2,
 ) -> _S:

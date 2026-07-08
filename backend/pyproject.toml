@@ -125,15 +125,23 @@ select = ["E", "F", "W", "I", "N", "UP", "S", "B", "G"]
 ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 
 [tool.ruff.lint.per-file-ignores]
-# Dev CLI helpers: subprocess + SQL-string concat are expected; input comes
-# from argparse + known-safe table names. Globs are relative to this
+# Dev/eval CLI helpers under scripts/ are throwaway analysis code, NOT shipped
+# product code — subprocess + SQL-string concat (safe table names), best-effort
+# try/except, non-crypto random (sampling), math-style UPPERCASE vars, and
+# terse one-line style are all expected here. Globs are relative to this
 # pyproject.toml (the `backend/` directory), so `scripts/*` matches
 # `backend/scripts/*.py` at the repo level.
-"scripts/*" = ["S603", "S607", "S608"]
+"scripts/*" = [
+    "S603", "S607", "S608", "S110", "S311",
+    "N806", "B023", "E702", "E741", "F841", "E501", "B007",
+]
 "scripts/bootstrap_dev.py" = ["S105", "S603", "S607"]
-# Test files use hardcoded fixture passwords (S105/S107) and import-at-
-# bottom patterns (E402). These are expected and benign in test context.
-"tests/*" = ["S105", "S107", "E501"]
+# Test files: hardcoded fixture passwords (S105/S106/S107), temp-file paths
+# (S108), subprocess calls (S603/S607), `pytest.raises(Exception)` (B017), and
+# set-env-before-import ordering (E402) are all expected + benign in tests.
+"tests/*" = ["S105", "S106", "S107", "S108", "S603", "S607", "E402", "E501", "B017", "N806", "N801"]
+# ops/ metrics helpers: a best-effort try/except around export is intentional.
+"ops/*" = ["S110"]
 "migrations/runner.py" = ["S603", "S607"]
 # cv_parser.py contains the multi-line LLM prompt — single-string lines
 # inside the system / user prompt cannot be split without breaking the
@@ -142,6 +150,23 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 # Step-1.5 added _maybe_normalise_skills_via_esco below the LLM prompt;
 # the late-bound `_coerce_str` imports keep their explicit `noqa: E402`.
 "src/services/profile/cv_parser.py" = ["E501"]
+# RSS/XML source parsers use stdlib xml.etree by design (ARCHITECTURE.md) to
+# parse KNOWN job feeds — S314 (untrusted-XML) is accepted here.
+"src/sources/**/*.py" = ["S314"]
+# database.py / feed.py build `IN (?,?,?)` placeholder lists dynamically — the
+# `?`s are generated, values are always parameterized, so S608 is a false
+# positive. database.py also has a best-effort purge swallow (S110).
+"src/repositories/database.py" = ["S110", "S608"]
+"src/services/feed.py" = ["S608"]
+# channels.py: the OAuth "token" field name trips S105 (not a real secret).
+"src/api/routes/channels.py" = ["S105"]
+# rescore.py is scoring code (owner-managed): keep math-style UPPERCASE vars
+# (N806). B023 flags a lambda that captures loop vars jid/ms — left untouched
+# and surfaced to the owner rather than edited in a lint pass.
+"src/services/rescore.py" = ["N806", "B023"]
+# Intentional late/conditional imports after module-level setup.
+"src/cli_view.py" = ["E402"]
+"src/services/profile/github_enricher.py" = ["E402"]
 
 [tool.mypy]
 # Step-0 pre-flight (Tier C) — mypy strict gate. We set python_version to

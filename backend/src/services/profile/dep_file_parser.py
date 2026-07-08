@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Tuple
 
 logger = logging.getLogger("job360.profile.deps")
 
@@ -356,7 +355,7 @@ _PARSERS = {
 }
 
 
-def parse_manifest(filename: str, content: str) -> Tuple[str, set[str]]:
+def parse_manifest(filename: str, content: str) -> tuple[str, set[str]]:
     """Dispatch on filename; return ``(ecosystem, deps)``.
 
     Unknown filenames return ``("unknown", set())``. Swallowed

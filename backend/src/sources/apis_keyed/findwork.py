@@ -28,7 +28,11 @@ class FindworkSource(BaseJobSource):
 
         jobs = []
         headers = {"Authorization": f"Token {self._api_key}"}
-        search_term = self.search_queries[0] if self.search_queries else self.job_titles[0] if self.job_titles else "software engineer"
+        search_term = (
+            self.search_queries[0] if self.search_queries
+            else self.job_titles[0] if self.job_titles
+            else "software engineer"
+        )
         params = {
             "search": search_term,
             "location": "united kingdom",
@@ -45,7 +49,6 @@ class FindworkSource(BaseJobSource):
             title = item.get("role", "")
             description = item.get("text", "")
             location = item.get("location", "")
-            text = f"{title} {description}".lower()
 
             if not _is_uk_or_remote(location):
                 continue

@@ -6,7 +6,6 @@ sheet. Run: python -m scripts.prep_two_real
 """
 from __future__ import annotations
 
-import io
 import json
 import logging
 import sqlite3
@@ -36,7 +35,7 @@ def main() -> None:
     ]
 
     all_ids: dict = {}
-    sheet = io.open(SHEET, "w", encoding="utf-8")
+    sheet = open(SHEET, "w", encoding="utf-8")
     for uid in UIDS:
         profile = load_profile(uid)
         cfg = generate_search_config(profile)

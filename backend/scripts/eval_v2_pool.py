@@ -17,7 +17,6 @@ Then: grade the blind sheet -> eval_v2_gold.json, judge, score.
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import logging
 import random
@@ -147,7 +146,7 @@ def main() -> None:
 
     by_id = {r["id"]: r for r in catalog}
     pool_out = {}
-    sheet = io.open(SHEET, "w", encoding="utf-8")
+    sheet = open(SHEET, "w", encoding="utf-8")
     from src.services.profile.storage import current_profile_version_id
 
     for uid in UIDS:

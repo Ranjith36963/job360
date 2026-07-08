@@ -25,7 +25,6 @@ from migrations import runner
 from src.api.routes import channels as channels_route
 from src.services.channels import crypto
 
-
 # ---------------------------------------------------------------------------
 # Shared fixture (mirrors test_channels_routes.py exactly)
 # ---------------------------------------------------------------------------

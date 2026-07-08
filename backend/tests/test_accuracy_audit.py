@@ -6,7 +6,7 @@ Run from backend/ with:
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import pytest
 
@@ -22,7 +22,6 @@ from scripts.accuracy_audit import (
     top_mismatches,
 )
 
-
 # =========================================================================== #
 #  spearman()                                                                  #
 # =========================================================================== #
@@ -30,11 +29,11 @@ from scripts.accuracy_audit import (
 
 class TestSpearman:
     def test_perfect_positive(self) -> None:
-        pairs: List[Tuple[float, float]] = [(1, 10), (2, 20), (3, 30)]
+        pairs: list[tuple[float, float]] = [(1, 10), (2, 20), (3, 30)]
         assert spearman(pairs) == pytest.approx(1.0, abs=1e-9)
 
     def test_perfect_negative(self) -> None:
-        pairs: List[Tuple[float, float]] = [(1, 30), (2, 20), (3, 10)]
+        pairs: list[tuple[float, float]] = [(1, 30), (2, 20), (3, 10)]
         assert spearman(pairs) == pytest.approx(-1.0, abs=1e-9)
 
     def test_none_on_fewer_than_two(self) -> None:
@@ -43,28 +42,28 @@ class TestSpearman:
 
     def test_none_on_zero_variance(self) -> None:
         # All app scores the same → zero variance on one side → undefined
-        pairs: List[Tuple[float, float]] = [(5, 10), (5, 20), (5, 30)]
+        pairs: list[tuple[float, float]] = [(5, 10), (5, 20), (5, 30)]
         assert spearman(pairs) is None
 
     def test_tied_ranks_handled(self) -> None:
         # Ties get average rank.  Three items with the same app score: ranks 1,2,3
         # → average = 2 for all.  On the gold side monotone → expected correlation
         # must be 0 (flat app rank against varying gold rank → r=0).
-        pairs: List[Tuple[float, float]] = [(5, 10), (5, 20), (5, 30)]
+        pairs: list[tuple[float, float]] = [(5, 10), (5, 20), (5, 30)]
         # zero-variance on app side → None
         result = spearman(pairs)
         assert result is None
 
     def test_unordered_pairs(self) -> None:
         # A moderately positive correlation but not perfect.
-        pairs: List[Tuple[float, float]] = [(3, 30), (1, 10), (2, 25)]
+        pairs: list[tuple[float, float]] = [(3, 30), (1, 10), (2, 25)]
         r = spearman(pairs)
         assert r is not None
         assert 0.0 < r <= 1.0
 
     def test_partial_inversion(self) -> None:
         # Reverse the middle two elements — correlation should be <1 and >−1
-        pairs: List[Tuple[float, float]] = [(1, 10), (2, 30), (3, 20), (4, 40)]
+        pairs: list[tuple[float, float]] = [(1, 10), (2, 30), (3, 20), (4, 40)]
         r = spearman(pairs)
         assert r is not None
         assert -1.0 < r < 1.0
@@ -124,7 +123,7 @@ Row = dict  # {app: Optional[float], gold: float, ...}
 
 
 class TestBucketPrecisionRecall:
-    def _rows(self, pairs: List[Tuple[Optional[float], float]]) -> List[Row]:
+    def _rows(self, pairs: list[tuple[Optional[float], float]]) -> list[Row]:
         return [{"app": a, "gold": g} for a, g in pairs]
 
     def test_all_true_positives(self) -> None:
@@ -184,7 +183,7 @@ class TestBucketPrecisionRecall:
 
 
 class TestTopMismatches:
-    def _rows(self, items: List[Tuple[int, int, int, str, str]]) -> List[dict]:
+    def _rows(self, items: list[tuple[int, int, int, str, str]]) -> list[dict]:
         return [
             {"job_id": jid, "title": t, "app": a, "gold": g, "reason": r}
             for jid, t, a, g, r in items

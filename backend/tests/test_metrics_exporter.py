@@ -3,9 +3,7 @@ import asyncio
 import json
 import sqlite3
 
-
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
-
 
 # ---------------------------------------------------------------------------
 # Helpers — build minimal in-memory SQLite DBs that match the real schema.

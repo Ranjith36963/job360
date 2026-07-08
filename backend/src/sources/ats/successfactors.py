@@ -1,13 +1,13 @@
 import logging
-import xml.etree.ElementTree as ET
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import SUCCESSFACTORS_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
-from src.core.companies import SUCCESSFACTORS_COMPANIES
 
 logger = logging.getLogger("job360.sources.successfactors")
 

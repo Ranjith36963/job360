@@ -181,8 +181,8 @@ async def rescore_user_feed(
             # will actually run.  When matcher_on is False, shortlist_jobs is
             # never allocated and clear_user_verdicts is never called.
             if matcher_on:
-                from src.services.llm_matcher import clear_user_verdicts  # noqa: PLC0415
                 from src.models import Job as _Job  # noqa: PLC0415
+                from src.services.llm_matcher import clear_user_verdicts  # noqa: PLC0415
                 await clear_user_verdicts(db._conn, user_id)
                 shortlist_jobs = []
             else:

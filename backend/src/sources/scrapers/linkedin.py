@@ -1,6 +1,6 @@
-import re
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from src.models import Job

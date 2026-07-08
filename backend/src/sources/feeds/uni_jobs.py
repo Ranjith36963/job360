@@ -2,9 +2,8 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-
 from src.models import Job
-from src.sources.base import BaseJobSource, _sanitize_xml, _is_uk_or_remote
+from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
 logger = logging.getLogger("job360.sources.uni_jobs")
 

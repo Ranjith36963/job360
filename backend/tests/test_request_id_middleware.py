@@ -5,8 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.middleware import RequestIdMiddleware
-from src.utils.logger import get_request_id, set_request_id, _request_id_var
-
+from src.utils.logger import _request_id_var, get_request_id, set_request_id
 
 # ---------------------------------------------------------------------------
 # Minimal app for middleware tests — avoids pulling in the full lifespan / DB.
@@ -77,6 +76,7 @@ def test_cors_exposes_x_request_id():
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.testclient import TestClient
+
     from src.api.middleware import RequestIdMiddleware
 
     app2 = FastAPI()

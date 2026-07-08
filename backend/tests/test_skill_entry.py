@@ -16,7 +16,6 @@ from src.services.profile.skill_entry import (
     merge_skill_entries,
 )
 
-
 # ── SOURCE_CONFIDENCE + SkillEntry.from_source ──────────────────────
 
 

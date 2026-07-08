@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_db
-from src.utils.logger import get_audit_logger
 from src.api.models import (
     ApplicationTimelineResponse,
     PipelineAdvanceRequest,
@@ -23,6 +22,7 @@ from src.api.models import (
     TimelineEntry,
 )
 from src.repositories.database import JobDatabase
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["pipeline"])
 

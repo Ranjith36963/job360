@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -43,10 +42,6 @@ class NoFluffJobsSource(BaseJobSource):
             name = item.get("name", "")
             # Some responses use "name" instead of "title"
             title = title or name
-
-            category = item.get("category", "")
-            technology = " ".join(item.get("technology", []) if isinstance(item.get("technology"), list) else [])
-            text = f"{title} {category} {technology}".lower()
 
             # Location handling
             location_obj = item.get("location", {})

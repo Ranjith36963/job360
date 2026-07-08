@@ -27,12 +27,11 @@ port 9310. Grafana reads via Prometheus federation.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from src.repositories.database import JobDatabase
 from src.core.settings import DB_PATH
-
+from src.repositories.database import JobDatabase
 
 KPI_PORT = 9310
 REFRESH_SECONDS = 300  # 5 minutes

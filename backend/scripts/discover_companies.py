@@ -32,13 +32,14 @@ _BACKEND = Path(__file__).resolve().parents[1]  # scripts/ → backend/
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from src.core import companies as companies_mod  # noqa: E402
 from src.services.company_discovery import (  # noqa: E402
     ATS_PROBES,
     discover,
     merge_slugs,
     normalize_slug,
 )
+
+from src.core import companies as companies_mod  # noqa: E402
 
 # ATS name -> the list variable in core/companies.py holding its slugs.
 # Only simple string-list ATS are auto-discoverable here (Workday / Personio /

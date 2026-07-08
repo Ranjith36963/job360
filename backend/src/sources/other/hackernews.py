@@ -2,7 +2,6 @@ import logging
 import re
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -22,7 +21,7 @@ def _parse_hn_comment(text: str) -> dict | None:
 
     # Strip HTML tags
     clean = _HTML_TAG_RE.sub(" ", text)
-    lines = [l.strip() for l in clean.split("\n") if l.strip()]
+    lines = [ln.strip() for ln in clean.split("\n") if ln.strip()]
     if not lines:
         return None
 

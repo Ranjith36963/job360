@@ -71,8 +71,8 @@ def main():
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -100,7 +100,7 @@ def main():
 
     print("\n" + "=" * 80)
     print("[B] NON-CIRCULAR ENGINE SCORES (each engine vs consensus EXCLUDING its own model)")
-    print("    rankable = profiles whose 3-way panel agreement >= %.2f" % GATE)
+    print(f"    rankable = profiles whose 3-way panel agreement >= {GATE:.2f}")
     print("=" * 80)
 
     rankable = {}
