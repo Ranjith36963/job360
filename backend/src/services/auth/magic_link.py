@@ -158,38 +158,32 @@ async def consume_magic_link(
             (now, row["id"]),
         )
 
-        # Find-or-create the user by email. NOTE: do NOT filter on
-        # `deleted_at IS NULL` here — the users.email UNIQUE constraint ignores
-        # deleted_at, so a soft-deleted row still owns the email. Filtering it
-        # out made this miss the existing row and try to INSERT a duplicate
-        # (UniqueViolation). Match on email alone, then reuse the row.
-        cur = await db.execute(
-            "SELECT id, email_verified_at FROM users WHERE email = ?",
-            (email,),
+        # Find-or-create the user by email, ATOMICALLY. `INSERT OR IGNORE`
+        # (shim → `ON CONFLICT DO NOTHING`) creates the row on first sight and is
+        # a safe no-op if the email already exists — active OR soft-deleted (the
+        # users.email UNIQUE constraint ignores deleted_at). This removes the old
+        # SELECT-then-INSERT race that raised a `UniqueViolation` in prod when two
+        # consumes hit the same new email, or when a soft-deleted row still owned
+        # it. The schema requires a password_hash, so store an argon2 hash of a
+        # random secret (unguessable; the user can set a real one later via reset).
+        # Clicking the emailed link proves ownership, so a new row starts verified.
+        new_id = uuid.uuid4().hex
+        random_pw = secrets.token_urlsafe(32)
+        await db.execute(
+            "INSERT OR IGNORE INTO users(id, email, password_hash, email_verified_at) "
+            "VALUES (?, ?, ?, ?)",
+            (new_id, email, hash_password(random_pw), now),
         )
-        user = await cur.fetchone()
-        if user is None:
-            # New account. The schema requires a password_hash — store an
-            # argon2 hash of a random secret (unguessable; the user can set a
-            # real password later via the reset flow). Clicking the emailed
-            # link proves ownership, so start verified.
-            user_id = uuid.uuid4().hex
-            random_pw = secrets.token_urlsafe(32)
-            await db.execute(
-                "INSERT INTO users(id, email, password_hash, email_verified_at) "
-                "VALUES (?, ?, ?, ?)",
-                (user_id, email, hash_password(random_pw), now),
-            )
-        else:
-            user_id = user["id"]
-            # Existing row (active OR soft-deleted). Clicking the link proves
-            # ownership: verify (keep an existing timestamp) AND reactivate a
-            # soft-deleted account — magic-link sign-in brings you back in.
-            await db.execute(
-                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?), "
-                "deleted_at = NULL WHERE id = ?",
-                (now, user_id),
-            )
+        # Read back the real id: the row we just inserted, or the existing owner.
+        cur = await db.execute("SELECT id FROM users WHERE email = ?", (email,))
+        user_id = (await cur.fetchone())["id"]
+        # Prove ownership: verify (keep any existing timestamp) AND reactivate a
+        # soft-deleted account — magic-link sign-in brings you back in.
+        await db.execute(
+            "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?), "
+            "deleted_at = NULL WHERE id = ?",
+            (now, user_id),
+        )
         await db.commit()
 
     cookie = await auth_sessions.create_session(db_path, user_id=user_id, secret=secret)
