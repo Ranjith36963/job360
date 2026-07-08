@@ -56,6 +56,11 @@ dev = [
     # cycles to cut wall-clock time on the 600+ test suite.
     "pytest-xdist>=3.0.0",
     "mypy>=1.10.0",
+    # Lint gate (ci.yml runs `python -m ruff check .`). Was documented as a dev
+    # extra but missing here, so CI died with "No module named ruff" before it
+    # could lint. Pinned to the 0.15 minor: a future minor can add rules and
+    # silently re-break the gate on an unrelated push.
+    "ruff>=0.15.9,<0.16",
 ]
 indeed = [
     "python-jobspy",
