@@ -56,6 +56,10 @@ dev = [
     # cycles to cut wall-clock time on the 600+ test suite.
     "pytest-xdist>=3.0.0",
     "mypy>=1.10.0",
+    # Linter. PINNED exactly: ruff's rule set changes between releases, so an
+    # unpinned ruff drifts — a new version flags code that was clean, breaking
+    # CI on unrelated PRs (that's what happened here). Bump deliberately.
+    "ruff==0.15.9",
 ]
 indeed = [
     "python-jobspy",
