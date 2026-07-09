@@ -1,6 +1,20 @@
 # Job360 Project Status
 
-## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
+## Current State: LIVE on Railway; CI now green; Step 4 (ops hardening) partially shipped via the 2026-07-09 top-5-leverage batch (stacked PRs #27→#31)
+
+> **Top-5-leverage batch (2026-07-09, stacked PRs #27→#29→#30→#31, on Opus 4.8).**
+> Full detail in `docs/IMPLEMENTATION_LOG.md`. In short: **PLAN-1** fixed the
+> long-red CI gate (ruff missing from `[dev]`, a pre-existing Postgres test bug,
+> and the suite never self-bootstrapping its DB — new `scripts/init_db.py` + CI
+> init step; CI confirmed green on GitHub). **PLAN-2** made email failures visible
+> (ERROR not WARNING) + documented `RESEND_API_KEY`/`SMTP_FROM` + failure tests
+> (the actual sign-up unblock is a human Resend-domain/Railway step). **PLAN-3**
+> added `RequestTimeoutMiddleware` (504), fixed the container healthchecks
+> (`/api/livez`), and a backup runbook with a logged restore drill (backup
+> automation deliberately skipped — public repo). **PLAN-4** rescued ~2,300 lines
+> of stranded profile-extraction quality work from `tp-final` via a selective
+> 13-commit cherry-pick (OpenAI-primary CV extraction + LLM provider hardening +
+> pillar-1 dedup fixes). Each landed behind the full ~1,700-test Postgres gate.
 
 > **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
 > profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
@@ -26,8 +40,8 @@
 > Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
-**Last updated:** 2026-06-20
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Last updated:** 2026-07-09
+**Total tests:** defer to the runtime collected count (~1,720 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
@@ -156,7 +170,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - **Matcher batch (funnel→judge) merged post-Step-3** on `fix/per-user-search-and-scoring-gate` — `services/llm_matcher.py`, migration 0017 (`user_feed` llm_* columns), `_run_matcher_stage` in pipeline, API llm_* fields, dashboard AI-verdict badge + COALESCE sort, MATCHER_ENABLED/THRESHOLD/MAX_JOBS flags (all default off). Measured: 18/18 in 89.8 s, judge spread 20–92, 10/10 fit accuracy.
 - **Autonomous maintenance loop** running — worker/integrator/scout/health agents processing missions from `docs/maintenance/MISSIONS.md`.
 
-**Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
+**Step 4 — ops hardening.** SHIPPED in the 2026-07-09 top-5 batch: GitHub Actions CI green (ruff dep + DB self-bootstrap), security-headers middleware (already existed), `/livez` + `/readyz` split (already existed), FastAPI request-timeout middleware (`RequestTimeoutMiddleware`, 504), container healthchecks fixed to `/api/livez`, DB backup script + **logged restore drill** (`docs/RUNBOOK-backups.md`; automated backup deferred — public repo). Still PENDING: secret manager integration, worker timeouts, LLM call timeouts, per-query DB deadlines, pip-audit + npm audit + gitleaks + bandit in CI, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
 **Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
 
@@ -185,7 +199,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
+- Tests: defer to the runtime collected count (~1,720 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
 
 ---
 
@@ -245,7 +259,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
 | (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+| **Total (current green baseline)** | | defer to runtime count (~1,720 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
 
 ### Not covered or lightly covered
 
