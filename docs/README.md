@@ -35,6 +35,7 @@ Start here to find the right doc fast.
 | Doc | What it is |
 |---|---|
 | [`STACK.md`](STACK.md) | Tech stack layer-by-layer: what we have vs what to add (Postgres, Docker, Stripe, etc.) + costs. |
+| [`llm_prod.md`](llm_prod.md) | Production LLM provider choice (researched 2026-07-08): why the 429s, provider comparison, GDPR split, recommended chain. TL;DR: Gemini 2.5 Flash single / +DeepSeek for cheap batch. |
 | [`STACK_checklist.md`](STACK_checklist.md) | Code-audited checklist: 27 built ✅ (with file proof) vs 21 to build ❌. |
 | [`UPGRADE_PLAN.md`](UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
