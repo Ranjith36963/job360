@@ -1455,6 +1455,14 @@
       },
       "ProfileResponse": {
         "properties": {
+          "ai_suggestions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ai Suggestions",
+            "type": "array"
+          },
           "current_version_id": {
             "anyOf": [
               {
@@ -1530,6 +1538,17 @@
             },
             "default": {},
             "title": "Skill Tiers",
+            "type": "object"
+          },
+          "skills_by_source": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Skills By Source",
             "type": "object"
           },
           "summary": {

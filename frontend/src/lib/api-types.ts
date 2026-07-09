@@ -1977,6 +1977,11 @@ export interface components {
         };
         /** ProfileResponse */
         ProfileResponse: {
+            /**
+             * Ai Suggestions
+             * @default []
+             */
+            ai_suggestions: string[];
             /** Current Version Id */
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
@@ -2021,6 +2026,13 @@ export interface components {
              * @default {}
              */
             skill_tiers: {
+                [key: string]: string[];
+            };
+            /**
+             * Skills By Source
+             * @default {}
+             */
+            skills_by_source: {
                 [key: string]: string[];
             };
             summary: components["schemas"]["ProfileSummary"];

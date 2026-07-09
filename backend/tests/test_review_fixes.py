@@ -86,7 +86,7 @@ dependencies = [
     assert names == {"foo", "bar", "baz", "quux"}
 
 
-def test_fix2_pep621_optional_extras_still_captured():
+def test_fix2_pep621_optional_extras_excluded_runtime_only():
     content = """
 [project]
 dependencies = ["fastapi>=0.115"]
@@ -94,11 +94,15 @@ dependencies = ["fastapi>=0.115"]
 dev = ["pytest>=8", "ruff[extra]>=0.1"]
 indeed = ["python-jobspy"]
 """
+    # Runtime-only: [project.optional-dependencies] (dev/test/feature extras) is
+    # excluded to drop tooling noise (eslint/pytest/ruff...). A rare real feature
+    # extra (python-jobspy) is the casualty — the LLM pass recovers it. Structural
+    # runtime-vs-dev split, not a keyword denylist (rule #28).
     names = dep_file_parser.parse_pyproject_toml(content)
     assert "fastapi" in names
-    assert "pytest" in names
-    assert "ruff" in names
-    assert "python-jobspy" in names
+    assert "pytest" not in names
+    assert "ruff" not in names
+    assert "python-jobspy" not in names
 
 
 # ── #3: parse_cv_async graceful degradation on validation exhaustion

@@ -272,6 +272,45 @@ def _extract_inline_tech_skills(text: str) -> list[str]:
     return out
 
 
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+\-]+)@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_LINKEDIN_SLUG_RE = re.compile(r"linkedin\.com/in/([A-Za-z0-9\-]+)", re.IGNORECASE)
+
+
+def _identity_tokens(text: str) -> set[str]:
+    """Compacted letters of the person's OWN contact identifiers — email
+    local-part(s) and the LinkedIn URL slug. Used to recognise the name when the
+    2-column PDF de-wrap bleeds the identity block (name/headline/location) into
+    the Top-Skills sidebar. STRUCTURAL: matches the user's own contact info, never
+    a skill vocabulary (CLAUDE.md rule #28)."""
+    tokens: set[str] = set()
+    for m in _EMAIL_RE.finditer(text):  # emails sit on their own line, no wrap
+        local = re.sub(r"[^a-z]", "", m.group(1).lower())
+        if len(local) >= 5:
+            tokens.add(local)
+    healed = text.replace("\n", "")  # heal a slug wrapped across two lines
+    for m in _LINKEDIN_SLUG_RE.finditer(healed):
+        slug = re.sub(r"[^a-z]", "", m.group(1).lower())
+        if len(slug) >= 5:
+            tokens.add(slug)
+    return tokens
+
+
+def _drop_trailing_identity_block(skills: list[str], id_tokens: set[str]) -> list[str]:
+    """If a skill line's compacted letters EXACTLY equal one of the person's own
+    contact identifiers, it's their name that bled in — and the de-wrap always
+    appends the identity block (name → headline → location) AFTER the real skills,
+    so truncate from the name line to the end. Exact-token match (not substring)
+    + multi-word + position>0 keeps this from ever eating a real skill."""
+    if not id_tokens or not skills:
+        return skills
+    for idx, s in enumerate(skills):
+        words = re.findall(r"[A-Za-z]+", s)
+        compact = "".join(words).lower()
+        if idx > 0 and len(words) >= 2 and len(compact) >= 5 and compact in id_tokens:
+            return skills[:idx]
+    return skills
+
+
 def _extract_skills(skills_text: str) -> list[str]:
     """LinkedIn lists one skill per line under 'Skills' / 'Top Skills'."""
     seen: set[str] = set()
@@ -669,11 +708,28 @@ def deterministic_linkedin_fields(text: str) -> dict:
     skills = _extract_skills(
         sections.get("skills", "") or sections.get("top skills", "")
     )
+    # REAL layout: the header section is often EMPTY and the de-wrap appends the
+    # identity block (name/headline/location) to the END of the Top-Skills body.
+    # Recognise the name via the user's own email/URL and truncate the trailing
+    # block (structural, not a keyword denylist: rule #28 safe).
+    skills = _drop_trailing_identity_block(skills, _identity_tokens(text))
+    # LinkedIn's 2-column "Save to PDF" export interleaves the left "Top Skills"
+    # sidebar with the right-column header, so de-wrap can bleed the person's own
+    # name / headline / location into the skills body. Those are already captured
+    # structurally as header fields — drop any "skill" that is verbatim a header
+    # line (structural identity filter, NOT a keyword denylist: rule #28 safe).
+    header_lines = {
+        ln.strip().lower()
+        for ln in sections.get("header", "").splitlines()
+        if ln.strip()
+    }
+    if skills:
+        skills = [s for s in skills if s.strip().lower() not in header_lines]
     # Also harvest the inline "Technologies: A • B • C" lines stated per role —
     # deterministic, and recovers the tech stack the Top-Skills sidebar omits.
     seen_sk = {s.lower() for s in skills}
     for s in _extract_inline_tech_skills(text):
-        if s.lower() not in seen_sk:
+        if s.lower() not in seen_sk and s.strip().lower() not in header_lines:
             skills.append(s)
             seen_sk.add(s.lower())
     return {

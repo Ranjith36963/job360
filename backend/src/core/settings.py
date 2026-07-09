@@ -52,7 +52,12 @@ DFE_APPRENTICESHIPS_API_KEY = os.getenv("DFE_APPRENTICESHIPS_API_KEY", "")
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
-# LLM providers for CV analysis (free tiers)
+# LLM providers for CV analysis.
+# OpenAI (paid) is the PRIMARY — reliable quota, deterministic (temp 0), structured
+# output. The free tiers (Gemini/Groq/Cerebras) remain as fallbacks. Key is read
+# case-insensitively so a lowercase `openai_api_key=` in .env still works.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") or os.getenv("openai_api_key", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")

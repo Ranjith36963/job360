@@ -124,13 +124,19 @@ def test_adapter_splits_experience_into_titles_and_companies():
 def test_adapter_flattens_education_lines():
     schema = CVSchema.model_validate({
         "education": [
-            {"degree": "BSc CS", "institution": "MIT", "dates": "2018-2022", "details": ["Thesis: NN"]}
+            {"degree": "BSc CS", "institution": "MIT", "dates": "2018-2022",
+             "details": ["Thesis: NN", "Neural Networks", "Machine Learning"]}
         ]
     })
     cv = cv_schema_to_cvdata(schema, raw_text="")
-    assert "BSc CS" in cv.education
-    assert any("MIT" in line and "2018-2022" in line for line in cv.education)
-    assert "Thesis: NN" in cv.education
+    # ONE entry per degree, combining degree + institution + dates so the
+    # "Education: N" stat counts qualifications, not lines. Coursework/thesis
+    # details are NOT flattened in (each was a separate fake "education entry").
+    assert len(cv.education) == 1
+    entry = cv.education[0]
+    assert "BSc CS" in entry and "MIT" in entry and "2018-2022" in entry
+    assert "Thesis: NN" not in entry
+    assert "Neural Networks" not in cv.education
 
 
 def test_adapter_surfaces_career_domain_string():
