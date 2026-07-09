@@ -91,10 +91,10 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
 
-  // FIXME(e2e): the "Use password instead" toggle fix below is correct, but after
-  // a mocked-200 sign-in the form still doesn't navigate to ?next=/profile (stays
-  // on /login) — a login-form success-redirect issue to debug in a stable env.
-  // Quarantined so frontend-e2e keeps gating on the passing specs.
+  // FIXME(e2e): the "Use password instead" toggle fix (below) is correct, but the
+  // post-sign-in redirect to ?next=/profile still doesn't fire under the mocked
+  // login (stays on /login) — confirmed still failing even WITH the E2E middleware
+  // bypass, so it's a login-form success-redirect issue, not auth. Needs stable env.
   test.fixme("returning user signing in on the gated /login lands on /profile", async ({
     page,
     context,

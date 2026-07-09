@@ -68,8 +68,9 @@ test.describe("Tailor my CV", () => {
     ]);
   });
 
-  // FIXME(e2e): pre-existing failure (tailor dialog / dev-server cold-compile) —
-  // quarantined so the suite can gate on the passing specs; needs a stable env.
+  // FIXME(e2e): the "Tailor my CV" button/dialog doesn't open under the mocked job
+  // page (the click times out) — not an auth issue (the E2E middleware bypass didn't
+  // change it). Quarantined; needs a stable env to debug the dialog render.
   test.fixme("opens from the job page, shows generated docs, edits + saves, offers download", async ({
     page,
   }) => {
