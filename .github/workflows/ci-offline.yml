@@ -81,14 +81,12 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run Playwright UI specs
         working-directory: frontend
-        # NON-BLOCKING until the specs get a session that survives the middleware.
-        # middleware.ts verifies the session with a SERVER-SIDE fetch to the
-        # backend (/api/auth/me); page.route only mocks BROWSER requests, so the
-        # fake-cookie specs can't get past the guard without a real backend in
-        # this job. Proper fix (follow-up): run a backend service here, or add a
-        # test-mode bypass to the middleware. Real browser coverage of prod is
-        # handled by synthetic-live.yml. Kept visible (not deleted) but not gating.
-        continue-on-error: true
+        # GATING (no continue-on-error): a real regression in the 24 passing specs
+        # now fails CI. The 4 pre-existing failures (dashboard-sort x2, landing-cta
+        # sign-in redirect, tailor-cv dialog) are quarantined with `test.fixme` +
+        # FIXME notes — they need a stable Playwright env to debug the live DOM (the
+        # middleware fails OPEN when the backend is unreachable, so those aren't an
+        # auth-guard problem). Real browser coverage of prod lives in synthetic-live.yml.
         run: npx playwright test
 
   loop2-e2e-spotlight:
