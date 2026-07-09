@@ -58,11 +58,16 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 
 # Email
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
 SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
+# Transactional email (magic-link login + verification). email_sender.py prefers
+# Resend when RESEND_API_KEY is set, else falls back to SMTP. Declared here for
+# discoverability + .env.example parity; email_sender.py reads them (and
+# SMTP_HOST/SMTP_PORT) from os.environ directly, so the old hardcoded
+# SMTP_HOST/SMTP_PORT constants here were dead and have been removed.
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 # Slack / Discord webhooks
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")

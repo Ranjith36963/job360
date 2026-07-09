@@ -167,6 +167,19 @@ def test_request_mints_token_and_returns_204(client, monkeypatch, temp_db):
     assert row["used_at"] is None
 
 
+def test_request_returns_204_and_mints_token_when_send_fails(client, monkeypatch, temp_db):
+    """Delivery failure must not leak email existence (still 204) and must still
+    mint the token row, so a resend after the provider is fixed works."""
+    async def _failing_send(**_kwargs):
+        return False
+
+    monkeypatch.setattr("src.services.auth.magic_link.send_system_email", _failing_send)
+    raw = _request_capture_token(client, monkeypatch, "bob@example.com")
+    row = asyncio.run(_latest_token_row(temp_db, "bob@example.com"))
+    assert row is not None
+    assert row["token_hash"] == tokens.hash_token(raw)
+
+
 def test_request_rate_limited_after_cap(client, temp_db):
     email = "spammer@example.com"
     # Cap is 3 per 5 min. First three allowed, fourth suppressed.
