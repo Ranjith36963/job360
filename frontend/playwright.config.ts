@@ -18,8 +18,15 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
+    // Run against a PRODUCTION build in CI, not `npm run dev`. Dev mode compiles
+    // each route on its first hit; on the slower CI runner that first-navigation
+    // compile exceeds Playwright's 30s test timeout and the login/dashboard/tailor
+    // specs fail (even after 2 retries). A prebuilt server navigates instantly —
+    // verified locally: 7 specs 1.9m (dev) -> 32s (start). Locally we still reuse a
+    // running `npm run dev` for fast iteration.
+    command: process.env.CI ? "npm run build && npm run start" : "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
+    timeout: 240_000,
   },
 });
