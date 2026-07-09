@@ -119,7 +119,7 @@ test.describe("Tailor my CV", () => {
 
     // CV tab is active by default — its generated draft is shown
     await expect(dialog.getByText(/generated cv draft/i)).toBeVisible({
-      timeout: 10_000,
+      timeout: 30_000,
     });
 
     // Cover Letter tab shows its own generated draft

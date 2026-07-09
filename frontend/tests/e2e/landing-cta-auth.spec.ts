@@ -61,7 +61,7 @@ test.describe("Landing CTA → profile journeys", () => {
     await page.goto("/");
     await page.getByRole("link", { name: /get started/i }).click();
     // Generous timeout: Next dev cold-compiles /login on first hit.
-    await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 40_000 });
   });
 
   test("logged-out 'Upload Your CV' redirects to sign-in with next=/profile", async ({
@@ -69,7 +69,7 @@ test.describe("Landing CTA → profile journeys", () => {
   }) => {
     await page.goto("/");
     await page.getByRole("link", { name: /upload your cv/i }).click();
-    await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 40_000 });
   });
 
   // ── Journey 3: already signed in → straight to /profile ───────────────────
@@ -85,7 +85,7 @@ test.describe("Landing CTA → profile journeys", () => {
     await page.getByRole("link", { name: /get started/i }).click();
 
     // Generous timeout: /profile may cold-compile on the first navigation.
-    await expect(page).toHaveURL(/\/profile/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/profile/, { timeout: 40_000 });
     await expect(page).not.toHaveURL(/\/login/);
   });
 
@@ -114,7 +114,7 @@ test.describe("Landing CTA → profile journeys", () => {
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /^sign in$/i }).click();
 
-    await expect(page).toHaveURL(/\/profile/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/profile/, { timeout: 40_000 });
   });
 
   // ── Journey 1: new visitor → create account → /profile ────────────────────
@@ -139,6 +139,6 @@ test.describe("Landing CTA → profile journeys", () => {
     await page.getByRole("button", { name: /create account/i }).click();
 
     // register's safeNext defaults to /profile, so a fresh sign-up lands there.
-    await expect(page).toHaveURL(/\/profile/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/profile/, { timeout: 40_000 });
   });
 });

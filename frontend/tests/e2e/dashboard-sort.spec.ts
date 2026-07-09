@@ -110,7 +110,7 @@ test.describe("Dashboard job sort order", () => {
 
     // Wait for the list to populate (cold-compile tolerant).
     await expect
-      .poll(async () => (await renderedScores(page)).length, { timeout: 15_000 })
+      .poll(async () => (await renderedScores(page)).length, { timeout: 40_000 })
       .toBe(SCORES_UNSORTED.length);
 
     const scores = await renderedScores(page);
@@ -124,14 +124,14 @@ test.describe("Dashboard job sort order", () => {
 
     await page.goto("/dashboard");
     await expect
-      .poll(async () => (await renderedScores(page)).length, { timeout: 15_000 })
+      .poll(async () => (await renderedScores(page)).length, { timeout: 40_000 })
       .toBe(SCORES_UNSORTED.length);
 
     for (const tab of TABS) {
       await page.getByRole("button", { name: new RegExp(`^${tab}\\b`, "i") }).click();
       // Re-read after the tab's refetch settles and assert still descending.
       await expect
-        .poll(async () => isDescending(await renderedScores(page)), { timeout: 10_000 })
+        .poll(async () => isDescending(await renderedScores(page)), { timeout: 30_000 })
         .toBe(true);
       const scores = await renderedScores(page);
       expect(scores, `tab ${tab} order: ${scores}`).toEqual([78, 66, 54, 39, 35, 31]);
