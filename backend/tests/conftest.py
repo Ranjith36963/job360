@@ -51,6 +51,26 @@ from src.services.channels import crypto  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _offline_openai(monkeypatch):
+    """Keep the WHOLE suite offline for LLMs (rule #4).
+
+    The repo ``.env`` carries real keys for OpenAI + the free tiers, and
+    ``settings.py`` reads them at import. Any un-mocked ``llm_extract`` /
+    ``llm_extract_fast`` call would otherwise hit a live provider — slow, flaky,
+    and non-deterministic. Blank ALL provider keys here; a test that genuinely
+    exercises a provider patches its key back with ``patch.object``. Un-mocked
+    LLM calls then raise the no-key error, which every caller handles gracefully.
+    """
+    try:
+        import src.services.profile.llm_provider as _lp
+
+        for _k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
+            monkeypatch.setattr(_lp, _k, "", raising=False)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _instant_asyncio_sleep(monkeypatch, request):
     """Make ``asyncio.sleep`` instant for the whole suite.
 

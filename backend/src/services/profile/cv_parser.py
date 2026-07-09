@@ -65,12 +65,32 @@ Return a JSON object with exactly these fields:
 }}
 
 RULES:
-1. Extract EVERYTHING. If in doubt, include it. A missed skill means a missed job match.
-2. Skills should be individual items, not categories. "Python" not "Programming Languages: Python".
+1. Extract every CONCRETE skill — tools, technologies, frameworks, methods, named
+   competencies, domains, certifications. When in doubt about a concrete skill, include it
+   (a missed skill is a missed job match).
+2. Skills should be individual items, not section labels. "Python" not "Programming Languages: Python".
 3. For a single compound tool keep it whole: "AWS Bedrock". BUT when a skill lists tools in parentheses, extract the parent AND each tool inside as SEPARATE skills — "AWS (Bedrock, SageMaker, S3, CloudWatch)" → "AWS", "AWS Bedrock", "SageMaker", "S3", "CloudWatch"; "Python (Pandas, NumPy, Matplotlib)" → "Python", "Pandas", "NumPy", "Matplotlib"; "OCR (Tesseract)" → "OCR", "Tesseract".
 4. Include achievements with their metrics: "achieving 90% accuracy" not just "90%".
 5. If something appears in both the skills section AND experience bullets, include it once in skills.
 6. Domain-agnostic: whether it's "TensorFlow" or "HIPAA compliance" or "Contract negotiation" — extract it.
+7. Extract named CATEGORIES and ACRONYMS too, not only the products under them. When the CV
+   names a category/acronym alongside specific tools (e.g. "EDR Tool: CrowdStrike, Defender"
+   or "SIEM, EDR and MDR tools"), extract BOTH the acronym/category ("EDR", "MDR", "SIEM")
+   AND each product ("CrowdStrike", "Defender"). Domain initialisms ARE skills.
+8. Skills are concrete and transferable. Do NOT turn a vague job DUTY into a skill — skip
+   generic activities like "reporting", "teamwork", "collaboration", "documentation",
+   "communication" UNLESS stated as a named competency, framework, or methodology.
+9. MINE THE PROSE — not just the skills section. A skill counts even when it appears ONLY
+   inside a project, an experience bullet, or an education detail and is never listed in the
+   skills section. When a sentence shows a technique, architecture, method, model, algorithm,
+   or concept being used, built, trained, or applied, extract that technique/method/concept
+   ITSELF as a skill (e.g. a bullet describing a system built with a convolutional network
+   demonstrates that architecture; a bullet saying transfer learning was applied demonstrates
+   that method; a bullet about a trained forecasting model demonstrates that modelling skill).
+   This applies to EVERY domain, not just software (e.g. a clinical audit, a litigation
+   strategy, a structural load calculation are skills demonstrated in prose). Do NOT limit
+   skills to the items already written in the skills section — the strongest signal often
+   hides in what the person actually DID.
 
 CV TEXT:
 ---
@@ -240,8 +260,50 @@ _DET_OTHER_HEADINGS = {
 }
 _DET_ALL_HEADINGS = _DET_SKILL_HEADINGS | _DET_SUMMARY_HEADINGS | _DET_OTHER_HEADINGS
 
-# Delimiters that separate skills on one line.
-_DET_SKILL_DELIMS = set(",•·|;/")
+# Structural STEMS that mark a skills/tools section heading. These are
+# section-LABEL word-stems (e.g. "Core Technical Skills", "TOOLS & TECHNOLOGIES",
+# "Tech Stack"), NOT a skill vocabulary — so a CV using any heading containing
+# one is recognised without hardcoding skill names (CLAUDE.md rule #28).
+_DET_SKILL_HEADING_STEMS = (
+    "skill", "tool", "technolog", "tech stack", "competenc", "expertise", "proficien",
+)
+
+
+def _is_skill_heading(key: str) -> bool:
+    """A short heading line whose label contains a skills/tools section stem."""
+    return bool(key) and any(stem in key for stem in _DET_SKILL_HEADING_STEMS)
+
+
+# Last-word markers of a section heading. A short heading whose FINAL word is one
+# of these ends the preceding section — so "PROFESSIONAL EXPERIENCE", "WORK
+# HISTORY", "TECHNICAL PROJECTS" all stop a skills block even though they aren't
+# in the exact heading set. Structural section labels, NOT a skill vocabulary
+# (rule #28).
+_DET_SECTION_LAST_WORDS = {
+    "experience", "employment", "education", "projects", "project",
+    "certifications", "certification", "achievements", "awards", "publications",
+    "references", "interests", "languages", "contact", "history",
+    "qualifications", "training", "courses", "summary", "profile", "objective",
+    "volunteering", "accomplishments",
+}
+
+
+def _is_section_heading(key: str) -> bool:
+    """True if ``key`` is any recognised section heading — used to stop a captured
+    body at the next section. Matches the fixed set, a skills-section stem, OR a
+    short heading whose LAST word is a section marker ('professional experience',
+    'work history') so non-exact headings still end the block."""
+    if not key:
+        return False
+    if key in _DET_ALL_HEADINGS or _is_skill_heading(key):
+        return True
+    words = key.split()
+    return 1 <= len(words) <= 4 and words[-1] in _DET_SECTION_LAST_WORDS
+
+# Delimiters that separate skills on one line. NOTE: "/" is intentionally NOT a
+# delimiter — it binds compound skills ("CI/CD", "AI/ML", "TCP/IP") that must
+# stay whole; splitting on it shattered them into meaningless halves.
+_DET_SKILL_DELIMS = set(",•·|;")
 # Pull out a trailing "(a, b, c)" group: "Python (Pandas, NumPy)" → outer + inner.
 _DET_PAREN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
 
@@ -299,29 +361,43 @@ def _det_expand_token(token: str) -> list[str]:
 
 def _det_heading_key(line: str) -> str:
     """Normalise a line for heading comparison: lowercase, strip, drop a
-    trailing colon. Returns '' for lines too long to be a heading."""
-    t = line.strip().rstrip(":").strip().lower()
-    # Real headings are short. Guards against a sentence that happens to
-    # start with 'Summary of my work ...' being treated as a heading.
+    trailing colon. Returns '' for lines that aren't heading-shaped."""
+    s = line.strip()
+    # Prose sentences end with a period — headings don't. Guards against a
+    # wrapped summary line ("...within a UK technology organisation.") being
+    # mistaken for a skills heading just because it contains a stem ("technolog").
+    if s.endswith("."):
+        return ""
+    t = s.rstrip(":").strip().lower()
+    # Real headings are short. Guards against a long sentence being treated
+    # as a heading.
     if len(t) > 30:
         return ""
     return t
 
 
-def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
-    """Return the body lines under the first heading in ``heading_set``,
-    stopping at the next recognised heading. Empty list when absent."""
+def _det_collect_section(
+    lines: list[str], heading_set: set, *, stem_skills: bool = False
+) -> list[str]:
+    """Return the body lines under the first matching heading, stopping at the
+    next recognised section heading. Empty list when absent.
+
+    With ``stem_skills=True`` the start heading is matched STRUCTURALLY — any
+    short heading line whose label contains a skills/tools stem (``_is_skill_
+    heading``) — so non-standard headings like "Core Technical Skills" or
+    "TOOLS & TECHNOLOGIES" are captured, not just the exact ``heading_set``.
+    """
     out: list[str] = []
     capturing = False
     for line in lines:
         key = _det_heading_key(line)
         if not capturing:
-            if key in heading_set:
+            if key in heading_set or (stem_skills and _is_skill_heading(key)):
                 capturing = True
             continue
-        # capturing
-        if key and key in _DET_ALL_HEADINGS:
-            break  # next section starts
+        # capturing — stop at the next recognised section heading
+        if _is_section_heading(key):
+            break
         if line.strip():
             out.append(line.strip())
     return out
@@ -330,6 +406,50 @@ def _det_collect_section(lines: list[str], heading_set: set) -> list[str]:
 # NOTE (CLAUDE.md rule #28): the hardcoded prose skill-term + common-tool
 # vocabularies that used to live here were removed. The deterministic pass does
 # NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
+
+
+_DET_WRAP_MIN_LEN = 40  # a line shorter than this didn't hit the page margin,
+#                         so the next line is a NEW item, not a wrap continuation.
+
+
+def _det_label_prefix_len(line: str) -> int:
+    """Length of a leading 'Category Label:' on a skills line, else 0. Structural
+    (a short title-like run before a colon), not a keyword list — rule #28."""
+    i = line.find(":")
+    if i == -1:
+        return 0
+    label = line[:i].strip()
+    # A label is short and few words ("Cloud & MLOps:", "AI Automation Tools:").
+    if label and len(label) <= 30 and len(label.split()) <= 5:
+        return i + 1
+    return 0
+
+
+def _det_merge_wrapped_lines(skill_lines: list[str]) -> list[str]:
+    """Rebuild logical skill lines from physically-wrapped PDF lines.
+
+    A PDF wraps a long skills line at the page margin, splitting one skill across
+    two physical lines ("… • Audio" / "Processing • …") — so "Audio Processing"
+    must rejoin. But a genuinely NEW item (a line starting with a bullet, a line
+    with its own "Category:" label, or any line following a SHORT line that could
+    not have wrapped) must stay separate. Only true margin-wraps are merged.
+    """
+    logical: list[str] = []
+    for raw in skill_lines:
+        s = raw.strip()
+        if not s:
+            continue
+        starts_bullet = s[0] in "•·"
+        has_label = _det_label_prefix_len(s) > 0
+        prev_could_wrap = bool(logical) and len(logical[-1]) >= _DET_WRAP_MIN_LEN
+        is_continuation = (
+            bool(logical) and not starts_bullet and not has_label and prev_could_wrap
+        )
+        if is_continuation:
+            logical[-1] = f"{logical[-1]} {s}"
+        else:
+            logical.append(s)
+    return logical
 
 
 def deterministic_cv_fields(raw_text: str) -> dict:
@@ -345,19 +465,28 @@ def deterministic_cv_fields(raw_text: str) -> dict:
         return {"skills": [], "summary": ""}
     lines = raw_text.splitlines()
 
-    skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS)
+    skill_lines = _det_collect_section(lines, _DET_SKILL_HEADINGS, stem_skills=True)
+    units: list[str] = []
+    for logical in _det_merge_wrapped_lines(skill_lines):
+        units.extend(_det_split_line(logical))
     skills: list[str] = []
     seen: set[str] = set()
-    for line in skill_lines:
-        for token in _det_split_line(line):
-            # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
-            # yields the real skills, not the category name.
-            if ":" in token:
-                token = token.rsplit(":", 1)[-1]
-            for tok in _det_expand_token(token):
-                if tok and tok.lower() not in seen:
-                    skills.append(tok)
-                    seen.add(tok.lower())
+    for token in units:
+        # Drop a leading "Category: " label so "Cloud & MLOps: AWS (...)"
+        # yields the real skills, not the category name.
+        if ":" in token:
+            token = token.rsplit(":", 1)[-1]
+        for tok in _det_expand_token(token):
+            tok = tok.strip()
+            # Structural noise guard: real skills are short. A token with
+            # >5 words or >45 chars is prose (common on CVs that state skills
+            # in sentences, not lists), not a skill — drop it. This keeps
+            # precision when stem-matched headings pull in prose bodies.
+            if not tok or len(tok) > 45 or len(tok.split()) > 5:
+                continue
+            if tok.lower() not in seen:
+                skills.append(tok)
+                seen.add(tok.lower())
 
     # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
     # The deterministic pass reads STRUCTURE only (the Skills section + its

@@ -37,8 +37,100 @@ financial analyst) to avoid over-packing the primary tier.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterable
+
+# Structural skill-shape guard (rule #28: shape, NOT a skill vocabulary). A skill
+# is a short noun phrase — not a sentence, a date, or a section header. This is
+# the last line of defence so junk from ANY source (a mis-parsed CV line, a stray
+# LLM output) never reaches the tiers or search.
+_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+_SECTION_HEADERS = {
+    "professional experience", "work experience", "experience", "employment",
+    "education", "professional summary", "summary", "certifications",
+    "licenses & certifications", "projects", "achievements", "awards",
+    "publications", "references", "interests", "contact", "profile",
+}
+
+
+def significant_github_languages(languages: dict) -> list[str]:
+    """The user's real programming languages from the GitHub language-byte map.
+
+    GitHub reports config-file 'languages' (Makefile, Dockerfile, Procfile,
+    Batchfile, PowerShell, Just…) alongside real ones, but those are always a
+    tiny fraction of the bytes. Keep the top few by bytes plus anything ≥0.5% of
+    the total — that drops the config-file noise structurally (by proportion, not
+    a name denylist: rule #28) while keeping real secondary languages."""
+    if not isinstance(languages, dict) or not languages:
+        return []
+    ranked = sorted(
+        ((k, v) for k, v in languages.items()
+         if isinstance(k, str) and isinstance(v, (int, float)) and v > 0),
+        key=lambda kv: -kv[1],
+    )
+    total = sum(v for _, v in ranked) or 1
+    out: list[str] = []
+    for i, (lang, byts) in enumerate(ranked):
+        # The #1 language always shows; everything else must be ≥0.5% of bytes.
+        if i == 0 or byts / total >= 0.005:
+            out.append(lang)
+    return out
+
+
+def _acronym_of(short: str, long: str) -> bool:
+    """True if ``short`` is the initialism of the multi-word ``long`` — 'RAG' of
+    'Retrieval Augmented Generation', 'NLP' of 'Natural Language Processing'. A
+    general algorithm (first letters), NOT a synonym vocabulary (rule #28).
+
+    Guards keep it safe for ALL profiles: the acronym is 3-6 alphanumerics (2-char
+    ones like 'AI'/'ML' are too ambiguous — 'AI' also initials 'Adobe
+    Illustrator'), and the expansion is a 2-6 word phrase whose word-initials
+    match EXACTLY. So 'RAG Pipelines' (initials 'RP') and 'Go' vs 'Google' never
+    merge."""
+    s = re.sub(r"[^a-z0-9]", "", short.lower())
+    if not (3 <= len(s) <= 6):
+        return False
+    words = [w for w in long.split() if w and w[0].isalnum()]
+    if not (2 <= len(words) <= 6):
+        return False
+    return s == "".join(w[0].lower() for w in words)
+
+
+def _merge_acronym_expansions(ev_list: list[SkillEvidence]) -> list[SkillEvidence]:
+    """Collapse acronym↔expansion pairs, keeping the acronym form and unioning
+    sources. Order-preserving; only exact initialism pairs merge."""
+    consumed: set[int] = set()
+    for i in range(len(ev_list)):
+        if i in consumed:
+            continue
+        for j in range(len(ev_list)):
+            if i == j or j in consumed or i in consumed:
+                continue
+            a, b = ev_list[i], ev_list[j]
+            if _acronym_of(a.name, b.name):        # a = acronym, b = expansion
+                a.sources = list(dict.fromkeys(a.sources + b.sources))
+                consumed.add(j)
+            elif _acronym_of(b.name, a.name):      # b = acronym, a = expansion
+                b.sources = list(dict.fromkeys(b.sources + a.sources))
+                consumed.add(i)
+    return [e for k, e in enumerate(ev_list) if k not in consumed]
+
+
+def _looks_like_skill(name: str) -> bool:
+    """True if ``name`` is skill-shaped: a short phrase, not prose/date/header."""
+    s = name.strip()
+    if not s:
+        return False
+    if s.endswith("."):                       # a sentence, not a skill
+        return False
+    if len(s) > 50 or len(s.split()) > 6:      # prose, not a skill
+        return False
+    if _YEAR_RE.search(s):                     # a date range, not a skill
+        return False
+    if s.lower() in _SECTION_HEADERS:          # a CV section header, not a skill
+        return False
+    return True
 
 # Source identifier literals. Kept loose (plain strings) rather than
 # enums so future additions (``github_topic``, ``esco_expansion``) can
@@ -127,9 +219,11 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
         if not name or not isinstance(name, str):
             return
         name = name.strip()
-        if not name:
+        if not name or not _looks_like_skill(name):
             return
-        key = name.casefold()
+        # Whitespace-insensitive identity so "Chroma DB" and "ChromaDB" (and
+        # "MLOps" / "ML Ops") collapse to one skill instead of showing twice.
+        key = re.sub(r"\s+", "", name).casefold()
         if key not in evidence:
             evidence[key] = SkillEvidence(name=name)
         if source not in evidence[key].sources:
@@ -147,9 +241,13 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
             _add(s, "cv_explicit")
         for s in getattr(cv, "linkedin_skills", []) or []:
             _add(s, "linkedin")
-        for s in getattr(cv, "github_frameworks", []) or []:
-            _add(s, "github_dep")
-        for s in getattr(cv, "github_skills_inferred", []) or []:
+        # GitHub contributes ONLY: (1) significant programming languages (byte-
+        # thresholded) and (2) the LLM-read repo skills. Raw dependency package
+        # names (github_frameworks: pytest, @capacitor/core, workbox-window) and
+        # raw repo topics (github_topics: gmail, slack, hitl) are build metadata,
+        # NOT user skills — surfacing them floods the profile and destroys trust.
+        # The meaningful frameworks (React, FastAPI) are recovered by the LLM pass.
+        for s in significant_github_languages(getattr(cv, "github_languages", {}) or {}):
             _add(s, "github_lang")
         # Two-pass LLM enhance sources.
         for s in getattr(cv, "github_llm_skills", []) or []:
@@ -157,4 +255,6 @@ def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
         for s in getattr(cv, "about_me_inferred_skills", []) or []:
             _add(s, "about_me_llm")
 
-    return list(evidence.values())
+    # Collapse acronym↔expansion pairs (RAG ⇄ Retrieval Augmented Generation) so
+    # the same skill isn't shown under two names.
+    return _merge_acronym_expansions(list(evidence.values()))

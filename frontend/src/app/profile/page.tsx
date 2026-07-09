@@ -323,78 +323,111 @@ export default function ProfilePage() {
               />
             </div>
 
-            {/* ── Skill Tiers ──────────────────────────── */}
-            {profile?.skill_tiers && (
-              <div className="animate-fade-in-up glass-card rounded-xl p-6">
-                <h2 className="font-heading text-base font-semibold mb-4 text-foreground">
-                  Skill Tiers
-                </h2>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  {/* Primary */}
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-score-high">
-                      Primary
-                    </p>
-                    {(profile.skill_tiers.primary ?? []).length === 0 ? (
-                      <p className="text-xs text-muted-foreground">None</p>
-                    ) : (
-                      <ul className="flex flex-wrap gap-1.5">
-                        {(profile.skill_tiers.primary ?? []).map((skill) => (
-                          <li
-                            key={skill}
-                            className="rounded-full bg-score-high/10 px-2.5 py-0.5 text-xs font-medium text-score-high"
-                          >
-                            {skill}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+            {/* ── Your Skills (grouped by source) ────────── */}
+            {(() => {
+              const bySource =
+                (profile as unknown as {
+                  skills_by_source?: Record<string, string[]>;
+                })?.skills_by_source ?? {};
+              const aiSuggestions =
+                (profile as unknown as { ai_suggestions?: string[] })
+                  ?.ai_suggestions ?? [];
+              const GROUPS: {
+                key: string;
+                label: string;
+                chip: string;
+              }[] = [
+                {
+                  key: "cv",
+                  label: "From your CV",
+                  chip: "bg-score-high/10 text-score-high",
+                },
+                {
+                  key: "linkedin",
+                  label: "From LinkedIn",
+                  chip: "bg-sky-500/10 text-sky-400",
+                },
+                {
+                  key: "github",
+                  label: "From GitHub",
+                  chip: "bg-violet-500/10 text-violet-400",
+                },
+                {
+                  key: "preferences",
+                  label: "Added by you",
+                  chip: "bg-yellow-500/10 text-yellow-500",
+                },
+              ];
+              const total = new Set(
+                GROUPS.flatMap((g) =>
+                  (bySource[g.key] ?? []).map((s) => s.toLowerCase())
+                )
+              ).size;
+              const hasAny = total > 0 || aiSuggestions.length > 0;
+              if (!hasAny) return null;
+              return (
+                <div className="animate-fade-in-up glass-card rounded-xl p-6">
+                  <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
+                    Your Skills{" "}
+                    <span className="text-muted-foreground">({total})</span>
+                  </h2>
+                  <p className="mb-4 text-xs text-muted-foreground">
+                    Everything we found, grouped by where it came from.
+                  </p>
+                  <div className="space-y-4">
+                    {GROUPS.map((g) => {
+                      const items = bySource[g.key] ?? [];
+                      if (items.length === 0) return null;
+                      return (
+                        <div key={g.key}>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            {g.label}{" "}
+                            <span className="opacity-60">({items.length})</span>
+                          </p>
+                          <ul className="flex flex-wrap gap-1.5">
+                            {items.map((skill) => (
+                              <li
+                                key={`${g.key}-${skill}`}
+                                className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${g.chip}`}
+                              >
+                                {skill}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  {/* Secondary */}
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-yellow-500">
-                      Secondary
-                    </p>
-                    {(profile.skill_tiers.secondary ?? []).length === 0 ? (
-                      <p className="text-xs text-muted-foreground">None</p>
-                    ) : (
+                  {/* AI Suggestions — opt-in, never counted in matching */}
+                  {aiSuggestions.length > 0 && (
+                    <div className="mt-5 border-t border-border/50 pt-4">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                        AI suggestions
+                      </p>
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        Related skills that fit your profile. These aren&apos;t
+                        counted — add the ones you actually have under{" "}
+                        <span className="text-foreground">
+                          Additional Skills
+                        </span>
+                        .
+                      </p>
                       <ul className="flex flex-wrap gap-1.5">
-                        {(profile.skill_tiers.secondary ?? []).map((skill) => (
+                        {aiSuggestions.map((skill) => (
                           <li
-                            key={skill}
-                            className="rounded-full bg-yellow-500/10 px-2.5 py-0.5 text-xs font-medium text-yellow-500"
+                            key={`ai-${skill}`}
+                            className="rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90"
                           >
-                            {skill}
+                            + {skill}
                           </li>
                         ))}
                       </ul>
-                    )}
-                  </div>
-
-                  {/* Tertiary */}
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Tertiary
-                    </p>
-                    {(profile.skill_tiers.tertiary ?? []).length === 0 ? (
-                      <p className="text-xs text-muted-foreground">None</p>
-                    ) : (
-                      <ul className="flex flex-wrap gap-1.5">
-                        {(profile.skill_tiers.tertiary ?? []).map((skill) => (
-                          <li
-                            key={skill}
-                            className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-                          >
-                            {skill}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ── Skill ESCO Mappings ───────────────────── */}
             {profile?.skill_esco &&

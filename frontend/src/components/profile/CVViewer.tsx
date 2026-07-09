@@ -27,21 +27,29 @@ function highlightText(
 ): React.ReactNode[] {
   if (!terms.length) return [text];
 
-  // Escape regex specials and sort longest-first for greedy matching
+  // A skill can wrap across a line in the PDF text ("Machine" end of one line,
+  // "Learning" start of the next), so the space inside a term must match ANY
+  // whitespace — including a newline. Escape regex specials first, then turn each
+  // run of spaces into \s+ so "Machine Learning" also matches "Machine\nLearning".
   const escaped = terms
-    .filter((t) => t.length > 2)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .filter((t) => t.trim().length > 2)
+    .map((t) =>
+      t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")
+    )
     .sort((a, b) => b.length - a.length);
 
   if (!escaped.length) return [text];
+
+  // Compare on whitespace-collapsed, lower-cased forms so a wrapped match
+  // ("Machine\nLearning") still equals its term ("Machine Learning").
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const termSet = new Set(terms.map(norm));
 
   const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
   const parts = text.split(pattern);
 
   return parts.map((part, i) => {
-    const isMatch = terms.some(
-      (t) => t.toLowerCase() === part.toLowerCase()
-    );
+    const isMatch = termSet.has(norm(part));
     if (isMatch) {
       return (
         <mark key={i} className={className}>
