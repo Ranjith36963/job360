@@ -64,8 +64,8 @@ def _offline_openai(monkeypatch):
         import src.services.profile.llm_provider as _lp
 
         monkeypatch.setattr(_lp, "OPENAI_API_KEY", "", raising=False)
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001, S110 — best-effort hermeticity guard; if the
+        pass          # module can't be imported here there's nothing to blank.
 
 
 @pytest.fixture(autouse=True)

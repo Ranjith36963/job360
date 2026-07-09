@@ -125,12 +125,11 @@ async def _attempt(call, prompt: str, system: str, provider: str) -> dict[str, A
 
 
 async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
-    """CV parsing — OpenAI (paid, primary) → Cerebras → Groq → Gemini fallback.
+    """CV parsing — OpenAI (paid, primary) → Gemini → Groq → Cerebras fallback.
 
     OpenAI ``gpt-4o-mini`` leads: paid quota removes the silent-empty / 429
-    failures the free tiers hit, and temp-0 JSON mode is deterministic. Among the
-    free-tier fallbacks Gemini goes LAST — its free tier 429s once exhausted and
-    taxes every call with retry-then-fallback. Each call has a hard timeout + smart 429
+    failures the free tiers hit, and temp-0 JSON mode is deterministic. The free
+    tiers stay as zero-cost fallbacks. Each call has a hard timeout + smart 429
     backoff (see ``_attempt``).
 
     Raises:
@@ -142,14 +141,14 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     errors: list[str] = []
     rate_limited = False
 
-    # Order is deliberate: OpenAI (paid) primary, then the free tiers with Gemini
-    # LAST (its free tier 429s — see docstring). The _attempt() wrapper adds the
-    # hard timeout + smart 429 backoff + rate-limit taxonomy on top of that order.
+    # OpenAI (paid) is primary; the free tiers follow as zero-cost fallbacks. The
+    # _attempt() wrapper adds the hard timeout + smart 429 backoff + rate-limit
+    # taxonomy on top of this order.
     for key, call, name in (
         (OPENAI_API_KEY, _call_openai, "openai"),
-        (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
-        (GROQ_API_KEY, _call_groq, "groq"),
         (GEMINI_API_KEY, _call_gemini, "gemini"),
+        (GROQ_API_KEY, _call_groq, "groq"),
+        (CEREBRAS_API_KEY, _call_cerebras, "cerebras"),
     ):
         if not key:
             continue
