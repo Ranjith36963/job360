@@ -71,6 +71,14 @@ jobs:
         working-directory: backend
         run: python -m ruff check .
 
+      - name: Initialize DB schema (fresh CI Postgres)
+        # The service Postgres starts empty. Tests that isolate into per-path
+        # schemas self-bootstrap, but tests that fall back to the default
+        # DB_PATH read the `public` schema, which nothing else creates. Mirror
+        # a production first-boot (init_db + migrations) so those tests pass.
+        working-directory: backend
+        run: python -m scripts.init_db
+
       - name: Tests (offline suite)
         working-directory: backend
         run: python -m pytest -q -p no:randomly
