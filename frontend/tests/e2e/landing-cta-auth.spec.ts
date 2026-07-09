@@ -91,11 +91,7 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
 
-  // FIXME(e2e): the "Use password instead" toggle fix (below) is correct, but the
-  // post-sign-in redirect to ?next=/profile still doesn't fire under the mocked
-  // login (stays on /login) — confirmed still failing even WITH the E2E middleware
-  // bypass, so it's a login-form success-redirect issue, not auth. Needs stable env.
-  test.fixme("returning user signing in on the gated /login lands on /profile", async ({
+  test("returning user signing in on the gated /login lands on /profile", async ({
     page,
     context,
   }) => {
@@ -114,9 +110,11 @@ test.describe("Landing CTA → profile journeys", () => {
     );
 
     await page.goto("/login?next=%2Fprofile");
-    await page.getByLabel(/email/i).fill("returning@example.com");
-    // The login form now defaults to magic-link; reveal the password field first.
+    // The form defaults to magic-link; switch to the password form FIRST — each
+    // form has its OWN email input, so fill email+password AFTER switching or the
+    // password form submits with an empty email and validation blocks the redirect.
     await page.getByRole("button", { name: /use password instead/i }).click();
+    await page.getByLabel(/email/i).fill("returning@example.com");
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /^sign in$/i }).click();
 

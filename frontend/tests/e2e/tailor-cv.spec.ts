@@ -68,9 +68,12 @@ test.describe("Tailor my CV", () => {
     ]);
   });
 
-  // FIXME(e2e): the "Tailor my CV" button/dialog doesn't open under the mocked job
-  // page (the click times out) — not an auth issue (the E2E middleware bypass didn't
-  // change it). Quarantined; needs a stable env to debug the dialog render.
+  // FIXME(e2e): STALE spec — the job-detail page renders tailor as an INLINE
+  // <TailorSection> (JobDetailClient.tsx:494), not a "Tailor my CV" button that
+  // opens a dialog (that button+dialog lives on the dashboard JobCard). So the
+  // button click times out and the dialog assertions can't pass here. Needs a
+  // rewrite to target the inline section (or to run against the dashboard card),
+  // not an auth/env issue. Quarantined until rewritten.
   test.fixme("opens from the job page, shows generated docs, edits + saves, offers download", async ({
     page,
   }) => {
