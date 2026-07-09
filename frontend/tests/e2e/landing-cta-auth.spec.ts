@@ -91,8 +91,10 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
 
-  // FIXME(e2e): pre-existing failure (sign-in redirect) — quarantined so the suite
-  // can gate on the passing specs; needs a stable Playwright env to debug.
+  // FIXME(e2e): the "Use password instead" toggle fix below is correct, but after
+  // a mocked-200 sign-in the form still doesn't navigate to ?next=/profile (stays
+  // on /login) — a login-form success-redirect issue to debug in a stable env.
+  // Quarantined so frontend-e2e keeps gating on the passing specs.
   test.fixme("returning user signing in on the gated /login lands on /profile", async ({
     page,
     context,
@@ -113,6 +115,8 @@ test.describe("Landing CTA → profile journeys", () => {
 
     await page.goto("/login?next=%2Fprofile");
     await page.getByLabel(/email/i).fill("returning@example.com");
+    // The login form now defaults to magic-link; reveal the password field first.
+    await page.getByRole("button", { name: /use password instead/i }).click();
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /^sign in$/i }).click();
 

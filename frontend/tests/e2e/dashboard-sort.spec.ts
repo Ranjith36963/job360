@@ -87,8 +87,11 @@ async function mockDashboard(page: Page) {
 }
 
 async function renderedScores(page: Page): Promise<number[]> {
-  return page.$$eval('[aria-label^="Match score"]', (els) =>
-    els.map((el) => Number((el.getAttribute("aria-label")!.match(/\d+/) || [])[0]))
+  // The primary score badge (JobCard.tsx) labels itself
+  // "AI fit score: N" when judged, else "Keyword match score: N" — so match on
+  // the shared "score: N" suffix rather than the old (renamed) "Match score" copy.
+  return page.$$eval('[aria-label*="score: "]', (els) =>
+    els.map((el) => Number((el.getAttribute("aria-label")!.match(/(\d+)\s*$/) || [])[1]))
   );
 }
 
@@ -99,10 +102,7 @@ function isDescending(arr: number[]): boolean {
 test.describe("Dashboard job sort order", () => {
   const TABS = ["All", "24h", "48h", "3d", "5d", "7d"];
 
-  // FIXME(e2e): pre-existing failure (sort order / mock shape drift) — quarantined
-  // so frontend-e2e can GATE on the passing specs instead of being non-blocking.
-  // Needs a stable Playwright env to debug the live DOM (the sandbox is unreliable).
-  test.fixme("jobs render highest-score-first regardless of server order", async ({
+  test("jobs render highest-score-first regardless of server order", async ({
     page,
     context,
   }) => {
@@ -121,8 +121,7 @@ test.describe("Dashboard job sort order", () => {
     expect(isDescending(scores)).toBe(true);
   });
 
-  // FIXME(e2e): pre-existing failure — quarantined (see note above).
-  test.fixme("sort holds in every time-bucket tab", async ({ page, context }) => {
+  test("sort holds in every time-bucket tab", async ({ page, context }) => {
     await context.addCookies([SESSION_COOKIE]);
     await mockDashboard(page);
 
