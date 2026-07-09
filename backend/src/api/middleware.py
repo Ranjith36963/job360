@@ -1,13 +1,14 @@
 """HTTP middleware for Job360 FastAPI app."""
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from src.utils.logger import _request_id_var, get_logger, get_request_id, set_request_id
 
@@ -131,3 +132,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if _is_production():
             response.headers["Strict-Transport-Security"] = _HSTS
         return response
+
+
+class RequestTimeoutMiddleware(BaseHTTPMiddleware):
+    """Cap inbound request duration so a hung handler can't tie up a worker.
+
+    A backstop, not a scheduler: outbound source-fetch ceilings
+    (``SOURCE_FETCH_TIMEOUT*``) are a different knob. LLM-heavy routes (CV
+    tailoring, profile extraction) legitimately run longer than a normal API
+    round-trip, so they are exempted by path prefix. Everything else that
+    exceeds ``timeout_seconds`` gets a ``504`` instead of hanging.
+
+    Note: cancelling ``call_next`` abandons the handler mid-flight. DB writes in
+    this app are autocommit single statements (``repositories/pg.py``), so a
+    cancelled request cannot leave an open transaction.
+    """
+
+    def __init__(self, app, timeout_seconds: float = 60.0, exempt_prefixes: tuple = ()):
+        super().__init__(app)
+        self.timeout_seconds = timeout_seconds
+        self.exempt_prefixes = tuple(exempt_prefixes)
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if any(request.url.path.startswith(p) for p in self.exempt_prefixes):
+            return await call_next(request)
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=self.timeout_seconds)
+        except asyncio.TimeoutError:
+            return JSONResponse(status_code=504, content={"detail": "request timed out"})
