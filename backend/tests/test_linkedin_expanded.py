@@ -23,7 +23,6 @@ from src.services.profile.linkedin_parser import (
 )
 from src.services.profile.models import CVData
 
-
 # ── Coercion (unit, no LLM) ─────────────────────────────────────────
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from src.services.profile import cv_parser
 from src.services.profile.layout import segment_sections_from_words
 

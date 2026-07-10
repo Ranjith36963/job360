@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -23,7 +22,6 @@ class RemotiveSource(BaseJobSource):
         for item in data["jobs"]:
             title = item.get("title", "")
             desc = item.get("description", "")
-            tags = " ".join(item.get("tags", []))
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_pub = item.get("publication_date")
             posted_at = raw_pub if raw_pub else None

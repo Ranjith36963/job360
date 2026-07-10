@@ -19,7 +19,6 @@ from src.services.profile.schemas import (
     cv_schema_to_cvdata,
 )
 
-
 # ── CVSchema validation ─────────────────────────────────────────────
 
 

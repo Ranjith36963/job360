@@ -13,7 +13,6 @@ from src.repositories.database import JobDatabase
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import JobScorer
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -211,6 +210,7 @@ def _seed_profile(db_path: str, user_id: str) -> int:
     """Insert a profile + version row and return the version id."""
     import json
     from dataclasses import asdict
+
     from src.services.profile.models import CVData, UserPreferences
 
     cv = CVData(
@@ -322,9 +322,9 @@ async def test_rescore_user_feed_scores_matching_jobs(full_db, monkeypatch):
     )
 
     # Score for the top row must equal what score_catalog_row returns
-    from src.services.rescore import score_catalog_row
-    from src.services.profile.storage import load_profile
     from src.services.profile.keyword_generator import generate_search_config
+    from src.services.profile.storage import load_profile
+    from src.services.rescore import score_catalog_row
     profile = load_profile(user_id)
     config = generate_search_config(profile)
     scorer = JobScorer(config, user_preferences=profile.preferences, enrichment_lookup=lambda j: None)
@@ -347,8 +347,8 @@ async def test_rescore_clears_verdicts(full_db, monkeypatch):
     off by default in tests via conftest.py, so we must enable it explicitly here).
     We also stub _run_matcher_stage so no real LLM calls are made.
     """
-    import src.services.profile.storage as storage_mod
     import src.services.llm_matcher as matcher_mod
+    import src.services.profile.storage as storage_mod
 
     monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
     # FIX 1: enable the matcher so clear_user_verdicts actually runs
@@ -439,8 +439,8 @@ async def test_rescore_no_profile_returns_early(full_db, monkeypatch):
 async def test_rescore_matcher_off_never_clears_verdicts(full_db, monkeypatch):
     """FIX 1: with MATCHER_ENABLED=False (default in tests), clear_user_verdicts
     is NEVER imported or called — the verdict path is a complete no-op."""
-    import src.services.profile.storage as storage_mod
     import src.services.llm_matcher as matcher_mod
+    import src.services.profile.storage as storage_mod
 
     monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
     # Explicitly confirm the flag is off (conftest sets it, but be explicit)
@@ -474,8 +474,8 @@ async def test_rescore_matcher_off_never_clears_verdicts(full_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_rescore_bad_row_does_not_abort(full_db, monkeypatch):
     """FIX 3: if score_catalog_row raises for one job, other jobs are still processed."""
-    import src.services.profile.storage as storage_mod
     import src.services.llm_matcher as matcher_mod
+    import src.services.profile.storage as storage_mod
     from src.services import rescore as rescore_mod
 
     monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
@@ -543,8 +543,9 @@ async def test_rescore_per_user_lock_is_present_and_released(full_db, monkeypatc
     """FIX 4: after rescore_user_feed completes, the per-user Lock exists in
     _user_rescore_locks and is NOT held (released cleanly)."""
     import asyncio as _asyncio
-    import src.services.profile.storage as storage_mod
+
     import src.services.llm_matcher as matcher_mod
+    import src.services.profile.storage as storage_mod
     from src.services import rescore as rescore_mod
 
     monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
@@ -578,8 +579,8 @@ def test_score_catalog_row_sets_job_id_from_row():
     (see skill_matcher.py line 519). We therefore supply a UserPreferences so
     the scorer actually reaches the lookup call.
     """
-    from src.services.rescore import score_catalog_row
     from src.services.profile.models import SearchConfig, UserPreferences
+    from src.services.rescore import score_catalog_row
     from src.services.skill_matcher import JobScorer
 
     captured = []

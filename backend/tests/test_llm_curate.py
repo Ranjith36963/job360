@@ -2,7 +2,7 @@
 suggestions. All LLM calls are mocked (offline, rule #4)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

@@ -20,7 +20,7 @@ import logging
 import re
 from typing import Any
 
-from src.services.profile._llm_utils import coerce_str, coerce_str_list
+from src.services.profile._llm_utils import coerce_str
 from src.services.profile.models import CVData
 
 logger = logging.getLogger("job360.profile.linkedin")

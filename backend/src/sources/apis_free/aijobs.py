@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -23,7 +22,6 @@ class AIJobsSource(BaseJobSource):
             title = item.get("title", "")
             description = item.get("description", "")
             location = item.get("location", "")
-            text = f"{title} {description}".lower()
 
             if not _is_uk_or_remote(location):
                 continue

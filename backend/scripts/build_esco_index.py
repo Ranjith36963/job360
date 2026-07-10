@@ -50,7 +50,6 @@ import json
 import sys
 from pathlib import Path
 
-
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "backend" / "data" / "esco"
 
 

@@ -16,7 +16,6 @@ import re
 
 from src.services.profile.models import UserProfile
 
-
 # Domain → keyword set. Keys are matched against:
 #   - job titles (preferences + CV extracted + LinkedIn positions)
 #   - skills (all tiers)

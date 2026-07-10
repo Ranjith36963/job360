@@ -36,8 +36,9 @@ def test_jsonformatter_includes_extra_fields():
 
 
 def test_jsonformatter_includes_exception_info():
-    from src.utils.logger import JSONFormatter
     import sys
+
+    from src.utils.logger import JSONFormatter
     formatter = JSONFormatter()
     try:
         raise ValueError("boom")

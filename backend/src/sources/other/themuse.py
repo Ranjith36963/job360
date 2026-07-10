@@ -2,7 +2,6 @@ import logging
 import re
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -43,7 +42,6 @@ class TheMuseSource(BaseJobSource):
                 company = company_obj.get("name", "") if isinstance(company_obj, dict) else ""
                 contents = item.get("contents", "")
                 description = _HTML_TAG_RE.sub("", contents)[:5000]
-                text = f"{title} {description}".lower()
 
                 locations = item.get("locations", [])
                 location = ", ".join(

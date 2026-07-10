@@ -3,7 +3,6 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 

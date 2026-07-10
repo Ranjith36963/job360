@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime, timezone
 
-
+from src.core.settings import USER_AGENT
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.core.settings import USER_AGENT
 
 logger = logging.getLogger("job360.sources.remoteok")
 

@@ -11,7 +11,6 @@ into a real `UserProfile` (cv_data + preferences) so the live engines score it.
 """
 from __future__ import annotations
 
-
 # Each spec fills the SCORING-relevant corners: cv (titles/skills/summary/work),
 # github, linkedin, and preferences. Kept as plain data so it's reproducible.
 PROFILES: list[dict] = [

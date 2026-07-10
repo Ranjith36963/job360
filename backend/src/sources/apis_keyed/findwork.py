@@ -45,7 +45,6 @@ class FindworkSource(BaseJobSource):
             title = item.get("role", "")
             description = item.get("text", "")
             location = item.get("location", "")
-            text = f"{title} {description}".lower()
 
             if not _is_uk_or_remote(location):
                 continue

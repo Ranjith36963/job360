@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from src.api.errors import register_exception_logging
 from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware
 
-
 # ─── 3a: access log records who ──────────────────────────────────────────────
 
 

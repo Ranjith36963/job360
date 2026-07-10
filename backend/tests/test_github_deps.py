@@ -17,7 +17,6 @@ import pytest
 from src.services.profile import dep_file_parser, github_enricher
 from src.services.profile.models import CVData
 
-
 # ── dep_file_parser — per-format ────────────────────────────────────
 
 

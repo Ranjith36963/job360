@@ -197,7 +197,7 @@ def setup_profile(cv_path, linkedin_path, github_username):
     prefs = UserPreferences(
         target_job_titles=[t.strip() for t in titles_input.split(",") if t.strip()],
         additional_skills=[s.strip() for s in skills_input.split(",") if s.strip()],
-        preferred_locations=[l.strip() for l in locations_input.split(",") if l.strip()],
+        preferred_locations=[loc.strip() for loc in locations_input.split(",") if loc.strip()],
         work_arrangement=arrangement,
         salary_min=salary_min if salary_min > 0 else None,
         salary_max=salary_max if salary_max > 0 else None,

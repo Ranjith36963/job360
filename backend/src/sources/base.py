@@ -6,13 +6,13 @@ from abc import ABC, abstractmethod
 
 import aiohttp
 
-from src.models import Job
-from src.core.settings import MAX_RETRIES, RETRY_BACKOFF, REQUEST_TIMEOUT, USER_AGENT, RATE_LIMITS
-from src.services.skill_matcher import UK_TERMS, REMOTE_TERMS, FOREIGN_INDICATORS
-from src.services.conditional_cache import ConditionalCache, CachedEntry
-from src.utils.rate_limiter import RateLimiter
-from src.core.keywords import RELEVANCE_KEYWORDS as _DEFAULT_RELEVANCE_KEYWORDS
 from src.core.keywords import JOB_TITLES as _DEFAULT_JOB_TITLES
+from src.core.keywords import RELEVANCE_KEYWORDS as _DEFAULT_RELEVANCE_KEYWORDS
+from src.core.settings import MAX_RETRIES, RATE_LIMITS, REQUEST_TIMEOUT, RETRY_BACKOFF, USER_AGENT
+from src.models import Job
+from src.services.conditional_cache import CachedEntry, ConditionalCache
+from src.services.skill_matcher import FOREIGN_INDICATORS, REMOTE_TERMS, UK_TERMS
+from src.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger("job360.sources")
 

@@ -161,7 +161,7 @@ async def _queue_digest(db: aiosqlite.Connection, user_id: str, channel: str, jo
         logger.debug("Could not queue digest for user %s channel %s: %s", user_id, channel, exc)
 
 
-def _log_dispatch(user_id: str, job_id: int | None, results: list["ChannelSendResult"]) -> None:
+def _log_dispatch(user_id: str, job_id: int | None, results: list[ChannelSendResult]) -> None:
     """Gap I — one structured line per channel: did it send / queue / skip, and why."""
     for r in results:
         if r.queued_digest:

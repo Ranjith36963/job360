@@ -53,7 +53,6 @@ class JobSpySource(BaseJobSource):
             for _, row in df.iterrows():
                 title = str(row.get("title", ""))
                 desc = str(row.get("description", ""))
-                text = f"{title} {desc}".lower()
                 site = str(row.get("site", "indeed")).lower()
                 source_name = site if site in ("indeed", "glassdoor") else "indeed"
                 now_iso = datetime.now(timezone.utc).isoformat()

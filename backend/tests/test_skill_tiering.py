@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.skill_tiering import (

@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
@@ -46,7 +45,6 @@ class HNJobsSource(BaseJobSource):
         title = item.get("title", "")
         url = item.get("url", "")
         text = item.get("text", "")
-        check_text = f"{title} {text}".lower()
 
         # Extract company from title (format: "Company is hiring ..." or "Company (YC ...)")
         company = "Unknown"

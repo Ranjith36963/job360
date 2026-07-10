@@ -17,8 +17,8 @@ from typing import Optional
 import pytest
 
 from src.models import Job
-from src.services.circuit_breaker import default_registry as _default_registry
 from src.services.circuit_breaker import BreakerState
+from src.services.circuit_breaker import default_registry as _default_registry
 
 
 class _FakeSource:
@@ -58,9 +58,9 @@ def tmp_db_path(tmp_path, monkeypatch):
     we reset both so run_search inside this fixture starts from a known
     clean state.
     """
-    from src.core import settings as core_settings
     from src.api import dependencies
     from src.api.routes import search as search_route
+    from src.core import settings as core_settings
 
     path = tmp_path / "test.db"
     monkeypatch.setattr(core_settings, "DB_PATH", path, raising=True)
@@ -89,10 +89,13 @@ def fake_profile(monkeypatch):
     the storage module alone does NOT work because `main.py` did
     `from src.services.profile.storage import load_profile`.
     """
-    from src.services.profile.models import (
-        CVData, SearchConfig, UserPreferences, UserProfile,
-    )
     from src import main as main_mod
+    from src.services.profile.models import (
+        CVData,
+        SearchConfig,
+        UserPreferences,
+        UserProfile,
+    )
 
     stub = UserProfile(
         cv_data=CVData(
@@ -125,7 +128,10 @@ async def test_run_search_loads_profile_for_given_user(tmp_db_path, monkeypatch)
     """
     from src import main as main_mod
     from src.services.profile.models import (
-        CVData, SearchConfig, UserPreferences, UserProfile,
+        CVData,
+        SearchConfig,
+        UserPreferences,
+        UserProfile,
     )
 
     captured: dict[str, str] = {}
@@ -159,7 +165,10 @@ async def test_run_search_defaults_to_tenant_when_no_user(tmp_db_path, monkeypat
     """run_search() with no user_id keeps loading DEFAULT_TENANT_ID (CLI path)."""
     from src import main as main_mod
     from src.services.profile.models import (
-        CVData, SearchConfig, UserPreferences, UserProfile,
+        CVData,
+        SearchConfig,
+        UserPreferences,
+        UserProfile,
     )
 
     captured: dict[str, str] = {}
@@ -194,7 +203,10 @@ async def test_dashboard_feed_isolated_between_two_users(tmp_db_path, monkeypatc
     from src import main as main_mod
     from src.repositories.database import JobDatabase
     from src.services.profile.models import (
-        CVData, SearchConfig, UserPreferences, UserProfile,
+        CVData,
+        SearchConfig,
+        UserPreferences,
+        UserProfile,
     )
 
     # Mirror production init order (dependencies.init_db): base tables, then
@@ -408,8 +420,8 @@ async def test_job_detail_dims_are_per_user(tmp_db_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_run_search_uses_tiered_scheduler(tmp_db_path, fake_profile, monkeypatch):
     """Assert run_search calls TieredScheduler.tick exactly once with force=True."""
-    from src.services import scheduler as scheduler_mod
     from src import main as main_mod
+    from src.services import scheduler as scheduler_mod
 
     tick_calls: list[dict] = []
     original_tick = scheduler_mod.TieredScheduler.tick

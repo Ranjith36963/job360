@@ -8,26 +8,25 @@ signature are preserved, so downstream tests (``TestEnrichCVFromLinkedIn``,
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.linkedin_parser import (
-    parse_linkedin_pdf,
-    parse_linkedin_pdf_async,
-    enrich_cv_from_linkedin,
-    is_linkedin_pdf,
-    _split_sections,
+    _coerce_certifications,
+    _coerce_education,
+    _coerce_positions,
+    _dewrap_columns,
     _extract_header_fields,
     _extract_skills,
     _looks_like_linkedin,
-    _coerce_positions,
-    _coerce_education,
-    _coerce_certifications,
-    _dewrap_columns,
+    _split_sections,
+    enrich_cv_from_linkedin,
+    is_linkedin_pdf,
+    parse_linkedin_pdf,
+    parse_linkedin_pdf_async,
 )
-
+from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 # ---------------------------------------------------------------------------
 # Two-column de-interleaving (LinkedIn "Save to PDF" sidebar fix)
@@ -91,12 +90,11 @@ class TestInlineTechSkills:
         sk = set(_extract_inline_tech_skills(text))
         assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
 from src.services.profile.github_enricher import (
-    fetch_github_profile,
-    enrich_cv_from_github,
     _infer_skills,
+    enrich_cv_from_github,
+    fetch_github_profile,
 )
 from src.services.profile.keyword_generator import generate_search_config
-
 
 # ---------------------------------------------------------------------------
 # Helpers — build LinkedIn-shaped PDFs in memory

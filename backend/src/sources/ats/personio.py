@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import COMPANY_NAME_OVERRIDES, PERSONIO_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
-from src.core.companies import PERSONIO_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.personio")
 
@@ -56,7 +56,6 @@ class PersonioSource(BaseJobSource):
         for position in root.iter("position"):
             title = (position.findtext("name") or "").strip()
             office = (position.findtext("office") or "").strip()
-            department = (position.findtext("department") or "").strip()
             pos_id = (position.findtext("id") or "").strip()
 
             # Get job descriptions
