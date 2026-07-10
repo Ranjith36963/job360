@@ -33,7 +33,7 @@ flowchart TD
     Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30\n− Foreign location 15"]
     Scorer --> OptEngines["Enrichment + Semantic +\nLLM Judge (opt-in flags)"]
     OptEngines --> Dedup[Deduplicator\nnormalized company+title]
-    Dedup --> DB[(SQLite\nSeen Jobs + Run Log)]
+    Dedup --> DB[(Postgres\nSeen Jobs + Run Log)]
 
     DB --> Channels{NotificationChannel ABC}
     Channels --> Email[Email\nHTML + CSV]
@@ -70,6 +70,14 @@ flowchart TD
 - **Interactive preferences**: Target titles, skills, locations, salary range, work arrangement
 - **Dynamic keywords**: Profile generates personalised search queries, relevance keywords, and scoring criteria
 - **Profile required**: As of 2026-04-09 the keyword fallback lists are empty — `setup-profile` must run before the engine can produce meaningful scores
+- **Two-pass extraction**: every input (CV/LinkedIn/GitHub/preferences) gets a deterministic pass + an LLM enhance pass, merged into one profile; re-runs automatically on any profile change
+- **LLM provider chain**: OpenAI `gpt-4o-mini` (primary) → Gemini → Groq → Cerebras, plus an `llm_curate.py` reasoning pass that merges duplicate CV/LinkedIn entries and suggests adjacent skills (opt-in, never auto-counted)
+
+### Tailored applications (per job)
+- **Tailored CV / cover letter generation** (`services/tailoring/`, `POST /tailor/{job_id}/generate`) — drafts a CV/cover-letter tailored to a specific job against the user's profile
+- **PDF/DOCX export**, editable draft with a "keep" action, and per-user usage tracking (`tailored_usage`, for freemium metering)
+- **Integrity + provenance** — flags claims not traceable to the user's actual profile data, and maps generated text back to the source profile field
+- **Skill-gap analysis** (`services/skill_gap.py`) — steers generation around the gap between a job's required skills and the user's profile instead of inventing coverage
 
 ### Scoring (0-100)
 - **Title match** (0-40 pts) — exact match = 40, partial = 20, keyword overlap = 5 each
@@ -101,14 +109,14 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 25 routes (health, jobs, actions, profile, search, pipeline)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules / ~70 endpoints (health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
-- **Persistent tracking** — SQLite database prevents duplicate notifications across runs
+- **Persistent tracking** — Postgres database prevents duplicate notifications across runs
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
 - **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request; per-source fetch ceiling 240s (ATS) / 60s (others) via `TieredScheduler.resolve_fetch_timeout()`
@@ -119,9 +127,9 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (~1,409 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (~1,712 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
 
-> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly --ignore=tests/test_main.py 2>nul` for live per-file counts.
+> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch + two-pass extraction + Pillar-1 overhaul + tailoring batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly 2>nul` for live per-file counts.
 
 | Test file | Approx. count | What it covers |
 |-----------|-------|----------------|
@@ -133,9 +141,9 @@ flowchart TD
 | `test_models.py` | 21+ | Job dataclass, normalisation, company cleaning |
 | `test_notifications.py` | 19+ | Email, Slack, Discord sending |
 | `test_deduplicator.py` | 29+ | Cross-source dedup (incl. marketing-suffix B-4 tests) |
-| `test_main.py` | 12 | Orchestrator (excluded from canonical run — hits live Indeed) |
+| `test_main.py` | 14 | Orchestrator — offline since M8 (JobSpy stubbed), part of the canonical run |
 | `test_cli.py` | 11+ | CLI commands + SOURCE_REGISTRY assertions |
-| `test_database.py` | 9+ | SQLite operations, migrations, source history |
+| `test_database.py` | 9+ | Postgres operations, migrations, source history |
 | `test_api.py` | 9+ | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
 | `test_llm_provider.py` | 8+ | Multi-provider LLM client for CV parsing |
 | `test_notification_base.py` | 7+ | ABC, format_salary, channel discovery |
@@ -145,7 +153,7 @@ flowchart TD
 | `test_cron.py` | 5 | cron_setup.sh validation |
 | `test_cli_view.py` | 5+ | Rich terminal table viewer |
 | `test_csv_export.py` | 4+ | CSV export format |
-| (Pillar-2/-3 + Step-0..3 + matcher batch additions) | ~900+ | auth, feed, prefilter, channels, dispatcher, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, notification rules, application history, llm_matcher |
+| (Pillar-2/-3 + Step-0..3 + matcher batch + two-pass + Pillar-1 overhaul + tailoring additions) | ~1,200+ | auth, feed, prefilter, channels, dispatcher, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, notification rules, application history, llm_matcher, llm_curate, tailoring (generator/prompts/pdf/docx/patterns/integrity/provenance), skill_gap |
 
 ## Quick Start
 
@@ -316,7 +324,7 @@ What `keywords.py` still contains (domain-agnostic, applies to any profession):
 - **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
-**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: Gemini→Groq→Cerebras free-tier fallback chain). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
+**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: OpenAI `gpt-4o-mini` primary → Gemini → Groq → Cerebras free-tier fallback chain). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
 
 ### ATS Companies (`backend/src/core/companies.py`)
 
@@ -374,21 +382,22 @@ job360/
 │       │   ├── auth/
 │       │   ├── channels/        # Apprise dispatcher
 │       │   ├── notifications/   # email, slack, discord, report_generator
-│       │   └── profile/         # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
+│       │   ├── profile/         # cv_parser, llm_provider (OpenAI→Gemini→Groq→Cerebras), llm_curate, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator, two_pass
+│       │   └── tailoring/       # generator, prompts, pdf, docx, patterns, integrity, provenance
 │       ├── repositories/        # (renamed from storage/)
-│       │   ├── database.py
+│       │   ├── database.py      # Postgres via pg.py (Phase 1 migration)
 │       │   └── csv_export.py
 │       ├── sources/             # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
-│       │   ├── apis_free/   (9 free_json + 2 rss-tier)
-│       │   ├── ats/         (12)
+│       │   ├── apis_free/   (10: 9 free_json + 1 rss-tier)
+│       │   ├── ats/         (11)
 │       │   ├── feeds/       (8)
-│       │   ├── scrapers/    (7)
+│       │   ├── scrapers/    (5)
 │       │   └── other/       (4 classes / 5 keys)
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # ~1,409 collected offline (2 live deselected) across 60+ files (defer to runtime count)
+├── backend/tests/               # ~1,712 collected offline (2 live deselected) across 60+ files (defer to runtime count)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
@@ -412,7 +421,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-The full suite passes (~1,409 collected offline, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+The full suite passes (~1,712 collected offline, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
 
 ## Output
 

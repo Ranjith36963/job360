@@ -26,8 +26,8 @@
 > Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
-**Last updated:** 2026-06-20
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Last updated:** 2026-07-10
+**Total tests:** defer to the runtime collected count (~1,712 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 47 entries in `SOURCE_REGISTRY` (46 live instances — `indeed` + `glassdoor` share `JobSpySource`); gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
@@ -171,7 +171,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 ## What Is Working Right Now
 
 - Full 47-source pipeline (46 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16)
-- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
+- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: OpenAI `gpt-4o-mini` primary → Gemini → Groq → Cerebras, plus an `llm_curate.py` reasoning pass for cross-source dedup + adjacent-skill suggestions)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
 - Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
@@ -181,7 +181,8 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
 - Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + ChromaDB)
-- SQLite database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
+- Postgres database (psycopg3, Phase 1 migration off SQLite/aiosqlite) with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications` / `tailored_documents` / `tailored_usage`
+- Tailored CV / cover-letter generation per job (`services/tailoring/` + `api/routes/tailor.py`): AI draft → user-polished doc, PDF/DOCX export, fabrication-integrity checks, provenance mapping back to profile fields, `skill_gap.py` gap analysis
 - Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
@@ -234,7 +235,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_deduplicator.py` | `deduplicator.py` | 13 |
 | `test_main.py` | `main.py` orchestrator + error paths | 14 |
 | `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
-| `test_database.py` | SQLite database + migration + source history | 9 |
+| `test_database.py` | Postgres database + migration + source history | 9 |
 | `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |
 | `test_llm_provider.py` | Multi-provider LLM client for CV parsing | 8 |
 | `test_notification_base.py` | Channel base + discovery | 7 |
@@ -244,8 +245,15 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_cron.py` | cron_run.sh | 5 |
 | `test_cli_view.py` | `cli_view.py` | 5 |
 | `test_csv_export.py` | CSV export | 4 |
-| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+| `test_two_pass.py` | `services/profile/two_pass.py` two-pass extraction | 43 |
+| `test_cv_coverletter.py` | `services/tailoring/generator.py` + `api/routes/tailor.py` | 19 |
+| `test_pillar1_closure.py` | Pillar-1 extraction overhaul closure (OpenAI-primary chain) | 18 |
+| `test_tailoring_integrity.py` | `services/tailoring/integrity.py` | 7 |
+| `test_skill_gap.py` | `services/skill_gap.py` | 6 |
+| `test_tailoring_provenance.py` | `services/tailoring/provenance.py` | 6 |
+| `test_llm_curate.py` | `services/profile/llm_curate.py` merge/adjacent-skill passes | 5 |
+| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~1,150 |
+| **Total (current green baseline)** | | defer to runtime count (~1,712 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
 
 ### Not covered or lightly covered
 

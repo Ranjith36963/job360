@@ -16,9 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
-- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (~1,409 collected offline, 2 live tests deselected — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (~1,712 collected offline, 2 live tests deselected — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
-- **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
+- **Two deployables:** `backend/` (Python 3.9+, FastAPI, async Postgres via psycopg3 — migrated off SQLite/aiosqlite in the Phase 1 Postgres migration) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but only 46 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
 
 ## Hard Rules (load-bearing, numbered, do not violate)
@@ -99,7 +99,7 @@ Job360 is an automated UK job search system supporting **any professional domain
 | Package | Version | Purpose |
 |---------|---------|---------|
 | aiohttp | >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite | >=0.19.0 | Async SQLite for job storage |
+| psycopg[binary] | >=3.2 | Async Postgres driver for job storage (Phase 1 migration; replaces aiosqlite) |
 | python-dotenv | >=1.0.0 | .env file loading |
 | jinja2 | >=3.1.0 | HTML report templates |
 | click | >=8.1.0 | CLI framework |
@@ -112,7 +112,7 @@ Job360 is an automated UK job search system supporting **any professional domain
 | uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
 | python-multipart | >=0.0.9 | File upload support |
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| google-generativeai / groq / cerebras-cloud-sdk | latest | Multi-provider LLM client for CV parsing |
+| openai / google-generativeai / groq / cerebras-cloud-sdk | latest | Multi-provider LLM client for CV parsing (OpenAI `gpt-4o-mini` primary → Gemini → Groq → Cerebras fallback) |
 | argon2-cffi / itsdangerous / cryptography | latest | Auth + signed sessions + Fernet (Batch 2) |
 | apprise | >=1.9.9 | Multi-channel notification dispatch (Batch 2; lazy-imported) |
 | rapidfuzz / scikit-learn | latest | Pillar 2 dedup layers 2–3 (lazy-imported) |
@@ -182,7 +182,7 @@ npm run test:e2e               # Playwright
 
 ## Architecture (high-level)
 
-The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **SQLite DB** → **Notifications + Reports + CSV**.
+The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **Postgres DB** → **Notifications + Reports + CSV**.
 
 > **Full directory layout, data-flow diagrams, DB schema, and dependency tables: see `ARCHITECTURE.md`.** This file holds only the high-level picture + Claude-specific guidance.
 
@@ -194,19 +194,19 @@ job360/
 │   ├── main.py                # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml         # Deps + ruff/mypy/pytest config
 │   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
-│   ├── migrations/            # 22 forward+reverse SQL migration pairs (0000 → 0021) + runner.py
+│   ├── migrations/            # 25 forward+reverse SQL migration pairs (0000 → 0024) + runner.py
 │   ├── src/
 │   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── models.py          # Job dataclass with normalized_key() for dedup
-│   │   ├── api/               # FastAPI app + 11 route modules (46 endpoints, all per-user routes gated)
+│   │   ├── api/               # FastAPI app + 13 route modules (70 endpoints, all per-user routes gated)
 │   │   ├── core/              # settings, keywords, companies, skill_synonyms, fx, tenancy
-│   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
-│   │   ├── repositories/      # database, csv_export
+│   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, skill_gap, rescore, llm_matcher, auth/, channels/, notifications/, profile/, tailoring/
+│   │   ├── repositories/      # database (Postgres via pg.py), csv_export
 │   │   ├── sources/           # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY entries
 │   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep @02:00, notification_tick @every 5m)
 │   │   └── utils/             # logger, rate_limiter, time_buckets
-│   └── tests/                 # ~1,409 collected offline (defer to runtime collected count)
+│   └── tests/                 # ~1,712 collected offline (2 deselected; defer to runtime collected count)
 └── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
     └── src/
         ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, channels (top-level), settings/{layout,notifications,account}, notifications (ledger)
@@ -221,7 +221,7 @@ job360/
 - `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
 - `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
 - `src/services/channels/dispatcher.py` — Apprise wrapper. Consults the single per-user `notification_rules` row: score-threshold filter, timezone-aware quiet-hours hold-and-queue, mode routing (instant send vs daily/every_n_hours queue); `force=True` bypasses the gate for bundle sends (rules #23/#24).
-- `src/repositories/database.py` — Async SQLite (aiosqlite), WAL, 5s busy timeout. Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
+- `src/repositories/database.py` — Async Postgres (psycopg3 via `src/repositories/pg.py`; Phase 1 migration off SQLite/aiosqlite — no PRAGMAs/WAL/busy_timeout, Postgres handles concurrency natively). Shared catalog: `jobs`, `run_log` (gained `matcher_stats`), `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`, `tailored_documents`, `tailored_usage`, `tailoring_patterns` (migration 0023 — tailored-CV/cover-letter feature). Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
 
 ### Sources
 
@@ -253,6 +253,8 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
+| `DATABASE_URL` | Yes in prod (in `_REQUIRED_PROD_VARS`) | Postgres connection string (Phase 1 migration off SQLite). Dev default in `core/settings.py`: `postgresql://job360:job360dev@localhost:5433/job360` |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` / `CEREBRAS_API_KEY` | No (recommended: `OPENAI_API_KEY`) | Multi-provider LLM chain for CV/LinkedIn/GitHub extraction (`services/profile/llm_provider.py`) — OpenAI primary → Gemini → Groq → Cerebras fallback |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
 | `ENGINE1_ENABLED` / `ENGINE2_ENABLED` / `ENGINE3_ENABLED` / `ENGINE4_ENABLED` | No (E1 default `true`; E2/E3/E4 default to their legacy flag) | **Independent per-engine switches** — any combo. Effective gate is `ENGINEx_ENABLED OR <legacy flag>` (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`). E1 (keyword) had no prior flag. |
@@ -276,7 +278,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 
 ## Testing
 
-**~1,409 collected offline** (2 live tests deselected — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
+**~1,712 collected offline** (2 live tests deselected — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). Shared fixtures in `tests/conftest.py`. All HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
 
 `make test` runs the full suite including `test_main.py` (rehabbed offline in M8 — JobSpy stubbed, runs in ~8 s).
 
@@ -336,6 +338,14 @@ Every profile input now runs a **deterministic pass** (plain code) AND an **LLM 
 `services/profile/two_pass.py` orchestrates: `run_two_pass_extraction(profile)` re-runs both passes for all four inputs **from stored data only** (no re-upload, no GitHub re-fetch); each pass no-ops when its input/keys are absent and never raises. `reextract_and_rescore(user_id)` = load → re-extract → `save_profile(..., "two_pass_reextract")` (new version id) → `rescore_user_feed`. The `profile.py` change trigger now schedules `reextract_and_rescore` instead of bare `rescore_user_feed`.
 
 **Rule analog (same spirit as #18):** new `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`, `about_me_inferred_skills`) need **no migration** — profiles store as a JSON blob and `storage._filter_fields` drops unknown keys, so old rows load with defaults. New skill-tiering sources: `about_me_llm` (2.0) and `github_llm` (1.5) in `skill_tiering._SOURCE_WEIGHTS`. **Cost note:** any input change re-runs all LLM passes in the background (faithful to design); gate behind a flag later if it proves expensive. M2 / the LLM judge is untouched.
+
+### Pillar-1 extraction overhaul (merged to `main`)
+
+Provider chain for CV/LinkedIn/GitHub LLM calls is now **OpenAI (`gpt-4o-mini`, paid, primary) → Gemini → Groq → Cerebras** (`src/services/profile/llm_provider.py`) — OpenAI leads because its paid quota removes the silent-empty/429 failures the free-tier-only chain used to hit. Scoring calls (`llm_score_batch`) reorder to **OpenAI → Cerebras → Groq → Gemini** (Cerebras kept second there for raw speed). New curation layer `src/services/profile/llm_curate.py` adds two LLM-reasoning passes that the deterministic/fuzzy passes can't do safely: `llm_merge_duplicates` (collapses the same CV/LinkedIn entry phrased two different ways into one canonical entry) and `llm_suggest_adjacent_skills` (proposes neighbouring skills, e.g. PyTorch → TensorFlow, as opt-in suggestions the user must accept — never auto-counted). Both no-op on trivial input and degrade gracefully on provider outage (rule #28-compliant: no hardcoded vocabulary, LLM reasoning only).
+
+### Tailored CV / cover letter generation (`src/services/tailoring/`, `src/api/routes/tailor.py`)
+
+Per-job tailored document generation, on top of the existing profile + scoring stack: `generator.py` (drafts a tailored CV/cover-letter against a specific job + the user's profile), `prompts.py` (prompt templates), `pdf.py` / `docx.py` (export), `patterns.py` (learns phrasing patterns across a user's accepted docs), `integrity.py` (flags possible fabrications — claims not traceable to the user's actual profile data), `provenance.py` (maps each generated segment back to the source profile field it came from). `src/services/skill_gap.py` computes the gap between a job's required skills and the user's profile so the generator can steer around it instead of inventing coverage. API surface is `src/api/routes/tailor.py`: `POST /tailor/{job_id}/generate`, `GET /tailor/{job_id}`, `GET /tailor/{job_id}/{doc_kind}/provenance`, `PATCH /tailor/{job_id}/{doc_kind}`, `POST /tailor/{job_id}/{doc_kind}/keep`, `GET /tailor/{job_id}/{doc_kind}/download`. New tables (migration 0023 `tailored_documents`/`tailored_usage`/`tailoring_patterns`, migration 0024 flagged-terms column): `tailored_documents` stores the AI draft + user-polished version + status per job/doc-kind; `tailored_usage` tracks per-user generation counts (for freemium metering); `tailoring_patterns` stores learned phrasing features by `doc_kind`.
 
 ## Related documentation
 

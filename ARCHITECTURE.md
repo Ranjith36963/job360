@@ -18,7 +18,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Markdown report
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
-                                                  Store -> SQLite catalog (jobs table)
+                                                  Store -> Postgres catalog (jobs table)
                                                   Embed (opt-in) -> ChromaDB
 ```
 
@@ -39,14 +39,14 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 22 forward/reverse SQL migrations (0000 → 0021) + runner.py
+│   ├── migrations/                   # 25 forward/reverse SQL migrations (0000 → 0024) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 11 route modules
-│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules
+│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
@@ -75,9 +75,12 @@ job360/
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
-│   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
+│   │   │   ├── profile/              # cv_parser, llm_provider (OpenAI→Gemini→Groq→Cerebras), llm_curate (merge-dupes/adjacent-skills), linkedin_parser, github_enricher, models, preferences, storage, keyword_generator, two_pass, skill_entry, skill_normalizer, skill_tiering
+│   │   │   ├── tailoring/            # generator, prompts, pdf, docx, patterns, integrity, provenance (tailored CV/cover-letter per job)
+│   │   │   ├── skill_gap.py          # required-vs-profile skill gap (feeds the tailoring generator)
+│   │   │   └── rescore.py            # profile-version re-score trigger
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 22-migration forward-compat schema
+│   │   │   ├── database.py           # Async Postgres (psycopg3 via pg.py; Phase 1 migration off SQLite) + 25-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -93,7 +96,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+│   └── tests/                        # ~1,712 collected offline (2 live deselected) across 60+ files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -270,7 +273,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
 - `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
-- Uses `llm_provider.llm_extract_validated` (Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
+- Uses `llm_provider.llm_extract_validated` (OpenAI→Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
 - Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
 - `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
 - Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
@@ -478,7 +481,7 @@ LinkedIn profile PDF -> parse_linkedin_pdf() -> dict
   +-> is_linkedin_pdf() 2-of-3 heuristic (URL / headings / footer)
   +-> _split_sections() by known heading vocabulary
   +-> Deterministic: summary, skills (one per line), headline, industry
-  +-> LLM (Gemini -> Groq -> Cerebras) in parallel for:
+  +-> LLM (OpenAI -> Gemini -> Groq -> Cerebras) in parallel for:
   |     - Experience -> [{title, company, start, end, description}, ...]
   |     - Education  -> [{school, degree, start, end, notes}, ...]
   |     - Certifications -> [{name, authority, start, end}, ...]
@@ -509,7 +512,7 @@ PDF/DOCX -> extract_text() -> raw text
   |
   +-> _find_sections() -> {skills, experience, education, certifications, summary}
   |
-  +-> LLM extraction via llm_provider.py (Gemini/Groq/Cerebras with free-tier fallback)
+  +-> LLM extraction via llm_provider.py (OpenAI gpt-4o-mini primary, paid -> Gemini/Groq/Cerebras free-tier fallback)
   |     Returns: skills[], job_titles[], education[], certifications[], summary
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```
@@ -536,6 +539,8 @@ Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
 no-ops when its input or LLM key is missing. Skill provenance is preserved: the
 new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 `skill_tiering` alongside the existing ones.
+
+**Curation layer (`services/profile/llm_curate.py`, Pillar-1 overhaul):** runs after the two passes above. `llm_merge_duplicates` collapses the same real-world entry (degree, role) written two different ways across CV + LinkedIn into one clean entry. `llm_suggest_adjacent_skills` proposes neighbouring skills (PyTorch → TensorFlow/Keras/JAX) as opt-in suggestions — never auto-counted into matching. Both are pure LLM reasoning (rule #28: no hardcoded vocabulary), no-op on trivial input, never raise.
 
 ---
 
@@ -571,7 +576,7 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 22 forward-migrations (0000–0021). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by 25 forward-migrations (0000–0024) against **Postgres** (psycopg3 — Phase 1 migration off SQLite/aiosqlite; the `CREATE TABLE`/`AUTOINCREMENT` syntax below is the historical SQLite baseline, kept for continuity). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016); `magic_link_tokens` table (migration 0022); `run_log` gains `matcher_stats` (LLM judge telemetry); new `tailored_documents` / `tailored_usage` / `tailoring_patterns` tables (migration 0023) plus a flagged-terms column (migration 0024) for the tailored-CV/cover-letter feature.
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -627,11 +632,11 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
 
-**Pragmas:** `journal_mode=WAL`, `busy_timeout=5000`
+**Pragmas:** historical SQLite-era setting, now obsolete — Postgres has no PRAGMAs/WAL/busy_timeout; it handles concurrency natively (no "database is locked").
 
 **Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
 
-**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a SQLite DEFAULT).
+**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a DB-level DEFAULT).
 
 ---
 
@@ -706,7 +711,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | Package | Purpose |
 |---------|---------|
 | aiohttp >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite >=0.19.0 | Async SQLite for job storage |
+| psycopg[binary] >=3.2 | Async Postgres driver for job storage (Phase 1 migration; replaces aiosqlite) |
 | python-dotenv >=1.0.0 | .env file loading |
 | jinja2 >=3.1.0 | HTML report templates |
 | click >=8.1.0 | CLI framework |
@@ -719,9 +724,10 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | uvicorn[standard] >=0.30.0 | ASGI server for FastAPI |
 | python-multipart >=0.0.9 | File upload support for FastAPI |
 | httpx >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| google-generativeai >=0.8.0 | Gemini LLM provider for CV parsing |
-| groq >=0.11.0 | Groq LLM provider for CV parsing |
-| cerebras-cloud-sdk >=1.0.0 | Cerebras LLM provider for CV parsing |
+| openai (installed, not yet declared in pyproject.toml — see note) | OpenAI `gpt-4o-mini` LLM provider for CV parsing, now primary |
+| google-generativeai >=0.8.0 | Gemini LLM provider for CV parsing (2nd in chain) |
+| groq >=0.11.0 | Groq LLM provider for CV parsing (3rd in chain) |
+| cerebras-cloud-sdk >=1.0.0 | Cerebras LLM provider for CV parsing (4th in chain) |
 
 ### Dev (requirements-dev.txt)
 
