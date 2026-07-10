@@ -20,6 +20,36 @@ jobs:
   offline-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The backend moved to PostgreSQL, so the suite needs a live DB (settings.py
+    # defaults to :5433; we point DATABASE_URL at the service on :5432 here).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +85,13 @@ jobs:
       - name: Run Playwright UI specs
         working-directory: frontend
         run: npx playwright test
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
 
   loop2-e2e-spotlight:
     # A fast, focused run of just the automated Loop 2 lifecycle test, so a
@@ -62,6 +99,34 @@ jobs:
     # scanning the whole suite.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
