@@ -1540,3 +1540,38 @@ passes in the background (faithful to the ask). On a CV upload this re-runs the
 CV LLM once more than strictly needed. If this proves expensive, gate
 `reextract_and_rescore`'s LLM passes behind a flag later — the deterministic
 passes are free and always safe.
+
+## Dashboard score-consistency + Postgres test-gate fix (2026-07)
+
+**Attribution correction (why this note exists).** The **dashboard
+score-consistency fix** shipped in commit **`fc8ce20`**, which a *concurrent
+session* committed under a tailor-only subject
+(`fix(tailor): don't flag dotted credentials`). That commit is already published
+on `origin/main`, so its message can't be reworded without force-rewriting shared
+history — this forward note records the true contents instead.
+
+**1) Dashboard / job detail — score consistency (`fc8ce20`, on `origin/main`).**
+Job cards showed the keyword `match_score` in the big badge while the list was
+ranked by the LLM judge fit (`COALESCE(llm_fit_score, match_score)`), so the
+prominent numbers looked scrambled. Fix: the big badge now shows the *same* score
+the list sorts by (judge fit when judged, else keyword), labelled `AI fit` /
+`match`; the keyword score is kept as a small `kw N` chip; badge and AI-verdict
+pill colours are unified on 70/40 bands. The job detail page leads with the AI
+fit + verdict, keyword demoted. Backend `GET /jobs/{id}` now surfaces the
+per-user judge verdict (`llm_fit_score` / `llm_verdict` / `llm_reason`). Files:
+`JobCard.tsx`, `JobDetailClient.tsx`, `api/routes/jobs.py`, `repositories/database.py`
+(+ `llm-verdict-badge`, `job-detail-score`, `test_api` tests). Verified live via
+Playwright.
+
+**2) Postgres "missing table" tolerance (`f6c522c` on `phase-1-postgres`;
+independently `62b91f5` on `origin/main`).** The profile-version helpers in
+`services/profile/storage.py` tolerate a missing `user_profile_versions` table
+(pre-migration DB) — but the check matched only SQLite's `no such table`. Postgres
+says `relation "..." does not exist`, so the "tolerated" error re-raised and
+crashed `run_search`, failing the full suite on a fresh DB. `_is_missing_table()`
+now recognises both backends' wording. Full suite: **1673 passed** on a fresh DB.
+
+**3) Local gate helper (`scripts/gate-fresh-db.sh`).** Runs the commit gate against
+a clean throwaway Postgres database — matching CI's fresh-Postgres service
+(`ci-offline.yml`, `d0cefe6`) — so the local suite isn't polluted by the shared
+dev DB's data + partial migration state.
