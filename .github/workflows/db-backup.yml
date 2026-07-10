@@ -36,21 +36,16 @@ jobs:
       - name: Install tools (Postgres client 18)
         run: |
           # Railway's Postgres is 18.x; pg_dump refuses to dump a server newer
-          # than itself, and Ubuntu 24.04's default client is 16 — so pull the
-          # matching client from the official PostgreSQL (PGDG) apt repo.
-          # aws CLI v2 + gpg are already on the runner image.
+          # than itself, and Ubuntu 24.04's default client is 16. Use PostgreSQL's
+          # OFFICIAL repo-setup script (postgresql-common) — it installs the PGDG
+          # apt key/repo correctly, avoiding the `sudo gpg --dearmor` /dev/tty
+          # failure that a manual key import hits in CI. aws CLI v2 is pre-installed.
           sudo apt-get update -q
-          sudo apt-get install -y -q curl ca-certificates lsb-release
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -q postgresql-client-18
           pg_dump --version
           aws --version
-          gpg --version
 
       - name: Dump prod database
         env:
