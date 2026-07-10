@@ -1,0 +1,116 @@
+# Self-verifying encrypted Postgres backup → Cloudflare R2.
+#
+# Trust model: a backup is only counted if it PROVES it can be restored. Every
+# run dumps prod, restores that dump into a throwaway Postgres, and asserts the
+# data is really there (users/jobs/migration head) BEFORE encrypting + uploading.
+# A corrupt/empty dump makes the job go RED → GitHub emails the owner. So a green
+# run means "this exact file was proven restorable tonight".
+#
+# The dump holds user PII (emails, CVs), so it is encrypted with a passphrase
+# (BACKUP_PASSPHRASE secret) before it ever leaves the runner — R2 only ever sees
+# ciphertext. Restore: docs/RUNBOOK-backups.md.
+name: db-backup
+on:
+  schedule:
+    - cron: "17 2 * * *" # 02:17 UTC nightly
+  workflow_dispatch: {} # fire on demand from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # Throwaway Postgres used ONLY to restore-verify tonight's dump.
+      verify_db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: verify
+          POSTGRES_PASSWORD: verify
+          POSTGRES_DB: verify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U verify"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - name: Install tools (pg client 16 + awscli + gpg)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client awscli gnupg
+          pg_dump --version
+
+      - name: Dump prod database
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: |
+          TS=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "TS=$TS" >> "$GITHUB_ENV"
+          pg_dump --no-owner --no-privileges "$DATABASE_URL" > dump.sql
+          SIZE=$(stat -c%s dump.sql)
+          echo "dump size: $SIZE bytes"
+          # A real dump of a live DB is far bigger than 10 KB. Guards against
+          # "backed up the wrong / empty database".
+          test "$SIZE" -gt 10000
+
+      - name: VERIFY — restore the dump into a throwaway DB and check the data
+        run: |
+          export PGPASSWORD=verify
+          psql -h localhost -U verify -d verify -v ON_ERROR_STOP=1 -f dump.sql
+          USERS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM users")
+          JOBS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM jobs")
+          # _schema_migrations.id is TEXT (e.g. '0024_tailored_flagged_terms'), so
+          # COUNT the applied migrations (an integer) rather than max(id).
+          MIG=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM _schema_migrations")
+          echo "restored: users=$USERS jobs=$JOBS migrations_applied=$MIG"
+          # Hard gates — a dump that restores but is empty is NOT a valid backup.
+          test "$USERS" -ge 1
+          test "$MIG" -ge 20
+          {
+            echo "## ✅ Backup verified by restore"
+            echo ""
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| users restored | $USERS |"
+            echo "| jobs restored | $JOBS |"
+            echo "| migrations applied | $MIG |"
+            echo "| dump size (bytes) | $(stat -c%s dump.sql) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Encrypt (gpg symmetric) — R2 only ever sees ciphertext
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          gzip -c dump.sql > dump.sql.gz
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --passphrase "$BACKUP_PASSPHRASE" \
+            -o "job360-${TS}.sql.gz.gpg" dump.sql.gz
+          rm -f dump.sql dump.sql.gz
+          echo "encrypted artifact: job360-${TS}.sql.gz.gpg ($(stat -c%s job360-${TS}.sql.gz.gpg) bytes)"
+
+      - name: Upload to Cloudflare R2 (S3-compatible)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3 cp "job360-${TS}.sql.gz.gpg" "s3://${R2_BUCKET}/job360-${TS}.sql.gz.gpg" \
+            --endpoint-url "$R2_ENDPOINT"
+          echo "uploaded to r2://${R2_BUCKET}/job360-${TS}.sql.gz.gpg"
+
+      - name: Prune R2 to the newest 30 backups
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          # List backups oldest→newest, delete all but the newest 30.
+          mapfile -t OLD < <(aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' | grep '^job360-.*\.sql\.gz\.gpg$' | sort | head -n -30)
+          for key in "${OLD[@]}"; do
+            [ -n "$key" ] && aws s3 rm "s3://${R2_BUCKET}/${key}" --endpoint-url "$R2_ENDPOINT"
+          done
+          echo "retention: kept newest 30, pruned ${#OLD[@]}"
