@@ -15,6 +15,7 @@ import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from migrations import runner
 from src.services.channels import crypto
@@ -118,7 +119,7 @@ def _login(client: TestClient, email: str, password: str = "s3cretpassword") -> 
 # ---------------------------------------------------------------------------
 
 
-def _delete_me(client: TestClient, password: Optional[str] = None) -> "Response":
+def _delete_me(client: TestClient, password: Optional[str] = None) -> Response:
     """Send DELETE /api/auth/users/me.
 
     Starlette's TestClient.delete() does not expose a body parameter — use

@@ -49,7 +49,6 @@ class CareerjetSource(BaseJobSource):
             for item in data["jobs"]:
                 title = item.get("title", "")
                 description = item.get("description", "")
-                text = f"{title} {description}".lower()
 
                 apply_url = item.get("url", "")
                 if apply_url in seen_urls:
@@ -62,7 +61,6 @@ class CareerjetSource(BaseJobSource):
                 confidence = "high" if raw_date else "low"
 
                 # Parse salary if available
-                salary = item.get("salary", "")
                 salary_min = item.get("salary_min")
                 salary_max = item.get("salary_max")
                 if salary_min is not None:

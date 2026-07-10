@@ -55,8 +55,8 @@ def main():
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from scripts import engine_ablation as ea
+    from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 
@@ -110,7 +110,7 @@ def main():
         print("\nNo rankable profiles yet (judge runs may still be accruing).")
         return
 
-    print(f"\nDe-biased engine-vs-gold Spearman per rankable profile:")
+    print("\nDe-biased engine-vs-gold Spearman per rankable profile:")
     hdr = "ENGINE".ljust(10) + "".join(u.replace("eval-", "")[:9].rjust(11) for u in rankable)
     print(hdr + "   MEAN   WORST")
     print("-" * 78)

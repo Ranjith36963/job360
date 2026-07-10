@@ -24,8 +24,8 @@ def main() -> None:
             pass
 
     from scripts.accuracy_audit import _fetch_feed_rows, _fetch_profile, _open_db_ro
-    from scripts.eval_fake_profiles import aggregate, results_from_strong
     from scripts.engine_ablation import run_leaderboard_strong
+    from scripts.eval_fake_profiles import aggregate, results_from_strong
     from src.core.settings import DB_PATH
     from src.services.profile.storage import load_profile
 

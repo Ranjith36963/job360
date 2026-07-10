@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-
 # 32 bytes of entropy → 256 bits → ~43 base64url chars.
 # Past any brute-force horizon; small enough for URL query strings.
 _TOKEN_NBYTES = 32

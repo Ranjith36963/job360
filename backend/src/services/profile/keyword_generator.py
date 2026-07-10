@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from src.core.keywords import VISA_KEYWORDS, LOCATIONS
+
+from src.core.keywords import LOCATIONS, VISA_KEYWORDS
 from src.core.skill_synonyms import canonicalize_skill
 from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.skill_tiering import (

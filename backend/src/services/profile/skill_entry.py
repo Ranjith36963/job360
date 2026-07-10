@@ -24,7 +24,7 @@ disagree about a skill's importance.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -66,7 +66,7 @@ class SkillEntry:
         source: str,
         esco_uri: Optional[str] = None,
         last_seen: Optional[str] = None,
-    ) -> "SkillEntry":
+    ) -> SkillEntry:
         """Construct with confidence derived from the ``SOURCE_CONFIDENCE`` table."""
         conf = SOURCE_CONFIDENCE.get(source, 0.5)
         return cls(

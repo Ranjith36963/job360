@@ -8,7 +8,7 @@ embeds parameters in the PHC string).
 from __future__ import annotations
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError, VerificationError
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 _hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4, hash_len=32)
 

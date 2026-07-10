@@ -87,7 +87,9 @@ async function mockDashboard(page: Page) {
 }
 
 async function renderedScores(page: Page): Promise<number[]> {
-  return page.$$eval('[aria-label^="Match score"]', (els) =>
+  // JobCard's score badge is labelled "AI fit score: N" (judged) or "Keyword
+  // match score: N" (keyword) — match both via the shared " score: " infix.
+  return page.$$eval('[aria-label*=" score: "]', (els) =>
     els.map((el) => Number((el.getAttribute("aria-label")!.match(/\d+/) || [])[0]))
   );
 }
@@ -96,12 +98,7 @@ function isDescending(arr: number[]): boolean {
   return arr.every((v, i) => i === 0 || arr[i - 1] >= v);
 }
 
-// QUARANTINED (CI-flaky, pre-existing): passes locally against `next start`
-// but in CI the mocked data arrives (scores present in the trace network
-// response) yet the list/dialog never renders — a production-hydration race
-// specific to the CI runner. Tracked for a dedicated fix; skipped so the
-// e2e job reports the 24 reliably-green specs.
-test.describe.fixme("Dashboard job sort order", () => {
+test.describe("Dashboard job sort order", () => {
   const TABS = ["All", "24h", "48h", "3d", "5d", "7d"];
 
   test("jobs render highest-score-first regardless of server order", async ({
@@ -134,12 +131,16 @@ test.describe.fixme("Dashboard job sort order", () => {
 
     for (const tab of TABS) {
       await page.getByRole("button", { name: new RegExp(`^${tab}\\b`, "i") }).click();
-      // Re-read after the tab's refetch settles and assert still descending.
+      // Clicking a tab triggers a refetch that briefly EMPTIES the list while
+      // the new bucket loads. Poll on the full expected array — NOT on
+      // isDescending(), which is vacuously true for the transient [] and would
+      // let the wait exit mid-refetch (the flake this spec was quarantined for).
       await expect
-        .poll(async () => isDescending(await renderedScores(page)), { timeout: 30_000 })
-        .toBe(true);
-      const scores = await renderedScores(page);
-      expect(scores, `tab ${tab} order: ${scores}`).toEqual([78, 66, 54, 39, 35, 31]);
+        .poll(async () => await renderedScores(page), {
+          timeout: 30_000,
+          message: `tab ${tab} never settled to sorted order`,
+        })
+        .toEqual([78, 66, 54, 39, 35, 31]);
     }
   });
 });

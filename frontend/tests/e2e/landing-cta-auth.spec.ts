@@ -91,12 +91,7 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
 
-  // QUARANTINED (CI-flaky, pre-existing): passes locally against `next start`
-  // but in CI the mocked data arrives (scores present in the trace network
-  // response) yet the list/dialog never renders — a production-hydration race
-  // specific to the CI runner. Tracked for a dedicated fix; skipped so the
-  // e2e job reports the 24 reliably-green specs.
-  test.fixme("returning user signing in on the gated /login lands on /profile", async ({
+  test("returning user signing in on the gated /login lands on /profile", async ({
     page,
     context,
   }) => {
@@ -115,6 +110,8 @@ test.describe("Landing CTA → profile journeys", () => {
     );
 
     await page.goto("/login?next=%2Fprofile");
+    // Login defaults to the magic-link form now; reveal the password form.
+    await page.getByRole("button", { name: /use password/i }).click();
     await page.getByLabel(/email/i).fill("returning@example.com");
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /^sign in$/i }).click();

@@ -160,7 +160,7 @@ def _merge_fuzzy(jobs: list[Job], *, rank_key) -> list[Job]:
       - normalized location matches.
     """
     try:
-        from rapidfuzz import fuzz   # type: ignore
+        from rapidfuzz import fuzz  # type: ignore
     except ImportError:
         # Degraded — keep Layer-1 result.
         return jobs
@@ -208,8 +208,8 @@ def _merge_tfidf(jobs: list[Job], *, rank_key) -> list[Job]:
     if len(jobs) <= 1:
         return jobs
     try:
-        from sklearn.feature_extraction.text import TfidfVectorizer   # type: ignore
-        from sklearn.metrics.pairwise import cosine_similarity         # type: ignore
+        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
+        from sklearn.metrics.pairwise import cosine_similarity  # type: ignore
     except ImportError:
         return jobs
 
@@ -283,7 +283,7 @@ def _merge_embedding_reposts(
         by_company.setdefault(company, []).append(job)
 
     kept: list[Job] = []
-    for company, group in by_company.items():
+    for _company, group in by_company.items():
         company_kept: list[Job] = []
         for job in group:
             job_id = getattr(job, "id", None)

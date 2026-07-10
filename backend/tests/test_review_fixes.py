@@ -11,11 +11,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.profile import dep_file_parser
-from src.services.profile import skill_entry
+from src.services.profile import dep_file_parser, skill_entry
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
-
 
 # ── #1: CVSchema.industries + languages plumbed into CVData ────────
 
@@ -233,11 +231,13 @@ def test_fix5_legacy_hydrate_passes_source_action(monkeypatch, tmp_path):
     mislabel legacy migrations as ordinary 'user_edit'.
     """
     import asyncio
+
     import aiosqlite
+
     from migrations import runner
     from src.core import settings as core_settings
-    from src.services.profile import storage
     from src.core.tenancy import DEFAULT_TENANT_ID
+    from src.services.profile import storage
 
     async def _bootstrap():
         db = tmp_path / "t.db"

@@ -1,55 +1,56 @@
-import re
 import asyncio
+import re
+
 import aiohttp
 from aioresponses import aioresponses
 
-from src.sources.apis_keyed.reed import ReedSource
-from src.sources.apis_keyed.adzuna import AdzunaSource
-from src.sources.apis_keyed.jsearch import JSearchSource
-from src.sources.apis_free.arbeitnow import ArbeitnowSource
-from src.sources.apis_free.remoteok import RemoteOKSource
-from src.sources.apis_free.jobicy import JobicySource
-from src.sources.apis_free.himalayas import HimalayasSource
-from src.sources.ats.greenhouse import GreenhouseSource
-from src.sources.ats.lever import LeverSource
-from src.sources.ats.workable import WorkableSource
-from src.sources.ats.ashby import AshbySource
-from src.sources.apis_free.remotive import RemotiveSource
-from src.sources.apis_keyed.jooble import JoobleSource
-from src.sources.scrapers.linkedin import LinkedInSource
-from src.sources.ats.smartrecruiters import SmartRecruitersSource
-from src.sources.ats.pinpoint import PinpointSource
-from src.sources.ats.recruitee import RecruiteeSource
-from src.sources.other.indeed import JobSpySource
-from src.sources.ats.workday import WorkdaySource
-from src.sources.apis_keyed.google_jobs import GoogleJobsSource
-from src.sources.apis_free.devitjobs import DevITJobsSource
-from src.sources.apis_free.landingjobs import LandingJobsSource
+from src.services.profile.models import SearchConfig
 from src.sources.apis_free.aijobs import AIJobsSource
-from src.sources.other.themuse import TheMuseSource
-from src.sources.other.hackernews import HackerNewsSource
+from src.sources.apis_free.arbeitnow import ArbeitnowSource
+from src.sources.apis_free.devitjobs import DevITJobsSource
+from src.sources.apis_free.himalayas import HimalayasSource
+from src.sources.apis_free.hn_jobs import HNJobsSource
+from src.sources.apis_free.jobicy import JobicySource
+from src.sources.apis_free.landingjobs import LandingJobsSource
+from src.sources.apis_free.remoteok import RemoteOKSource
+from src.sources.apis_free.remotive import RemotiveSource
+from src.sources.apis_free.teaching_vacancies import TeachingVacanciesSource
+from src.sources.apis_keyed.adzuna import AdzunaSource
 from src.sources.apis_keyed.careerjet import CareerjetSource
 from src.sources.apis_keyed.findwork import FindworkSource
+from src.sources.apis_keyed.google_jobs import GoogleJobsSource
 from src.sources.apis_keyed.gov_apprenticeships import GovApprenticeshipsSource
-from src.sources.other.nofluffjobs import NoFluffJobsSource
-from src.sources.apis_free.hn_jobs import HNJobsSource
+from src.sources.apis_keyed.jooble import JoobleSource
+from src.sources.apis_keyed.jsearch import JSearchSource
+from src.sources.apis_keyed.reed import ReedSource
+from src.sources.ats.ashby import AshbySource
+from src.sources.ats.greenhouse import GreenhouseSource
+from src.sources.ats.lever import LeverSource
+from src.sources.ats.personio import PersonioSource
+from src.sources.ats.pinpoint import PinpointSource
+from src.sources.ats.recruitee import RecruiteeSource
+from src.sources.ats.rippling import RipplingSource
+from src.sources.ats.smartrecruiters import SmartRecruitersSource
+from src.sources.ats.successfactors import SuccessFactorsSource
+from src.sources.ats.workable import WorkableSource
+from src.sources.ats.workday import WorkdaySource
+from src.sources.feeds.biospace import BioSpaceSource
 from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
 from src.sources.feeds.nhs_jobs import NHSJobsSource
-from src.sources.ats.personio import PersonioSource
-from src.sources.feeds.workanywhere import WorkAnywhereSource
-from src.sources.feeds.weworkremotely import WeWorkRemotelySource
+from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
 from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
-from src.sources.feeds.biospace import BioSpaceSource
+from src.sources.feeds.uni_jobs import UniJobsSource
+from src.sources.feeds.weworkremotely import WeWorkRemotelySource
+from src.sources.feeds.workanywhere import WorkAnywhereSource
+from src.sources.other.hackernews import HackerNewsSource
+from src.sources.other.indeed import JobSpySource
+from src.sources.other.nofluffjobs import NoFluffJobsSource
+from src.sources.other.themuse import TheMuseSource
+from src.sources.scrapers.aijobs_ai import AIJobsAISource
+from src.sources.scrapers.bcs_jobs import BCSJobsSource
 from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
-from src.sources.scrapers.bcs_jobs import BCSJobsSource
-from src.sources.feeds.uni_jobs import UniJobsSource
-from src.sources.ats.successfactors import SuccessFactorsSource
-from src.sources.scrapers.aijobs_ai import AIJobsAISource
-from src.sources.apis_free.teaching_vacancies import TeachingVacanciesSource
-from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
-from src.sources.ats.rippling import RipplingSource
-from src.services.profile.models import SearchConfig
+from src.sources.scrapers.linkedin import LinkedInSource
 
 
 def _make_search_config(queries: list[str]) -> SearchConfig:
@@ -655,6 +656,7 @@ def test_jobspy_parses_dataframe():
     """Test JobSpySource by mocking the scrape_jobs function."""
     import sys
     from unittest.mock import MagicMock, patch
+
     import pandas as pd
 
     df = pd.DataFrame([{
@@ -2135,6 +2137,7 @@ def test_jobspy_default_sites_exclude_glassdoor():
     possible for a future re-enable."""
     import sys
     from unittest.mock import MagicMock, patch
+
     import pandas as pd
 
     async def _test():

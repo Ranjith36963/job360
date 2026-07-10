@@ -1,18 +1,18 @@
 """Tests for src/utils/time_buckets.py — shared bucketing utilities."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.utils.time_buckets import (
-    parse_date_safe,
-    get_job_age_hours,
+    BUCKETS,
     assign_bucket,
     bucket_jobs,
     bucket_summary_counts,
-    format_relative_time,
     extract_matched_skills,
+    format_relative_time,
+    get_job_age_hours,
+    parse_date_safe,
     score_color_hex,
     score_color_name,
-    BUCKETS,
 )
 
 

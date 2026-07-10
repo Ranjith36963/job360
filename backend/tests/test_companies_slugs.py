@@ -5,17 +5,17 @@ network-validate each slug — that would require live HTTP and is out of
 scope for the pytest-offline contract. Validation per-slug is a follow-up.
 """
 from src.core.companies import (
+    ASHBY_COMPANIES,
     GREENHOUSE_COMPANIES,
     LEVER_COMPANIES,
-    WORKABLE_COMPANIES,
-    ASHBY_COMPANIES,
-    SMARTRECRUITERS_COMPANIES,
+    PERSONIO_COMPANIES,
     PINPOINT_COMPANIES,
     RECRUITEE_COMPANIES,
-    PERSONIO_COMPANIES,
-    WORKDAY_COMPANIES,
-    SUCCESSFACTORS_COMPANIES,
     RIPPLING_COMPANIES,
+    SMARTRECRUITERS_COMPANIES,
+    SUCCESSFACTORS_COMPANIES,
+    WORKABLE_COMPANIES,
+    WORKDAY_COMPANIES,
 )
 
 

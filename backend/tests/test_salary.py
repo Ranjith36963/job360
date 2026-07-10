@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import pytest
 
+from src.core.fx import to_gbp
 from src.services.job_enrichment_schema import SalaryBand, SalaryFrequency
 from src.services.salary import normalize_salary
-from src.core.fx import to_gbp
-
 
 # ---------------------------------------------------------------------------
 # FX

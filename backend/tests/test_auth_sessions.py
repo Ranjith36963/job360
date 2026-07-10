@@ -9,7 +9,6 @@ import pytest
 from migrations import runner
 from src.services.auth import sessions as auth_sessions
 
-
 SESSION_SECRET = "test-secret-" + "x" * 32
 
 

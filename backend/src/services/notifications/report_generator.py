@@ -1,8 +1,12 @@
 import html as html_mod
 from datetime import datetime, timezone
+
 from src.models import Job
 from src.utils.time_buckets import (
-    BUCKETS, bucket_jobs, bucket_summary_counts, score_color_hex,
+    BUCKETS,
+    bucket_jobs,
+    bucket_summary_counts,
+    score_color_hex,
 )
 
 

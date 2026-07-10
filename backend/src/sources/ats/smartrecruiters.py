@@ -1,12 +1,12 @@
-import re
 import logging
+import re
 from datetime import datetime, timezone
 
 import aiohttp
 
+from src.core.companies import COMPANY_NAME_OVERRIDES, SMARTRECRUITERS_COMPANIES
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
-from src.core.companies import SMARTRECRUITERS_COMPANIES, COMPANY_NAME_OVERRIDES
 
 logger = logging.getLogger("job360.sources.smartrecruiters")
 

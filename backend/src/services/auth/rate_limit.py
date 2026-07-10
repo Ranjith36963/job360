@@ -23,7 +23,6 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Deque, Dict
 
-
 _LOCK = Lock()
 _BUCKETS: Dict[str, Deque[datetime]] = {}
 # Separate store for login brute-force lockout. Unlike _BUCKETS (which records
