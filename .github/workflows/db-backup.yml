@@ -44,7 +44,11 @@ jobs:
           sudo apt-get install -y -q postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -q postgresql-client-18
-          pg_dump --version
+          # Ubuntu's base client-16 owns /usr/bin/pg_dump, so plain `pg_dump`
+          # stays 16 even with 18 installed. Put the 18 binaries first on PATH
+          # for every later step (dump + verify both need pg_dump/psql 18).
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
           aws --version
 
       - name: Dump prod database
