@@ -33,11 +33,16 @@ jobs:
           --health-cmd "pg_isready -U verify"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - name: Install tools (pg client 16 + awscli + gpg)
+      - name: Install tools (Postgres client 16)
         run: |
+          # aws CLI v2 + gpg are pre-installed on the GitHub runner image; only
+          # the Postgres client needs installing (Ubuntu 24.04 dropped the apt
+          # 'awscli' package, which is why installing it here failed).
           sudo apt-get update -q
-          sudo apt-get install -y -q postgresql-client awscli gnupg
+          sudo apt-get install -y -q postgresql-client
           pg_dump --version
+          aws --version
+          gpg --version
 
       - name: Dump prod database
         env:
