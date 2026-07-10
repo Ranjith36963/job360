@@ -56,6 +56,11 @@ dev = [
     # cycles to cut wall-clock time on the 600+ test suite.
     "pytest-xdist>=3.0.0",
     "mypy>=1.10.0",
+    # Linter — MUST be in dev extras so the CI "Lint (ruff)" step (now a
+    # blocking gate) can actually run it. Before 2026-07-10 ruff was absent
+    # here, so the CI step failed silently on "No module named ruff" under
+    # continue-on-error. Pinned to the 0.x line the backlog was drained against.
+    "ruff>=0.15,<0.16",
 ]
 indeed = [
     "python-jobspy",
