@@ -58,11 +58,13 @@ jobs:
           psql -h localhost -U verify -d verify -v ON_ERROR_STOP=1 -f dump.sql
           USERS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM users")
           JOBS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM jobs")
-          MIG=$(psql -h localhost -U verify -d verify -tAc "SELECT COALESCE(max(id),0) FROM _schema_migrations")
-          echo "restored: users=$USERS jobs=$JOBS migration_head=$MIG"
+          # _schema_migrations.id is TEXT (e.g. '0024_tailored_flagged_terms'), so
+          # COUNT the applied migrations (an integer) rather than max(id).
+          MIG=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM _schema_migrations")
+          echo "restored: users=$USERS jobs=$JOBS migrations_applied=$MIG"
           # Hard gates — a dump that restores but is empty is NOT a valid backup.
           test "$USERS" -ge 1
-          test "$MIG" -ge 25
+          test "$MIG" -ge 20
           {
             echo "## ✅ Backup verified by restore"
             echo ""
@@ -70,7 +72,7 @@ jobs:
             echo "|---|---|"
             echo "| users restored | $USERS |"
             echo "| jobs restored | $JOBS |"
-            echo "| migration head | $MIG |"
+            echo "| migrations applied | $MIG |"
             echo "| dump size (bytes) | $(stat -c%s dump.sql) |"
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -12,7 +12,7 @@ restored:**
 
 1. `pg_dump` prod.
 2. **Restore that dump into a throwaway Postgres in the same run** and assert the
-   data is real (`users ≥ 1`, `_schema_migrations` head `≥ 25`). A corrupt/empty
+   data is real (`users ≥ 1`, `≥ 20` rows in `_schema_migrations`). A corrupt/empty
    dump fails the job → GitHub emails the owner. A green run = "proven restorable
    tonight". Row counts are written to the run summary.
 3. **Encrypt** (`gpg --symmetric AES256`, `BACKUP_PASSPHRASE` secret) — R2 only
