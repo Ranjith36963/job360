@@ -22,7 +22,7 @@ jobs:
     services:
       # Throwaway Postgres used ONLY to restore-verify tonight's dump.
       verify_db:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_USER: verify
           POSTGRES_PASSWORD: verify
@@ -33,13 +33,21 @@ jobs:
           --health-cmd "pg_isready -U verify"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - name: Install tools (Postgres client 16)
+      - name: Install tools (Postgres client 18)
         run: |
-          # aws CLI v2 + gpg are pre-installed on the GitHub runner image; only
-          # the Postgres client needs installing (Ubuntu 24.04 dropped the apt
-          # 'awscli' package, which is why installing it here failed).
+          # Railway's Postgres is 18.x; pg_dump refuses to dump a server newer
+          # than itself, and Ubuntu 24.04's default client is 16 — so pull the
+          # matching client from the official PostgreSQL (PGDG) apt repo.
+          # aws CLI v2 + gpg are already on the runner image.
           sudo apt-get update -q
-          sudo apt-get install -y -q postgresql-client
+          sudo apt-get install -y -q curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client-18
           pg_dump --version
           aws --version
           gpg --version
