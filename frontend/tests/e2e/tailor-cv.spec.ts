@@ -68,12 +68,12 @@ test.describe("Tailor my CV", () => {
     ]);
   });
 
-  // QUARANTINED (CI-flaky, pre-existing): passes locally against `next start`
-  // but in CI the mocked data arrives (scores present in the trace network
-  // response) yet the list/dialog never renders — a production-hydration race
-  // specific to the CI runner. Tracked for a dedicated fix; skipped so the
-  // e2e job reports the 24 reliably-green specs.
-
+  // QUARANTINED — not hermetic: /jobs/[id]/page.tsx is a Server Component that
+  // fetches the job SERVER-SIDE from ${NEXT_PUBLIC_API_URL || :8000}. Playwright's
+  // page.route only mocks CLIENT-side requests, so the server fetch isn't
+  // intercepted; with no backend in CI it returns null → the tailor button never
+  // stabilises. Fixing needs either a stub backend for this job, or making the
+  // job detail fetch client-side. Tracked; skipped so the e2e job stays green.
   test.fixme("opens from the job page, shows generated docs, edits + saves, offers download", async ({
     page,
   }) => {
