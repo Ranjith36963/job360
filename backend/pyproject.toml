@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
     "httpx>=0.27.0",
+    "openai>=1.0.0",                # primary LLM provider (gpt-4o-mini); SDK used in llm_provider._call_openai
     "google-generativeai>=0.8.0",
     "groq>=0.11.0",
     "cerebras-cloud-sdk>=1.0.0",
