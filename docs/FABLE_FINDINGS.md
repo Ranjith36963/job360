@@ -331,7 +331,58 @@ No committed `.env` or secrets (git-grep for key patterns = zero); real CV/`User
 
 # 🔬 Independent second-opinion fleet + adversarial verification
 
-_Two fresh Sonnet sweeps (service internals; routes/worker/enrichment) and an Opus adversarial verifier are re-checking everything above against real code. Their new findings + verdicts (any false positive struck, severities re-graded) will be appended here on completion._
+_Second-opinion fleet on the routes/worker/enrichment paths surfaced these NEW issues not caught by the first sweep. (Service-internals sweep + adversarial verifier still finishing.)_
+
+### N1 — [HIGH] Daily digest silently never fires unless the send-minute is a multiple of 5
+- **File:** `backend/src/workers/tasks.py:679-687` (`_bundle_due` daily branch) vs cron `settings.py:120` (`notification_tick` runs at minutes 0,5,10,…).
+- **Evidence:** The tick only executes at 5-minute marks, but the daily branch requires an EXACT `now_local.hour==h and now_local.minute==m`, while the UI accepts any `HH:MM` (e.g. `08:03`).
+- **Impact:** Most users who pick a send-time whose minute isn't divisible by 5 **never get their daily digest**. A single missed tick (restart/outage) also skips that user for the whole day.
+- **Fix:** Match a window, not an exact minute — round `m` down to the nearest 5 on save, or check `0 <= (now_local - target) < tick_interval`, with catch-up.
+
+### N2 — [HIGH] Profile extraction runs ~8 sequential LLM calls synchronously inside the HTTP request
+- **File:** `backend/src/api/routes/profile.py:320-328` → `services/profile/two_pass.py:158-265`.
+- **Evidence:** Every profile-writing route `await`s `run_two_pass_extraction` (CV+LinkedIn+GitHub+about-me passes + 3 `llm_merge_duplicates` + `llm_suggest_adjacent_skills`) — up to 8 chained LLM round-trips, each with a 60s timeout × 2 retries × 4-provider fallback.
+- **Impact:** One upload can block the response for tens of seconds to minutes → gateway timeouts (Railway/nginx 30–60s), hung tab, event-loop task tied up.
+- **Fix:** Move it to an ARQ background job (the pattern `_maybe_trigger_rescore` already uses); return 202 + a job id; frontend polls.
+
+### N3 — [HIGH] Job-detail page loads the ENTIRE `job_enrichment` table on every request
+- **File:** `backend/src/api/routes/jobs.py:625` (`_build_enrichment_lookup(db._conn)`), which does `SELECT … FROM job_enrichment` with no WHERE/LIMIT.
+- **Evidence:** Runs on every authenticated `GET /jobs/{id}` when enrichment is on (it is, in prod), deserializing every catalog row — when only one job's enrichment is needed. A single-row `load_enrichment(conn, job_id)` already exists and is unused here.
+- **Impact:** Full-table scan on a page users hit constantly, worsening daily as the 30-day catalog grows.
+- **Fix:** Use `load_enrichment(db._conn, row["id"])`; wrap the single value for `JobScorer`.
+
+### N4 — [MEDIUM] `/jobs` `limit`/`offset`/`hours` unbounded/unvalidated
+- **File:** `backend/src/api/routes/jobs.py:437,444-445`.
+- **Evidence:** `limit=Query(100)`, `offset=Query(0)`, `hours=Query(None)` — no `ge`/`le` (siblings `runs.py`/`notifications.py` do bound). Negative `offset`/`limit` silently slices from the tail; negative `hours` makes a future cutoff.
+- **Impact:** Oversized responses / silently-wrong pages / accepted nonsense input.
+- **Fix:** `Query(100, ge=1, le=500)`, `Query(0, ge=0)`, `hours ge=0`.
+
+### N5 — [MEDIUM] Two spots leak raw exception text to clients
+- **File:** `backend/src/api/routes/tailor.py:158-159` (`detail=f"Generation failed: {exc}"`) and `search.py:82` (`progress=str(e)`, returned by the status endpoint).
+- **Impact:** Internal error detail (LLM provider names, response fragments, DB internals) exposed in API responses.
+- **Fix:** `logger.exception` server-side; return a generic message.
+
+### N6 — [MEDIUM] `search.py` `_runs` in-memory store grows unbounded
+- **File:** `backend/src/api/routes/search.py:28,81-86`.
+- **Evidence:** Module-level `_runs: dict` with no eviction/TTL — every `POST /search` adds an entry never removed (also holds the leaked exception text from N5).
+- **Impact:** Slow unbounded memory growth over process lifetime.
+- **Fix:** LRU/TTL eviction on completed/failed entries.
+
+### N7 — [MEDIUM] Redundant/N+1 DB round-trips in the hot paths
+- **`main.py:683-689` then `750-764`** re-issues the identical `SELECT id FROM jobs …` per job in the feed-write loop after `job.id` was already resolved above — doubles point-queries per run. **Fix:** reuse `job.id`.
+- **`tasks.py:721-729`** (`notification_tick`) does one `SELECT timezone FROM users` per rule instead of a join; **`tasks.py:553-560`** (`send_bundle`) fetches job details one-by-one instead of `WHERE id IN (…)`. Runs every 5 min forever. **Fix:** batch both.
+
+### N8 — [LOW] `_safe_fetch` swallows `asyncio.CancelledError`
+- **File:** `backend/src/services/scheduler.py:152-168` — `except BaseException` catches cancellation and records it as a breaker "failure". **Fix:** `except asyncio.CancelledError: raise` first.
+
+### N9 — [LOW] `GET /profile/versions` `limit` unbounded
+- **File:** `backend/src/api/routes/profile.py:441` — `limit: int = 20` with no bound. **Fix:** `Query(20, ge=1, le=100)`.
+
+_(The routes/worker sweep independently confirmed several first-fleet findings — e.g. the dead `score_and_ingest` fan-out ties to H1, and it verified enrichment `enrich_batch` handles per-job exceptions correctly. Clean per this sweep: `job_enrichment_schema.py`, `auth.py`, `pipeline.py`/`actions.py`/`notification_rules.py`/`runs.py` pagination + scoping.)_
+
+---
+
+_Still pending: the service-internals fresh sweep + the Opus adversarial verifier's line-by-line verdicts on all findings. Their results append here._
 
 ---
 
