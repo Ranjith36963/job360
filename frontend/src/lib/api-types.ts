@@ -1198,7 +1198,12 @@ export interface paths {
         };
         /**
          * Get Notification Rule
-         * @description Return the authenticated user's notification rule, or 404 if none set.
+         * @description Return the authenticated user's notification rule.
+         *
+         *     Returns ``null`` (HTTP 200) when the user has not saved one yet — the client
+         *     treats that as "no rule, use defaults". Settings is a per-user singleton, so
+         *     "not set" is a normal empty-state, not a 404 error (a 404 would surface as a
+         *     console error in the browser even though the client handles it fine).
          */
         get: operations["get_notification_rule_api_settings_notification_rule_get"];
         /**
@@ -1972,6 +1977,11 @@ export interface components {
         };
         /** ProfileResponse */
         ProfileResponse: {
+            /**
+             * Ai Suggestions
+             * @default []
+             */
+            ai_suggestions: string[];
             /** Current Version Id */
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
@@ -2016,6 +2026,13 @@ export interface components {
              * @default {}
              */
             skill_tiers: {
+                [key: string]: string[];
+            };
+            /**
+             * Skills By Source
+             * @default {}
+             */
+            skills_by_source: {
                 [key: string]: string[];
             };
             summary: components["schemas"]["ProfileSummary"];
@@ -4169,7 +4186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotificationRule"];
+                    "application/json": components["schemas"]["NotificationRule"] | null;
                 };
             };
             /** @description Validation Error */

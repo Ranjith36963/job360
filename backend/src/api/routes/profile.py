@@ -164,7 +164,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     # Skills grouped by SOURCE for the source-based profile view. Maps each
     # provenance source label to a user-facing bucket; a skill with multiple
     # sources appears under each of its buckets.
-    _SOURCE_BUCKET = {
+    _SOURCE_BUCKET = {  # noqa: N806 — constant-style lookup table, intentionally uppercase
         "cv_explicit": "cv",
         "linkedin": "linkedin",
         "github_llm": "github",

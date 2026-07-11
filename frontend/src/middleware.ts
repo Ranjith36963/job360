@@ -35,6 +35,16 @@ export async function middleware(request: NextRequest) {
   const session = request.cookies.get("job360_session");
   if (!session?.value) return bounceToLogin();
 
+  // E2E test bypass — NEVER active in production. When the Playwright webServer
+  // sets E2E_TEST_MODE=1 (and NODE_ENV is not "production"), a PRESENT cookie is
+  // trusted without the server-side /api/auth/me round-trip, so the hermetic
+  // (mocked, no live backend) specs pass the guard deterministically instead of
+  // relying on the fail-open catch below. Double-gated (env flag + non-prod) so
+  // it can never weaken the real auth guard in a deployed build.
+  if (process.env.NODE_ENV !== "production" && process.env.E2E_TEST_MODE === "1") {
+    return NextResponse.next();
+  }
+
   // VERIFY the cookie is real, not just present: ask the backend who it belongs to.
   // A stale/expired cookie -> 401 -> bounce to login (and clear it). This fixes the
   // bug where a leftover cookie slipped past the gate, then the API 401'd on the page.

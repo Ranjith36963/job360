@@ -379,17 +379,20 @@ TEXT:
 
 # ── Batch 1.5 — expanded LinkedIn sections ────────────────────────
 
-_LANGUAGES_PROMPT = """Extract every human language from the LinkedIn Languages section text below.
-Return JSON: {{"languages": [{{"language": str, "proficiency": str}}, ...]}}
-
-Rules:
-- "language" = the language name (e.g. "English", "Mandarin Chinese", "Spanish").
-- "proficiency" = the proficiency level as written (e.g. "Native or bilingual", "Professional working", "Elementary"). Empty string if missing.
-
-TEXT:
----
-{text}
----"""
+_LANGUAGES_PROMPT = (
+    "Extract every human language from the LinkedIn Languages section text below.\n"
+    'Return JSON: {{"languages": [{{"language": str, "proficiency": str}}, ...]}}\n'
+    "\n"
+    "Rules:\n"
+    '- "language" = the language name (e.g. "English", "Mandarin Chinese", "Spanish").\n'
+    '- "proficiency" = the proficiency level as written (e.g. "Native or bilingual", '
+    '"Professional working", "Elementary"). Empty string if missing.\n'
+    "\n"
+    "TEXT:\n"
+    "---\n"
+    "{text}\n"
+    "---"
+)
 
 _PROJECTS_PROMPT = """Extract every portfolio/personal project from the LinkedIn Projects section text below.
 Return JSON: {{"projects": [{{"title": str, "description": str, "start": str, "end": str, "url": str}}, ...]}}
@@ -405,20 +408,23 @@ TEXT:
 {text}
 ---"""
 
-_VOLUNTEER_PROMPT = """Extract every volunteer role from the LinkedIn Volunteer Experience section text below.
-Return JSON: {{"volunteer": [{{"role": str, "organisation": str, "cause": str, "start": str, "end": str, "description": str}}, ...]}}
-
-Rules:
-- "role" = the volunteer position title.
-- "organisation" = the organisation/charity name.
-- "cause" = the stated cause if present (e.g. "Education", "Environment"). Empty if missing.
-- "start"/"end" verbatim. Empty if missing.
-- "description" = concatenated bullets/paragraph. Empty if missing.
-
-TEXT:
----
-{text}
----"""
+_VOLUNTEER_PROMPT = (
+    "Extract every volunteer role from the LinkedIn Volunteer Experience section text below.\n"
+    'Return JSON: {{"volunteer": [{{"role": str, "organisation": str, "cause": str, '
+    '"start": str, "end": str, "description": str}}, ...]}}\n'
+    "\n"
+    "Rules:\n"
+    '- "role" = the volunteer position title.\n'
+    '- "organisation" = the organisation/charity name.\n'
+    '- "cause" = the stated cause if present (e.g. "Education", "Environment"). Empty if missing.\n'
+    '- "start"/"end" verbatim. Empty if missing.\n'
+    '- "description" = concatenated bullets/paragraph. Empty if missing.\n'
+    "\n"
+    "TEXT:\n"
+    "---\n"
+    "{text}\n"
+    "---"
+)
 
 _COURSES_PROMPT = """Extract every course from the LinkedIn Courses section text below.
 Return JSON: {{"courses": [{{"title": str, "institution": str, "date": str}}, ...]}}

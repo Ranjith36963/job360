@@ -33,6 +33,10 @@ export default defineConfig({
     command: process.env.CI ? "npm run build && npm run start" : "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
+    // Turn on the middleware's E2E auth bypass (src/middleware.ts) so the hermetic,
+    // mocked specs pass the session guard without a live backend. Never set in prod.
+    env: { E2E_TEST_MODE: "1" },
+    // CI builds prod first (`npm run build && npm run start`); give that room.
     timeout: 240_000,
   },
 });

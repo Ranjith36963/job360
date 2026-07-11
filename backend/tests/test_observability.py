@@ -68,19 +68,42 @@ def test_sentry_no_dsn_no_raise(monkeypatch):
     assert calls == [], "_init_sentry() should not call sentry_sdk.init when DSN is empty"
 
 
-def test_sentry_with_dsn_calls_init(monkeypatch):
-    """_init_sentry() with a non-empty DSN must call sentry_sdk.init with that dsn."""
+def test_sentry_dsn_but_not_prod_no_init(monkeypatch):
+    """DSN present but NOT a prod environment (local dev / tests) → no init.
+
+    This is the guard that stops local crashes (port-in-use, dev DB timeouts)
+    from leaking into the production Sentry project and drowning out real signal.
+    """
     import sentry_sdk
 
     from src.api import main as app_main
 
     fake_dsn = "https://abc123@o123456.ingest.sentry.io/7654321"
     monkeypatch.setattr("src.core.settings.SENTRY_DSN", fake_dsn, raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     calls: list = []
     monkeypatch.setattr(sentry_sdk, "init", lambda **kwargs: calls.append(kwargs))
     app_main._init_sentry()
-    assert len(calls) == 1, "sentry_sdk.init should be called exactly once"
+    assert calls == [], "Sentry must NOT init outside production, even with a DSN set"
+
+
+def test_sentry_with_dsn_in_prod_calls_init(monkeypatch):
+    """DSN + a deployed prod environment → sentry_sdk.init called once, tagged prod."""
+    import sentry_sdk
+
+    from src.api import main as app_main
+
+    fake_dsn = "https://abc123@o123456.ingest.sentry.io/7654321"
+    monkeypatch.setattr("src.core.settings.SENTRY_DSN", fake_dsn, raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    calls: list = []
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kwargs: calls.append(kwargs))
+    app_main._init_sentry()
+    assert len(calls) == 1, "sentry_sdk.init should be called exactly once in prod"
     assert calls[0]["dsn"] == fake_dsn
+    assert calls[0]["environment"] == "production"
 
 
 # ---------------------------------------------------------------------------

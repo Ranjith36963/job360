@@ -271,7 +271,6 @@ async def test_layer2_uses_kept_docs_as_examples(authenticated_async_context, mo
         await client.post(f"/api/tailor/{job1}/cv/keep")
         captured.clear()
         await client.post(f"/api/tailor/{job2}/generate")  # new job → should reuse my style
-    cv_prompts = [c["prompt"] for c in captured if "SUMMARY" in c["prompt"] or "CV" in c["system"]]
     assert any("MY_UNIQUE_VOICE_ZZ" in c["prompt"] for c in captured)
 
 

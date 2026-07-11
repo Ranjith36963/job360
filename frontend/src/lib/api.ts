@@ -482,13 +482,14 @@ export async function testChannel(id: number): Promise<ChannelTestResult> {
 // ---- Notification rule (one shared rulebook per user) ----
 
 /**
- * Get the user's single notification rule. The backend returns 404 when the
- * user has not saved one yet — we treat that as "no rule, use defaults" and
- * return null rather than throwing.
+ * Get the user's single notification rule. The backend returns 200 with a null
+ * body when the user has not saved one yet — we surface that as null ("no rule,
+ * use defaults"). The 404 branch is kept as defensive back-compat in case an
+ * older backend is still returning 404 for the empty-state.
  */
 export async function getNotificationRule(): Promise<NotificationRule | null> {
   try {
-    return await request<NotificationRule>("/api/settings/notification-rule");
+    return await request<NotificationRule | null>("/api/settings/notification-rule");
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;

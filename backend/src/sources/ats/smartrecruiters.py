@@ -39,7 +39,10 @@ class SmartRecruitersSource(BaseJobSource):
                 else:
                     location = str(loc)
                 ref = item.get("ref", "")
-                apply_url = ref if ref.startswith("http") else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
+                apply_url = (
+                    ref if ref.startswith("http")
+                    else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
+                )
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_released = item.get("releasedDate")
                 posted_at = raw_released if raw_released else None
