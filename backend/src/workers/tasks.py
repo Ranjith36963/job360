@@ -14,6 +14,7 @@ import functools
 import hashlib
 import time
 from datetime import datetime, timezone
+from datetime import time as _time
 from typing import Any, Callable, Optional
 
 from src.core.settings import ENRICHMENT_THRESHOLD
@@ -477,7 +478,7 @@ async def nightly_ghost_sweep(ctx: dict) -> dict:
         """
         SELECT id, staleness_state, consecutive_misses, last_seen_at
         FROM jobs
-        WHERE staleness_state != 'confirmed_expired'
+        WHERE staleness_state IS NULL OR staleness_state != 'confirmed_expired'
         """
     )
     rows = [dict(r) for r in await cursor.fetchall()]
@@ -665,8 +666,15 @@ async def _mark_digest_rows_sent(db: aiosqlite.Connection, user_id: str) -> None
 def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
     """Return True when it is time to send a bundle for this rule.
 
-    - notify_mode == 'instant': never bundle (always immediate)
-    - notify_mode == 'daily': true when now_local.hour:minute matches daily_send_time
+    - notify_mode == 'instant': never bundle here (always immediate; the
+      quiet-hours flush for stranded instant matches lives in
+      ``notification_tick``, not this pure helper).
+    - notify_mode == 'daily': true when the current tick is at/after the
+      user-local send time AND no bundle has been sent yet today (user-local
+      date). This is a "window, not exact minute" check — the cron only ticks
+      every 5 min, so an exact ``HH:MM`` compare missed any send-time whose
+      minute wasn't a tick multiple (finding N1). It also self-heals a missed
+      tick (restart/outage): the next tick at/after the send time still fires.
     - notify_mode == 'every_n_hours': true when last_sent_at is None OR
       now_utc - last_sent_at >= interval_hours
 
@@ -683,8 +691,20 @@ def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
             now_local = now_utc.astimezone(tz)
             send_time_str = rule.get("daily_send_time", "08:00")
             h, m = map(int, send_time_str.split(":"))
-            # Match within the same minute
-            return now_local.hour == h and now_local.minute == m
+            target_local = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            # Not yet at today's send time → not due.
+            if now_local < target_local:
+                return False
+            # At/after the send time: due only if we haven't already sent a
+            # bundle today (user-local date). Fires once on the first tick
+            # at/after the send time; never twice the same day.
+            last_sent_str = rule.get("last_sent_at")
+            if not last_sent_str:
+                return True
+            last_sent_local = datetime.fromisoformat(
+                last_sent_str.replace("Z", "+00:00")
+            ).astimezone(tz)
+            return last_sent_local.date() < now_local.date()
         except Exception:  # noqa: BLE001
             return False
     if mode == "every_n_hours":
@@ -698,6 +718,43 @@ def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
         except Exception:  # noqa: BLE001
             return True
     return False
+
+
+def _in_quiet_window(rule: dict, now_utc: datetime, user_tz: str) -> bool:
+    """True when ``now_utc`` falls inside the rule's quiet-hours window.
+
+    ``quiet_hours_start`` / ``quiet_hours_end`` are HH:MM strings in the user's
+    local timezone. Supports wraparound windows that cross midnight
+    (e.g. 23:00–07:00). Uses stdlib ``zoneinfo`` (no pytz). Returns False when
+    no window is configured or on any parse error (default: allow dispatch).
+    """
+    qs = rule.get("quiet_hours_start")
+    qe = rule.get("quiet_hours_end")
+    if not qs or not qe:
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(user_tz)
+        now_local = now_utc.astimezone(tz).time().replace(second=0, microsecond=0)
+        start = _time(*map(int, qs.split(":")))
+        end = _time(*map(int, qe.split(":")))
+        if start <= end:
+            return start <= now_local < end
+        return now_local >= start or now_local < end
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _has_pending_digests(db: aiosqlite.Connection, user_id: str) -> bool:
+    """True when the user has unsent ``user_notification_digests`` rows."""
+    try:
+        cur = await db.execute(
+            "SELECT 1 FROM user_notification_digests WHERE user_id = ? AND sent = 0 LIMIT 1",
+            (user_id,),
+        )
+        return await cur.fetchone() is not None
+    except Exception:  # noqa: BLE001 — table missing on legacy DB
+        return False
 
 
 @_logged_task
@@ -728,7 +785,17 @@ async def notification_tick(ctx: dict) -> dict[str, int]:
         except Exception:  # noqa: BLE001
             user_tz = "UTC"
 
-        if _bundle_due(rule, now_utc=now_utc, user_tz=user_tz):
+        due = _bundle_due(rule, now_utc=now_utc, user_tz=user_tz)
+        # SI2 — quiet-hours flush. An instant-mode user's matches are queued
+        # into user_notification_digests while inside quiet hours (dispatcher
+        # gate 3+4). Instant mode never bundles, so once quiet hours end nothing
+        # would drain those rows. Flush them here: outside the quiet window AND
+        # there are pending rows → enqueue send_bundle (drains with force=True).
+        if not due and rule.get("notify_mode", "instant") == "instant":
+            if not _in_quiet_window(rule, now_utc, user_tz) and await _has_pending_digests(db, user_id):
+                due = True
+
+        if due:
             enqueue = ctx.get("enqueue")
             if enqueue is not None:
                 result = enqueue("send_bundle", user_id)

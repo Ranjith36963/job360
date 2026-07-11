@@ -229,3 +229,38 @@ async def test_sweep_skips_confirmed_expired(mem_db):
     # The sweep should not touch this row (confirmed_expired is excluded)
     assert result["transitioned"] == 0
     assert await _get_staleness(mem_db, job_id) == "confirmed_expired"
+
+
+# ---------------------------------------------------------------------------
+# Test 5 (M6): a NULL staleness_state row is still swept (Postgres NULL bug)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_includes_null_staleness_state(mem_db):
+    """Legacy rows with staleness_state IS NULL must be evaluated + transitioned.
+
+    In Postgres ``NULL != 'confirmed_expired'`` is NULL (filtered out), so the
+    old WHERE clause silently skipped every NULL row → dead postings kept being
+    served (finding M6). The fixed clause (``IS NULL OR != …``) includes them.
+    """
+    job_id = await _insert_job_with_timestamps(
+        mem_db,
+        title="Null State Job",
+        company="LegacyCorp",
+        consecutive_misses=2,
+        last_seen_hours_ago=13.0,  # qualifies for active → possibly_stale
+        staleness_state="active",
+    )
+    # Force the column back to NULL to simulate a pre-ghost-detection legacy row.
+    await mem_db._conn.execute(
+        "UPDATE jobs SET staleness_state = NULL WHERE id = ?",
+        (job_id,),
+    )
+    await mem_db._conn.commit()
+
+    result = await nightly_ghost_sweep(_ctx(mem_db._conn))
+
+    assert result["evaluated"] >= 1
+    assert result["transitioned"] >= 1
+    assert await _get_staleness(mem_db, job_id) == "possibly_stale"

@@ -65,6 +65,32 @@ async def test_jobs_list_empty(authenticated_async_context):
 
 
 @pytest.mark.asyncio
+async def test_jobs_list_limit_over_max_is_rejected(authenticated_async_context):
+    """N4 — unbounded pagination guard. A client asking for an absurd `limit`
+    (e.g. to try to OOM the server) must be rejected with 422, not served."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?limit=10000000")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_jobs_list_negative_offset_is_rejected(authenticated_async_context):
+    """N4 — a negative offset must be rejected with 422, not silently coerced."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?offset=-1")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_jobs_list_limit_within_bound_still_works(authenticated_async_context):
+    """Positive control: an in-bound `limit` (the upper allowed value) still 200s —
+    the N4 fix clamps abuse, it doesn't break normal callers."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?limit=200")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_actions_counts_empty(authenticated_async_context):
     async with authenticated_async_context() as client:
         resp = await client.get("/api/actions/counts")

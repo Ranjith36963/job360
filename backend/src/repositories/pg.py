@@ -48,6 +48,7 @@ import uuid
 from typing import Any, Iterable, Optional, Sequence
 
 import psycopg
+from psycopg import pq
 from psycopg.rows import RowMaker
 
 _log = logging.getLogger("job360.db")
@@ -69,18 +70,26 @@ class OperationalError(psycopg.OperationalError):
     """aiosqlite.OperationalError stand-in.
 
     Subclasses ``psycopg.OperationalError`` so callers that catch either name
-    behave the same. The shim re-raises Postgres ``UndefinedTable`` /
-    ``UndefinedColumn`` as this type so the codebase's SQLite-era graceful
-    degrade (``except OperationalError: return []`` when a table is missing on a
-    legacy DB) keeps working — those are ``ProgrammingError`` subclasses in
-    psycopg, not ``OperationalError``.
+    behave the same. The shim re-raises Postgres ``UndefinedTable`` (and a couple
+    of other "schema object missing" errors) as this type so the codebase's
+    SQLite-era graceful degrade (``except OperationalError: return []`` when a
+    table is missing on a legacy DB) keeps working — those are
+    ``ProgrammingError`` subclasses in psycopg, not ``OperationalError``.
+
+    ``UndefinedColumn`` is deliberately NOT remapped (finding H3): a missing or
+    typo'd COLUMN is a bug, not a "feature not migrated yet" degrade. If it were
+    an ``OperationalError`` the many ``except OperationalError: return []``
+    readers would silently blank the dashboard. It propagates as a
+    ``ProgrammingError`` instead.
     """
 
 
-# Postgres errors that mean "schema object missing" (SQLite: "no such table").
+# Postgres errors that mean "schema OBJECT missing" (SQLite: "no such table").
+# NOTE: ``UndefinedColumn`` is intentionally excluded (finding H3). A mis-named
+# column must surface loudly, not degrade to an empty result — it is handled
+# separately in ``Connection.execute`` (logged + re-raised as ProgrammingError).
 _MISSING_OBJECT_ERRORS = (
     psycopg.errors.UndefinedTable,
-    psycopg.errors.UndefinedColumn,
     psycopg.errors.UndefinedObject,
     psycopg.errors.InvalidSchemaName,
 )
@@ -226,6 +235,56 @@ def _has_insert(sql_upper: str) -> bool:
     return sql_upper.lstrip().startswith("INSERT")
 
 
+def _split_string_literals(sql: str) -> list[tuple[str, bool]]:
+    """Split ``sql`` into ``(text, is_string_literal)`` chunks on single-quote
+    boundaries, honouring SQL's ``''`` escaped-quote-inside-a-literal rule.
+
+    Used so token rewrites (``?`` -> ``%s``, ``rowid`` -> ``ctid``) never touch
+    data that lives inside a quoted string literal (findings V3 / L4). Naive
+    about dollar-quoting, but no repo SQL uses it.
+    """
+    chunks: list[tuple[str, bool]] = []
+    buf: list[str] = []
+    in_str = False
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if in_str:
+            buf.append(ch)
+            if ch == "'":
+                if i + 1 < n and sql[i + 1] == "'":  # '' escape -> stay inside
+                    buf.append("'")
+                    i += 2
+                    continue
+                chunks.append(("".join(buf), True))
+                buf = []
+                in_str = False
+        else:
+            if ch == "'":
+                if buf:
+                    chunks.append(("".join(buf), False))
+                    buf = []
+                buf.append(ch)
+                in_str = True
+            else:
+                buf.append(ch)
+        i += 1
+    if buf:
+        chunks.append(("".join(buf), in_str))
+    return chunks
+
+
+def _apply_outside_string_literals(sql: str, fn) -> str:
+    """Apply ``fn`` to every non-string-literal region of ``sql``.
+
+    Fast-paths the common no-quote statement so the tokenizer only runs when a
+    literal is actually present.
+    """
+    if "'" not in sql:
+        return fn(sql)
+    return "".join(chunk if is_lit else fn(chunk) for chunk, is_lit in _split_string_literals(sql))
+
+
 def translate(sql: str) -> str:
     """Translate a single SQLite statement to its Postgres equivalent."""
     # PRAGMA table_info(x) -> information_schema query
@@ -245,7 +304,9 @@ def translate(sql: str) -> str:
     out = _RE_BLOB.sub("BYTEA", out)
     out = _RE_BEGIN_IMMEDIATE.sub("BEGIN", out)
     out = _RE_SQLITE_MASTER.sub(_SQLITE_MASTER_VIEW, out)
-    out = _RE_ROWID.sub("ctid", out)
+    # rowid -> ctid only OUTSIDE string literals (finding V3/L4): a ``rowid``
+    # substring inside a quoted value is data, not the implicit-rowid keyword.
+    out = _apply_outside_string_literals(out, lambda s: _RE_ROWID.sub("ctid", s))
     low = out.lower()
     # Table-level FOREIGN KEY first (it contains a REFERENCES the inline rule
     # would otherwise chop, leaving a dangling ``FOREIGN KEY (...)``).
@@ -262,8 +323,10 @@ def translate(sql: str) -> str:
         out = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", out)
         if "on conflict" not in out.lower():
             out = out.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
-    # Placeholder translation (last, so nothing we inserted contains '?').
-    out = out.replace("?", "%s")
+    # Placeholder translation (last, so nothing we inserted contains '?'). Only
+    # OUTSIDE string literals (finding V3/L4): a ``?`` inside a quoted value is
+    # data (e.g. ``WHERE note = 'ok?'``), not a bind placeholder.
+    out = _apply_outside_string_literals(out, lambda s: s.replace("?", "%s"))
     return out
 
 
@@ -397,21 +460,48 @@ class Connection:
     def row_factory(self, value):
         self._row_factory = value
 
+    async def _read_lastval(self) -> Optional[int]:
+        """``SELECT lastval()`` on a short-lived, always-closed cursor."""
+        async with self._raw.cursor() as c2:
+            await c2.execute("SELECT lastval()")
+            row = await c2.fetchone()
+            return row[0] if row else None
+
     async def execute(self, sql: str, params: Iterable[Any] = ()) -> Cursor:
         translated = translate(sql)
         cur = self._raw.cursor()
         prm = tuple(params) if params else None
         try:
             await cur.execute(translated, prm)
+        except psycopg.errors.UndefinedColumn:
+            # A missing/typo'd COLUMN is a bug, not the graceful "table not
+            # migrated yet" degrade. Do NOT remap to OperationalError (readers do
+            # ``except OperationalError: return []`` and would blank the
+            # dashboard). Log loudly and let it propagate (finding H3).
+            _log.error(
+                "db_undefined_column",
+                extra={"event": "db_undefined_column", "sql": translated},
+                exc_info=True,
+            )
+            raise
         except _MISSING_OBJECT_ERRORS as exc:
             raise OperationalError(str(exc)) from exc
+        # ``lastrowid`` (aiosqlite parity) is emulated via ``SELECT lastval()``.
+        # Only probe when the INSERT actually inserted a row: ``ON CONFLICT DO
+        # NOTHING`` that conflicts inserts nothing, and lastval() would then
+        # return a STALE id from an earlier insert in the session (finding V2).
+        # When inside a transaction (the migration runner wraps each body in one
+        # per finding H2), isolate the probe in a SAVEPOINT so a "lastval is not
+        # defined" error — a TEXT/UUID-PK insert never touches a sequence — can't
+        # poison the enclosing transaction.
         lastrowid: Optional[int] = None
-        if _has_insert(translated.upper()) and "returning" not in translated.lower():
+        if _has_insert(translated.upper()) and "returning" not in translated.lower() and cur.rowcount:
             try:
-                async with self._raw.cursor() as c2:
-                    await c2.execute("SELECT lastval()")
-                    row = await c2.fetchone()
-                    lastrowid = row[0] if row else None
+                if self._raw.info.transaction_status == pq.TransactionStatus.IDLE:
+                    lastrowid = await self._read_lastval()
+                else:
+                    async with self._raw.transaction():
+                        lastrowid = await self._read_lastval()
             except psycopg.Error:
                 lastrowid = None
         return Cursor(cur, lastrowid)
@@ -427,6 +517,18 @@ class Connection:
             cur = self._raw.cursor()
             await cur.execute(translate(stmt))
             await cur.close()
+
+    def transaction(self):
+        """Explicit transaction block (psycopg passthrough).
+
+        aiosqlite has no direct analog — our connection is autocommit. The
+        migration runner uses this to make each migration body + its
+        ``_schema_migrations`` bookkeeping INSERT atomic: on any error the whole
+        body rolls back and the stem is NOT recorded (finding H2). On an
+        autocommit connection psycopg emits an explicit BEGIN/COMMIT around the
+        block (ROLLBACK on error); nested blocks use SAVEPOINTs.
+        """
+        return self._raw.transaction()
 
     async def commit(self) -> None:  # autocommit -> no-op
         return None
