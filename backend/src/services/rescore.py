@@ -204,7 +204,11 @@ async def rescore_user_feed(
                         # transient lock under concurrent writes doesn't drop
                         # this scored row (the except below used to swallow it).
                         await with_write_retry(
-                            lambda: feed.upsert_feed_row(
+                            # Bind loop vars as defaults so the closure captures
+                            # THIS iteration's values (B023); the callback is
+                            # awaited inline here, but the explicit binding keeps
+                            # it correct if it ever becomes deferred.
+                            lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(
                                 user_id=user_id,
                                 job_id=jid,
                                 score=int(ms),

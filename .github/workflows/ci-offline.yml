@@ -88,6 +88,13 @@ jobs:
         # middleware fails OPEN when the backend is unreachable, so those aren't an
         # auth-guard problem). Real browser coverage of prod lives in synthetic-live.yml.
         run: npx playwright test
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
 
   loop2-e2e-spotlight:
     # A fast, focused run of just the automated Loop 2 lifecycle test, so a

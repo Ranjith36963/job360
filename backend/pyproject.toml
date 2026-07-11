@@ -56,10 +56,11 @@ dev = [
     # cycles to cut wall-clock time on the 600+ test suite.
     "pytest-xdist>=3.0.0",
     "mypy>=1.10.0",
-    # Linter. PINNED exactly: ruff's rule set changes between releases, so an
-    # unpinned ruff drifts — a new version flags code that was clean, breaking
-    # CI on unrelated PRs (that's what happened here). Bump deliberately.
-    "ruff==0.15.9",
+    # Linter — MUST be in dev extras so the CI "Lint (ruff)" blocking gate can run
+    # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
+    # changes between releases, so bump deliberately (an unpinned bump flags
+    # previously-clean code and reds CI on unrelated PRs).
+    "ruff>=0.15,<0.16",
 ]
 indeed = [
     "python-jobspy",
@@ -126,7 +127,15 @@ select = ["E", "F", "W", "I", "N", "UP", "S", "B", "G"]
 #       don't litter every signature with `# noqa: B008`.
 # B904: FastAPI uses HTTPException as a response (not an error); raising it
 #       inside `except` clauses without `from err` is intentional.
-ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
+# UP006 (Dict/List/Type → dict/list/type): same py3.9 rationale as UP007/UP035 —
+#   subscripting builtins in runtime positions isn't 3.9-safe; keep typing.* forms.
+# N806: uppercase locals are used deliberately for in-function CONSTANTS
+#   (e.g. `_SOURCE_BUCKET`) and ML/math names (`X`, `y`); not a bug.
+# S110 (try/except/pass): the codebase uses it for intentional graceful
+#   degradation (best-effort DB/version reads); logging every one is noise.
+# S311 (non-crypto random): used for jitter/sampling, never for secrets.
+ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904",
+          "UP006", "N806", "S110", "S311"]
 
 [tool.ruff.lint.per-file-ignores]
 # Dev/eval CLI helpers under scripts/ are throwaway analysis code, NOT shipped
@@ -135,15 +144,22 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 # terse one-line style are all expected here. Globs are relative to this
 # pyproject.toml (the `backend/` directory), so `scripts/*` matches
 # `backend/scripts/*.py` at the repo level.
+# Dev CLI + analysis helpers: subprocess/SQL/temp-file/compact one-liners, long
+# report lines (E501), loop-var closures in throwaway callbacks (B023), scratch
+# locals (F841), and %-format one-liners (UP031) are expected in dev tooling.
+# (Union of both pre-merge branches' allowances.)
 "scripts/*" = [
-    "S603", "S607", "S608", "S110", "S311",
-    "N806", "B023", "E702", "E741", "F841", "E501", "B007",
+    "S603", "S607", "S608", "S110", "S311", "S106", "S108",
+    "N806", "B023", "E702", "E741", "F841", "E501", "B007", "UP031",
 ]
 "scripts/bootstrap_dev.py" = ["S105", "S603", "S607"]
-# Test files: hardcoded fixture passwords (S105/S106/S107), temp-file paths
-# (S108), subprocess calls (S603/S607), `pytest.raises(Exception)` (B017), and
-# set-env-before-import ordering (E402) are all expected + benign in tests.
-"tests/*" = ["S105", "S106", "S107", "S108", "S110", "S603", "S607", "E402", "E501", "B017", "N806", "N801"]
+# Test files: fixture passwords/tokens (S105/S106/S107), temp files (S108),
+# best-effort try/except (S110), compact `a; b` setup lines (E702),
+# pytest.raises(Exception) (B017), %-format assertion messages (UP031),
+# bottom-of-file imports (E402/E501), subprocess launches (S603/S607), helper
+# class/var naming (N801/N806/E741/B007), scratch locals (F841) — all expected
+# in test context. (Union of both pre-merge branches' allowances.)
+"tests/*" = ["S105", "S106", "S107", "S108", "S110", "S603", "S607", "E402", "E501", "B017", "N806", "N801", "E702", "UP031", "E741", "B007", "F841"]
 # FIXME(pillar1): test_two_pass.py (merged via PR #25) defines TestAboutMe /
 # TestGithub / TestLinkedIn DeterministicPass classes TWICE (lines ~388 vs ~562)
 # with different bodies — the second set shadows the first, so the first set's
@@ -161,20 +177,26 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904"]
 # the late-bound `_coerce_str` imports keep their explicit `noqa: E402`.
 "src/services/profile/cv_parser.py" = ["E501"]
 # RSS/XML source parsers use stdlib xml.etree by design (ARCHITECTURE.md) to
-# parse KNOWN job feeds — S314 (untrusted-XML) is accepted here.
-"src/sources/**/*.py" = ["S314"]
+# parse KNOWN/semi-trusted job feeds — S314 accepted. Some feed/source files
+# also carry long URL/param lines — E501. (Nested glob: sources live in
+# category subfolders, so `**/*.py`, not `*`.)
+"src/sources/**/*.py" = ["S314", "E501"]
 # database.py / feed.py build `IN (?,?,?)` placeholder lists dynamically — the
 # `?`s are generated, values are always parameterized, so S608 is a false
 # positive. database.py also has a best-effort purge swallow (S110).
 "src/repositories/database.py" = ["S110", "S608"]
 "src/services/feed.py" = ["S608"]
-# channels.py: the OAuth "token" field name trips S105 (not a real secret).
-"src/api/routes/channels.py" = ["S105"]
+# channels.py: _SLACK_TOKEN_URL / _DISCORD_TOKEN_URL are URLs not secrets (S105);
+# long URL lines (E501).
+"src/api/routes/channels.py" = ["S105", "E501"]
 # rescore.py is scoring code (owner-managed): keep math-style UPPERCASE vars
 # (N806). B023 flags a lambda that captures loop vars jid/ms — left untouched
 # and surfaced to the owner rather than edited in a lint pass.
 "src/services/rescore.py" = ["N806", "B023"]
-# Intentional late/conditional imports after module-level setup.
+# LLM prompt strings can't be wrapped without changing what the model sees — E501.
+"src/services/profile/linkedin_parser.py" = ["E501"]
+# Intentional late/conditional imports after module-level setup (rules #11/#16
+# heavy-dep deferral + rule-#28 note imports) — E402.
 "src/cli_view.py" = ["E402"]
 "src/services/profile/github_enricher.py" = ["E402"]
 

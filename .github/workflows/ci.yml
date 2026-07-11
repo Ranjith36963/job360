@@ -68,6 +68,12 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Lint (ruff)
+        # Backlog drained 2026-07-10: 329 findings → 0. The bulk auto-fixed
+        # (`ruff check --fix`, ~141 import-sort/style); the rest were real
+        # code fixes (dead-var deletes, ambiguous-name renames, a closure
+        # binding, a missing import) plus intentional-category ignores scoped
+        # in pyproject.toml (tests/*, scripts/*, LLM-prompt E501, etc.).
+        # BLOCKING again — keep it green.
         working-directory: backend
         run: python -m ruff check .
 
