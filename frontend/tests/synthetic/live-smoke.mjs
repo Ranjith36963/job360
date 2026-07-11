@@ -14,6 +14,10 @@
 //   SMOKE_BASE_URL  frontend URL   (default: live prod frontend)
 //   SMOKE_API_URL   backend URL    (default: live prod backend)
 //   SMOKE_SESSION   verified synthetic account session cookie (enables authed corners)
+//   SMOKE_ALLOW_WRITES  "1"/"true" to run MUTATING corners (CV upload → extraction).
+//        DEFAULT OFF → authed walk is READ-ONLY (only opens pages, never writes). Turn
+//        on ONLY for a throwaway synthetic account — NEVER a real user's cookie, or the
+//        6-hourly run would overwrite that user's profile + burn an LLM call each time.
 //   SMOKE_OUT       artifact dir   (default: smoke-artifacts)
 //
 // Exit code: non-zero if ANY corner failed (so CI goes red + emails the owner).
@@ -25,6 +29,9 @@ import path from "path";
 const FE = (process.env.SMOKE_BASE_URL || "https://frontend-production-c608f.up.railway.app").replace(/\/+$/, "");
 const BE = (process.env.SMOKE_API_URL || "https://backend-production-80e8e.up.railway.app").replace(/\/+$/, "");
 const SESSION = process.env.SMOKE_SESSION || "";
+// READ-ONLY by default. Mutating corners (CV upload → extraction) run ONLY when this is
+// explicitly on — so pointing SMOKE_SESSION at a real account can never overwrite it.
+const ALLOW_WRITES = /^(1|true|yes)$/i.test(process.env.SMOKE_ALLOW_WRITES || "");
 const OUT = process.env.SMOKE_OUT || "smoke-artifacts";
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -118,8 +125,15 @@ await corner("contact page", async () => { await gotoOK("/contact"); });
 // ── AUTHED corners (need a verified synthetic session) ──
 const AUTHED = [
   ["dashboard loads", async () => { await gotoOK("/dashboard"); await page.waitForTimeout(2500); }],
-  ["profile + CV upload → extraction", async () => {
+  [ALLOW_WRITES ? "profile + CV upload → extraction" : "profile page renders (read-only)", async () => {
     await gotoOK("/profile");
+    if (!ALLOW_WRITES) {
+      // READ-ONLY: just prove the profile page renders. No upload → no profile overwrite,
+      // no LLM call. Safe to point at a real user's account.
+      await page.locator("input, button").first().waitFor({ state: "visible", timeout: 15000 });
+      return;
+    }
+    // MUTATING (opt-in, synthetic accounts only): upload a sample CV and wait for extraction.
     const cv = path.resolve(new URL("./sample-cv.pdf", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
     const fileInput = page.locator('input[type="file"]').first();
     await fileInput.waitFor({ state: "attached", timeout: 15000 });
