@@ -5,39 +5,53 @@
 
 > **Scope note — "production" = `main`.** Railway deploys from `main`. The stacked PRs **#27→#31** (CI fix, prod email, request-timeout middleware, healthcheck fixes, extraction rescue) are **merged-worthy but NOT yet in production**, so a few items below are already fixed *pending merge* — each is tagged **[FIXED-PENDING-MERGE]**. Everything else is true of production right now.
 
-## Severity summary
+## Severity summary (after adversarial verification)
 
-| Sev | Count | Headline |
+An Opus verifier re-read the real code — **including psycopg3's own source** — for every load-bearing finding. **Headline correction: there are no true CRITICALs.** The two originally graded CRITICAL were over-graded — psycopg3 async connections *serialize* concurrent coroutines under an internal lock (they do **not** raise "another operation in progress"; that's psycopg2/asyncpg). So the shared connection is a throughput bottleneck, not corruption. Honest revised picture (counts approximate — severities were re-graded during verification):
+
+| Sev | ~Count | Headline |
 |-----|------:|----------|
-| 🔴 CRITICAL | 2 | One shared DB connection for all requests → corruption/errors under any concurrency |
-| 🟠 HIGH | 11 | Multi-dim scoring silently off in the ingest path; migration half-apply; PII to Sentry; cookie `Secure` gap; migrations in the serving process; no security scanning; 4 frontend UX/leak bugs |
-| 🟡 MEDIUM | 18 | SSRF via webhooks; enumeration; in-memory rate limits; worker has no timeouts/health; purge deletes live jobs; NULL-comparison ghost bug; non-atomic writes; … |
-| 🟢 LOW | 8 | GDPR-deleted account resurrection; future-date recency; CORS width; env-example gaps; … |
+| 🔴 CRITICAL | 0 | C1 corrected → MEDIUM, C2 dismissed — see verification |
+| 🟠 HIGH | ~15 | **Notifications never fire in prod (SI1)**; multi-dim scoring silently off (H1); migration half-apply → schema drift (H2); Sentry ships cookies/passwords (H4); cookie `Secure` prod-gate (H5); **ChromaDB persists to wrong dir → wiped on deploy (SI3)**; quiet-hours flush missing (SI2); daily digest never sends (N1); untested prod SQL-rewriter (T1); undocumented shipped tailoring feature (T2) |
+| 🟡 MEDIUM | ~28 | shared-connection bottleneck + `lastval()` id race (C1/M13); SSRF (M1); register enumeration (M2); in-memory rate limits (M3); purge deletes live jobs (M5); profile extraction blocks the request (N2); full-table load per job view (N3); no security scanning (H7); … |
+| 🟢 LOW | ~16 | frontend UX (drag/skeleton/error-copy — H8–H11); GDPR-deleted resurrection (L1); future-date recency (L2); CORS width (L3); … |
 
-## 🎯 Fix these first (ranked by risk × ease)
+## 🎯 Fix these first (ranked by impact × ease)
 
-1. **C1 — pool the database connection.** Everything else is noise next to this; the app is one traffic spike from constant `"another operation in progress"` errors. Small, well-bounded fix.
-2. **H1 — set `job.id` in the worker ingest path.** One line; restores multi-dimensional scoring that is currently silently disabled for every job the pipeline writes.
-3. **H4 — `Sentry send_default_pii=False` + scrub cookies/passwords.** One line + a `before_send`; stops shipping session cookies and plaintext passwords to a third party.
-4. **H5 — gate the session cookie `Secure` flag on the same prod check as everything else.** One line; closes a real session-capture window.
-5. **H2 / H6 — make migrations atomic and move them out of the request-serving lifespan.** Prevents silent schema drift and "one bad migration = full outage on every replica."
-6. **H7 — add `pip-audit` + `npm audit` + `gitleaks` + `bandit` to CI.** Cheap, catches the next class of problem automatically (the feedback-loop principle).
+1. **SI1 — the notification system never fires in production.** `score_and_ingest` (the only path that queues digests / sends instant alerts) is never enqueued by the real pipeline, so no user ever gets a job-match email/Slack/Discord. Highest *functional* impact — verify, then wire the pipeline to enqueue it.
+2. **H1 — set `job.id` in the worker ingest path** (`tasks.py`). One line; restores multi-dim scoring that's silently off for every ingested job.
+3. **H4 — `Sentry send_default_pii=False` + scrub** (`main.py:63`). Stops shipping session cookies + plaintext passwords to a third party.
+4. **H5 — gate the cookie `Secure` flag on `_is_production()`** (`auth.py:109`). Closes a session-capture window.
+5. **SI3 — fix the ChromaDB path** (`vector_index.py:19`, `parents[3]`→`parents[2]`). Stops the vector index being wiped on every redeploy.
+6. **N1/SI2 — fix the daily-digest window + add the quiet-hours flush** (`tasks.py:679`). Most users currently never receive a daily/queued digest.
+7. **H2 — make migrations atomic + move out of the serving lifespan.** Prevents silent schema drift + boot outages.
+8. **C1 (now MEDIUM) — pool the DB connection.** Removes the throughput ceiling + closes the `lastval()` id race (M13). Worth doing before traffic grows — not the emergency it was billed as.
+9. **H7 — add pip-audit + npm audit + gitleaks + bandit to CI.**
 
 ---
 
-# 🔴 CRITICAL
+# ✅ Adversarial verification — corrections applied
 
-### C1 — A single shared psycopg async connection serves every concurrent request
-- **File:** `backend/src/api/dependencies.py:8-22` (`_db` global singleton) + `backend/src/repositories/database.py:19,25` (one `self._conn`, opened once).
-- **Evidence (verified by manager):** `_db` is a module-global `JobDatabase` created once in `init_db()` and returned to *every* request by `get_db()`. `JobDatabase` opens exactly one connection (`self._conn = await aiosqlite.connect(...)` → psycopg via the shim) and all ~40 methods run on it. psycopg3 async connections raise `ProgrammingError: another operation is in progress` when two coroutines use them at once.
-- **Impact:** Under any real concurrency (two overlapping requests), queries error out or read each other's cursors. It has *not* bitten yet only because live traffic is tiny (≈7–11 users); the first modest spike turns it into constant 500s and possibly cross-user data bleed.
-- **Fix:** Use `psycopg_pool.AsyncConnectionPool`; acquire a connection per request/operation (`async with pool.connection() as conn:`), never share one `AsyncConnection` across tasks. Wire pool open/close into the FastAPI lifespan. (This also fixes C2, M13, and the `lastval()` races.)
+The Opus verifier read real code for every load-bearing finding and corrected this document:
 
-### C2 — LLM-judge `match_batch` runs concurrent DB ops on that same shared connection
-- **File:** `backend/src/services/llm_matcher.py:181-241` (`match_batch`, `asyncio.gather` + `Semaphore(3)`).
-- **Evidence:** Each of the 3 concurrent `_one()` coroutines calls `has_verdict`/`load_enrichment`/`save_verdict` on the shared `_db._conn`.
-- **Impact:** The judge stage collides on the connection under exactly the concurrency it was designed for → intermittent "operation in progress" and dropped verdicts during rescore.
-- **Fix:** Same as C1 — each `_one()` takes its own pooled connection. Once C1 lands with a pool, this resolves.
+- **C1 → MEDIUM (was CRITICAL).** The `_db` singleton + one shared `self._conn` is real (`dependencies.py:8-28`, `database.py:19-25`), **but** psycopg3 serializes concurrent ops under a connection lock (`cursor_async.py`) — no corruption, no "operation in progress" error. Real teeth: a **throughput bottleneck** + it enables the `lastval()` id race (M13). *(My own earlier check confirmed the code structure but assumed psycopg2/asyncpg semantics — the verifier caught that. Exactly why the adversarial pass earns its keep.)*
+- **C2 → dismissed.** `match_batch`'s concurrent DB ops serialize cleanly; no dropped verdicts. Perf only.
+- **Frontend H8–H11 → MEDIUM/LOW**, **H3/H6/H7 → MEDIUM**, **M6 → LOW-MEDIUM** (ghost NULL bug is real but the column defaults to `'active'`, so few NULL rows). **Every other HIGH is code-true;** H1/H2/H4/H5 are solid.
+
+**Three extra issues the verifier found while reading:**
+- **V1 — the migration half-apply (H2) is not unique to 0002.** `0000_baseline`, `0017`, `0018`, `0021` also use bare `CREATE TABLE`; any can be falsely marked "applied" after a partial re-run. Fix the *runner* (one transaction per body), not just migration 0002.
+- **V2 — `pg.py Connection.execute` returns unclosed cursors** (`pg.py:402`) → server-side cursors accumulate on the shared connection; every INSERT also pays an unused `SELECT lastval()` round-trip.
+- **V3 — `translate()`'s blind `?`→`%s`** (`pg.py:266`) has the same string-literal risk as the `rowid`→`ctid` rewrite (L4): a `?` inside a string value gets rewritten.
+
+---
+
+# 🟡 (was CRITICAL) C1 — one shared DB connection, corrected to MEDIUM
+
+### C1 — A single shared psycopg async connection serves every request (throughput bottleneck, not corruption)
+- **File:** `backend/src/api/dependencies.py:8-22` + `backend/src/repositories/database.py:19,25`.
+- **Evidence:** `_db` is a module-global `JobDatabase` created once and returned to every request; it holds one `self._conn` used by all ~40 methods. **Corrected:** psycopg3 serializes concurrent coroutines on that connection under an internal lock — it does not raise or corrupt.
+- **Impact:** Every request contends for one connection → a hard throughput ceiling (requests queue behind each other), and the two-step `INSERT` then `SELECT lastval()` pattern (M13) can return a wrong id under interleaving.
+- **Fix:** `psycopg_pool.AsyncConnectionPool`, one connection per operation, opened/closed in the lifespan. (Also closes M13 and V2.)
 
 ---
 
@@ -382,7 +396,36 @@ _(The routes/worker sweep independently confirmed several first-fleet findings �
 
 ---
 
-_Still pending: the service-internals fresh sweep + the Opus adversarial verifier's line-by-line verdicts on all findings. Their results append here._
+### SI1 — [HIGH] The notification pipeline is fully disconnected in production — no user is ever notified
+- **File:** `backend/src/workers/tasks.py:86,181,319,574`; `backend/src/main.py:744-780`.
+- **Evidence:** `dispatch()` (the only writer of `user_notification_digests` and the only instant-send path) is reachable only via `send_notification` → enqueued only from inside `score_and_ingest`. A tree-wide grep for `enqueue(`/`score_and_ingest` shows **nothing ever enqueues it** — the real per-user search writes straight to `user_feed` via `FeedService.upsert_feed_row` and never enqueues. So `notification_tick`→`send_bundle` always finds `pending == []`.
+- **Impact:** In prod, **no channel (email/Slack/Discord/…) ever receives a job-match notification**, and the per-user `score_threshold` gate is dead code. (Magic-link/verification emails are a *different*, direct path and are unaffected — those work.)
+- **Fix:** After the per-user `user_feed` write (in `main.py` or a cron scanning new rows), enqueue `send_notification`/call `dispatch()` with the computed `match_score`. Add an integration test that runs a real search and asserts a ledger/digest row is produced. **(Recommend verifying this one before acting — it's grep-based; confirm no enqueue path exists on the deployed worker.)**
+
+### SI2 — [HIGH] Quiet-hours "flush" (claimed by rule #24) doesn't exist → instant alerts queued in quiet hours are stranded forever
+- **File:** `backend/src/workers/tasks.py:665-700` (`_bundle_due`) + `dispatcher.py:273`.
+- **Evidence:** `dispatch()` queues an `instant`-mode user's match if it lands in quiet hours, but `_bundle_due` returns `False` for `mode=="instant"` and has no "quiet hours ended → flush the backlog" branch (grep for `flush` = 0 logic hits). Rule #24 explicitly claims a quiet-hours-flush branch.
+- **Impact:** Once SI1 is fixed and quiet hours are on, any instant match arriving during quiet hours is queued and never sent, even after quiet hours end.
+- **Fix:** Add a branch: if an instant-mode user has unsent `user_notification_digests` rows AND is no longer in the quiet window → drain.
+
+### SI3 — [HIGH] ChromaDB persists to the wrong directory → wiped on every redeploy
+- **File:** `backend/src/services/vector_index.py:19` — `_DEFAULT_PATH = ...parents[3]/"data"/"chroma"`.
+- **Evidence:** The file is at `backend/src/services/vector_index.py`, so `parents[3]` = **repo root**, resolving to `D:\dev\job360\data\chroma` — NOT `backend/data/chroma` (confirmed: a stray root-level `data/chroma` exists). `skill_normalizer.py` is one dir deeper so its `parents[3]` correctly lands in `backend/data`.
+- **Impact:** A Railway volume mounting `backend/data/` silently excludes the vector index → every redeploy wipes ChromaDB's store, and hybrid search fails *silently* back to keyword-only. (This is the known BACKLOG item #7b.)
+- **Fix:** `parents[3]` → `parents[2]` in `vector_index.py:19`. (Move the existing root `data/chroma` into `backend/data/chroma` while the app is stopped — **Pillar-2 is owner-reserved, so confirm before moving live embeddings**.)
+
+### SI4 — [MEDIUM] `FeedService` is unreachable dead code that ranks by `score`, not the judge verdict
+- **File:** `backend/src/services/feed.py:60,77`.
+- **Evidence:** Its methods have zero call sites; the live read path is `database.py:1058` (`get_user_feed_jobs`, correctly `ORDER BY COALESCE(f.llm_fit_score, f.score) DESC`). `FeedService.list_for_user` orders by `score DESC` only, yet its docstring calls it the "single source of truth."
+- **Impact:** Harmless today, but a future caller (e.g. reviving the notification path in SI1) that trusts this "SSOT" will rank by keyword score, contradicting the documented judge-outranks-funnel rule.
+- **Fix:** Delete the unused methods, or fix the ordering and route all callers through one path.
+
+### SI5 — [LOW] `prefilter.experience_ok` symmetric ±1 band contradicts its docstring
+- **File:** `backend/src/services/prefilter.py:110-113` — `abs(job_level - user_level) <= 1` while the docstring says the rule is "junior skips senior — not the reverse."
+- **Impact:** A senior user is filtered away from entry/junior roles they may still want.
+- **Fix:** Make the check one-directional, or correct the docstring to say it's intentionally symmetric.
+
+_Verified clean by this sweep: `salary.py` (cadence multipliers correct), `deduplicator.py` (4-layer thresholds + tiebreaks + lazy imports correct), `retrieval.py`/rerank wiring (RRF + cross-encoder threaded correctly, degrades gracefully), `deadline.py`/`skill_gap.py`/`domain_classifier.py`/`conditional_cache.py`/`metrics_exporter.py`, `report_generator.py`._
 
 ---
 
