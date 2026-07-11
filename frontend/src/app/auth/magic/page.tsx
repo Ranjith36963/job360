@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { consumeMagicLink } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -40,9 +41,10 @@ function MagicBody() {
         if (!cancelled) {
           setState("error");
           setError(
-            err instanceof Error
-              ? err.message
-              : "This sign-in link is invalid or expired. Request a new one from the login page."
+            friendlyAuthError(
+              err,
+              "This sign-in link is invalid or expired. Request a new one from the login page."
+            )
           );
         }
       }

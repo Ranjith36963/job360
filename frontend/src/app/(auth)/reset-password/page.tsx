@@ -15,6 +15,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { confirmPasswordReset } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,12 +62,11 @@ function ResetForm() {
       setDone(true);
     } catch (err) {
       // Backend returns 400 for any failure (unknown / expired / used /
-      // deleted-user). Show a generic message — don't help an attacker
-      // distinguish those cases.
+      // deleted-user). friendlyAuthError keeps the message generic — don't
+      // help an attacker distinguish those cases, and never leak the raw
+      // "API error 400: …" string to the user.
       setServerError(
-        err instanceof Error
-          ? err.message
-          : "Reset link is invalid or expired. Request a new one.",
+        friendlyAuthError(err, "Reset link is invalid or expired. Request a new one."),
       );
     }
   });

@@ -46,9 +46,17 @@ export async function middleware(request: NextRequest) {
     });
     if (!verify.ok) return bounceToLogin();
   } catch {
-    // Backend unreachable: fail OPEN (let the page load; its API calls surface the
-    // error) rather than locking everyone out if the backend is briefly down.
-    return NextResponse.next();
+    // M14: Backend unreachable — fail CLOSED. Serving the protected shell here
+    // (the old "fail open" behaviour) let a stale/expired/invalid session
+    // through unverified any time the auth check itself couldn't complete.
+    // Redirect to login instead. We deliberately do NOT delete the cookie
+    // here (unlike bounceToLogin): this is a transient network failure, not
+    // proof the session is invalid, so a legitimate user shouldn't be forced
+    // through a full re-login once the backend recovers — the same cookie
+    // will be re-verified on their next request.
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl, { status: 307 });
   }
 
   return NextResponse.next();
