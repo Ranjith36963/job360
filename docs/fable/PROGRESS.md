@@ -4,13 +4,17 @@
 > names the commit-level change + how it was verified. Honest status only — a thing
 > is "✅ Fixed" only when it's coded AND verified, not when it's planned.
 
-## ✅ Fixed (coded + verified)
+## ✅ Fixed (coded + verified + COMMITTED — pushed to branch, commit `7f906c6`)
+
+Full backend suite **1715 passed, 0 failed** on the merged tree; pushed for GitHub CI (Linux) to re-verify.
 
 | # | Finding | Doc | What was done | Verified by |
 |---|---|---|---|---|
-| 1 | **Dead ARQ worker** (P0) — `ctx['db']` never set, every cron crashed | `04-OPS` | Added `on_startup`/`on_shutdown` to `WorkerSettings` opening the DB connection + wiring `enqueue`; set `max_jobs=1` so the shared connection is never used concurrently | New regression test `test_worker_startup_populates_ctx` + full `test_worker_tasks.py` (15 passed) |
-| 2 | **Session cookie may ship without `Secure`** (P1) — gated on unused `JOB360_ENV` | `01-SECURITY` | Cookie `secure` now uses the same prod check as the rest of the app (`APP_ENV=production` OR `RAILWAY_ENVIRONMENT`) | ruff + parse; no test depended on `JOB360_ENV` |
-| 3 | **Sentry `send_default_pii=True`** ships cookies/PII (P1) | `01`, `04`, `05` | Set `send_default_pii=False` + added a `before_send` scrubber stripping Cookie/Authorization headers, cookies, and request bodies | ruff + parse; prod-gated init unchanged |
+| 1 | **Dead ARQ worker** (P0) — `ctx['db']` never set, every cron crashed | `04-OPS` | Added `on_startup`/`on_shutdown` to `WorkerSettings` opening the DB connection + wiring `enqueue`; set `max_jobs=1` so the shared connection is never used concurrently | New regression test `test_worker_startup_populates_ctx` + full suite (1715 passed) |
+| 2 | **Session cookie may ship without `Secure`** (P1) — gated on unused `JOB360_ENV` | `01-SECURITY` | Cookie `secure` now uses the same prod check as the rest of the app (`APP_ENV=production` OR `RAILWAY_ENVIRONMENT`) | full suite green |
+| 3 | **Sentry `send_default_pii=True`** ships cookies/PII (P1) | `01`, `04`, `05` | Set `send_default_pii=False` + added a `before_send` scrubber stripping Cookie/Authorization headers, cookies, and request bodies | full suite green |
+
+**Still to do on these:** ⚠️ the worker fix revives the crons, but the worker still has **no Sentry** — pair it with the `09-PRODUCTION-SIGNALS` P0 (init Sentry in the worker) so a future worker failure actually alerts.
 
 ## 🔜 Next up (code-fixable, in roadmap order)
 
