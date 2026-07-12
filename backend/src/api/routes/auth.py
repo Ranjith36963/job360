@@ -104,9 +104,13 @@ def _client_meta(request: Request) -> dict:
 
 
 def _set_session_cookie(response: Response, cookie: str) -> None:
-    # Secure flag gates on JOB360_ENV so prod deploys don't serve bare cookies
-    # by accident. Any value other than "prod" falls back to dev-friendly.
-    secure = os.environ.get("JOB360_ENV") == "prod"
+    # Secure flag gates on the SAME prod check the rest of the app uses
+    # (APP_ENV=production OR RAILWAY_ENVIRONMENT). Previously gated on JOB360_ENV,
+    # which is never set on Railway — so prod served the 30-day session cookie
+    # WITHOUT Secure, letting it ride plain-HTTP requests. See docs/fable/01.
+    secure = os.environ.get("APP_ENV", "").lower() == "production" or bool(
+        os.environ.get("RAILWAY_ENVIRONMENT", "")
+    )
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=cookie,

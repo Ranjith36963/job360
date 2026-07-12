@@ -60,10 +60,27 @@ def _init_sentry() -> None:
     # No DSN, or not a deployed prod environment → do not report at all.
     if not dsn or not is_prod:
         return
+    def _scrub_pii(event, _hint):
+        # Belt-and-suspenders on top of send_default_pii=False: strip auth
+        # headers, cookies, and request bodies (may hold passwords / CV text)
+        # before any event leaves for Sentry. See docs/fable/01 + 05.
+        req = event.get("request")
+        if isinstance(req, dict):
+            headers = req.get("headers")
+            if isinstance(headers, dict):
+                for h in list(headers):
+                    if h.lower() in ("cookie", "authorization"):
+                        headers[h] = "[redacted]"
+            req.pop("cookies", None)
+            if "data" in req:
+                req["data"] = "[redacted]"
+        return event
+
     sentry_sdk.init(
         dsn=dsn,
         environment=os.environ.get("RAILWAY_ENVIRONMENT") or "production",
-        send_default_pii=True,
+        send_default_pii=False,
+        before_send=_scrub_pii,
         traces_sample_rate=0.1,
     )
 
