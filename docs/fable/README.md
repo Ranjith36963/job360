@@ -30,6 +30,8 @@ scorecard. Then go to the area doc you care about. Each doc follows the same sha
 | `05-COMPLIANCE-AND-LEGAL.md` | UK-GDPR, PII, data-subject rights, subprocessors, the scraping legal risk. |
 | `06-HARNESS-AND-WORKFLOW.md` | Skills, hooks, workflows, loops, CLAUDE.md, memory — how you run Claude Code. |
 | `07-ROADMAP.md` | The sequenced 30/60/90-day plan that turns the fixes into a path, not a pile. |
+| `08-GAPS-NOT-YET-AUDITED.md` | The honest boundary — dimensions NOT swept (performance, cost, test-quality, …) that a true A still needs. |
+| `PROGRESS.md` | Live tracker: fixes shipped (coded + verified) vs pending vs "needs you". |
 
 ## Priority legend
 
