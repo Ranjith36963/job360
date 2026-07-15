@@ -23,9 +23,32 @@ async def init_db() -> JobDatabase:
 
 
 async def get_db() -> JobDatabase:
+    """The boot singleton — schema owner. Used at boot + by tests for data setup.
+    Routes should depend on ``get_request_db`` instead (per-request connection)."""
     if _db is None:
         await init_db()
     return _db
+
+
+async def get_request_db():
+    """Per-request DB connection dependency (docs/fable/02 — the P0 fix).
+
+    Each request gets its OWN short-lived connection instead of the process-wide
+    shared singleton. psycopg3 forbids using one async connection from two coroutines
+    at once, so the shared connection could interleave/corrupt concurrent requests
+    ("another operation is already in progress") and never recovered after a DB
+    restart. A fresh connection per request is concurrency-safe and self-healing.
+    Schema + migrations still run ONCE at boot via ``init_db()``; this only opens a
+    connection (no DDL). FastAPI closes it after the response via the finally block.
+    """
+    if _db is None:
+        await init_db()  # ensure schema + migrations applied once (idempotent)
+    db = JobDatabase(str(DB_PATH))
+    await db.connect()
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 async def close_db():

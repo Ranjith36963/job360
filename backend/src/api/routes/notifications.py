@@ -21,7 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import NotificationLedgerEntry, NotificationLedgerListResponse
 from src.repositories.database import JobDatabase
 
@@ -38,7 +38,7 @@ async def list_notifications(
     job_id: Optional[int] = Query(None, description="Filter by job id"),
     start_time: Optional[str] = Query(None, description="ISO-8601 lower bound on created_at"),
     end_time: Optional[str] = Query(None, description="ISO-8601 upper bound on created_at"),
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
     """Return the caller's most recent notification ledger entries,
@@ -79,7 +79,7 @@ async def list_notifications(
 
 @router.get("/notifications/stats")
 async def notification_stats(
-    db: JobDatabase = Depends(get_db),  # noqa: B008
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict:
     """Step-3 O-02 — per-channel success/failure aggregation.

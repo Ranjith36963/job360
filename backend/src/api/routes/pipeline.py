@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import (
     ApplicationTimelineResponse,
     PipelineAdvanceRequest,
@@ -44,7 +44,7 @@ def _to_pipeline_application(row: dict) -> PipelineApplication:
 @router.get("/pipeline", response_model=PipelineListResponse)
 async def list_pipeline(
     stage: Optional[str] = Query(None),
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """List caller's tracked job applications, optionally filtered by stage."""
@@ -54,7 +54,7 @@ async def list_pipeline(
 
 @router.get("/pipeline/counts")
 async def pipeline_counts(
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Return application counts per pipeline stage, scoped to caller."""
@@ -66,7 +66,7 @@ async def pipeline_counts(
 
 @router.get("/pipeline/reminders", response_model=PipelineRemindersResponse)
 async def pipeline_reminders(
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Return the caller's stale applications (no update in 7+ days)."""
@@ -77,7 +77,7 @@ async def pipeline_reminders(
 @router.post("/pipeline/{job_id}", response_model=PipelineApplication)
 async def create_application(
     job_id: int,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Add a job to the caller's application pipeline (stage: applied).
@@ -107,7 +107,7 @@ async def create_application(
 async def advance_application(
     job_id: int,
     body: PipelineAdvanceRequest,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Advance the caller's application to the specified pipeline stage."""
@@ -129,7 +129,7 @@ async def advance_application(
 @router.get("/pipeline/{job_id}/timeline", response_model=ApplicationTimelineResponse)
 async def get_pipeline_timeline(
     job_id: int,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Return the stage history for this application, scoped to caller."""
@@ -150,7 +150,7 @@ class NotesUpdateRequest(BaseModel):
 async def update_notes(
     job_id: int,
     body: NotesUpdateRequest,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     """Update the latest notes for an application, archiving the previous value."""

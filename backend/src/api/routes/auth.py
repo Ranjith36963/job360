@@ -17,7 +17,7 @@ from src.api.auth_deps import (
     _secret,
     require_user,
 )
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
 from src.repositories import pg as aiosqlite
 from src.repositories.database import JobDatabase
@@ -263,7 +263,7 @@ class AccountDeleteRequest(BaseModel):
 async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """ERASE the caller's account (GDPR Article 17). Requires current-password
@@ -301,7 +301,7 @@ class PasswordChangeRequest(BaseModel):
 async def change_password(
     req: PasswordChangeRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """Authenticated password change. Requires current password verification,
@@ -340,7 +340,7 @@ class EmailChangeRequest(BaseModel):
 async def change_email(
     req: EmailChangeRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""

@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 
 router = APIRouter(tags=["runs"])
@@ -64,7 +64,7 @@ class RunsListResponse(BaseModel):
 async def recent_runs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — rule #12
 ):
     """Return paginated pipeline run history from run_log, newest first.
@@ -150,7 +150,7 @@ def _classify(zero_streak: int, total: int, errored: int) -> str:
 @router.get("/runs/source-health", response_model=SourceHealthResponse)
 async def source_health(
     runs: int = Query(20, ge=1, le=100, description="How many recent runs to aggregate over."),
-    db: JobDatabase = Depends(get_db),  # noqa: B008
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ):
     """Aggregate per-source job-count + error stats across recent runs.

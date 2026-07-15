@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import ActionRequest, ActionResponse, ActionsListResponse
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger
@@ -16,7 +16,7 @@ _VALID_ACTIONS = {"liked", "applied", "not_interested"}
 async def set_action(
     job_id: int,
     body: ActionRequest,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     if body.action not in _VALID_ACTIONS:
@@ -38,7 +38,7 @@ async def set_action(
 @router.delete("/jobs/{job_id}/action", response_model=ActionResponse)
 async def delete_action(
     job_id: int,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     await db.delete_action(job_id, user.id)
@@ -51,7 +51,7 @@ async def delete_action(
 
 @router.get("/actions", response_model=ActionsListResponse)
 async def list_actions(
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     rows = await db.get_actions(user.id)
@@ -64,7 +64,7 @@ async def list_actions(
 
 @router.get("/actions/counts")
 async def action_counts(
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ):
     counts = await db.get_action_counts(user.id)

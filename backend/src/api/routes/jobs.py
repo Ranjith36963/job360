@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from src.api.auth_deps import CurrentUser, optional_user, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import JobListResponse, JobResponse
 from src.repositories.database import JobDatabase
 
@@ -382,7 +382,7 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
 
 @router.get("/jobs/export")
 async def export_jobs(
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
     """Download all recent jobs as CSV (catalog is shared; auth gates access)."""
@@ -443,7 +443,7 @@ async def list_jobs(
     mode: Optional[str] = Query(None, description="'keyword' | 'hybrid' (Batch 2.7)"),
     limit: int = Query(100),
     offset: int = Query(0),
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; sitemap + unfurl bots read unauthenticated
 ):
     # Step-1 B8 — wire ?mode=hybrid through services.retrieval. Falls back
@@ -534,7 +534,7 @@ async def list_jobs(
 @router.get("/jobs/{job_id}/duplicates")
 async def get_job_duplicates(
     job_id: int,
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — public: shared catalog
 ):
     """Return alternate listings for the same job across sources (Option A: query-time grouping).
@@ -673,7 +673,7 @@ def _user_skill_names(profile) -> list[str]:
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
-    db: JobDatabase = Depends(get_db),  # noqa: B008 — FastAPI dependency-injection idiom
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; generateMetadata reads unauthenticated
 ):
     # Step-1 B6: single LEFT JOIN — JobResponse surfaces enrichment fields.

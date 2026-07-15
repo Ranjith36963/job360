@@ -18,6 +18,19 @@ class JobDatabase:
         self._path = db_path
         self._conn: aiosqlite.Connection | None = None
 
+    async def connect(self) -> None:
+        """Open a connection WITHOUT running the schema DDL (docs/fable/02).
+
+        The schema + migrations are created once at boot by ``init_db()``. Per-request
+        instances just need a live connection, so this skips the (heavy, redundant)
+        CREATE TABLE executescript. Used by the per-request ``get_db()`` dependency so
+        each request has its OWN connection — psycopg3 forbids sharing one async
+        connection across concurrent coroutines, and a fresh connection also self-heals
+        after a DB restart (the old single shared connection did neither).
+        """
+        self._conn = await aiosqlite.connect(self._path)
+        self._conn.row_factory = aiosqlite.Row
+
     async def init_db(self):
         # Postgres connection (schema selected from self._path in test mode;
         # always ``public`` in production). No PRAGMAs / WAL / busy_timeout —

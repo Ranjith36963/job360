@@ -686,3 +686,25 @@ async def test_jobs_response_deadline_null_when_not_set(authenticated_async_cont
     body = resp.json()
     assert body["deadline"] is None
     assert body["deadline_source"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_request_db_yields_own_connection_not_the_singleton():
+    """docs/fable/02 P0 — each request gets its OWN connection via get_request_db,
+    distinct from the shared boot singleton, so concurrent requests can't collide on
+    one psycopg async connection ('another operation is already in progress')."""
+    import src.api.dependencies as _deps
+
+    singleton = await _deps.get_db()
+    conns = []
+    for _ in range(2):
+        agen = _deps.get_request_db()
+        db = await agen.__anext__()
+        conns.append(db._conn)
+        # exhaust the generator so the finally-block closes the connection
+        try:
+            await agen.__anext__()
+        except StopAsyncIteration:
+            pass
+    assert conns[0] is not conns[1], "each request must get a fresh connection"
+    assert conns[0] is not singleton._conn, "request conn must not be the singleton"
