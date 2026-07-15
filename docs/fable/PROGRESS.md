@@ -49,3 +49,31 @@ Grades move only as **shipped** fixes accumulate. After the three fixes above:
 
 Full **A across all areas** requires the "Needs YOU" items too — those are decisions and
 budget, not code. This tracker will keep showing the true state as fixes land.
+
+---
+
+## Session update — ~27 of ~30 landed (branch `worktree-feat-live-smoke`)
+
+**All fixes below are committed + pushed, each with a full-suite-green gate (1716-1717 passed).**
+
+### P0 (both done)
+- ✅ **Sentry-in-worker** (272d29b) — worker crashes now reach Sentry (component=worker) + regression test.
+- ⏳ **DB connection pool** — NOT done. Conclusively scoped as a dedicated refactor: `get_db()` returns a shared singleton that `conftest.py` (lines 98-236) monkeypatches to inject the test DB. Making it per-request/pooled must also rebuild that test-DB wiring or it breaks every API test; also touches 18 route files + the pg shim. Recommend as the next focused piece.
+
+### P1
+- ✅ **Real erasure** (272d29b) — `hard_delete_user` across 17 per-user tables; closes erasure + orphans + resurrection (3 findings). Test verifies per-user data erased + shared catalog survives.
+- ✅ **Frontend auth-page error leak** (1c75b50) — `friendlyAuthError` on reset/verify pages.
+- ✅ **PostHog funnel** (63964ec) — 6 journey events instrumented.
+- ✅ **Magic-link Sentry issue** — resolved (non-code) + client-log level-gate (272d29b).
+- ⏳ **Transactional migrations** — NOT done. Large: reworks the pg-shim autocommit model + runner. Dedicated effort.
+
+### P2
+- ✅ Security: **XML billion-laughs guard** + **timing-safe login** (3f532b2), **lockout email+IP** (1b3519f).
+- ✅ Data: **purge on last_seen_at** (4e41e86, with test). ⏳ ISO timestamps (risky shim change) + normalized_key (**hard rule #1 + hands-off-on-search memory — flagged, not edited**) NOT done.
+- ✅ Frontend: **dashboard error state** (903af8d), **a11y** role=alert (7c7e78b) + aria-invalid (31010ca).
+- ✅ Ops: **restore runbook** (c880f88), **Node 20→22** (6abce80), **worker job_timeout** (4e41e86). ⏳ error-rate alert + railway.json = **needs YOU** (Sentry/Railway dashboards — not codeable via connected tools).
+- ✅ Harness: **gitleaks** (6abce80), **.claude/agents/ reviewers** (33a9b37). ⏳ CLAUDE.md trim (risky big edit) NOT done.
+
+### Remaining (honest): 2 dedicated refactors (pool, migrations) · 1 hands-off (normalized_key) · 2 risky (ISO timestamps, CSRF/Redis) · 2 needs-you (error-rate, railway.json) · 1 low-value-risky (CLAUDE.md trim).
+
+**Infra note:** the local test-DB (Docker Postgres) was wedged/slow mid-session; fixed by restarting Docker + `fsync=off` on the disposable test DB (80min→10min gates).
