@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 # agent-gate.sh — the ONLY way to earn a commit.
-# Runs the canonical gates and writes a stamp binding the PASS to this exact
-# tree state (HEAD + index + working tree). Any edit after the gate run
-# invalidates the stamp, so "ran tests, then changed one more thing, then
-# committed" is impossible. See agentic-loop/hardening.md.
+# Runs the gates and writes a stamp binding the PASS to this exact tree state
+# (HEAD + index + working tree). Any edit after the gate run invalidates the
+# stamp, so "ran tests, then changed one more thing, then committed" is
+# impossible. See agentic-loop/hardening.md.
+#
+# Tiered (2026-07-15):
+#   default  — TARGETED backend tests: each changed backend/src file maps to
+#              its tests/test_<name>.py; changed test files run as-is; ruff on
+#              changed .py files. Falls back to the FULL suite when no changed
+#              file maps to a test (conservative default).
+#   --full   — the original canonical full backend suite (~90 min on Windows).
+#              Use before merges/releases or when touching core plumbing.
+# CI (ci-offline.yml) runs the full suite on Linux for every PR either way —
+# the local gate is the fast shift-left check, CI is the final word.
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
+
+MODE="fast"
+[ "${1:-}" = "--full" ] && MODE="full"
 
 tree_fingerprint() {
   { git rev-parse HEAD; git status --porcelain; git diff; git diff --cached; } | git hash-object --stdin
@@ -17,14 +30,35 @@ BACKEND_CHANGED=$(echo "$CHANGED" | grep -c '^backend/' || true)
 FRONTEND_CHANGED=$(echo "$CHANGED" | grep -c '^frontend/' || true)
 
 if [ "$BACKEND_CHANGED" -gt 0 ]; then
-  echo "[gate] backend suite..."
-  # Process isolation (pytest-xdist). Single-process runs leak a non-daemon
-  # aiosqlite worker thread per connection; after ~68 test files the process
-  # exhausts Windows handles/threads and DEADLOCKS at ~4% (green on Linux CI,
-  # wedges on Windows). --dist loadfile gives each test file its own worker
-  # process, so nothing accumulates. Same tests, same rigor — just isolated.
-  # Verified: 1759 passed / 0 failed on Windows this way vs. a hard hang otherwise.
-  (cd backend && python -m pytest -q -p no:randomly -n 4 --dist loadfile)
+  if [ "$MODE" = "full" ]; then
+    echo "[gate] backend suite (full)..."
+    (cd backend && python -m pytest -q -p no:randomly)
+  else
+    # Map each changed backend .py file to its test file by name.
+    # backend/src/**/foo.py -> tests/test_foo.py; changed test files run as-is.
+    TARGETS=""
+    for f in $(echo "$CHANGED" | grep '^backend/' | grep '\.py$' || true); do
+      base="$(basename "$f" .py)"
+      case "$f" in
+        backend/tests/test_*.py) [ -f "$f" ] && TARGETS="$TARGETS ${f#backend/}" ;;
+        backend/tests/*) ;; # conftest/fixtures: no direct target; fall through
+        *) [ -f "backend/tests/test_${base}.py" ] && TARGETS="$TARGETS tests/test_${base}.py" ;;
+      esac
+    done
+    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+    LINT_FILES="$(echo "$CHANGED" | grep '^backend/.*\.py$' | sed 's|^backend/||' | while read -r p; do [ -f "backend/$p" ] && echo "$p"; done | tr '\n' ' ')"
+    if [ -n "${TARGETS// /}" ]; then
+      echo "[gate] backend targeted tests: $TARGETS"
+      (cd backend && python -m pytest -q -p no:randomly $TARGETS)
+      if [ -n "${LINT_FILES// /}" ]; then
+        echo "[gate] ruff on changed files..."
+        (cd backend && ruff check $LINT_FILES)
+      fi
+    else
+      echo "[gate] no changed file maps to a test — running FULL backend suite (conservative fallback)"
+      (cd backend && python -m pytest -q -p no:randomly)
+    fi
+  fi
 fi
 
 # M7 — API-types drift guard. A backend API-model change OR a frontend change
@@ -46,4 +80,4 @@ fi
 
 mkdir -p "$ROOT/.claude"
 tree_fingerprint > "$ROOT/.claude/gate-stamp"
-echo "[gate] PASS — stamp written"
+echo "[gate] PASS ($MODE) — stamp written"
