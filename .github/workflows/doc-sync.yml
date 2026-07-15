@@ -1,0 +1,51 @@
+name: doc-sync
+
+# Loop 3 — daily code↔docs drift check (report-only).
+# Reads hard facts from the code and compares them to every numeric claim in
+# the docs. On drift it opens (or comments on) a GitHub issue — it NEVER edits
+# files. Read-only by design: see docs/maintenance/loop1_safe_reenable.md
+# ("verify=read is safe"; only Loop 1 writes, and Loop 1 stays off).
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # 06:30 UTC daily — right after ci-offline (06:00)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run doc drift check
+        id: check
+        run: |
+          set +e
+          python scripts/doc_sync_check.py > drift.md
+          code=$?
+          set -e
+          cat drift.md
+          echo "drift=$code" >> "$GITHUB_OUTPUT"
+          # exit 2 = the checker itself crashed — fail the workflow loudly
+          [ "$code" -le 1 ] || exit "$code"
+
+      - name: Open or update drift issue
+        if: steps.check.outputs.drift == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Doc drift detected (Loop 3 doc-sync)"
+          num=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number' || true)
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file drift.md
+          else
+            gh issue create --title "$title" --body-file drift.md
+          fi
