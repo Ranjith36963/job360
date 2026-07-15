@@ -81,7 +81,7 @@ def test_setup_logging_writes_jsonl(tmp_path):
             h.flush()
         jsonl_path = tmp_path / "job360.jsonl"
         assert jsonl_path.exists(), f"Expected {jsonl_path} to be created"
-        lines = [l for l in jsonl_path.read_text().strip().split("\n") if l]
+        lines = [ln for ln in jsonl_path.read_text().strip().split("\n") if ln]
         entry = json.loads(lines[-1])
         assert entry["message"] == "structured event"
         assert entry["level"] == "INFO"
@@ -154,7 +154,7 @@ def test_audit_logger_writes_json_event(tmp_path):
             h.flush()
         audit_path = tmp_path / "audit.log"
         assert audit_path.exists()
-        line = [l for l in audit_path.read_text().strip().split("\n") if l][-1]
+        line = [ln for ln in audit_path.read_text().strip().split("\n") if ln][-1]
         entry = json.loads(line)
         assert entry["message"] == "auth"
         assert entry["event"] == "register"

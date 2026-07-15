@@ -5562,7 +5562,7 @@
     },
     "/api/settings/notification-rule": {
       "get": {
-        "description": "Return the authenticated user's notification rule, or 404 if none set.",
+        "description": "Return the authenticated user's notification rule.\n\nReturns ``null`` (HTTP 200) when the user has not saved one yet \u2014 the client\ntreats that as \"no rule, use defaults\". Settings is a per-user singleton, so\n\"not set\" is a normal empty-state, not a 404 error (a 404 would surface as a\nconsole error in the browser even though the client handles it fine).",
         "operationId": "get_notification_rule_api_settings_notification_rule_get",
         "parameters": [
           {
@@ -5587,7 +5587,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationRule"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NotificationRule"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get Notification Rule Api Settings Notification Rule Get"
                 }
               }
             },

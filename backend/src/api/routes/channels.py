@@ -182,7 +182,12 @@ async def create_channel(
         channel_id = cur.lastrowid
     get_audit_logger().info(
         "channel_created",
-        extra={"event": "channel_created", "user_id": user.id, "channel_type": body.channel_type, "channel_id": channel_id},
+        extra={
+            "event": "channel_created",
+            "user_id": user.id,
+            "channel_type": body.channel_type,
+            "channel_id": channel_id,
+        },
     )
     return ChannelOut(
         id=int(channel_id or 0),

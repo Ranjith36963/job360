@@ -314,7 +314,7 @@ async def test_rescore_user_feed_scores_matching_jobs(full_db, monkeypatch):
 
     assert len(rows) > 0, "Expected at least one feed row"
     # All feed rows must be stamped with the profile_version
-    for title, score, pv in rows:
+    for title, _score, pv in rows:
         assert pv == version_id, f"Row '{title}' has profile_version={pv}, expected {version_id}"
     # The senior python role should have the highest score
     assert rows[0][0] == "Senior Python Engineer", (

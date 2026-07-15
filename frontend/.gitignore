@@ -44,3 +44,6 @@ next-env.d.ts
 # Playwright generated artifacts
 /test-results/
 /playwright-report/
+
+# synthetic live-smoke output
+smoke-artifacts/

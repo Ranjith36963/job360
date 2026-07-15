@@ -110,8 +110,10 @@ test.describe("Landing CTA → profile journeys", () => {
     );
 
     await page.goto("/login?next=%2Fprofile");
-    // Login defaults to the magic-link form now; reveal the password form.
-    await page.getByRole("button", { name: /use password/i }).click();
+    // The form defaults to magic-link; switch to the password form FIRST — each
+    // form has its OWN email input, so fill email+password AFTER switching or the
+    // password form submits with an empty email and validation blocks the redirect.
+    await page.getByRole("button", { name: /use password instead/i }).click();
     await page.getByLabel(/email/i).fill("returning@example.com");
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /^sign in$/i }).click();

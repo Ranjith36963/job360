@@ -141,11 +141,17 @@ async def _insert_job(db_path: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_get_rule_404_when_none(authenticated_async_context):
-    """1. GET returns 404 for new user (no rule yet)."""
+async def test_get_rule_null_when_none(authenticated_async_context):
+    """1. GET returns 200 with null body for a new user (no rule yet).
+
+    Settings is a per-user singleton, so "not set" is a normal empty-state the
+    client reads as "use defaults" — not a 404 (which the browser logs as a
+    console error even though the client handles it).
+    """
     async with authenticated_async_context() as client:
         resp = await client.get("/api/settings/notification-rule")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.json() is None
 
 
 @pytest.mark.asyncio

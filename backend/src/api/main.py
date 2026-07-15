@@ -118,12 +118,13 @@ def _strip_password_fields(obj) -> None:
 def _init_sentry() -> None:
     """Initialise Sentry error tracking + performance monitoring.
 
-    Guards on ``SENTRY_DSN`` being non-empty so local dev and the test
-    suite are completely unaffected (no network calls, no patching).
-    ``traces_sample_rate`` is set to 0.1 in production (10 % of requests
-    are traced) and 1.0 elsewhere so every request is traced in staging/dev.
-    FastAPI / Starlette integration is automatic once ``sentry_sdk.init``
-    is called — no extra wiring required.
+    Only reports from a **deployed production** environment. Guards on BOTH
+    ``SENTRY_DSN`` being non-empty AND the process running in production, so
+    local dev and the test suite never send errors — even when a DSN is present
+    in the shared ``.env``. (Without the prod gate, local crashes like a port
+    already in use or a dev DB timeout leak into the prod Sentry project and
+    drown out real signal.) FastAPI / Starlette integration is automatic once
+    ``sentry_sdk.init`` is called — no extra wiring required.
 
     H4 — ``send_default_pii=False`` and a ``before_send`` scrubber keep
     cookies / auth headers / passwords out of every captured event.
@@ -131,17 +132,21 @@ def _init_sentry() -> None:
     import src.core.settings as _settings  # read module attr so monkeypatch works in tests
 
     dsn = _settings.SENTRY_DSN
-    if not dsn:
-        return
     is_prod = (
         os.environ.get("APP_ENV", "").lower() == "production"
         or bool(os.environ.get("RAILWAY_ENVIRONMENT", ""))
     )
+    # No DSN, or not a deployed prod environment → do not report at all.
+    if not dsn or not is_prod:
+        return
     sentry_sdk.init(
         dsn=dsn,
+        environment=os.environ.get("RAILWAY_ENVIRONMENT") or "production",
+        # H4 — never send PII; a before_send scrubber strips any cookies /
+        # auth headers / passwords that slip into an event.
         send_default_pii=False,
         before_send=_scrub_event,
-        traces_sample_rate=0.1 if is_prod else 1.0,
+        traces_sample_rate=0.1,
     )
 
 

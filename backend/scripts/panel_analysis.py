@@ -100,7 +100,7 @@ def main():
 
     print("\n" + "=" * 80)
     print("[B] NON-CIRCULAR ENGINE SCORES (each engine vs consensus EXCLUDING its own model)")
-    print("    rankable = profiles whose 3-way panel agreement >= %.2f" % GATE)
+    print(f"    rankable = profiles whose 3-way panel agreement >= {GATE:.2f}")
     print("=" * 80)
 
     rankable = {}

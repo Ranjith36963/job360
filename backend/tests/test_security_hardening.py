@@ -71,6 +71,9 @@ def test_sentry_init_disables_default_pii(monkeypatch):
 
     monkeypatch.setattr(settings_mod, "SENTRY_DSN", "https://x@example.com/1")
     monkeypatch.setattr(main_mod.sentry_sdk, "init", fake_init)
+    # _init_sentry only reports from a deployed prod env (prod-gate). Mark prod so
+    # it reaches the init() call whose PII settings this test asserts on.
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
 
     main_mod._init_sentry()
 
