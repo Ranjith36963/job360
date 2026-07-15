@@ -111,7 +111,11 @@ function ResetForm() {
           <p className="text-sm text-red-400">{errors.confirm.message}</p>
         )}
       </div>
-      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      {serverError && (
+        <p role="alert" className="text-sm text-red-400">
+          {serverError}
+        </p>
+      )}
       <Button type="submit" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "Updating…" : "Set new password"}
       </Button>

@@ -91,7 +91,11 @@ function RegisterForm() {
           Minimum 8 characters. We hash with argon2id — never store plaintext.
         </p>
       </div>
-      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      {serverError && (
+        <p role="alert" className="text-sm text-red-400">
+          {serverError}
+        </p>
+      )}
       <Button type="submit" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "Creating..." : "Create account"}
       </Button>
