@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """Loop 3 — doc-sync drift check (report-only, read-only by design).
 
-Extracts hard facts from the CODE (source-registry size, unique source classes,
-migration head) and compares them against every numeric claim the DOCS make.
-Prints a GitHub-issue-ready markdown report.
+Extracts hard facts from the CODE and compares them against the claims the
+DOCS make. Prints a GitHub-issue-ready markdown report.
 
 Exit 0 = docs match code. Exit 1 = drift found. Exit 2 = checker itself broke.
+
+Fails LOUD, never silently green (reviewer findings 2026-07-15):
+- a fact whose claim can no longer be found in ANY doc is drift (reworded or
+  deleted claims must not slip past the regexes);
+- a missing doc file is drift;
+- forbidden stale phrases (prose lies numbers can't catch) are drift;
+- LIVING docs must carry a fresh `<!-- last-verified: YYYY-MM-DD ... -->`
+  stamp (written by /sync) — missing or older than STALE_DAYS is drift.
+
+Deliberately NOT checked: the collected-test count (needs Postgres, and
+parametrization makes any cheap def-count tolerance flaky — a false-alarming
+check trains people to ignore the loop).
 
 Read-only on purpose: this loop REPORTS drift, it never edits docs
 (see docs/maintenance/loop1_safe_reenable.md — "verify=read is safe").
@@ -15,6 +26,7 @@ Run: python scripts/doc_sync_check.py   (from the repo root)
 from __future__ import annotations
 
 import ast
+import datetime as _dt
 import os
 import re
 import sys
@@ -22,30 +34,54 @@ from pathlib import Path
 
 ROOT = Path(os.environ["JOB360_ROOT"]) if os.environ.get("JOB360_ROOT") else Path(__file__).resolve().parents[1]
 
-DOC_FILES = [
+STALE_DAYS = 45
+
+# LIVING docs (DOC-MAINTENANCE.md §1): must match code AND carry a fresh stamp.
+LIVING_DOCS = [
     "CLAUDE.md",
     "README.md",
     "ARCHITECTURE.md",
     "STATUS.md",
     "backend/CLAUDE.md",
+    "frontend/README.md",
 ]
+
+# Prose lies that numbers can't catch. Each = (forbidden phrase, why).
+FORBIDDEN_PHRASES = [
+    ("async SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
+]
+
+_STAMP_RE = re.compile(r"<!--\s*last-verified:\s*(\d{4}-\d{2}-\d{2})")
 
 
 def registry_counts() -> tuple[int, int]:
-    """(registry entries, unique source classes) from SOURCE_REGISTRY in src/main.py."""
+    """(registry entries, unique source classes) from SOURCE_REGISTRY in src/main.py.
+
+    Strict on purpose: only a module-top-level plain dict literal of
+    Name/Attribute values counts. Anything cleverer must crash the checker
+    (exit 2) rather than silently under-count.
+    """
     tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
+    for node in tree.body:  # top level only — never a dict inside a function
         targets = []
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             targets = [node.target]
         for t in targets:
-            if getattr(t, "id", None) == "SOURCE_REGISTRY" and isinstance(node.value, ast.Dict):
-                keys = [k for k in node.value.keys if isinstance(k, ast.Constant)]
-                classes = {getattr(v, "id", None) or getattr(v, "attr", None) for v in node.value.values}
-                return len(keys), len(classes)
-    raise RuntimeError("SOURCE_REGISTRY dict literal not found in backend/src/main.py")
+            if getattr(t, "id", None) == "SOURCE_REGISTRY":
+                if not isinstance(node.value, ast.Dict):
+                    raise RuntimeError("SOURCE_REGISTRY is not a plain dict literal")
+                classes = set()
+                for k, v in zip(node.value.keys, node.value.values):
+                    if k is None or not isinstance(k, ast.Constant):
+                        raise RuntimeError("SOURCE_REGISTRY has a non-literal / **spread key")
+                    name = getattr(v, "id", None) or getattr(v, "attr", None)
+                    if not name:
+                        raise RuntimeError("SOURCE_REGISTRY value is not a class Name/Attribute")
+                    classes.add(name)
+                return len(node.value.keys), len(classes)
+    raise RuntimeError("SOURCE_REGISTRY dict literal not found at top level of backend/src/main.py")
 
 
 def migration_head() -> int:
@@ -76,19 +112,46 @@ def main() -> int:
         ("migration-head", mig_head, r"0000 → (\d{4})"),
     ]
 
-    drift: list[tuple[str, int, str, str, str]] = []  # file, line, fact, doc-says, code-says
-    for rel in DOC_FILES:
+    drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
+    matches_per_fact: dict[str, int] = {}
+    today = _dt.date.today()
+
+    for rel in LIVING_DOCS:
         path = ROOT / rel
         if not path.exists():
+            # A vanished LIVING doc is exactly the stale-merge disaster case.
+            drift.append((rel, "-", "missing-doc", "file deleted/renamed", "must exist"))
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
+
         for fact, actual, pattern in checks:
             for i, line in enumerate(lines, start=1):
                 for m in re.finditer(pattern, line):
+                    matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
                     claimed = int(m.group(1))
                     if claimed != actual:
-                        drift.append((rel, i, fact, str(claimed), str(actual)))
+                        drift.append((rel, str(i), fact, str(claimed), str(actual)))
+
+        for phrase, why in FORBIDDEN_PHRASES:
+            for i, line in enumerate(lines, start=1):
+                if phrase.lower() in line.lower():
+                    drift.append((rel, str(i), "stale-phrase", f'"{phrase}"', why))
+
+        stamp = _STAMP_RE.search(text)
+        if not stamp:
+            drift.append((rel, "-", "freshness", "no last-verified stamp", "run /sync (stamps + verifies)"))
+        else:
+            age = (today - _dt.date.fromisoformat(stamp.group(1))).days
+            if age > STALE_DAYS:
+                drift.append((rel, "-", "freshness", f"verified {age} days ago", f"max {STALE_DAYS} — run /sync"))
+
+    # A fact nobody claims anymore = the claim was reworded/deleted and this
+    # checker just went blind to it. That is drift, not success.
+    for fact in {c[0] for c in checks}:
+        if matches_per_fact.get(fact, 0) == 0:
+            drift.append(("(all docs)", "-", fact, "claim not found in any doc",
+                          "reworded/removed — update checker patterns or restore the claim"))
 
     print("# Doc-sync drift report (Loop 3)\n")
     print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "
@@ -96,7 +159,7 @@ def main() -> int:
           f"migration head = **{mig_head:04d}**\n")
 
     if not drift:
-        print("No drift — every doc claim matches the code. ✅")
+        print("No drift — every doc claim matches the code, all stamps fresh. OK")
         return 0
 
     print("| File | Line | Fact | Doc says | Code says |")
@@ -109,6 +172,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows consoles default to cp1252; arrows in doc text or this output
+    # would raise UnicodeEncodeError -> bogus exit 2. Force utf-8 stdout.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — very old runtimes; keep going
+        pass
     try:
         sys.exit(main())
     except Exception as exc:  # noqa: BLE001 — a broken checker must be loud, not a silent pass

@@ -5,8 +5,13 @@ Triggered by: `/doc-audit` (optionally `/doc-audit <area>`)
 You are running the full document-lifecycle audit defined in
 `docs/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
 contract. The code is the only truth. Follow the five steps IN ORDER.
-All changes land on a `docs/audit-<date>` branch and end in ONE docs-only PR —
-never commit to main.
+All changes land on a `docs/audit-<YYYYMMDD>-<HHMM>` branch (time suffix —
+parallel sessions on the same day must not collide) and end in ONE docs-only
+PR — never commit to main. Rebase on a freshly-fetched `origin/main` right
+before pushing. **Only one doc-writing session (sync or audit) may run at a
+time** — check for an open `docs:` PR first; if one exists, stop and say so.
+If `docs/archive/` or `docs/maintenance/PARKED.md` are missing, create them
+first (with a one-line header explaining their purpose).
 
 ---
 
@@ -31,7 +36,11 @@ history (not the doc's own claims):
 
 - **IMPLEMENTED** (the code it describes exists and is merged) → stamp the top
   with `> **IMPLEMENTED** in PR #N (<sha>) — archived <date>` and `git mv` it
-  to `docs/archive/`. Do not edit its content.
+  to `docs/archive/`. Do not edit its content. **After EVERY move, grep the
+  whole repo for the old path** (`grep -rn "<old path>" --include="*.md"`) and
+  update each referrer — `docs/README.md` (the plan index) and CLAUDE.md's
+  "Related documentation" section link to plan files; a move without a link
+  fix leaves dead links the tripwire cannot see.
 - **SUPERSEDED** (replaced by a newer plan/design) → banner + pointer, leave in
   place or archive, content frozen.
 - **ACTIVE / not yet built** → leave untouched. If a LIVING doc contradicts it

@@ -57,6 +57,21 @@ that is a deliberate Loop-1-incident lesson, not a missing feature.)
    YYYY-MM-DD by /sync -->` near the top, updated by every Tier-2 run, so
    staleness is measurable ("verified 40 days ago" is itself a finding).
 
+7. **One doc-writing session at a time.** `/sync` and `/doc-audit` both edit
+   docs; with parallel agent sessions, two doc branches on the same evening
+   collide. Before starting either: check for an open `docs:` PR — if one
+   exists, stop. Branch names carry a `-<HHMM>` time suffix, and every docs
+   branch rebases on fresh `origin/main` right before pushing.
+8. **Rule 5 is currently self-policed, not CI-enforced.** A tiny PR-lint
+   workflow (fail when the body lacks a `docs:` line) is the known upgrade —
+   until it exists, agents opening PRs must include the line themselves.
+
+**Scope note — out-of-repo memory.** Claude's memory files
+(`~/.claude/projects/D--dev-job360/memory/*.md`) also make factual claims
+about this repo. They are OUTSIDE this framework's write-scope (not in git,
+not PR-reviewable). `/doc-audit` Step 4 may *flag* stale memory claims in its
+report, but never edits them — memory hygiene is the session's own job.
+
 ## 5. Enterprise mapping (what big companies do → the Job360 version)
 
 | Enterprise practice | Here |

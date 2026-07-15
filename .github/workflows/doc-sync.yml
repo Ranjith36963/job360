@@ -1,19 +1,32 @@
 name: doc-sync
 
-# Loop 3 — daily code↔docs drift check (report-only).
-# Reads hard facts from the code and compares them to every numeric claim in
-# the docs. On drift it opens (or comments on) a GitHub issue — it NEVER edits
-# files. Read-only by design: see docs/maintenance/loop1_safe_reenable.md
-# ("verify=read is safe"; only Loop 1 writes, and Loop 1 stays off).
+# Loop 3 — code↔docs drift check (report-only).
+# Reads hard facts from the code and compares them to the claims in the docs.
+# On drift (scheduled runs) it opens/updates ONE GitHub issue — it NEVER edits
+# files. Read-only by design: see docs/maintenance/loop1_safe_reenable.md.
+#
+# Also runs on every PR as a NON-BLOCKING report (step summary only) so a
+# stale-branch clobber is visible at review time, not 24h later.
+#
+# Scheduled-run realities (not bugs, just facts):
+# - cron only fires on the DEFAULT branch — this does nothing until merged;
+# - cron timing is best-effort (the 06:30 slot may slip);
+# - GitHub auto-disables schedules after ~60 days without repo activity —
+#   if the repo goes quiet, re-enable under Actions or run workflow_dispatch.
 
 on:
   schedule:
-    - cron: "30 6 * * *" # 06:30 UTC daily — right after ci-offline (06:00)
+    - cron: "30 6 * * *" # 06:30 UTC daily — after ci-offline (06:00, best effort)
   workflow_dispatch: {}
+  pull_request: {}
 
 permissions:
   contents: read
   issues: write
+
+concurrency:
+  group: doc-sync
+  cancel-in-progress: false
 
 jobs:
   drift-check:
@@ -29,23 +42,59 @@ jobs:
         id: check
         run: |
           set +e
-          python scripts/doc_sync_check.py > drift.md
+          python scripts/doc_sync_check.py > drift.md 2>&1
           code=$?
           set -e
           cat drift.md
+          cat drift.md >> "$GITHUB_STEP_SUMMARY"
           echo "drift=$code" >> "$GITHUB_OUTPUT"
           # exit 2 = the checker itself crashed — fail the workflow loudly
           [ "$code" -le 1 ] || exit "$code"
 
-      - name: Open or update drift issue
-        if: steps.check.outputs.drift == '1'
+      # PR runs stop here: the report is in the step summary, non-blocking.
+
+      - name: Find existing drift issue (exact title)
+        id: issue
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           title="Doc drift detected (Loop 3 doc-sync)"
-          num=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number' || true)
-          if [ -n "$num" ]; then
+          # Exact-match on title in jq — `gh --search` tokenizes and can hit
+          # unrelated issues; `.[0].number` on [] yields the string "null".
+          num=$(gh issue list --state open --json number,title \
+                 -q ".[] | select(.title == \"$title\") | .number" | head -1)
+          echo "num=$num" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update drift issue (only when the report changed)
+        if: github.event_name != 'pull_request' && steps.check.outputs.drift == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          num="${{ steps.issue.outputs.num }}"
+          title="${{ steps.issue.outputs.title }}"
+          if [ -z "$num" ] || [ "$num" = "null" ]; then
+            gh issue create --title "$title" --body-file drift.md
+            exit 0
+          fi
+          # No daily spam: comment only if the report differs from the last
+          # posted body (issue body or newest comment, whichever is later).
+          gh issue view "$num" --json body,comments \
+            -q 'if (.comments | length) > 0 then .comments[-1].body else .body end' \
+            > last_posted.md || true
+          if ! diff -q <(tr -d '\r' < drift.md) <(tr -d '\r' < last_posted.md) >/dev/null 2>&1; then
             gh issue comment "$num" --body-file drift.md
           else
-            gh issue create --title "$title" --body-file drift.md
+            echo "drift unchanged since last post — not commenting"
+          fi
+
+      - name: Close drift issue when resolved
+        if: github.event_name != 'pull_request' && steps.check.outputs.drift == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          num="${{ steps.issue.outputs.num }}"
+          if [ -n "$num" ] && [ "$num" != "null" ]; then
+            gh issue close "$num" --comment "Drift resolved — docs match code again. (Loop 3 auto-close)"
           fi

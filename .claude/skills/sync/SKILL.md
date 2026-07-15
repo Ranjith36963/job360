@@ -41,7 +41,11 @@ If no mismatches found, say so and stop.
 
 ---
 
-## Step 3: Fix All Mismatches
+## Step 3: Fix All Mismatches (on a docs branch, never main)
+
+**Before editing anything:** create a branch `docs/sync-<YYYYMMDD>-<HHMM>`
+off a freshly-fetched `origin/main` (the time suffix prevents collisions when
+parallel sessions run the same day). All edits happen there.
 
 For each mismatch found in Step 2:
 
@@ -49,9 +53,23 @@ For each mismatch found in Step 2:
 - Edit ONLY the stale facts — do not rewrite sections that are correct
 - Keep the same structure and tone of the existing document
 
+**Then stamp every LIVING doc you verified** (even ones needing no fix):
+add or update `<!-- last-verified: YYYY-MM-DD by /sync -->` on line 2 of
+CLAUDE.md, README.md, ARCHITECTURE.md, STATUS.md, backend/CLAUDE.md,
+frontend/README.md. The daily Loop-3 tripwire (`scripts/doc_sync_check.py`)
+reads these stamps and flags any doc not verified within 45 days.
+
+**If a doc claims something the code does NOT do** (code is behind the doc):
+do NOT "fix" the doc to describe missing code and do NOT delete the claim —
+record it in `docs/maintenance/PARKED.md` (doc, claim, evidence, date).
+
 ---
 
-## Step 4: Report
+## Step 4: Report + PR
+
+Rebase the docs branch on `origin/main` immediately before pushing (another
+session may have merged meanwhile). Push and open ONE docs-only PR titled
+`docs: sync <date>`. Never commit doc fixes to main directly.
 
 Show a summary of what was updated:
 
