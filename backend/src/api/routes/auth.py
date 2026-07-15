@@ -176,7 +176,17 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     # attacker guessing one account's password gets locked out after
     # LOGIN_MAX_ATTEMPTS failures within the window — checked BEFORE we touch
     # the DB or verify the hash.
-    throttle_key = f"login:{str(req.email).lower()}"
+    # Lock on email+IP, not email alone (docs/fable/01): an email-only lockout lets
+    # an attacker lock a VICTIM out of their own account by spamming failures for
+    # their email. Scoping to the source IP means the attacker only locks their own
+    # (email, IP) bucket; the real user, on a different IP, can still sign in.
+    # XFF is trusted only behind the JOB360_TRUST_PROXY gate (else it's spoofable).
+    _ip = request.client.host if request.client else "unknown"
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if _xff:
+            _ip = _xff
+    throttle_key = f"login:{str(req.email).lower()}:{_ip}"
     if auth_rate_limit.is_locked(
         throttle_key,
         max_failures=LOGIN_MAX_ATTEMPTS,
