@@ -44,9 +44,11 @@ def test_sentry_scrub_removes_sensitive_headers_and_password():
     assert "Set-Cookie" not in headers
     # non-sensitive header preserved
     assert headers.get("User-Agent") == "pytest"
-    # password stripped everywhere, harmless fields kept
-    assert "password" not in scrubbed["request"]["data"]
-    assert scrubbed["request"]["data"]["email"] == "a@b.com"
+    # request BODY is blanket-redacted — it may hold CV text / passwords / PII
+    # you can't enumerate field-by-field (merged from the parallel audit's
+    # stronger _scrub_pii approach).
+    assert scrubbed["request"]["data"] == "[redacted]"
+    # password stripped everywhere outside the body too (recursive strip)
     assert "password" not in scrubbed["extra"]
     assert scrubbed["extra"]["keep"] == "ok"
 

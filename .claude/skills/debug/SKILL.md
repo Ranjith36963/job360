@@ -27,9 +27,9 @@ One command to investigate scoring, logs, notifications, and deduplication with 
 
 ```bash
 python -c "
-from src.profile.storage import load_profile
-from src.profile.keyword_generator import generate_search_config
-from src.filters.skill_matcher import JobScorer
+from src.services.profile.storage import load_profile
+from src.services.profile.keyword_generator import generate_search_config
+from src.services.skill_matcher import JobScorer
 
 profile = load_profile()
 if not profile:
@@ -171,46 +171,59 @@ If the user provides `[source]` or `[severity]`, filter the output accordingly.
 
 ### Target: `notify`
 
-Send a test notification to verify configuration:
+> **Architecture note (2026):** notifications are no longer global per-channel classes
+> (the old `SlackChannel`/`DiscordChannel`/`EmailChannel` are gone). They are now
+> **per-user**: `src/services/channels/dispatcher.py::dispatch()` reads the user's single
+> `notification_rules` row + their Fernet-encrypted `user_channels` and sends via Apprise.
+> There is no standalone "send to slack" — a test-send needs a user context.
+
+Verify the notification path is importable and inspect a user's channel config:
 
 ```bash
 python -c "
 import asyncio
+from src.services.channels.dispatcher import dispatch, ChannelSendResult  # import must succeed
+from src.core.settings import DB_PATH
+from src.repositories import pg as aiosqlite
 
-channel = '<CHANNEL_ARG>'  # slack, discord, or email
+user_email = '<CHANNEL_ARG>'  # pass the USER'S EMAIL (notifications are per-user now)
 
-if channel == 'slack':
-    from src.notifications.slack_notify import SlackChannel
-    ch = SlackChannel()
-elif channel == 'discord':
-    from src.notifications.discord_notify import DiscordChannel
-    ch = DiscordChannel()
-elif channel == 'email':
-    from src.notifications.email_notify import EmailChannel
-    ch = EmailChannel()
-else:
-    print(f'Unknown channel: {channel}')
-    print('Supported: slack, discord, email')
-    exit(1)
+async def main():
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute('SELECT id FROM users WHERE email = ?', (user_email,))
+        row = await cur.fetchone()
+        if not row:
+            print(f'No user with email {user_email!r}')
+            return
+        uid = row['id']
+        chans = await (await db.execute(
+            'SELECT channel_type, enabled FROM user_channels WHERE user_id = ?', (uid,)
+        )).fetchall()
+        rule = await (await db.execute(
+            'SELECT notify_mode, min_score FROM notification_rules WHERE user_id = ?', (uid,)
+        )).fetchone()
+        print(f'user {uid}: {len(chans)} channel(s)')
+        for c in chans:
+            print(f'  {c[\"channel_type\"]}: enabled={bool(c[\"enabled\"])}')
+        print(f'rule: {dict(rule) if rule else \"(none — no notifications will send)\"}')
+        print('dispatcher import OK — to actually send, use the /verify-job360 skill or the'
+              ' channels settings page test-send (both drive the real per-user path).')
 
-if not ch.is_configured():
-    print(f'{channel}: NOT CONFIGURED (missing env vars)')
-    exit(1)
-
-print(f'{channel}: configured, sending test...')
-test_jobs = []
-test_stats = {'total_found': 0, 'new_jobs': 0, 'sources_queried': 0}
-try:
-    asyncio.run(ch.send(test_jobs, test_stats))
-    print(f'{channel}: SUCCESS')
-except Exception as e:
-    print(f'{channel}: FAILED — {e}')
+asyncio.run(main())
 "
 ```
 
-Replace `<CHANNEL_ARG>` with the user's argument.
+Replace `<CHANNEL_ARG>` with the **user's email**. For an actual end-to-end test-send,
+use the `/verify-job360` skill or the channels settings UI — both exercise the real
+per-user dispatcher rather than a fabricated global send.
 
 ### Target: `dedup`
+
+> **Note:** the `normalized_key()` demo below always works. The DB match query uses
+> stdlib `sqlite3` against a local `data/jobs.db` — that only exists on a SQLite dev
+> box. **Prod is Postgres**, so there the query prints "Database not found"; check the
+> `jobs` table in Postgres instead. The normalized-key logic it demonstrates is identical.
 
 **Capture** the dedup key and **query the database** for existing matches:
 

@@ -109,6 +109,7 @@ def _set_session_cookie(response: Response, cookie: str) -> None:
     # (APP_ENV=production OR RAILWAY_ENVIRONMENT set) so a prod deploy never
     # serves a bare session cookie. Reuses middleware._is_production so the
     # signal can't drift out of sync with the other prod-gated behaviour.
+    # (Previously gated on JOB360_ENV, never set on Railway — see docs/fable/01.)
     secure = _is_production()
     response.set_cookie(
         key=SESSION_COOKIE_NAME,

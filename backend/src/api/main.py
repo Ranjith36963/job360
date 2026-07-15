@@ -97,6 +97,12 @@ def _scrub_event(event, hint=None):
             if isinstance(headers, dict):
                 for name in [h for h in headers if h.lower() in _SENTRY_SENSITIVE_HEADERS]:
                     headers.pop(name, None)
+            # The request body may hold passwords / CV text; the cookies key
+            # duplicates the header. Redact both (merged from the parallel
+            # audit's _scrub_pii — see docs/fable/01 + 05).
+            request.pop("cookies", None)
+            if "data" in request:
+                request["data"] = "[redacted]"
         _strip_password_fields(event)
     except Exception:  # noqa: BLE001 — scrubbing must never break error reporting
         return event
@@ -142,8 +148,9 @@ def _init_sentry() -> None:
     sentry_sdk.init(
         dsn=dsn,
         environment=os.environ.get("RAILWAY_ENVIRONMENT") or "production",
-        # H4 — never send PII; a before_send scrubber strips any cookies /
-        # auth headers / passwords that slip into an event.
+        # H4 — never send PII; the _scrub_event before_send hook strips cookies /
+        # auth headers / passwords / request body that slip into an event
+        # (merged with the parallel audit's scrubber — see docs/fable/01 + 05).
         send_default_pii=False,
         before_send=_scrub_event,
         traces_sample_rate=0.1,
