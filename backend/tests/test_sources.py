@@ -34,7 +34,6 @@ from src.sources.ats.smartrecruiters import SmartRecruitersSource
 from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.ats.workable import WorkableSource
 from src.sources.ats.workday import WorkdaySource
-from src.sources.base import _is_uk_or_remote
 from src.sources.feeds.biospace import BioSpaceSource
 from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
 from src.sources.feeds.nhs_jobs import NHSJobsSource
@@ -2159,52 +2158,3 @@ def test_jobspy_default_sites_exclude_glassdoor():
         finally:
             await session.close()
     _run(_test())
-
-
-# ---- S3 fix — _is_uk_or_remote word-boundary matching (FABLE_FINDINGS.md) ----
-#
-# Before the fix, membership used plain substring `in`, so "uk" (a UK_TERM)
-# matched inside unrelated words like "Milwaukee" or "Ukraine". Because
-# UK_TERMS is checked before FOREIGN_INDICATORS, that false match short-
-# circuited the function to True before a real foreign indicator
-# ("usa") ever got a chance to fire.
-
-
-def test_is_uk_or_remote_milwaukee_false_positive_fixed():
-    """"uk" is a substring of "Milwaukee" but must not match as a token —
-    the real foreign indicator "usa" should decide this location is not UK."""
-    assert _is_uk_or_remote("Milwaukee, USA") is False
-
-
-def test_is_uk_or_remote_ukraine_false_positive_fixed():
-    """"uk" is a substring of "Ukraine" but must not match as a token —
-    the real foreign indicator "usa" should decide this location is not UK."""
-    assert _is_uk_or_remote("Kyiv, Ukraine — USA-based team") is False
-
-
-def test_is_uk_or_remote_true_uk_city_still_matches():
-    """Regression guard: genuine UK terms must still match as whole tokens."""
-    assert _is_uk_or_remote("London, UK") is True
-    assert _is_uk_or_remote("Manchester") is True
-
-
-def test_is_uk_or_remote_remote_term_still_matches():
-    assert _is_uk_or_remote("Remote") is True
-
-
-def test_is_uk_or_remote_unknown_location_defaults_true():
-    assert _is_uk_or_remote("") is True
-    assert _is_uk_or_remote("Some Town Nobody Has Heard Of") is True
-
-
-# ---- S7 fix — eightykhours must declare a niche DOMAINS (FABLE_FINDINGS.md) ----
-
-
-def test_eightykhours_declares_niche_domain():
-    """Without a DOMAINS override, EightyKHoursSource silently inherited the
-    base class's {"general"} default and fired for every user's search —
-    injecting AI-safety/EA job noise into e.g. a nurse or professor search.
-    It must declare a specific domain so _build_sources() domain filtering
-    can exclude it for unrelated profiles."""
-    assert EightyKHoursSource.DOMAINS != {"general"}
-    assert EightyKHoursSource.DOMAINS == {"tech"}

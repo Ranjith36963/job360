@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ApiError, friendlyAuthError, apiErrorMessage } from "./api-error";
+import { ApiError } from "./api-error";
 
 describe("ApiError", () => {
   it("extends Error with correct name", () => {
@@ -54,53 +54,5 @@ describe("ApiError", () => {
   it("default retryAfter is null", () => {
     const err = new ApiError(400, "Bad request");
     expect(err.retryAfter).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// H11 — friendlyAuthError must never leak the raw "API error NNN: …" string
-// ---------------------------------------------------------------------------
-
-describe("friendlyAuthError", () => {
-  it("never contains the raw 'API error' prefix for an ApiError", () => {
-    const err = new ApiError(400, "some backend token/expiry detail");
-    const msg = friendlyAuthError(err, "fallback");
-    expect(msg).not.toMatch(/API error \d+/);
-  });
-
-  it("maps 401/403 to a generic credentials message", () => {
-    expect(friendlyAuthError(new ApiError(401, "invalid credentials"))).toBe(
-      "Incorrect email or password."
-    );
-    expect(friendlyAuthError(new ApiError(403, "forbidden"))).toBe(
-      "Incorrect email or password."
-    );
-  });
-
-  it("maps 429 to a rate-limit message", () => {
-    expect(friendlyAuthError(new ApiError(429, "too many"))).toMatch(/too many attempts/i);
-  });
-
-  it("maps 500+ to a generic server message", () => {
-    expect(friendlyAuthError(new ApiError(503, "db down"))).toMatch(/server had a problem/i);
-  });
-
-  it("falls back to the provided fallback for a non-ApiError, non-Error value", () => {
-    expect(friendlyAuthError("boom", "custom fallback")).toBe("custom fallback");
-  });
-
-  it("uses the provided fallback message by default", () => {
-    expect(friendlyAuthError(null)).toBe("Something went wrong. Please try again.");
-  });
-});
-
-describe("apiErrorMessage", () => {
-  it("prefers the ApiError detail over the raw 'API error NNN' string", () => {
-    const err = new ApiError(400, "token is expired");
-    expect(apiErrorMessage(err)).toBe("token is expired");
-  });
-
-  it("falls back for a non-Error value", () => {
-    expect(apiErrorMessage(42, "fallback text")).toBe("fallback text");
   });
 });

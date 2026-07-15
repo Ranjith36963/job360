@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
-import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 // Backend origin the `/api/*` proxy forwards to. Set BACKEND_ORIGIN in the
 // deploy env; defaults to the local dev backend.
@@ -16,18 +15,6 @@ const nextConfig: NextConfig = {
       {
         source: "/api/:path*",
         destination: `${BACKEND_ORIGIN}/api/:path*`,
-      },
-    ];
-  },
-
-  // M15 — no security headers were set at all before this. Applies to every
-  // route (including /api/* rewrites, which pass through Next's own response
-  // pipeline for the matched pages/assets).
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: SECURITY_HEADERS,
       },
     ];
   },

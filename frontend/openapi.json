@@ -2142,7 +2142,6 @@
       "TailorSaveRequest": {
         "properties": {
           "text": {
-            "maxLength": 50000,
             "title": "Text",
             "type": "string"
           }
@@ -2878,7 +2877,7 @@
     },
     "/api/auth/users/me": {
       "delete": {
-        "description": "Soft-delete the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.",
+        "description": "ERASE the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
         "operationId": "delete_account_api_auth_users_me_delete",
         "parameters": [
           {
@@ -3311,8 +3310,6 @@
             "required": false,
             "schema": {
               "default": 100,
-              "maximum": 200,
-              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -3323,7 +3320,6 @@
             "required": false,
             "schema": {
               "default": 0,
-              "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }

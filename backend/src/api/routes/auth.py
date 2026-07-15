@@ -18,7 +18,6 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_db
-from src.api.middleware import _is_production
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
 from src.repositories import pg as aiosqlite
 from src.repositories.database import JobDatabase
@@ -34,6 +33,12 @@ from src.utils.logger import get_audit_logger
 logger = logging.getLogger("job360.api.auth")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# A fixed argon2 hash to verify against when a login email doesn't exist, so the
+# response takes the same ~argon2 time whether or not the account is registered —
+# no timing side-channel to enumerate accounts (docs/fable/01). Computed once at
+# import (a single argon2 hash).
+_DUMMY_PW_HASH = hash_password("timing-equalizer-not-a-real-password")
 
 
 async def _safe_request_email_verification(
@@ -105,12 +110,13 @@ def _client_meta(request: Request) -> dict:
 
 
 def _set_session_cookie(response: Response, cookie: str) -> None:
-    # H5 — Secure flag gates on the SAME prod detection as HSTS / Sentry / CORS
-    # (APP_ENV=production OR RAILWAY_ENVIRONMENT set) so a prod deploy never
-    # serves a bare session cookie. Reuses middleware._is_production so the
-    # signal can't drift out of sync with the other prod-gated behaviour.
-    # (Previously gated on JOB360_ENV, never set on Railway — see docs/fable/01.)
-    secure = _is_production()
+    # Secure flag gates on the SAME prod check the rest of the app uses
+    # (APP_ENV=production OR RAILWAY_ENVIRONMENT). Previously gated on JOB360_ENV,
+    # which is never set on Railway — so prod served the 30-day session cookie
+    # WITHOUT Secure, letting it ride plain-HTTP requests. See docs/fable/01.
+    secure = os.environ.get("APP_ENV", "").lower() == "production" or bool(
+        os.environ.get("RAILWAY_ENVIRONMENT", "")
+    )
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=cookie,
@@ -192,7 +198,11 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             (req.email,),
         )
         row = await cur.fetchone()
-    if row is None or not verify_password(row["password_hash"], req.password):
+    # Always run one argon2 verify — against the real hash, or a fixed dummy when
+    # the email is unknown — so login timing can't reveal whether an account exists.
+    stored_hash = row["password_hash"] if row is not None else _DUMMY_PW_HASH
+    pw_ok = verify_password(stored_hash, req.password)
+    if row is None or not pw_ok:
         auth_rate_limit.record_failure(throttle_key)
         get_audit_logger().warning(
             "auth",
@@ -246,8 +256,12 @@ async def delete_account(
     db: JobDatabase = Depends(get_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
-    """Soft-delete the caller's account (GDPR Article 17). Requires current-password
-    verification (hard rule #26), then clears the session cookie."""
+    """ERASE the caller's account (GDPR Article 17). Requires current-password
+    verification (hard rule #26), then clears the session cookie.
+
+    Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
+    (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
+    left the data in place and could be resurrected on a later magic-link consume."""
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
@@ -257,7 +271,7 @@ async def delete_account(
         row = await cursor.fetchone()
     if not row or not verify_password(row["password_hash"], req.current_password):
         raise HTTPException(status_code=401, detail="current password is incorrect")
-    await db.soft_delete_user(user.id)
+    await db.hard_delete_user(user.id)
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)

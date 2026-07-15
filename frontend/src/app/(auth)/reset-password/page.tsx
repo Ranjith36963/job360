@@ -61,10 +61,10 @@ function ResetForm() {
       await confirmPasswordReset(token, data.password);
       setDone(true);
     } catch (err) {
-      // Backend returns 400 for any failure (unknown / expired / used /
-      // deleted-user). friendlyAuthError keeps the message generic — don't
-      // help an attacker distinguish those cases, and never leak the raw
-      // "API error 400: …" string to the user.
+      // Backend returns 400 with ONE generic detail for any failure (unknown /
+      // expired / used / deleted-user). friendlyAuthError surfaces that generic
+      // detail (or a nice 429/500 message) WITHOUT the leaking "API error 400:"
+      // prefix — so we never help an attacker distinguish cases. See docs/fable/03.
       setServerError(
         friendlyAuthError(err, "Reset link is invalid or expired. Request a new one."),
       );

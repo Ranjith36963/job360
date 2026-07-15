@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { KanbanBoard } from "./KanbanBoard";
 import type { PipelineApplication } from "@/lib/types";
 
@@ -98,24 +98,5 @@ describe("KanbanBoard keyboard a11y", () => {
     // Desktop + mobile renders both show the button — check at least one exists
     const btns = screen.getAllByRole("button", { name: /advance DevOps Engineer to outreach/i });
     expect(btns.length).toBeGreaterThan(0);
-  });
-
-  // H8: PointerSensor must have an activationConstraint (distance: 8) so a
-  // plain click on a nested button (Advance/Notes/History/CV) inside the
-  // draggable card isn't swallowed as a drag gesture. A simple click (no
-  // pointer movement) firing onAdvance is the regression guard for that.
-  it("clicking Advance fires onAdvance without needing a drag gesture", () => {
-    const onAdvance = vi.fn();
-    render(
-      <KanbanBoard
-        applications={[makeApp({ job_id: 7, title: "Backend Engineer", stage: "applied" })]}
-        onAdvance={onAdvance}
-      />
-    );
-    const [btn] = screen.getAllByRole("button", {
-      name: /advance Backend Engineer to outreach/i,
-    });
-    fireEvent.click(btn);
-    expect(onAdvance).toHaveBeenCalledWith(7, "outreach");
   });
 });

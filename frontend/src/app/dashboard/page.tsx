@@ -21,7 +21,6 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "@/lib/toast";
-import { apiErrorMessage } from "@/lib/api-error";
 import type { JobFilters, JobListResponse, JobResponse, StatusResponse } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -107,19 +106,8 @@ export default function DashboardPage() {
 
   const {
     data: jobsData,
-    // H10: isFetching stays true during background refetches too — used
-    // only to drive a subtle "Refreshing…" indicator, never the skeleton.
-    isFetching,
-    // Gate the skeleton on isLoading (no data yet at all) — this used to
-    // blank the whole grid back to skeletons on every 30s refetch even
-    // though the previously-loaded data was perfectly fine to keep showing.
-    isLoading,
-    // H9: surface fetch failures instead of silently falling through to the
-    // "no jobs found" empty state, which reads as "you have zero matches"
-    // when the real story is "the request failed".
-    isError: jobsIsError,
-    error: jobsError,
-    // #44: refetch drives the error-state "Retry" button (line ~392).
+    isFetching: loading,
+    isError: jobsError,
     refetch: refetchJobs,
   } = useQuery<JobListResponse>({
     queryKey: queryKeys.jobList(filters),
@@ -127,8 +115,6 @@ export default function DashboardPage() {
     staleTime: 30_000,
     placeholderData: (prev) => prev, // keep previous data while re-fetching
   });
-  // Background refetch in progress while we already have data on screen.
-  const refreshing = isFetching && !isLoading && !jobsIsError;
 
   // Judge outranks funnel: sort by the LLM fit score when a job has been
   // judged, else the keyword match_score — mirroring the server's
@@ -155,11 +141,7 @@ export default function DashboardPage() {
     [filters.min_score]
   );
 
-  const {
-    data: allJobsData,
-    isError: countsIsError,
-    error: countsError,
-  } = useQuery<JobListResponse>({
+  const { data: allJobsData } = useQuery<JobListResponse>({
     queryKey: queryKeys.jobList(allJobsKey),
     queryFn: () => getJobs(allJobsKey),
     staleTime: 30_000,
@@ -172,9 +154,6 @@ export default function DashboardPage() {
   // TanStack Query — pipeline status (last run time, O1)
   // ---------------------------------------------------------------------------
 
-  // status is intentionally best-effort (see retry: 1) — a failure here only
-  // hides the "Last run" timestamp, it never masquerades as "no jobs found",
-  // so it doesn't need its own error banner.
   const { data: statusData } = useQuery<StatusResponse>({
     queryKey: queryKeys.status(),
     queryFn: getStatus,
@@ -221,15 +200,8 @@ export default function DashboardPage() {
   async function handleAction(jobId: number, action: string) {
     const nextAction = action === "remove" ? null : action;
 
-    // L8: cancel any in-flight refetch of these exact queries first.
-    // Without this, a response that was already in flight can land right
-    // after our optimistic write and silently clobber it with stale data.
-    await Promise.all([
-      queryClient.cancelQueries({ queryKey: queryKeys.jobList(filters) }),
-      queryClient.cancelQueries({ queryKey: queryKeys.jobList(allJobsKey) }),
-    ]);
-
-    const patchJob = (old: JobListResponse | undefined) => {
+    // Optimistic update: patch the cached job list in-place
+    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(filters), (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -237,13 +209,7 @@ export default function DashboardPage() {
           j.id === jobId ? { ...j, action: nextAction } : j
         ),
       };
-    };
-
-    // Optimistic update: patch the cached job list in-place
-    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(filters), patchJob);
-    // L8: also patch the unfiltered bucket-counts query so its cached rows
-    // don't disagree with the filtered list's action state.
-    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(allJobsKey), patchJob);
+    });
 
     try {
       if (action === "remove") {
@@ -371,7 +337,14 @@ export default function DashboardPage() {
               <span className="text-gradient-lime">Dashboard</span>
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {jobsIsError ? (
+              {total > 0 ? (
+                <>
+                  <span className="font-mono text-foreground">{total}</span> jobs
+                  matched your profile
+                </>
+              ) : loading ? (
+                "Loading jobs..."
+              ) : jobsError ? (
                 <span role="alert" className="text-red-400">
                   Couldn&apos;t load jobs.{" "}
                   <button
@@ -382,13 +355,6 @@ export default function DashboardPage() {
                     Retry
                   </button>
                 </span>
-              ) : total > 0 ? (
-                <>
-                  <span className="font-mono text-foreground">{total}</span> jobs
-                  matched your profile
-                </>
-              ) : isLoading ? (
-                "Loading jobs..."
               ) : (
                 "No jobs found yet"
               )}
@@ -484,13 +450,6 @@ export default function DashboardPage() {
 
         <Separator />
 
-        {/* ---- Bucket-count error note (H9) ---- */}
-        {countsIsError && (
-          <p className="text-xs text-destructive">
-            {apiErrorMessage(countsError, "Couldn't refresh the time-bucket counts.")}
-          </p>
-        )}
-
         {/* ---- Time Buckets ---- */}
         <div className="animate-fade-in-up stagger-2">
           <TimeBuckets
@@ -500,36 +459,10 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* ---- Job list error banner (H9) — a fetch failure must never look
-              like "you have zero matches"; render a distinct error state
-              instead of falling through to JobList's empty state. Mirrors
-              the pipeline page's error banner. ---- */}
-        {jobsIsError && (
-          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.06] p-4">
-            <p className="text-sm text-destructive">
-              {apiErrorMessage(jobsError, "Failed to load jobs. Please try again.")}
-            </p>
-          </div>
-        )}
-
         {/* ---- Job Grid ---- */}
-        {!jobsIsError && (
-          <div className="animate-fade-in-up stagger-3">
-            {/* H10: gate the skeleton on isLoading (no data yet). A background
-                refetch (isFetching but data already present) instead shows a
-                subtle inline indicator so the grid never blanks out. */}
-            {refreshing && (
-              <p
-                role="status"
-                className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground"
-              >
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                Refreshing…
-              </p>
-            )}
-            <JobList jobs={jobs} loading={isLoading} onAction={handleAction} />
-          </div>
-        )}
+        <div className="animate-fade-in-up stagger-3">
+          <JobList jobs={jobs} loading={loading} onAction={handleAction} />
+        </div>
       </div>
     </div>
   );
