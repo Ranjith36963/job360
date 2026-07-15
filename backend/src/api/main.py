@@ -18,7 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
 from src.api.errors import register_exception_logging
-from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
+from src.api.middleware import (
+    AccessLogMiddleware,
+    OriginCheckMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
 from src.api.routes import (
     actions,
     auth,
@@ -96,6 +101,10 @@ app.add_middleware(
 # middleware have finished. This guarantees headers appear on every response
 # including CORS pre-flight and error responses.
 app.add_middleware(SecurityHeadersMiddleware)
+# OriginCheckMiddleware — CSRF defence-in-depth: reject unsafe-method requests
+# whose Origin is present but not allow-listed (docs/fable/01). No-Origin requests
+# (non-browser / tests) pass; browser CSRF is blocked (browsers always send Origin).
+app.add_middleware(OriginCheckMiddleware)
 # AccessLogMiddleware logs one line per request. Added BEFORE RequestIdMiddleware
 # so RequestId stays OUTERMOST (LIFO) — that way request_id is already set when
 # the access line is emitted.
