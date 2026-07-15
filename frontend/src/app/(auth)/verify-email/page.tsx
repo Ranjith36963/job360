@@ -13,6 +13,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { confirmEmailVerification } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -39,9 +40,10 @@ function VerifyBody() {
         if (!cancelled) {
           setState("error");
           setError(
-            err instanceof Error
-              ? err.message
-              : "Verification link is invalid or expired. Request a new one from your account settings.",
+            friendlyAuthError(
+              err,
+              "Verification link is invalid or expired. Request a new one from your account settings.",
+            ),
           );
         }
       }

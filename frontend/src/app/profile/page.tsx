@@ -16,6 +16,7 @@ import {
   uploadLinkedin,
   uploadGithub,
 } from "@/lib/api";
+import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse, PreferencesRequest } from "@/lib/types";
 
 // ── Completeness calculation ────────────────────────────────
@@ -89,13 +90,14 @@ export default function ProfilePage() {
       const data = await getProfile();
       setProfile(data);
     } catch (err: unknown) {
-      // 404 = no profile yet — that's OK
-      if (err instanceof Error && err.message.includes("404")) {
+      // L7: 404 = no profile yet — that's OK. Check the typed status instead
+      // of string-matching the error message (which could coincidentally
+      // contain "404" for an unrelated reason, e.g. a detail mentioning a
+      // job id).
+      if (err instanceof ApiError && err.isNotFound) {
         setProfile(null);
       } else {
-        setError(
-          err instanceof Error ? err.message : "Failed to load profile"
-        );
+        setError(apiErrorMessage(err, "Failed to load profile"));
       }
     } finally {
       setLoadingProfile(false);
