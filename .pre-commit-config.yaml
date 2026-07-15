@@ -12,3 +12,11 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+  # docs/fable/06 P2 — secret scanning on the commit path. Previously secret
+  # detection lived only in the manual /commit skill (and silently skipped when
+  # the tool wasn't installed); nothing scanned on a plain `git commit`. gitleaks
+  # blocks a key pasted into any tracked file before it can be committed.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
