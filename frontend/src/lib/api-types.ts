@@ -247,8 +247,12 @@ export interface paths {
         post?: never;
         /**
          * Delete Account
-         * @description Soft-delete the caller's account (GDPR Article 17). Requires current-password
+         * @description ERASE the caller's account (GDPR Article 17). Requires current-password
          *     verification (hard rule #26), then clears the session cookie.
+         *
+         *     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
+         *     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
+         *     left the data in place and could be resurrected on a later magic-link consume.
          */
         delete: operations["delete_account_api_auth_users_me_delete"];
         options?: never;

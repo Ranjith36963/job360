@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -50,39 +49,12 @@ def _init_sentry() -> None:
     drown out real signal.) FastAPI / Starlette integration is automatic once
     ``sentry_sdk.init`` is called — no extra wiring required.
     """
-    import src.core.settings as _settings  # read module attr so monkeypatch works in tests
+    # Delegates to the shared init so the API and the ARQ worker report identically
+    # (docs/fable/09 P0 — the worker was previously unobserved). Prod-gating + the
+    # PII scrubber live in src/core/observability.py.
+    from src.core.observability import init_sentry
 
-    dsn = _settings.SENTRY_DSN
-    is_prod = (
-        os.environ.get("APP_ENV", "").lower() == "production"
-        or bool(os.environ.get("RAILWAY_ENVIRONMENT", ""))
-    )
-    # No DSN, or not a deployed prod environment → do not report at all.
-    if not dsn or not is_prod:
-        return
-    def _scrub_pii(event, _hint):
-        # Belt-and-suspenders on top of send_default_pii=False: strip auth
-        # headers, cookies, and request bodies (may hold passwords / CV text)
-        # before any event leaves for Sentry. See docs/fable/01 + 05.
-        req = event.get("request")
-        if isinstance(req, dict):
-            headers = req.get("headers")
-            if isinstance(headers, dict):
-                for h in list(headers):
-                    if h.lower() in ("cookie", "authorization"):
-                        headers[h] = "[redacted]"
-            req.pop("cookies", None)
-            if "data" in req:
-                req["data"] = "[redacted]"
-        return event
-
-    sentry_sdk.init(
-        dsn=dsn,
-        environment=os.environ.get("RAILWAY_ENVIRONMENT") or "production",
-        send_default_pii=False,
-        before_send=_scrub_pii,
-        traces_sample_rate=0.1,
-    )
+    init_sentry(component="api")
 
 
 @asynccontextmanager

@@ -144,7 +144,8 @@ def test_delete_account_requires_auth(client):
 
 
 def test_delete_account_soft_deletes(client, temp_db):
-    """DELETE with correct password sets deleted_at; subsequent login fails (rule #26)."""
+    """DELETE with correct password ERASES the account (docs/fable/05); subsequent
+    login fails because the row is gone (rule #26)."""
     _register(client, "del@example.com", "s3cretpassword")
     # Sanity: authenticated GET /me works before delete
     assert client.get("/api/auth/me").status_code == 200
@@ -156,7 +157,7 @@ def test_delete_account_soft_deletes(client, temp_db):
     client.cookies.clear()
     assert client.get("/api/auth/me").status_code == 401
 
-    # Login must fail because deleted_at IS NOT NULL
+    # Login must fail because the account row was erased
     assert _login(client, "del@example.com") == 401
 
 

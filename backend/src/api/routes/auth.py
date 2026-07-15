@@ -246,8 +246,12 @@ async def delete_account(
     db: JobDatabase = Depends(get_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
-    """Soft-delete the caller's account (GDPR Article 17). Requires current-password
-    verification (hard rule #26), then clears the session cookie."""
+    """ERASE the caller's account (GDPR Article 17). Requires current-password
+    verification (hard rule #26), then clears the session cookie.
+
+    Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
+    (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
+    left the data in place and could be resurrected on a later magic-link consume."""
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = aiosqlite.Row
         cursor = await adb.execute(
@@ -257,7 +261,7 @@ async def delete_account(
         row = await cursor.fetchone()
     if not row or not verify_password(row["password_hash"], req.current_password):
         raise HTTPException(status_code=401, detail="current password is incorrect")
-    await db.soft_delete_user(user.id)
+    await db.hard_delete_user(user.id)
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
