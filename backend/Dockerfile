@@ -35,10 +35,12 @@ USER job360
 
 EXPOSE 8000
 
-# Hit the /api/health endpoint. $PORT is injected by Railway (dynamic); fall
+# Hit the /api/livez liveness probe (always 200 if the process is up, zero
+# dependency checks — a failing container healthcheck should mean "process is
+# wedged", not "Redis blipped"). $PORT is injected by Railway (dynamic); fall
 # back to 8000 for local `docker run`. Shell-form so ${PORT} expands.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD curl -fsS http://localhost:${PORT:-8000}/api/health || exit 1
+  CMD curl -fsS http://localhost:${PORT:-8000}/api/livez || exit 1
 
 # Shell form (not exec) so ${PORT} is expanded by the shell. Railway assigns a
 # dynamic port and routes to it; the app MUST listen on $PORT or it's unreachable.

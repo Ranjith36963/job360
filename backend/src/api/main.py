@@ -19,7 +19,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import close_db, init_db
 from src.api.errors import register_exception_logging
-from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
+from src.api.middleware import (
+    AccessLogMiddleware,
+    RequestIdMiddleware,
+    RequestTimeoutMiddleware,
+    SecurityHeadersMiddleware,
+)
 from src.api.routes import (
     actions,
     auth,
@@ -90,6 +95,17 @@ app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
 
 # Gap E — log every unhandled exception (traceback + request_id) into data/logs/.
 register_exception_logging(app)
+
+# RequestTimeoutMiddleware is added FIRST so it is INNERMOST (Starlette LIFO):
+# it wraps only the route handler, so a hung route returns a 504 that the outer
+# middleware still post-process — CORS + security headers + a logged access line
+# + a request id. LLM-heavy routes (tailoring, profile extraction) legitimately
+# run longer than a normal round-trip, so they are exempted by prefix.
+app.add_middleware(
+    RequestTimeoutMiddleware,
+    timeout_seconds=float(os.environ.get("API_REQUEST_TIMEOUT_SECONDS", "60")),
+    exempt_prefixes=("/api/tailor", "/api/profile"),
+)
 
 # CORS — env-driven so dev / staging / prod can differ without a rebuild.
 # Default keeps Batch 1 behaviour (localhost:3000) so existing dev flows work.
