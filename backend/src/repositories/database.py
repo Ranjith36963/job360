@@ -545,9 +545,17 @@ class JobDatabase:
         return [dict(row) for row in rows]
 
     async def purge_old_jobs(self, days: int = 30) -> int:
-        """Delete jobs where first_seen is older than `days` ago. Returns count deleted."""
+        """Delete jobs not seen in the last `days`. Returns count deleted.
+
+        Keys on LIVENESS (last_seen_at), not ingestion (first_seen) — docs/fable/02:
+        a posting still live after 30 days should be kept, not deleted-then-re-inserted
+        (which reset its score + re-notified). COALESCE falls back to first_seen for
+        legacy rows whose last_seen_at is NULL, so nothing accumulates un-purgeable.
+        """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._conn.execute("DELETE FROM jobs WHERE first_seen < ?", (cutoff,))
+        cursor = await self._conn.execute(
+            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
+        )
         await self._conn.commit()
         _log.info(
             "purge_old_jobs",

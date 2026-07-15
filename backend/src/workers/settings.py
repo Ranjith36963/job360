@@ -163,6 +163,11 @@ class WorkerSettings:
     # Worker throughput here is not latency-critical (notifications/enrichment).
     max_jobs = 1
 
+    # Explicit per-task ceiling (docs/fable/04) sized to the slowest known task —
+    # the LLM-judge/enrichment batch. Without this, ARQ's generic default lets a
+    # hung LLM call tie up the (single) worker slot indefinitely.
+    job_timeout = 600  # seconds
+
     # Periodic / cron jobs — Step-3 B-14.
     # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``.
     # IMPORTANT: newer arq reads ``WorkerSettings.__dict__['cron_jobs']`` directly
