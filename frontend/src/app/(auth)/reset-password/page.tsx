@@ -15,6 +15,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { confirmPasswordReset } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,13 +61,12 @@ function ResetForm() {
       await confirmPasswordReset(token, data.password);
       setDone(true);
     } catch (err) {
-      // Backend returns 400 for any failure (unknown / expired / used /
-      // deleted-user). Show a generic message — don't help an attacker
-      // distinguish those cases.
+      // Backend returns 400 with ONE generic detail for any failure (unknown /
+      // expired / used / deleted-user). friendlyAuthError surfaces that generic
+      // detail (or a nice 429/500 message) WITHOUT the leaking "API error 400:"
+      // prefix — so we never help an attacker distinguish cases. See docs/fable/03.
       setServerError(
-        err instanceof Error
-          ? err.message
-          : "Reset link is invalid or expired. Request a new one.",
+        friendlyAuthError(err, "Reset link is invalid or expired. Request a new one."),
       );
     }
   });

@@ -13,6 +13,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { confirmEmailVerification } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -38,10 +39,14 @@ function VerifyBody() {
       } catch (err) {
         if (!cancelled) {
           setState("error");
+          // friendlyAuthError surfaces the backend's generic 400 detail (or a
+          // nice 429/500 message) WITHOUT the leaking "API error 400:" prefix.
+          // See docs/fable/03.
           setError(
-            err instanceof Error
-              ? err.message
-              : "Verification link is invalid or expired. Request a new one from your account settings.",
+            friendlyAuthError(
+              err,
+              "Verification link is invalid or expired. Request a new one from your account settings.",
+            ),
           );
         }
       }
