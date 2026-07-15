@@ -115,6 +115,30 @@ def test_last_modified_roundtrip():
     _run(_t())
 
 
+def test_malformed_json_returns_none_not_raise():
+    """S6 fix (docs/FABLE_FINDINGS.md): `_conditional_fetch`'s except only
+    caught `(aiohttp.ClientError, asyncio.TimeoutError)` even though it calls
+    `resp.json()` for the JSON-flavored helper — unlike `_request`, which
+    already includes `json.JSONDecodeError`. A malformed/HTML-error body on
+    a conditional-fetch source used to raise out of `fetch_jobs()` uncaught.
+    Must now degrade gracefully to `None`."""
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            url = "https://api.example.test/broken-json"
+            with aioresponses() as m:
+                # Server returns a non-JSON body (e.g. an HTML error page)
+                # but with a JSON content-type, forcing resp.json() to raise.
+                m.get(url, body="<html>502 Bad Gateway</html>",
+                      content_type="application/json")
+                src = _Probe(session)
+                body = await src._get_json_conditional(url)
+                assert body is None
+        finally:
+            await session.close()
+    _run(_t())
+
+
 def test_no_cache_when_no_validator_header():
     """Server returned neither ETag nor Last-Modified → nothing cached."""
     async def _t():

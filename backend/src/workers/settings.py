@@ -83,6 +83,48 @@ def _load_arq_redis_settings() -> object:
     return RedisSettings(host=rs.host, port=rs.port, database=rs.database)
 
 
+async def worker_startup(ctx: dict) -> None:
+    """ARQ ``on_startup`` — populate ``ctx`` with what every task needs.
+
+    WITHOUT this hook, real ARQ only injects ``job_id``/``redis``/etc. into
+    ``ctx``; it never sets ``ctx['db']`` or ``ctx['enqueue']``. Every task reads
+    ``ctx['db']`` (tasks.py), so the FIRST cron tick raised ``KeyError: 'db'`` and
+    the whole notification/digest/ghost-sweep/enrichment pipeline was silently
+    dead in production. Tests passed only because they build ``ctx`` by hand.
+
+    This opens ONE connection for the worker process and exposes ``enqueue`` as a
+    thin wrapper over ``ctx['redis'].enqueue_job``. ``max_jobs = 1`` (below) keeps
+    tasks serial so the single connection is never used by two coroutines at once
+    (the psycopg "another operation in progress" hazard).
+    """
+    from migrations import runner  # local import — keep module import light
+    from src.core.settings import DB_PATH
+    from src.repositories import pg as aiosqlite
+
+    # Worker may boot independently of the API; migrations are idempotent and
+    # advisory-locked, so applying them here is safe.
+    await runner.up(str(DB_PATH))
+
+    conn = await aiosqlite.connect(str(DB_PATH))
+    conn.row_factory = aiosqlite.Row
+    ctx["db"] = conn
+
+    async def _enqueue(function_name: str, *args: object) -> object:
+        redis = ctx.get("redis")
+        if redis is None:  # defensive — real ARQ always injects redis
+            raise RuntimeError("worker enqueue called before redis was injected")
+        return await redis.enqueue_job(function_name, *args)
+
+    ctx["enqueue"] = _enqueue
+
+
+async def worker_shutdown(ctx: dict) -> None:
+    """ARQ ``on_shutdown`` — close the connection opened in ``worker_startup``."""
+    db = ctx.get("db")
+    if db is not None:
+        await db.close()
+
+
 class WorkerSettings:
     """ARQ boot class — see `arq src.workers.settings.WorkerSettings`.
 
@@ -102,6 +144,17 @@ class WorkerSettings:
         # Step-3 B-14 — nightly ghost-detection sweep
         nightly_ghost_sweep,
     ]
+
+    # Lifecycle hooks — open/close the DB connection tasks read from ``ctx['db']``
+    # and wire ``ctx['enqueue']``. staticmethod so ARQ can call them as plain
+    # ``await on_startup(ctx)`` without an implicit ``self`` bind.
+    on_startup = staticmethod(worker_startup)
+    on_shutdown = staticmethod(worker_shutdown)
+
+    # Serial execution: tasks share the single ``ctx['db']`` connection, so run
+    # one at a time to avoid two coroutines using one psycopg connection at once.
+    # Worker throughput here is not latency-critical (notifications/enrichment).
+    max_jobs = 1
 
     # Periodic / cron jobs — Step-3 B-14.
     # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``.

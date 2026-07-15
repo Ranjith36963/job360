@@ -100,7 +100,7 @@ def main():
     print("=" * 78)
     print("CONVERGENCE — trustworthy engine ranking (de-biased; rankable profiles only)")
     print("=" * 78)
-    print("Inter-rater gate (Opus gold vs Gemini judge, >= %.2f to count):" % GATE)
+    print(f"Inter-rater gate (Opus gold vs Gemini judge, >= {GATE:.2f} to count):")
     for uid, (ir, K) in interrater.items():
         tag = "USED" if uid in rankable else "excluded (no agreed gold)"
         irs = f"{ir:.3f}" if ir is not None else "n/a"

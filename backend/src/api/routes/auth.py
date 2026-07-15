@@ -18,6 +18,7 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_db
+from src.api.middleware import _is_production
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
 from src.repositories import pg as aiosqlite
 from src.repositories.database import JobDatabase
@@ -104,9 +105,12 @@ def _client_meta(request: Request) -> dict:
 
 
 def _set_session_cookie(response: Response, cookie: str) -> None:
-    # Secure flag gates on JOB360_ENV so prod deploys don't serve bare cookies
-    # by accident. Any value other than "prod" falls back to dev-friendly.
-    secure = os.environ.get("JOB360_ENV") == "prod"
+    # H5 — Secure flag gates on the SAME prod detection as HSTS / Sentry / CORS
+    # (APP_ENV=production OR RAILWAY_ENVIRONMENT set) so a prod deploy never
+    # serves a bare session cookie. Reuses middleware._is_production so the
+    # signal can't drift out of sync with the other prod-gated behaviour.
+    # (Previously gated on JOB360_ENV, never set on Railway — see docs/fable/01.)
+    secure = _is_production()
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=cookie,

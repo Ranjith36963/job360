@@ -87,10 +87,11 @@ async function mockDashboard(page: Page) {
 }
 
 async function renderedScores(page: Page): Promise<number[]> {
-  // JobCard's score badge is labelled "AI fit score: N" (judged) or "Keyword
-  // match score: N" (keyword) — match both via the shared " score: " infix.
-  return page.$$eval('[aria-label*=" score: "]', (els) =>
-    els.map((el) => Number((el.getAttribute("aria-label")!.match(/\d+/) || [])[0]))
+  // The primary score badge (JobCard.tsx) labels itself
+  // "AI fit score: N" when judged, else "Keyword match score: N" — so match on
+  // the shared "score: N" suffix rather than the old (renamed) "Match score" copy.
+  return page.$$eval('[aria-label*="score: "]', (els) =>
+    els.map((el) => Number((el.getAttribute("aria-label")!.match(/(\d+)\s*$/) || [])[1]))
   );
 }
 

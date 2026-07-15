@@ -478,3 +478,57 @@ async def test_cli_arq_scoring_parity(worker_db):
     assert any(
         b.match_score > 0 for b in cli_breakdowns
     ), "fixture too weak — ensure at least one job matches the default config"
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_populates_ctx(monkeypatch):
+    """Regression guard for the dead-worker P0.
+
+    Real ARQ never sets ctx['db']/ctx['enqueue']; on_startup must. The original
+    bug shipped green because tests built ctx by hand — this test exercises the
+    real on_startup wiring so the suite fails if it regresses.
+    """
+    from src.workers import settings as ws
+
+    async def _noop_up(path):
+        return None
+
+    monkeypatch.setattr("migrations.runner.up", _noop_up)
+
+    class _FakeConn:
+        row_factory = None
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    fake_conn = _FakeConn()
+
+    async def _fake_connect(path):
+        return fake_conn
+
+    monkeypatch.setattr("src.repositories.pg.connect", _fake_connect)
+
+    enqueued: list = []
+
+    class _FakeRedis:
+        async def enqueue_job(self, name, *args):
+            enqueued.append((name, args))
+            return "job-id"
+
+    ctx: dict = {"redis": _FakeRedis()}
+
+    await ws.worker_startup(ctx)
+    assert ctx["db"] is fake_conn
+    assert callable(ctx["enqueue"])
+
+    await ctx["enqueue"]("score_and_ingest", 7)
+    assert enqueued == [("score_and_ingest", (7,))]
+
+    await ws.worker_shutdown(ctx)
+    assert fake_conn.closed is True
+
+    # The class must actually expose the hooks to ARQ, serialized.
+    assert ws.WorkerSettings.on_startup is not None
+    assert ws.WorkerSettings.on_shutdown is not None
+    assert ws.WorkerSettings.max_jobs == 1

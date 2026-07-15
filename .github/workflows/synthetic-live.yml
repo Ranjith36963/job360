@@ -1,0 +1,43 @@
+# Loop 2 — LIVE production synthetic smoke (Playwright walks the real deployed app).
+#
+# Unlike uptime.yml (a 200/OK ping) this drives a real browser corner-by-corner like a
+# human and, on any failure, screenshots it + logs the REASON into the server log system
+# (POST /api/client-log). Fails red → GitHub emails the owner (scheduled-workflow default).
+#
+# Public corners always run. Authed corners run only when the SMOKE_SESSION secret is set
+# to a VERIFIED synthetic account's job360_session cookie (prod email-verification can't be
+# automated in CI). See tests/synthetic/live-smoke.mjs.
+name: synthetic-live
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6h; tune to taste (authed run makes a real LLM call)
+  workflow_dispatch: {}
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps + Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Walk live production
+        env:
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+          SMOKE_API_URL: ${{ vars.SMOKE_API_URL }}
+          SMOKE_SESSION: ${{ secrets.SMOKE_SESSION }}
+        run: node tests/synthetic/live-smoke.mjs
+      - name: Upload report + failure screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-report
+          path: frontend/smoke-artifacts/
+          if-no-files-found: ignore

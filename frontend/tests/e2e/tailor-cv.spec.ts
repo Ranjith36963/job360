@@ -68,12 +68,12 @@ test.describe("Tailor my CV", () => {
     ]);
   });
 
-  // QUARANTINED — not hermetic: /jobs/[id]/page.tsx is a Server Component that
-  // fetches the job SERVER-SIDE from ${NEXT_PUBLIC_API_URL || :8000}. Playwright's
-  // page.route only mocks CLIENT-side requests, so the server fetch isn't
-  // intercepted; with no backend in CI it returns null → the tailor button never
-  // stabilises. Fixing needs either a stub backend for this job, or making the
-  // job detail fetch client-side. Tracked; skipped so the e2e job stays green.
+  // FIXME(e2e): STALE spec — the job-detail page renders tailor as an INLINE
+  // <TailorSection> (JobDetailClient.tsx:494), not a "Tailor my CV" button that
+  // opens a dialog (that button+dialog lives on the dashboard JobCard). So the
+  // button click times out and the dialog assertions can't pass here. Needs a
+  // rewrite to target the inline section (or to run against the dashboard card),
+  // not an auth/env issue. Quarantined until rewritten.
   test.fixme("opens from the job page, shows generated docs, edits + saves, offers download", async ({
     page,
   }) => {

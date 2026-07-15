@@ -440,7 +440,7 @@ async def test_run_search_uses_tiered_scheduler(tmp_db_path, fake_profile, monke
     monkeypatch.setattr(main_mod, "_build_sources",
                         lambda *a, **kw: srcs)
 
-    stats = await main_mod.run_search(db_path=tmp_db_path, no_notify=True)
+    await main_mod.run_search(db_path=tmp_db_path, no_notify=True)
 
     assert len(tick_calls) == 1, f"tick should be called exactly once, got {tick_calls}"
     assert tick_calls[0]["force"] is True

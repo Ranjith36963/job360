@@ -141,11 +141,17 @@ async def _insert_job(db_path: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_get_rule_404_when_none(authenticated_async_context):
-    """1. GET returns 404 for new user (no rule yet)."""
+async def test_get_rule_null_when_none(authenticated_async_context):
+    """1. GET returns 200 with null body for a new user (no rule yet).
+
+    Settings is a per-user singleton, so "not set" is a normal empty-state the
+    client reads as "use defaults" — not a 404 (which the browser logs as a
+    console error even though the client handles it).
+    """
     async with authenticated_async_context() as client:
         resp = await client.get("/api/settings/notification-rule")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.json() is None
 
 
 @pytest.mark.asyncio
@@ -165,6 +171,18 @@ async def test_put_rule_updates_mode(authenticated_async_context):
         get_resp = await client.get("/api/settings/notification-rule")
     assert get_resp.json()["notify_mode"] == "every_n_hours"
     assert get_resp.json()["interval_hours"] == 8
+
+
+@pytest.mark.asyncio
+async def test_put_rule_rejects_invalid_notify_mode(authenticated_async_context):
+    """M2 — notify_mode is really an enum (instant|daily|every_n_hours). A
+    free-form string must be rejected with 422, never silently written."""
+    async with authenticated_async_context() as client:
+        resp = await client.put(
+            "/api/settings/notification-rule",
+            json={"notify_mode": "hourly-ish"},
+        )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

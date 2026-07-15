@@ -5,7 +5,7 @@ Tests import directly from scripts.engine_health (pure functions only).
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 from scripts.engine_health import (
     actions_precision,
@@ -126,7 +126,7 @@ class TestFreshnessStats:
         assert abs(stats["median_age_days"] - 1.0) < 0.5
 
     def test_mixed_none_and_dates(self) -> None:
-        posted: List[Optional[str]] = [None, "2024-06-15T11:00:00+00:00", None]
+        posted: list[Optional[str]] = [None, "2024-06-15T11:00:00+00:00", None]
         stats = freshness_stats(posted, self.NOW)
         assert stats["count"] == 3
         assert stats["with_date"] == 1

@@ -223,6 +223,22 @@ async def test_save_edit_persists_polished(authenticated_async_context, fixture_
 
 
 @pytest.mark.asyncio
+async def test_save_edit_rejects_oversized_text(authenticated_async_context, fixture_user_id, monkeypatch):
+    """N6 — a client can't push an unbounded blob into the DB via the edit body."""
+    _patch_route(monkeypatch, [])
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+    oversized_text = "x" * 50_001
+    async with authenticated_async_context() as client:
+        await client.post(f"/api/tailor/{job_id}/generate")
+        resp = await client.patch(f"/api/tailor/{job_id}/cv", json={"text": oversized_text})
+    assert resp.status_code == 422
+    # No poisoning: the draft is untouched (still the original AI draft, not the oversized text)
+    row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
+    assert row["polished"] is None
+
+
+@pytest.mark.asyncio
 async def test_keep_marks_kept_and_learns_patterns_only(authenticated_async_context, fixture_user_id, monkeypatch):
     _patch_route(monkeypatch, [])
     db = await api_deps.get_db()
@@ -271,7 +287,6 @@ async def test_layer2_uses_kept_docs_as_examples(authenticated_async_context, mo
         await client.post(f"/api/tailor/{job1}/cv/keep")
         captured.clear()
         await client.post(f"/api/tailor/{job2}/generate")  # new job → should reuse my style
-    cv_prompts = [c["prompt"] for c in captured if "SUMMARY" in c["prompt"] or "CV" in c["system"]]
     assert any("MY_UNIQUE_VOICE_ZZ" in c["prompt"] for c in captured)
 
 
