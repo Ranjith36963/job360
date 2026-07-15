@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import posthog from "posthog-js";
 import { User, CheckCircle, AlertCircle, History, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import {
   uploadLinkedin,
   uploadGithub,
 } from "@/lib/api";
-import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse, PreferencesRequest } from "@/lib/types";
 
 // ── Completeness calculation ────────────────────────────────
@@ -90,14 +90,13 @@ export default function ProfilePage() {
       const data = await getProfile();
       setProfile(data);
     } catch (err: unknown) {
-      // L7: 404 = no profile yet — that's OK. Check the typed status instead
-      // of string-matching the error message (which could coincidentally
-      // contain "404" for an unrelated reason, e.g. a detail mentioning a
-      // job id).
-      if (err instanceof ApiError && err.isNotFound) {
+      // 404 = no profile yet — that's OK
+      if (err instanceof Error && err.message.includes("404")) {
         setProfile(null);
       } else {
-        setError(apiErrorMessage(err, "Failed to load profile"));
+        setError(
+          err instanceof Error ? err.message : "Failed to load profile"
+        );
       }
     } finally {
       setLoadingProfile(false);
@@ -115,6 +114,10 @@ export default function ProfilePage() {
       try {
         const data = await uploadProfile(file);
         setProfile(data);
+        posthog.capture("cv_uploaded");
+        posthog.capture("extraction_completed", {
+          skills_found: data.summary.skills_count,
+        });
         toast.success("CV uploaded and parsed");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to upload CV";

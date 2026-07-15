@@ -323,3 +323,35 @@ def test_notification_rules_unique_user(db):
 
     with pytest.raises(Exception):
         asyncio.run(_insert_twice())
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_user_erases_per_user_data_keeps_shared_catalog(db):
+    """docs/fable/05 — hard_delete_user ERASES the user's per-user rows and the
+    users row itself, but never touches the shared jobs catalog (rules #10/#17).
+    Regression guard so 'delete my account' can't silently revert to soft-delete."""
+    await db._conn.executescript(
+        "CREATE TABLE IF NOT EXISTS users ("
+        " id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,"
+        " password_hash TEXT NOT NULL, deleted_at TEXT);"
+    )
+    await _create_user_feed_table(db)
+    await db.insert_job(_make_job(title="Erasure Catalog Job"))
+    await db._conn.execute(
+        "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+        ("u-erase", "erase@example.com", "!"),
+    )
+    await db._conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES(?, ?, ?, ?)",
+        ("u-erase", 1, 80, "all"),
+    )
+    await db._conn.commit()
+
+    await db.hard_delete_user("u-erase")
+
+    cur = await db._conn.execute("SELECT COUNT(*) FROM users WHERE id = ?", ("u-erase",))
+    assert (await cur.fetchone())[0] == 0, "account row must be erased, not soft-deleted"
+    cur = await db._conn.execute("SELECT COUNT(*) FROM user_feed WHERE user_id = ?", ("u-erase",))
+    assert (await cur.fetchone())[0] == 0, "per-user feed rows must be erased"
+    cur = await db._conn.execute("SELECT COUNT(*) FROM jobs")
+    assert (await cur.fetchone())[0] == 1, "shared jobs catalog must survive erasure"

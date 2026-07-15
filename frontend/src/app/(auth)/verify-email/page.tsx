@@ -39,6 +39,9 @@ function VerifyBody() {
       } catch (err) {
         if (!cancelled) {
           setState("error");
+          // friendlyAuthError surfaces the backend's generic 400 detail (or a
+          // nice 429/500 message) WITHOUT the leaking "API error 400:" prefix.
+          // See docs/fable/03.
           setError(
             friendlyAuthError(
               err,

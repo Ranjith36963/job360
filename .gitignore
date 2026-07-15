@@ -39,13 +39,8 @@ test-*.png
 
 # Python build artifacts
 *.egg-info/
-# E2E verification artifacts: ignore everything under test-artifacts/ EXCEPT the
-# two committed fixtures (README + sample CV). The old `test-artifacts/*.png`
-# glob only caught top-level PNGs, letting nested screenshot dirs (design/,
-# tailor/, verify-*/) accumulate untracked and risk a `git add -A` sweep.
-test-artifacts/*
-!test-artifacts/README.md
-!test-artifacts/sample_cv.pdf
+# E2E verification artifacts (keep sample_cv.pdf, ignore screenshots/reports)
+test-artifacts/*.png
 frontend/playwright-report/
 # Personal/local Claude Code config — machine-specific (permissions, hooks).
 # Stays on disk; should not be version-controlled (W2 review fix).

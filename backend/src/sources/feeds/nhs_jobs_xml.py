@@ -11,8 +11,6 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-from defusedxml.ElementTree import fromstring as _safe_fromstring  # M18: XXE-safe parse of untrusted feed XML
-
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
@@ -46,7 +44,7 @@ class NHSJobsXMLSource(BaseJobSource):
     def _parse_xml(self, xml_text: str) -> list[Job]:
         results: list[Job] = []
         try:
-            root = _safe_fromstring(_sanitize_xml(xml_text))
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             logger.warning("NHSJobsXML: XML parse error: %s", e)
             return []

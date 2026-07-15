@@ -412,11 +412,8 @@ interface KanbanBoardProps {
 
 export function KanbanBoard({ applications, onAdvance, onRefresh }: KanbanBoardProps) {
   // Keyboard map: Space = pick up / drop, Arrow keys = move between columns, Escape = cancel
-  // H8: require an 8px pointer move before a drag activates, so a plain click
-  // (Notes / History / CV / Advance buttons nested inside a draggable card)
-  // reaches the button instead of being swallowed as a drag start.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(PointerSensor),
     useSensor(KeyboardSensor),
   );
 

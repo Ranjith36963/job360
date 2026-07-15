@@ -495,6 +495,14 @@ async def test_worker_startup_populates_ctx(monkeypatch):
 
     monkeypatch.setattr("migrations.runner.up", _noop_up)
 
+    # docs/fable/09 P0 — worker_startup MUST init Sentry (tagged worker) so worker
+    # crashes are observable. Spy on it to lock the wiring in.
+    sentry_calls: list = []
+    monkeypatch.setattr(
+        "src.core.observability.init_sentry",
+        lambda *, component="api": sentry_calls.append(component),
+    )
+
     class _FakeConn:
         row_factory = None
         closed = False
@@ -521,6 +529,7 @@ async def test_worker_startup_populates_ctx(monkeypatch):
     await ws.worker_startup(ctx)
     assert ctx["db"] is fake_conn
     assert callable(ctx["enqueue"])
+    assert sentry_calls == ["worker"]  # observability wired (docs/fable/09 P0)
 
     await ctx["enqueue"]("score_and_ingest", 7)
     assert enqueued == [("score_and_ingest", (7,))]

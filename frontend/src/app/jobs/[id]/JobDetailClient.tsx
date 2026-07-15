@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import posthog from "posthog-js";
 import {
   ArrowLeft,
   ExternalLink,
@@ -164,6 +165,15 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
       document.title = `${job.title} at ${job.company} — Job360`;
     }
   }, [job]);
+
+  // Fire once per view when the job finishes loading — keyed on job.id so it
+  // doesn't re-fire on unrelated re-renders (e.g. like/dismiss action state).
+  useEffect(() => {
+    if (job) {
+      posthog.capture("job_viewed", { job_id: job.id });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id]);
 
   // Toggle action
   const handleAction = useCallback(

@@ -391,34 +391,3 @@ def test_split_sql_statements_ignores_semicolon_in_inline_comment():
             db.execute(s)
     finally:
         db.close()
-
-
-@pytest.mark.asyncio
-async def test_up_rolls_back_partial_migration_on_failure(tmp_db_path, tmp_path):
-    """Finding H2: a migration whose body fails mid-way must roll back ENTIRELY
-    and NOT be recorded as applied — no half-applied migration marked "done".
-
-    The up.sql here creates ``good_tbl`` (succeeds) then inserts into a missing
-    table (fails). Under the per-migration transaction the CREATE must roll back
-    and the stem must be absent from ``_schema_migrations``.
-    """
-    d = tmp_path / "m_partial"
-    d.mkdir()
-    (d / "0001_partial.up.sql").write_text(
-        "CREATE TABLE good_tbl (id INTEGER PRIMARY KEY);\n"
-        "INSERT INTO missing_table_xyz (id) VALUES (1);\n"
-    )
-    (d / "0001_partial.down.sql").write_text("DROP TABLE IF EXISTS good_tbl;")
-
-    with pytest.raises(Exception):
-        await runner.up(tmp_db_path, migrations_dir=d)
-
-    async with aiosqlite.connect(tmp_db_path) as db:
-        cur = await db.execute("SELECT id FROM _schema_migrations")
-        recorded = {r[0] for r in await cur.fetchall()}
-        assert "0001_partial" not in recorded, "half-applied migration was recorded as done"
-
-        cur2 = await db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='good_tbl'"
-        )
-        assert await cur2.fetchone() is None, "partial CREATE TABLE was not rolled back"

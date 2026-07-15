@@ -12,7 +12,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { requestPasswordReset } from "@/lib/api";
-import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,9 +46,8 @@ export default function ForgotPasswordPage() {
       setSubmitted(true);
     } catch (err) {
       // The backend always returns 204; a failure here is genuinely a
-      // network / parse problem. Show a friendly message, never the raw
-      // "API error NNN: …" string.
-      setServerError(friendlyAuthError(err, "Something went wrong. Please try again."));
+      // network / parse problem and we surface it verbatim.
+      setServerError(err instanceof Error ? err.message : "request failed");
     }
   });
 
@@ -89,13 +87,19 @@ export default function ForgotPasswordPage() {
                   id="email"
                   type="email"
                   autoComplete="email"
+                  aria-invalid={!!errors.email}
+                  aria-describedby={errors.email ? "email-error" : undefined}
                   {...register("email")}
                 />
                 {errors.email && (
-                  <p className="text-sm text-red-400">{errors.email.message}</p>
+                  <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
                 )}
               </div>
-              {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+              {serverError && (
+                <p role="alert" className="text-sm text-red-400">
+                  {serverError}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? "Sending…" : "Send reset link"}
               </Button>

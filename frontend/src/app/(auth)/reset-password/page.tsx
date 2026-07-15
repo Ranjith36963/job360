@@ -61,10 +61,10 @@ function ResetForm() {
       await confirmPasswordReset(token, data.password);
       setDone(true);
     } catch (err) {
-      // Backend returns 400 for any failure (unknown / expired / used /
-      // deleted-user). friendlyAuthError keeps the message generic — don't
-      // help an attacker distinguish those cases, and never leak the raw
-      // "API error 400: …" string to the user.
+      // Backend returns 400 with ONE generic detail for any failure (unknown /
+      // expired / used / deleted-user). friendlyAuthError surfaces that generic
+      // detail (or a nice 429/500 message) WITHOUT the leaking "API error 400:"
+      // prefix — so we never help an attacker distinguish cases. See docs/fable/03.
       setServerError(
         friendlyAuthError(err, "Reset link is invalid or expired. Request a new one."),
       );
@@ -93,10 +93,12 @@ function ResetForm() {
           id="password"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -105,13 +107,19 @@ function ResetForm() {
           id="confirm"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.confirm}
+          aria-describedby={errors.confirm ? "confirm-error" : undefined}
           {...register("confirm")}
         />
         {errors.confirm && (
-          <p className="text-sm text-red-400">{errors.confirm.message}</p>
+          <p id="confirm-error" className="text-sm text-red-400">{errors.confirm.message}</p>
         )}
       </div>
-      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      {serverError && (
+        <p role="alert" className="text-sm text-red-400">
+          {serverError}
+        </p>
+      )}
       <Button type="submit" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "Updating…" : "Set new password"}
       </Button>

@@ -84,10 +84,12 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
           id="magic-email"
           type="email"
           autoComplete="email"
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? "magic-email-error" : undefined}
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="magic-email-error" className="text-sm text-red-400">{errors.email.message}</p>
         )}
       </div>
       {serverError && (
@@ -146,10 +148,12 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
           id="email"
           type="email"
           autoComplete="email"
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? "email-error" : undefined}
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -158,10 +162,12 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
           id="password"
           type="password"
           autoComplete="current-password"
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
         )}
       </div>
       {serverError && (

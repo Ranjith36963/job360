@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import posthog from "posthog-js";
 
 import { register as registerUser } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
@@ -56,6 +57,7 @@ function RegisterForm() {
     setServerError(null);
     try {
       await registerUser(data.email, data.password);
+      posthog.capture("signup_completed");
       router.push(safeNext(next));
     } catch (err) {
       setServerError(friendlyAuthError(err, "Sign-up failed. Please try again."));
@@ -70,10 +72,12 @@ function RegisterForm() {
           id="email"
           type="email"
           autoComplete="email"
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? "email-error" : undefined}
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -82,16 +86,22 @@ function RegisterForm() {
           id="password"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
         )}
         <p className="text-xs text-muted-foreground">
           Minimum 8 characters. We hash with argon2id — never store plaintext.
         </p>
       </div>
-      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+      {serverError && (
+        <p role="alert" className="text-sm text-red-400">
+          {serverError}
+        </p>
+      )}
       <Button type="submit" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "Creating..." : "Create account"}
       </Button>
