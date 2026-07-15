@@ -93,10 +93,12 @@ function ResetForm() {
           id="password"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -105,10 +107,12 @@ function ResetForm() {
           id="confirm"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.confirm}
+          aria-describedby={errors.confirm ? "confirm-error" : undefined}
           {...register("confirm")}
         />
         {errors.confirm && (
-          <p className="text-sm text-red-400">{errors.confirm.message}</p>
+          <p id="confirm-error" className="text-sm text-red-400">{errors.confirm.message}</p>
         )}
       </div>
       {serverError && (

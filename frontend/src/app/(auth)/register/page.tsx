@@ -70,10 +70,12 @@ function RegisterForm() {
           id="email"
           type="email"
           autoComplete="email"
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? "email-error" : undefined}
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -82,10 +84,12 @@ function RegisterForm() {
           id="password"
           type="password"
           autoComplete="new-password"
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
         )}
         <p className="text-xs text-muted-foreground">
           Minimum 8 characters. We hash with argon2id — never store plaintext.
