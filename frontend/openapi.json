@@ -1455,6 +1455,14 @@
       },
       "ProfileResponse": {
         "properties": {
+          "ai_suggestions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ai Suggestions",
+            "type": "array"
+          },
           "current_version_id": {
             "anyOf": [
               {
@@ -1530,6 +1538,17 @@
             },
             "default": {},
             "title": "Skill Tiers",
+            "type": "object"
+          },
+          "skills_by_source": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Skills By Source",
             "type": "object"
           },
           "summary": {
@@ -2123,6 +2142,7 @@
       "TailorSaveRequest": {
         "properties": {
           "text": {
+            "maxLength": 50000,
             "title": "Text",
             "type": "string"
           }
@@ -3291,6 +3311,8 @@
             "required": false,
             "schema": {
               "default": 100,
+              "maximum": 200,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -3301,6 +3323,7 @@
             "required": false,
             "schema": {
               "default": 0,
+              "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }

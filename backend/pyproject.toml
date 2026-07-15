@@ -6,6 +6,7 @@ requires-python = ">=3.9"
 dependencies = [
     "aiohttp>=3.9.0,<3.14",  # <3.14: 3.14 broke aioresponses 0.7.8 (test HTTP mocking). Lift once aioresponses supports 3.14.
     "aiosqlite>=0.19.0",
+    "defusedxml>=0.7.1",  # M18: XXE-safe parsing of untrusted RSS/XML job feeds
     "psycopg[binary]>=3.2",  # async Postgres driver (Phase 1 migration)
     "python-dotenv>=1.0.0",
     "jinja2>=3.1.0",
@@ -164,9 +165,9 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904",
 # Step-1.5 added _maybe_normalise_skills_via_esco below the LLM prompt;
 # the late-bound `_coerce_str` imports keep their explicit `noqa: E402`.
 "src/services/profile/cv_parser.py" = ["E501"]
-# RSS/XML job-feed parsers use stdlib xml.etree by design (feeds are
-# semi-trusted; defusedxml is a deferred dependency choice, not a bug) — S314.
-# Some feed/source files also carry long URL/param lines — E501.
+# RSS/XML job-feed parsers now parse untrusted feed XML via defusedxml (M18 —
+# XXE-safe); the stdlib xml.etree import remains only for ET.ParseError. Keep the
+# S314 ignore as belt-and-braces for that residual import. Long URL lines — E501.
 "src/sources/*" = ["S314", "E501"]
 # Late/lazy imports below module setup (rules #11/#16 heavy-dep deferral + the
 # rule-#28 note imports) are intentional — E402.

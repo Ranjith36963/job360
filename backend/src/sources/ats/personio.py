@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import aiohttp
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # M18: XXE-safe parse of untrusted feed XML
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, PERSONIO_COMPANIES
 from src.models import Job
@@ -48,7 +49,7 @@ class PersonioSource(BaseJobSource):
     def _parse_feed(self, xml_text: str, company_name: str, slug: str) -> list[Job]:
         jobs = []
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = _safe_fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             logger.warning("Personio [%s]: XML parse error: %s", slug, e)
             return []
