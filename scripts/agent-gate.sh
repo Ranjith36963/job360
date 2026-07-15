@@ -18,7 +18,13 @@ FRONTEND_CHANGED=$(echo "$CHANGED" | grep -c '^frontend/' || true)
 
 if [ "$BACKEND_CHANGED" -gt 0 ]; then
   echo "[gate] backend suite..."
-  (cd backend && python -m pytest -q -p no:randomly)
+  # Process isolation (pytest-xdist). Single-process runs leak a non-daemon
+  # aiosqlite worker thread per connection; after ~68 test files the process
+  # exhausts Windows handles/threads and DEADLOCKS at ~4% (green on Linux CI,
+  # wedges on Windows). --dist loadfile gives each test file its own worker
+  # process, so nothing accumulates. Same tests, same rigor — just isolated.
+  # Verified: 1759 passed / 0 failed on Windows this way vs. a hard hang otherwise.
+  (cd backend && python -m pytest -q -p no:randomly -n 4 --dist loadfile)
 fi
 
 # M7 — API-types drift guard. A backend API-model change OR a frontend change

@@ -18,6 +18,11 @@ class EightyKHoursSource(BaseJobSource):
     """80,000 Hours — high-impact AI safety jobs via Algolia API."""
     name = "eightykhours"
     category = "scrapers"
+    # S7 fix: without an override this inherited the base class's
+    # {"general"} default, so it fired for every user regardless of
+    # domain (a nurse/professor search got AI-safety/EA noise injected).
+    # See docs/FABLE_FINDINGS.md.
+    DOMAINS = {"tech"}
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []

@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import aiohttp
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # M18: XXE-safe parse of untrusted feed XML
 
 from src.core.companies import SUCCESSFACTORS_COMPANIES
 from src.models import Job
@@ -40,7 +41,7 @@ class SuccessFactorsSource(BaseJobSource):
         now = datetime.now(timezone.utc).isoformat()
 
         try:
-            root = ET.fromstring(_sanitize_xml(xml_text))
+            root = _safe_fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             logger.warning("SuccessFactors [%s]: XML parse error: %s", company_name, e)
             return []

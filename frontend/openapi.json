@@ -2142,6 +2142,7 @@
       "TailorSaveRequest": {
         "properties": {
           "text": {
+            "maxLength": 50000,
             "title": "Text",
             "type": "string"
           }
@@ -3310,6 +3311,8 @@
             "required": false,
             "schema": {
               "default": 100,
+              "maximum": 200,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -3320,6 +3323,7 @@
             "required": false,
             "schema": {
               "default": 0,
+              "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }
