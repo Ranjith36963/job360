@@ -200,16 +200,24 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     for e in schema.experience:
         experience_lines.extend(e.bullets)
 
+    # ONE entry per degree — "degree — institution | dates" combined on a single
+    # line so the "Education: N" stat counts qualifications, not lines. The
+    # per-degree DETAILS (coursework, thesis, project bullets) are NOT flattened
+    # in — each was becoming its own "education entry", inflating the count to a
+    # meaningless number (28 for a 2-degree CV). Details stay in raw_text.
+    # (Education is NOT a CV-highlight source, so combining is display-safe.)
     education_lines: list[str] = []
     for edu in schema.education:
+        parts: list[str] = []
         if edu.degree:
-            education_lines.append(edu.degree)
+            parts.append(edu.degree)
         if edu.institution:
-            line = edu.institution
+            inst = edu.institution
             if edu.dates:
-                line += f" | {edu.dates}"
-            education_lines.append(line)
-        education_lines.extend(edu.details)
+                inst += f" | {edu.dates}"
+            parts.append(inst)
+        if parts:
+            education_lines.append(" — ".join(parts))
 
     return CVData(
         raw_text=raw_text,

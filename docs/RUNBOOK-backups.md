@@ -4,25 +4,40 @@ Job360's production data lives in a single Postgres database (Railway). This
 runbook covers how to back it up and — the part people skip — how to actually
 restore it.
 
-## ⚠️ Why automated CI-artifact backups are NOT wired up
+## Automated backups: self-verifying nightly → Cloudflare R2
 
-The obvious approach (a nightly GitHub Action that runs `pg_dump` and uploads the
-dump as a workflow artifact) is **unsafe for this repo because the repo is
-public**. A dump contains every user's email and CV; a workflow artifact in a
-public repo is downloadable by anyone. So we deliberately did **not** add that
-workflow. Pick one of the safe options below instead.
+`.github/workflows/db-backup.yml` runs **02:17 UTC nightly** (and on demand via
+the Actions tab). Trust model — **a backup only counts if it proves it can be
+restored:**
 
-### Option A (recommended): Railway managed backups
-Railway's Postgres plugin offers automated daily backups + point-in-time
-restore on its paid tiers. Enable it in the Railway dashboard → Postgres service
-→ Backups. Zero code, encrypted at rest, never touches the repo. This is the
-right answer for a live product.
+1. `pg_dump` prod.
+2. **Restore that dump into a throwaway Postgres in the same run** and assert the
+   data is real (`users ≥ 1`, `≥ 20` rows in `_schema_migrations`). A corrupt/empty
+   dump fails the job → GitHub emails the owner. A green run = "proven restorable
+   tonight". Row counts are written to the run summary.
+3. **Encrypt** (`gpg --symmetric AES256`, `BACKUP_PASSPHRASE` secret) — R2 only
+   ever stores ciphertext, so the repo can stay public and a leaked R2 key still
+   exposes nothing.
+4. Upload to a **private R2 bucket**; keep the newest 30.
 
-### Option B: make the repo private, then enable the artifact workflow
-If the repo is made private, a nightly `pg_dump → upload-artifact` job becomes
-safe (artifacts inherit the private repo's access control). The script
-(`backend/scripts/backup_db.py`) already exists; wiring is a ~40-line workflow.
-Do NOT do this while the repo is public.
+Why R2 and not a GitHub artifact: a workflow artifact in a *public* repo is
+world-downloadable and the dump is user PII. R2 is private + the file is
+encrypted anyway — two independent protections.
+
+### One-time setup (secrets the workflow needs)
+Create these GitHub repo secrets (Settings → Secrets and variables → Actions):
+- `PROD_DATABASE_URL` — the **external** Railway Postgres URL (not `*.railway.internal`).
+- `BACKUP_PASSPHRASE` — a long random passphrase. **Store it offline too — without
+  it the backups are unrecoverable.**
+- `R2_ENDPOINT` — `https://<account-id>.r2.cloudflarestorage.com`
+- `R2_BUCKET` — e.g. `job360-backups` (a **private** R2 bucket)
+- `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` — an R2 API token scoped to that bucket.
+
+### Alternative: Railway managed backups (paid)
+Railway Pro gives daily backups + point-in-time recovery in the dashboard
+(Postgres → Backups). Zero code, and PITR is strictly better than nightly dumps.
+Move to this when revenue justifies the Pro plan; until then the R2 workflow
+above fully protects the data for $0.
 
 ## Manual backup (any time, from a machine with the Postgres client)
 
@@ -46,12 +61,19 @@ container instead (see the drill below).
 A dump is only useful if restore works. **Always restore into a NEW database,
 never in-place over live data**, then repoint the app.
 
+**Restoring an encrypted R2 backup** (the `.sql.gz.gpg` files):
+
 ```bash
-# 1. Create a fresh target database
+# 0. Download the newest backup from R2
+aws s3 ls "s3://job360-backups/" --endpoint-url "$R2_ENDPOINT" | sort | tail -1
+aws s3 cp "s3://job360-backups/job360-<TS>.sql.gz.gpg" . --endpoint-url "$R2_ENDPOINT"
+
+# 1. Create a fresh target database (never restore over live data)
 psql "$ADMIN_DATABASE_URL" -c "CREATE DATABASE job360_restored;"
 
-# 2. Load the dump
-gunzip -c job360-2026-07-09T0200Z.sql.gz | psql "postgresql://…/job360_restored"
+# 2. Decrypt → gunzip → load (needs BACKUP_PASSPHRASE)
+gpg --batch --quiet --decrypt --passphrase "$BACKUP_PASSPHRASE" \
+  "job360-<TS>.sql.gz.gpg" | gunzip -c | psql "postgresql://…/job360_restored"
 
 # 3. Sanity-check row counts and the migration head
 psql "postgresql://…/job360_restored" -c \
@@ -59,6 +81,9 @@ psql "postgresql://…/job360_restored" -c \
 
 # 4. Only once verified: repoint the app's DATABASE_URL at the restored DB.
 ```
+
+For a plain unencrypted `.sql.gz` (from `scripts/backup_db.py` run manually), skip
+the `gpg` step: `gunzip -c file.sql.gz | psql "postgresql://…/job360_restored"`.
 
 ## Restore drill — logged evidence
 

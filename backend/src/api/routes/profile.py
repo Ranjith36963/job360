@@ -264,8 +264,14 @@ def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) 
 
 
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
-    """Parse the preferences JSON form and set it on the profile."""
+    """Parse the preferences JSON form and set it on the profile.
+
+    Fields the form does NOT carry (``github_username`` — set by the separate
+    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
+    EXISTING preferences so a routine preferences save never silently wipes them.
+    """
     pref_dict = json.loads(preferences_json)
+    existing = profile.preferences or UserPreferences()
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -278,7 +284,9 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         experience_level=pref_dict.get("experience_level", ""),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
-        github_username=pref_dict.get("github_username", ""),
+        github_username=pref_dict.get("github_username", existing.github_username),
+        preferred_workplace=pref_dict.get("preferred_workplace", existing.preferred_workplace),
+        needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
 
 

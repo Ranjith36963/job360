@@ -115,6 +115,10 @@ class TestPreferences:
         assert prefs.target_job_titles == ["Engineer", "Scientist"]
 
     def test_merge_deduplicates(self):
+        # BEHAVIOUR CHANGE (skill-quality fix): additional_skills is the USER's
+        # extras only and no longer absorbs cv_skills — folding the CV in here
+        # collapsed the skill tiers (everything scored user_declared) and stuffed
+        # the preferences box. Titles still merge (prefs first, CV appended).
         cv_skills = ["Python", "SQL", "Java"]
         cv_titles = ["Software Engineer"]
         prefs = UserPreferences(
@@ -124,24 +128,22 @@ class TestPreferences:
         merged = merge_cv_and_preferences(cv_skills, cv_titles, prefs)
         # Titles: prefs first, CV deduped
         assert merged.target_job_titles == ["Software Engineer", "Data Analyst"]
-        # Skills: prefs first, CV minus excluded, deduped
-        assert "Python" in merged.additional_skills
-        assert "React" in merged.additional_skills
-        assert "SQL" in merged.additional_skills
-        assert "Java" in merged.additional_skills
-        # No duplicates
-        assert len([s for s in merged.additional_skills if s == "Python"]) == 1
+        # Skills: the user's own extras, deduped — NOT the CV skills.
+        assert merged.additional_skills == ["Python", "React"]
+        assert "SQL" not in merged.additional_skills
+        assert "Java" not in merged.additional_skills
 
     def test_merge_excludes_skills(self):
-        cv_skills = ["Python", "SQL", "Java"]
+        # excluded_skills now filters the user's OWN additional_skills (cv skills
+        # are not merged in at all).
         prefs = UserPreferences(
-            additional_skills=["React"],
+            additional_skills=["React", "Java"],
             excluded_skills=["Java"],
         )
-        merged = merge_cv_and_preferences(cv_skills, [], prefs)
-        assert "Java" not in merged.additional_skills
-        assert "Python" in merged.additional_skills
-        assert "React" in merged.additional_skills
+        merged = merge_cv_and_preferences(["Python", "SQL"], [], prefs)
+        assert "Java" not in merged.additional_skills   # excluded
+        assert "React" in merged.additional_skills       # user extra kept
+        assert "Python" not in merged.additional_skills  # cv skill not folded in
 
     def test_merge_preserves_github_username(self):
         """BUG-1 regression: github_username must survive merge."""
@@ -151,6 +153,48 @@ class TestPreferences:
         )
         merged = merge_cv_and_preferences(["SQL"], [], prefs)
         assert merged.github_username == "testuser"
+
+    def test_cv_job_titles_do_not_pollute_target_roles(self):
+        """TRUST: past CV job titles ('AI Solutions Engineer – R&D Department',
+        'AI/ML Engineer Intern') were dumped into 'Roles you're targeting' with
+        near-duplicates. target_job_titles = what the USER wants, not past roles."""
+        prefs = UserPreferences(target_job_titles=["AI Engineer", "ML Engineer"])
+        merged = merge_cv_and_preferences(
+            [], ["AI Solutions Engineer – R&D Department", "AI/ML Engineer Intern"], prefs
+        )
+        assert merged.target_job_titles == ["AI Engineer", "ML Engineer"]
+        assert "AI/ML Engineer Intern" not in merged.target_job_titles
+
+    def test_apply_preferences_preserves_fields_the_form_omits(self):
+        """TRUST/data-loss BUG: saving the preferences form built a FRESH
+        UserPreferences, wiping fields the form doesn't carry — github_username
+        (set by the separate GitHub route), preferred_workplace, needs_visa. Those
+        must be preserved when the form omits them."""
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserProfile
+
+        profile = UserProfile(
+            cv_data=CVData(),
+            preferences=UserPreferences(
+                github_username="ranjith36963",
+                preferred_workplace="remote",
+                needs_visa=True,
+            ),
+        )
+        # a normal preferences save — no github_username / workplace / visa in it
+        _apply_preferences(
+            json.dumps({"target_job_titles": ["AI Engineer"], "additional_skills": ["Docker"]}),
+            profile,
+        )
+        # form fields applied…
+        assert profile.preferences.target_job_titles == ["AI Engineer"]
+        assert profile.preferences.additional_skills == ["Docker"]
+        # …and the omitted fields survived
+        assert profile.preferences.github_username == "ranjith36963"
+        assert profile.preferences.preferred_workplace == "remote"
+        assert profile.preferences.needs_visa is True
 
 
 # -----------------------------------------------------------------------
@@ -216,7 +260,7 @@ class TestKeywordGenerator:
             cv_data=CVData(
                 raw_text="t",
                 skills=["Django", "Flask"],  # cv_explicit → secondary
-                github_skills_inferred=["Haskell"],  # github_lang  → tertiary
+                github_languages={"Haskell": 200_000},  # github_lang  → tertiary
             ),
             preferences=UserPreferences(
                 additional_skills=["Product Strategy"],  # user_declared → primary

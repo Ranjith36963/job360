@@ -42,20 +42,26 @@ MANIFEST_FILES: tuple[tuple[str, str], ...] = (
 # ── package.json (npm) ──────────────────────────────────────────────
 
 def parse_package_json(content: str) -> set[str]:
-    """Extract names from dependencies + devDependencies + peerDependencies."""
+    """Extract RUNTIME dependency names — the ``dependencies`` section only.
+
+    ``devDependencies`` / ``peerDependencies`` / ``optionalDependencies`` are
+    EXCLUDED on purpose: they are build/test tooling (eslint, prettier,
+    ``@types/*``, husky, @testing-library/*), not skills. We use the manifest's
+    OWN runtime-vs-dev split — a structural signal from the file's schema, NOT a
+    hardcoded skill keyword/denylist (CLAUDE.md rule #28). Real runtime
+    frameworks (react, next, etc.) live in ``dependencies``; anything the LLM
+    pass still wants it can infer from code + topics.
+    """
     try:
         data = json.loads(content)
     except (json.JSONDecodeError, TypeError):
         return set()
     if not isinstance(data, dict):
         return set()
-
-    names: set[str] = set()
-    for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
-        section = data.get(key)
-        if isinstance(section, dict):
-            names.update(k for k in section.keys() if isinstance(k, str))
-    return names
+    section = data.get("dependencies")
+    if not isinstance(section, dict):
+        return set()
+    return {k for k in section.keys() if isinstance(k, str)}
 
 
 # ── requirements.txt (pypi) ─────────────────────────────────────────
@@ -123,38 +129,21 @@ def _parse_pyproject_via_tomllib(content: str) -> set[str] | None:
 
     names: set[str] = set()
     project = data.get("project") or {}
+    # PEP 621 RUNTIME deps only. [project.optional-dependencies] holds
+    # test/dev/extra groups (tooling) and is EXCLUDED (rule #28: structural
+    # dev-vs-runtime split, not a keyword denylist).
     for spec in project.get("dependencies") or []:
         if isinstance(spec, str):
             nm = _req_name(spec)
             if nm:
                 names.add(nm)
-    optional = project.get("optional-dependencies") or {}
-    if isinstance(optional, dict):
-        for group in optional.values():
-            if isinstance(group, list):
-                for spec in group:
-                    if isinstance(spec, str):
-                        nm = _req_name(spec)
-                        if nm:
-                            names.add(nm)
-
-    # Poetry layout (still common in the wild)
+    # Poetry RUNTIME deps only — skip dev-dependencies and dev groups.
     poetry = ((data.get("tool") or {}).get("poetry")) or {}
-    for key in ("dependencies", "dev-dependencies"):
-        section = poetry.get(key)
-        if isinstance(section, dict):
-            for k in section.keys():
-                if isinstance(k, str) and k.lower() != "python":
-                    names.add(k.lower())
-    groups = poetry.get("group") or {}
-    if isinstance(groups, dict):
-        for group in groups.values():
-            if isinstance(group, dict):
-                deps = group.get("dependencies") or {}
-                if isinstance(deps, dict):
-                    for k in deps.keys():
-                        if isinstance(k, str) and k.lower() != "python":
-                            names.add(k.lower())
+    section = poetry.get("dependencies")
+    if isinstance(section, dict):
+        for k in section.keys():
+            if isinstance(k, str) and k.lower() != "python":
+                names.add(k.lower())
     return names
 
 
@@ -216,21 +205,12 @@ def _parse_pyproject_via_regex(content: str) -> set[str]:
             if nm:
                 names.add(nm)
 
-    # PEP 621 — [project.optional-dependencies] block.
-    # Find the section header, read up to the next top-level ``[``.
-    opt_header_re = re.compile(r"^\[project\.optional-dependencies\](.*?)(?=^\[|\Z)",
-                               re.MULTILINE | re.DOTALL)
-    for block_m in opt_header_re.finditer(content):
-        block = block_m.group(1)
-        for spec_m in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*[^"]*)"', block):
-            nm = _req_name(spec_m.group(1))
-            if nm:
-                names.add(nm)
+    # [project.optional-dependencies] (test/dev/extras) is EXCLUDED — runtime only.
 
-    # Poetry — [tool.poetry.dependencies] / .dev / .group.X.dependencies
+    # Poetry — [tool.poetry.dependencies] RUNTIME only (skip dev-dependencies
+    # and dev groups).
     poetry_sections = re.compile(
-        r"^\[tool\.poetry(?:\.group\.[A-Za-z0-9_-]+)?\."
-        r"(?:dependencies|dev-dependencies)\](.*?)(?=^\[|\Z)",
+        r"^\[tool\.poetry\.dependencies\](.*?)(?=^\[|\Z)",
         re.MULTILINE | re.DOTALL,
     )
     for block_m in poetry_sections.finditer(content):
@@ -261,9 +241,9 @@ def parse_pyproject_toml(content: str) -> set[str]:
 # ── Cargo.toml (cargo) ──────────────────────────────────────────────
 
 _CARGO_SECTION_RE = re.compile(
-    # Lookahead on terminator so ``findall`` doesn't consume the next
-    # ``[`` and miss subsequent sections (caught by dev-dependencies test).
-    r"^\[(?:dependencies|dev-dependencies|build-dependencies)\](.*?)(?=^\[|\Z)",
+    # RUNTIME [dependencies] only — [dev-dependencies] and [build-dependencies]
+    # are tooling (test/build), excluded by the manifest's own section split.
+    r"^\[dependencies\](.*?)(?=^\[|\Z)",
     re.MULTILINE | re.DOTALL,
 )
 _CARGO_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=")

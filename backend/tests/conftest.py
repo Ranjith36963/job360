@@ -51,6 +51,24 @@ from src.services.channels import crypto  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _offline_openai(monkeypatch):
+    """Keep the suite offline for the paid PRIMARY provider.
+
+    OpenAI (``gpt-4o-mini``) is now first in the provider chain, and the repo
+    ``.env`` carries a real key that ``settings.py`` reads at import. Tests that
+    don't patch a provider would otherwise hit the live OpenAI API. Blank the
+    module-level key here; tests that genuinely exercise the OpenAI path set it
+    back with their own ``patch.object``. Mirrors rule #18's hermeticity intent.
+    """
+    try:
+        import src.services.profile.llm_provider as _lp
+
+        monkeypatch.setattr(_lp, "OPENAI_API_KEY", "", raising=False)
+    except Exception:  # noqa: BLE001, S110 — best-effort hermeticity guard; if the
+        pass          # module can't be imported here there's nothing to blank.
+
+
+@pytest.fixture(autouse=True)
 def _instant_asyncio_sleep(monkeypatch, request):
     """Make ``asyncio.sleep`` instant for the whole suite.
 

@@ -1540,3 +1540,75 @@ passes in the background (faithful to the ask). On a CV upload this re-runs the
 CV LLM once more than strictly needed. If this proves expensive, gate
 `reextract_and_rescore`'s LLM passes behind a flag later — the deterministic
 passes are free and always safe.
+
+## Top-5-leverage batch — plans 1–4 (2026-07-09, stacked PRs #27→#29→#30→#31)
+
+Four ranked plan files (`PLAN-1..4.md`, draft PR #23) executed as a stacked chain
+off `main`. Each landed behind the full commit gate (~1,700-test Postgres suite +
+api-types drift). Implemented on Opus 4.8. **Human follow-ups** flagged below are
+dashboard/DNS-only and cannot be done from the repo.
+
+### PLAN-1 — green the CI gate (`fix/ci-red-gate`, PR #27)
+`ci.yml` was red on every push for **three stacked reasons**, each hiding the next:
+1. `ruff` was never in `[dev]` extras → CI died with `No module named ruff` before
+   it could lint. Fixed: pinned `ruff>=0.15.9,<0.16` in `backend/pyproject.toml`.
+2. A large ruff sweep (132 files: import-sort, unused-import removal, targeted
+   `# noqa` with reasons — lazy imports per rules #11/#16 preserved) + a
+   **pre-existing** Postgres test bug: `test_cli_view.py::test_load_jobs_sync_nonexistent_db`
+   expected `[]` for a missing DB, but under Postgres the path is advisory and the
+   shared catalog is always present. Rewrote it to force a query error and assert
+   the real graceful-degradation branch (proven pre-existing: failed identically on
+   clean `origin/main`).
+3. The suite had **never actually run in CI** (ruff failed first), hiding that it
+   doesn't self-bootstrap its DB. Locally green only because a dev Postgres is
+   pre-migrated; on a fresh CI Postgres, tests that fall back to the default
+   `DB_PATH` → `public` schema found no tables. Fixed: new `backend/scripts/init_db.py`
+   (`init_db()` + `runner.up()`, idempotent, mirrors a prod first-boot) run before
+   the suite in `ci.yml` + both `ci-offline.yml` backend jobs; `ci-offline.yml`
+   given a Postgres+Redis service and set to schedule/dispatch-only.
+Also merged `worktree-feat-live-smoke` (synthetic-live.yml Playwright smoke,
+notification-rule 404→null fix, Sentry prod-gating, atomic magic-link find-or-create;
+supersedes draft PR #24). **CI confirmed green on GitHub** (backend + frontend).
+
+### PLAN-2 — production email readiness (`feat/unblock-real-signups`, PR #29)
+Magic-link login works, but Resend is in sandbox mode (delivers only to the owner),
+so no other human can log in. Code half:
+- `email_sender.py`: the 4 delivery-failure logs are now `ERROR` (were `WARNING`) —
+  a broken provider is visible instead of silently eating every login email.
+- Declared/documented `RESEND_API_KEY` + `SMTP_FROM` (previously read only via
+  `os.environ`) in `settings.py` + `.env.example`; removed the dead
+  `SMTP_HOST`/`SMTP_PORT` settings constants.
+- Tests: `test_email_sender.py` (Resend 5xx + no-provider → False + ERROR), a
+  magic-link send-failure test (still 204 no-enumeration, token still minted), and
+  3 frontend consume-page tests.
+- **HUMAN:** verify a domain in Resend + set `RESEND_API_KEY`/`SMTP_FROM` on Railway
+  (or the Gmail SMTP stopgap), then flip `REQUIRE_EMAIL_VERIFICATION` back to `true`.
+
+### PLAN-3 — prod safety net (`feat/prod-safety-net`, PR #30)
+- **Backup automation deliberately SKIPPED** — repo is public, so a `pg_dump`
+  artifact would leak user PII. `docs/RUNBOOK-backups.md` recommends Railway managed
+  backups (or make the repo private first) and logs a **real restore drill** (dev DB
+  dump → scratch restore → row counts matched: users 7/7, jobs 19/19).
+- `RequestTimeoutMiddleware` (new, `src/api/middleware.py`): inbound requests over
+  `API_REQUEST_TIMEOUT_SECONDS` (default 60) get a `504`. Registered innermost so
+  504s still carry CORS + security headers + an access-log line; LLM routes
+  (`/api/tailor`, `/api/profile`) exempt. 3 tests (`real_sleep` marker).
+- Healthchecks: `Dockerfile` `/api/health`→`/api/livez`; `docker-compose.prod.yml`
+  `/health`→`/api/livez` (that path 404'd — the compose healthcheck never passed).
+- Documented `DATABASE_URL`/`SENTRY_DSN`/`API_REQUEST_TIMEOUT_SECONDS`/`BACKUP_*` in
+  `.env.example`. livez/readyz + security-headers middleware already existed (unchanged).
+
+### PLAN-4 — rescue stranded extraction work (`rescue/pillar1-extraction`, PR #31)
+Selective **13-commit cherry-pick** from `tp-final` (tag `tp-final-safe`), skipping
+the 6 refactors main already re-implemented (two-pass merge, 4-input route split,
+dead-code removal) and the newer `0d4090b` feature (out of scope). Landed: LLM
+provider hardening (per-call hard timeout, smart 429 backoff, `LLMRateLimited`/
+`LLMAllProvidersFailed` taxonomy), **OpenAI `gpt-4o-mini` as paid primary for CV
+extraction**, prompt-steered extraction + deterministic skill-heading detection,
+GitHub runtime-only manifest deps (rule #28-safe), and 5 pillar-1 dedup/trust fixes
+(fuzzy + acronym dedup of certs/education/skills; prose/dates/headers dropped from
+the skill stream). **Provider-order reconciliation** (the plan's flagged trap):
+`services/profile/llm_provider.py` conflicted twice — resolved to OpenAI-primary →
+Gemini → Groq → Cerebras (dec740b's tested design) on the branch's hardened
+`_attempt()` loop; the engine-side Cerebras-first ordering (`e1cbb30`) is a different
+call chain and untouched. 292 targeted extraction tests pass; full gate 1715 passed.
