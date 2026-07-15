@@ -106,6 +106,8 @@ export default function DashboardPage() {
   const {
     data: jobsData,
     isFetching: loading,
+    isError: jobsError,
+    refetch: refetchJobs,
   } = useQuery<JobListResponse>({
     queryKey: queryKeys.jobList(filters),
     queryFn: () => getJobs(filters),
@@ -338,6 +340,17 @@ export default function DashboardPage() {
                 </>
               ) : loading ? (
                 "Loading jobs..."
+              ) : jobsError ? (
+                <span role="alert" className="text-red-400">
+                  Couldn&apos;t load jobs.{" "}
+                  <button
+                    type="button"
+                    onClick={() => refetchJobs()}
+                    className="underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </span>
               ) : (
                 "No jobs found yet"
               )}
