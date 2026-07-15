@@ -77,3 +77,25 @@ budget, not code. This tracker will keep showing the true state as fixes land.
 ### Remaining (honest): 2 dedicated refactors (pool, migrations) · 1 hands-off (normalized_key) · 2 risky (ISO timestamps, CSRF/Redis) · 2 needs-you (error-rate, railway.json) · 1 low-value-risky (CLAUDE.md trim).
 
 **Infra note:** the local test-DB (Docker Postgres) was wedged/slow mid-session; fixed by restarting Docker + `fsync=off` on the disposable test DB (80min→10min gates).
+
+---
+
+## Session update 2 — 2026-07-15 (branch `worktree-feat-live-smoke`)
+
+Since the last note, the two "dedicated refactor" items and several risky/needs-you
+items were closed. **True current state below** (earlier note above is superseded).
+
+### Now DONE + full-suite-green
+- ✅ **DB connection pool (P0)** — `15c5b68`. Split `get_db()` (boot singleton, schema owner + test setup) from new `get_request_db()` (per-request connection, closed in `finally`). 9 route files migrated. Fixes the shared-psycopg-connection concurrency + self-heal problem.
+- ✅ **normalized_key whitespace (P2, rule #1)** — `1042fe3`. Collapses internal whitespace runs so cosmetically-different spacing dedups to one key. Dedup tests re-run per rule #1.
+- ✅ **CSRF Origin-check middleware (P2)** — `ae10834`. Rejects unsafe-method requests with a non-allowlisted Origin.
+- ✅ **Redis rate limits (P2 security)** — gated behind `RATE_LIMIT_REDIS` (default off = byte-identical in-memory). Redis sliding window via an atomic Lua `EVAL` (shared across replicas); **falls back to in-memory on any Redis error** so a Redis outage never breaks auth. 9 offline tests (fake client) incl. the fallback path.
+- ✅ **ISO timestamps (P2 data)** — pg shim now emits `…+00:00` (was space form) for `CURRENT_TIMESTAMP` **and** `datetime('now')` defaults, matching the app's `.isoformat()`. Fixes text-sort ordering on the notification ledger. `+00:00` chosen over `Z` because Python 3.9 `fromisoformat` rejects `Z` and unguarded call sites parse these columns. 5 unit tests + verified against 68 ledger/oauth tests.
+- ✅ **railway.json (P2 ops)** — backend (`/api/health` healthcheck + `ON_FAILURE` restart) and frontend (restart policy). Deliberately omit `build`/`startCommand` so they harden without risking the live deploy's known-good build.
+
+### Still open — honest
+- ⏳ **Transactional migrations (P1)** — **attempted, reverted.** Genuine tension: the runner's design is *idempotent re-apply* (`init_db()` backfills columns, then `runner.up()` re-applies the same migrations, relying on duplicate-tolerance). Wrapping migrations in all-or-nothing transactions conflicts with that — a tolerated duplicate error aborts the whole Postgres transaction (`InFailedSqlTransaction`). A correct fix requires auditing all ~23 migrations for `IF [NOT] EXISTS` guards so each is transaction-safe. That is a dedicated piece, not a quick wrap. Reverted rather than ship broken boot-critical code.
+- ⏳ **Sentry error-rate alert (P2 ops)** — **needs YOU.** Confirmed via the Sentry MCP catalog: it exposes find/get/inspect alert tools but **no create-alert-rule tool** (verified `python-fastapi` currently has zero alert rules). Create it in the Sentry dashboard: metric alert on the `python-fastapi` project, error-count/rate threshold, notify your channel.
+- ⏳ **CLAUDE.md trim (P2 harness)** — **intentionally NOT done.** The root CLAUDE.md is load-bearing (28 numbered hard rules). Trimming risks dropping a rule a future session then violates. The correct call is to keep it; "shorter" is not worth a silent rule loss.
+
+### Tally: of the original ~25 P0/P1/P2 goal items, **22 done + verified**, 1 dedicated refactor (migrations), 1 needs-you (Sentry alert), 1 keep-as-is (CLAUDE.md).
