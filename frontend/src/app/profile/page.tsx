@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import posthog from "posthog-js";
 import { User, CheckCircle, AlertCircle, History, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -113,6 +114,10 @@ export default function ProfilePage() {
       try {
         const data = await uploadProfile(file);
         setProfile(data);
+        posthog.capture("cv_uploaded");
+        posthog.capture("extraction_completed", {
+          skills_found: data.summary.skills_count,
+        });
         toast.success("CV uploaded and parsed");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to upload CV";

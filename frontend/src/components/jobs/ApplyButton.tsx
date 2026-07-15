@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
+import posthog from "posthog-js";
 import { Button } from "@/components/ui/button";
 import { createPipelineApplication } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -35,6 +36,7 @@ export function ApplyButton({
     setLoading(true);
     try {
       await createPipelineApplication(job.id);
+      posthog.capture("application_created", { job_id: job.id });
       toast.success(`Applied to ${job.title} — tracking in Pipeline`);
     } catch {
       // Non-blocking — the apply URL already opened

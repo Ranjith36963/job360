@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import posthog from "posthog-js";
 
 import { register as registerUser } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
@@ -56,6 +57,7 @@ function RegisterForm() {
     setServerError(null);
     try {
       await registerUser(data.email, data.password);
+      posthog.capture("signup_completed");
       router.push(safeNext(next));
     } catch (err) {
       setServerError(friendlyAuthError(err, "Sign-up failed. Please try again."));

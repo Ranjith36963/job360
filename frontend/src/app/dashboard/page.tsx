@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import posthog from "posthog-js";
 import { Briefcase, Clock, Download, Globe, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -257,6 +258,9 @@ export default function DashboardPage() {
                 ? "Search complete!"
                 : "Search failed"
             );
+            if (status.status === "completed") {
+              posthog.capture("search_run");
+            }
             // Invalidate all job queries so both lists re-fetch with fresh data
             void queryClient.invalidateQueries({ queryKey: queryKeys.jobs() });
             // Clear message after a few seconds

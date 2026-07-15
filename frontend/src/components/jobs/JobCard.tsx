@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import {
   Heart,
   X,
@@ -153,6 +154,7 @@ export function JobCard({ job, onAction }: JobCardProps) {
     window.open(safeUrl(job.apply_url), "_blank", "noopener,noreferrer");
     try {
       await createPipelineApplication(job.id);
+      posthog.capture("application_created", { job_id: job.id });
       toast.success("Added to pipeline — Applied");
     } catch (err) {
       // Not a blocking error — job still opened
