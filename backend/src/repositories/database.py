@@ -1243,63 +1243,6 @@ class JobDatabase:
         )
         await self._conn.commit()
 
-    # Table names are internal constants (never user input) — the placeholders
-    # below are still parameterized. S608 is a false positive here (ignored for
-    # this file in pyproject).
-    _PER_USER_TABLES = (
-        "application_stage_history", "applications", "email_verifications",
-        "notification_ledger", "notification_rules", "oauth_states",
-        "password_resets", "sessions", "tailored_documents", "tailored_usage",
-        "user_actions", "user_channels", "user_feed",
-        "user_notification_digests", "user_profile_versions", "user_profiles",
-    )
-
-    async def hard_delete_user(self, user_id: str) -> None:
-        """GDPR Article 17 — irreversibly ERASE all of a user's personal data.
-
-        Deletes the user's rows from every per-user table (CVs, profile versions,
-        channel creds, feed, actions, applications, tailored docs, tokens, …),
-        anonymises the shared observability ``run_log`` (keeps aggregate ops data,
-        severs the personal link), removes the email-keyed ``magic_link_tokens``,
-        and drops the ``users`` row last. NEVER touches the shared catalog
-        (``jobs``/``job_enrichment``/``job_embeddings``) — rules #10/#17.
-
-        Replaces the old soft-delete (which only set ``deleted_at`` and left CVs +
-        embeddings + actions in place, and could be resurrected on a later
-        magic-link consume). One fix closes three findings: erasure (fable/05),
-        orphaned child rows (fable/02), and soft-delete resurrection (fable/01).
-        """
-        # magic_link_tokens is keyed by email, not user_id — look it up first.
-        cur = await self._conn.execute("SELECT email FROM users WHERE id = ?", (user_id,))
-        row = await cur.fetchone()
-        email = row["email"] if row else None
-
-        for tbl in self._PER_USER_TABLES:
-            try:
-                await self._conn.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
-            except Exception:  # noqa: BLE001 — tolerate a table absent in a partial test schema
-                pass
-
-        # run_log is shared observability: anonymise rather than delete.
-        try:
-            await self._conn.execute(
-                "UPDATE run_log SET user_id = NULL WHERE user_id = ?", (user_id,)
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
-        if email is not None:
-            try:
-                await self._conn.execute(
-                    "DELETE FROM magic_link_tokens WHERE email = ?", (email,)
-                )
-            except Exception:  # noqa: BLE001
-                pass
-
-        # The account row itself, last.
-        await self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        await self._conn.commit()
-
     async def update_user_password(self, user_id: str, new_hash: str) -> None:
         """Replace the stored password hash for the given user."""
         await self._conn.execute(

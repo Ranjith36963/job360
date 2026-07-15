@@ -30,18 +30,24 @@ def _sanitize_xml(text: str) -> str:
 
 
 def _is_uk_or_remote(location: str) -> bool:
-    """Return True if a job location is likely UK, remote, or unknown."""
+    """Return True if a job location is likely UK, remote, or unknown.
+
+    Uses word-boundary matching (not plain substring `in`) so a term like
+    "uk" only matches the standalone token, not a substring embedded in an
+    unrelated word — e.g. "Milwaukee" or "Ukraine" must not false-match
+    "uk" (S3 fix; see docs/FABLE_FINDINGS.md).
+    """
     if not location:
         return True  # Unknown — might be UK, don't filter
     loc_lower = location.lower()
     for term in UK_TERMS:
-        if term in loc_lower:
+        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
             return True
     for term in REMOTE_TERMS:
-        if term in loc_lower:
+        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
             return True
     for indicator in FOREIGN_INDICATORS:
-        if indicator in loc_lower:
+        if re.search(rf"\b{re.escape(indicator)}\b", loc_lower):
             return False
     return True  # Unknown location, don't filter out
 
@@ -238,7 +244,7 @@ class BaseJobSource(ABC):
                         CachedEntry(body=body, etag=etag, last_modified=last_modified),
                     )
                 return body
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError) as e:
             logger.warning("[%s] conditional request error: %s", self.name, e)
             return None
         finally:

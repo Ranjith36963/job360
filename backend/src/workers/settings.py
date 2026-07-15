@@ -97,13 +97,6 @@ async def worker_startup(ctx: dict) -> None:
     tasks serial so the single connection is never used by two coroutines at once
     (the psycopg "another operation in progress" hazard).
     """
-    # docs/fable/09 P0 — the worker process had NO Sentry, so a crashing cron was
-    # invisible. Initialise it (prod-gated, no-op in dev/test) so worker failures
-    # actually reach the same Sentry project as API errors, tagged component=worker.
-    from src.core.observability import init_sentry
-
-    init_sentry(component="worker")
-
     from migrations import runner  # local import — keep module import light
     from src.core.settings import DB_PATH
     from src.repositories import pg as aiosqlite

@@ -12,7 +12,7 @@ tests monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)`
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_verified_user
 from src.api.dependencies import get_db
@@ -53,7 +53,9 @@ class TailorBundle(BaseModel):
 
 
 class TailorSaveRequest(BaseModel):
-    text: str
+    # N6 — a tailored CV/cover letter tops out at a few thousand words; cap the
+    # edit body so a client can't push a multi-MB blob into the DB unbounded.
+    text: str = Field(max_length=50_000)
 
 
 class ProvenanceSegment(BaseModel):
