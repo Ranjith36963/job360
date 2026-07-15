@@ -1,0 +1,77 @@
+# Doc-Maintenance Framework (Loop 3)
+
+> **One principle: the code is the only truth.** Every document is either
+> (a) synced to the code, (b) archived history, or (c) a parked intention.
+> Nothing else is allowed to exist. This file defines how that stays true
+> while the codebase changes every day.
+
+## 1. Doc taxonomy — every doc gets exactly ONE type
+
+| Type | Examples | Rule |
+|------|----------|------|
+| **LIVING** | `CLAUDE.md`, `ARCHITECTURE.md`, `README.md`, `STATUS.md`, `backend/CLAUDE.md`, `frontend/README.md` | Must always match the code. Any drift is a bug, same severity as a failing test. |
+| **PLAN** | `docs/plans/*`, `docs/step_*_plan.md`, design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. |
+| **LOG** | `docs/IMPLEMENTATION_LOG.md`, `docs/maintenance/JOURNAL.md` | Append-only. Never rewritten, so never stale by definition. |
+| **REFERENCE** | decision records (`docs/plans/batch-2-decisions.md`), research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
+
+## 2. Plan lifecycle (fixes the "implemented docs still lying around" problem)
+
+```
+DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
+                          │
+                          └─► SUPERSEDED (banner + pointer, content frozen)
+```
+
+- A plan whose code has merged gets stamped at the top —
+  `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to
+  `docs/archive/`. It is never deleted (history) and never updated (honesty).
+- A plan that was abandoned or replaced gets a `> **SUPERSEDED by <doc>**` banner.
+- A plan not yet built stays where it is — it is the backlog.
+
+## 3. The three tiers (how the loop actually runs)
+
+| Tier | What | When | Cost |
+|------|------|------|------|
+| **1 — Tripwire** | `scripts/doc_sync_check.py` compares hard code facts (source count, migration head, …) against every numeric doc claim; opens a GitHub issue on drift | **Daily, automatic** (CI cron, this PR) | Free, no LLM |
+| **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR | After every merged feature batch, or whenever Tier 1 fires | One Claude session |
+| **3 — Auditor** | The `/doc-audit` skill: full lifecycle pass — classify docs, archive IMPLEMENTED plans, park contradictions, find undocumented modules, write the health report | Weekly, or after a multi-PR day | One Claude session |
+
+Tier 1 watches every day for free. Tiers 2–3 are one slash command each —
+run them when the tripwire pings or a batch lands. (No unattended write-loop:
+that is a deliberate Loop-1-incident lesson, not a missing feature.)
+
+## 4. Hard rules
+
+1. **Code wins every contradiction.** When doc and code disagree there are only
+   two legal outcomes: the doc was stale → fix the doc; or the feature is
+   missing → record it in `docs/maintenance/PARKED.md` (never silently delete
+   an intention, never "fix" a doc to describe code that doesn't exist).
+2. **Doc edits land by PR only.** The agent proposes, a human lands —
+   the `loop1_safe_reenable.md` rule. No loop ever pushes doc edits to main.
+3. **Implemented plans are archived, not updated.**
+4. **Logs are append-only.**
+5. **Every code PR declares its doc impact** — one line in the PR body:
+   `docs: updated <files>` or `docs: no impact`. Reviewer (human or agent)
+   checks the claim.
+6. **Every LIVING doc carries a freshness stamp** — `<!-- last-verified:
+   YYYY-MM-DD by /sync -->` near the top, updated by every Tier-2 run, so
+   staleness is measurable ("verified 40 days ago" is itself a finding).
+
+## 5. Enterprise mapping (what big companies do → the Job360 version)
+
+| Enterprise practice | Here |
+|---|---|
+| Docs-as-code: in repo, PR-reviewed, versioned | Already true — keep it |
+| Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
+| Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
+| ADRs (architecture decision records) | `docs/plans/batch-2-decisions.md` pattern — keep appending |
+| Archive-over-delete retention | `docs/archive/` + stamps, nothing deleted |
+| Doc impact required in code review | Rule 5 above |
+
+## 6. Outputs this framework maintains
+
+- `docs/maintenance/DOC-HEALTH.md` — scorecard from each Tier-3 audit:
+  docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
+- `docs/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
+  found in docs that are not yet implemented, each with source doc + date.
+- `docs/archive/` — stamped, frozen, implemented/superseded plans.
