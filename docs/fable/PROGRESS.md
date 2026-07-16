@@ -111,3 +111,16 @@ The two items previously left open are now closed:
 
 ### Final tally: **25 of 26 goal items done + verified + pushed.**
 The one remaining — **Sentry error-rate alert** — is not codeable (the Sentry MCP has no create-alert tool); it's being created in the dashboard by the user. Everything in-code is shipped and full-suite-green on `worktree-feat-live-smoke`.
+
+---
+
+## Session update 4 — 2026-07-16 (final)
+
+- ✅ **6 re-audit gaps** (`4af1c7b`): purge-orphans D4, Dependabot C10, CSRF-GET S6, sequence-resync D3, Article-20 export C7, consent gate C3 — independently verified in code.
+- ✅ **SQLite fully removed** (`f4c42e6`, user directive): dead aiosqlite dep gone, all disguised imports honest (`pg`/`pgsync`), conftest sys.modules swap deleted, 8 dead scripts repaired, ZERO sqlite imports remain. Dialect rewrite (translate()) flagged as the remaining follow-up batch.
+- ✅ **DB audit trail C8** (`b939e29`): migration 0025 `audit_log` + QueueListener tee on the audit logger; GDPR anonymise-on-erasure; email denylisted; included in Article-20 export.
+- ✅ **Atomic Kanban moves D11** (`b939e29`): BEGIN/COMMIT + savepoint-guarded history insert.
+- ✅ **Fail-closed middleware F4** (`b939e29`): outage → login redirect (cookie kept, explained on the login page).
+- ✅ **Stale Sentry issue P2**: PYTHON-FASTAPI-2 resolved live via the Sentry API with explanation.
+
+### Remaining (all deliberate): D7/D8 (dev-only down migrations), D12 (splitter — latent), F2 (double-gated E2E bypass), O8 (mypy grandfathered), C11 (MFA — scoped feature). Non-code needs-user: privacy/terms, subprocessors, scraping decision, breach plan, backup region.
