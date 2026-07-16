@@ -84,6 +84,41 @@ async def test_status_lists_applied_and_pending(tmp_db_path, tmp_migrations_dir)
 
 
 @pytest.mark.asyncio
+async def test_failed_migration_rolls_back_atomically(tmp_db_path, tmp_path):
+    """A migration that fails partway leaves NO partial state (docs/fable/02).
+
+    Transactional migrations: statement 1 creates a table, statement 2 is
+    invalid (targets a table that doesn't exist). The whole migration must roll
+    back — the first statement's table must NOT survive, and the migration must
+    NOT be recorded as applied. Before the fix (autocommit per statement),
+    statement 1 committed and the table leaked.
+    """
+    d = tmp_path / "m_atomic"
+    d.mkdir()
+    (d / "0001_partial.up.sql").write_text(
+        "CREATE TABLE atomic_probe_tbl (id INTEGER PRIMARY KEY);\n"
+        "INSERT INTO definitely_no_such_table_xyz (id) VALUES (1);"
+    )
+    (d / "0001_partial.down.sql").write_text("DROP TABLE IF EXISTS atomic_probe_tbl;")
+
+    with pytest.raises(Exception):
+        await runner.up(tmp_db_path, migrations_dir=d)
+
+    # The good statement's table must have been rolled back with the bad one.
+    async with aiosqlite.connect(tmp_db_path) as db:
+        cur = await db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='atomic_probe_tbl'"
+        )
+        row = await cur.fetchone()
+    assert row is None, "partial migration table should have been rolled back, not committed"
+
+    # And the migration must not be recorded as applied — it's still pending.
+    status = await runner.status(tmp_db_path, migrations_dir=d)
+    assert "0001_partial" in status["pending"]
+    assert "0001_partial" not in status["applied"]
+
+
+@pytest.mark.asyncio
 async def test_concurrent_up_is_race_safe(tmp_db_path, tmp_migrations_dir):
     """Step-1 B11: two concurrent up() calls against the same DB must not
     crash on the `_schema_migrations` UNIQUE(id) constraint.

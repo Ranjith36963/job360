@@ -64,14 +64,19 @@ class Connection:
             raise pg.OperationalError(str(exc)) from exc
         lastrowid = None
         if translated.upper().lstrip().startswith("INSERT") and "returning" not in translated.lower():
-            try:
-                c2 = self._raw.cursor()
-                c2.execute("SELECT lastval()")
-                row = c2.fetchone()
-                lastrowid = row[0] if row else None
-                c2.close()
-            except psycopg.Error:
-                lastrowid = None
+            # Probe lastval() ONLY in autocommit (transaction IDLE) — mirrors the
+            # async shim (pg.Connection.execute). Inside a transaction a failing
+            # probe aborts the whole transaction; skip it there. See pg.py for the
+            # full rationale.
+            if self._raw.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+                try:
+                    c2 = self._raw.cursor()
+                    c2.execute("SELECT lastval()")
+                    row = c2.fetchone()
+                    lastrowid = row[0] if row else None
+                    c2.close()
+                except psycopg.Error:
+                    lastrowid = None
         return _Cursor(cur, lastrowid)
 
     def executemany(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> _Cursor:

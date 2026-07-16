@@ -417,13 +417,22 @@ class Connection:
             raise OperationalError(str(exc)) from exc
         lastrowid: Optional[int] = None
         if _has_insert(translated.upper()) and "returning" not in translated.lower():
-            try:
-                async with self._raw.cursor() as c2:
-                    await c2.execute("SELECT lastval()")
-                    row = await c2.fetchone()
-                    lastrowid = row[0] if row else None
-            except psycopg.Error:
-                lastrowid = None
+            # Probe lastval() ONLY in autocommit (transaction IDLE). Inside an
+            # explicit transaction a failing probe — e.g. INSERT ... ON CONFLICT
+            # DO NOTHING on a non-serial PK, where lastval() is undefined —
+            # ABORTS the whole transaction, so the next statement dies with
+            # InFailedSqlTransaction. The only in-transaction caller is the
+            # migration runner (transactional migrations), which never reads
+            # lastrowid, so skipping the probe there is safe. Autocommit callers
+            # (e.g. channels INSERT → cur.lastrowid) are unaffected.
+            if self._raw.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+                try:
+                    async with self._raw.cursor() as c2:
+                        await c2.execute("SELECT lastval()")
+                        row = await c2.fetchone()
+                        lastrowid = row[0] if row else None
+                except psycopg.Error:
+                    lastrowid = None
         return Cursor(cur, lastrowid)
 
     async def executemany(self, sql: str, seq_of_params: Iterable[Iterable[Any]]):

@@ -182,9 +182,11 @@ async def up(
     # Advisory-lock key: a fixed constant so all concurrent booters (FastAPI
     # lifespan + ARQ worker) serialize on the same lock. Postgres has no
     # "database is locked" — this just prevents two processes running the same
-    # migration body at once. Autocommit connections mean each statement
-    # commits immediately; idempotency comes from the ON CONFLICT DO NOTHING on
-    # the _schema_migrations INSERT plus the re-read under the lock.
+    # migration body at once. Each migration now runs in its OWN BEGIN/COMMIT
+    # (transactional migrations, docs/fable/02) so it applies atomically; the
+    # session-level advisory lock is held across those transactions. Idempotency
+    # comes from ON CONFLICT DO NOTHING on the _schema_migrations INSERT plus the
+    # re-read under the lock.
     lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
     async with aiosqlite.connect(db_path) as db:
         # Acquire the lock BEFORE creating the migrations table so concurrent
@@ -200,12 +202,24 @@ async def up(
                     continue
                 sql = (mdir / f"{stem}.up.sql").read_text()
                 try:
-                    await _apply_up_sql(db, sql)
-                    await db.execute(
-                        "INSERT INTO _schema_migrations(id, applied_at) "
-                        "VALUES (?, ?) ON CONFLICT DO NOTHING",
-                        (stem, datetime.now(timezone.utc).isoformat()),
-                    )
+                    # Transactional migration (docs/fable/02): each migration's
+                    # statements + its _schema_migrations bookmark commit together
+                    # or not at all. A mid-migration failure ROLLs the whole thing
+                    # back instead of leaving a half-applied schema. Requires the
+                    # pg-shim lastval() guard (pg.py) so an ON CONFLICT INSERT
+                    # doesn't abort the transaction via a failed lastval() probe.
+                    await db.execute("BEGIN")
+                    try:
+                        await _apply_up_sql(db, sql)
+                        await db.execute(
+                            "INSERT INTO _schema_migrations(id, applied_at) "
+                            "VALUES (?, ?) ON CONFLICT DO NOTHING",
+                            (stem, datetime.now(timezone.utc).isoformat()),
+                        )
+                        await db.execute("COMMIT")
+                    except Exception:
+                        await db.execute("ROLLBACK")
+                        raise
                     applied_set.add(stem)
                     applied_now.append(stem)
                 except psycopg.errors.DuplicateTable:
