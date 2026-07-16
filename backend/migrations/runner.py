@@ -61,6 +61,54 @@ async def _ensure_table(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
+async def _resync_identity_sequences(db: aiosqlite.Connection) -> int:
+    """Re-point every ``id`` identity sequence at MAX(id). Returns tables fixed.
+
+    Why (docs/fable/02 D3): the table-rebuild migrations (0002, 0010, 0011 …) copy
+    rows with their ORIGINAL ids — ``INSERT INTO x_new (id, …) SELECT id, …``.
+    Postgres does NOT advance an identity/serial sequence when you supply the id
+    explicitly, so after a rebuild the sequence still sits at 1 while the table
+    holds ids up to N. The next natural INSERT then tries id=1 and dies with a
+    UniqueViolation. SQLite's AUTOINCREMENT had no such split, so the migrations
+    never needed this — it only appeared once we moved to Postgres.
+
+    Running this after every ``up()`` is cheap and idempotent: setval to MAX(id)
+    is a no-op when the sequence is already correct. `is_called` is set false for
+    an empty table so the first insert still gets id=1.
+    """
+    # Only tables that actually own an auto-generated `id`. Note: we must NOT call
+    # pg_get_serial_sequence() inside this query's WHERE — it RAISES (not returns
+    # NULL) for a table with no `id` column, and the planner happily evaluates it
+    # against catalog relations like pg_statistic. Filter first, resolve after.
+    # current_schema(), NOT a hardcoded 'public': the test harness gives each test
+    # its own schema (t_*/mem_*) via search_path, and prod runs in public. Keying on
+    # the active schema makes this correct in both instead of silently no-op'ing.
+    cur = await db.execute(
+        """
+        SELECT table_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND column_name = 'id'
+          AND (is_identity = 'YES' OR column_default LIKE 'nextval%')
+        """
+    )
+    tables = [r[0] for r in await cur.fetchall()]
+    fixed = 0
+    for table in tables:
+        seq_cur = await db.execute("SELECT pg_get_serial_sequence(?, 'id')", (table,))
+        seq_row = await seq_cur.fetchone()
+        seq = seq_row[0] if seq_row else None
+        if not seq:
+            continue
+        await db.execute(
+            f"SELECT setval('{seq}', "  # noqa: S608 — names come from pg_class, not user input
+            f"GREATEST(COALESCE((SELECT MAX(id) FROM {table}), 0), 1), "
+            f"(SELECT COALESCE(MAX(id), 0) FROM {table}) > 0)"
+        )
+        fixed += 1
+    return fixed
+
+
 async def _applied_ids(db: aiosqlite.Connection) -> list[str]:
     cur = await db.execute("SELECT id FROM _schema_migrations ORDER BY id")
     return [row[0] for row in await cur.fetchall()]
@@ -232,6 +280,13 @@ async def up(
                     applied_set.add(stem)
                 if target is not None and stem == target:
                     break
+            # Rebuild migrations copy explicit ids, which leaves identity sequences
+            # behind MAX(id) → the next insert would collide (docs/fable/02 D3).
+            # Runs unconditionally, NOT just when we applied something: a DB whose
+            # sequences are already wrong (rebuilt by an earlier boot, or rolled
+            # back and re-applied) must self-heal too. setval-to-MAX is idempotent
+            # and cheap, and we are still holding the advisory lock.
+            await _resync_identity_sequences(db)
         finally:
             await db.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
     return applied_now

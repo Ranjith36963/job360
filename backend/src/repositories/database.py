@@ -12,6 +12,27 @@ from src.utils.logger import get_logger  # noqa: E402
 
 _log = get_logger("db.repo")  # job360.db.repo → data/logs/
 
+# Child tables purged alongside a `jobs` row (docs/fable/02 D4 — orphan cleanup).
+# The pg shim strips EVERY foreign-key clause, including ON DELETE CASCADE, so the
+# DB will never cascade for us; purge_old_jobs must delete these explicitly.
+#
+# ONLY catalog-DERIVED rows belong here — data that is meaningless once the job is
+# gone and that the pipeline can regenerate. `user_feed` dominates the bloat: one
+# row per user per job.
+#
+# Deliberately NOT purged (rule #3 — purging them would be real data loss):
+#   applications, application_stage_history, tailored_documents, tailored_usage,
+#   user_actions, notification_ledger
+# Those are the USER's own records and audit trail. A user's Kanban entry or
+# tailored CV must survive the shared catalog aging out, so they may keep an
+# orphan job_id by design.
+_PURGE_CASCADE_TABLES = (
+    "job_enrichment",
+    "job_embeddings",
+    "user_feed",
+    "user_notification_digests",
+)
+
 
 class JobDatabase:
     def __init__(self, db_path: str):
@@ -564,8 +585,19 @@ class JobDatabase:
         a posting still live after 30 days should be kept, not deleted-then-re-inserted
         (which reset its score + re-notified). COALESCE falls back to first_seen for
         legacy rows whose last_seen_at is NULL, so nothing accumulates un-purgeable.
+
+        Also deletes the catalog-derived child rows (docs/fable/02 D4). The pg shim
+        strips EVERY foreign-key clause — including ``ON DELETE CASCADE`` — so there
+        is no DB-level cascade; without this, every purge orphaned rows forever.
+        ``user_feed`` is the big one: one row per user per job.
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        stale = "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?"
+        # Children first (the subquery needs the jobs rows to still exist).
+        for table in _PURGE_CASCADE_TABLES:
+            await self._conn.execute(
+                f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
+            )
         cursor = await self._conn.execute(
             "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
         )
@@ -1274,6 +1306,71 @@ class JobDatabase:
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
     )
+
+    # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
+    # user's OWN data — what they authored or what we derived about them.
+    # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
+    # email_verifications, oauth_states. Those hold short-lived security tokens,
+    # not portable personal data; exporting them would hand out live credentials.
+    _EXPORT_TABLES = (
+        "applications", "application_stage_history", "notification_ledger",
+        "notification_rules", "tailored_documents", "tailored_usage",
+        "user_actions", "user_channels", "user_feed", "user_profile_versions",
+        "user_profiles",
+    )
+
+    # Secret-bearing columns are redacted even inside exported tables — e.g. the
+    # Fernet-encrypted channel credentials and the argon2 password hash. The user
+    # gets their data, never their (or our) secrets.
+    _EXPORT_REDACT_COLUMNS = frozenset({
+        "password_hash", "config_encrypted", "credentials_encrypted", "token",
+        "token_hash", "secret", "access_token", "refresh_token", "webhook_url",
+    })
+
+    @classmethod
+    def _scrub_export_row(cls, row: dict) -> dict:
+        return {
+            k: ("[redacted]" if k in cls._EXPORT_REDACT_COLUMNS and v is not None else v)
+            for k, v in row.items()
+        }
+
+    async def export_user_data(self, user_id: str) -> dict:
+        """GDPR Article 20 — return everything we hold on this user, as plain data.
+
+        Read-only counterpart to :meth:`hard_delete_user`. Scoped strictly by
+        ``user_id`` (rule #12) and never touches the shared catalog (rules #10/#17)
+        — a user's export contains their feed/actions/applications, not the whole
+        jobs table.
+
+        Secrets are redacted (see ``_EXPORT_REDACT_COLUMNS``) and token tables are
+        omitted entirely, so this is safe to hand to the user as a file.
+        """
+        out: dict = {}
+        cur = await self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cur.fetchone()
+        out["user"] = self._scrub_export_row(dict(row)) if row else None
+
+        incomplete: list[str] = []
+        for tbl in self._EXPORT_TABLES:
+            try:
+                cur = await self._conn.execute(
+                    f"SELECT * FROM {tbl} WHERE user_id = ?", (user_id,)  # noqa: S608 — name from a module constant
+                )
+                out[tbl] = [self._scrub_export_row(dict(r)) for r in await cur.fetchall()]
+            except Exception as exc:  # noqa: BLE001 — tolerate a table absent in a partial test schema
+                # NEVER fail silently: an empty list here is indistinguishable from
+                # "you have no rows", so a broken query would hand the user an
+                # incomplete Article-20 export while looking successful. Log it and
+                # tell the caller which tables could not be read.
+                _log.warning(
+                    "export_user_data: table unreadable, exported as empty",
+                    extra={"event": "export_table_failed", "table": tbl, "error": str(exc)},
+                )
+                out[tbl] = []
+                incomplete.append(tbl)
+        if incomplete:
+            out["_incomplete_tables"] = incomplete
+        return out
 
     async def hard_delete_user(self, user_id: str) -> None:
         """GDPR Article 17 — irreversibly ERASE all of a user's personal data.

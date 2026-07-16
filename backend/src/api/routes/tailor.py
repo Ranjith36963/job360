@@ -237,7 +237,7 @@ async def keep(
     return _doc_out(row)
 
 
-@router.get("/tailor/{job_id}/{doc_kind}/download")
+@router.post("/tailor/{job_id}/{doc_kind}/download")
 async def download(
     job_id: int,
     doc_kind: str,
@@ -248,6 +248,13 @@ async def download(
     """Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
 
     ``fmt`` = ``pdf`` (default) | ``docx``.
+
+    POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it marks the doc kept
+    and feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics
+    and a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
+    cross-site top-level link click still sends the SameSite=Lax cookie. As POST it
+    is Origin-checked like every other mutation. The frontend already fetches this
+    as a blob, so the method change is transparent there.
     """
     _check_kind(doc_kind)
     if fmt not in ("pdf", "docx"):

@@ -21,7 +21,9 @@
 import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, Suspense } from "react";
+import { useEffect, useSyncExternalStore, Suspense } from "react";
+
+import { getConsent, subscribeConsent } from "@/lib/consent";
 
 // ── Page-view tracker ────────────────────────────────────────────────────────
 // Separate component because useSearchParams requires a <Suspense> boundary in
@@ -48,10 +50,31 @@ export function PostHogProviderWrapper({
 }: {
   children: React.ReactNode;
 }) {
+  // Consent gate (docs/fable/05 C3). PostHog used to init on load — i.e. before
+  // the user agreed to anything, which UK GDPR/PECR does not allow. Now nothing
+  // loads until the choice is explicitly "accepted"; no choice yet = no tracking.
+  // Consent is an external store (localStorage + window event), so subscribe via
+  // useSyncExternalStore. Server snapshot = null → never init during SSR.
+  const consent = useSyncExternalStore(subscribeConsent, getConsent, () => null);
+
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-    // Skip if no key or already initialised (module-level singleton guard).
-    if (!key || posthog.__loaded) return;
+    if (!key) return;
+
+    if (consent !== "accepted") {
+      // Declined (or undecided) after having loaded earlier in this session —
+      // stop sending and drop the stored id.
+      if (posthog.__loaded && consent === "declined") {
+        posthog.opt_out_capturing();
+        posthog.reset();
+      }
+      return;
+    }
+
+    if (posthog.__loaded) {
+      posthog.opt_in_capturing(); // re-accepted after a decline
+      return;
+    }
 
     posthog.init(key, {
       api_host:
@@ -61,8 +84,11 @@ export function PostHogProviderWrapper({
       capture_pageleave: true,
       // Only build profiles for identified users to stay GDPR-friendly.
       person_profiles: "identified_only",
+      // Never record sessions: it would capture the user's CV, salary and
+      // application content — far beyond what they consented to (fable/05 C3).
+      disable_session_recording: true,
     });
-  }, []);
+  }, [consent]);
 
   return (
     // Pass the singleton as `client` — PostHogProvider reads it for usePostHog().

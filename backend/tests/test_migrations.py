@@ -84,6 +84,41 @@ async def test_status_lists_applied_and_pending(tmp_db_path, tmp_migrations_dir)
 
 
 @pytest.mark.asyncio
+async def test_identity_sequence_resynced_after_id_copy(tmp_db_path, tmp_path):
+    """docs/fable/02 D3 — a migration that copies explicit ids must leave the
+    identity sequence pointing past MAX(id).
+
+    Postgres does not advance a serial/identity sequence when the id is supplied
+    explicitly (which every table-rebuild migration does: `INSERT INTO x_new
+    (id, ...) SELECT id, ...`). Without a setval the sequence still sits at 1, so
+    the next natural INSERT collides with an existing row (UniqueViolation).
+    """
+    d = tmp_path / "m_seq"
+    d.mkdir()
+    (d / "0001_seqfix.up.sql").write_text(
+        "CREATE TABLE seq_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT);\n"
+        # Copy rows in WITH their ids, exactly like the rebuild migrations do.
+        "INSERT INTO seq_probe (id, name) VALUES (1, 'a');\n"
+        "INSERT INTO seq_probe (id, name) VALUES (2, 'b');\n"
+        "INSERT INTO seq_probe (id, name) VALUES (3, 'c');"
+    )
+    (d / "0001_seqfix.down.sql").write_text("DROP TABLE IF EXISTS seq_probe;")
+
+    await runner.up(tmp_db_path, migrations_dir=d)
+
+    # The next natural insert (no explicit id) must NOT collide with id 1/2/3.
+    async with aiosqlite.connect(tmp_db_path) as db:
+        await db.execute("INSERT INTO seq_probe (name) VALUES ('d')")
+        await db.commit()
+        cur = await db.execute("SELECT COUNT(*) FROM seq_probe")
+        assert (await cur.fetchone())[0] == 4
+        cur = await db.execute("SELECT MAX(id) FROM seq_probe")
+        assert (await cur.fetchone())[0] == 4, "sequence did not resume after MAX(id)"
+        await db.execute("DROP TABLE IF EXISTS seq_probe")
+        await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_failed_migration_rolls_back_atomically(tmp_db_path, tmp_path):
     """A migration that fails partway leaves NO partial state (docs/fable/02).
 

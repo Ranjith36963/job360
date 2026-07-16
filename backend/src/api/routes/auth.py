@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
@@ -250,6 +252,34 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def me(user: CurrentUser = Depends(require_user)) -> UserResponse:
     return UserResponse(id=user.id, email=user.email)
+
+
+# ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────
+
+
+@router.get("/users/me/export")
+async def export_my_data(
+    db: JobDatabase = Depends(get_request_db),
+    user: CurrentUser = Depends(require_user),
+) -> Response:
+    """Download everything we hold on the caller as one JSON file (Article 20).
+
+    GET is correct here: it is a pure read, no state changes. Scoped to the
+    session's own ``user.id`` (rule #12) — the caller can never name another user.
+    Secrets (password hash, encrypted channel creds) are redacted and the
+    security-token tables are omitted entirely; see ``export_user_data``.
+    """
+    data = await db.export_user_data(user.id)
+    body = json.dumps(
+        {"exported_at": datetime.now(timezone.utc).isoformat(), "data": data},
+        indent=2,
+        default=str,
+    )
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="job360-my-data.json"'},
+    )
 
 
 # ── B-11: Soft-delete (GDPR Article 17) ──────────────────────────────────────

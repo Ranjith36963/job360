@@ -281,7 +281,7 @@ async def test_download_returns_pdf_and_keeps(authenticated_async_context, fixtu
     job_id = await _insert_job(db)
     async with authenticated_async_context() as client:
         await client.post(f"/api/tailor/{job_id}/generate")
-        resp = await client.get(f"/api/tailor/{job_id}/cv/download")
+        resp = await client.post(f"/api/tailor/{job_id}/cv/download")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
     assert resp.content[:4] == b"%PDF"

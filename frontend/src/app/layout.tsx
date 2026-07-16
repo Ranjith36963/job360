@@ -8,6 +8,7 @@ import { AuthProvider } from "@/components/layout/AuthProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { PostHogProviderWrapper } from "@/components/providers/PostHogProviderWrapper";
+import { ConsentBanner } from "@/components/consent/ConsentBanner";
 import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 import { Toaster } from "sonner";
 import "./globals.css";
@@ -68,6 +69,9 @@ export default function RootLayout({
                 <Navbar />
                 <main className="flex-1">{children}</main>
                 <Footer />
+                {/* Analytics consent gate (fable/05 C3) — PostHog stays off
+                    until the user accepts here. */}
+                <ConsentBanner />
               </TooltipProvider>
               <Toaster position="bottom-right" richColors />
             </AuthProvider>
