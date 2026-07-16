@@ -4,14 +4,26 @@ Triggered by: `/doc-audit` (optionally `/doc-audit <area>`)
 
 You are running the full document-lifecycle audit defined in
 `docs/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
-contract. The code is the only truth. Follow the five steps IN ORDER.
-All changes land on a `docs/audit-<YYYYMMDD>-<HHMM>` branch (time suffix —
-parallel sessions on the same day must not collide) and end in ONE docs-only
-PR — never commit to main. Rebase on a freshly-fetched `origin/main` right
-before pushing. **Only one doc-writing session (sync or audit) may run at a
-time** — check for an open `docs:` PR first; if one exists, stop and say so.
-If `docs/archive/` or `docs/maintenance/PARKED.md` are missing, create them
-first (with a one-line header explaining their purpose).
+contract. The code is the only truth.
+
+**TWO-PHASE CONTRACT (strict — user's rule):**
+- **Phase A — REPORT ONLY.** Run Steps 1–4 without changing ANY file. Present
+  the findings as a plain-English report: what you found, and for each item a
+  RECOMMENDED action (archive / banner / fix / park / write-doc / delete).
+  Then STOP and wait for the user's decisions.
+- **Phase B — APPLY (only what the user approved).** Execute exactly the
+  approved items, nothing more, on a `docs/audit-<YYYYMMDD>-<HHMM>` branch
+  (time suffix — parallel sessions must not collide), ending in ONE docs-only
+  PR — never commit to main. Rebase on freshly-fetched `origin/main` right
+  before pushing. **Only one doc-writing session (sync or audit) at a time** —
+  check for an open `docs:` PR first; if one exists, stop and say so.
+  If `docs/archive/` or `docs/maintenance/PARKED.md` are missing, create them
+  first (with a one-line header explaining their purpose).
+
+**AHEAD docs are untouchable (user's rule):** a doc describing something not
+yet built (a plan, a promise, a design) is the product backlog. LIST it in the
+Phase-A report — never edit it, never move it, never park-annotate it, in
+either phase, unless the user explicitly orders that specific doc changed.
 
 ---
 

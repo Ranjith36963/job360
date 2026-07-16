@@ -59,9 +59,12 @@ CLAUDE.md, README.md, ARCHITECTURE.md, STATUS.md, backend/CLAUDE.md,
 frontend/README.md. The daily Loop-3 tripwire (`scripts/doc_sync_check.py`)
 reads these stamps and flags any doc not verified within 45 days.
 
-**If a doc claims something the code does NOT do** (code is behind the doc):
-do NOT "fix" the doc to describe missing code and do NOT delete the claim —
-record it in `docs/maintenance/PARKED.md` (doc, claim, evidence, date).
+**If a doc claims something the code does NOT do** (code is behind the doc —
+an "AHEAD" doc): **leave that doc completely untouched** (user's rule —
+promises are backlog, not bugs). Record the gap in
+`docs/maintenance/PARKED.md` only (doc, claim, evidence, date) and mention it
+in the PR body so the user sees it. Never edit, move, or annotate the source
+doc itself.
 
 ---
 
