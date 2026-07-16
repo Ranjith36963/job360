@@ -144,9 +144,8 @@ def _register_user_and_get_cookie(app, email: str) -> str:
     assert cookie
     # #15: /search now requires a verified email; this test checks the
     # per-user concurrency cap, not verification — mark the user verified.
-    import sqlite3 as _sqlite3
-
     import src.core.settings as _settings
+    from src.repositories import pgsync as _sqlite3
 
     _c = _sqlite3.connect(str(_settings.DB_PATH))
     _c.execute(

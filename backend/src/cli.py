@@ -48,14 +48,13 @@ def run(source, dry_run, log_level, db_path, no_email):
 def status():
     """Show the last run stats from the database."""
     from src.core.settings import DB_PATH
-    from src.repositories import pgsync as sqlite3
-
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    from src.repositories import pgsync
+    conn = pgsync.connect(str(DB_PATH))
+    conn.row_factory = pgsync.Row
     try:
         try:
             row = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
-        except sqlite3.Error:
+        except pgsync.Error:
             click.echo("No database found. Run 'job360 run' first.")
             return
         if not row:

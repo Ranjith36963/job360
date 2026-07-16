@@ -13,10 +13,10 @@ import asyncio
 import json
 from pathlib import Path
 
-import aiosqlite
 import pytest
 
 from migrations import runner
+from src.repositories import pg
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 
@@ -25,7 +25,7 @@ async def _bootstrap_db(db_path: str) -> None:
     pre-migration jobs/user_actions/applications tables that 0002 rebuilds,
     then run the full migration chain through 0007.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.executescript(
             """
             CREATE TABLE jobs (
@@ -61,7 +61,7 @@ async def _bootstrap_db(db_path: str) -> None:
         )
         await db.commit()
     await runner.up(db_path)
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
             ("user-1", "u@example.com", "x"),
@@ -151,8 +151,8 @@ def test_list_profile_versions_respects_limit_arg(versioned_storage):
 
 def test_snapshots_isolated_per_user(versioned_storage):
     storage = versioned_storage
-    import sqlite3
-    with sqlite3.connect(str(storage.DB_PATH)) as conn:
+    from src.repositories import pgsync
+    with pgsync.connect(str(storage.DB_PATH)) as conn:
         conn.execute(
             "INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)",
             ("user-2", "b@example.com", "x"),

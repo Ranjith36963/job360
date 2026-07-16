@@ -19,11 +19,11 @@ import tempfile
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto, dispatcher
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ async def rules_db():
     """Migrated aiosqlite DB path with users seeded."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE IF NOT EXISTS user_actions (
@@ -58,7 +58,7 @@ async def rules_db():
         )
         await db.commit()
     await runner.up(path)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("alice", "a@example.com", "!"),
@@ -82,7 +82,7 @@ def _fernet_key():
 
 async def _insert_channel(db_path: str, user_id: str, channel_type: str, url: str, enabled: int = 1) -> int:
     ct = crypto.encrypt(url)
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute(
             "INSERT INTO user_channels(user_id, channel_type, display_name, credential_encrypted, enabled) "
             "VALUES(?, ?, ?, ?, ?)",
@@ -104,7 +104,7 @@ async def _insert_notification_rule(
 ) -> None:
     """Insert a single notification rule for a user (new schema)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.execute(
             "INSERT INTO notification_rules"
             "(user_id, score_threshold, notify_mode, enabled, "
@@ -126,7 +126,7 @@ async def _insert_notification_rule(
 async def _insert_job(db_path: str) -> int:
     """Insert a minimal job row and return its id."""
     now = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute(
             "INSERT INTO jobs(title, company, apply_url, source, date_found, "
             "normalized_company, normalized_title, first_seen) "
@@ -207,7 +207,7 @@ async def test_dispatcher_skips_below_threshold(rules_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(rules_db) as db:
+        async with pg.connect(rules_db) as db:
             results = await dispatcher.dispatch(
                 db,
                 user_id="alice",
@@ -233,7 +233,7 @@ async def test_dispatcher_fires_above_threshold(rules_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(rules_db) as db:
+        async with pg.connect(rules_db) as db:
             results = await dispatcher.dispatch(
                 db,
                 user_id="alice",
@@ -268,7 +268,7 @@ async def test_dispatcher_quiet_hours_skips(rules_db):
             if hasattr(instance, "async_notify"):
                 del instance.async_notify
 
-            async with aiosqlite.connect(rules_db) as db:
+            async with pg.connect(rules_db) as db:
                 results = await dispatcher.dispatch(
                     db,
                     user_id="alice",

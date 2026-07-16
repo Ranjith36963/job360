@@ -106,14 +106,14 @@ async def worker_startup(ctx: dict) -> None:
 
     from migrations import runner  # local import — keep module import light
     from src.core.settings import DB_PATH
-    from src.repositories import pg as aiosqlite
+    from src.repositories import pg
 
     # Worker may boot independently of the API; migrations are idempotent and
     # advisory-locked, so applying them here is safe.
     await runner.up(str(DB_PATH))
 
-    conn = await aiosqlite.connect(str(DB_PATH))
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(str(DB_PATH))
+    conn.row_factory = pg.Row
     ctx["db"] = conn
 
     async def _enqueue(function_name: str, *args: object) -> object:

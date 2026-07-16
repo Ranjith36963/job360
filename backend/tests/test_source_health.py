@@ -14,12 +14,12 @@ import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto
 
 
@@ -33,7 +33,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -99,7 +99,7 @@ async def _seed_run(
     """Insert a run_log row directly so we can simulate run history without
     actually firing the pipeline."""
     now = timestamp or datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.execute(
             """
             INSERT INTO run_log(

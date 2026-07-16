@@ -96,7 +96,7 @@ async def test_purge_deletes_derived_children_but_keeps_user_records():
         assert deleted == 1
 
         for table in ("job_enrichment", "job_embeddings", "user_feed", "user_notification_digests"):
-            c = await db._conn.execute(f"SELECT COUNT(*) FROM {table} WHERE job_id = ?", (job_id,))
+            c = await db._conn.execute(f"SELECT COUNT(*) FROM {table} WHERE job_id = ?", (job_id,))  # noqa: S608 — table names from a literal tuple
             assert (await c.fetchone())[0] == 0, f"{table} orphaned a row for the purged job"
 
         c = await db._conn.execute(

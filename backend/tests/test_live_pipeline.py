@@ -117,12 +117,11 @@ def test_live_full_pipeline_all_three_pillars(tmp_path, monkeypatch):
     import uuid
     from pathlib import Path
 
-    import aiosqlite
-
     import src.core.settings as _settings
     import src.services.profile.storage as _storage
     from migrations import runner
     from src.main import run_search
+    from src.repositories import pg
     from src.repositories.database import JobDatabase
     from src.services.auth.passwords import hash_password
     from src.services.profile.models import CVData, UserPreferences, UserProfile
@@ -142,7 +141,7 @@ def test_live_full_pipeline_all_three_pillars(tmp_path, monkeypatch):
 
     async def _create_user():
         uid = uuid.uuid4().hex
-        async with aiosqlite.connect(db_file) as c:
+        async with pg.connect(db_file) as c:
             await c.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
                 (uid, "live-e2e@example.com", hash_password("testpassword123")),

@@ -4,10 +4,10 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 
 from migrations import runner
+from src.repositories import pg
 from src.services.prefilter import FilterProfile
 from src.workers.tasks import (
     idempotency_key,
@@ -21,7 +21,7 @@ from src.workers.tasks import (
 async def worker_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE jobs (
@@ -65,7 +65,7 @@ async def worker_db():
         )
         await db.commit()
     await runner.up(path)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("alice", "a@x", "!"),
@@ -114,7 +114,7 @@ def test_idempotency_key_is_deterministic():
 
 @pytest.mark.asyncio
 async def test_score_and_ingest_creates_feed_rows_for_each_passing_user(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         # Inject a per-user scorer — the Phase 5 task MUST call it for every
         # user. Deliberately returning distinct scores per user proves the
@@ -152,7 +152,7 @@ async def test_score_and_ingest_creates_feed_rows_for_each_passing_user(worker_d
 
 @pytest.mark.asyncio
 async def test_score_and_ingest_skips_users_failing_prefilter(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         ctx = {
             "db": db,
@@ -175,7 +175,7 @@ async def test_score_and_ingest_skips_users_failing_prefilter(worker_db):
 
 @pytest.mark.asyncio
 async def test_score_and_ingest_is_idempotent(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         ctx = {
             "db": db,
             "enqueue": lambda *a: None,
@@ -190,7 +190,7 @@ async def test_score_and_ingest_is_idempotent(worker_db):
 
 @pytest.mark.asyncio
 async def test_ledger_idempotent_per_channel(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         ctx = {
             "db": db,
             "enqueue": lambda *a: None,
@@ -206,7 +206,7 @@ async def test_ledger_idempotent_per_channel(worker_db):
 
 @pytest.mark.asyncio
 async def test_instant_notification_suppressed_below_threshold(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         ctx = {
             "db": db,
@@ -226,7 +226,7 @@ async def test_instant_notification_suppressed_below_threshold(worker_db):
 
 @pytest.mark.asyncio
 async def test_mark_ledger_sent_updates_status(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         ctx = {
             "db": db,
             "enqueue": lambda *a: None,
@@ -242,7 +242,7 @@ async def test_mark_ledger_sent_updates_status(worker_db):
 
 @pytest.mark.asyncio
 async def test_mark_ledger_failed_increments_retry(worker_db):
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         ctx = {
             "db": db,
             "enqueue": lambda *a: None,
@@ -299,7 +299,7 @@ async def test_score_and_ingest_passes_user_prefs_and_enrichment_lookup(worker_d
 
     monkeypatch.setattr("src.workers.tasks.JobScorer", _SpyScorer)
 
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         ctx = {"db": db, "enqueue": lambda *a: None}  # NB: no 'scorer' override
         result = await score_and_ingest(
             ctx,
@@ -339,7 +339,7 @@ async def test_score_and_ingest_enqueues_enrichment_when_flag_on(worker_db, monk
     monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", True)
     monkeypatch.setattr("src.workers.tasks.ENRICHMENT_THRESHOLD", 60)
 
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         ctx = {
             "db": db,
@@ -366,7 +366,7 @@ async def test_score_and_ingest_does_not_enqueue_enrichment_when_flag_off(worker
     """
     monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", False)
 
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         ctx = {
             "db": db,
@@ -390,7 +390,7 @@ async def test_score_and_ingest_below_threshold_no_enrichment(worker_db, monkeyp
     monkeypatch.setattr("src.workers.tasks.ENRICHMENT_ENABLED", True)
     monkeypatch.setattr("src.workers.tasks.ENRICHMENT_THRESHOLD", 90)
 
-    async with aiosqlite.connect(worker_db) as db:
+    async with pg.connect(worker_db) as db:
         enqueued: list[tuple] = []
         ctx = {
             "db": db,

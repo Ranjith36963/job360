@@ -3,10 +3,10 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 
 from migrations import runner
+from src.repositories import pg
 from src.services.auth import sessions as auth_sessions
 
 SESSION_SECRET = "test-secret-" + "x" * 32
@@ -20,7 +20,7 @@ async def session_db():
     # (0002_multi_tenant) rebuild user_actions / applications which this
     # test has no reason to create.
     await runner.up(path, target="0001_auth")
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         # Insert a placeholder user matching the sessions FK.
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
@@ -82,7 +82,7 @@ async def test_expired_session_returns_none(session_db):
     cookie = await auth_sessions.create_session(
         session_db, user_id="user-1", secret=SESSION_SECRET
     )
-    async with aiosqlite.connect(session_db) as db:
+    async with pg.connect(session_db) as db:
         past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         await db.execute("UPDATE sessions SET expires_at = ?", (past,))
         await db.commit()

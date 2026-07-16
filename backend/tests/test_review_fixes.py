@@ -232,16 +232,15 @@ def test_fix5_legacy_hydrate_passes_source_action(monkeypatch, tmp_path):
     """
     import asyncio
 
-    import aiosqlite
-
     from migrations import runner
     from src.core import settings as core_settings
     from src.core.tenancy import DEFAULT_TENANT_ID
+    from src.repositories import pg
     from src.services.profile import storage
 
     async def _bootstrap():
         db = tmp_path / "t.db"
-        async with aiosqlite.connect(str(db)) as con:
+        async with pg.connect(str(db)) as con:
             await con.executescript(
                 """
                 CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, company TEXT,
@@ -258,7 +257,7 @@ def test_fix5_legacy_hydrate_passes_source_action(monkeypatch, tmp_path):
             )
             await con.commit()
         await runner.up(str(db))
-        async with aiosqlite.connect(str(db)) as con:
+        async with pg.connect(str(db)) as con:
             # INSERT OR IGNORE — migration 0002_multi_tenant already
             # seeds the DEFAULT_TENANT_ID placeholder row for legacy
             # backfill, so a plain INSERT would trip the UNIQUE

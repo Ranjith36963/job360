@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
+
+from src.repositories import pgsync
 
 logging.disable(logging.WARNING)
 
@@ -27,8 +28,8 @@ async def _main() -> None:
     from src.services.profile.storage import current_profile_version_id, save_profile
     from src.services.skill_matcher import JobScorer
 
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    conn = pgsync.connect(str(DB_PATH))
+    conn.row_factory = pgsync.Row
     catalog = [dict(r) for r in conn.execute(
         "SELECT id,title,company,location,description,salary_min,salary_max,date_found,"
         "posted_at,date_confidence FROM jobs"

@@ -21,12 +21,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto
 
 
@@ -41,7 +41,7 @@ async def _seed_job_rows(db_path: str) -> list[int]:
     Per CLAUDE.md rule #10, `jobs` is the shared catalog — no user_id.
     """
     now = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute(
             """INSERT INTO jobs
                (title, company, location, apply_url, source, date_found,
@@ -131,9 +131,8 @@ def _register(client, email, password="s3cretpassword"):
     assert r.status_code == 201, r.text
     # #15: app routes (e.g. /search) now require a verified email. These tests
     # exercise IDOR/auth scoping, not verification, so mark the user verified.
-    import sqlite3 as _sqlite3
-
     import src.core.settings as _settings
+    from src.repositories import pgsync as _sqlite3
 
     _c = _sqlite3.connect(str(_settings.DB_PATH))
     _c.execute(

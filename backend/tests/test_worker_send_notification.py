@@ -13,10 +13,10 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels.dispatcher import ChannelSendResult
 from src.workers.tasks import send_notification
 
@@ -28,7 +28,7 @@ async def db_ctx():
     os.close(fd)
     # Batch 2 test fixture pattern: pre-create user_actions + applications
     # so migration 0002 can rebuild them with user_id columns.
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE jobs (
@@ -72,7 +72,7 @@ async def db_ctx():
         await db.commit()
     await runner.up(path)
     # Seed 1 job + 1 user
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("alice", "a@example.test", "!"),
@@ -86,8 +86,8 @@ async def db_ctx():
              "acme", "ai engineer", now),
         )
         await db.commit()
-    conn = await aiosqlite.connect(path)
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(path)
+    conn.row_factory = pg.Row
     yield {"db": conn}
     await conn.close()
     try:
@@ -97,7 +97,7 @@ async def db_ctx():
 
 
 async def _ledger_rows(db) -> list[dict]:
-    db.row_factory = aiosqlite.Row
+    db.row_factory = pg.Row
     cur = await db.execute(
         "SELECT user_id, job_id, channel, status, error_message, retry_count "
         "FROM notification_ledger ORDER BY id"

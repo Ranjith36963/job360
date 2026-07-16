@@ -1,20 +1,19 @@
-"""Synchronous ``sqlite3``-shaped shim backed by psycopg3.
+"""Synchronous Postgres helper (psycopg3) — the blocking counterpart of :mod:`pg`.
 
-Used only by the test-suite: ``conftest`` registers this module as
-``sys.modules["sqlite3"]`` so test files that do ``import sqlite3`` and
-``sqlite3.connect(path)`` transparently talk to the shared Postgres, with the
-same schema-per-path isolation the async :mod:`pg` helper provides.
+Used by the CLI, profile storage, and tests that need a plain blocking
+connection. ``connect(path)`` maps the legacy db-path argument to the shared
+Postgres DSN, with the same schema-per-path isolation the async :mod:`pg`
+helper provides in TEST_MODE.
 
-Only the small slice of the sqlite3 surface the tests use is implemented:
-``connect``, ``Connection.{execute,executescript,executemany,commit,close,
-cursor}`` + context manager, ``Cursor.{fetchone,fetchall,rowcount,lastrowid}``,
-``Row``, ``OperationalError`` / ``IntegrityError``. Anything else falls through
-to the real stdlib ``sqlite3`` via module ``__getattr__``.
+Surface: ``connect``, ``Connection.{execute,executescript,executemany,commit,
+close,cursor}`` + context manager, ``Cursor.{fetchone,fetchall,rowcount,
+lastrowid}``, ``Row``, ``OperationalError`` / ``IntegrityError`` / ``Error``.
+SQL passes through the same SQLite→Postgres ``translate()`` as :mod:`pg`
+(legacy dialect in query strings — removing that is the dialect-rewrite batch).
 """
 
 from __future__ import annotations
 
-import sqlite3 as _real_sqlite3
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -130,6 +129,3 @@ def connect(path: Optional[str] = None, *args, **kwargs) -> Connection:
             cur.execute(f'SET search_path TO "{schema}", public')
     return Connection(raw)
 
-
-def __getattr__(name: str):  # PEP 562 — fall through to the real sqlite3
-    return getattr(_real_sqlite3, name)

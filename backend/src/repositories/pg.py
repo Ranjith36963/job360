@@ -1,12 +1,14 @@
-"""psycopg3 async connection helper — the aiosqlite replacement.
+"""psycopg3 async connection helper — the backend's single door to Postgres.
 
-This module is the single door through which the whole backend talks to
-Postgres. It deliberately mimics the small slice of the ``aiosqlite`` surface
-the codebase actually uses, so porting a call-site is usually a one-line import
-swap (``import aiosqlite`` -> ``from src.repositories import pg as aiosqlite``)
-rather than a rewrite.
+Every module talks to Postgres through here (``from src.repositories import
+pg``). Historical note: the API shape intentionally matches the slice of
+``aiosqlite`` the codebase used pre-migration, which is why ``commit()`` is a
+no-op and query strings are still written in SQLite dialect — ``execute()``
+runs them through ``translate()``. Removing that legacy dialect (and this
+translator) is the dialect-rewrite batch; until then this module is the
+compatibility boundary.
 
-What it provides (aiosqlite-shaped):
+What it provides:
   * ``connect(path_or_dsn=None)`` — awaitable AND async context manager,
     returning a :class:`Connection`.
   * ``Connection.execute(sql, params=())`` — awaitable; translates SQLite SQL

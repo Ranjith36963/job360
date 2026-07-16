@@ -14,7 +14,7 @@ means in one short line). No walls of text — say what happened, what I did, wh
 
 ## What this is
 
-The Job360 backend: Python 3.9+, FastAPI, async SQLite (aiosqlite), ARQ worker.
+The Job360 backend: Python 3.9+, FastAPI, PostgreSQL (psycopg3 via `src/repositories/pg.py`), ARQ worker.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/`, `chroma/`).
 
@@ -42,7 +42,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 - `conftest.py` mocks `asyncio.sleep` to instant (retry/backoff sleeps otherwise sum
   to ~37 min). Tests asserting on **real** elapsed time must use `@pytest.mark.real_sleep`.
 - `conftest.py` closes the lazily-created `dependencies._db` singleton per test —
-  aiosqlite leaves a non-daemon worker thread per open connection (blocks process exit).
+  an open async DB connection blocks process exit (non-daemon worker thread).
 - **DB_PATH gotcha:** modules that do `from src.core.settings import DB_PATH` bind the
   *value* at import time. Test fixtures must redirect `DB_PATH` on **every** importer
   (the fixtures loop over `sys.modules`), not just `settings`, or queries hit the real DB.
@@ -52,7 +52,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 - `src/main.py` — orchestrator + `SOURCE_REGISTRY` (47) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
-- `src/repositories/database.py` — async SQLite · `migrations/` — forward/reverse SQL pairs
+- `src/repositories/database.py` — async PostgreSQL · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.

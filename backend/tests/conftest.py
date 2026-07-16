@@ -22,21 +22,15 @@ import sys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# --- Postgres migration shims ----------------------------------------------
-# The backend moved from aiosqlite/SQLite to psycopg3/Postgres. Production code
-# imports the async helper directly (``from src.repositories import pg``), but
-# the ~40 test files still do ``import aiosqlite`` / ``import sqlite3`` and pass
-# file paths around. We register the shims under those module names so those
-# imports transparently hit Postgres, and enable schema-per-path isolation so
-# each distinct ``db_path`` (tmp file or ``:memory:``) gets its own fresh schema
-# — the same "fresh DB per test" the old tmp ``.db`` files gave.
+# --- Postgres test mode ------------------------------------------------------
+# Everything runs on Postgres via ``src.repositories.pg`` / ``pgsync`` — tests
+# import those directly (the old ``sys.modules["aiosqlite"/"sqlite3"]`` disguise
+# is gone). TEST_MODE enables schema-per-path isolation: each distinct
+# ``db_path`` (tmp file or ``:memory:``) gets its own fresh Postgres schema —
+# the same "fresh DB per test" the old tmp ``.db`` files gave.
 from src.repositories import pg as _pg  # noqa: E402
-from src.repositories import pgsync as _pgsync  # noqa: E402
 
 _pg.TEST_MODE = True
-sys.modules["aiosqlite"] = _pg
-sys.modules["sqlite3"] = _pgsync
-
 from contextlib import asynccontextmanager  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
@@ -206,7 +200,7 @@ def authenticated_async_context(monkeypatch, tmp_path):
     # authed test hitting a gated route would 403. (Unverified behaviour is
     # covered explicitly in test_email_enforcement.py.)
     if captured_user_id:
-        import sqlite3 as _sqlite3
+        from src.repositories import pgsync as _sqlite3
 
         _vc = _sqlite3.connect(str(db_path))
         _vc.execute(

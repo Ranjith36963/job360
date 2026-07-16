@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
@@ -37,7 +37,7 @@ _PURGE_CASCADE_TABLES = (
 class JobDatabase:
     def __init__(self, db_path: str):
         self._path = db_path
-        self._conn: aiosqlite.Connection | None = None
+        self._conn: pg.Connection | None = None
 
     async def connect(self) -> None:
         """Open a connection WITHOUT running the schema DDL (docs/fable/02).
@@ -49,15 +49,15 @@ class JobDatabase:
         connection across concurrent coroutines, and a fresh connection also self-heals
         after a DB restart (the old single shared connection did neither).
         """
-        self._conn = await aiosqlite.connect(self._path)
-        self._conn.row_factory = aiosqlite.Row
+        self._conn = await pg.connect(self._path)
+        self._conn.row_factory = pg.Row
 
     async def init_db(self):
         # Postgres connection (schema selected from self._path in test mode;
         # always ``public`` in production). No PRAGMAs / WAL / busy_timeout —
         # Postgres handles concurrency natively (no "database is locked").
-        self._conn = await aiosqlite.connect(self._path)
-        self._conn.row_factory = aiosqlite.Row
+        self._conn = await pg.connect(self._path)
+        self._conn.row_factory = pg.Row
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1103,7 +1103,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (cutoff, min_score))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return await self.get_recent_jobs(days=days, min_score=min_score)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1139,7 +1139,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (user_id, cutoff, min_score))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         out: list[dict] = []
@@ -1168,7 +1168,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (job_id,))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             # Fallback for fresh DBs without migration 0008 — still apply
             # the staleness filter so the read path stays consistent.
             cursor = await self._conn.execute(
@@ -1240,7 +1240,7 @@ class JobDatabase:
         params.extend([limit, offset])
         try:
             cursor = await self._conn.execute(sql, tuple(params))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1279,7 +1279,7 @@ class JobDatabase:
             params.append(end_time)
         try:
             cursor = await self._conn.execute(sql, tuple(params))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
@@ -1499,7 +1499,7 @@ class JobDatabase:
                 "SELECT * FROM notification_rules WHERE user_id = ? ORDER BY channel",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1511,7 +1511,7 @@ class JobDatabase:
                 "SELECT * FROM notification_rules WHERE user_id = ?",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return None
         row = await cursor.fetchone()
         return dict(row) if row else None
@@ -1573,7 +1573,7 @@ class JobDatabase:
                 (ts, user_id),
             )
             await self._conn.commit()
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             pass
 
     async def get_users_with_rules(self) -> list[dict]:
@@ -1582,7 +1582,7 @@ class JobDatabase:
             cursor = await self._conn.execute(
                 "SELECT * FROM notification_rules WHERE enabled = 1"
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -1597,7 +1597,7 @@ class JobDatabase:
             )
             await self._conn.commit()
             return cursor.rowcount
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
 
     async def queue_digest_notification(self, user_id: str, channel: str, job_id: int) -> None:
@@ -1613,7 +1613,7 @@ class JobDatabase:
                 (user_id, channel, job_id),
             )
             await self._conn.commit()
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             pass  # Table missing on legacy DB — graceful no-op.
 
     async def get_pending_digests(self, user_id: str, channel: str) -> list[dict]:
@@ -1623,7 +1623,7 @@ class JobDatabase:
                 "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
                 (user_id, channel),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1641,7 +1641,7 @@ class JobDatabase:
                 "WHERE user_id = ? AND channel = ? AND sent = 0",
                 (now, user_id, channel),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
         await self._conn.commit()
         return cursor.rowcount
@@ -1663,7 +1663,7 @@ class JobDatabase:
                 "GROUP BY channel, status",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return {}
         rows = await cursor.fetchall()
         result: dict[str, dict[str, int]] = {}
@@ -1690,7 +1690,7 @@ class JobDatabase:
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
 
     async def count_recent_runs(self, user_id: str) -> int:
@@ -1702,7 +1702,7 @@ class JobDatabase:
             )
             row = await cursor.fetchone()
             return int(row[0]) if row else 0
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
 
     async def close(self):

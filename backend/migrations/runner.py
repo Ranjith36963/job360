@@ -44,12 +44,12 @@ from typing import Optional
 
 import psycopg
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
 
 
-async def _ensure_table(db: aiosqlite.Connection) -> None:
+async def _ensure_table(db: pg.Connection) -> None:
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -61,7 +61,7 @@ async def _ensure_table(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
-async def _resync_identity_sequences(db: aiosqlite.Connection) -> int:
+async def _resync_identity_sequences(db: pg.Connection) -> int:
     """Re-point every ``id`` identity sequence at MAX(id). Returns tables fixed.
 
     Why (docs/fable/02 D3): the table-rebuild migrations (0002, 0010, 0011 …) copy
@@ -109,12 +109,12 @@ async def _resync_identity_sequences(db: aiosqlite.Connection) -> int:
     return fixed
 
 
-async def _applied_ids(db: aiosqlite.Connection) -> list[str]:
+async def _applied_ids(db: pg.Connection) -> list[str]:
     cur = await db.execute("SELECT id FROM _schema_migrations ORDER BY id")
     return [row[0] for row in await cur.fetchall()]
 
 
-async def _applied_map(db: aiosqlite.Connection) -> dict[str, str]:
+async def _applied_map(db: pg.Connection) -> dict[str, str]:
     """Return ``{stem: applied_at}`` for every recorded migration.
 
     Used by the enhanced ``status`` CLI printer (Step-0 Tier B) to show the
@@ -147,7 +147,7 @@ def _split_sql_statements(sql: str) -> list[str]:
     Strips both full-line AND inline ``--`` comments before splitting, so a
     ``;`` inside a trailing comment doesn't sever a statement mid-way. (0015's
     ``-- NULL = not yet used; set on successful consume`` did exactly that,
-    producing ``sqlite3.OperationalError: incomplete input``.)
+    producing ``pgsync.OperationalError: incomplete input``.)
 
     Still naive about ``;`` inside string literals — but no repo migration has
     one, and none has ``--`` inside a string literal either (verified against
@@ -166,7 +166,7 @@ def _split_sql_statements(sql: str) -> list[str]:
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
-async def _apply_up_sql(db: aiosqlite.Connection, sql: str) -> None:
+async def _apply_up_sql(db: pg.Connection, sql: str) -> None:
     """Run the up SQL statement-by-statement, tolerating a pre-existing
     forward state for idempotent ``ADD COLUMN`` statements.
 
@@ -220,7 +220,7 @@ async def up(
     lock so only one writer is in the critical section, (b) re-reads the
     applied set *inside* the transaction so a loser that lost the lock to
     a winner sees the stem already applied and skips without re-running
-    the SQL, and (c) still swallows ``sqlite3.IntegrityError`` on the final
+    the SQL, and (c) still swallows ``pgsync.IntegrityError`` on the final
     INSERT as a defence-in-depth belt-and-braces — if any exotic path ever
     slips through the re-check we log-and-continue rather than crash the
     second booting process.
@@ -236,7 +236,7 @@ async def up(
     # comes from ON CONFLICT DO NOTHING on the _schema_migrations INSERT plus the
     # re-read under the lock.
     lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         # Acquire the lock BEFORE creating the migrations table so concurrent
         # booters don't race on CREATE TABLE (also non-atomic in Postgres).
         await db.execute("SELECT pg_advisory_lock(?)", (lock_key,))
@@ -302,7 +302,7 @@ async def down(
     Returns the stem that was reverted, or ``None`` if none was applied.
     """
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await _ensure_table(db)
         applied = await _applied_ids(db)
         if not applied:
@@ -321,7 +321,7 @@ async def status(
     migrations_dir: Optional[Path] = None,
 ) -> dict[str, list[str]]:
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await _ensure_table(db)
         applied = await _applied_ids(db)
     all_pairs = _discover_pairs(mdir)
@@ -342,7 +342,7 @@ async def _status_rows(
     so re-invoking ``status`` is idempotent and matches the library contract.
     """
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         # Detect pre-existing schema-migrations table before _ensure_table
         # would create it, so the CLI printer can surface "run up first".
         cur = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_migrations'")

@@ -27,7 +27,7 @@ from typing import Callable
 from pydantic import BaseModel, Field
 
 from src.models import Job
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import with_write_retry
 from src.services.profile.llm_provider import llm_extract_validated
 
@@ -141,7 +141,7 @@ async def match_job(
     return await fn(prompt, MatchVerdict, _SYSTEM_PROMPT)
 
 
-async def has_verdict(conn: aiosqlite.Connection, user_id: str, job_id: int) -> bool:
+async def has_verdict(conn: pg.Connection, user_id: str, job_id: int) -> bool:
     """True if this user's feed row for the job already carries a verdict."""
     cur = await conn.execute(
         "SELECT 1 FROM user_feed WHERE user_id = ? AND job_id = ? "
@@ -152,7 +152,7 @@ async def has_verdict(conn: aiosqlite.Connection, user_id: str, job_id: int) -> 
 
 
 async def save_verdict(
-    conn: aiosqlite.Connection, user_id: str, job_id: int, verdict: MatchVerdict
+    conn: pg.Connection, user_id: str, job_id: int, verdict: MatchVerdict
 ) -> None:
     """Persist the judge's verdict onto the user's feed row (per-user state)."""
     await conn.execute(
@@ -163,7 +163,7 @@ async def save_verdict(
     await conn.commit()
 
 
-async def clear_user_verdicts(conn: aiosqlite.Connection, user_id: str) -> int:
+async def clear_user_verdicts(conn: pg.Connection, user_id: str) -> int:
     """Clear all LLM verdict fields for every feed row belonging to ``user_id``.
 
     Used when the user's profile changes significantly (re-judge backlog).
@@ -183,7 +183,7 @@ async def match_batch(
     *,
     user_id: str,
     profile_text: str,
-    conn: aiosqlite.Connection,
+    conn: pg.Connection,
     semaphore_limit: int = 3,
     skip_existing: bool = True,
     llm_extract_validated_fn: LLMExtractFn | None = None,

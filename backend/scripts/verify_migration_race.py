@@ -1,7 +1,7 @@
 """Standalone verifier for Step-1 B11 — migration runner race safety.
 
 Reproduces the concurrent-boot scenario that used to crash the second
-process with ``sqlite3.IntegrityError: UNIQUE constraint failed:
+process with ``pgsync.IntegrityError: UNIQUE constraint failed:
 _schema_migrations.id``. Two ``runner.up()`` calls race against the same
 SQLite file; this script passes only if (a) neither raises, and (b) each
 migration is recorded exactly once.
@@ -44,9 +44,8 @@ async def _run() -> int:
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
 
-    import aiosqlite  # noqa: E402
-
     from migrations import runner  # noqa: E402
+    from src.repositories import pg
 
     tmp_root = Path(tempfile.mkdtemp(prefix="verify_migration_race_"))
     db_fd, db_path = tempfile.mkstemp(suffix=".db", dir=tmp_root)
@@ -64,7 +63,7 @@ async def _run() -> int:
             print(f"FAIL: concurrent up() raised: {failures!r}", file=sys.stderr)
             return 1
 
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute("SELECT id, COUNT(*) FROM _schema_migrations GROUP BY id")
             rows = await cur.fetchall()
         dup = [r for r in rows if r[1] != 1]

@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote as urlquote
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
@@ -97,7 +97,7 @@ async def request_password_reset(
     (route) ignores the return value to keep the no-enumeration contract.
     """
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL",
             (email,),
@@ -141,7 +141,7 @@ async def confirm_password_reset(
     h = tokens.hash_token(raw_token)
     now = _now_iso()
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         # Single read to validate everything atomically. SQLite's
         # transaction default ensures this is consistent with the UPDATE
         # below.

@@ -19,11 +19,12 @@ import argparse
 import json
 import math
 import os
-import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from src.repositories import pgsync
 
 # ---------------------------------------------------------------------------
 # Ensure repo's backend/ is on sys.path so `src.*` imports resolve when this
@@ -384,8 +385,8 @@ def _db_read_jobs(db_path: str) -> tuple[list[str | None], list[str | None]]:
         Empty lists when table is absent or has no rows.
     """
     try:
-        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
+        con = pgsync.connect(f"file:{db_path}?mode=ro", uri=True)
+        con.row_factory = pgsync.Row
         cur = con.execute("SELECT posted_at, staleness_state FROM jobs")
         rows = cur.fetchall()
         con.close()
@@ -408,8 +409,8 @@ def _db_read_feed(db_path: str, user_id: str | None = None) -> list[dict]:
         Empty list when table is absent or has no rows.
     """
     try:
-        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
+        con = pgsync.connect(f"file:{db_path}?mode=ro", uri=True)
+        con.row_factory = pgsync.Row
         if user_id:
             cur = con.execute(
                 "SELECT score, llm_fit_score FROM user_feed WHERE user_id = ?",
@@ -431,8 +432,8 @@ def _db_read_actions(db_path: str, user_id: str | None = None) -> list[dict]:
         List of dicts with keys: score, action (may be None for unactioned jobs).
     """
     try:
-        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
+        con = pgsync.connect(f"file:{db_path}?mode=ro", uri=True)
+        con.row_factory = pgsync.Row
         if user_id:
             cur = con.execute(
                 """

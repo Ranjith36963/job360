@@ -14,12 +14,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.auth import email_verification, rate_limit, tokens
 from src.services.channels import crypto
 
@@ -44,7 +44,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -102,8 +102,8 @@ def client(temp_db):
 
 
 async def _verification_row(db_path, user_id):
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, token_hash, email, expires_at, used_at FROM email_verifications "
             "WHERE user_id = ? ORDER BY id DESC LIMIT 1",
@@ -113,8 +113,8 @@ async def _verification_row(db_path, user_id):
 
 
 async def _email_verified_at(db_path, user_id):
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT email_verified_at FROM users WHERE id = ?", (user_id,)
         )
@@ -169,7 +169,7 @@ def test_resend_issues_additional_token(client, monkeypatch, temp_db):
     assert r.status_code == 204
     # Should be 2 verification rows now (the register one + the resend one).
     async def _count():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             cur = await db.execute(
                 "SELECT COUNT(*) FROM email_verifications WHERE user_id = ?",
                 (user_id,),
@@ -212,7 +212,7 @@ def test_confirm_rejects_expired_token(client, monkeypatch, temp_db):
     past = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     async def _expire():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE email_verifications SET expires_at = ? WHERE user_id = ?",
                 (past, user_id),
@@ -230,7 +230,7 @@ def test_confirm_rejects_after_email_change(client, monkeypatch, temp_db):
     user_id, raw = _register_capture_token(client, monkeypatch, "old@example.com")
 
     async def _swap_email():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE users SET email = ? WHERE id = ?", ("new@example.com", user_id)
             )
@@ -246,7 +246,7 @@ def test_confirm_rejects_soft_deleted_user(client, monkeypatch, temp_db):
     user_id, raw = _register_capture_token(client, monkeypatch, "alice@example.com")
 
     async def _soft_delete():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE users SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?",
                 (user_id,),
@@ -283,7 +283,7 @@ def test_is_email_verified_helper(monkeypatch, temp_db):
     test that the column round-trips correctly without HTTP layering."""
     async def _scenario():
         # Insert a user row directly
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
                 ("u1", "u1@example.com", "!"),
@@ -291,7 +291,7 @@ def test_is_email_verified_helper(monkeypatch, temp_db):
             await db.commit()
         assert await email_verification.is_email_verified(db_path=temp_db, user_id="u1") is False
 
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE users SET email_verified_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
                 "WHERE id = ?",

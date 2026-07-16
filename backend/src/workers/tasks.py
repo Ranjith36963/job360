@@ -3,7 +3,7 @@
 These are plain ``async def`` — they can be called directly from tests
 (with a stub ``ctx``) or registered as ARQ functions (see
 ``workers/settings.py``). The tasks touch only:
-  * ``ctx['db']`` — an open aiosqlite.Connection
+  * ``ctx['db']`` — an open pg.Connection
   * ``ctx['enqueue']`` — async callable(function_name, *args) used for fan-out
     (in tests, a ``list.append``-style stub; in prod, ``ctx['redis'].enqueue_job``)
 """
@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 
 from src.core.settings import ENRICHMENT_THRESHOLD
 from src.models import Job
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.services.feed import FeedService
 from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
@@ -70,14 +70,14 @@ def idempotency_key(user_id: str, job_id: int, channel: str) -> str:
     return hashlib.sha1(raw, usedforsecurity=False).hexdigest()
 
 
-async def _load_users(db: aiosqlite.Connection) -> list[dict[str, Any]]:
+async def _load_users(db: pg.Connection) -> list[dict[str, Any]]:
     """Fetch all active users with their filter profile.
 
     Batch 2 stores the profile fields inline on a future user_profiles table;
     until that lands, the function accepts a fixture-provided path via
     ``ctx['users_loader']`` in tests.
     """
-    db.row_factory = aiosqlite.Row
+    db.row_factory = pg.Row
     cur = await db.execute("SELECT id FROM users WHERE deleted_at IS NULL")
     return [dict(r) for r in await cur.fetchall()]
 
@@ -94,7 +94,7 @@ async def score_and_ingest(
     Parameters
     ----------
     ctx : dict
-        Worker context. Must contain ``'db'`` (aiosqlite.Connection).
+        Worker context. Must contain ``'db'`` (pg.Connection).
     job_id : int
         Row id in the ``jobs`` table.
     users_override : optional
@@ -103,8 +103,8 @@ async def score_and_ingest(
 
     Returns ``{'ingested': N, 'notifications_queued': M}``.
     """
-    db: aiosqlite.Connection = ctx["db"]
-    db.row_factory = aiosqlite.Row
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
     cur = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
     job_row = await cur.fetchone()
     if job_row is None:
@@ -202,7 +202,7 @@ async def score_and_ingest(
     return {"ingested": ingested, "notifications_queued": queued}
 
 
-async def _record_ledger_if_new(db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str) -> bool:
+async def _record_ledger_if_new(db: pg.Connection, *, user_id: str, job_id: int, channel: str) -> bool:
     """Insert a ledger row in ``queued`` state. Idempotent per (user, job, channel).
 
     Returns True if a new row was created, False if it already existed.
@@ -217,12 +217,12 @@ async def _record_ledger_if_new(db: aiosqlite.Connection, *, user_id: str, job_i
         )
         await db.commit()
         return True
-    except aiosqlite.IntegrityError:
+    except pg.IntegrityError:
         await db.rollback()
         return False
 
 
-async def mark_ledger_sent(db: aiosqlite.Connection, *, user_id: str, job_id: int, channel: str) -> None:
+async def mark_ledger_sent(db: pg.Connection, *, user_id: str, job_id: int, channel: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
         """
@@ -236,7 +236,7 @@ async def mark_ledger_sent(db: aiosqlite.Connection, *, user_id: str, job_id: in
 
 
 async def mark_ledger_failed(
-    db: aiosqlite.Connection,
+    db: pg.Connection,
     *,
     user_id: str,
     job_id: int,
@@ -260,7 +260,7 @@ async def mark_ledger_failed(
 #
 # These are the top-level functions registered in
 # src.workers.settings.WorkerSettings.functions. ARQ contract: first arg
-# is `ctx: dict` with 'db' (aiosqlite.Connection) and optionally 'enqueue'.
+# is `ctx: dict` with 'db' (pg.Connection) and optionally 'enqueue'.
 
 
 @_logged_task
@@ -285,7 +285,7 @@ async def send_notification(
     Parameters
     ----------
     ctx : dict
-        Must contain ``'db'`` (aiosqlite.Connection). Optionally:
+        Must contain ``'db'`` (pg.Connection). Optionally:
         ``'dispatcher'`` — a test hook returning
         ``list[ChannelSendResult]``; when absent, uses the real
         ``services.channels.dispatcher.dispatch``.
@@ -299,8 +299,8 @@ async def send_notification(
 
     Returns ``{'sent': int, 'failed': int}``.
     """
-    db: aiosqlite.Connection = ctx["db"]
-    db.row_factory = aiosqlite.Row
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
 
     # Fetch job context for the notification body
     cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
@@ -427,7 +427,7 @@ def _parse_dt(value) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _bucket_for_row(row: aiosqlite.Row) -> str:
+def _bucket_for_row(row: pg.Row) -> str:
     """Compute time bucket from the 5-column date model (Batch 1) with fallbacks."""
     first_seen_raw = row["first_seen_at"] if "first_seen_at" in row.keys() else None
     if not first_seen_raw:
@@ -469,8 +469,8 @@ async def nightly_ghost_sweep(ctx: dict) -> dict:
     """
     from src.services.ghost_detection import StalenessState, evaluate_job_state  # noqa: PLC0415 — lazy
 
-    db: aiosqlite.Connection = ctx["db"]
-    db.row_factory = aiosqlite.Row
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
 
     # Load all non-expired jobs (CONFIRMED_EXPIRED is sticky; skip it).
     cursor = await db.execute(
@@ -529,8 +529,8 @@ async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
 
     Returns {'sent': int, 'failed': int, 'jobs_count': int}.
     """
-    db: aiosqlite.Connection = ctx["db"]
-    db.row_factory = aiosqlite.Row
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
 
     try:
         cur = await db.execute(
@@ -646,7 +646,7 @@ async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     return {"sent": sent, "failed": failed, "jobs_count": jobs_count}
 
 
-async def _mark_digest_rows_sent(db: aiosqlite.Connection, user_id: str) -> None:
+async def _mark_digest_rows_sent(db: pg.Connection, user_id: str) -> None:
     """Flip sent=1 on all pending digest rows for user_id (all channels)."""
     import logging
     _log = logging.getLogger(__name__)
@@ -707,8 +707,8 @@ async def notification_tick(ctx: dict) -> dict[str, int]:
     Runs every 5 minutes (configured in WorkerSettings.get_cron_jobs).
     For each user with an enabled rule, checks _bundle_due(); if true, enqueues send_bundle.
     """
-    db: aiosqlite.Connection = ctx["db"]
-    db.row_factory = aiosqlite.Row
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
     now_utc = datetime.now(timezone.utc)
 
     try:
@@ -756,12 +756,12 @@ async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:
         save_enrichment,
     )
 
-    db: aiosqlite.Connection = ctx["db"]
+    db: pg.Connection = ctx["db"]
 
     if await has_enrichment(db, job_id):
         return {"enriched": False, "reason": "already_enriched"}
 
-    db.row_factory = aiosqlite.Row
+    db.row_factory = pg.Row
     cur = await db.execute(
         "SELECT id, title, company, location, description FROM jobs WHERE id = ?",
         (job_id,),

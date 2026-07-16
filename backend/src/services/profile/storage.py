@@ -12,7 +12,7 @@ exists AND no row for the default tenant is in the DB, the JSON is
 hydrated into the DB and then deleted. One-shot, idempotent, and
 non-destructive on parse error (file stays for the user to inspect).
 
-Storage is synchronous (stdlib ``sqlite3``), not async (``aiosqlite``).
+Storage is synchronous (``pgsync``, blocking psycopg3), not async (``pg``).
 Single-row reads/writes are sub-millisecond; keeping this sync means
 both the async HTTP path and the Click CLI can call it without
 ``asyncio.run`` wrappers. Matches the storage pattern for
@@ -29,7 +29,7 @@ from typing import Optional
 
 from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
-from src.repositories import pgsync as sqlite3
+from src.repositories import pgsync
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 logger = logging.getLogger("job360.profile.storage")
@@ -76,7 +76,7 @@ def save_profile(
     cv_json = json.dumps(asdict(profile.cv_data), default=str)
     pref_json = json.dumps(asdict(profile.preferences), default=str)
     now = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         conn.execute(
             """
             INSERT INTO user_profiles (user_id, cv_data, preferences, updated_at)
@@ -103,7 +103,7 @@ def save_profile(
                 (user_id, now, source_action, cv_json, pref_json),
             )
             _prune_old_versions(conn, user_id)
-        except sqlite3.OperationalError as e:
+        except pgsync.OperationalError as e:
             if _is_missing_table(e):
                 logger.info(
                     "user_profile_versions table absent — skipping snapshot "
@@ -129,7 +129,7 @@ VERSION_RETENTION = 10
 See plan §8 risks table ("Versioned snapshots balloon DB size")."""
 
 
-def _prune_old_versions(conn: sqlite3.Connection, user_id: str) -> None:
+def _prune_old_versions(conn: pgsync.Connection, user_id: str) -> None:
     """Delete snapshots beyond ``VERSION_RETENTION`` for a single user.
 
     Uses one DELETE keyed on a NOT-IN sub-select. Fine for the expected
@@ -170,7 +170,7 @@ def restore_profile_version(user_id: str, version_id: int) -> Optional[UserProfi
     save it separately. Atomic here means "one function call, one
     transaction, tenant-scoped" — not "ACID across multiple DB rows".
     """
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             """
             SELECT cv_data, preferences
@@ -208,7 +208,7 @@ def list_profile_versions(user_id: str, limit: int = 10) -> list[dict]:
     plus parsed ``cv_data`` + ``preferences``. Callers typically render
     these in a history UI — not used on the hot scoring path.
     """
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             """
             SELECT id, created_at, source_action, cv_data, preferences
@@ -239,7 +239,7 @@ def current_profile_version_id(user_id: str) -> Optional[int]:
     absent (pre-migration DB). Tolerates missing table via OperationalError.
     """
     try:
-        with sqlite3.connect(str(DB_PATH)) as conn:
+        with pgsync.connect(str(DB_PATH)) as conn:
             cur = conn.execute(
                 "SELECT MAX(id) FROM user_profile_versions WHERE user_id = ?",
                 (user_id,),
@@ -248,7 +248,7 @@ def current_profile_version_id(user_id: str) -> Optional[int]:
         if row is None or row[0] is None:
             return None
         return int(row[0])
-    except sqlite3.OperationalError as e:
+    except pgsync.OperationalError as e:
         if _is_missing_table(e):
             return None
         raise
@@ -268,7 +268,7 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
     both SQLite ("no such table") and Postgres ("does not exist") wording.
     """
     try:
-        with sqlite3.connect(str(DB_PATH)) as conn:
+        with pgsync.connect(str(DB_PATH)) as conn:
             cur = conn.execute(
                 """
                 SELECT cv_data, preferences
@@ -280,7 +280,7 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
                 (user_id,),
             )
             rows = cur.fetchall()
-    except sqlite3.OperationalError as e:
+    except pgsync.OperationalError as e:
         if _is_missing_table(e):
             return False
         raise
@@ -301,7 +301,7 @@ def load_profile(user_id: str) -> Optional[UserProfile]:
     delete the file.
     """
     _maybe_hydrate_legacy_json(user_id)
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
             (user_id,),
@@ -325,7 +325,7 @@ def profile_exists(user_id: str) -> bool:
     reports ``True`` on the first call.
     """
     _maybe_hydrate_legacy_json(user_id)
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT 1 FROM user_profiles WHERE user_id = ? LIMIT 1",
             (user_id,),
@@ -353,7 +353,7 @@ def _maybe_hydrate_legacy_json(user_id: str) -> None:
     """
     if user_id != DEFAULT_TENANT_ID or not LEGACY_PROFILE_PATH.exists():
         return
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT 1 FROM user_profiles WHERE user_id = ? LIMIT 1",
             (user_id,),

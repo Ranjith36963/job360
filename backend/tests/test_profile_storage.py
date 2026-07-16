@@ -19,11 +19,11 @@ import asyncio
 import json
 from dataclasses import asdict
 
-import aiosqlite
 import pytest
 
 from migrations import runner
 from src.core.tenancy import DEFAULT_TENANT_ID
+from src.repositories import pg
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 USER_ALICE = "aaaaaaaa-0000-0000-0000-000000000001"
@@ -31,7 +31,7 @@ USER_BOB = "bbbbbbbb-0000-0000-0000-000000000002"
 
 
 async def _bootstrap_db(db_path: str) -> None:
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.executescript(
             """
             CREATE TABLE jobs (
@@ -68,7 +68,7 @@ async def _bootstrap_db(db_path: str) -> None:
         await db.commit()
     await runner.up(db_path)
     # Seed Alice + Bob so ON DELETE CASCADE has real parents.
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
             (USER_ALICE, "alice@example.test", "!"),
@@ -191,20 +191,20 @@ def test_concurrent_saves_for_a_and_b_do_not_collide(storage_db):
 
 
 def test_resaving_a_profile_updates_updated_at(storage_db):
-    import sqlite3
     import time
 
+    from src.repositories import pgsync
     from src.services.profile.storage import save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         ts1 = conn.execute(
             "SELECT updated_at FROM user_profiles WHERE user_id = ?", (USER_ALICE,)
         ).fetchone()[0]
 
     time.sleep(0.02)  # force clock tick
     save_profile(_make_profile("rust"), USER_ALICE)
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         ts2 = conn.execute(
             "SELECT updated_at FROM user_profiles WHERE user_id = ?", (USER_ALICE,)
         ).fetchone()[0]
@@ -218,8 +218,7 @@ def test_resaving_a_profile_updates_updated_at(storage_db):
 
 
 def test_deleting_user_drops_profile_row(storage_db):
-    import sqlite3
-
+    from src.repositories import pgsync
     from src.services.profile.storage import load_profile, save_profile
 
     save_profile(_make_profile("python"), USER_ALICE)
@@ -231,7 +230,7 @@ def test_deleting_user_drops_profile_row(storage_db):
     # behaviour the rest of the suite relies on), so removing a user is now the
     # app layer's job — account deletion drops the user and its profile row
     # together. Emulate that here and assert the profile is gone.
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         conn.execute("DELETE FROM user_profiles WHERE user_id = ?", (USER_ALICE,))
         conn.execute("DELETE FROM users WHERE id = ?", (USER_ALICE,))
         conn.commit()
@@ -248,10 +247,9 @@ def test_legacy_json_hydrates_to_default_tenant_and_deletes_file(storage_db):
     """First load(DEFAULT_TENANT_ID) with legacy JSON + no DB row ->
     row created, JSON deleted."""
     # Seed the placeholder user so the FK CASCADE parent exists.
-    import sqlite3
-
+    from src.repositories import pgsync
     from src.services.profile.storage import load_profile
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
             (DEFAULT_TENANT_ID, "local@job360.local", "!"),
@@ -275,10 +273,9 @@ def test_legacy_json_hydrates_to_default_tenant_and_deletes_file(storage_db):
 def test_legacy_hydrate_is_idempotent(storage_db):
     """Second load(DEFAULT_TENANT_ID) after hydrate must return the DB row
     and do nothing else (legacy file already gone)."""
-    import sqlite3
-
+    from src.repositories import pgsync
     from src.services.profile.storage import load_profile, save_profile
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
             (DEFAULT_TENANT_ID, "local@job360.local", "!"),
@@ -338,10 +335,9 @@ def test_profile_exists_true_after_save(storage_db):
 
 def test_corrupt_legacy_json_does_not_crash_load(storage_db):
     """A malformed legacy JSON file leaves the DB untouched and the file in place."""
-    import sqlite3
-
+    from src.repositories import pgsync
     from src.services.profile.storage import load_profile
-    with sqlite3.connect(storage_db["db_path"]) as conn:
+    with pgsync.connect(storage_db["db_path"]) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash) VALUES (?, ?, ?)",
             (DEFAULT_TENANT_ID, "local@job360.local", "!"),
@@ -431,10 +427,10 @@ def test_profile_changed_true_when_two_different_preferences(storage_db):
 
 def test_current_profile_version_id_returns_none_missing_table(tmp_path, monkeypatch):
     """Tolerate a DB without the user_profile_versions table."""
-    import sqlite3
+    from src.repositories import pgsync
 
     db_path = tmp_path / "bare.db"
-    with sqlite3.connect(str(db_path)) as conn:
+    with pgsync.connect(str(db_path)) as conn:
         conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
         conn.commit()
 
@@ -448,10 +444,10 @@ def test_current_profile_version_id_returns_none_missing_table(tmp_path, monkeyp
 
 def test_profile_changed_returns_false_missing_table(tmp_path, monkeypatch):
     """Tolerate a DB without user_profile_versions — return False."""
-    import sqlite3
+    from src.repositories import pgsync
 
     db_path = tmp_path / "bare.db"
-    with sqlite3.connect(str(db_path)) as conn:
+    with pgsync.connect(str(db_path)) as conn:
         conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
         conn.commit()
 

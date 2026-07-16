@@ -18,7 +18,7 @@ If you have time for nothing else: **read this section, the Hard Rules index bel
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (~1,409 collected offline, 2 live tests deselected — defer to the runtime collected count). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
-- **Two deployables:** `backend/` (Python 3.9+, FastAPI, async SQLite) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
+- **Two deployables:** `backend/` (Python 3.9+, FastAPI, PostgreSQL via psycopg3) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but only 46 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
 
 ## Hard Rules (load-bearing, numbered, do not violate)
@@ -99,7 +99,7 @@ Job360 is an automated UK job search system supporting **any professional domain
 | Package | Version | Purpose |
 |---------|---------|---------|
 | aiohttp | >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite | >=0.19.0 | Async SQLite for job storage |
+| psycopg[binary] | >=3.2 | Async PostgreSQL driver (ALL storage — SQLite is fully removed) |
 | python-dotenv | >=1.0.0 | .env file loading |
 | jinja2 | >=3.1.0 | HTML report templates |
 | click | >=8.1.0 | CLI framework |
@@ -182,7 +182,7 @@ npm run test:e2e               # Playwright
 
 ## Architecture (high-level)
 
-The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **SQLite DB** → **Notifications + Reports + CSV**.
+The pipeline flows: **CLI (Click)** → **Orchestrator (`src/main.py`)** → **Sources (async fetch via `asyncio.gather`)** → **Scorer** → **Deduplicator** → **PostgreSQL** → **Notifications + Reports + CSV**.
 
 > **Full directory layout, data-flow diagrams, DB schema, and dependency tables: see `ARCHITECTURE.md`.** This file holds only the high-level picture + Claude-specific guidance.
 
@@ -221,7 +221,7 @@ job360/
 - `src/services/deduplicator.py` — 4-layer dedup (exact key → RapidFuzz → TF-IDF → embedding repost; layers 2–4 lazy-imported per rule #16; layer 4 gated on `SEMANTIC_ENABLED`).
 - `src/services/scheduler.py` — `TieredScheduler` + `TIER_INTERVALS_SECONDS` (60s ATS / 5m keyed / 15m RSS / 60m scrapers). Consults `circuit_breaker.BreakerRegistry` before each tick.
 - `src/services/channels/dispatcher.py` — Apprise wrapper. Consults the single per-user `notification_rules` row: score-threshold filter, timezone-aware quiet-hours hold-and-queue, mode routing (instant send vs daily/every_n_hours queue); `force=True` bypasses the gate for bundle sends (rules #23/#24).
-- `src/repositories/database.py` — Async SQLite (aiosqlite), WAL, 5s busy timeout. Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
+- `src/repositories/database.py` — Async PostgreSQL (`src/repositories/pg.py`, psycopg3; query strings still in legacy SQLite dialect via `translate()` — dialect rewrite pending). Shared catalog: `jobs`, `run_log`, `job_enrichment`, `job_embeddings`. Per-user: `users`, `sessions`, `user_feed`, `user_actions`, `applications`, `notification_ledger`, `user_channels`, `user_profiles`, `user_profile_versions`, `notification_rules`, `user_notification_digests`, `application_stage_history`. Auto-purges shared `jobs` >30 days old via `purge_old_jobs()` (rule #3).
 
 ### Sources
 

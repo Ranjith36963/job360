@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 
 from src.models import Job
+from src.repositories import pg
 from src.services.llm_matcher import (
     MatchVerdict,
     _build_match_prompt,
@@ -100,8 +100,8 @@ async def test_match_job_uses_injected_fn_no_http():
 @pytest.fixture
 async def mem_db():
     """Minimal in-memory aiosqlite connection with jobs + user_feed tables."""
-    conn = await aiosqlite.connect(":memory:")
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(":memory:")
+    conn.row_factory = pg.Row
     await conn.executescript("""
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,8 +257,8 @@ def test_flag_defaults_off(monkeypatch):
 @pytest.fixture
 async def stage_db():
     """Minimal in-memory DB for _run_matcher_stage tests."""
-    conn = await aiosqlite.connect(":memory:")
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(":memory:")
+    conn.row_factory = pg.Row
     await conn.executescript("""
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

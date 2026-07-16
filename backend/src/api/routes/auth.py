@@ -21,7 +21,7 @@ from src.api.auth_deps import (
 )
 from src.api.dependencies import get_request_db
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
 from src.services.auth import email_verification as auth_email_verification
@@ -145,7 +145,7 @@ async def register(
                 (user_id, req.email, pw_hash),
             )
             await db.commit()
-        except aiosqlite.IntegrityError:
+        except pg.IntegrityError:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="email already registered",
@@ -204,7 +204,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             headers={"Retry-After": str(LOGIN_LOCKOUT_WINDOW_SECONDS)},
         )
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, email, password_hash FROM users " "WHERE email = ? AND deleted_at IS NULL",
             (req.email,),
@@ -303,7 +303,7 @@ async def delete_account(
     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
     left the data in place and could be resurrected on a later magic-link consume."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -338,7 +338,7 @@ async def change_password(
     then invalidates the session cookie to force re-login (hard rule #26 —
     matches the email-change path)."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -375,7 +375,7 @@ async def change_email(
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -385,7 +385,7 @@ async def change_email(
         raise HTTPException(status_code=401, detail="current password is incorrect")
     # Check new email is not already taken by another user
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT id FROM users WHERE email = ? AND id != ?",
             (str(req.new_email), user.id),

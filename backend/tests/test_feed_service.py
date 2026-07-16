@@ -2,10 +2,10 @@
 import os
 import tempfile
 
-import aiosqlite
 import pytest
 
 from migrations import runner
+from src.repositories import pg
 from src.services.feed import FeedService
 
 
@@ -14,7 +14,7 @@ async def feed_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     # Legacy schema must exist before 0002 rebuild clauses fire.
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE user_actions (
@@ -38,7 +38,7 @@ async def feed_db():
         )
         await db.commit()
     await runner.up(path)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("alice", "a@x", "!"),
@@ -56,7 +56,7 @@ async def feed_db():
 
 
 async def _seed(db_path, rows):
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         svc = FeedService(db)
         for user_id, job_id, score, bucket, status in rows:
             await svc.upsert_feed_row(
@@ -72,7 +72,7 @@ async def test_list_for_user_returns_active_only(feed_db):
         ("alice", 1, 85, "24h", "active"),
         ("alice", 2, 70, "24h", "skipped"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         rows = await svc.list_for_user("alice")
     assert len(rows) == 1
@@ -85,7 +85,7 @@ async def test_list_for_user_filters_by_bucket(feed_db):
         ("alice", 1, 85, "24h", "active"),
         ("alice", 2, 70, "3_7d", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         rows = await svc.list_for_user("alice", bucket="24h")
     assert [r.job_id for r in rows] == [1]
@@ -97,7 +97,7 @@ async def test_list_for_user_scoped_per_user(feed_db):
         ("alice", 1, 85, "24h", "active"),
         ("bob", 2, 90, "24h", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         alice_rows = await svc.list_for_user("alice")
         bob_rows = await svc.list_for_user("bob")
@@ -112,7 +112,7 @@ async def test_list_pending_notifications_filters_by_threshold(feed_db):
         ("alice", 2, 85, "24h", "active"),
         ("alice", 3, 95, "24h", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         rows = await svc.list_pending_notifications("alice", min_score=80)
     assert sorted(r.job_id for r in rows) == [2, 3]
@@ -124,7 +124,7 @@ async def test_mark_notified_excludes_from_subsequent_pending(feed_db):
         ("alice", 1, 85, "24h", "active"),
         ("alice", 2, 90, "24h", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         pending = await svc.list_pending_notifications("alice", min_score=80)
         await svc.mark_notified([r.id for r in pending])
@@ -138,7 +138,7 @@ async def test_update_status_skipped_hides_from_dashboard(feed_db):
     await _seed(feed_db, [
         ("alice", 1, 85, "24h", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         await svc.update_status("alice", 1, "skipped")
         rows = await svc.list_for_user("alice")
@@ -151,7 +151,7 @@ async def test_cascade_stale_marks_job_across_users(feed_db):
         ("alice", 42, 85, "24h", "active"),
         ("bob", 42, 70, "24h", "active"),
     ])
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         updated = await svc.cascade_stale(42)
         alice_rows = await svc.list_for_user("alice")
@@ -167,7 +167,7 @@ async def test_upsert_is_idempotent_on_conflict(feed_db):
     # Previously this test asserted the score was OVERWRITTEN to 85; that was
     # the OLD contract.  Under the new contract, same version -> freeze the
     # first score.  bucket IS always updated regardless.
-    async with aiosqlite.connect(feed_db) as db:
+    async with pg.connect(feed_db) as db:
         svc = FeedService(db)
         first = await svc.upsert_feed_row(
             user_id="alice", job_id=1, score=60, bucket="24h"
@@ -191,8 +191,8 @@ async def test_upsert_is_idempotent_on_conflict(feed_db):
 @pytest.mark.asyncio
 async def test_upsert_with_profile_version_stamps_column(feed_db):
     """profile_version=7 is persisted in the user_feed row."""
-    async with aiosqlite.connect(feed_db) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
         svc = FeedService(db)
         await svc.upsert_feed_row(
             user_id="alice", job_id=10, score=70, bucket="24h", profile_version=7
@@ -209,8 +209,8 @@ async def test_upsert_with_profile_version_stamps_column(feed_db):
 @pytest.mark.asyncio
 async def test_upsert_without_profile_version_leaves_null(feed_db):
     """Calling without profile_version kwarg must leave the column NULL."""
-    async with aiosqlite.connect(feed_db) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
         svc = FeedService(db)
         await svc.upsert_feed_row(
             user_id="alice", job_id=11, score=55, bucket="24h"
@@ -232,8 +232,8 @@ async def test_upsert_updates_profile_version_on_conflict(feed_db):
     overwrite only when version changes).  Previously only profile_version was
     asserted; score=75 is now also checked to confirm overwrite behaviour.
     """
-    async with aiosqlite.connect(feed_db) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
         svc = FeedService(db)
         await svc.upsert_feed_row(
             user_id="alice", job_id=12, score=60, bucket="24h", profile_version=3
@@ -265,8 +265,8 @@ async def test_upsert_score_frozen_when_same_version(feed_db):
     (including both NULL), the score must not change.  This prevents time-based
     score drift when the same profile runs another search cycle.
     """
-    async with aiosqlite.connect(feed_db) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
         svc = FeedService(db)
         # First write — score 70, version 5
         await svc.upsert_feed_row(
@@ -296,8 +296,8 @@ async def test_upsert_score_overwritten_when_version_changes(feed_db):
     the score must be replaced with the new value (a new profile version
     produced a better/worse score and we want to surface it).
     """
-    async with aiosqlite.connect(feed_db) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
         svc = FeedService(db)
         # First write — score 70, version 5
         await svc.upsert_feed_row(

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 
 import pytest
 
+from src.repositories import pgsync
 from src.repositories.db_retry import with_write_retry
 
 
@@ -21,7 +21,7 @@ def test_retries_are_logged_then_succeeds(caplog):
     async def fn():
         calls["n"] += 1
         if calls["n"] < 3:
-            raise sqlite3.OperationalError("database is locked")
+            raise pgsync.OperationalError("database is locked")
         return "ok"
 
     with caplog.at_level(logging.WARNING, logger="job360.db"):
@@ -34,10 +34,10 @@ def test_retries_are_logged_then_succeeds(caplog):
 
 def test_final_lock_failure_is_logged_and_raised(caplog):
     async def fn():
-        raise sqlite3.OperationalError("database is locked")
+        raise pgsync.OperationalError("database is locked")
 
     with caplog.at_level(logging.ERROR, logger="job360.db"):
-        with pytest.raises(sqlite3.OperationalError):
+        with pytest.raises(pgsync.OperationalError):
             asyncio.run(with_write_retry(fn, attempts=2, base_delay=0))
 
     fails = [r for r in caplog.records if getattr(r, "event", "") == "db_write_failed"]
@@ -46,10 +46,10 @@ def test_final_lock_failure_is_logged_and_raised(caplog):
 
 def test_non_lock_error_not_retried_or_logged(caplog):
     async def fn():
-        raise sqlite3.OperationalError("no such column: bogus")
+        raise pgsync.OperationalError("no such column: bogus")
 
     with caplog.at_level(logging.WARNING, logger="job360.db"):
-        with pytest.raises(sqlite3.OperationalError):
+        with pytest.raises(pgsync.OperationalError):
             asyncio.run(with_write_retry(fn, attempts=3, base_delay=0))
 
     # A bad-SQL error is raised immediately — no retry/fail lock logs.

@@ -13,12 +13,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.auth import rate_limit
 from src.services.channels import crypto
 
@@ -89,7 +89,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (

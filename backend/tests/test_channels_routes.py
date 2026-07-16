@@ -13,12 +13,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import patch
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto
 
 
@@ -32,7 +32,7 @@ def api(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -249,8 +249,8 @@ def test_create_webhook_stores_apprise_jsons_url(api):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT credential_encrypted FROM user_channels WHERE channel_type='webhook'"
             )
@@ -280,7 +280,7 @@ def test_create_webhook_http_stores_json_url(api):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT credential_encrypted FROM user_channels WHERE channel_type='webhook'"
             )
@@ -327,7 +327,7 @@ def test_create_email_stores_mailtos_url(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT credential_encrypted FROM user_channels WHERE channel_type='email'"
             )

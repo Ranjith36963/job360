@@ -3,13 +3,12 @@
 `require_verified_user` returns 403 `email_not_verified` for a logged-in but
 unverified user; verified users pass. `POST /api/search` is gated with it.
 """
-import sqlite3
-
 import pytest
 from fastapi import HTTPException
 
 import src.core.settings as settings_mod
 from src.api.auth_deps import CurrentUser, require_verified_user
+from src.repositories import pgsync
 
 
 @pytest.mark.asyncio
@@ -32,7 +31,7 @@ async def test_search_route_blocks_unverified_user(authenticated_async_context):
     """Unverified user → POST /api/search → 403 (before any pipeline runs)."""
     uid = authenticated_async_context.fixture_user_id
     # conftest verifies the fixture user by default; un-verify for this test.
-    conn = sqlite3.connect(str(settings_mod.DB_PATH))
+    conn = pgsync.connect(str(settings_mod.DB_PATH))
     conn.execute("UPDATE users SET email_verified_at = NULL WHERE id = ?", (uid,))
     conn.commit()
     conn.close()

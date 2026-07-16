@@ -403,7 +403,7 @@ async def test_jobs_response_no_n_plus_one_for_enrichment(
     monkeypatch,
 ):
     """B6: listing 5 enriched jobs uses ONE joined SELECT for enrichment,
-    not one per row. We instrument aiosqlite.Connection.execute and assert
+    not one per row. We instrument pg.Connection.execute and assert
     the count of `SELECT ... FROM job_enrichment` queries is at most 1
     across the whole /api/jobs request."""
     db = await api_deps.get_db()
