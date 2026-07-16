@@ -288,7 +288,7 @@ The codebase has accumulated 4 major phases of work. Each section here gives **o
 
 ### Phase 1–2.5 (legacy, profile system + reliability)
 
-Done in commits `0d3ef72` → `a814ae8`. Outcome: dynamic per-user profile (CV + LinkedIn PDF + GitHub) replaces hard-coded AI/ML keywords; clean-architecture restructure (`backend/src/`, `frontend/src/`, phase-4 rename of `filters/` → `services/`, `notifications/` + `profile/` → `services/{notifications,profile}/`, `storage/` → `repositories/`, `config/` → `core/`); LLM-only CV parsing via Gemini/Groq/Cerebras fallback chain.
+Dynamic per-user profile (CV + LinkedIn PDF + GitHub) replaces hard-coded AI/ML keywords; clean-architecture restructure (rename of `filters/` → `services/`, `notifications/` + `profile/` → `services/{notifications,profile}/`, `storage/` → `repositories/`, `config/` → `core/`); LLM-only CV parsing via Gemini/Groq/Cerebras fallback chain.
 
 ### Pillar 3 Batch 2 (multi-user delivery layer)
 
@@ -296,7 +296,7 @@ Adds: auth (`users`, `sessions`), per-tenant isolation (`user_actions` / `applic
 
 ### Pillar 3 Batch 3 (tiered polling + source expansion)
 
-Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators, +5 sources (teaching_vacancies, gov_apprenticeships, nhs_jobs_xml, rippling, comeet), −3 drops (yc_companies, nomis, findajob), ATS slug catalog 104 → 268, source count 48 → 50. Rules added: #13 / #14 / #15. M6 rotation (2026-06): −4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), source count 50 → 46. gov_apprenticeships restored 2026-06-16 on the DfE Display Advert API v2 (keyed), source count 46 → 47.
+Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators. Rules added: #13 / #14 / #15. (Source add/drop history + the current count live in the Sources section, Common Gotchas, and `STATUS.md`.)
 
 ### Pillar 2 (search & match engine upgrade)
 
@@ -304,21 +304,13 @@ Adds: `skill_synonyms.py` (493-entry alias dict), `fx.py` (18-currency → GBP),
 
 ### Step 3 (control-surface batch — closed at origin/main `7194d0e` PR #9)
 
-Adds: 8 new endpoints (account-mgmt × 3, notification-rules × 4, runs × 1, plus `/jobs/{id}/duplicates`, `/profile/versions/{a}/diff/{b}`, `/pipeline/{id}/{timeline,notes}`); migrations 0012 (`notification_rules` + `users.timezone`), 0013 (`user_notification_digests`), 0014 (`applications.{last_advanced_at,interview_dates,notes_history}` + `application_stage_history`); dispatcher rule consultation with timezone-aware quiet hours; ARQ periodic tasks `send_daily_digest` + `nightly_ghost_sweep`; 5 new frontend pages (`/settings/{layout,page,notifications,account}`, `/notifications`); KanbanBoard polish (timeline drawer, notes editor, filter panel, confirmation dialogs). Reviewer pass closed R-1..R-7. Rules added: #23 / #24 / #25 / #26.
-
-**Step 3 carry-overs — all DONE/shipped:** RHF + zod form validation (V-01..V-03) ✓, CV upload size cap + MIME allowlist 413/415 (V-04) ✓, OpenAPI → TS codegen M7 (V-05) ✓, `@dnd-kit/*` keyboard a11y on KanbanBoard (C-07) ✓.
+Adds: 8 new endpoints (account-mgmt × 3, notification-rules × 4, runs × 1, plus `/jobs/{id}/duplicates`, `/profile/versions/{a}/diff/{b}`, `/pipeline/{id}/{timeline,notes}`); migrations 0012 (`notification_rules` + `users.timezone`), 0013 (`user_notification_digests`), 0014 (`applications.{last_advanced_at,interview_dates,notes_history}` + `application_stage_history`); dispatcher rule consultation with timezone-aware quiet hours; ARQ periodic tasks `send_daily_digest` + `nightly_ghost_sweep`; new `/settings/*` + `/notifications` frontend pages; KanbanBoard polish. Rules added: #23 / #24 / #25 / #26. (Carry-overs — RHF+zod validation, CV upload caps, OpenAPI→TS codegen, dnd-kit a11y — all shipped.)
 
 ### Matcher batch (funnel → judge, post-Step-3)
-
-Commits a925f42..d801f78, plus 76f6ca7 (Python 3.9 compat fix) and 6974bb6 (dashboard sort fix). Branch: `fix/per-user-search-and-scoring-gate`.
 
 Adds engine #4 — the LLM judge: `services/llm_matcher.py` (`MatchVerdict`, `match_batch` with semaphore-3 concurrency, skip-existing logic); migration 0017 (`user_feed` gains `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`); `_run_matcher_stage` pipeline stage runs after the per-user feed write in `src/main.py`; API `/api/jobs` response now exposes `llm_*` fields; `user_feed` reads rank by `COALESCE(llm_fit_score, score) DESC`; frontend dashboard shows an AI-verdict badge and sorts by the judge score.
 
 **Rule analog (same spirit as rule #18):** `MATCHER_ENABLED` defaults `false`. With the flag off, pipeline behaviour is byte-identical to pre-batch — no extra LLM calls, no extra DB writes. With it on, only jobs whose keyword `match_score >= MATCHER_THRESHOLD` (default 30) are judged, up to `MATCHER_MAX_JOBS` (default 30) per user per run.
-
-**Measured performance:** 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras chain, zero provider failures). Judge spread 20–92 vs keyword engine 30–43 on the same corpus. Fit-bucket accuracy 10/10 on the labeled sample; correctly rejected every intern role for a senior-level profile.
-
-**Known follow-ons (backlog):** ~~re-judge when profile changes (#8)~~ **DONE (2026-06-13, migration 0018 + rescore.py)**, judge telemetry (#9), Level-6 single-call experiment combining enrichment + judge (#10).
 
 **Profile-version re-score (automatic, no new flags).** Every `user_feed` row is now stamped with the `user_profile_versions` ID that produced its score. Two modes:
 - **Profile changes** → the API trigger in `profile.py` detects the change, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile (keyword re-score always; LLM re-judge only if `MATCHER_ENABLED=true`).

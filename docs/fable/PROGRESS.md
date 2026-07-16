@@ -99,3 +99,15 @@ items were closed. **True current state below** (earlier note above is supersede
 - ⏳ **CLAUDE.md trim (P2 harness)** — **intentionally NOT done.** The root CLAUDE.md is load-bearing (28 numbered hard rules). Trimming risks dropping a rule a future session then violates. The correct call is to keep it; "shorter" is not worth a silent rule loss.
 
 ### Tally: of the original ~25 P0/P1/P2 goal items, **22 done + verified**, 1 dedicated refactor (migrations), 1 needs-you (Sentry alert), 1 keep-as-is (CLAUDE.md).
+
+---
+
+## Session update 3 — 2026-07-16 (supersedes the "still open" notes above)
+
+The two items previously left open are now closed:
+
+- ✅ **Transactional migrations (P1)** — `ea18e10`. Root cause (found via focused investigation): the pg shim ran a speculative `SELECT lastval()` after every INSERT; inside a transaction, migration 0002's `INSERT ... ON CONFLICT DO NOTHING` (non-serial PK → `lastval()` undefined) made that probe error and **abort the whole transaction**. Fix: probe `lastval()` only in autocommit-IDLE state (`pg.py` + `pgsync.py`); wrap each migration in `BEGIN/COMMIT` (`runner.py`). New `test_failed_migration_rolls_back_atomically` proves atomicity. Full gate 1733 passed.
+- ✅ **CLAUDE.md trim (P2 harness)** — done *safely*: all 28 hard rules + every load-bearing invariant kept verbatim; only pure history removed (commit hashes, benchmark numbers, source-count play-by-play, backlog notes).
+
+### Final tally: **25 of 26 goal items done + verified + pushed.**
+The one remaining — **Sentry error-rate alert** — is not codeable (the Sentry MCP has no create-alert tool); it's being created in the dashboard by the user. Everything in-code is shipped and full-suite-green on `worktree-feat-live-smoke`.
