@@ -33,12 +33,16 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 | Tier | What | When | Cost |
 |------|------|------|------|
 | **1 — Tripwire** | `scripts/doc_sync_check.py` compares hard code facts (source count, migration head, …) against every numeric doc claim; opens a GitHub issue on drift | **Daily, automatic** (CI cron, this PR) | Free, no LLM |
-| **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR | After every merged feature batch, or whenever Tier 1 fires | One Claude session |
+| **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR. **Runs AUTOMATICALLY in CI** when Tier 1 finds drift (the `auto-fix` job launches a Claude session — needs the one-time `CLAUDE_CODE_OAUTH_TOKEN` repo secret). Can also be run by hand anytime. | Automatic on drift; manual anytime | One Claude session |
 | **3 — Auditor** | The `/doc-audit` skill: full lifecycle pass — classify docs, archive IMPLEMENTED plans, park contradictions, find undocumented modules, write the health report | Weekly, or after a multi-PR day | One Claude session |
 
-Tier 1 watches every day for free. Tiers 2–3 are one slash command each —
-run them when the tripwire pings or a batch lands. (No unattended write-loop:
-that is a deliberate Loop-1-incident lesson, not a missing feature.)
+Tier 1 watches every day for free; Tier 2 fixes automatically when Tier 1
+fires. The write-loop is caged, not banned: the auto-fixer may edit **only
+`*.md` files**, its PR auto-merges **only when the diff is 100% markdown**
+(a deterministic CI check, not the LLM's own claim), and any non-markdown
+file in the diff blocks the merge and flags the PR for human review. Code
+changes still always require a human — the Loop-1 lesson holds where it
+matters.
 
 ## 4. Hard rules
 

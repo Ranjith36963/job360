@@ -31,6 +31,8 @@ concurrency:
 jobs:
   drift-check:
     runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.check.outputs.drift }}
     steps:
       - uses: actions/checkout@v4
 
@@ -98,3 +100,74 @@ jobs:
           if [ -n "$num" ] && [ "$num" != "null" ]; then
             gh issue close "$num" --comment "Drift resolved — docs match code again. (Loop 3 auto-close)"
           fi
+
+  # ────────────────────────────────────────────────────────────────────
+  # Auto-fixer: when the scheduled check finds drift, a Claude session
+  # runs IN CI, follows .claude/skills/sync/SKILL.md, fixes the docs,
+  # stamps them, and opens a docs-only PR. If the diff is 100% *.md files
+  # it enables auto-merge (squash) — code can never ride this train.
+  # Needs the CLAUDE_CODE_OAUTH_TOKEN repo secret (one-time setup:
+  # run `claude setup-token` locally, then
+  # `gh secret set CLAUDE_CODE_OAUTH_TOKEN`). Skips politely if absent.
+  # ────────────────────────────────────────────────────────────────────
+  auto-fix:
+    needs: drift-check
+    if: >
+      github.event_name != 'pull_request' &&
+      needs.drift-check.outputs.drift == '1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Check fixer token present
+        id: token
+        run: echo "have=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.have == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Claude fixes the docs (Loop 3 Tier-2, automated)
+        if: steps.token.outputs.have == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the automated Tier-2 doc fixer (Loop 3). Follow
+            .claude/skills/sync/SKILL.md exactly, with these constraints:
+            - Run `python scripts/doc_sync_check.py` first; fix EVERY drift
+              row it reports (numbers, stale phrases) in the LIVING docs.
+            - Add/update the `<!-- last-verified: YYYY-MM-DD by /sync -->`
+              stamp on line 2 of all six LIVING docs.
+            - If a doc claims something the code does not do, add it to
+              docs/maintenance/PARKED.md — never describe missing code as real.
+            - Edit ONLY *.md files. Never touch code, configs, or workflows.
+            - Branch: docs/sync-auto-${{ github.run_id }}. Commit, push, then
+              open a PR titled "docs: auto-sync (Loop 3)" whose body is the
+              before/after drift report. Do NOT merge it.
+            - Re-run scripts/doc_sync_check.py at the end; include its output
+              in the PR body as proof (should report freshness-only or clean).
+          claude_args: "--allowedTools 'Bash,Edit,Write,Read,Glob,Grep'"
+
+      - name: Enable auto-merge only if the PR is 100% markdown
+        if: steps.token.outputs.have == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr=$(gh pr list --head "docs/sync-auto-${{ github.run_id }}" --json number -q '.[0].number')
+          [ -n "$pr" ] && [ "$pr" != "null" ] || { echo "no PR created — nothing to merge"; exit 0; }
+          nonmd=$(gh pr view "$pr" --json files -q '.files[].path' | grep -vc '\.md$' || true)
+          if [ "$nonmd" -eq 0 ]; then
+            gh pr merge "$pr" --auto --squash \
+              || gh pr comment "$pr" --body "Docs-only diff verified, but auto-merge is unavailable (no branch protection?). Merge manually."
+          else
+            gh pr comment "$pr" --body "⚠️ Auto-merge REFUSED: this PR touches $nonmd non-markdown file(s). A doc-sync PR must be 100% docs — review carefully."
+          fi
+
+      - name: Note when fixer is not configured
+        if: steps.token.outputs.have != 'true'
+        run: echo "CLAUDE_CODE_OAUTH_TOKEN secret not set — drift issue filed, auto-fix skipped." >> "$GITHUB_STEP_SUMMARY"
