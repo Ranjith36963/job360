@@ -56,9 +56,15 @@ export async function middleware(request: NextRequest) {
     });
     if (!verify.ok) return bounceToLogin();
   } catch {
-    // Backend unreachable: fail OPEN (let the page load; its API calls surface the
-    // error) rather than locking everyone out if the backend is briefly down.
-    return NextResponse.next();
+    // Backend unreachable: fail CLOSED (docs/fable/03 F4) — an UNVERIFIED
+    // session must not grant access to a protected page. Deliberately DIFFERENT
+    // from bounceToLogin(): the cookie is NOT deleted (the outage is ours; the
+    // session may be perfectly valid once the backend recovers), and an error
+    // marker tells the login page to explain rather than look like a logout.
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    loginUrl.searchParams.set("error", "service_unavailable");
+    return NextResponse.redirect(loginUrl, { status: 307 });
   }
 
   return NextResponse.next();

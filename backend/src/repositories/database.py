@@ -932,27 +932,37 @@ class JobDatabase:
         )
         row = await cursor.fetchone()
         from_stage = row[0] if row else None
-        await self._conn.execute(
-            """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
-               WHERE user_id = ? AND job_id = ?""",
-            (stage, now, now, user_id, job_id),
-        )
-        # Insert history entry (Step-3 B-06). Gracefully skips if the
-        # application_stage_history table doesn't exist yet (e.g. migration
-        # 0014 hasn't run) so existing tests remain green.
+        # Stage move + its history row commit together or not at all (docs/
+        # fable/02 D11): previously each statement auto-committed, so a crash
+        # between them moved the card but silently dropped the history entry.
+        # The history INSERT sits behind a SAVEPOINT so the long-standing
+        # tolerance for a missing application_stage_history table (init_db-only
+        # test flows, pre-0014) skips JUST the history — without the savepoint
+        # that error would abort the whole transaction and undo the UPDATE.
+        await self._conn.execute("BEGIN")
         try:
             await self._conn.execute(
-                """INSERT INTO application_stage_history
-                   (job_id, user_id, from_stage, to_stage, transitioned_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (job_id, user_id, from_stage, stage, now),
+                """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
+                   WHERE user_id = ? AND job_id = ?""",
+                (stage, now, now, user_id, job_id),
             )
-        except Exception:  # noqa: BLE001, S110
-            # Table not yet created (migration 0014 not run) — tolerate gracefully.
-            # Logging is omitted intentionally: this is a known transient state
-            # during init_db()-only flows (tests) before the runner applies the DDL.
-            pass  # noqa: S110
-        await self._conn.commit()
+            await self._conn.execute("SAVEPOINT _adv_hist")
+            try:
+                await self._conn.execute(
+                    """INSERT INTO application_stage_history
+                       (job_id, user_id, from_stage, to_stage, transitioned_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (job_id, user_id, from_stage, stage, now),
+                )
+                await self._conn.execute("RELEASE SAVEPOINT _adv_hist")
+            except Exception:  # noqa: BLE001
+                # Table not yet created (migration 0014 not run) — keep the
+                # stage move, skip only the history row.
+                await self._conn.execute("ROLLBACK TO SAVEPOINT _adv_hist")
+            await self._conn.execute("COMMIT")
+        except Exception:
+            await self._conn.execute("ROLLBACK")
+            raise
         return await self._get_application(job_id, user_id)
 
     async def _get_application(self, job_id: int, user_id: str) -> dict:
@@ -1313,10 +1323,10 @@ class JobDatabase:
     # email_verifications, oauth_states. Those hold short-lived security tokens,
     # not portable personal data; exporting them would hand out live credentials.
     _EXPORT_TABLES = (
-        "applications", "application_stage_history", "notification_ledger",
-        "notification_rules", "tailored_documents", "tailored_usage",
-        "user_actions", "user_channels", "user_feed", "user_profile_versions",
-        "user_profiles",
+        "applications", "application_stage_history", "audit_log",
+        "notification_ledger", "notification_rules", "tailored_documents",
+        "tailored_usage", "user_actions", "user_channels", "user_feed",
+        "user_profile_versions", "user_profiles",
     )
 
     # Secret-bearing columns are redacted even inside exported tables — e.g. the
@@ -1402,6 +1412,17 @@ class JobDatabase:
         try:
             await self._conn.execute(
                 "UPDATE run_log SET user_id = NULL WHERE user_id = ?", (user_id,)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        # audit_log (migration 0025): same retention pattern — the security
+        # history (a login happened, from this IP) is kept for legitimate
+        # interest, but the personal link is severed. detail never holds email
+        # (audit_trail denylists it), so NULLing user_id fully anonymises.
+        try:
+            await self._conn.execute(
+                "UPDATE audit_log SET user_id = NULL WHERE user_id = ?", (user_id,)
             )
         except Exception:  # noqa: BLE001
             pass

@@ -144,6 +144,13 @@ def setup_audit_logger() -> logging.Logger:
     )
     handler.setFormatter(JSONFormatter())
     audit.addHandler(handler)
+    # docs/fable/05 C8 — tee the same records into the audit_log DB table so
+    # audit history survives file rotation and is queryable with SQL. Lazy
+    # import: audit_trail pulls in the DB layer, which this low-level logging
+    # module must not import at module scope.
+    from src.services.audit_trail import install_db_audit_trail
+
+    install_db_audit_trail(audit)
     return audit
 
 

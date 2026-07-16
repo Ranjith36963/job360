@@ -203,11 +203,29 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
 
 function LoginForm() {
   const [mode, setMode] = useState<"magic" | "password">("magic");
+  const searchParams = useSearchParams();
+  // Set by the middleware when it fails CLOSED on a backend outage (fable/03
+  // F4): the user was redirected here even though their session may be fine.
+  // Explain that, so the bounce doesn't read as "you were logged out".
+  const serviceDown = searchParams.get("error") === "service_unavailable";
 
-  return mode === "magic" ? (
-    <MagicLinkForm onUsePassword={() => setMode("password")} />
-  ) : (
-    <PasswordForm onUseMagic={() => setMode("magic")} />
+  return (
+    <>
+      {serviceDown && (
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-yellow-600/40 bg-yellow-500/10 p-3 text-sm text-yellow-500"
+        >
+          We couldn&apos;t reach the server to verify your session — you may still be
+          signed in. Please try again in a moment.
+        </p>
+      )}
+      {mode === "magic" ? (
+        <MagicLinkForm onUsePassword={() => setMode("password")} />
+      ) : (
+        <PasswordForm onUseMagic={() => setMode("magic")} />
+      )}
+    </>
   );
 }
 
