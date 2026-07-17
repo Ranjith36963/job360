@@ -11,6 +11,8 @@ in-memory/tmp SQLite DB. No live HTTP. (CLAUDE.md rule #4)
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from src.models import Job
@@ -257,39 +259,60 @@ async def test_job_duplicates_accessible_unauthenticated(authenticated_async_con
 
 @pytest.mark.asyncio
 async def test_profile_version_diff_changes(authenticated_async_context):
-    """Two versions with different preferences → diff endpoint returns 200 with changes."""
-    async with authenticated_async_context() as client:
-        # Save version 1
-        r1 = await client.post(
-            "/api/profile",
-            data={"preferences": '{"target_job_titles": ["Engineer"]}'},
-        )
-        assert r1.status_code == 200
+    """Two versions with different CV text → diff endpoint DETECTS the change.
 
-        # Save version 2 with different content
-        r2 = await client.post(
-            "/api/profile",
-            data={"preferences": '{"target_job_titles": ["Scientist"]}'},
-        )
-        assert r2.status_code == 200
+    The diff endpoint compares ``cv_data`` (profile_json) between versions, not
+    ``preferences`` (see ``diff_profile_versions`` in routes/profile.py) — so the
+    two saves below change the CV text (which lands in ``cv_data.raw_text``) to
+    actually produce a non-empty diff. A shape-only check (`"changed_fields" in
+    body`) would pass even for a diff engine that always returns `[]`; this
+    asserts the specific changed field name is present.
+    """
+    with patch(
+        "src.api.routes.profile.run_two_pass_extraction",
+        new=AsyncMock(return_value=None),
+    ):
+        async with authenticated_async_context() as client:
+            # Save version 1 with CV text A
+            with patch(
+                "src.api.routes.profile.extract_text",
+                new=lambda path: "Software Engineer with Python experience.",
+            ):
+                r1 = await client.post(
+                    "/api/profile",
+                    files={"cv": ("cv1.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+                )
+            assert r1.status_code == 200
 
-        list_resp = await client.get("/api/profile/versions")
-        assert list_resp.status_code == 200
-        versions = list_resp.json()["versions"]
-        assert len(versions) >= 2
+            # Save version 2 with different CV text
+            with patch(
+                "src.api.routes.profile.extract_text",
+                new=lambda path: "Data Scientist with R and machine learning experience.",
+            ):
+                r2 = await client.post(
+                    "/api/profile",
+                    files={"cv": ("cv2.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+                )
+            assert r2.status_code == 200
 
-        v_new = versions[0]["id"]
-        v_old = versions[1]["id"]
+            list_resp = await client.get("/api/profile/versions")
+            assert list_resp.status_code == 200
+            versions = list_resp.json()["versions"]
+            assert len(versions) >= 2
 
-        diff_resp = await client.get(f"/api/profile/versions/{v_old}/diff/{v_new}")
+            v_new = versions[0]["id"]
+            v_old = versions[1]["id"]
+
+            diff_resp = await client.get(f"/api/profile/versions/{v_old}/diff/{v_new}")
 
     assert diff_resp.status_code == 200
     body = diff_resp.json()
     assert body["version_id1"] == v_old
     assert body["version_id2"] == v_new
     assert "changes" in body
-    assert "changed_fields" in body
-    assert isinstance(body["changed_fields"], list)
+    # The changed CV text must actually be detected, not just an empty shape.
+    assert "raw_text" in body["changed_fields"]
+    assert body["changes"]["raw_text"]["from"] != body["changes"]["raw_text"]["to"]
 
 
 @pytest.mark.asyncio

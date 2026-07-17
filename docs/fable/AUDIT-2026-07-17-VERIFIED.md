@@ -707,3 +707,14 @@ thread leak on timeout) needs a killable process pool — a larger dedicated cha
 | **M7** | PARTIAL (`upsert_tailored_doc` not atomic) | `repositories/database.py:775` — DELETE+INSERT wrapped in one `async with self._conn.transaction()`; a failure between them rolls back so the user's existing tailored doc survives. Tests: `test_cv_coverletter.py` (atomic replace + INSERT-fails-keeps-original). |
 | **M16** | OPEN_BUG (403 force-navigates, discards form) | `lib/api.ts` no longer sets `window.location` on 403 `email_not_verified`; it throws a typed `ApiError.isEmailNotVerified` and emits a notifier. `components/layout/AuthProvider.tsx` subscribes and does the single top-level `router.push("/verify-email")` (guarded). Tests: api-error / api / AuthProvider. |
 | **M17** | OPEN_BUG (board renders off `counts` not data) | `app/pipeline/page.tsx` — EmptyState-vs-board now gates on `applications.length` (the data actually rendered), not the independent `counts` total. Test: `pipeline-page-empty-state.test.tsx`. |
+
+---
+
+## ✅ CLOSED in Batch 4 — Test quality + doc (2026-07-18)
+
+| ID | Was | Now fixed at |
+|---|---|---|
+| **T4** | OPEN_BUG (no migration test on a populated table) | `tests/test_migrations.py::test_0020_notification_rules_rebuild_preserves_existing_row` — seeds a real `notification_rules` row at the pre-0020 schema, runs the 0020 DROP+recreate rebuild, asserts the row survives with correctly-translated (`digest`→`daily`) and correctly-DEFAULTED (`daily_send_time`, `interval_hours`) values. Guards the H2/H6 data-loss class. |
+| **T6-T9** | PARTIAL (weak assertions unfixed) | `test_database.py` + `test_tenancy_isolation.py`: `pytest.raises(Exception)` → `pytest.raises(pg.IntegrityError)`, setup insert moved outside the block (so only the duplicate is asserted). `test_discovery.py` + `test_profile_versions_endpoint.py`: shape-only `"changed_fields" in body` strengthened to assert the specific changed field NAME is present (a diff returning `[]` now fails). |
+| **T12** | OPEN_ACCEPTED (no real concurrent-write test) | `tests/test_concurrent_writes.py` — two real `pg.connect()` connections race `upsert_feed_row` (INSERT…ON CONFLICT) on the same `user_feed` row via `asyncio.gather`; asserts neither raises, exactly one row survives, and the final state is one of the two valid writes (never a corrupt hybrid). |
+| **T5** | OPEN_ACCEPTED (rule #28 lists a live file as "being removed") | root `CLAUDE.md` rule #28 — `skill_synonyms.py` removed from the "offenders being removed" list and scoped OUT with a stated reason (it's scoring/keyword-generation vocabulary in `skill_matcher`/`keyword_generator`, NOT profile extraction under `services/profile/`). Rule text now matches reality. |
