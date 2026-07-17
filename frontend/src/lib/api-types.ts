@@ -1678,6 +1678,11 @@ export interface components {
             deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
+            /**
+             * Dims Active
+             * @default false
+             */
+            dims_active: boolean;
             /** Employment Type */
             employment_type?: string | null;
             /**
@@ -1760,6 +1765,11 @@ export interface components {
             /** Salary Period */
             salary_period?: string | null;
             /**
+             * Salary Score
+             * @default 0
+             */
+            salary_score: number;
+            /**
              * Semantic
              * @default 0
              */
@@ -1791,8 +1801,18 @@ export interface components {
             transferable_skills: string[];
             /** Visa Flag */
             visa_flag: boolean;
+            /**
+             * Visa Score
+             * @default 0
+             */
+            visa_score: number;
             /** Visa Sponsorship */
             visa_sponsorship?: boolean | null;
+            /**
+             * Workplace Score
+             * @default 0
+             */
+            workplace_score: number;
             /** Workplace Type */
             workplace_type?: string | null;
             /** Years Experience Min */

@@ -29,6 +29,7 @@ from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
+from src.utils.logger import mask_email
 
 logger = logging.getLogger("job360.auth.password_reset")
 
@@ -105,7 +106,7 @@ async def request_password_reset(
         row = await cur.fetchone()
         if row is None:
             # Don't leak existence. Caller still returns 204.
-            logger.info("password reset requested for unknown email: %s", email)
+            logger.info("password reset requested for unknown email: %s", mask_email(email))
             return False
         user_id = row["id"]
 

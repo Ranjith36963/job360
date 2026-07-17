@@ -317,6 +317,17 @@ async def test_jobs_response_includes_score_dim_breakdown(authenticated_async_co
     # Unset dims default to 0 (Pillar 2.9 sentinel for "not scored").
     assert body["experience"] == 0
     assert body["credentials"] == 0
+    # The three dims the engine computed and then DISCARDED are now part of the
+    # contract. They only carry values on the per-user recompute path (they
+    # depend on the caller's preferences, so they are deliberately NOT columns
+    # on the shared catalog — rules #10/#17); here they are present and 0.
+    for dim in ("salary_score", "visa_score", "workplace_score"):
+        assert dim in body, f"{dim} missing from JobResponse: {body}"
+    # dims_active must be explicit and FALSE with no enrichment row. This is the
+    # honest half of the fix: 0 is ambiguous (never-measured vs a real earned 0
+    # like visa_score=0 when you need sponsorship), so the UI needs this flag to
+    # know whether it may draw those axes at all.
+    assert body["dims_active"] is False
     assert body["penalty"] == 0
 
 

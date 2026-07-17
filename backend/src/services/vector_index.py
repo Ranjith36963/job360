@@ -13,10 +13,19 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from src.core.settings import DATA_DIR
+
 logger = logging.getLogger("job360.services.vector_index")
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parents[3] / "data" / "chroma"
+# Sourced from settings.DATA_DIR — the ONE place the app defines where runtime
+# data lives (jobs.db, exports/, logs/, chroma/). It previously hand-counted
+# `Path(__file__).resolve().parents[3]`, which is the REPO ROOT, not backend/:
+# the store was written to <repo>/data/chroma while the docstring, .gitignore
+# and every other component expected backend/data/chroma. Nothing else could
+# find it, and a container that only persists backend/data/ dropped it on every
+# redeploy. Deriving from DATA_DIR makes that drift impossible.
+_DEFAULT_PATH = DATA_DIR / "chroma"
 _COLLECTION_NAME = "jobs"
 
 

@@ -124,3 +124,113 @@ The one remaining — **Sentry error-rate alert** — is not codeable (the Sentr
 - ✅ **Stale Sentry issue P2**: PYTHON-FASTAPI-2 resolved live via the Sentry API with explanation.
 
 ### Remaining (all deliberate): D7/D8 (dev-only down migrations), D12 (splitter — latent), F2 (double-gated E2E bypass), O8 (mypy grandfathered), C11 (MFA — scoped feature). Non-code needs-user: privacy/terms, subprocessors, scraping decision, breach plan, backup region.
+
+---
+
+## Session update 5 — 2026-07-16 — cross-session findings (SI1/M5/SI3/M8)
+
+Verified another session's list against real code:
+
+- **M5 — "purge deletes live jobs": ALREADY FIXED, not a bug.** `purge_old_jobs` keys on `COALESCE(last_seen_at, first_seen) < cutoff` (`4e41e86`), and `main.py:201` calls `update_last_seen()` for every job each successful scrape (behind a completeness gate so a rate-limited scrape isn't treated as absence). A live job keeps its `last_seen_at` fresh and survives. The finding describes the OLD `first_seen` behaviour.
+- **SI3 — ChromaDB wrong path: CONFIRMED + FIXED.** `vector_index.py` hand-counted `parents[3]`, which is the REPO ROOT, not `backend/` — the store went to `<repo>/data/chroma` while the docstring, `.gitignore` and every other component expected `backend/data/chroma`. Now derived from `settings.DATA_DIR` (the single source of truth) so it cannot drift again. 4 regression tests.
+- **M8 — "unclamped dim scores": CONFIRMED (in the RADAR, not the scorers) + clamp FIXED.** All four dim scorers are bounded by construction (`salary_score` even has `min(ratio, 1.0)`) and the combined `match_score` IS clamped (`skill_matcher.py:414,551`, rule #27 holds). The real bug was `ScoreRadar.tsx`: `value: Math.round((raw/d.max)*100)` with no bound. Now clamped to [0,100] — drawing only; raw stays verbatim in tooltip/aria.
+- **SI1 — notifications disconnected in prod: CODE OK, DEPLOYMENT missing.** Worker code + dispatch + tick are tested and healthy. Needs a Railway **worker service** (`arq src.workers.settings.WorkerSettings`) + **Redis** + SMTP/channel creds. Owner action.
+
+### ⚠️ NEW finding (discovered while verifying M8) — ScoreRadar shows a model that doesn't exist
+`ScoreRadar.tsx` DIMENSIONS maxes sum to exactly 100 (15+20+10+10+5+10+10+20) — an aspirational 8-dim model. The backend writes the LEGACY weights and only 5 of the 8 dims (`main.py:626-634`: role, skill, location_score, recency, seniority_score). Consequences:
+- `role` max **15** vs real `TITLE_WEIGHT=40` → a full title match plots as **267%** (now clamped to 100, but the % shown is still wrong).
+- `skill` max **20** vs real `SKILL_WEIGHT=40` → **200%**.
+- `seniority_score` max **10** vs real `SENIORITY_WEIGHT=8` → full marks reads as 80%; a penalty reads negative.
+- `experience`, `credentials`, `semantic` are **never populated** → three axes permanently 0.
+The clamp stops the broken geometry, but the underlying mismatch is a **product decision** (implement the 8-dim model, or retune the radar to the 5 real dims + real weights) and stays OPEN for the owner. Radar tests currently pin the wrong maxes ("12/15", "18/20", "8/10").
+
+---
+
+## Session update 6 — 2026-07-16 — the Score Radar told a lie (Fable-advised)
+
+### What was wrong
+The "8D Score Radar" — the app's hero element — displayed a scoring model that **never existed**. Three layers each believed a different model:
+
+| Layer | Dimensions |
+|---|---|
+| **Engine computes** (`skill_matcher.py` → `ScoreBreakdown`) | title 40, skill 40, location 10, recency 10, seniority ±8, **salary 10, visa 6, workplace 6** |
+| **DB stores** (migration 0011) | role, skill, seniority, location, recency, **experience, credentials, semantic, penalty** |
+| **Radar drew** (`ScoreRadar.tsx`) | role(15), skill(20), seniority(10), **experience(10), credentials(5)**, location(10), recency(10), **semantic(20)** |
+
+Only **5 of 8 overlapped**. Consequences that shipped to users:
+- `role` max **15** vs real `TITLE_WEIGHT=40` → a perfect title match plotted at **267%**, spiking outside the grid; `skill` 20 vs 40 → 200%.
+- `experience` / `credentials` / `semantic` / `penalty` were **never computed by anything** → 4 permanently-zero axes (the exact trap rule #21 warns about).
+- `salary` / `visa` / `workplace` **were computed every request and silently discarded** — real signal the user never saw.
+
+### Root cause (git-verified)
+The **chart came first and the database was bent to fit it.** `207a71a` (2026-04-08) shipped the frontend with 8 *invented* axes whose maxes sum to a tidy 100. `5ef2e49` (2026-04-25, Step 1.5) then added migration 0011 with the 9 columns *the UI expected* — `main.py:623` admits it: *"Engine doesn't currently produce experience/credentials/semantic/penalty — those columns persist as 0 until later batches."* Those batches never came. Authority ran **UI → API → DB**, with the engine evolving independently.
+
+### The decision (Fable's recommendation, adopted): point the chart at the engine
+**Do NOT build the missing dims to justify the chart.** The lucky fact: the real engine has *exactly 8* dimensions, so the 8-axis hero survives — only the labels/maxes/source change.
+- Rejected "implement experience/credentials": would mean **inventing scoring rules to fill a drawing**, disturbing the clamped 130→100 economy (rule #27) and the 53+55 scorer/profile tests (rule #9).
+- Rejected "implement semantic": it needs `SEMANTIC_ENABLED`, default OFF (rule #18) — you'd build a dim that is structurally 0 for most users. Same bug, new paint.
+- **No new DB columns, deliberately.** salary/visa/workplace depend on the **caller's preferences**; a column on the shared `jobs` catalog would bake user A's salary target into a row user B reads (rules #10/#17). The detail route already recomputes the full breakdown per-user at read time — the three dims were literally sitting in a local variable and being dropped. Surfacing them = copying three fields.
+
+### The honest half: `dims_active`
+With enrichment off (the default), the four enrichment dims are hard 0. An 8-axis radar with 4 dead axes looks broken — and plotting 0% is a **lie**. So the API sends an explicit `dims_active` boolean and the UI renders those axes **dormant** ("not measured") instead.
+**Never infer dormancy from zeros**: 0 is ambiguous — it can be a real, *earned* 0 (`visa_score=0` because the caller needs sponsorship and the job offers none). Tests pin both directions.
+
+### Shipped (PR 1 — safe half, no scoring maths touched)
+- `api/models.py`: `JobResponse` gains `salary_score`, `visa_score`, `workplace_score`, `dims_active`; dead fields kept (removal = PR 2).
+- `api/routes/jobs.py`: surfaces the three discarded dims + sets `dims_active` from the enrichment-lookup hit.
+- `ScoreRadar.tsx`: 8 REAL dims at REAL weights (40/40/10/10/8/10/6/6); dormant rendering; draw-clamp retained (now guarding the −8 seniority case only); average excludes dormant axes.
+- `JobDetailClient.tsx`: header "8D Score Breakdown" → **"Score Drivers"** — the axes do *not* break down the score and must never be summed to it.
+- Tests rewritten (10) — they previously **pinned the fiction** ("12/15", "18/20").
+
+### ⚠️ Traps for whoever touches this next
+1. **Dims never sum to `match_score`.** Raw max 130 clamped to 100; the −30/−15 title/location penalties live on **no axis**. Any `total = sum(axes)` will visibly contradict the score badge. Total comes from `match_score`, always.
+2. **Zero is ambiguous, always.** Only `dims_active` separates "not measured" from "scored zero". Anyone "simplifying" by inferring from zeros re-introduces the lie subtly.
+3. **Negative seniority can't be drawn** (a radar's centre is 0). The draw-clamp is NOT obsolete after the max fix — it is now *only* guarding the −8 case. Removing it re-inverts the polygon.
+4. **The 4 enrichment weights are env-tunable** (`settings.py:148-151`) but title/skill/location/recency are hardcoded — retuning `SALARY_WEIGHT` in prod silently drifts from the frontend's hardcoded maxes. Cheap insurance: emit the maxes with `dims_active`.
+
+### Still OPEN — PR 2 (needs owner sign-off)
+Remove `experience`/`credentials`/`semantic`/`penalty` from `JobResponse` + the `Job` dataclass + `database.py` column lists; optionally migration 0026 dropping the 4 dead columns (all-zero on live data, so low-risk — but it IS live-data DDL, so it's the owner's call and can be deferred indefinitely).
+
+---
+
+## Session update 7 — 2026-07-16 — PII in logs (audit M9)
+
+**Reported: 2 leaking log lines. Actual: 6.** `email_sender.py` logged the raw recipient on **five** separate lines (78, 83, 87, 93, 122, 124 — send-ok, send-failed, resend-ok, resend-error, resend-failed, no-credentials), not just the one flagged; `password_reset.py:108` logged the raw address of an *unknown* email on the reset path.
+
+Why it matters: logs rotate, ship and get grepped — they outlive the request by far. An address is personal data, and the reset-path line leaked addresses of people who aren't even users.
+
+**Fix:** `utils/logger.mask_email()` — `alice@example.com` → `a***@example.com`. Applied to all 6 sites.
+- **Keeps the domain on purpose**: that's the delivery-debugging value (bounces, DNS, spam filtering) with far less identifying power than the local-part.
+- **Keeps the first char on purpose**: enough to correlate two lines as the same user in a support ticket, without identifying them.
+- **Degrades safely**: `None`/garbage → `<none>`/`***`, never echoed — a mis-passed value can't leak by accident.
+- 11 tests, including **call-site** tests (rule #21): a masking helper nobody calls fixes nothing, so the tests assert the *logger output* contains `v***@example.com` and NOT the raw address.
+
+---
+
+## Session update 8 — 2026-07-16 — the finding docs now tell the truth themselves
+
+**The drift:** `docs/fable/01`–`09` still described every finding as OPEN. Zero FIXED markers. All the truth lived only in this tracker — so anyone opening `01-SECURITY.md` read "your rate limits are broken, login leaks timing, XML DoS is live", all fixed weeks earlier. That drift is not cosmetic: **it already cost real work** — another session re-reported M5 and M8 as open bugs because the docs said so.
+
+**Fixed:** every finding in `01`/`02`/`03`/`04`/`05`/`06`/`09` now carries its own **STATUS** line with the commit (35 findings marked), and `00-EXECUTIVE-SUMMARY.md` opens with a status banner — its "4 blockers" are all fixed, and the grades are explicitly flagged stale. Rule applied: only claim **FIXED** for what was verified in code; partials say **PARTIAL**; accepted risks say **OPEN (accepted)**. An over-claiming doc is worse than a stale one.
+
+**Recorded honestly — a miss:** the plaintext-emails-in-logs leak (M9) was **not found by this audit**; an external one caught it. It's now in `05-COMPLIANCE` labelled as a miss, with *why* it was missed (this audit checked what data reaches **third parties** — Sentry, subprocessors — but never grepped what we write to **our own logs**) and a grep recipe for the next audit. The external report said 2 leaking lines; there were **6**.
+
+### Open decision — `penalty` is NOT a dead column (contradicts Fable's PR-2 advice)
+Fable called `penalty` the "4th dead column" — accurate on the symptom (always 0), wrong on the cause. `experience`/`credentials`/`semantic` are **fiction**: nothing computes them. But the engine **does** compute penalties (`_negative_penalty` −30 for a negative title, `_foreign_location_penalty` −15) — it just folds them into the total and never exposes them, because `ScoreBreakdown` has no `penalty` field. There is even a built **"Penalty Applied" UI card** (`JobDetailClient.tsx:616`) that has **never once rendered**.
+
+So `penalty` is the same case as salary/visa/workplace: **real signal, computed, discarded** — and Fable's own principle ("surface what's computed, don't invent what isn't") says **wire it, don't delete it**. Wiring means adding one field to `ScoreBreakdown`; it changes **no maths** (the penalty is already inside `match_score`), only what's reported — so it stays in the safe category.
+
+**PR 2 therefore becomes:** delete the 3 fictions (`experience`, `credentials`, `semantic`); **wire** `penalty`. The `DROP COLUMN` migration stays deferred (live-data DDL, owner's call, harmless to defer forever).
+
+### ⛔ PR 2 — CANCELLED by owner decision (2026-07-16)
+
+**Do not do this.** Not deferred — **declined**. Owner's call, and a sound one.
+
+Scope that is now closed:
+- Do NOT remove `experience` / `credentials` / `semantic` / `penalty` from `JobResponse`, the `Job` dataclass, or `database.py`'s column lists.
+- Do NOT write migration 0026 dropping those columns.
+- Do NOT wire `penalty` into `ScoreBreakdown` (the "Penalty Applied" card in `JobDetailClient.tsx:616` stays dormant by design).
+
+**Why this is right:** the columns are all-zero `INTEGER DEFAULT 0` — they cost nothing and harm nothing. The dead penalty card simply never renders: invisible, not broken. Against that, `DROP COLUMN` on live Railway data is the one change a `git revert` cannot undo. PR 1 already delivered the value that mattered (the radar shows the real engine; salary/visa/workplace are surfaced instead of discarded). The remainder is cosmetic tidiness bought with irreversible risk — a bad trade.
+
+**To a future session:** the dead fields and the dormant penalty card are **known and intentionally left**. Do not "clean them up". If you think otherwise, ask the owner — this was decided with the full picture, not by omission.

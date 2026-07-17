@@ -644,6 +644,20 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     out["location_score"] = breakdown.location_score
     out["recency"] = breakdown.recency_score
     out["seniority_score"] = breakdown.seniority_score
+    # salary/visa/workplace were computed above and then DISCARDED — the engine
+    # produced them every request and no one ever saw them. Surface them here
+    # rather than persisting: they depend on THIS caller's preferences, so a
+    # column on the shared `jobs` catalog would leak one user's salary target
+    # into another user's row (rules #10/#17). Read-time recompute is the
+    # correct home; this function already does it.
+    out["salary_score"] = breakdown.salary_score
+    out["visa_score"] = breakdown.visa_score
+    out["workplace_score"] = breakdown.workplace_score
+    # Explicit "did the enrichment dims actually run?" — never inferred from
+    # zeros, because 0 is ambiguous (a real earned 0 vs never-measured). The
+    # dims only populate when an enrichment row EXISTS for this job (rule #20:
+    # both user_preferences AND a lookup hit are required).
+    out["dims_active"] = enrichment_lookup_dict.get(row["id"]) is not None
     out["visa_flag"] = int(scorer.check_visa_flag(job))
     out["experience_level"] = detect_experience_level(job.title)
     # Overall: the stored feed score the user saw; recompute only as fallback.

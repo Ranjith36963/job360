@@ -57,20 +57,37 @@ class JobResponse(BaseModel):
     visa_flag: bool
     job_type: str = ""
     experience_level: str = ""
-    # Score-dim breakdown (Pillar 2 Batch 2.9). Step-1.5 S1.1 wired the
-    # 9 columns end-to-end (migration 0011 → Job dataclass → main.py
-    # capture → insert_job → _row_to_job_response). `role`/`skill`/
-    # `location_score`/`recency`/`seniority_score` carry their respective
-    # ScoreBreakdown component each run; the remaining four
-    # (experience/credentials/semantic/penalty) persist as 0 until the
-    # engine starts producing those signals — see CLAUDE.md rule #21.
+    # ── Score-dim breakdown ─────────────────────────────────────────────
+    # These are the EIGHT dimensions the engine actually computes, with the
+    # weights it actually uses (skill_matcher.TITLE/SKILL/LOCATION/RECENCY_WEIGHT
+    # = 40/40/10/10 and settings.{SENIORITY,SALARY,VISA,WORKPLACE}_WEIGHT =
+    # 8/10/6/6). `role`/`skill`/`location_score`/`recency`/`seniority_score`
+    # are ALSO persisted on `jobs` (migration 0011); salary/visa/workplace are
+    # computed per-request only — they depend on the CALLER's preferences, so
+    # persisting them on the shared catalog would leak one user's salary target
+    # into another user's row (rules #10/#17).
+    #
+    # NEVER sum these to derive the total: the raw max is 130 clamped to 100
+    # (rule #27), and the title/location penalties (−30/−15) land on no
+    # dimension at all. `match_score` is the only truth for the total.
     role: int = 0
     skill: int = 0
-    seniority_score: int = 0
-    experience: int = 0
-    credentials: int = 0
     location_score: int = 0
     recency: int = 0
+    seniority_score: int = 0
+    salary_score: int = 0
+    visa_score: int = 0
+    workplace_score: int = 0
+    # Did the enrichment-driven dims (seniority/salary/visa/workplace) actually
+    # run for this job+user? MUST be explicit — a 0 is ambiguous: it can mean
+    # "not measured" OR a real, earned 0 (e.g. visa_score=0 because the caller
+    # needs sponsorship and this job offers none). The UI greys the four dims
+    # out when this is False instead of drawing a truthful-looking 0%.
+    dims_active: bool = False
+    # Legacy dead columns (migration 0011) — the engine never produced these.
+    # Kept only so existing consumers don't break; scheduled for removal.
+    experience: int = 0
+    credentials: int = 0
     semantic: int = 0
     penalty: int = 0
     matched_skills: list[str] = []

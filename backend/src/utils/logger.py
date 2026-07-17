@@ -4,6 +4,7 @@ import sys
 import uuid
 from contextvars import ContextVar, Token
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 
 _RUN_ID = uuid.uuid4().hex[:8]
 
@@ -158,3 +159,31 @@ def get_audit_logger() -> logging.Logger:
     """Return the audit logger; assumes setup_audit_logger() was already called."""
 
     return logging.getLogger("job360.audit")
+
+
+def mask_email(email: Optional[str]) -> str:
+    """Mask an address for logs: ``alice@example.com`` -> ``a***@example.com``.
+
+    Audit M9 — plaintext emails were being written to on-disk logs (which are
+    rotated, shipped and grepped, and long outlive the request). An address is
+    personal data; the log only ever needs enough to correlate a support ticket,
+    not to identify the person.
+
+    Keeps the FIRST character + the domain: enough to answer "is this the same
+    user as that other line?" and "did it go to the right provider?", while the
+    local-part — the identifying half — is gone. The domain is retained
+    deliberately: it carries the delivery-debugging value (bounces, DNS, spam
+    filtering) with far less identifying power than the local-part.
+
+    Degrades safely: None/empty -> "<none>", a non-address string -> fully
+    masked rather than echoed, so a mis-passed value can't leak by accident.
+    """
+    if not email:
+        return "<none>"
+    local, sep, domain = str(email).partition("@")
+    if not sep or not domain:
+        # Not an address — never echo an unknown value into the log.
+        return "***"
+    if not local:
+        return f"***@{domain}"
+    return f"{local[0]}***@{domain}"

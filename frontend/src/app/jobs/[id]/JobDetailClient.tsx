@@ -514,19 +514,25 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
             {/* Score Radar */}
             <div className="glass-card rounded-2xl p-6 animate-fade-in-up stagger-2">
               <h3 className="mb-4 text-center font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
-                8D Score Breakdown
+                Score Drivers
               </h3>
+              {/* "Score Drivers", not "8D Score Breakdown": these axes do NOT
+                  break down the score — they can't be summed to reach it (raw
+                  max 130 clamped to 100, and the title/location penalties land
+                  on no axis). The headline total is rendered from match_score
+                  elsewhere on this page. */}
               <ScoreRadar
                 scores={{
                   role: job.role,
                   skill: job.skill,
-                  seniority_score: job.seniority_score,
-                  experience: job.experience,
-                  credentials: job.credentials,
                   location_score: job.location_score,
                   recency: job.recency,
-                  semantic: job.semantic,
+                  seniority_score: job.seniority_score,
+                  salary_score: job.salary_score,
+                  visa_score: job.visa_score,
+                  workplace_score: job.workplace_score,
                 }}
+                dimsActive={job.dims_active}
                 size={300}
               />
             </div>

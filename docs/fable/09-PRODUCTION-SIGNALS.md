@@ -14,16 +14,19 @@ They will, the moment traffic arrives.
 ---
 
 ## P0 (observability) — Your worker crashes are INVISIBLE to Sentry
+> **STATUS: FIXED** — `272d29b`. `init_sentry(component='worker')` runs in `worker_startup`, sharing `core/observability.py` with the API.
 - **What the data shows:** Sentry reports the app as "healthy" (2 minor issues). But `grep sentry src/workers/` returns **nothing** — Sentry is initialised only in the API's `lifespan` (`main.py`), never in the ARQ worker process.
 - **Why it matters:** the dead-worker P0 (`04-OPS`) produces `KeyError: 'db'` on every cron tick — and **none of it reaches Sentry**, because the worker doesn't report. Your error tracker is blind exactly where your biggest bug lives. "Sentry is quiet" has been giving false comfort.
 - **Fix:** call `sentry_sdk.init(...)` in the worker's `on_startup` (reuse `_init_sentry` from `main.py`). Then the dead-worker errors (and any future worker failure) actually page you. **Do this alongside the worker fix — otherwise you fix the worker but still can't see if it breaks again.**
 
 ## P1 (real bug, already fixed — just close it out) — Magic-link 500 on launch day
+> **STATUS: CLOSED** — resolved live via the Sentry API (`PYTHON-FASTAPI-2`) with the explanation posted to the issue. Zero events in 11 days confirmed the code fix held.
 - **What the data shows:** `PYTHON-FASTAPI-1` — `UniqueViolation: users_email_key` at `/api/auth/magic-link/consume`, 2026-07-02 (launch day), 1 user (your own test email), 1 occurrence.
 - **Status:** **already fixed in current code** — `magic_link.py:173` now uses `INSERT OR IGNORE` (find-or-create atomic); the crash predates that fix. The Sentry issue is just stale/unresolved.
 - **Fix:** confirm the fix is deployed to prod, then **resolve the Sentry issue** so it stops looking like an open problem. ⚠️ Note: the fix reactivates soft-deleted accounts on magic-link sign-in (`deleted_at = NULL`) — correct for UX, but conflicts with the GDPR-erasure item in `05-COMPLIANCE`. Reconcile the two.
 
 ## P2 — `/api/client-log` is generating Sentry errors (noise or signal?)
+> **STATUS: FIXED** — `client_log.py` level-gates (error/warning/info) and `observability.py` `ignore_logger('job360.client')` keeps client noise out of Sentry.
 - **What the data shows:** `PYTHON-FASTAPI-2` — `client_event` at `/api/client-log`, **30 events, 2 users, one day** (~7 days ago). This is the frontend→server log bridge (and where the synthetic-smoke test POSTs failures).
 - **Why it matters:** either (a) real client-side errors you should look at, or (b) client logs being recorded as *backend* Sentry errors = noise that will bury real signal as traffic grows. 30 events in one day from 2 users is a burst worth explaining.
 - **Fix:** investigate the 30 events; make sure client-log entries only reach Sentry when they're genuine errors, not routine client events (level-gate them).
@@ -31,6 +34,7 @@ They will, the moment traffic arrives.
 ---
 
 ## P1 (product) — You cannot measure your funnel: no product events instrumented
+> **STATUS: FIXED** — `63964ec`. Six events: signup_completed, cv_uploaded, extraction_completed, search_run, job_viewed, application_created. NOTE: now gated on consent (fable/05 C3) — PostHog does not initialise until the user accepts.
 - **What the data shows:** PostHog tracks only built-in events — `$pageview`, `$identify`, `$exception`, autocapture, `$web_vitals`. There are **zero** custom Job360 events: no `signup_completed`, `cv_uploaded`, `search_run`, `job_viewed`, `application_created`.
 - **Why it matters:** you're **flying blind on the actual user journey.** You cannot answer "of users who sign up, how many upload a CV? see jobs? apply?" — the single most important question for a job-search product. Pageviews tell you *pages*, not *outcomes*. Every product decision is currently a guess.
 - **Fix:** instrument ~6 key journey events with `posthog.capture()`: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`. Then build one funnel insight. This is small (a day) and turns your product from un-measurable to measurable — a genuine gate for "production-grade."

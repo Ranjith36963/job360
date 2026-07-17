@@ -573,6 +573,11 @@
             ],
             "title": "Dedup Group Ids"
           },
+          "dims_active": {
+            "default": false,
+            "title": "Dims Active",
+            "type": "boolean"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -807,6 +812,11 @@
             ],
             "title": "Salary Period"
           },
+          "salary_score": {
+            "default": 0,
+            "title": "Salary Score",
+            "type": "integer"
+          },
           "semantic": {
             "default": 0,
             "title": "Semantic",
@@ -875,6 +885,11 @@
             "title": "Visa Flag",
             "type": "boolean"
           },
+          "visa_score": {
+            "default": 0,
+            "title": "Visa Score",
+            "type": "integer"
+          },
           "visa_sponsorship": {
             "anyOf": [
               {
@@ -885,6 +900,11 @@
               }
             ],
             "title": "Visa Sponsorship"
+          },
+          "workplace_score": {
+            "default": 0,
+            "title": "Workplace Score",
+            "type": "integer"
           },
           "workplace_type": {
             "anyOf": [

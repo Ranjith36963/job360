@@ -12,21 +12,25 @@
 ---
 
 ## P1 — The whole app shares ONE psycopg async connection (not concurrency-safe)
+> **STATUS: FIXED** — `15c5b68`. `get_request_db()` opens a fresh per-request connection, closed in `finally`; 9 route files migrated. `get_db()` stays the boot singleton (schema owner) only.
 - **What I saw:** `database.py:19,25` — `JobDatabase._conn` is a single connection opened once in `init_db()`. `api/dependencies.py:8-28` hands that same singleton to *every* request. Every method does `await self._conn.execute(...)` on it. `pg.py:409-417` even fires a second statement (`SELECT lastval()`) on the same raw connection between awaits.
 - **Why it matters:** psycopg3 `AsyncConnection` must not be used by more than one coroutine at a time. FastAPI serves requests concurrently. Two overlapping requests interleave at an `await` → `psycopg.ProgrammingError: another operation is already in progress`, or a cursor returns the *other* request's rows. Survives low traffic; **500s or cross-request data leaks under real load.**
 - **Fix (P1, top priority):** use `psycopg_pool.AsyncConnectionPool`, acquire a connection per request/operation. Never share one connection across coroutines. This single change fixes the root of several findings below.
 
 ## P1 — Migrations run under autocommit → non-atomic; a half-failed migration bricks the schema on boot
+> **STATUS: FIXED** — `ea18e10`. Each migration runs in its own BEGIN/COMMIT (ROLLBACK + re-raise on error). The first attempt failed because the shim's speculative `SELECT lastval()` aborted the transaction; it is now probed only in autocommit-IDLE state. Test: `test_failed_migration_rolls_back_atomically`.
 - **What I saw:** `pg.py:321` opens connections `autocommit=True`; `Connection.commit()` is a no-op (`pg.py:431-432`). The runner applies each statement separately (`runner.py:136-148`) and **migrations auto-run on FastAPI boot** (`dependencies.py:21`). Rebuild migrations are multi-statement `CREATE new / INSERT SELECT / DROP / RENAME`.
 - **Why it matters:** if statement 3 of 4 fails, the first statements already committed but the migration is NOT recorded → next boot re-runs from a corrupted half-state (`user_actions` already dropped, or `_new` already renamed) with no rollback. SQLite's `executescript` was implicitly transactional; the shim removed that safety.
 - **Fix:** wrap each migration body in one explicit `BEGIN…COMMIT` on a non-autocommit connection; record the migration inside the same transaction.
 
 ## P1 — Rebuild migrations copy explicit `id` into IDENTITY columns without advancing the sequence
+> **STATUS: FIXED** — `4af1c7b`. `runner._resync_identity_sequences()` setvals every `id` sequence to MAX(id) after `up()`, keyed on `current_schema()` (NOT a hardcoded 'public', which silently no-ops in the per-test schemas). Runs unconditionally so an already-broken DB self-heals on boot.
 - **What I saw:** `pg.py:243` maps `AUTOINCREMENT` → `IDENTITY`. `0002_multi_tenant.up.sql`, `0010…down.sql`, `0011…down.sql` all `INSERT … SELECT id, …`. Postgres does NOT bump the identity sequence on explicit-value inserts.
 - **Why it matters:** run any of these on a *populated* table (e.g. an operator rolls back 0011 on the live `jobs` catalog) → sequence still at 1 → next insert auto-generates id 1, collides → `UniqueViolation`, pipeline inserts die. Hides until the first rollback/re-migration on real data.
 - **Fix:** after each copy, `SELECT setval(pg_get_serial_sequence('tbl','id'), MAX(id))` — or don't copy `id`.
 
 ## P1 — `ON DELETE CASCADE` is silently stripped by the shim → purge/user-delete leave orphans
+> **STATUS: FIXED (both halves)** — user-delete: `hard_delete_user` erases all 17 per-user tables. purge: `4af1c7b` — `purge_old_jobs` deletes the catalog-DERIVED children (`job_enrichment`, `job_embeddings`, `user_feed`, `user_notification_digests`). User-authored rows (applications, tailored docs, actions, ledger) deliberately SURVIVE a catalog purge — deleting them would be real data loss (rule #3). Test pins both directions.
 - **What I saw:** `pg.py:186-198` strips ALL foreign-key clauses, including `ON DELETE CASCADE`. `job_enrichment`/`job_embeddings`/`user_feed`/`user_actions`/`applications` all declare `REFERENCES jobs(id) ON DELETE CASCADE`, but `purge_old_jobs` only does `DELETE FROM jobs` (`database.py:547-556`). Nothing deletes the children.
 - **Why it matters:** every 30-day purge orphans enrichment/embedding/feed/action rows pointing at vanished `job_id`s — they accumulate forever (bloat), and the DB-declared integrity is a lie. **Also a compliance issue:** a user-delete that leaves child rows behind is an incomplete "right to be forgotten" (see `05-COMPLIANCE-AND-LEGAL.md`).
 - **Fix:** explicit child deletes in `purge_old_jobs` and every job/user delete — or add real Postgres FKs with cascade and stop stripping them.
@@ -34,6 +38,7 @@
 ---
 
 ## P2 — the drift-and-atomicity cluster (all downstream of the shim)
+> **STATUS: MOSTLY FIXED** — timestamp drift FIXED (`5cfe292`: the shim emits canonical `...+00:00` for `CURRENT_TIMESTAMP` **and** `datetime('now')`; `+00:00` not `Z` because Python 3.9's `fromisoformat` rejects `Z` and unguarded call sites parse these columns). purge-on-`first_seen` FIXED (`4e41e86`). `normalized_key` whitespace FIXED (`1042fe3`). Non-atomic multi-step write FIXED (`b939e29`: `advance_application`). REMAINING: `lastrowid` is transaction-safe but not switched to `RETURNING id`; down-migrations 0014/0017/0018 don't fully reverse; 0002's down narrows the unique key. All dev-only or cosmetic — no live defect.
 - **Timestamp format drift** (`pg.py:160,242`): `DEFAULT CURRENT_TIMESTAMP` emits `2026-07-11 12:00:00` (space) but app writes ISO `2026-07-11T12:00:00+00:00`. Compared as *text* in `get_notification_ledger` range filters + `ORDER BY created_at` (`database.py:1180-1186`) → space-format always sorts before T-format → **wrong time-range filters and mis-ordered ledgers** when default- and app-inserted rows mix. **Fix:** one canonical ISO format for defaults *and* app writes, or store `timestamptz` and stop string-comparing.
 - **Purge keys on `first_seen` not `last_seen_at`** (`database.py:547-556`): a posting still live after 30 days gets deleted then re-inserted as brand-new (resets scores, re-notifies). **Fix:** purge on `last_seen_at < cutoff`.
 - **"Best-effort" down migrations don't reverse** (`0014/0017/0018 .down.sql`): they only delete the ledger row, so `down` reports success while columns remain — false reversibility during an incident. **Fix:** implement real reverse, or make `down` loudly refuse and say "restore from backup".
@@ -43,6 +48,7 @@
 - **Multi-step writes non-atomic** (`advance_application` `database.py:882-902`; `mark_missed_for_source` `422-464`): crash mid-sequence leaves stage advanced with no history row. **Fix:** one explicit transaction per multi-step write.
 
 ## P3 — Naive `;` statement splitting
+> **STATUS: OPEN (accepted)** — inline `--` comments are stripped and no repo migration has `;` or `--` inside a string literal. A latent trap for a FUTURE migration, not a live bug.
 - `runner.py:96-118` + `pg.py:270-284` split on `;` naively (breaks on `;` inside a string literal or a `$$` function body). Safe today; a future migration could sever mid-statement at boot. **Fix:** guard `$$` bodies / use a real splitter; add a test asserting the limits.
 
 ---
