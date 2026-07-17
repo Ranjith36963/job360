@@ -696,3 +696,14 @@ specified and ready on your word.
 harmless (never read; `JobSpySource.name` is hardcoded `"indeed"`), and removing it risks
 the five-surface source-count contract (rule #8) for zero functional gain. **S5** (JobSpy
 thread leak on timeout) needs a killable process pool — a larger dedicated change.
+
+---
+
+## ✅ CLOSED in Batch 3 — Routes/worker correctness + frontend (2026-07-17)
+
+| ID | Was | Now fixed at |
+|---|---|---|
+| **N6** | OPEN_BUG (`_runs` grows unbounded) | `api/routes/search.py` — `_prune_runs()` (TTL 1h + max 500), evicts only completed/failed by `created_at`, never active runs; `created_at` stripped from the public response. Tests: `test_search_runs_eviction.py` (5). |
+| **M7** | PARTIAL (`upsert_tailored_doc` not atomic) | `repositories/database.py:775` — DELETE+INSERT wrapped in one `async with self._conn.transaction()`; a failure between them rolls back so the user's existing tailored doc survives. Tests: `test_cv_coverletter.py` (atomic replace + INSERT-fails-keeps-original). |
+| **M16** | OPEN_BUG (403 force-navigates, discards form) | `lib/api.ts` no longer sets `window.location` on 403 `email_not_verified`; it throws a typed `ApiError.isEmailNotVerified` and emits a notifier. `components/layout/AuthProvider.tsx` subscribes and does the single top-level `router.push("/verify-email")` (guarded). Tests: api-error / api / AuthProvider. |
+| **M17** | OPEN_BUG (board renders off `counts` not data) | `app/pipeline/page.tsx` — EmptyState-vs-board now gates on `applications.length` (the data actually rendered), not the independent `counts` total. Test: `pipeline-page-empty-state.test.tsx`. |

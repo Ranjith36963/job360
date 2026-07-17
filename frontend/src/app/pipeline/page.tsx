@@ -274,8 +274,14 @@ export default function PipelinePage() {
 
       {/* ═══════════════════════════════════════════════════
           EMPTY STATE
+          M17 fix: gate on `applications.length` (the array the board
+          actually maps over), not the independently-fetched `counts`
+          total. If the two responses ever diverge — or `counts` fetch
+          silently returns stale/zero data — this must still reflect
+          what's really on screen instead of showing an empty board or
+          hiding a populated one.
           ═══════════════════════════════════════════════════ */}
-      {total === 0 && !loading && !error && (
+      {applications.length === 0 && !loading && !error && (
         <div className="animate-fade-in-up stagger-3">
           <EmptyState
             icon={<Kanban className="h-12 w-12" />}
@@ -288,7 +294,7 @@ export default function PipelinePage() {
       {/* ═══════════════════════════════════════════════════
           KANBAN BOARD
           ═══════════════════════════════════════════════════ */}
-      {total > 0 && (
+      {applications.length > 0 && (
         <div className="animate-fade-in-up stagger-4">
           <KanbanBoard
             applications={applications}

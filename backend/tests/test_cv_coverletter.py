@@ -379,3 +379,44 @@ async def test_fabrication_flag_surfaces_not_section_headers(authenticated_async
     # persists to the DB so the warning is still there on reopen
     row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
     assert "FabricatedCorpXQ" in row["flagged_terms"]
+
+
+# ── M7: upsert_tailored_doc is atomic (DELETE + INSERT in one transaction) ─────
+
+@pytest.mark.asyncio
+async def test_upsert_replaces_atomically(fixture_user_id):
+    """A normal regenerate replaces the existing draft — exactly one row survives."""
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+    await db.upsert_tailored_doc(fixture_user_id, job_id, "cv", "v1 original draft")
+    await db.upsert_tailored_doc(fixture_user_id, job_id, "cv", "v2 fresh draft")
+    row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
+    assert row["ai_draft"] == "v2 fresh draft"  # replaced
+    assert len(await db.get_tailored_docs(fixture_user_id, job_id)) == 1  # no dupes
+
+
+@pytest.mark.asyncio
+async def test_upsert_insert_failure_does_not_lose_existing_doc(fixture_user_id, monkeypatch):
+    """M7 data-loss fix: if the INSERT dies AFTER the DELETE, the transaction rolls
+    back and the user's original tailored document survives — it is NOT lost."""
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+    await db.upsert_tailored_doc(fixture_user_id, job_id, "cv", "precious original draft")
+
+    # Break the INSERT step only; the DELETE still runs first inside the txn.
+    real_execute = db._conn.execute
+
+    async def _failing_execute(sql, params=()):
+        if sql.strip().upper().startswith("INSERT INTO TAILORED_DOCUMENTS"):
+            raise RuntimeError("simulated crash between DELETE and INSERT")
+        return await real_execute(sql, params)
+
+    monkeypatch.setattr(db._conn, "execute", _failing_execute)
+    with pytest.raises(RuntimeError):
+        await db.upsert_tailored_doc(fixture_user_id, job_id, "cv", "doomed new draft")
+    monkeypatch.undo()  # restore real execute for the assertion read
+
+    # The DELETE was rolled back with the failed INSERT — original doc still there.
+    row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
+    assert row is not None, "original doc was lost — DELETE was not rolled back"
+    assert row["ai_draft"] == "precious original draft"

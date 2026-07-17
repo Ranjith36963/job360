@@ -57,6 +57,33 @@ export function channelConnectUrl(provider: "slack" | "discord"): string {
 }
 
 // ---------------------------------------------------------------------------
+// Email-not-verified notifier
+// ---------------------------------------------------------------------------
+// A 403 email_not_verified means a signed-in user hasn't confirmed their email
+// and hit a verified-only route. The fetch client MUST NOT navigate on its own:
+// a background refetch calling `window.location.href` silently yanks the user
+// off a half-filled form and discards their input. Instead `request()` (a)
+// throws a typed ApiError (`err.isEmailNotVerified`) the caller can catch, and
+// (b) notifies subscribers so ONE top-level handler (AuthProvider) owns the
+// redirect decision — navigation is a deliberate app-level response, not a
+// hidden effect in every fetch.
+
+type EmailNotVerifiedListener = () => void;
+const emailNotVerifiedListeners = new Set<EmailNotVerifiedListener>();
+
+/** Subscribe to email-not-verified auth failures. Returns an unsubscribe fn. */
+export function onEmailNotVerified(listener: EmailNotVerifiedListener): () => void {
+  emailNotVerifiedListeners.add(listener);
+  return () => {
+    emailNotVerifiedListeners.delete(listener);
+  };
+}
+
+function emitEmailNotVerified(): void {
+  for (const listener of emailNotVerifiedListeners) listener();
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -95,21 +122,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       retryAfter = ra ? parseInt(ra, 10) : 60;
     }
 
-    // #15: an unverified user hit a verified-only route — send them to the
-    // verify-email page instead of surfacing a raw error (browser only).
-    if (
-      res.status === 403 &&
-      (code === "email_not_verified" || detail === "email_not_verified")
-    ) {
-      if (
-        typeof window !== "undefined" &&
-        !window.location.pathname.startsWith("/verify-email")
-      ) {
-        window.location.href = "/verify-email";
-      }
+    const err = new ApiError(res.status, detail, code, retryAfter);
+
+    // #15 / M16: an unverified user hit a verified-only route. Do NOT navigate
+    // from here — a background refetch firing `window.location.href` would yank
+    // the user off a half-filled form. Notify the top-level handler
+    // (AuthProvider) so the redirect is a deliberate app-level decision, then
+    // throw the typed error so foreground callers can catch it too.
+    if (err.isEmailNotVerified) {
+      emitEmailNotVerified();
     }
 
-    throw new ApiError(res.status, detail, code, retryAfter);
+    throw err;
   }
 
   // 204 No Content — logout returns empty body
