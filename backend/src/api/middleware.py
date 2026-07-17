@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from src.utils.logger import _request_id_var, get_logger, get_request_id, set_request_id
+from src.utils.logger import _request_id_var, get_logger, get_request_id, mask_ip, set_request_id
 
 _access_log = get_logger("access")  # "job360.access" → main job360 handlers (jsonl + log file)
 
@@ -99,9 +99,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                     "duration_ms": round((time.perf_counter() - start) * 1000, 1),
                     "request_id": get_request_id(),
                     # WHO made the request — set on request.state by require_user /
-                    # optional_user (None for anonymous routes).
+                    # optional_user (None for anonymous routes). Left unmasked: an
+                    # internal opaque uuid needed for correlation, far lower PII
+                    # than a raw client IP (M9).
                     "user_id": getattr(request.state, "user_id", None),
-                    "client": request.client.host if request.client else None,
+                    # M9 — mask the client IP before it hits the on-disk rotating
+                    # access log; see mask_ip() in src/utils/logger.py.
+                    "client": mask_ip(request.client.host if request.client else None),
                 },
             )
 

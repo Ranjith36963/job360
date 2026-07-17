@@ -663,3 +663,16 @@ data-loss-adjacent, dedicated PR), **M16/M17/L6** (frontend), plus the source-qu
 (S1/S2/S4/S5/S7/S8) and test-hygiene (T4/T6-T9/T12) items. Owner decisions unchanged:
 scraping sources, privacy/terms, subprocessors, MFA, breach plan, single-region backups,
 mypy `continue-on-error`.
+
+---
+
+## ✅ CLOSED in Batch 1 — Security (2026-07-17)
+
+| ID | Was | Now fixed at |
+|---|---|---|
+| **M1** | OPEN_BUG (authenticated webhook SSRF) | NEW `backend/src/services/channels/ssrf_guard.py::assert_public_http_url` — rejects non-http(s), non-standard ports, and any host (literal or every getaddrinfo-resolved IP) that is private/loopback/link-local/reserved/multicast/unspecified (169.254.169.254 caught). Enforced at CREATE (`api/routes/channels.py:135`, 422) AND re-checked at SEND (`services/channels/dispatcher.py:76` in both `dispatch()` and `test_send()`) — DNS-rebinding defence. Tests: `test_channels_ssrf.py` + `test_channels_routes.py`. |
+| **M3** | PARTIAL (`/register` un-throttled) | `api/routes/auth.py:139-156` — per-IP throttle (10/hour) at the top of `register()`, before any DB lookup so it can't leak email existence; 429 when over. Test: `test_auth_throttle.py`. |
+| **LOCKOUT** | PARTIAL (reset throttle IP-only) | `api/routes/auth.py:452-456` — password-reset now ALSO throttled per-email (`password-reset-email:<sha256>`, 3/hour) in addition to the IP limit, so IP-rotation can no longer email-bomb one address; still returns 204 silently (no enumeration). Test: `test_auth_throttle.py`. |
+| **M9** (IP-in-logs) | OPEN (the original FABLE M9) | `utils/logger.py::mask_ip` (sha256 → `ip_<hex>`) applied in `api/middleware.py` so the access log stores a stable non-reversible token, never the raw client IP. user_id kept (internal opaque uuid). Test: `test_request_id_middleware.py`. |
+
+**Deferred to owner (infrastructure — per the /goal boundary):** **M10** — editing `docker-compose.prod.yml` (drop the hardcoded `job360dev` password) and changing prod secret-defaulting is a production-deploy config change; the safety review correctly flagged it as needing your sign-off. Recommendation ready: env-ref the compose password + generate ephemeral dev secrets. Awaiting your go.

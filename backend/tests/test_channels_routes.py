@@ -10,6 +10,7 @@ Existing tests updated for the new create_channel contract (Task 2):
 - ``test_test_send_*`` tests use ``webhook`` type (https URL → jsons://... stored).
 """
 import asyncio
+import socket
 from contextlib import asynccontextmanager
 from unittest.mock import patch
 
@@ -20,6 +21,23 @@ from fastapi.testclient import TestClient
 from migrations import runner
 from src.repositories import pg
 from src.services.channels import crypto
+
+# A stable public IP used to make webhook host resolution offline+deterministic.
+_PUBLIC_IP = "93.184.216.34"
+
+
+def _fake_getaddrinfo_public(host, *args, **kwargs):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (_PUBLIC_IP, 0))]
+
+
+@pytest.fixture(autouse=True)
+def _mock_dns(monkeypatch):
+    """Resolve every hostname to a public IP so webhook SSRF checks run offline.
+
+    Individual SSRF tests override this (or use IP-literal hosts, which skip
+    resolution entirely).
+    """
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo_public)
 
 
 @asynccontextmanager
@@ -391,3 +409,78 @@ def test_create_chat_type_via_paste_rejected(api):
         )
         assert r.status_code == 400, f"expected 400 for {ct}, got {r.status_code}: {r.text}"
         assert "Connect flow" in r.json()["detail"] or "connect" in r.json()["detail"].lower()
+
+
+# ===========================================================================
+# NEW — SSRF guard on webhook create (M1)
+# ===========================================================================
+
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://127.0.0.1/x",          # loopback
+        "http://169.254.169.254/x",    # cloud metadata (link-local)
+        "http://10.0.0.5/x",           # RFC1918 private
+        "http://[::1]/x",              # IPv6 loopback literal
+    ],
+)
+def test_create_webhook_private_ip_rejected(api, bad_url):
+    """Webhook pointing at an internal/loopback/metadata address → 422."""
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "SSRF",
+            "credential": bad_url,
+        },
+    )
+    assert r.status_code == 422, f"{bad_url} should be rejected: {r.text}"
+
+
+def test_create_webhook_private_ip_not_stored(api):
+    """A rejected webhook must not create a channel row."""
+    _register(api, "alice@example.com")
+    api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "SSRF",
+            "credential": "http://127.0.0.1/x",
+        },
+    )
+    r = api.get("/api/settings/channels")
+    assert r.json() == []
+
+
+def test_create_webhook_public_host_accepted(api):
+    """A normal public https webhook is accepted (host mocked to a public IP)."""
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "Good Hook",
+            "credential": "https://hooks.example.com/x",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_create_webhook_host_resolving_to_private_rejected(api, monkeypatch):
+    """Host that DNS-resolves to a private IP is rejected even if name looks public."""
+    def _private(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.1.2.3", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _private)
+
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "Sneaky",
+            "credential": "https://internal.attacker.example/x",
+        },
+    )
+    assert r.status_code == 422, r.text

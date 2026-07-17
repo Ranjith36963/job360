@@ -1,11 +1,12 @@
 """Tests for RequestIdMiddleware and request_id contextvar helpers."""
+import logging
 import re
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.middleware import RequestIdMiddleware
-from src.utils.logger import _request_id_var, get_request_id, set_request_id
+from src.api.middleware import AccessLogMiddleware, RequestIdMiddleware
+from src.utils.logger import _request_id_var, get_request_id, mask_ip, set_request_id
 
 # ---------------------------------------------------------------------------
 # Minimal app for middleware tests — avoids pulling in the full lifespan / DB.
@@ -100,3 +101,47 @@ def test_cors_exposes_x_request_id():
     resp = client2.get("/ping2", headers={"Origin": "http://localhost:3000"})
     expose = resp.headers.get("Access-Control-Expose-Headers", "")
     assert "X-Request-Id" in expose, f"expose_headers missing; got: {expose!r}"
+
+
+# ---------------------------------------------------------------------------
+# M9 — AccessLogMiddleware must log a masked client IP, never the raw one.
+# ---------------------------------------------------------------------------
+
+def _make_access_log_app() -> FastAPI:
+    app = FastAPI()
+    app.add_middleware(AccessLogMiddleware)
+
+    @app.get("/pong")
+    async def pong():
+        return {"ok": True}
+
+    return app
+
+
+def test_access_log_client_field_is_masked_not_raw(caplog):
+    raw_ip = "203.0.113.7"
+    client = TestClient(_make_access_log_app(), client=(raw_ip, 12345))
+
+    with caplog.at_level(logging.INFO, logger="job360.access"):
+        resp = client.get("/pong")
+
+    assert resp.status_code == 200
+    records = [r for r in caplog.records if r.name == "job360.access"]
+    assert records, "AccessLogMiddleware did not emit a log record"
+    logged_client = records[-1].client
+
+    assert logged_client == mask_ip(raw_ip)
+    assert logged_client != raw_ip
+    assert logged_client.startswith("ip_")
+
+
+def test_mask_ip_none_is_placeholder():
+    assert mask_ip(None) == "<none>"
+
+
+def test_mask_ip_is_stable_for_same_input():
+    assert mask_ip("198.51.100.23") == mask_ip("198.51.100.23")
+
+
+def test_mask_ip_differs_for_different_input():
+    assert mask_ip("198.51.100.23") != mask_ip("198.51.100.24")

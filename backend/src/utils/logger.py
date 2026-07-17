@@ -1,3 +1,4 @@
+import hashlib
 import json as json_mod
 import logging
 import sys
@@ -187,3 +188,24 @@ def mask_email(email: Optional[str]) -> str:
     if not local:
         return f"***@{domain}"
     return f"{local[0]}***@{domain}"
+
+
+def mask_ip(ip: Optional[str]) -> str:
+    """Mask a client IP for logs: ``203.0.113.7`` -> ``ip_3f2a9c1e0b7d``.
+
+    M9 — raw client IPs were being written to on-disk rotating access logs
+    (``data/logs/job360.log`` / ``.jsonl``), which are rotated, shipped and
+    grepped, and long outlive the request. An IP is personal data under GDPR;
+    the log only ever needs a stable token to answer "same caller as that
+    other line?", not the actual address.
+
+    Non-reversible: a truncated SHA-256 hash, prefixed so it reads as a token
+    rather than a real value at a glance. Same input always yields the same
+    token (stable for correlation); the raw IP cannot be recovered from it.
+
+    Degrades safely: None/empty -> "<none>".
+    """
+    if not ip:
+        return "<none>"
+    digest = hashlib.sha256(str(ip).encode("utf-8")).hexdigest()[:12]
+    return f"ip_{digest}"

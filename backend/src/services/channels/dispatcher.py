@@ -33,6 +33,7 @@ from typing import Any, Optional
 
 from src.repositories import pg
 from src.services.channels.crypto import decrypt
+from src.services.channels.ssrf_guard import assert_public_http_url
 from src.utils.logger import get_logger
 
 logger = get_logger("channels.dispatcher")  # job360.channels.dispatcher → data/logs/
@@ -70,6 +71,28 @@ async def load_user_channels(
         query += " AND enabled = 1"
     cur = await db.execute(query, params)
     return [dict(r) for r in await cur.fetchall()]
+
+
+def _assert_webhook_url_safe(channel_type: str, apprise_url: str) -> None:
+    """Re-resolve a webhook host at SEND time and reject private targets.
+
+    The stored credential for a webhook channel is an Apprise ``json[s]://``
+    URL. We map it back to ``http[s]://`` and run the same SSRF guard used at
+    create time — this catches a host that was public when the channel was
+    created but has since been re-pointed to a private IP (DNS rebinding).
+
+    No-op for non-webhook channels (slack/discord/telegram/email use their own
+    provider URLs, not user-supplied hosts). Raises ``ValueError`` when unsafe.
+    """
+    if channel_type != "webhook":
+        return
+    if apprise_url.startswith("jsons://"):
+        http_url = "https://" + apprise_url[len("jsons://"):]
+    elif apprise_url.startswith("json://"):
+        http_url = "http://" + apprise_url[len("json://"):]
+    else:
+        return
+    assert_public_http_url(http_url)
 
 
 def format_payload(channel_type: str, title: str, body: str) -> tuple[str, str]:
@@ -285,6 +308,19 @@ async def dispatch(
 
         # Immediate dispatch via Apprise
         url = decrypt(ch["credential_encrypted"])
+        # SSRF re-check: block a webhook re-pointed to a private IP after create.
+        try:
+            _assert_webhook_url_safe(ch_type, url)
+        except ValueError as e:
+            results.append(
+                ChannelSendResult(
+                    channel_id=ch["id"],
+                    channel_type=ch_type,
+                    ok=False,
+                    error=str(e)[:500],
+                )
+            )
+            continue
         ap = apprise.Apprise()
         ap.add(url)
         t, b = format_payload(ch_type, title, body)
@@ -345,6 +381,16 @@ async def test_send(db: pg.Connection, channel_id: int, *, user_id: Optional[str
     if row is None:
         return ChannelSendResult(channel_id=channel_id, channel_type="", ok=False, error="channel not found")
     url = decrypt(row["credential_encrypted"])
+    # SSRF re-check: block a webhook re-pointed to a private IP after create.
+    try:
+        _assert_webhook_url_safe(row["channel_type"], url)
+    except ValueError as e:
+        return ChannelSendResult(
+            channel_id=row["id"],
+            channel_type=row["channel_type"],
+            ok=False,
+            error=str(e)[:500],
+        )
     ap = apprise.Apprise()
     ap.add(url)
     t, b = format_payload(

@@ -45,6 +45,24 @@ from src.services.channels import crypto  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _reset_auth_rate_limit():
+    """Clear the auth rate-limiter's module-global buckets around every test.
+
+    ``services/auth/rate_limit.py`` keeps its sliding windows in process-global
+    dicts. The register throttle (``register:<ip>``) and the password-reset
+    throttles accumulate across tests because the whole suite shares one
+    TestClient IP (``testclient``). Without this reset, the 11th register call
+    anywhere in the session would 429 and unrelated tests would fail. Reset
+    before and after so each test starts from an empty limiter.
+    """
+    from src.services.auth import rate_limit as _rl
+
+    _rl.reset_for_tests()
+    yield
+    _rl.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _offline_openai(monkeypatch):
     """Keep the WHOLE suite offline for LLMs (rule #4).
 
