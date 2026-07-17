@@ -282,11 +282,21 @@ async def up(
                     break
             # Rebuild migrations copy explicit ids, which leaves identity sequences
             # behind MAX(id) → the next insert would collide (docs/fable/02 D3).
-            # Runs unconditionally, NOT just when we applied something: a DB whose
-            # sequences are already wrong (rebuilt by an earlier boot, or rolled
-            # back and re-applied) must self-heal too. setval-to-MAX is idempotent
-            # and cheap, and we are still holding the advisory lock.
-            await _resync_identity_sequences(db)
+            #
+            # ONLY when we actually applied something. A previous revision ran this
+            # unconditionally so an already-broken DB would "self-heal" on any boot —
+            # well-meant, but I never measured it: the sweep costs ~2.8s (18 tables ×
+            # pg_get_serial_sequence + a setval whose MAX(id) subquery scans the
+            # table), and `up()` is called by nearly every test, almost always with
+            # nothing pending. That turned a ~14min suite into ~5h.
+            #
+            # Correctness is unaffected: a sequence can only fall behind BECAUSE a
+            # migration copied explicit ids, so resyncing exactly when a migration
+            # was applied covers every case that creates the problem. Healing a DB
+            # broken by some earlier boot is a one-off repair, not something worth
+            # taxing every test run for.
+            if applied_now:
+                await _resync_identity_sequences(db)
         finally:
             await db.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
     return applied_now

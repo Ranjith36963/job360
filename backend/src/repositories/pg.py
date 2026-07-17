@@ -409,6 +409,13 @@ class Connection:
     def row_factory(self, value):
         self._row_factory = value
 
+    async def _read_lastval(self) -> Optional[int]:
+        """``SELECT lastval()`` on a short-lived, always-closed cursor."""
+        async with self._raw.cursor() as c2:
+            await c2.execute("SELECT lastval()")
+            row = await c2.fetchone()
+            return row[0] if row else None
+
     async def execute(self, sql: str, params: Iterable[Any] = ()) -> Cursor:
         translated = translate(sql)
         cur = self._raw.cursor()
@@ -417,24 +424,42 @@ class Connection:
             await cur.execute(translated, prm)
         except _MISSING_OBJECT_ERRORS as exc:
             raise OperationalError(str(exc)) from exc
+        # ``lastrowid`` (aiosqlite parity) is emulated via ``SELECT lastval()``.
+        #
+        # Two independent traps, BOTH handled here:
+        #  1. STALE ID — only probe when the INSERT actually inserted a row
+        #     (``cur.rowcount``). An ``ON CONFLICT DO NOTHING`` that conflicts
+        #     inserts nothing, and lastval() would then hand back an id from an
+        #     EARLIER insert in the same session — a silently wrong value.
+        #  2. POISONED TRANSACTION — a TEXT/UUID-PK insert never touches a
+        #     sequence, so lastval() raises "lastval is not yet defined". In
+        #     autocommit that error is harmless; inside a transaction (the
+        #     migration runner wraps each body in one) it ABORTS the whole
+        #     transaction and the next statement dies with InFailedSqlTransaction.
+        #     So: probe directly when IDLE, else isolate it in a SAVEPOINT
+        #     (``self._raw.transaction()``) — which keeps the probe's failure
+        #     local AND still returns a real lastrowid inside a transaction.
+        #
+        # NOTE: this is the sibling worktree's implementation, adopted verbatim in
+        # preference to this branch's earlier "skip the probe when in a
+        # transaction" fix. Theirs is strictly better — it catches the stale-id
+        # case this branch missed entirely, and it preserves lastrowid inside a
+        # transaction instead of returning None. Converging on their version also
+        # shrinks the pg.py merge conflict between the two branches.
         lastrowid: Optional[int] = None
-        if _has_insert(translated.upper()) and "returning" not in translated.lower():
-            # Probe lastval() ONLY in autocommit (transaction IDLE). Inside an
-            # explicit transaction a failing probe — e.g. INSERT ... ON CONFLICT
-            # DO NOTHING on a non-serial PK, where lastval() is undefined —
-            # ABORTS the whole transaction, so the next statement dies with
-            # InFailedSqlTransaction. The only in-transaction caller is the
-            # migration runner (transactional migrations), which never reads
-            # lastrowid, so skipping the probe there is safe. Autocommit callers
-            # (e.g. channels INSERT → cur.lastrowid) are unaffected.
-            if self._raw.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
-                try:
-                    async with self._raw.cursor() as c2:
-                        await c2.execute("SELECT lastval()")
-                        row = await c2.fetchone()
-                        lastrowid = row[0] if row else None
-                except psycopg.Error:
-                    lastrowid = None
+        if (
+            _has_insert(translated.upper())
+            and "returning" not in translated.lower()
+            and cur.rowcount
+        ):
+            try:
+                if self._raw.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+                    lastrowid = await self._read_lastval()
+                else:
+                    async with self._raw.transaction():
+                        lastrowid = await self._read_lastval()
+            except psycopg.Error:
+                lastrowid = None
         return Cursor(cur, lastrowid)
 
     async def executemany(self, sql: str, seq_of_params: Iterable[Iterable[Any]]):

@@ -292,3 +292,26 @@ PR #48 retitled **`[MERGE #47 FIRST]`** + a comment documenting the dependency, 
 2. **PR #48** — this work (resolve the 12 conflicts against the restored base)
 
 Merging #48 alone is safe for *its own* content but leaves main without security CI.
+
+---
+
+## Session update 11 — 2026-07-17 — I made the suite 20x slower, and the gate caught me
+
+### The regression (mine)
+`_resync_identity_sequences` (my D3 fix) was set to run **unconditionally** on every `runner.up()`. My own comment justified it:
+
+> *"Runs unconditionally, NOT just when we applied something: a DB whose sequences are already wrong must self-heal too. setval-to-MAX is idempotent **and cheap**."*
+
+**"Cheap" was an assumption I never measured.** It costs **~2,821 ms** per call: 18 tables × (`pg_get_serial_sequence` + a `setval` whose `MAX(id)` subquery scans the table), on top of an `information_schema.columns` scan (215ms / 22.9k rows — itself inflated by leaked per-test schemas). `up()` is called by nearly every test, almost always with **nothing pending** — so nearly every call paid 2.8s for zero work.
+
+Result: the backend suite went from **~14 min to ~5 hours** (measured: 8% after 26 minutes). I noticed only because the new heartbeat let me *see* it crawling instead of assuming it was dead — the previous silence would have hidden this as "another flaky gate".
+
+### The fix
+Restore the `if applied_now:` guard I had removed. **Correctness is unaffected:** a sequence can only fall behind *because a migration copied explicit ids*, so resyncing exactly when a migration is applied covers every case that creates the problem. Healing a DB broken by some earlier boot is a **one-off repair**, not a tax on every test run.
+
+Verified: `test_identity_sequence_resynced_after_id_copy` (the entire reason the resync exists) still passes — 13/13 in 11.7s; `test_account_mgmt` 18/18 in 57s (was crawling).
+
+### Why this one stings
+The D3 fix was correct and well-tested. The *deployment decision around it* — "run it always, it's cheap" — was unmeasured, and it silently degraded the whole suite for every session sharing this machine. Same shape as the day's other failures: **a confident claim from an instrument I never actually consulted.** Here the instrument was a stopwatch, and I simply never started it.
+
+**Rule:** if a helper runs on a hot path (every boot, every test), *time it* before choosing "always" over "only when needed". "Idempotent" says nothing about cost.
