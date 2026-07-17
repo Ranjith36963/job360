@@ -234,3 +234,35 @@ Scope that is now closed:
 **Why this is right:** the columns are all-zero `INTEGER DEFAULT 0` — they cost nothing and harm nothing. The dead penalty card simply never renders: invisible, not broken. Against that, `DROP COLUMN` on live Railway data is the one change a `git revert` cannot undo. PR 1 already delivered the value that mattered (the radar shows the real engine; salary/visa/workplace are surfaced instead of discarded). The remainder is cosmetic tidiness bought with irreversible risk — a bad trade.
 
 **To a future session:** the dead fields and the dormant penalty card are **known and intentionally left**. Do not "clean them up". If you think otherwise, ask the owner — this was decided with the full picture, not by omission.
+
+---
+
+## Session update 9 — 2026-07-17 — the commit gate itself was broken (Fable-audited)
+
+### The incident that exposed it
+`agent-gate.sh` is silent for ~13min. I read silence as death and **relaunched 8 times** — ending with 8 concurrent full pytest suites on one Postgres, ~1,180 leaked `t_*`/`mem_*` schemas, and a wedged test DB. **I caused the outage I was diagnosing.** My "is it alive?" check (`ps aux | grep agent-gate`) was guaranteed to return 0 **even for a perfectly healthy run**: MSYS/Git-Bash `ps` shows only the executable name, never script args. I trusted an instrument that could only ever say one thing. On Windows use `tasklist` / `Get-CimInstance Win32_Process`.
+
+### Fable's verdict: my 4 flaws were real — but only the ERGONOMIC layer
+> *"The gate's actual correctness holes — stamp-after-run and hook TOCTOU — predate the incident and would let a bad commit through even on a quiet, single-run day."*
+
+I had found what hurt *me*, not what was *broken*. The two it caught that I missed:
+
+- **M1 (the real hole) — the stamp bound the WRONG tree.** `tree_fingerprint` ran *after* the 13-min suite, so any edit made **during** a run got blessed by a stamp whose tests never covered it — and the hook accepted it. This defeats the gate's single purpose. (I had been editing during runs all session.)
+- **M2 — the cleanup sabotages other worktrees.** `pytest_sessionfinish` drops **every** `t_*`/`mem_*` schema in the shared DB — including schemas belonging to the other ~13 worktrees' *in-flight* suites. Under any concurrency this rips schemas out from under live runs, producing "random" native crashes independent of my kills.
+
+Refuted (my worry, wrong): `set -euo pipefail` + subshells propagate failure correctly — a crashed pytest means no stamp. Fail-closed works.
+
+### Shipped
+- **M1 fix**: fingerprint at start, verify at end; tree moved → **no stamp**, loud failure. *Verified by test*: a simulated mid-run edit changes the fingerprint and the guard fires.
+- **Advisory lock, per DATABASE SERVER** (not per worktree — ~14 worktrees share ONE Postgres, so the contention is on the DB, not the repo). `pg_try_advisory_lock` is **kill-safe**: it dies with the connection, so a hard-killed gate can never leave a stale lockfile. Launch #2 now aborts with *"another gate is running"* — exactly the message that would have stopped launches #2–#8.
+- **Heartbeat + log**: `PYTHONUNBUFFERED=1`, output tee'd to `backend/data/logs/gate-<ts>.log`, and an "alive — Nm elapsed" line every 30s. **Silence is now distinguishable from death** — this kills the entire incident class.
+- **Honest drift message**: the check regenerates the files first, so the worktree is correct *by construction* — the only possible failure is "you didn't stage them". It used to say "run gen:types" (the thing you just did); it now names the two files to stage.
+- **The contract documented** in the script header: stage → gate → commit, and do not edit in between. Nobody had written it down.
+
+### Live proof of M3 (found while documenting it)
+Writing this very section was **blocked by the hook** — because the prose contained the literal phrase the hook greps for. `.claude/hooks/commit-gate.sh:9` does `case "$CMD" in *"git commit"*)`, a naive substring match against the whole command string. So *describing* the flaw trips the guard, while a compound command that mutates a file, stages it, and commits (all in one line) passes the check against the pre-mutation tree and commits unverified content. The guard blocks the innocent and waves through the actual bypass.
+
+### Still open (owner sign-off — Fable's #4/#5/#7)
+- **Wire `scripts/gate-fresh-db.sh`** — you already built it: a throwaway DB per gate. One `DROP DATABASE` replaces ~1,000 schema drops; a killed run leaks one easily-listed database instead of invisible schemas; cross-worktree interference vanishes. Changes the canonical command → your call.
+- **Scope the sweep to own-run schemas** (`conftest.py`), so a finishing suite stops nuking other worktrees' live schemas (M2). Keep the global sweep as an opt-in janitor.
+- **Real git `pre-commit` hook** to close the TOCTOU properly (fires inside git, at commit time, on the actual tree). Keep the PreToolUse hook for the friendly early error. Affects human commits too → your call.
