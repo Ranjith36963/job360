@@ -65,9 +65,16 @@ updates:
       # at eslint 9. Un-ignore when Vercel's config supports eslint 10. (PR #64)
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
-      # vitest 4 — needs @vitest/coverage-v8 co-bumped to 4.x; low-value dev
-      # tooling, take deliberately. Un-ignore + co-bump when wanted. (PR #62)
+      # The vitest test-runner family is EXACT-PEER-PINNED: @vitest/coverage-v8
+      # hard-peers vitest at the exact version, and coverage-v8 ships no 3.x
+      # patch (its only next release is 4.x, which needs vitest 4). So ANY solo
+      # bump — even a vitest 3.2.4→3.2.7 patch — breaks `npm ci` with ERESOLVE
+      # (PRs #62/#67/#68). Freeze the whole family at its current 3.x; to move,
+      # co-bump vitest + @vitest/coverage-v8 to 4.x by hand and re-run tests.
       - dependency-name: "vitest"
+      - dependency-name: "@vitest/coverage-v8"
+      # jsdom 26→29 major — dev test-DOM env; take deliberately. (PR #68)
+      - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
