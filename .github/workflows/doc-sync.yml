@@ -151,7 +151,10 @@ jobs:
               before/after drift report. Do NOT merge it.
             - Re-run scripts/doc_sync_check.py at the end; include its output
               in the PR body as proof (should report freshness-only or clean).
-          claude_args: "--allowedTools 'Bash,Edit,Write,Read,Glob,Grep'"
+          # No inner quotes — the action passes this string verbatim; quoted
+          # tool names never match and every call gets DENIED (learned from
+          # run 29584302854: 3 denials, $1.94 spent, nothing shipped, job green).
+          claude_args: --allowedTools Bash,Edit,Write,Read,Glob,Grep
 
       - name: Enable auto-merge only if the PR is 100% markdown
         if: steps.token.outputs.have == 'true'
@@ -159,7 +162,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pr=$(gh pr list --head "docs/sync-auto-${{ github.run_id }}" --json number -q '.[0].number')
-          [ -n "$pr" ] && [ "$pr" != "null" ] || { echo "no PR created — nothing to merge"; exit 0; }
+          # The fixer ran because drift EXISTS — no PR means it silently failed
+          # (e.g. tool permissions). Fail LOUD so a broken fixer is never green.
+          [ -n "$pr" ] && [ "$pr" != "null" ] || { echo "::error::auto-fixer produced no PR despite drift — check the Claude step log"; exit 1; }
           nonmd=$(gh pr view "$pr" --json files -q '.files[].path' | grep -vc '\.md$' || true)
           if [ "$nonmd" -eq 0 ]; then
             gh pr merge "$pr" --auto --squash \
