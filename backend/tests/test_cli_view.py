@@ -1,16 +1,16 @@
 """Tests for src/cli_view.py — Rich terminal view."""
 
-import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.cli_view import _load_jobs_sync, display_jobs
+from src.repositories import pgsync
 
 
 def _create_test_db(db_path: str, jobs: list[dict]):
     """Create a test SQLite DB with jobs."""
-    conn = sqlite3.connect(db_path)
+    conn = pgsync.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

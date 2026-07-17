@@ -4,12 +4,12 @@ Uses TestClient with a temporary DB path patched via ``DB_PATH`` env override.
 HTTP responses are exercised end-to-end through the real session flow.
 """
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto
 
 
@@ -21,7 +21,7 @@ def temp_db(monkeypatch, tmp_path):
     import asyncio
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (

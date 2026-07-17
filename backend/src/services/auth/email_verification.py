@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote as urlquote
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
@@ -126,7 +126,7 @@ async def confirm_email_verification(
     h = tokens.hash_token(raw_token)
     now = _now_iso()
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             """
             SELECT ev.id        AS ver_id,
@@ -186,7 +186,7 @@ async def confirm_email_verification(
 async def is_email_verified(*, db_path: str, user_id: str) -> bool:
     """True iff the user has ever completed email verification."""
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT email_verified_at FROM users WHERE id = ?", (user_id,)
         )

@@ -343,6 +343,17 @@ async def test_jobs_response_includes_score_dim_breakdown(authenticated_async_co
     # Unset dims default to 0 (Pillar 2.9 sentinel for "not scored").
     assert body["experience"] == 0
     assert body["credentials"] == 0
+    # The three dims the engine computed and then DISCARDED are now part of the
+    # contract. They only carry values on the per-user recompute path (they
+    # depend on the caller's preferences, so they are deliberately NOT columns
+    # on the shared catalog — rules #10/#17); here they are present and 0.
+    for dim in ("salary_score", "visa_score", "workplace_score"):
+        assert dim in body, f"{dim} missing from JobResponse: {body}"
+    # dims_active must be explicit and FALSE with no enrichment row. This is the
+    # honest half of the fix: 0 is ambiguous (never-measured vs a real earned 0
+    # like visa_score=0 when you need sponsorship), so the UI needs this flag to
+    # know whether it may draw those axes at all.
+    assert body["dims_active"] is False
     assert body["penalty"] == 0
 
 
@@ -429,7 +440,7 @@ async def test_jobs_response_no_n_plus_one_for_enrichment(
     monkeypatch,
 ):
     """B6: listing 5 enriched jobs uses ONE joined SELECT for enrichment,
-    not one per row. We instrument aiosqlite.Connection.execute and assert
+    not one per row. We instrument pg.Connection.execute and assert
     the count of `SELECT ... FROM job_enrichment` queries is at most 1
     across the whole /api/jobs request."""
     db = await api_deps.get_db()
@@ -712,3 +723,25 @@ async def test_jobs_response_deadline_null_when_not_set(authenticated_async_cont
     body = resp.json()
     assert body["deadline"] is None
     assert body["deadline_source"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_request_db_yields_own_connection_not_the_singleton():
+    """docs/fable/02 P0 — each request gets its OWN connection via get_request_db,
+    distinct from the shared boot singleton, so concurrent requests can't collide on
+    one psycopg async connection ('another operation is already in progress')."""
+    import src.api.dependencies as _deps
+
+    singleton = await _deps.get_db()
+    conns = []
+    for _ in range(2):
+        agen = _deps.get_request_db()
+        db = await agen.__anext__()
+        conns.append(db._conn)
+        # exhaust the generator so the finally-block closes the connection
+        try:
+            await agen.__anext__()
+        except StopAsyncIteration:
+            pass
+    assert conns[0] is not conns[1], "each request must get a fresh connection"
+    assert conns[0] is not singleton._conn, "request conn must not be the singleton"

@@ -18,7 +18,7 @@ from typing import Optional
 
 from itsdangerous import BadSignature, TimestampSigner
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.utils.logger import get_audit_logger
 
@@ -76,7 +76,7 @@ async def resolve_session(
         return None
     now = datetime.now(timezone.utc).isoformat()
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT user_id, expires_at FROM sessions WHERE id = ?", (sid,)
         )

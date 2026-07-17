@@ -1,5 +1,22 @@
 # 00 — Executive Summary
 
+> ## STATUS AS OF 2026-07-16 — READ THIS FIRST
+> **The audit below is the ORIGINAL findings, preserved as written. Most are now FIXED.**
+> Each finding in `01`–`09` now carries its own **STATUS** line with the commit — trust
+> those, not the prose around them. Full history: `PROGRESS.md`.
+>
+> **All 4 "blockers" below are fixed.** Of ~45 findings, the only things left are:
+> | Still open | Kind |
+> |---|---|
+> | **SI1 — notifications don't reach users in prod** | needs a Railway **worker service + Redis + SMTP creds** — no code will fix it |
+> | Real privacy/terms + subprocessor list | writing, not code |
+> | Scraping ToS decision (LinkedIn/Indeed/Glassdoor) | business decision |
+> | Breach plan · status page/SLA · backup 2nd region | owner decisions |
+> | MFA (C11) | a real feature, not a defect |
+> | D7/D8/D12, F2, O8, H3–H5 | dev-only paths + accepted trade-offs — none are live bugs |
+>
+> **Grades below are stale** — they describe the pre-fix state and are kept for the record.
+
 > Job360 enterprise-readiness audit. Six specialist sub-agents (Opus + Sonnet) swept
 > every corner; Fable judged, verified the top finding directly, and wrote this.
 > **Read this page, then the area doc for whatever you fix first.**
@@ -16,6 +33,7 @@ scales nor self-heals. Fix those two and a short list of correctness/compliance 
 and you cross the line from "works on the happy path" to "enterprise-grade."
 
 ## The 4 things that actually block you (do these first)
+> **STATUS: ALL 4 FIXED.** (1) worker `ctx['db']` — FIXED (`272d29b` + worker_startup); the worker RUNS, but SI1 remains: it isn't DEPLOYED (needs a Railway worker service + Redis). (2) single connection — FIXED (`15c5b68`, per-request `get_request_db`). (3) scraping — **OPEN, owner decision** (unchanged; no code can fix it). (4) delete-doesn't-erase — FIXED (`hard_delete_user`, all 17 per-user tables).
 
 | # | Blocker | Where | Why it's a blocker |
 |---|---|---|---|

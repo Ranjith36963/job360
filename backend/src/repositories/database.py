@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
@@ -12,18 +12,52 @@ from src.utils.logger import get_logger  # noqa: E402
 
 _log = get_logger("db.repo")  # job360.db.repo → data/logs/
 
+# Child tables purged alongside a `jobs` row (docs/fable/02 D4 — orphan cleanup).
+# The pg shim strips EVERY foreign-key clause, including ON DELETE CASCADE, so the
+# DB will never cascade for us; purge_old_jobs must delete these explicitly.
+#
+# ONLY catalog-DERIVED rows belong here — data that is meaningless once the job is
+# gone and that the pipeline can regenerate. `user_feed` dominates the bloat: one
+# row per user per job.
+#
+# Deliberately NOT purged (rule #3 — purging them would be real data loss):
+#   applications, application_stage_history, tailored_documents, tailored_usage,
+#   user_actions, notification_ledger
+# Those are the USER's own records and audit trail. A user's Kanban entry or
+# tailored CV must survive the shared catalog aging out, so they may keep an
+# orphan job_id by design.
+_PURGE_CASCADE_TABLES = (
+    "job_enrichment",
+    "job_embeddings",
+    "user_feed",
+    "user_notification_digests",
+)
+
 
 class JobDatabase:
     def __init__(self, db_path: str):
         self._path = db_path
-        self._conn: aiosqlite.Connection | None = None
+        self._conn: pg.Connection | None = None
+
+    async def connect(self) -> None:
+        """Open a connection WITHOUT running the schema DDL (docs/fable/02).
+
+        The schema + migrations are created once at boot by ``init_db()``. Per-request
+        instances just need a live connection, so this skips the (heavy, redundant)
+        CREATE TABLE executescript. Used by the per-request ``get_db()`` dependency so
+        each request has its OWN connection — psycopg3 forbids sharing one async
+        connection across concurrent coroutines, and a fresh connection also self-heals
+        after a DB restart (the old single shared connection did neither).
+        """
+        self._conn = await pg.connect(self._path)
+        self._conn.row_factory = pg.Row
 
     async def init_db(self):
         # Postgres connection (schema selected from self._path in test mode;
         # always ``public`` in production). No PRAGMAs / WAL / busy_timeout —
         # Postgres handles concurrency natively (no "database is locked").
-        self._conn = await aiosqlite.connect(self._path)
-        self._conn.row_factory = aiosqlite.Row
+        self._conn = await pg.connect(self._path)
+        self._conn.row_factory = pg.Row
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -545,9 +579,56 @@ class JobDatabase:
         return [dict(row) for row in rows]
 
     async def purge_old_jobs(self, days: int = 30) -> int:
-        """Delete jobs where first_seen is older than `days` ago. Returns count deleted."""
+        """Delete jobs not seen in the last `days`. Returns count deleted.
+
+        Keys on LIVENESS (last_seen_at), not ingestion (first_seen) — docs/fable/02:
+        a posting still live after 30 days should be kept, not deleted-then-re-inserted
+        (which reset its score + re-notified). COALESCE falls back to first_seen for
+        legacy rows whose last_seen_at is NULL, so nothing accumulates un-purgeable.
+
+        Also deletes the catalog-derived child rows (docs/fable/02 D4). The pg shim
+        strips EVERY foreign-key clause — including ``ON DELETE CASCADE`` — so there
+        is no DB-level cascade; without this, every purge orphaned rows forever.
+        ``user_feed`` is the big one: one row per user per job.
+        """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._conn.execute("DELETE FROM jobs WHERE first_seen < ?", (cutoff,))
+        stale = "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?"
+        # Children first (the subquery needs the jobs rows to still exist).
+        #
+        # Skip a child table that does not exist IN THIS SCHEMA. EVERY table in
+        # _PURGE_CASCADE_TABLES is created by a MIGRATION (job_enrichment is 0008,
+        # user_feed is 0011 …), but ``init_db()`` above only creates the legacy
+        # pre-Batch-2 tables — migration 0000's header spells this split out. So a
+        # DB built by init_db() ALONE, with no runner.up(), is a legitimate state
+        # (several tests do exactly that) in which these children are absent, and
+        # an unguarded DELETE dies with UndefinedTable. Production always migrates
+        # on boot (api/dependencies.py lifespan), so this skips nothing there.
+        #
+        # ``current_schema()``, NOT to_regclass(): to_regclass resolves through the
+        # whole search_path, which in test mode is ``"t_xxx", public``. An
+        # init_db-only test in its own ``mem_*``/``t_*`` schema would then resolve
+        # ``user_feed`` via the PUBLIC fallback the moment a dev has run
+        # ``python main.py`` (default DSN → same Postgres, writes ``public``) — and
+        # the DELETE would silently wipe real ``public`` rows whose job_id collides
+        # with the test's ids (1–2 in a fresh schema — near-certain). Pinning to the
+        # ACTIVE schema means "exists here", never "exists somewhere on the path".
+        # Same current_schema() discipline as runner.py's sequence resync. NOT a
+        # try/except UndefinedTable: an explicit check can't also swallow a REAL
+        # error from the DELETE.
+        existing = await self._conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema()"
+        )
+        present = {r[0] for r in await existing.fetchall()}
+        for table in _PURGE_CASCADE_TABLES:
+            if table not in present:
+                continue
+            await self._conn.execute(
+                f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
+            )
+        cursor = await self._conn.execute(
+            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
+        )
         await self._conn.commit()
         _log.info(
             "purge_old_jobs",
@@ -879,27 +960,37 @@ class JobDatabase:
         )
         row = await cursor.fetchone()
         from_stage = row[0] if row else None
-        await self._conn.execute(
-            """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
-               WHERE user_id = ? AND job_id = ?""",
-            (stage, now, now, user_id, job_id),
-        )
-        # Insert history entry (Step-3 B-06). Gracefully skips if the
-        # application_stage_history table doesn't exist yet (e.g. migration
-        # 0014 hasn't run) so existing tests remain green.
+        # Stage move + its history row commit together or not at all (docs/
+        # fable/02 D11): previously each statement auto-committed, so a crash
+        # between them moved the card but silently dropped the history entry.
+        # The history INSERT sits behind a SAVEPOINT so the long-standing
+        # tolerance for a missing application_stage_history table (init_db-only
+        # test flows, pre-0014) skips JUST the history — without the savepoint
+        # that error would abort the whole transaction and undo the UPDATE.
+        await self._conn.execute("BEGIN")
         try:
             await self._conn.execute(
-                """INSERT INTO application_stage_history
-                   (job_id, user_id, from_stage, to_stage, transitioned_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (job_id, user_id, from_stage, stage, now),
+                """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
+                   WHERE user_id = ? AND job_id = ?""",
+                (stage, now, now, user_id, job_id),
             )
-        except Exception:  # noqa: BLE001, S110
-            # Table not yet created (migration 0014 not run) — tolerate gracefully.
-            # Logging is omitted intentionally: this is a known transient state
-            # during init_db()-only flows (tests) before the runner applies the DDL.
-            pass  # noqa: S110
-        await self._conn.commit()
+            await self._conn.execute("SAVEPOINT _adv_hist")
+            try:
+                await self._conn.execute(
+                    """INSERT INTO application_stage_history
+                       (job_id, user_id, from_stage, to_stage, transitioned_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (job_id, user_id, from_stage, stage, now),
+                )
+                await self._conn.execute("RELEASE SAVEPOINT _adv_hist")
+            except Exception:  # noqa: BLE001
+                # Table not yet created (migration 0014 not run) — keep the
+                # stage move, skip only the history row.
+                await self._conn.execute("ROLLBACK TO SAVEPOINT _adv_hist")
+            await self._conn.execute("COMMIT")
+        except Exception:
+            await self._conn.execute("ROLLBACK")
+            raise
         return await self._get_application(job_id, user_id)
 
     async def _get_application(self, job_id: int, user_id: str) -> dict:
@@ -1050,7 +1141,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (cutoff, min_score))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return await self.get_recent_jobs(days=days, min_score=min_score)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1086,7 +1177,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (user_id, cutoff, min_score))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         out: list[dict] = []
@@ -1115,7 +1206,7 @@ class JobDatabase:
         )
         try:
             cursor = await self._conn.execute(sql, (job_id,))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             # Fallback for fresh DBs without migration 0008 — still apply
             # the staleness filter so the read path stays consistent.
             cursor = await self._conn.execute(
@@ -1187,7 +1278,7 @@ class JobDatabase:
         params.extend([limit, offset])
         try:
             cursor = await self._conn.execute(sql, tuple(params))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1226,7 +1317,7 @@ class JobDatabase:
             params.append(end_time)
         try:
             cursor = await self._conn.execute(sql, tuple(params))
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
@@ -1253,6 +1344,71 @@ class JobDatabase:
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
     )
+
+    # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
+    # user's OWN data — what they authored or what we derived about them.
+    # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
+    # email_verifications, oauth_states. Those hold short-lived security tokens,
+    # not portable personal data; exporting them would hand out live credentials.
+    _EXPORT_TABLES = (
+        "applications", "application_stage_history", "audit_log",
+        "notification_ledger", "notification_rules", "tailored_documents",
+        "tailored_usage", "user_actions", "user_channels", "user_feed",
+        "user_profile_versions", "user_profiles",
+    )
+
+    # Secret-bearing columns are redacted even inside exported tables — e.g. the
+    # Fernet-encrypted channel credentials and the argon2 password hash. The user
+    # gets their data, never their (or our) secrets.
+    _EXPORT_REDACT_COLUMNS = frozenset({
+        "password_hash", "config_encrypted", "credentials_encrypted", "token",
+        "token_hash", "secret", "access_token", "refresh_token", "webhook_url",
+    })
+
+    @classmethod
+    def _scrub_export_row(cls, row: dict) -> dict:
+        return {
+            k: ("[redacted]" if k in cls._EXPORT_REDACT_COLUMNS and v is not None else v)
+            for k, v in row.items()
+        }
+
+    async def export_user_data(self, user_id: str) -> dict:
+        """GDPR Article 20 — return everything we hold on this user, as plain data.
+
+        Read-only counterpart to :meth:`hard_delete_user`. Scoped strictly by
+        ``user_id`` (rule #12) and never touches the shared catalog (rules #10/#17)
+        — a user's export contains their feed/actions/applications, not the whole
+        jobs table.
+
+        Secrets are redacted (see ``_EXPORT_REDACT_COLUMNS``) and token tables are
+        omitted entirely, so this is safe to hand to the user as a file.
+        """
+        out: dict = {}
+        cur = await self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cur.fetchone()
+        out["user"] = self._scrub_export_row(dict(row)) if row else None
+
+        incomplete: list[str] = []
+        for tbl in self._EXPORT_TABLES:
+            try:
+                cur = await self._conn.execute(
+                    f"SELECT * FROM {tbl} WHERE user_id = ?", (user_id,)  # noqa: S608 — name from a module constant
+                )
+                out[tbl] = [self._scrub_export_row(dict(r)) for r in await cur.fetchall()]
+            except Exception as exc:  # noqa: BLE001 — tolerate a table absent in a partial test schema
+                # NEVER fail silently: an empty list here is indistinguishable from
+                # "you have no rows", so a broken query would hand the user an
+                # incomplete Article-20 export while looking successful. Log it and
+                # tell the caller which tables could not be read.
+                _log.warning(
+                    "export_user_data: table unreadable, exported as empty",
+                    extra={"event": "export_table_failed", "table": tbl, "error": str(exc)},
+                )
+                out[tbl] = []
+                incomplete.append(tbl)
+        if incomplete:
+            out["_incomplete_tables"] = incomplete
+        return out
 
     async def hard_delete_user(self, user_id: str) -> None:
         """GDPR Article 17 — irreversibly ERASE all of a user's personal data.
@@ -1284,6 +1440,17 @@ class JobDatabase:
         try:
             await self._conn.execute(
                 "UPDATE run_log SET user_id = NULL WHERE user_id = ?", (user_id,)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        # audit_log (migration 0025): same retention pattern — the security
+        # history (a login happened, from this IP) is kept for legitimate
+        # interest, but the personal link is severed. detail never holds email
+        # (audit_trail denylists it), so NULLing user_id fully anonymises.
+        try:
+            await self._conn.execute(
+                "UPDATE audit_log SET user_id = NULL WHERE user_id = ?", (user_id,)
             )
         except Exception:  # noqa: BLE001
             pass
@@ -1381,7 +1548,7 @@ class JobDatabase:
                 "SELECT * FROM notification_rules WHERE user_id = ? ORDER BY channel",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1393,7 +1560,7 @@ class JobDatabase:
                 "SELECT * FROM notification_rules WHERE user_id = ?",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return None
         row = await cursor.fetchone()
         return dict(row) if row else None
@@ -1455,7 +1622,7 @@ class JobDatabase:
                 (ts, user_id),
             )
             await self._conn.commit()
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             pass
 
     async def get_users_with_rules(self) -> list[dict]:
@@ -1464,7 +1631,7 @@ class JobDatabase:
             cursor = await self._conn.execute(
                 "SELECT * FROM notification_rules WHERE enabled = 1"
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -1479,7 +1646,7 @@ class JobDatabase:
             )
             await self._conn.commit()
             return cursor.rowcount
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
 
     async def queue_digest_notification(self, user_id: str, channel: str, job_id: int) -> None:
@@ -1495,7 +1662,7 @@ class JobDatabase:
                 (user_id, channel, job_id),
             )
             await self._conn.commit()
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             pass  # Table missing on legacy DB — graceful no-op.
 
     async def get_pending_digests(self, user_id: str, channel: str) -> list[dict]:
@@ -1505,7 +1672,7 @@ class JobDatabase:
                 "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
                 (user_id, channel),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1523,7 +1690,7 @@ class JobDatabase:
                 "WHERE user_id = ? AND channel = ? AND sent = 0",
                 (now, user_id, channel),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
         await self._conn.commit()
         return cursor.rowcount
@@ -1545,7 +1712,7 @@ class JobDatabase:
                 "GROUP BY channel, status",
                 (user_id,),
             )
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return {}
         rows = await cursor.fetchall()
         result: dict[str, dict[str, int]] = {}
@@ -1572,7 +1739,7 @@ class JobDatabase:
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return []
 
     async def count_recent_runs(self, user_id: str) -> int:
@@ -1584,7 +1751,7 @@ class JobDatabase:
             )
             row = await cursor.fetchone()
             return int(row[0]) if row else 0
-        except aiosqlite.OperationalError:
+        except pg.OperationalError:
             return 0
 
     async def close(self):

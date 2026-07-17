@@ -24,11 +24,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote as urlquote
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
+from src.utils.logger import mask_email
 
 logger = logging.getLogger("job360.auth.password_reset")
 
@@ -97,7 +98,7 @@ async def request_password_reset(
     (route) ignores the return value to keep the no-enumeration contract.
     """
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL",
             (email,),
@@ -105,7 +106,7 @@ async def request_password_reset(
         row = await cur.fetchone()
         if row is None:
             # Don't leak existence. Caller still returns 204.
-            logger.info("password reset requested for unknown email: %s", email)
+            logger.info("password reset requested for unknown email: %s", mask_email(email))
             return False
         user_id = row["id"]
 
@@ -141,7 +142,7 @@ async def confirm_password_reset(
     h = tokens.hash_token(raw_token)
     now = _now_iso()
     async with open_db(db_path) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         # Single read to validate everything atomically. SQLite's
         # transaction default ensures this is consistent with the UPDATE
         # below.

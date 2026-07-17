@@ -1,98 +1,94 @@
 /**
- * M14 — middleware must fail CLOSED when the backend auth check
- * (`/api/auth/me`) is unreachable, instead of serving the protected shell.
+ * Middleware auth guard — fail-closed on backend outage (docs/fable/03 F4).
  *
- * Before the fix, a fetch error in the try/catch returned NextResponse.next(),
- * which let ANY request with a `job360_session` cookie through to a protected
- * route while the backend was down/unreachable — cookie validity was never
- * actually checked in that path.
+ * The guard used to fail OPEN when the backend was unreachable: an unverified
+ * session cookie granted access to protected pages. These tests pin the new
+ * behaviour: outage → redirect to /login with error=service_unavailable, and —
+ * deliberately unlike a 401 bounce — WITHOUT deleting the cookie (the outage is
+ * ours; the session may be perfectly valid once the backend recovers).
  */
-
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { middleware } from "./middleware";
 
-const originalFetch = global.fetch;
-
-beforeEach(() => {
-  vi.resetAllMocks();
-});
-
-afterEach(() => {
-  global.fetch = originalFetch;
-});
-
-function makeRequest(path: string, cookie?: string) {
-  return new NextRequest(`http://localhost:3000${path}`, {
-    headers: cookie ? { cookie } : {},
+function protectedRequest(): NextRequest {
+  return new NextRequest("http://localhost:3000/dashboard", {
+    headers: { cookie: "job360_session=some-session-value" },
   });
 }
 
-describe("middleware — M14 fail-closed on backend-unreachable", () => {
-  it("redirects to /login (not next()) when the auth-check fetch throws", async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+describe("middleware — backend outage (F4)", () => {
+  beforeEach(() => {
+    vi.stubEnv("E2E_TEST_MODE", "");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED"))
+    );
+  });
 
-    const req = makeRequest("/dashboard", "job360_session=some-valid-looking-value");
-    const res = await middleware(req);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
 
+  it("fails CLOSED: redirects a protected route to /login", async () => {
+    const res = await middleware(protectedRequest());
     expect(res.status).toBe(307);
-    const location = res.headers.get("location");
-    expect(location).toContain("/login");
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/dashboard");
+    expect(location.searchParams.get("error")).toBe("service_unavailable");
   });
 
-  it("does NOT delete the session cookie on a network failure (transient, not invalid)", async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
-
-    const req = makeRequest("/dashboard", "job360_session=some-valid-looking-value");
-    const res = await middleware(req);
-
-    // bounceToLogin() (the "cookie is known-bad" path) deletes the cookie by
-    // appending a Set-Cookie header with Max-Age=0. The network-failure path
-    // must NOT do that.
-    const setCookie = res.headers.get("set-cookie");
-    expect(setCookie ?? "").not.toMatch(/job360_session=;/);
+  it("does NOT delete the session cookie on outage", async () => {
+    const res = await middleware(protectedRequest());
+    // A 401 bounce clears the cookie; the outage bounce must not — the session
+    // may still be valid when the backend comes back.
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).not.toMatch(/job360_session=;/);
   });
 
-  it("still bounces to login and clears the cookie for a genuinely invalid session (backend reachable, 401)", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
-
-    const req = makeRequest("/dashboard", "job360_session=stale-cookie");
-    const res = await middleware(req);
-
+  it("still bounces to login (cookie cleared) on a real 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 }))
+    );
+    const res = await middleware(protectedRequest());
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain("/login");
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("error")).toBeNull();
+    expect(res.headers.get("set-cookie") ?? "").toMatch(/job360_session=;/);
   });
 
-  it("passes through when the backend confirms the session is valid", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-
-    const req = makeRequest("/dashboard", "job360_session=good-cookie");
-    const res = await middleware(req);
-
-    // NextResponse.next() results in a 200 passthrough with no redirect.
+  it("lets a verified session through", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+    );
+    const res = await middleware(protectedRequest());
     expect(res.status).toBe(200);
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("bounces unauthenticated requests (no cookie) straight to login without calling fetch", async () => {
+  it("bounces a protected route with NO cookie without calling the backend", async () => {
     const fetchMock = vi.fn();
-    global.fetch = fetchMock;
-
-    const req = makeRequest("/dashboard");
-    const res = await middleware(req);
-
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/dashboard")
+    );
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain("/login");
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not gate public paths like /jobs", async () => {
+  it("public routes never hit the backend at all", async () => {
     const fetchMock = vi.fn();
-    global.fetch = fetchMock;
-
-    const req = makeRequest("/jobs/123");
-    const res = await middleware(req);
-
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/jobs/123")
+    );
     expect(res.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
   });

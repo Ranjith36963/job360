@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 from contextlib import asynccontextmanager
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg, pgsync
 from src.services.channels import crypto
 
 
@@ -30,7 +29,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -75,7 +74,7 @@ def client(temp_db):
 def _register_verified(client, db_path, email):
     r = client.post("/api/auth/register", json={"email": email, "password": "Correct-Horse-9"})
     assert r.status_code == 201, r.text
-    con = sqlite3.connect(db_path)
+    con = pgsync.connect(db_path)
     con.execute("UPDATE users SET email_verified_at=datetime('now') WHERE email=?", (email,))
     con.commit()
     con.close()

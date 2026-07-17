@@ -312,15 +312,14 @@ def versioned_storage_for_restore(tmp_path: Path, monkeypatch):
     """Reuse the test_profile_versions bootstrap pattern for rollback tests."""
     import asyncio
 
-    import aiosqlite
-
     from migrations import runner
     from src.core import settings as core_settings
+    from src.repositories import pg
     from src.services.profile import storage
 
     async def _bootstrap():
         db = tmp_path / "t.db"
-        async with aiosqlite.connect(str(db)) as con:
+        async with pg.connect(str(db)) as con:
             await con.executescript(
                 """
                 CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, company TEXT,
@@ -339,7 +338,7 @@ def versioned_storage_for_restore(tmp_path: Path, monkeypatch):
             )
             await con.commit()
         await runner.up(str(db))
-        async with aiosqlite.connect(str(db)) as con:
+        async with pg.connect(str(db)) as con:
             await con.execute(
                 "INSERT INTO users(id,email,password_hash) VALUES (?, ?, ?)",
                 ("alice", "a@example.test", "!"),

@@ -16,13 +16,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.api.routes import channels as channels_route
+from src.repositories import pg
 from src.services.channels import crypto
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ def api(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -138,8 +138,8 @@ def test_connect_slack_when_configured(api, monkeypatch):
     # Confirm the state was written to oauth_states.
     db_path = str(ch.DB_PATH)
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
                 (state,),
@@ -189,7 +189,7 @@ def test_callback_slack_happy_path(api, monkeypatch):
 
     async def _seed():
         now = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             # Select by email to avoid the DEFAULT_TENANT_ID placeholder row
             # inserted by migrations (which has a lower rowid than Alice).
             cur = await db.execute(
@@ -222,8 +222,8 @@ def test_callback_slack_happy_path(api, monkeypatch):
 
     # Check DB for the new channel row.
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT channel_type, connection_status, target_label, "
                 "credential_encrypted FROM user_channels WHERE channel_type='slack'"
@@ -266,7 +266,7 @@ def test_callback_unknown_state(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute("SELECT COUNT(*) FROM user_channels")
             return (await cur.fetchone())[0]
 
@@ -294,7 +294,7 @@ def test_callback_expired_state(api, monkeypatch):
     async def _seed():
         # Set created_at 11 minutes ago.
         old_ts = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             # Select by email to avoid the DEFAULT_TENANT_ID placeholder row.
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = 'alice@example.com'"
@@ -322,7 +322,7 @@ def test_callback_expired_state(api, monkeypatch):
 
     # State row should have been deleted.
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT COUNT(*) FROM oauth_states WHERE state = ?", (test_state,)
             )
@@ -397,8 +397,8 @@ def test_callback_idor_rejected(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check_bob():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = 'bob@example.com'"
             )
@@ -455,8 +455,8 @@ def test_connect_discord_when_configured(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
                 (state,),
@@ -505,7 +505,7 @@ def test_callback_discord_happy_path(api, monkeypatch):
 
     async def _seed():
         now = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = 'alice@example.com'"
             )
@@ -533,8 +533,8 @@ def test_callback_discord_happy_path(api, monkeypatch):
     assert "connected=discord" in r.headers["location"]
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT channel_type, connection_status, target_label, "
                 "credential_encrypted FROM user_channels WHERE channel_type='discord'"
@@ -595,7 +595,7 @@ def test_callback_discord_cross_type_state_rejected(api, monkeypatch):
 
     async def _seed():
         now = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = 'alice@example.com'"
             )
@@ -715,8 +715,8 @@ def test_connect_telegram_when_configured(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT user_id, channel_type FROM oauth_states WHERE state = ?",
                 (state,),
@@ -809,8 +809,8 @@ def test_poll_telegram_happy_path(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT channel_type, connection_status, target_label, "
                 "credential_encrypted FROM user_channels WHERE channel_type='telegram'"
@@ -864,7 +864,7 @@ def test_poll_telegram_not_yet(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT COUNT(*) FROM oauth_states WHERE state = ?", (state,)
             )
@@ -905,8 +905,8 @@ def test_poll_telegram_idor_rejected(api, monkeypatch):
     db_path = str(ch.DB_PATH)
 
     async def _check():
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(db_path) as db:
+            db.row_factory = pg.Row
             cur = await db.execute("SELECT id FROM users WHERE email = 'bob@example.com'")
             bob_row = await cur.fetchone()
             bob_id = bob_row["id"]
@@ -938,7 +938,7 @@ def test_list_channels_returns_connection_status_and_target_label(api, monkeypat
 
     async def _seed():
         now = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = 'alice@example.com'"
             )

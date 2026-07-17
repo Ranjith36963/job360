@@ -36,10 +36,9 @@ RUBRIC = (
 
 
 def _profile_text(uid):
-    import sqlite3
-
     from src.core.settings import DB_PATH
-    c = sqlite3.connect(str(DB_PATH)); c.row_factory = sqlite3.Row
+    from src.repositories import pgsync
+    c = pgsync.connect(str(DB_PATH)); c.row_factory = pgsync.Row
     r = c.execute("SELECT cv_data, preferences FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
     cv = json.loads(r["cv_data"]); p = json.loads(r["preferences"])
     titles = ", ".join((cv.get("job_titles") or [])[:6])
@@ -51,10 +50,9 @@ def _profile_text(uid):
 
 
 def _jobs_for(uid, ids):
-    import sqlite3
-
     from src.core.settings import DB_PATH
-    c = sqlite3.connect(str(DB_PATH)); c.row_factory = sqlite3.Row
+    from src.repositories import pgsync
+    c = pgsync.connect(str(DB_PATH)); c.row_factory = pgsync.Row
     out = []
     for jid in ids:
         r = c.execute("SELECT id,title,company,location,description FROM jobs WHERE id=?", (jid,)).fetchone()

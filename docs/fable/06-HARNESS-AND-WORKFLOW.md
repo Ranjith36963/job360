@@ -22,27 +22,33 @@
 ---
 
 ## P1 — `git push` / `git merge` / `git:*` are auto-approved (unsupervised push is possible)
+> **STATUS: FIXED** — `9fdef61`. `settings.json` permits read-only git only; no push/merge/`git:*`.
 - **What I saw:** `settings.json:6-7` allow-lists `Bash(git push:*)` and `Bash(git merge:*)` with no prompt. `settings.local.json:110` adds `Bash(git:*)` — which greenlights *every* git subcommand unsupervised: `reset --hard`, `clean -fdx`, `checkout`, `rebase`, `push`. The deny list only blocks force-push. The worker/integrator skills *say* "never push," but that's a soft instruction, not a guard.
 - **Why it matters:** this is **the biggest unsupervised-write vector now that ralph-loop is off** — the same class of failure (committing to main / wiping trees unsupervised) that got the loop disabled. A future automated session, or a prompt-injected instruction, could push or hard-reset with zero human check.
 - **Fix (P1 — highest value-per-effort in the whole harness):** remove `Bash(git:*)`, `Bash(git push:*)`, `Bash(git merge:*)` from the allowlist. Require a prompt for `push`/`merge`/`reset`/`clean`. Keep read-only git (`status`/`log`/`diff`) allowed.
 
 ## P2 — No secret-scan on the actual commit path
+> **STATUS: FIXED** — `6abce80`. gitleaks wired into `.pre-commit-config.yaml`.
 - **What I saw:** `.pre-commit-config.yaml` has ruff + whitespace + large-files but **no gitleaks/trufflehog/detect-secrets**. Secret scanning lives only in the manual `/commit` skill, and only if the tools happen to be installed (silently SKIPs otherwise). A key pasted into a `.py` or `.md` sails through a plain `git commit`.
 - **Fix:** add `gitleaks` to `.pre-commit-config.yaml` (one line), and/or a `PreToolUse` secret-scan hook mirroring `commit-gate.sh`.
 
 ## P3 — The gate is enforced, but verification is not
+> **STATUS: OPEN (accepted)** — tooling polish, not a product defect.
 - **What I saw:** `commit-gate.sh` is genuinely clever — blocks `git commit` unless a fresh `agent-gate.sh` stamp matches the exact tree, so "test → sneak an edit → commit" is impossible. But `agent-gate.sh` runs pytest + api-types drift only — **not** verify-job360. The Stop reminder to run verify is non-blocking. So your strongest asset is the one thing nothing enforces.
 - **Fix:** fold a lightweight verify assertion into the gate, or make the reminder a **blocking** Stop hook keyed to backend/frontend `src` diffs (it already computes that diff).
 
 ## P4 — `commit-gate.sh` bypass surfaces
+> **STATUS: OPEN (accepted)** — tooling polish.
 - **What I saw:** it matches only the literal `git commit` on the Bash tool. A commit via `gh`, an MCP git server, or any non-Bash path isn't intercepted. It shells `python -c` and **exits 0 (allows) on parse failure** if `python` isn't on the hook's PATH.
 - **Fix:** fail-closed on parse error; add `gh`/MCP paths to the matcher or document them as uncovered.
 
 ## P5 — `settings.local.json` is a 191-line junk drawer
+> **STATUS: OPEN (accepted)** — tooling polish.
 - **What I saw:** accreted one-off allows — `taskkill`, `rm -rf data/{logs,exports,reports}/*`, `mv jobs.db*`, dead `mcp__chrome-devtools__*` (not in your current servers), disabled-loop generator paths. Low risk, but nobody can eyeball what's actually permitted.
 - **Fix:** run the global **`fewer-permission-prompts`** skill to regenerate a clean minimal allowlist; delete the dead MCP + generator entries.
 
 ## P6 — CLAUDE.md is ~500 lines (best practice ≈ 200)
+> **STATUS: FIXED (conservatively)** — `966d394`. Pure history removed (commit hashes, benchmark numbers, source-count play-by-play, backlog notes); ALL 28 hard rules and every load-bearing invariant kept verbatim. Deliberately conservative: silently losing a rule costs far more than the tokens saved.
 - **What I saw:** most bulk is historical narrative that duplicates `docs/IMPLEMENTATION_LOG.md`. Rule-count drift: header says "28", worker skill references "27". A 500-line context tax on every session.
 - **Fix:** move phase/batch history to the log; keep the Hard-Rules index + Quick Orientation + Commands; reconcile 27/28.
 

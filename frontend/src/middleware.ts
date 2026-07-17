@@ -39,11 +39,12 @@ export async function middleware(request: NextRequest) {
   // playwright.config.ts's webServer env. It is never in .env.example, Railway,
   // or any real deploy, so it cannot weaken a deployed auth guard. We must NOT
   // also gate on NODE_ENV: the CI e2e runs a PRODUCTION build (npm run build &&
-  // start) for speed, so NODE_ENV==="production" there too — the old non-prod
-  // gate silently disabled this bypass in CI, and only the fail-open catch (now
-  // fail-closed, M14) was masking it. With E2E_TEST_MODE=1 a PRESENT cookie is
-  // trusted without the /api/auth/me round-trip, so hermetic (mocked, no live
-  // backend) specs pass the guard deterministically.
+  // start) for speed, so NODE_ENV==="production" there too — a non-prod gate
+  // silently disables this bypass in CI, and only the (now removed) fail-open
+  // catch was masking it. With the catch failing CLOSED (F4), that mask is gone,
+  // so the NODE_ENV gate turns every protected-route spec into a /login redirect.
+  // With E2E_TEST_MODE=1 a PRESENT cookie is trusted without the /api/auth/me
+  // round-trip, so hermetic (mocked, no live backend) specs pass deterministically.
   if (process.env.E2E_TEST_MODE === "1") {
     return NextResponse.next();
   }
@@ -59,16 +60,14 @@ export async function middleware(request: NextRequest) {
     });
     if (!verify.ok) return bounceToLogin();
   } catch {
-    // M14: Backend unreachable — fail CLOSED. Serving the protected shell here
-    // (the old "fail open" behaviour) let a stale/expired/invalid session
-    // through unverified any time the auth check itself couldn't complete.
-    // Redirect to login instead. We deliberately do NOT delete the cookie
-    // here (unlike bounceToLogin): this is a transient network failure, not
-    // proof the session is invalid, so a legitimate user shouldn't be forced
-    // through a full re-login once the backend recovers — the same cookie
-    // will be re-verified on their next request.
+    // Backend unreachable: fail CLOSED (docs/fable/03 F4) — an UNVERIFIED
+    // session must not grant access to a protected page. Deliberately DIFFERENT
+    // from bounceToLogin(): the cookie is NOT deleted (the outage is ours; the
+    // session may be perfectly valid once the backend recovers), and an error
+    // marker tells the login page to explain rather than look like a logout.
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
+    loginUrl.searchParams.set("error", "service_unavailable");
     return NextResponse.redirect(loginUrl, { status: 307 });
   }
 

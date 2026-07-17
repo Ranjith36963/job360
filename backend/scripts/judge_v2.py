@@ -11,16 +11,15 @@ POOL = r"C:/Users/Ranjith/AppData/Local/Temp/eval_v2_pool.json"
 
 
 async def _main() -> None:
-    import aiosqlite
-
     from src.core.settings import DB_PATH
     from src.models import Job
+    from src.repositories import pg
     from src.services.llm_matcher import clear_user_verdicts, match_batch, profile_to_matcher_text
     from src.services.profile.storage import load_profile
 
     pool = json.load(open(POOL))
-    conn = await aiosqlite.connect(str(DB_PATH))
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(str(DB_PATH))
+    conn.row_factory = pg.Row
     for uid, d in pool.items():
         ids = d["ids"]
         prof = load_profile(uid)

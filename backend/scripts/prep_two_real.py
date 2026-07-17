@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
+
+from src.repositories import pgsync
 
 logging.disable(logging.WARNING)
 
@@ -25,8 +26,8 @@ def main() -> None:
     from src.services.profile.storage import current_profile_version_id, load_profile
     from src.services.skill_matcher import JobScorer
 
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    conn = pgsync.connect(str(DB_PATH))
+    conn.row_factory = pgsync.Row
     catalog = [
         dict(r)
         for r in conn.execute(

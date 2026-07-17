@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any, Optional
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.services.channels.crypto import decrypt
 from src.utils.logger import get_logger
 
@@ -61,9 +61,9 @@ class ChannelSendResult:
 
 
 async def load_user_channels(
-    db: aiosqlite.Connection, user_id: str, *, enabled_only: bool = True
+    db: pg.Connection, user_id: str, *, enabled_only: bool = True
 ) -> list[dict[str, Any]]:
-    db.row_factory = aiosqlite.Row
+    db.row_factory = pg.Row
     query = "SELECT * FROM user_channels WHERE user_id = ?"
     params: list = [user_id]
     if enabled_only:
@@ -120,10 +120,10 @@ def _is_in_quiet_window(
         return False
 
 
-async def _load_notification_rule(db: aiosqlite.Connection, user_id: str) -> dict | None:
+async def _load_notification_rule(db: pg.Connection, user_id: str) -> dict | None:
     """Return the single notification_rules row for user_id or None."""
     try:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT * FROM notification_rules WHERE user_id = ?",
             (user_id,),
@@ -134,10 +134,10 @@ async def _load_notification_rule(db: aiosqlite.Connection, user_id: str) -> dic
         return None
 
 
-async def _load_user_timezone(db: aiosqlite.Connection, user_id: str) -> str:
+async def _load_user_timezone(db: pg.Connection, user_id: str) -> str:
     """Return the user's timezone string (IANA) from the users table, defaulting to UTC."""
     try:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
         row = await cur.fetchone()
         if row and row["timezone"]:
@@ -147,7 +147,7 @@ async def _load_user_timezone(db: aiosqlite.Connection, user_id: str) -> str:
     return "UTC"
 
 
-async def _queue_digest(db: aiosqlite.Connection, user_id: str, channel: str, job_id: int | None) -> None:
+async def _queue_digest(db: pg.Connection, user_id: str, channel: str, job_id: int | None) -> None:
     """Insert a pending digest row for the given (user_id, channel, job_id)."""
     if job_id is None:
         return
@@ -187,7 +187,7 @@ def _log_dispatch(user_id: str, job_id: int | None, results: list[ChannelSendRes
 
 
 async def dispatch(
-    db: aiosqlite.Connection,
+    db: pg.Connection,
     *,
     user_id: str,
     title: str,
@@ -323,7 +323,7 @@ async def _notify_async(ap, *, title: str, body: str) -> bool:
     return bool(ap.notify(title=title, body=body))
 
 
-async def test_send(db: aiosqlite.Connection, channel_id: int, *, user_id: Optional[str] = None) -> ChannelSendResult:
+async def test_send(db: pg.Connection, channel_id: int, *, user_id: Optional[str] = None) -> ChannelSendResult:
     """Send a test notification to a single channel.
 
     Ownership check: when ``user_id`` is supplied the SELECT filters by
@@ -333,7 +333,7 @@ async def test_send(db: aiosqlite.Connection, channel_id: int, *, user_id: Optio
     admin routes, digest path) that forget it won't leak here either.
     """
     apprise = _get_apprise_cls()
-    db.row_factory = aiosqlite.Row
+    db.row_factory = pg.Row
     if user_id is None:
         cur = await db.execute("SELECT * FROM user_channels WHERE id = ?", (channel_id,))
     else:

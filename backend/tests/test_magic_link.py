@@ -15,12 +15,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.auth import rate_limit, tokens
 from src.services.channels import crypto
 
@@ -53,7 +53,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -111,8 +111,8 @@ def client(temp_db):
 
 
 async def _latest_token_row(db_path, email):
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, token_hash, email, expires_at, used_at FROM magic_link_tokens "
             "WHERE email = ? ORDER BY id DESC LIMIT 1",
@@ -122,7 +122,7 @@ async def _latest_token_row(db_path, email):
 
 
 async def _count_tokens(db_path, email):
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute(
             "SELECT COUNT(*) FROM magic_link_tokens WHERE email = ?", (email,)
         )
@@ -130,8 +130,8 @@ async def _count_tokens(db_path, email):
 
 
 async def _user_row(db_path, email):
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, email, email_verified_at FROM users WHERE email = ?", (email,)
         )
@@ -203,7 +203,7 @@ def test_consume_creates_user_sets_cookie_and_verifies(client, monkeypatch, temp
 def test_consume_existing_user_verifies_no_duplicate(client, monkeypatch, temp_db):
     # Pre-create an unverified user.
     async def _seed():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
                 ("existing-id", "existing@example.com", "!"),
@@ -226,7 +226,7 @@ def test_consume_reuses_soft_deleted_user(client, monkeypatch, temp_db):
     # ignores deleted_at). consume must REUSE + reactivate it, not INSERT a
     # duplicate — that was a 500 UniqueViolation in prod.
     async def _seed():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash, deleted_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -243,8 +243,8 @@ def test_consume_reuses_soft_deleted_user(client, monkeypatch, temp_db):
     assert "job360_session" in r.cookies
 
     async def _deleted_at():
-        async with aiosqlite.connect(temp_db) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(temp_db) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT email_verified_at, deleted_at FROM users WHERE id = ?",
                 ("deleted-id",),
@@ -271,7 +271,7 @@ def test_consume_rejects_expired_token(client, monkeypatch, temp_db):
     )
 
     async def _expire():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE magic_link_tokens SET expires_at = ? WHERE email = ?",
                 (past, "slow@example.com"),

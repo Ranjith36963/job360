@@ -51,14 +51,13 @@ async def _judge_once(conn, uid, ids):
 async def _main() -> None:
     import os
 
-    import aiosqlite
-
     from src.core.settings import DB_PATH
+    from src.repositories import pg
     pool = json.load(open(POOL))
     if ONLY:
         pool = {u: pool[u] for u in ONLY if u in pool}
-    conn = await aiosqlite.connect(str(DB_PATH))
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(str(DB_PATH))
+    conn.row_factory = pg.Row
     # APPEND to existing runs (don't waste the rounds already done).
     if os.path.exists(OUT):
         runs = json.load(open(OUT))

@@ -17,13 +17,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.api.routes import runs as runs_route
+from src.repositories import pg
 from src.services.auth import email_verification, password_reset, rate_limit, tokens
 from src.services.channels import crypto
 
@@ -47,7 +47,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -146,8 +146,8 @@ def test_register_user_row_persists_after_simulated_verification_error(
     )
 
     async def _row():
-        async with aiosqlite.connect(temp_db) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(temp_db) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT id FROM users WHERE email = ?", ("alice@example.com",)
             )
@@ -195,7 +195,7 @@ def test_verify_email_resend_429_does_not_issue_token(client, monkeypatch, temp_
     client.post("/api/auth/verify-email/request")  # 204
 
     async def _count():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             cur = await db.execute(
                 "SELECT COUNT(*) FROM email_verifications WHERE email = ?",
                 ("alice@example.com",),
@@ -244,8 +244,8 @@ def test_password_reset_request_rate_limit_skips_token_issue(
     )
 
     async def _count():
-        async with aiosqlite.connect(temp_db) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(temp_db) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 """
                 SELECT COUNT(*) FROM password_resets pr

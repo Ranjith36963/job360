@@ -42,12 +42,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
 
 
-async def _ensure_table(db: aiosqlite.Connection) -> None:
+async def _ensure_table(db: pg.Connection) -> None:
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -59,12 +59,60 @@ async def _ensure_table(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
-async def _applied_ids(db: aiosqlite.Connection) -> list[str]:
+async def _resync_identity_sequences(db: pg.Connection) -> int:
+    """Re-point every ``id`` identity sequence at MAX(id). Returns tables fixed.
+
+    Why (docs/fable/02 D3): the table-rebuild migrations (0002, 0010, 0011 …) copy
+    rows with their ORIGINAL ids — ``INSERT INTO x_new (id, …) SELECT id, …``.
+    Postgres does NOT advance an identity/serial sequence when you supply the id
+    explicitly, so after a rebuild the sequence still sits at 1 while the table
+    holds ids up to N. The next natural INSERT then tries id=1 and dies with a
+    UniqueViolation. SQLite's AUTOINCREMENT had no such split, so the migrations
+    never needed this — it only appeared once we moved to Postgres.
+
+    Running this after every ``up()`` is cheap and idempotent: setval to MAX(id)
+    is a no-op when the sequence is already correct. `is_called` is set false for
+    an empty table so the first insert still gets id=1.
+    """
+    # Only tables that actually own an auto-generated `id`. Note: we must NOT call
+    # pg_get_serial_sequence() inside this query's WHERE — it RAISES (not returns
+    # NULL) for a table with no `id` column, and the planner happily evaluates it
+    # against catalog relations like pg_statistic. Filter first, resolve after.
+    # current_schema(), NOT a hardcoded 'public': the test harness gives each test
+    # its own schema (t_*/mem_*) via search_path, and prod runs in public. Keying on
+    # the active schema makes this correct in both instead of silently no-op'ing.
+    cur = await db.execute(
+        """
+        SELECT table_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND column_name = 'id'
+          AND (is_identity = 'YES' OR column_default LIKE 'nextval%')
+        """
+    )
+    tables = [r[0] for r in await cur.fetchall()]
+    fixed = 0
+    for table in tables:
+        seq_cur = await db.execute("SELECT pg_get_serial_sequence(?, 'id')", (table,))
+        seq_row = await seq_cur.fetchone()
+        seq = seq_row[0] if seq_row else None
+        if not seq:
+            continue
+        await db.execute(
+            f"SELECT setval('{seq}', "  # noqa: S608 — names come from pg_class, not user input
+            f"GREATEST(COALESCE((SELECT MAX(id) FROM {table}), 0), 1), "
+            f"(SELECT COALESCE(MAX(id), 0) FROM {table}) > 0)"
+        )
+        fixed += 1
+    return fixed
+
+
+async def _applied_ids(db: pg.Connection) -> list[str]:
     cur = await db.execute("SELECT id FROM _schema_migrations ORDER BY id")
     return [row[0] for row in await cur.fetchall()]
 
 
-async def _applied_map(db: aiosqlite.Connection) -> dict[str, str]:
+async def _applied_map(db: pg.Connection) -> dict[str, str]:
     """Return ``{stem: applied_at}`` for every recorded migration.
 
     Used by the enhanced ``status`` CLI printer (Step-0 Tier B) to show the
@@ -97,7 +145,7 @@ def _split_sql_statements(sql: str) -> list[str]:
     Strips both full-line AND inline ``--`` comments before splitting, so a
     ``;`` inside a trailing comment doesn't sever a statement mid-way. (0015's
     ``-- NULL = not yet used; set on successful consume`` did exactly that,
-    producing ``sqlite3.OperationalError: incomplete input``.)
+    producing ``pgsync.OperationalError: incomplete input``.)
 
     Still naive about ``;`` inside string literals — but no repo migration has
     one, and none has ``--`` inside a string literal either (verified against
@@ -116,7 +164,7 @@ def _split_sql_statements(sql: str) -> list[str]:
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
-async def _apply_up_sql(db: aiosqlite.Connection, sql: str) -> None:
+async def _apply_up_sql(db: pg.Connection, sql: str) -> None:
     """Run the up SQL statement-by-statement, tolerating a pre-existing
     forward state for idempotent ``ADD COLUMN`` statements.
 
@@ -160,7 +208,7 @@ async def up(
     -----------------------------------
     FastAPI (``src/api/dependencies.py`` lifespan) and the ARQ worker
     (``src/workers/settings.py``) both call this on startup. If two processes
-    race against the same SQLite file, the naive path had them both read an
+    race against the same database, the naive path had them both read an
     identical "applied" set, both run the same migration body, and both
     INSERT into ``_schema_migrations`` — the second INSERT tripped the
     ``UNIQUE(id)`` constraint and the process crashed.
@@ -180,11 +228,13 @@ async def up(
     # Advisory-lock key: a fixed constant so all concurrent booters (FastAPI
     # lifespan + ARQ worker) serialize on the same lock. Postgres has no
     # "database is locked" — this just prevents two processes running the same
-    # migration body at once. Autocommit connections mean each statement
-    # commits immediately; idempotency comes from the ON CONFLICT DO NOTHING on
-    # the _schema_migrations INSERT plus the re-read under the lock.
+    # migration body at once. Each migration now runs in its OWN BEGIN/COMMIT
+    # (transactional migrations, docs/fable/02) so it applies atomically; the
+    # session-level advisory lock is held across those transactions. Idempotency
+    # comes from ON CONFLICT DO NOTHING on the _schema_migrations INSERT plus the
+    # re-read under the lock.
     lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         # Acquire the lock BEFORE creating the migrations table so concurrent
         # booters don't race on CREATE TABLE (also non-atomic in Postgres).
         await db.execute("SELECT pg_advisory_lock(?)", (lock_key,))
@@ -201,6 +251,8 @@ async def up(
                 # body AND its _schema_migrations bookkeeping INSERT commit
                 # atomically. On ANY error the whole body rolls back and the stem
                 # is NOT recorded — no more half-applied migrations marked "done".
+                # Relies on the pg-shim lastval() guard (pg.py) so an ON CONFLICT
+                # INSERT can't abort this transaction via a failed lastval probe.
                 # A DuplicateTable is no longer swallowed-and-recorded: the
                 # advisory lock above already serialises concurrent booters, so a
                 # genuine duplicate now surfaces loudly instead of masking a
@@ -216,6 +268,23 @@ async def up(
                 applied_now.append(stem)
                 if target is not None and stem == target:
                     break
+            # Rebuild migrations copy explicit ids, which leaves identity sequences
+            # behind MAX(id) → the next insert would collide (docs/fable/02 D3).
+            #
+            # ONLY when we actually applied something. A previous revision ran this
+            # unconditionally so an already-broken DB would "self-heal" on any boot —
+            # well-meant, but I never measured it: the sweep costs ~2.8s (18 tables ×
+            # pg_get_serial_sequence + a setval whose MAX(id) subquery scans the
+            # table), and `up()` is called by nearly every test, almost always with
+            # nothing pending. That turned a ~14min suite into ~5h.
+            #
+            # Correctness is unaffected: a sequence can only fall behind BECAUSE a
+            # migration copied explicit ids, so resyncing exactly when a migration
+            # was applied covers every case that creates the problem. Healing a DB
+            # broken by some earlier boot is a one-off repair, not something worth
+            # taxing every test run for.
+            if applied_now:
+                await _resync_identity_sequences(db)
         finally:
             await db.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
     return applied_now
@@ -231,7 +300,7 @@ async def down(
     Returns the stem that was reverted, or ``None`` if none was applied.
     """
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await _ensure_table(db)
         applied = await _applied_ids(db)
         if not applied:
@@ -250,7 +319,7 @@ async def status(
     migrations_dir: Optional[Path] = None,
 ) -> dict[str, list[str]]:
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await _ensure_table(db)
         applied = await _applied_ids(db)
     all_pairs = _discover_pairs(mdir)
@@ -271,7 +340,7 @@ async def _status_rows(
     so re-invoking ``status`` is idempotent and matches the library contract.
     """
     mdir = migrations_dir or MIGRATIONS_DIR
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         # Detect pre-existing schema-migrations table before _ensure_table
         # would create it, so the CLI printer can surface "run up first".
         cur = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_migrations'")

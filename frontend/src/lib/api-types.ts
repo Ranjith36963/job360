@@ -280,6 +280,31 @@ export interface paths {
         patch: operations["change_email_api_auth_users_me_email_patch"];
         trace?: never;
     };
+    "/api/auth/users/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export My Data
+         * @description Download everything we hold on the caller as one JSON file (Article 20).
+         *
+         *     GET is correct here: it is a pure read, no state changes. Scoped to the
+         *     session's own ``user.id`` (rule #12) — the caller can never name another user.
+         *     Secrets (password hash, encrypted channel creds) are redacted and the
+         *     security-token tables are omitted entirely; see ``export_user_data``.
+         */
+        get: operations["export_my_data_api_auth_users_me_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/users/me/password": {
         parameters: {
             query?: never;
@@ -1326,15 +1351,22 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * Download
          * @description Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
          *
          *     ``fmt`` = ``pdf`` (default) | ``docx``.
+         *
+         *     POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it marks the doc kept
+         *     and feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics
+         *     and a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
+         *     cross-site top-level link click still sends the SameSite=Lax cookie. As POST it
+         *     is Origin-checked like every other mutation. The frontend already fetches this
+         *     as a blob, so the method change is transparent there.
          */
-        get: operations["download_api_tailor__job_id___doc_kind__download_get"];
-        put?: never;
-        post?: never;
+        post: operations["download_api_tailor__job_id___doc_kind__download_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1646,6 +1678,11 @@ export interface components {
             deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
+            /**
+             * Dims Active
+             * @default false
+             */
+            dims_active: boolean;
             /** Employment Type */
             employment_type?: string | null;
             /**
@@ -1728,6 +1765,11 @@ export interface components {
             /** Salary Period */
             salary_period?: string | null;
             /**
+             * Salary Score
+             * @default 0
+             */
+            salary_score: number;
+            /**
              * Semantic
              * @default 0
              */
@@ -1759,8 +1801,18 @@ export interface components {
             transferable_skills: string[];
             /** Visa Flag */
             visa_flag: boolean;
+            /**
+             * Visa Score
+             * @default 0
+             */
+            visa_score: number;
             /** Visa Sponsorship */
             visa_sponsorship?: boolean | null;
+            /**
+             * Workplace Score
+             * @default 0
+             */
+            workplace_score: number;
             /** Workplace Type */
             workplace_type?: string | null;
             /** Years Experience Min */
@@ -2758,6 +2810,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_my_data_api_auth_users_me_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
@@ -4383,7 +4466,7 @@ export interface operations {
             };
         };
     };
-    download_api_tailor__job_id___doc_kind__download_get: {
+    download_api_tailor__job_id___doc_kind__download_post: {
         parameters: {
             query?: {
                 fmt?: string;

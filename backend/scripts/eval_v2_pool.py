@@ -20,7 +20,8 @@ import asyncio
 import json
 import logging
 import random
-import sqlite3
+
+from src.repositories import pgsync
 
 logging.disable(logging.WARNING)
 
@@ -123,17 +124,17 @@ def main() -> None:
     from src.core.settings import DB_PATH
     from src.services.vector_index import VectorIndex
 
-    sconn = sqlite3.connect(str(DB_PATH))
-    sconn.row_factory = sqlite3.Row
+    sconn = pgsync.connect(str(DB_PATH))
+    sconn.row_factory = pgsync.Row
     catalog = [dict(r) for r in sconn.execute(
         "SELECT id,title,company,location,description,date_found FROM jobs")]
     vindex = VectorIndex()
 
-    import aiosqlite
+    from src.repositories import pg
 
     async def run():
-        aconn = await aiosqlite.connect(str(DB_PATH))
-        aconn.row_factory = aiosqlite.Row
+        aconn = await pg.connect(str(DB_PATH))
+        aconn.row_factory = pg.Row
         results = {}
         for uid in UIDS:
             profile, pool_ids, prov, kw_map, n_enr, embedded = await _build_for_user(

@@ -7,7 +7,7 @@ import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from src.utils.logger import _request_id_var, get_logger, get_request_id, set_request_id
 
@@ -131,3 +131,37 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if _is_production():
             response.headers["Strict-Transport-Security"] = _HSTS
         return response
+
+
+class OriginCheckMiddleware(BaseHTTPMiddleware):
+    """CSRF defence-in-depth on state-changing requests (docs/fable/01).
+
+    Cookie-auth requests already rely on ``SameSite=Lax``; this adds a second
+    layer. On unsafe methods (POST/PUT/PATCH/DELETE), if the request carries an
+    ``Origin`` header that is NOT in the allowlist, it is rejected with 403.
+
+    A request with NO ``Origin`` (curl, server-to-server, TestClient) is allowed —
+    a CSRF attack needs a browser, and browsers ALWAYS send ``Origin`` on a
+    cross-site state-changing request. So this blocks the browser CSRF vector
+    without breaking non-browser API clients. Allowlist = ``FRONTEND_ORIGIN``
+    (same source as CORS).
+    """
+
+    _UNSAFE = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if request.method in self._UNSAFE:
+            origin = request.headers.get("origin")
+            if origin:
+                allowed = {
+                    o.strip()
+                    for o in os.environ.get(
+                        "FRONTEND_ORIGIN", "http://localhost:3000"
+                    ).split(",")
+                    if o.strip()
+                }
+                if origin not in allowed:
+                    return JSONResponse(
+                        {"detail": "cross-origin request rejected"}, status_code=403
+                    )
+        return await call_next(request)

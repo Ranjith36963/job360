@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import CurrentUser, require_user
 from src.core import settings as _settings
 from src.core.settings import DB_PATH
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.channels import crypto, dispatcher
 from src.utils.logger import get_audit_logger
@@ -82,7 +82,7 @@ class TelegramPollOut(BaseModel):
 @router.get("", response_model=list[ChannelOut])
 async def list_channels(user: CurrentUser = Depends(require_user)) -> list[ChannelOut]:
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, channel_type, display_name, enabled, "
             "connection_status, target_label FROM user_channels "
@@ -225,7 +225,7 @@ async def test_send_channel(
     # Two-layer ownership check: HTTP SELECT here AND dispatcher filters
     # internally on user_id. Either layer rejects a cross-user attempt.
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id FROM user_channels WHERE id = ? AND user_id = ?",
             (channel_id, user.id),
@@ -271,7 +271,7 @@ _STATE_TTL_MINUTES = 10
 
 
 async def _consume_oauth_state(
-    db: aiosqlite.Connection,
+    db: pg.Connection,
     state: str,
     user_id: str,
     channel_type: str,
@@ -427,7 +427,7 @@ async def callback_slack(
     State is always consumed (deleted) on first use past validation.
     """
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
 
         await _consume_oauth_state(db, state, user.id, "slack")
 
@@ -578,7 +578,7 @@ async def callback_discord(
     State is always consumed (deleted) on first use past validation.
     """
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
 
         await _consume_oauth_state(db, state, user.id, "discord")
 
@@ -709,7 +709,7 @@ async def poll_telegram(
     ``{connected: false}`` with the state still alive.
     """
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT user_id, channel_type, created_at FROM oauth_states WHERE state = ?",
             (state,),

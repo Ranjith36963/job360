@@ -15,9 +15,15 @@ import argparse
 import io
 import json
 import math
-import sqlite3
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # backend/ on path for src.*
+
+import sys
+from pathlib import Path
+
+from src.repositories import pgsync  # noqa: E402
 
 # =========================================================================== #
 #  Pure maths helpers (TDD'd first)                                            #
@@ -268,20 +274,20 @@ def build_prompt(profile: dict, job: dict) -> str:
 # =========================================================================== #
 
 
-def _open_db_ro(db_path: str) -> sqlite3.Connection:
+def _open_db_ro(db_path: str) -> pgsync.Connection:
     """Open SQLite in read-only mode via URI."""
     uri = f"file:{db_path}?mode=ro"
-    return sqlite3.connect(uri, uri=True)
+    return pgsync.connect(uri, uri=True)
 
 
-def _fetch_user_id(conn: sqlite3.Connection, email: str) -> str | None:
+def _fetch_user_id(conn: pgsync.Connection, email: str) -> str | None:
     row = conn.execute(
         "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL", (email,)
     ).fetchone()
     return row[0] if row else None
 
 
-def _fetch_profile(conn: sqlite3.Connection, user_id: str) -> dict:
+def _fetch_profile(conn: pgsync.Connection, user_id: str) -> dict:
     """Return profile dict suitable for build_prompt().  Graceful on missing rows."""
     row = conn.execute(
         "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
@@ -320,7 +326,7 @@ def _fetch_profile(conn: sqlite3.Connection, user_id: str) -> dict:
     }
 
 
-def _fetch_feed_rows(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+def _fetch_feed_rows(conn: pgsync.Connection, user_id: str) -> list[dict]:
     """Return all active feed rows for the user joined to jobs.
 
     Columns returned per row:
@@ -357,7 +363,7 @@ def _fetch_feed_rows(conn: sqlite3.Connection, user_id: str) -> list[dict]:
     """
     try:
         rows = conn.execute(sql, (user_id,)).fetchall()
-    except sqlite3.OperationalError:
+    except pgsync.OperationalError:
         # Fallback when user_feed or llm_fit_score column not yet present
         sql_fallback = """
             SELECT

@@ -106,14 +106,14 @@ async def worker_startup(ctx: dict) -> None:
 
     from migrations import runner  # local import — keep module import light
     from src.core.settings import DB_PATH
-    from src.repositories import pg as aiosqlite
+    from src.repositories import pg
 
     # Worker may boot independently of the API; migrations are idempotent and
     # advisory-locked, so applying them here is safe.
     await runner.up(str(DB_PATH))
 
-    conn = await aiosqlite.connect(str(DB_PATH))
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(str(DB_PATH))
+    conn.row_factory = pg.Row
     ctx["db"] = conn
 
     async def _enqueue(function_name: str, *args: object) -> object:
@@ -162,6 +162,11 @@ class WorkerSettings:
     # one at a time to avoid two coroutines using one psycopg connection at once.
     # Worker throughput here is not latency-critical (notifications/enrichment).
     max_jobs = 1
+
+    # Explicit per-task ceiling (docs/fable/04) sized to the slowest known task —
+    # the LLM-judge/enrichment batch. Without this, ARQ's generic default lets a
+    # hung LLM call tie up the (single) worker slot indefinitely.
+    job_timeout = 600  # seconds
 
     # Periodic / cron jobs — Step-3 B-14.
     # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``.

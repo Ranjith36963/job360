@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import sqlite3
 import time
 import uuid as uuid_mod
 
 import pytest
 
 from migrations import runner
+from src.repositories import pgsync
 from src.utils import logger as logger_mod
 from src.utils import telemetry as tel_mod
 
@@ -101,7 +101,7 @@ def test_run_uuid_persisted_on_run_log(tmp_path):
 
     asyncio.run(_run())
 
-    conn = sqlite3.connect(db_path)
+    conn = pgsync.connect(db_path)
     try:
         cur = conn.execute(
             "SELECT run_uuid, per_source_errors, per_source_duration, total_duration "

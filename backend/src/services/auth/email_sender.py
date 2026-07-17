@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Optional
 
+from src.utils.logger import mask_email
+
 logger = logging.getLogger("job360.auth.email_sender")
 
 
@@ -76,13 +78,16 @@ async def send_system_email(
             if resp.status_code >= 400:
                 logger.error(
                     "send_system_email (resend) failed: to=%s subject=%s status=%s body=%s",
-                    to_email, subject, resp.status_code, resp.text[:300],
+                    mask_email(to_email), subject, resp.status_code, resp.text[:300],
                 )
                 return False
-            logger.info("send_system_email (resend) ok: to=%s subject=%s", to_email, subject)
+            logger.info("send_system_email (resend) ok: to=%s subject=%s", mask_email(to_email), subject)
             return True
         except Exception as exc:  # noqa: BLE001 — never raise to the auth flow
-            logger.error("send_system_email (resend) error: to=%s subject=%s err=%s", to_email, subject, exc)
+            logger.error(
+                "send_system_email (resend) error: to=%s subject=%s err=%s",
+                mask_email(to_email), subject, exc,
+            )
             return False
 
     # Fallback: real SMTP. Run BLOCKING smtplib in a worker thread so a slow or
@@ -91,7 +96,7 @@ async def send_system_email(
     if cfg is None:
         logger.error(
             "send_system_email skipped: no RESEND_API_KEY and SMTP_EMAIL/SMTP_PASSWORD not set. to=%s subject=%s",
-            to_email, subject,
+            mask_email(to_email), subject,
         )
         return False
     smtp_email, smtp_password = cfg
@@ -119,7 +124,7 @@ async def send_system_email(
 
         await asyncio.to_thread(_send_blocking)
     except Exception as exc:  # noqa: BLE001 — intentionally broad
-        logger.error("send_system_email failed: to=%s subject=%s err=%s", to_email, subject, exc)
+        logger.error("send_system_email failed: to=%s subject=%s err=%s", mask_email(to_email), subject, exc)
         return False
-    logger.info("send_system_email ok: to=%s subject=%s", to_email, subject)
+    logger.info("send_system_email ok: to=%s subject=%s", mask_email(to_email), subject)
     return True

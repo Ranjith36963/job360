@@ -505,3 +505,20 @@ def test_dedup_preserves_internal_hyphenated_words():
         ),
     ]
     assert len(deduplicate(jobs, enable_fuzzy=False, enable_tfidf=False)) == 2
+
+
+def test_normalized_key_collapses_internal_whitespace():
+    """docs/fable/02 rule #1 — the same job with cosmetically different spacing
+    (double space / tab) must produce ONE normalized key, else it persists as a dup."""
+    from src.models import Job
+
+    def _job(title, company):
+        return Job(
+            title=title, company=company, location="", apply_url="https://e/x",
+            source="reed", date_found="2026-01-01",
+        )
+
+    a = _job("Senior  Data\tEngineer", "Big Data Co")   # double space + tab
+    b = _job("Senior Data Engineer", "Big Data Co")      # single spaces
+    assert a.normalized_key() == b.normalized_key()
+    assert a.normalized_key()[1] == "senior data engineer"

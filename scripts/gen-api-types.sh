@@ -8,7 +8,16 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT/backend"
 # Offline export — does NOT need a running server (app.openapi() builds from routes).
-python -c "from src.api.main import app; import json; json.dump(app.openapi(), open('../frontend/openapi.json','w'), indent=2, sort_keys=True); open('../frontend/openapi.json','a').write('\n')"
+#
+# newline="\n" is LOAD-BEARING on Windows. Python text mode defaults to
+# newline=None, which rewrites every "\n" as "\r\n" — so the regenerated file
+# differed from the LF copy in git by raw bytes while being identical after
+# git's CRLF normalization. That split the gate against itself: `git diff`
+# (normalizes) saw no drift and passed, but `git status --porcelain` (raw) said
+# "MM", which moved the tree fingerprint and tripped the M1 "tree changed while
+# the gate ran" check on a tree nobody had touched. Keep the output LF so the
+# "deterministic outputs" promise above is true on every platform.
+python -c "from src.api.main import app; import json; json.dump(app.openapi(), open('../frontend/openapi.json','w',newline='\n'), indent=2, sort_keys=True); open('../frontend/openapi.json','a',newline='\n').write('\n')"
 cd "$ROOT/frontend"
 node_modules/.bin/openapi-typescript openapi.json -o src/lib/api-types.ts
 echo "[gen-api-types] regenerated frontend/openapi.json + src/lib/api-types.ts"

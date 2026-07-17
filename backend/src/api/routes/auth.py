@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
@@ -17,10 +19,10 @@ from src.api.auth_deps import (
     _secret,
     require_user,
 )
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
 from src.services.auth import email_verification as auth_email_verification
@@ -143,7 +145,7 @@ async def register(
                 (user_id, req.email, pw_hash),
             )
             await db.commit()
-        except aiosqlite.IntegrityError:
+        except pg.IntegrityError:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="email already registered",
@@ -176,7 +178,17 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     # attacker guessing one account's password gets locked out after
     # LOGIN_MAX_ATTEMPTS failures within the window — checked BEFORE we touch
     # the DB or verify the hash.
-    throttle_key = f"login:{str(req.email).lower()}"
+    # Lock on email+IP, not email alone (docs/fable/01): an email-only lockout lets
+    # an attacker lock a VICTIM out of their own account by spamming failures for
+    # their email. Scoping to the source IP means the attacker only locks their own
+    # (email, IP) bucket; the real user, on a different IP, can still sign in.
+    # XFF is trusted only behind the JOB360_TRUST_PROXY gate (else it's spoofable).
+    _ip = request.client.host if request.client else "unknown"
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if _xff:
+            _ip = _xff
+    throttle_key = f"login:{str(req.email).lower()}:{_ip}"
     if auth_rate_limit.is_locked(
         throttle_key,
         max_failures=LOGIN_MAX_ATTEMPTS,
@@ -192,7 +204,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             headers={"Retry-After": str(LOGIN_LOCKOUT_WINDOW_SECONDS)},
         )
     async with open_db(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, email, password_hash FROM users " "WHERE email = ? AND deleted_at IS NULL",
             (req.email,),
@@ -242,6 +254,34 @@ async def me(user: CurrentUser = Depends(require_user)) -> UserResponse:
     return UserResponse(id=user.id, email=user.email)
 
 
+# ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────
+
+
+@router.get("/users/me/export")
+async def export_my_data(
+    db: JobDatabase = Depends(get_request_db),
+    user: CurrentUser = Depends(require_user),
+) -> Response:
+    """Download everything we hold on the caller as one JSON file (Article 20).
+
+    GET is correct here: it is a pure read, no state changes. Scoped to the
+    session's own ``user.id`` (rule #12) — the caller can never name another user.
+    Secrets (password hash, encrypted channel creds) are redacted and the
+    security-token tables are omitted entirely; see ``export_user_data``.
+    """
+    data = await db.export_user_data(user.id)
+    body = json.dumps(
+        {"exported_at": datetime.now(timezone.utc).isoformat(), "data": data},
+        indent=2,
+        default=str,
+    )
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="job360-my-data.json"'},
+    )
+
+
 # ── B-11: Soft-delete (GDPR Article 17) ──────────────────────────────────────
 
 
@@ -253,7 +293,7 @@ class AccountDeleteRequest(BaseModel):
 async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """ERASE the caller's account (GDPR Article 17). Requires current-password
@@ -263,7 +303,7 @@ async def delete_account(
     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
     left the data in place and could be resurrected on a later magic-link consume."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -291,14 +331,14 @@ class PasswordChangeRequest(BaseModel):
 async def change_password(
     req: PasswordChangeRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """Authenticated password change. Requires current password verification,
     then invalidates the session cookie to force re-login (hard rule #26 —
     matches the email-change path)."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -330,12 +370,12 @@ class EmailChangeRequest(BaseModel):
 async def change_email(
     req: EmailChangeRequest,
     response: Response,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
@@ -345,7 +385,7 @@ async def change_email(
         raise HTTPException(status_code=401, detail="current password is incorrect")
     # Check new email is not already taken by another user
     async with open_db(str(DB_PATH)) as adb:
-        adb.row_factory = aiosqlite.Row
+        adb.row_factory = pg.Row
         cursor = await adb.execute(
             "SELECT id FROM users WHERE email = ? AND id != ?",
             (str(req.new_email), user.id),

@@ -12,10 +12,9 @@ IDS = r"C:/Users/Ranjith/AppData/Local/Temp/fake_sample_ids.json"
 
 
 async def _main() -> None:
-    import aiosqlite
-
     from src.core.settings import DB_PATH
     from src.models import Job
+    from src.repositories import pg
     from src.services.llm_matcher import (
         clear_user_verdicts,
         match_batch,
@@ -24,8 +23,8 @@ async def _main() -> None:
     from src.services.profile.storage import load_profile
 
     all_ids = json.load(open(IDS))
-    conn = await aiosqlite.connect(str(DB_PATH))
-    conn.row_factory = aiosqlite.Row
+    conn = await pg.connect(str(DB_PATH))
+    conn.row_factory = pg.Row
     for uid, ids in all_ids.items():
         prof = load_profile(uid)
         ptxt = profile_to_matcher_text(prof)

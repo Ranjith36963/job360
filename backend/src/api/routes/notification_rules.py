@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import NotificationRule, NotificationRuleUpdate
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger
@@ -44,7 +44,7 @@ def _rule_from_row(row: dict) -> NotificationRule:
     response_model=Optional[NotificationRule],
 )
 async def get_notification_rule(
-    db: JobDatabase = Depends(get_db),  # noqa: B008
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> Optional[NotificationRule]:
     """Return the authenticated user's notification rule.
@@ -66,7 +66,7 @@ async def get_notification_rule(
 )
 async def upsert_notification_rule(
     body: NotificationRuleUpdate,
-    db: JobDatabase = Depends(get_db),  # noqa: B008
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> NotificationRule:
     """Create or update the authenticated user's single notification rule.

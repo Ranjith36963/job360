@@ -4,7 +4,7 @@ import argparse
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src.repositories import pgsync as sqlite3
+from src.repositories import pgsync
 
 logger = logging.getLogger("job360.cli_view")
 
@@ -27,8 +27,8 @@ console = Console()
 def _load_jobs_sync(db_path: str | None = None, days: int = 7, min_score: int = 30) -> list[dict]:
     """Load recent jobs from SQLite synchronously."""
     path = db_path or str(DB_PATH)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = pgsync.connect(path)
+    conn.row_factory = pgsync.Row
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = conn.execute(

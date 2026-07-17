@@ -1,8 +1,8 @@
 """Tests for metrics_exporter — pipeline.json + notifications.json snapshots."""
 import asyncio
 import json
-import sqlite3
 
+from src.repositories import pgsync
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
 
 # ---------------------------------------------------------------------------
@@ -10,7 +10,7 @@ from src.services.metrics_exporter import export_notification_metrics, export_pi
 # ---------------------------------------------------------------------------
 
 def _db_with_run_log(path: str) -> None:
-    con = sqlite3.connect(path)
+    con = pgsync.connect(path)
     con.execute(
         "CREATE TABLE run_log ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -29,7 +29,7 @@ def _db_with_run_log(path: str) -> None:
 
 
 def _db_with_ledger(path: str) -> None:
-    con = sqlite3.connect(path)
+    con = pgsync.connect(path)
     con.execute(
         "CREATE TABLE notification_ledger ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "

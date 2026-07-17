@@ -22,7 +22,7 @@ from collections.abc import Awaitable
 from typing import Callable, Optional
 
 from src.models import Job
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.services.job_enrichment_schema import JobEnrichment
 from src.services.profile.llm_provider import llm_extract_validated
 
@@ -115,7 +115,7 @@ async def enrich_batch(
     *,
     semaphore_limit: int = 10,
     skip_existing: bool = True,
-    conn: Optional[aiosqlite.Connection] = None,
+    conn: Optional[pg.Connection] = None,
     llm_extract_validated_fn: Optional[LLMExtractFn] = None,
 ) -> list[Optional[JobEnrichment]]:
     """Enrich a batch of jobs concurrently, bounded by a semaphore.
@@ -217,7 +217,7 @@ async def enrich_batch(
 # ---------------------------------------------------------------------------
 
 
-async def has_enrichment(conn: aiosqlite.Connection, job_id: int) -> bool:
+async def has_enrichment(conn: pg.Connection, job_id: int) -> bool:
     """True if `job_enrichment` already has a row for this job."""
     cur = await conn.execute(
         "SELECT 1 FROM job_enrichment WHERE job_id = ? LIMIT 1",
@@ -228,7 +228,7 @@ async def has_enrichment(conn: aiosqlite.Connection, job_id: int) -> bool:
 
 
 async def save_enrichment(
-    conn: aiosqlite.Connection,
+    conn: pg.Connection,
     job_id: int,
     enrichment: JobEnrichment,
 ) -> None:
@@ -293,7 +293,7 @@ async def save_enrichment(
 
 
 async def _build_enrichment_lookup(
-    conn: aiosqlite.Connection,
+    conn: pg.Connection,
 ) -> dict[int, JobEnrichment]:
     """Bulk-load every persisted ``job_enrichment`` row into a dict.
 
@@ -319,7 +319,7 @@ async def _build_enrichment_lookup(
             FROM job_enrichment
             """
         )
-    except aiosqlite.OperationalError:
+    except pg.OperationalError:
         # Table not yet migrated (e.g. fresh test DB without 0008). Return empty.
         return {}
     rows = await cur.fetchall()
@@ -374,7 +374,7 @@ async def _build_enrichment_lookup(
 
 
 async def load_enrichment(
-    conn: aiosqlite.Connection,
+    conn: pg.Connection,
     job_id: int,
 ) -> Optional[JobEnrichment]:
     """Deserialise an enrichment row back into a `JobEnrichment` model.

@@ -120,6 +120,17 @@ MAX_CONCURRENT_SEARCHES_PER_USER = int(os.getenv("MAX_CONCURRENT_SEARCHES_PER_US
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
 
+# docs/fable/01 — cross-instance rate limiting. The default limiter (services/
+# auth/rate_limit.py) keeps its sliding windows in-process, so on a multi-replica
+# deploy each replica counts independently and an attacker gets N× the intended
+# budget. Setting RATE_LIMIT_REDIS=true routes the SAME limiter through Redis
+# (shared across replicas). Default OFF keeps behaviour byte-identical to the
+# in-memory path — matching the "flags default off" discipline (rules #18/#24) —
+# and the Redis path always FALLS BACK to in-memory on any Redis error, so a
+# Redis outage degrades to today's behaviour rather than failing open/closed.
+# Requires REDIS_URL to be set; ignored otherwise.
+RATE_LIMIT_REDIS = os.getenv("RATE_LIMIT_REDIS", "false").lower() in ("1", "true", "yes")
+
 # Pillar 2 Batch 2.2 — gate-pass scoring
 # A job must clear BOTH the title gate AND the skill gate to receive a linear
 # score; otherwise the score is suppressed to max(10, (title+skill)*0.25) so

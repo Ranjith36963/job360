@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import sys
 from pathlib import Path
+
+from src.repositories import pgsync
 
 # Ensure 'backend/' is on sys.path so 'src.*' imports resolve correctly
 # regardless of where the script is invoked from.
@@ -31,8 +32,8 @@ def _default_db_path() -> str:
 
 def backfill(db_path: str) -> tuple[int, int]:
     """Return (scanned, updated)."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = pgsync.connect(db_path)
+    conn.row_factory = pgsync.Row
     try:
         cur = conn.execute(
             "SELECT id, description FROM jobs "

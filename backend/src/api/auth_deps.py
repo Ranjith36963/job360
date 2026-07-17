@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from src.core.settings import DB_PATH
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 from src.services.auth import sessions as auth_sessions
 
 SESSION_COOKIE_NAME = "job360_session"
@@ -59,8 +59,8 @@ async def _current_user_from_cookie(
     )
     if user_id is None:
         return None
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(str(DB_PATH)) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             "SELECT id, email, email_verified_at FROM users "
             "WHERE id = ? AND deleted_at IS NULL",

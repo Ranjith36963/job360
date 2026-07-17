@@ -158,9 +158,13 @@ describe("JobDetailClient — document.title sync on soft navigation", () => {
     // Wait for the job to be rendered (h1 contains the title)
     await screen.findByText(/Senior Specialist Solutions Engineer/i);
 
-    // The useEffect must have fired by now
-    expect(document.title).toBe(
-      "Senior Specialist Solutions Engineer (AI/ML) at Databricks — Job360"
+    // The h1 rendering does NOT guarantee the title-sync effect has flushed —
+    // under full-suite load the commit→effect gap is real and this assertion
+    // raced it (flaked in the gate). Poll until the effect lands.
+    await waitFor(() =>
+      expect(document.title).toBe(
+        "Senior Specialist Solutions Engineer (AI/ML) at Databricks — Job360"
+      )
     );
   });
 

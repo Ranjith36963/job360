@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_verified_user
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.core.settings import TAILOR_FREE_PER_MONTH
 from src.repositories.database import JobDatabase
 from src.services.profile.llm_provider import llm_extract
@@ -106,7 +106,7 @@ def _load_cv_text(user_id: str) -> str:
 @router.post("/tailor/{job_id}/generate", response_model=TailorBundle)
 async def generate(
     job_id: int,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Generate a tailored CV + cover letter for (caller, job). Quota-gated."""
@@ -175,7 +175,7 @@ async def generate(
 @router.get("/tailor/{job_id}", response_model=TailorBundle)
 async def get_tailored(
     job_id: int,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Return the caller's tailored docs for a job (empty list if none generated)."""
@@ -186,7 +186,7 @@ async def get_tailored(
 async def provenance(
     job_id: int,
     doc_kind: str,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Per-line provenance for the doc: which lines are the user's OWN facts (grounded
@@ -207,7 +207,7 @@ async def save_edit(
     job_id: int,
     doc_kind: str,
     body: TailorSaveRequest,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Save the user's edited/polished version (guardrail #3 — always editable)."""
@@ -223,7 +223,7 @@ async def save_edit(
 async def keep(
     job_id: int,
     doc_kind: str,
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Mark KEPT → the learning trigger (§5 learn-from-kept-only)."""
@@ -239,17 +239,24 @@ async def keep(
     return _doc_out(row)
 
 
-@router.get("/tailor/{job_id}/{doc_kind}/download")
+@router.post("/tailor/{job_id}/{doc_kind}/download")
 async def download(
     job_id: int,
     doc_kind: str,
     fmt: str = "pdf",
-    db: JobDatabase = Depends(get_db),
+    db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ):
     """Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
 
     ``fmt`` = ``pdf`` (default) | ``docx``.
+
+    POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it marks the doc kept
+    and feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics
+    and a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
+    cross-site top-level link click still sends the SameSite=Lax cookie. As POST it
+    is Origin-checked like every other mutation. The frontend already fetches this
+    as a blob, so the method change is transparent there.
     """
     _check_kind(doc_kind)
     if fmt not in ("pdf", "docx"):

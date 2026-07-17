@@ -87,5 +87,11 @@ class Job:
     def normalized_key(self) -> tuple[str, str]:
         company = _COMPANY_SUFFIXES.sub("", self.company).strip()
         company = _COMPANY_REGION_SUFFIXES.sub("", company).strip().lower()
-        title = self.title.strip().lower()
+        # Collapse internal whitespace runs (docs/fable/02, rule #1): the same job
+        # from two sources with cosmetically different spacing — "Software  Engineer"
+        # (double space / tab / nbsp) vs "Software Engineer" — must produce the SAME
+        # key, or it persists as a duplicate row. Whitespace only, NOT punctuation
+        # (stripping punctuation risks over-merging distinct roles).
+        company = re.sub(r"\s+", " ", company)
+        title = re.sub(r"\s+", " ", self.title.strip().lower())
         return (company, title)

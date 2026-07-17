@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from src.core.settings import METRICS_DIR
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 _DEFAULT_METRICS_DIR = METRICS_DIR
 
@@ -45,8 +45,8 @@ async def export_pipeline_metrics(
     complete overwrite so downstream consumers always see a stable file.
     """
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cursor = await db.execute(
             "SELECT timestamp, total_found, new_jobs, sources_queried, "
             "total_duration, run_uuid, per_source_errors "
@@ -69,8 +69,8 @@ async def export_notification_metrics(
     sent_at, and sums retry_count to surface delivery health at a glance.
     """
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cursor = await db.execute(
             "SELECT channel, status, COUNT(*) AS count, "
             "MAX(sent_at) AS last_sent_at, SUM(retry_count) AS total_retries "

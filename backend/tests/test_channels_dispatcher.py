@@ -3,11 +3,11 @@ import os
 import tempfile
 from unittest.mock import patch
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto, dispatcher
 
 
@@ -20,7 +20,7 @@ def _fernet_key():
 async def channel_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE user_actions (
@@ -44,7 +44,7 @@ async def channel_db():
         )
         await db.commit()
     await runner.up(path)
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("alice", "a@x", "!"),
@@ -59,7 +59,7 @@ async def channel_db():
 
 async def _insert_channel(db_path, user_id, channel_type, url, enabled=1):
     ct = crypto.encrypt(url)
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute(
             """
             INSERT INTO user_channels(user_id, channel_type, display_name,
@@ -85,7 +85,7 @@ async def test_dispatch_sends_to_each_enabled_channel(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             results = await dispatcher.dispatch(
                 db, user_id="alice", title="Hi", body="there"
             )
@@ -105,7 +105,7 @@ async def test_dispatch_returns_error_on_apprise_false(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             results = await dispatcher.dispatch(
                 db, user_id="alice", title="Hi", body="there"
             )
@@ -126,7 +126,7 @@ async def test_dispatch_skips_disabled(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             results = await dispatcher.dispatch(
                 db, user_id="alice", title="T", body="B"
             )
@@ -144,7 +144,7 @@ async def test_test_send_returns_ok_true_on_success(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             result = await dispatcher.test_send(db, cid)
 
     assert result.ok is True
@@ -161,7 +161,7 @@ async def test_test_send_returns_error_on_exception(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             result = await dispatcher.test_send(db, cid)
 
     assert result.ok is False
@@ -178,7 +178,7 @@ def test_format_payload_variants():
 async def test_test_send_rejects_cross_user_channel_id(channel_db):
     """Defense-in-depth: dispatcher returns 'not found' when caller's
     user_id does not own the channel, even if they pass a real channel_id."""
-    async with aiosqlite.connect(channel_db) as db:
+    async with pg.connect(channel_db) as db:
         await db.execute(
             "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
             ("mallory", "m@x", "!"),
@@ -192,7 +192,7 @@ async def test_test_send_rejects_cross_user_channel_id(channel_db):
         if hasattr(instance, "async_notify"):
             del instance.async_notify
 
-        async with aiosqlite.connect(channel_db) as db:
+        async with pg.connect(channel_db) as db:
             # Mallory supplies alice's real channel_id but their own user_id.
             result = await dispatcher.test_send(db, alice_cid, user_id="mallory")
 

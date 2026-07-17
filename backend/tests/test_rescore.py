@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from src.models import Job
+from src.repositories import pgsync
 from src.repositories.database import JobDatabase
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import JobScorer
@@ -198,7 +198,7 @@ def _seed_user(db_path: str) -> str:
     """Insert a bare-minimum users row and return its id."""
     import uuid
     user_id = str(uuid.uuid4())
-    with sqlite3.connect(db_path) as conn:
+    with pgsync.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO users(id, email, password_hash) VALUES (?,?,?)",
             (user_id, f"{user_id}@test.example", "hash"),
@@ -226,7 +226,7 @@ def _seed_profile(db_path: str, user_id: str) -> int:
     cv_json = json.dumps(asdict(cv), default=str)
     pref_json = json.dumps(asdict(prefs), default=str)
     now = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(db_path) as conn:
+    with pgsync.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO user_profiles(user_id, cv_data, preferences, updated_at) "
             "VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
@@ -304,7 +304,7 @@ async def test_rescore_user_feed_scores_matching_jobs(full_db, monkeypatch):
     assert result["version"] == version_id
 
     # Verify the python-matching job got a feed row stamped with the version
-    with sqlite3.connect(full_db) as conn:
+    with pgsync.connect(full_db) as conn:
         rows = conn.execute(
             "SELECT j.title, f.score, f.profile_version "
             "FROM user_feed f JOIN jobs j ON j.id = f.job_id "
@@ -398,7 +398,7 @@ async def test_rescore_clears_verdicts(full_db, monkeypatch):
     from src.services.rescore import rescore_user_feed
     await rescore_user_feed(user_id, db_path=full_db)
 
-    with sqlite3.connect(full_db) as conn:
+    with pgsync.connect(full_db) as conn:
         r = conn.execute(
             "SELECT llm_matched_at FROM user_feed WHERE user_id = ? AND job_id = ?",
             (user_id, job_id),
@@ -423,7 +423,7 @@ async def test_rescore_no_profile_returns_early(full_db, monkeypatch):
     assert result == {"rescored": 0, "reason": "no_profile"}
 
     # No feed rows written
-    with sqlite3.connect(full_db) as conn:
+    with pgsync.connect(full_db) as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM user_feed WHERE user_id = ?", (user_id,)
         ).fetchone()[0]

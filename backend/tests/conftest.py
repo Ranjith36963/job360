@@ -22,21 +22,15 @@ import sys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# --- Postgres migration shims ----------------------------------------------
-# The backend moved from aiosqlite/SQLite to psycopg3/Postgres. Production code
-# imports the async helper directly (``from src.repositories import pg``), but
-# the ~40 test files still do ``import aiosqlite`` / ``import sqlite3`` and pass
-# file paths around. We register the shims under those module names so those
-# imports transparently hit Postgres, and enable schema-per-path isolation so
-# each distinct ``db_path`` (tmp file or ``:memory:``) gets its own fresh schema
-# — the same "fresh DB per test" the old tmp ``.db`` files gave.
+# --- Postgres test mode ------------------------------------------------------
+# Everything runs on Postgres via ``src.repositories.pg`` / ``pgsync`` — tests
+# import those directly (the old ``sys.modules["aiosqlite"/"sqlite3"]`` disguise
+# is gone). TEST_MODE enables schema-per-path isolation: each distinct
+# ``db_path`` (tmp file or ``:memory:``) gets its own fresh Postgres schema —
+# the same "fresh DB per test" the old tmp ``.db`` files gave.
 from src.repositories import pg as _pg  # noqa: E402
-from src.repositories import pgsync as _pgsync  # noqa: E402
 
 _pg.TEST_MODE = True
-sys.modules["aiosqlite"] = _pg
-sys.modules["sqlite3"] = _pgsync
-
 from contextlib import asynccontextmanager  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
@@ -206,7 +200,7 @@ def authenticated_async_context(monkeypatch, tmp_path):
     # authed test hitting a gated route would 403. (Unverified behaviour is
     # covered explicitly in test_email_enforcement.py.)
     if captured_user_id:
-        import sqlite3 as _sqlite3
+        from src.repositories import pgsync as _sqlite3
 
         _vc = _sqlite3.connect(str(db_path))
         _vc.execute(
@@ -257,11 +251,13 @@ def fixture_user_id(authenticated_async_context):
 
 
 def _bootstrap_async_db(db_path: str) -> None:
-    """Initialize the full JobDatabase schema + apply migrations 0000..0006.
+    """Initialize the full JobDatabase schema + apply ALL migrations (0000..latest).
 
     Uses ``JobDatabase.init_db()`` rather than a hand-written executescript
     so the schema stays in sync with production (incl. match_score,
-    visa_flag, salary_min/max, description columns, etc.).
+    visa_flag, salary_min/max, description columns, etc.), then runs the whole
+    migration set so migration-created tables (users, job_enrichment, user_feed,
+    audit_log, …) exist too.
     """
 
     async def _bootstrap():
@@ -273,6 +269,29 @@ def _bootstrap_async_db(db_path: str) -> None:
         await runner.up(db_path)
 
     asyncio.run(_bootstrap())
+
+
+@pytest.fixture
+def migrated_db_path(tmp_path):
+    """A tmp-file DB path with the FULL schema (init_db + every migration).
+
+    Use for any test that touches a MIGRATION-created table — ``users`` (0001),
+    ``job_enrichment`` (0008), ``user_feed`` (0011), ``audit_log`` (0025), … A
+    bare ``JobDatabase(":memory:")`` only runs ``init_db()``, which creates the
+    legacy pre-Batch-2 tables ONLY, so those tests 500 on ``relation ... does
+    not exist``. And ``:memory:`` can't be migrated after the fact: it hashes to
+    a fresh RANDOM schema on every connect (``schema_for_path``), so a follow-up
+    ``runner.up(":memory:")`` would migrate a DIFFERENT schema than the one the
+    test writes to. A stable tmp-file path keeps ``init_db`` and ``runner.up`` in
+    one schema (the abspath hashes to a stable ``t_*`` name).
+    """
+    db_path = str(tmp_path / "migrated.db")
+    _bootstrap_async_db(db_path)
+    yield db_path
+    # Drop the per-test schema so it doesn't accumulate in the shared Postgres
+    # (the async_client fixture does the same). Harmless in fresh CI; keeps a
+    # long-lived dev DB from silting up with hundreds of leftover t_* schemas.
+    asyncio.run(_pg.drop_schema(db_path))
 
 
 @pytest.fixture

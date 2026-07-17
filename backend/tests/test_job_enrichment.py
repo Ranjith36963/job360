@@ -9,10 +9,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import aiosqlite
 import pytest
 
 from src.models import Job
+from src.repositories import pg
 from src.services.job_enrichment import (
     enrich_job,
     has_enrichment,
@@ -241,10 +241,10 @@ def test_enrich_job_propagates_llm_failure():
 @pytest.fixture
 def db_with_schema(tmp_path):
     """Bring up an in-memory SQLite with migrations 0000 + 0008 applied."""
-    import sqlite3
+    from src.repositories import pgsync
 
     db_path = tmp_path / "test.db"
-    conn = sqlite3.connect(db_path)
+    conn = pgsync.connect(db_path)
     repo_root = Path(__file__).resolve().parent.parent
     # Minimum schema for the FK target + enrichment table.
     conn.executescript("""
@@ -262,7 +262,7 @@ def db_with_schema(tmp_path):
 
 @pytest.mark.asyncio
 async def test_save_and_load_enrichment_round_trip(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title, company) VALUES (?, ?)", ("Dev", "Co"))
         await conn.commit()
         job_id = cur.lastrowid
@@ -281,7 +281,7 @@ async def test_save_and_load_enrichment_round_trip(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_has_enrichment_detects_existing_row(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
@@ -294,7 +294,7 @@ async def test_has_enrichment_detects_existing_row(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_load_enrichment_returns_none_when_missing(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         assert await load_enrichment(conn, job_id=999) is None
 
 
@@ -302,7 +302,7 @@ async def test_load_enrichment_returns_none_when_missing(db_with_schema):
 async def test_save_enrichment_is_upsert(db_with_schema):
     """INSERT OR REPLACE — calling save twice does not error, keeps the
     latest values."""
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
@@ -321,7 +321,7 @@ async def test_save_enrichment_is_upsert(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_enrich_job_task_happy_path(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute(
             "INSERT INTO jobs(title, company, location, description) VALUES (?,?,?,?)",
             ("ML Engineer", "Acme", "London, UK", "Python PyTorch"),
@@ -338,7 +338,7 @@ async def test_enrich_job_task_happy_path(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_enrich_job_task_is_idempotent(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title, description) VALUES (?,?)", ("Dev", "desc"))
         await conn.commit()
         job_id = cur.lastrowid
@@ -361,7 +361,7 @@ async def test_enrich_job_task_is_idempotent(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_enrich_job_task_missing_job(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         ctx = {"db": conn, "llm_extract_validated": _mock_llm(_make_valid_enrichment())}
         result = await enrich_job_task(ctx, job_id=9999)
         assert result["enriched"] is False
@@ -370,7 +370,7 @@ async def test_enrich_job_task_missing_job(db_with_schema):
 
 @pytest.mark.asyncio
 async def test_enrich_job_task_handles_llm_failure(db_with_schema):
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Dev",))
         await conn.commit()
         job_id = cur.lastrowid
@@ -519,7 +519,7 @@ async def test_enrich_batch_returns_same_length_with_none_for_skipped(db_with_sc
     from src.services.job_enrichment import enrich_batch
 
     valid = _make_valid_enrichment()
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         jobs: list[Job] = []
         for i in range(6):
             cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", (f"Role {i}",))
@@ -589,7 +589,7 @@ async def test_enrich_batch_skip_existing_when_flag_set(db_with_schema):
         llm_calls["n"] += 1
         return valid
 
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         # Two jobs; one already enriched.
         cur1 = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("A",))
         await conn.commit()
@@ -625,7 +625,7 @@ async def test_enrich_batch_persists_results_to_db(db_with_schema):
 
     valid = _make_valid_enrichment()
 
-    async with aiosqlite.connect(db_with_schema) as conn:
+    async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute("INSERT INTO jobs(title) VALUES (?)", ("Persisted",))
         await conn.commit()
         job = _sample_job(title="Persisted")

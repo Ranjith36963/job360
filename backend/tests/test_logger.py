@@ -133,9 +133,16 @@ def test_setup_audit_logger_is_idempotent(tmp_path):
     audit.handlers.clear()
     with mock.patch.object(log_mod, "LOGS_DIR", tmp_path):
         log_mod.setup_audit_logger()
-        log_mod.setup_audit_logger()  # second call must not add a second handler
+        log_mod.setup_audit_logger()  # second call must not add more handlers
     try:
-        assert len(audit.handlers) == 1
+        # The audit logger legitimately owns TWO handlers since fable/05 C8:
+        # the rotating JSON file + the DB-trail QueueHandler (audit_trail.py).
+        # Idempotency = repeated setup never DUPLICATES either of them.
+        from logging.handlers import QueueHandler, RotatingFileHandler
+
+        assert len(audit.handlers) == 2
+        assert sum(isinstance(h, RotatingFileHandler) for h in audit.handlers) == 1
+        assert sum(isinstance(h, QueueHandler) for h in audit.handlers) == 1
     finally:
         for h in list(audit.handlers):
             h.close()

@@ -7,7 +7,7 @@ import os
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from src.api.dependencies import get_db
+from src.api.dependencies import get_request_db
 from src.api.models import (
     HealthResponse,
     LivezResponse,
@@ -99,7 +99,7 @@ async def readyz():
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status(db: JobDatabase = Depends(get_db)):
+async def status(db: JobDatabase = Depends(get_request_db)):
     jobs_total = await db.count_jobs()
     run_logs = await db.get_run_logs(limit=1)
     last_run = run_logs[0] if run_logs else None

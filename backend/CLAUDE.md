@@ -43,7 +43,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 - `conftest.py` mocks `asyncio.sleep` to instant (retry/backoff sleeps otherwise sum
   to ~37 min). Tests asserting on **real** elapsed time must use `@pytest.mark.real_sleep`.
 - `conftest.py` closes the lazily-created `dependencies._db` singleton per test —
-  aiosqlite leaves a non-daemon worker thread per open connection (blocks process exit).
+  an open async DB connection blocks process exit (non-daemon worker thread).
 - **DB_PATH gotcha:** modules that do `from src.core.settings import DB_PATH` bind the
   *value* at import time. Test fixtures must redirect `DB_PATH` on **every** importer
   (the fixtures loop over `sys.modules`), not just `settings`, or queries hit the real DB.

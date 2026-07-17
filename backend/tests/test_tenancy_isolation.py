@@ -7,11 +7,11 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import aiosqlite
 import pytest
 
 from migrations import runner
 from src.core.tenancy import DEFAULT_TENANT_ID
+from src.repositories import pg
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ async def tenant_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     # Phase 1 + Phase 2 migrations: first create legacy schema, then apply runner.
-    async with aiosqlite.connect(path) as db:
+    async with pg.connect(path) as db:
         await db.executescript(
             """
             CREATE TABLE user_actions (
@@ -55,7 +55,7 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_default_tenant_user_exists_after_migration(self, tenant_db):
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             cur = await db.execute(
                 "SELECT id, email FROM users WHERE id = ?", (DEFAULT_TENANT_ID,)
             )
@@ -65,7 +65,7 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_single_user_action_lands_on_default_tenant(self, tenant_db):
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             # Legacy INSERT path that does NOT supply user_id — DEFAULT kicks in.
             await db.execute(
                 "INSERT INTO user_actions(job_id, action, created_at) VALUES(?, ?, ?)",
@@ -80,7 +80,7 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_tenant_a_cannot_read_tenant_b_actions(self, tenant_db):
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
                 ("tenant-a", "a@test", "!"),
@@ -103,7 +103,7 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_tenant_a_cannot_read_tenant_b_applications(self, tenant_db):
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
                 ("tenant-a", "a@test", "!"),
@@ -128,7 +128,7 @@ class TestTenantIsolation:
     @pytest.mark.asyncio
     async def test_same_job_can_be_actioned_by_two_tenants(self, tenant_db):
         """Widened UNIQUE(user_id, job_id) — two users can like the same job."""
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
                 ("tenant-a", "a@test", "!"),
@@ -155,7 +155,7 @@ class TestTenantIsolation:
     @pytest.mark.asyncio
     async def test_duplicate_action_within_one_tenant_rejected(self, tenant_db):
         """Same (user_id, job_id) still unique within a tenant."""
-        async with aiosqlite.connect(tenant_db) as db:
+        async with pg.connect(tenant_db) as db:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
                 ("tenant-a", "a@test", "!"),

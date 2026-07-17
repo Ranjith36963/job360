@@ -11,13 +11,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from migrations import runner
+from src.repositories import pg
 from src.services.channels import crypto
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test_acct.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -184,8 +184,8 @@ def test_delete_account_wrong_password_does_not_soft_delete_db(client, temp_db):
     _delete_me(client, "WRONGPASSWORD")
 
     async def _check():
-        async with aiosqlite.connect(temp_db) as db:
-            db.row_factory = aiosqlite.Row
+        async with pg.connect(temp_db) as db:
+            db.row_factory = pg.Row
             cur = await db.execute(
                 "SELECT deleted_at FROM users WHERE email = ?",
                 ("del_db_check@example.com",),

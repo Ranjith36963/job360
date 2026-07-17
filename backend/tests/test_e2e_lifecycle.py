@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import sqlite3
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -31,6 +30,7 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pgsync
 from src.services.channels import crypto
 
 _PW = "Correct-Horse-9"
@@ -91,7 +91,7 @@ def _register(client, email) -> str:
 
 
 def _mark_verified(db_path, email):
-    con = sqlite3.connect(db_path)
+    con = pgsync.connect(db_path)
     con.execute("UPDATE users SET email_verified_at=datetime('now') WHERE email=?", (email,))
     con.commit()
     con.close()
@@ -100,7 +100,7 @@ def _mark_verified(db_path, email):
 def _seed_job_and_feed(db_path, user_id) -> int:
     """Seed one catalog job + one user_feed row so /jobs returns it for the user."""
     now = datetime.now(timezone.utc).isoformat()
-    con = sqlite3.connect(db_path)
+    con = pgsync.connect(db_path)
     cur = con.execute(
         "INSERT INTO jobs (title, company, location, apply_url, source, date_found, "
         "normalized_company, normalized_title, first_seen, staleness_state) "

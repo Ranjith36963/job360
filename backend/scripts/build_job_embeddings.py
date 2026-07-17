@@ -40,17 +40,16 @@ _BACKEND = _HERE.parent  # scripts/ → backend/
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-import aiosqlite  # noqa: E402
-
 from src.core.settings import SEMANTIC_ENABLED  # noqa: E402
 from src.models import Job  # noqa: E402
+from src.repositories import pg  # noqa: E402
 
 logger = logging.getLogger("job360.scripts.build_job_embeddings")
 
 
-async def _jobs_needing_embedding(conn: aiosqlite.Connection, model_name: str) -> list:
+async def _jobs_needing_embedding(conn: pg.Connection, model_name: str) -> list:
     """Return jobs whose audit row is absent for the active model version."""
-    conn.row_factory = aiosqlite.Row
+    conn.row_factory = pg.Row
     cur = await conn.execute(
         """
         SELECT j.id, j.title, j.company, j.location, j.description,
@@ -75,7 +74,7 @@ async def _run(db_path: str, limit: int | None) -> int:
 
     index = VectorIndex()
     encoded = 0
-    async with aiosqlite.connect(db_path) as conn:
+    async with pg.connect(db_path) as conn:
         rows = await _jobs_needing_embedding(conn, MODEL_NAME)
         if limit is not None:
             rows = rows[:limit]

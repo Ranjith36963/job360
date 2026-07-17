@@ -573,6 +573,11 @@
             ],
             "title": "Dedup Group Ids"
           },
+          "dims_active": {
+            "default": false,
+            "title": "Dims Active",
+            "type": "boolean"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -807,6 +812,11 @@
             ],
             "title": "Salary Period"
           },
+          "salary_score": {
+            "default": 0,
+            "title": "Salary Score",
+            "type": "integer"
+          },
           "semantic": {
             "default": 0,
             "title": "Semantic",
@@ -875,6 +885,11 @@
             "title": "Visa Flag",
             "type": "boolean"
           },
+          "visa_score": {
+            "default": 0,
+            "title": "Visa Score",
+            "type": "integer"
+          },
           "visa_sponsorship": {
             "anyOf": [
               {
@@ -885,6 +900,11 @@
               }
             ],
             "title": "Visa Sponsorship"
+          },
+          "workplace_score": {
+            "default": 0,
+            "title": "Workplace Score",
+            "type": "integer"
           },
           "workplace_type": {
             "anyOf": [
@@ -2977,6 +2997,54 @@
           }
         },
         "summary": "Change Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/users/me/export": {
+      "get": {
+        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
+        "operationId": "export_my_data_api_auth_users_me_export_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export My Data",
         "tags": [
           "auth"
         ]
@@ -5915,9 +5983,9 @@
       }
     },
     "/api/tailor/{job_id}/{doc_kind}/download": {
-      "get": {
-        "description": "Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.\n\n``fmt`` = ``pdf`` (default) | ``docx``.",
-        "operationId": "download_api_tailor__job_id___doc_kind__download_get",
+      "post": {
+        "description": "Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.\n\n``fmt`` = ``pdf`` (default) | ``docx``.\n\nPOST, not GET (docs/fable/01 S6): this endpoint MUTATES \u2014 it marks the doc kept\nand feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics\nand a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a\ncross-site top-level link click still sends the SameSite=Lax cookie. As POST it\nis Origin-checked like every other mutation. The frontend already fetches this\nas a blob, so the method change is transparent there.",
+        "operationId": "download_api_tailor__job_id___doc_kind__download_post",
         "parameters": [
           {
             "in": "path",

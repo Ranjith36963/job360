@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
+
+# Ensure backend/ is on sys.path so `src.*` resolves when run as a script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.repositories import pgsync  # noqa: E402
 
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "jobs.db"
 
@@ -55,20 +59,20 @@ def _print_rows(title: str, columns: list[str], rows: list[tuple]) -> None:
             print("\t".join(("" if v is None else str(v)) for v in row))
 
 
-def _table_counts(conn: sqlite3.Connection) -> list[tuple[str, int]]:
+def _table_counts(conn: pgsync.Connection) -> list[tuple[str, int]]:
     cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     out: list[tuple[str, int]] = []
     for (name,) in cur.fetchall():
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM '{name}'").fetchone()[0]
-        except sqlite3.Error as e:
+        except pgsync.Error as e:
             n = -1
             _say(f"[warn] count failed for {name}: {e}")
         out.append((name, n))
     return out
 
 
-def _latest_runs(conn: sqlite3.Connection, limit: int = 5) -> list[tuple]:
+def _latest_runs(conn: pgsync.Connection, limit: int = 5) -> list[tuple]:
     cur = conn.execute("PRAGMA table_info(run_log)")
     cols = {row[1] for row in cur.fetchall()}
     has_uuid = "run_uuid" in cols
@@ -99,7 +103,7 @@ def _latest_runs(conn: sqlite3.Connection, limit: int = 5) -> list[tuple]:
     return select, formatted  # type: ignore[return-value]
 
 
-def _top_jobs(conn: sqlite3.Connection, limit: int = 10) -> list[tuple]:
+def _top_jobs(conn: pgsync.Connection, limit: int = 10) -> list[tuple]:
     q = (
         "SELECT id, match_score, title, company, location, first_seen"
         " FROM jobs ORDER BY first_seen DESC, match_score DESC LIMIT ?"
@@ -107,30 +111,30 @@ def _top_jobs(conn: sqlite3.Connection, limit: int = 10) -> list[tuple]:
     return conn.execute(q, (limit,)).fetchall()
 
 
-def _user_id_for_email(conn: sqlite3.Connection, email: str) -> str | None:
+def _user_id_for_email(conn: pgsync.Connection, email: str) -> str | None:
     try:
         row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    except sqlite3.Error as e:
+    except pgsync.Error as e:
         _say(f"[warn] users lookup failed: {e}")
         return None
     return row[0] if row else None
 
 
-def _user_feed(conn: sqlite3.Connection, user_id: str, limit: int = 10) -> list[tuple]:
+def _user_feed(conn: pgsync.Connection, user_id: str, limit: int = 10) -> list[tuple]:
     try:
         return conn.execute(
             "SELECT job_id, status, score, notified_at FROM user_feed"
             " WHERE user_id = ? ORDER BY notified_at DESC NULLS LAST LIMIT ?",
             (user_id, limit),
         ).fetchall()
-    except sqlite3.Error:
+    except pgsync.Error:
         return conn.execute(
             "SELECT job_id, status, score, notified_at FROM user_feed" " WHERE user_id = ? ORDER BY rowid DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()
 
 
-def _user_actions(conn: sqlite3.Connection, user_id: str, limit: int = 10) -> list[tuple]:
+def _user_actions(conn: pgsync.Connection, user_id: str, limit: int = 10) -> list[tuple]:
     return conn.execute(
         "SELECT job_id, action, created_at FROM user_actions" " WHERE user_id = ? ORDER BY rowid DESC LIMIT ?",
         (user_id, limit),
@@ -148,7 +152,7 @@ def main() -> int:
         _say(f"ERROR: DB not found: {db_path}")
         return 1
 
-    conn = sqlite3.connect(str(db_path))
+    conn = pgsync.connect(str(db_path))
     try:
         counts = _table_counts(conn)
         _print_rows("Tables", ["table", "rows"], counts)

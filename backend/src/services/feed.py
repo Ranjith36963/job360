@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.repositories import pg as aiosqlite
+from src.repositories import pg
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class FeedRow:
     updated_at: str
 
 
-def _row(r: aiosqlite.Row) -> FeedRow:
+def _row(r: pg.Row) -> FeedRow:
     return FeedRow(
         id=r["id"],
         user_id=r["user_id"],
@@ -47,13 +47,13 @@ def _row(r: aiosqlite.Row) -> FeedRow:
 class FeedService:
     """Read + write operations on ``user_feed``.
 
-    Construct with an open ``aiosqlite.Connection`` (not a path) so callers
+    Construct with an open ``pg.Connection`` (not a path) so callers
     control transaction + connection lifecycle. All methods are ``async``.
     """
 
-    def __init__(self, db: aiosqlite.Connection):
+    def __init__(self, db: pg.Connection):
         self._db = db
-        self._db.row_factory = aiosqlite.Row
+        self._db.row_factory = pg.Row
 
     # ----- reads ----------------------------------------------------------
 

@@ -716,7 +716,11 @@ export async function downloadTailored(
   kind: TailorDocKind,
   fmt: TailorFormat = "pdf"
 ): Promise<void> {
+  // POST, not GET — the endpoint marks the doc kept + learns from it, so it is a
+  // mutation and is Origin-checked server-side (docs/fable/01 S6). We already read
+  // the response as a blob, so the method change is invisible to the user.
   const res = await fetch(`${API}${tailorDownloadUrl(jobId, kind, fmt)}`, {
+    method: "POST",
     credentials: "include",
   });
   if (!res.ok) {

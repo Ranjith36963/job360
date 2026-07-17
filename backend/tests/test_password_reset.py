@@ -14,12 +14,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-import aiosqlite
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
+from src.repositories import pg
 from src.services.auth import rate_limit, tokens
 from src.services.channels import crypto
 
@@ -44,7 +44,7 @@ def temp_db(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def _bootstrap():
-        async with aiosqlite.connect(db_path) as db:
+        async with pg.connect(db_path) as db:
             await db.executescript(
                 """
                 CREATE TABLE user_actions (
@@ -104,8 +104,8 @@ def client(temp_db):
 
 
 async def _read_reset_row(db_path, email):
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
+    async with pg.connect(db_path) as db:
+        db.row_factory = pg.Row
         cur = await db.execute(
             """
             SELECT pr.token_hash, pr.expires_at, pr.used_at, pr.user_id
@@ -122,7 +122,7 @@ async def _read_reset_row(db_path, email):
 async def _set_expired(db_path, user_id):
     """Backdate the user's most recent reset token to be already expired."""
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         await db.execute(
             "UPDATE password_resets SET expires_at = ? "
             "WHERE id = (SELECT id FROM password_resets WHERE user_id = ? "
@@ -133,7 +133,7 @@ async def _set_expired(db_path, user_id):
 
 
 async def _count_sessions(db_path, user_id):
-    async with aiosqlite.connect(db_path) as db:
+    async with pg.connect(db_path) as db:
         cur = await db.execute("SELECT COUNT(*) FROM sessions WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
         return row[0]
@@ -291,7 +291,7 @@ def test_reset_confirm_rejects_soft_deleted_user(client, monkeypatch, temp_db):
     raw = _issue_reset_and_get_raw_token(client, monkeypatch, "alice@example.com", temp_db)
 
     async def _soft_delete():
-        async with aiosqlite.connect(temp_db) as db:
+        async with pg.connect(temp_db) as db:
             await db.execute(
                 "UPDATE users SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?",
                 (user_id,),
