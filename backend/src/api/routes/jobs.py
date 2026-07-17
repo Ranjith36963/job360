@@ -441,8 +441,8 @@ async def list_jobs(
     action: Optional[str] = Query(None),
     visa_only: Optional[bool] = Query(None),
     mode: Optional[str] = Query(None, description="'keyword' | 'hybrid' (Batch 2.7)"),
-    limit: int = Query(100),
-    offset: int = Query(0),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; sitemap + unfurl bots read unauthenticated
 ):

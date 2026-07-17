@@ -11,23 +11,44 @@ from __future__ import annotations
 
 import os
 
+# H4 — request headers that must NEVER reach Sentry (credentials / session).
+_SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie"})
+
+
+def _strip_password_fields(obj) -> None:
+    """Recursively delete any ``password`` key (case-insensitive) in-place."""
+    if isinstance(obj, dict):
+        for key in [k for k in obj if isinstance(k, str) and k.lower() == "password"]:
+            obj.pop(key, None)
+        for value in obj.values():
+            _strip_password_fields(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _strip_password_fields(item)
+
 
 def _scrub_pii(event, _hint):
-    """Strip auth headers, cookies, and request bodies before an event leaves.
+    """Strip auth headers, cookies, request bodies, and password fields before an
+    event leaves the box (H4).
 
     Belt-and-suspenders on top of ``send_default_pii=False``: bodies may hold
-    passwords / CV text; the Cookie header holds the session token.
+    passwords / CV text; the Cookie header holds the session token. Never raises —
+    Sentry drops the event if ``before_send`` throws, so fail safe by returning
+    the event unmodified on shapes we don't expect.
     """
-    req = event.get("request")
-    if isinstance(req, dict):
-        headers = req.get("headers")
-        if isinstance(headers, dict):
-            for h in list(headers):
-                if h.lower() in ("cookie", "authorization"):
-                    headers[h] = "[redacted]"
-        req.pop("cookies", None)
-        if "data" in req:
-            req["data"] = "[redacted]"
+    try:
+        req = event.get("request") if isinstance(event, dict) else None
+        if isinstance(req, dict):
+            headers = req.get("headers")
+            if isinstance(headers, dict):
+                for h in [h for h in headers if h.lower() in _SENSITIVE_HEADERS]:
+                    headers.pop(h, None)
+            req.pop("cookies", None)
+            if "data" in req:
+                req["data"] = "[redacted]"
+        _strip_password_fields(event)
+    except Exception:  # noqa: BLE001 — scrubbing must never break error reporting
+        return event
     return event
 
 

@@ -12,7 +12,7 @@ existing Gmail App Password setup is enough to verify the flow.
 
 Failure model:
 - If ``SMTP_EMAIL`` / ``SMTP_PASSWORD`` are unset, ``send_system_email``
-  logs at WARNING and *returns False* — never raises. Callers can either
+  logs at ERROR and *returns False* — never raises. Callers can either
   treat that as a soft failure (don't 5xx the password-reset request — see
   Phase −2 plan note about no-enumeration) or surface it in dev console.
 - Network or auth failures during send are caught, logged, and produce
@@ -49,7 +49,7 @@ async def send_system_email(
     """Send a single transactional email. Returns True on success, False on failure.
 
     Never raises — the auth flows that call this must remain robust to SMTP
-    outages. A False return surfaces in logs at WARNING with the underlying
+    outages. A False return surfaces in logs at ERROR with the underlying
     cause so an operator can diagnose post-hoc.
     """
     from_addr = os.environ.get("SMTP_FROM") or os.environ.get("SMTP_EMAIL") or "onboarding@resend.dev"
@@ -76,7 +76,7 @@ async def send_system_email(
                     json=payload,
                 )
             if resp.status_code >= 400:
-                logger.warning(
+                logger.error(
                     "send_system_email (resend) failed: to=%s subject=%s status=%s body=%s",
                     mask_email(to_email), subject, resp.status_code, resp.text[:300],
                 )
@@ -84,7 +84,7 @@ async def send_system_email(
             logger.info("send_system_email (resend) ok: to=%s subject=%s", mask_email(to_email), subject)
             return True
         except Exception as exc:  # noqa: BLE001 — never raise to the auth flow
-            logger.warning(
+            logger.error(
                 "send_system_email (resend) error: to=%s subject=%s err=%s",
                 mask_email(to_email), subject, exc,
             )
@@ -94,7 +94,7 @@ async def send_system_email(
     # blocked SMTP server can never stall the async event loop again.
     cfg = _smtp_config()
     if cfg is None:
-        logger.warning(
+        logger.error(
             "send_system_email skipped: no RESEND_API_KEY and SMTP_EMAIL/SMTP_PASSWORD not set. to=%s subject=%s",
             mask_email(to_email), subject,
         )
@@ -124,7 +124,7 @@ async def send_system_email(
 
         await asyncio.to_thread(_send_blocking)
     except Exception as exc:  # noqa: BLE001 — intentionally broad
-        logger.warning("send_system_email failed: to=%s subject=%s err=%s", mask_email(to_email), subject, exc)
+        logger.error("send_system_email failed: to=%s subject=%s err=%s", mask_email(to_email), subject, exc)
         return False
     logger.info("send_system_email ok: to=%s subject=%s", mask_email(to_email), subject)
     return True

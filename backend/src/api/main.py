@@ -23,6 +23,7 @@ from src.api.middleware import (
     OriginCheckMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
+    _is_production,
 )
 from src.api.routes import (
     actions,
@@ -41,6 +42,39 @@ from src.api.routes import (
 )
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.utils.logger import setup_audit_logger, setup_logging
+
+
+def _is_prod_env() -> bool:
+    """Shared prod detection (APP_ENV=production OR RAILWAY_ENVIRONMENT set).
+
+    Delegates to ``middleware._is_production`` so cookie Secure / HSTS / Sentry /
+    CORS all gate on the exact same signal.
+    """
+    return _is_production()
+
+
+def _resolve_cors_credentials(origins: list[str], *, is_prod: bool) -> bool:
+    """Decide whether CORS may send credentials — fail closed (L3).
+
+    * Wildcard ``*`` origin: credentials are forbidden by the CORS spec. In
+      production we refuse to boot; in dev we downgrade to no-credentials.
+    * Empty origin list in production: refuse to boot (misconfiguration).
+    * Otherwise: allow credentials against the explicit allow-list.
+    """
+    has_wildcard = any(o == "*" for o in origins)
+    if has_wildcard:
+        if is_prod:
+            raise RuntimeError(
+                "CORS misconfiguration: wildcard origin '*' cannot be combined "
+                "with allow_credentials=True in production. Set FRONTEND_ORIGIN "
+                "to an explicit https origin."
+            )
+        return False
+    if not origins and is_prod:
+        raise RuntimeError(
+            "CORS misconfiguration: no FRONTEND_ORIGIN configured in production."
+        )
+    return True
 
 
 def _init_sentry() -> None:
@@ -88,10 +122,13 @@ register_exception_logging(app)
 # CORS — env-driven so dev / staging / prod can differ without a rebuild.
 # Default keeps Batch 1 behaviour (localhost:3000) so existing dev flows work.
 _origins = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000").split(",")
+_allow_origins = [o.strip() for o in _origins if o.strip()]
+# L3 — fail closed: wildcard/empty origins can never ship credentials in prod.
+_allow_credentials = _resolve_cors_credentials(_allow_origins, is_prod=_is_prod_env())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _origins if o.strip()],
-    allow_credentials=True,
+    allow_origins=_allow_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-Id"],

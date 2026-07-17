@@ -42,8 +42,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import psycopg
-
 from src.repositories import pg
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
@@ -210,20 +208,20 @@ async def up(
     -----------------------------------
     FastAPI (``src/api/dependencies.py`` lifespan) and the ARQ worker
     (``src/workers/settings.py``) both call this on startup. If two processes
-    race against the same SQLite file, the naive path had them both read an
+    race against the same database, the naive path had them both read an
     identical "applied" set, both run the same migration body, and both
     INSERT into ``_schema_migrations`` — the second INSERT tripped the
     ``UNIQUE(id)`` constraint and the process crashed.
 
-    Fix (Option A): for each pending migration we open a short
-    ``BEGIN IMMEDIATE`` write transaction that (a) takes SQLite's reserved
-    lock so only one writer is in the critical section, (b) re-reads the
-    applied set *inside* the transaction so a loser that lost the lock to
-    a winner sees the stem already applied and skips without re-running
-    the SQL, and (c) still swallows ``pgsync.IntegrityError`` on the final
-    INSERT as a defence-in-depth belt-and-braces — if any exotic path ever
-    slips through the re-check we log-and-continue rather than crash the
-    second booting process.
+    Fix: a session-level ``pg_advisory_lock`` (below) puts only one booter in
+    the critical section; the applied set is re-read *inside* the lock so a
+    loser sees the winner's stems already applied and skips. The final INSERT
+    carries ``ON CONFLICT DO NOTHING`` as belt-and-braces.
+
+    Atomicity (finding H2): each migration body runs inside ONE explicit
+    ``db.transaction()`` together with its ``_schema_migrations`` INSERT, so a
+    body that fails mid-way rolls back entirely and its stem is NOT recorded —
+    a half-applied migration can never be marked "done".
     """
     mdir = migrations_dir or MIGRATIONS_DIR
     applied_now: list[str] = []
@@ -249,35 +247,25 @@ async def up(
                         break
                     continue
                 sql = (mdir / f"{stem}.up.sql").read_text()
-                try:
-                    # Transactional migration (docs/fable/02): each migration's
-                    # statements + its _schema_migrations bookmark commit together
-                    # or not at all. A mid-migration failure ROLLs the whole thing
-                    # back instead of leaving a half-applied schema. Requires the
-                    # pg-shim lastval() guard (pg.py) so an ON CONFLICT INSERT
-                    # doesn't abort the transaction via a failed lastval() probe.
-                    await db.execute("BEGIN")
-                    try:
-                        await _apply_up_sql(db, sql)
-                        await db.execute(
-                            "INSERT INTO _schema_migrations(id, applied_at) "
-                            "VALUES (?, ?) ON CONFLICT DO NOTHING",
-                            (stem, datetime.now(timezone.utc).isoformat()),
-                        )
-                        await db.execute("COMMIT")
-                    except Exception:
-                        await db.execute("ROLLBACK")
-                        raise
-                    applied_set.add(stem)
-                    applied_now.append(stem)
-                except psycopg.errors.DuplicateTable:
-                    # A concurrent booter created the object; treat as applied.
+                # One explicit transaction per migration body (finding H2): the
+                # body AND its _schema_migrations bookkeeping INSERT commit
+                # atomically. On ANY error the whole body rolls back and the stem
+                # is NOT recorded — no more half-applied migrations marked "done".
+                # Relies on the pg-shim lastval() guard (pg.py) so an ON CONFLICT
+                # INSERT can't abort this transaction via a failed lastval probe.
+                # A DuplicateTable is no longer swallowed-and-recorded: the
+                # advisory lock above already serialises concurrent booters, so a
+                # genuine duplicate now surfaces loudly instead of masking a
+                # partially-applied state.
+                async with db.transaction():
+                    await _apply_up_sql(db, sql)
                     await db.execute(
                         "INSERT INTO _schema_migrations(id, applied_at) "
                         "VALUES (?, ?) ON CONFLICT DO NOTHING",
                         (stem, datetime.now(timezone.utc).isoformat()),
                     )
-                    applied_set.add(stem)
+                applied_set.add(stem)
+                applied_now.append(stem)
                 if target is not None and stem == target:
                     break
             # Rebuild migrations copy explicit ids, which leaves identity sequences

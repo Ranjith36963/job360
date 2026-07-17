@@ -12,6 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { requestPasswordReset } from "@/lib/api";
+import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,8 +47,9 @@ export default function ForgotPasswordPage() {
       setSubmitted(true);
     } catch (err) {
       // The backend always returns 204; a failure here is genuinely a
-      // network / parse problem and we surface it verbatim.
-      setServerError(err instanceof Error ? err.message : "request failed");
+      // network / parse problem. Show a friendly message, never the raw
+      // "API error NNN: …" string.
+      setServerError(friendlyAuthError(err, "Something went wrong. Please try again."));
     }
   });
 

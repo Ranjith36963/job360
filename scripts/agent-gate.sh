@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # agent-gate.sh — the ONLY way to earn a commit.
 #
-# Runs the canonical gates and writes a stamp binding the PASS to this exact
-# tree state (HEAD + index + working tree). Any edit after the gate run
-# invalidates the stamp, so "ran tests, then changed one more thing, then
-# committed" is impossible. See agentic-loop/hardening.md.
+# Runs the gates and writes a stamp binding the PASS to this exact tree state
+# (HEAD + index + working tree). Any edit after the gate run invalidates the
+# stamp, so "ran tests, then changed one more thing, then committed" is
+# impossible. See agentic-loop/hardening.md.
 #
 # CONTRACT (undocumented before — this is the order that actually works):
 #   1. git add -A        <- stage FIRST. The api-types drift check compares the
@@ -14,13 +14,32 @@
 #   3. git commit         <- do NOT edit anything in between; the stamp is bound
 #                            to the exact tree.
 #
-# Run it ONCE. It takes ~13 minutes and the backend suite is quiet for most of
-# it. A heartbeat line prints every 30s so silence is distinguishable from
-# death. Do NOT relaunch it because it "looks dead" — concurrent runs share one
-# Postgres and poison each other (see the advisory lock below).
+# Tiered (2026-07-15):
+#   default  — TARGETED backend tests: each changed backend/src file maps to
+#              its tests/test_<name>.py; changed test files run as-is; ruff on
+#              changed .py files. Falls back to the FULL suite when no changed
+#              file maps to a test (conservative default).
+#   --full   — the original canonical full backend suite. Use before
+#              merges/releases or when touching core plumbing (pg shim,
+#              migrations runner, auth) — a targeted run maps a changed file to
+#              tests/test_<name>.py only, so it CANNOT see the integration tests
+#              that a plumbing change actually breaks.
+# CI (ci-offline.yml) runs the full suite on Linux for every PR either way —
+# the local gate is the fast shift-left check, CI is the final word.
+#
+# Run it ONCE. A --full run took 34min (measured 2026-07-17, ~1,826 tests on
+# Windows); the earlier "~13min" here was guesswork and understating it is how
+# you talk yourself into believing a healthy run has died. The backend suite is
+# quiet for nearly all of it — a heartbeat line prints every 30s so silence is
+# distinguishable from death. Do NOT relaunch it because it "looks dead":
+# concurrent runs share one Postgres and poison each other (see the advisory
+# lock below). To check it is alive on Windows use `tasklist`, never MSYS `ps`.
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
+
+MODE="fast"
+[ "${1:-}" = "--full" ] && MODE="full"
 
 tree_fingerprint() {
   { git rev-parse HEAD; git status --porcelain; git diff; git diff --cached; } | git hash-object --stdin
@@ -93,8 +112,35 @@ _heartbeat & HB_PID=$!
 trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
 
 if [ "$BACKEND_CHANGED" -gt 0 ]; then
-  echo "[gate] backend suite... (~12min, quiet; heartbeat every 30s)"
-  (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+  if [ "$MODE" = "full" ]; then
+    echo "[gate] backend suite (full)... (~12min, quiet; heartbeat every 30s)"
+    (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+  else
+    # Map each changed backend .py file to its test file by name.
+    # backend/src/**/foo.py -> tests/test_foo.py; changed test files run as-is.
+    TARGETS=""
+    for f in $(echo "$CHANGED" | grep '^backend/' | grep '\.py$' || true); do
+      base="$(basename "$f" .py)"
+      case "$f" in
+        backend/tests/test_*.py) [ -f "$f" ] && TARGETS="$TARGETS ${f#backend/}" ;;
+        backend/tests/*) ;; # conftest/fixtures: no direct target; fall through
+        *) [ -f "backend/tests/test_${base}.py" ] && TARGETS="$TARGETS tests/test_${base}.py" ;;
+      esac
+    done
+    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+    LINT_FILES="$(echo "$CHANGED" | grep '^backend/.*\.py$' | sed 's|^backend/||' | while read -r p; do [ -f "backend/$p" ] && echo "$p"; done | tr '\n' ' ')"
+    if [ -n "${TARGETS// /}" ]; then
+      echo "[gate] backend targeted tests: $TARGETS"
+      (cd backend && python -m pytest -q -p no:randomly $TARGETS 2>&1 | tee -a "$GATE_LOG")
+      if [ -n "${LINT_FILES// /}" ]; then
+        echo "[gate] ruff on changed files..."
+        (cd backend && ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
+      fi
+    else
+      echo "[gate] no changed file maps to a test — running FULL backend suite (conservative fallback)"
+      (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+    fi
+  fi
 fi
 
 # M7 — API-types drift guard. A backend API-model change OR a frontend change
@@ -129,5 +175,7 @@ if [ "$FP_START" != "$FP_END" ]; then
 fi
 
 mkdir -p "$ROOT/.claude"
+# Write the fingerprint we VERIFIED above, not a freshly recomputed one — a
+# recompute here would re-open the M1 hole it just closed.
 printf '%s' "$FP_END" > "$ROOT/.claude/gate-stamp"
-echo "[gate] PASS — stamp written"
+echo "[gate] PASS ($MODE) — stamp written"

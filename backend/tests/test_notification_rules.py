@@ -174,6 +174,18 @@ async def test_put_rule_updates_mode(authenticated_async_context):
 
 
 @pytest.mark.asyncio
+async def test_put_rule_rejects_invalid_notify_mode(authenticated_async_context):
+    """M2 — notify_mode is really an enum (instant|daily|every_n_hours). A
+    free-form string must be rejected with 422, never silently written."""
+    async with authenticated_async_context() as client:
+        resp = await client.put(
+            "/api/settings/notification-rule",
+            json={"notify_mode": "hourly-ish"},
+        )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_put_rule_partial_update(authenticated_async_context):
     """3. PUT only changes the supplied fields, leaves others at their saved value."""
     async with authenticated_async_context() as client:
