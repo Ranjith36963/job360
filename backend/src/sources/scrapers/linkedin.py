@@ -20,6 +20,14 @@ _COMPANY_RE = re.compile(r'<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[
 _LOCATION_RE = re.compile(r'<span[^>]*class="[^"]*job-search-card__location[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
 _LINK_RE = re.compile(r'href="(https://[^"]*linkedin\.com/jobs/view/[^"]*)"', re.IGNORECASE)
 
+# S4: structural health check. `base-search-card__title` is the class the
+# title regex keys on — it MUST appear on any non-trivial LinkedIn guest
+# search response (results or not: LinkedIn's "no results" shell is tiny).
+# If the response is big but this marker is gone, the guest HTML layout
+# changed and the regexes above are silently matching nothing.
+_STRUCTURE_ANCHOR = "base-search-card__title"
+_MIN_STRUCTURAL_HTML_LEN = 500
+
 
 class LinkedInSource(BaseJobSource):
     name = "linkedin"
@@ -43,6 +51,12 @@ class LinkedInSource(BaseJobSource):
             if not html:
                 await asyncio.sleep(3)
                 continue
+            if len(html) > _MIN_STRUCTURAL_HTML_LEN and _STRUCTURE_ANCHOR not in html:
+                logger.error(
+                    "[linkedin] STRUCTURE CHANGED: expected '%s' not found in a "
+                    "%d-byte response — parser may be broken",
+                    _STRUCTURE_ANCHOR, len(html),
+                )
             try:
                 titles = _TITLE_RE.findall(html)
                 companies = _COMPANY_RE.findall(html)

@@ -176,7 +176,12 @@ class TieredScheduler:
         for src, result in zip(due, results):
             self._last_run[src.name] = now_val
             breaker = self._breakers.get(src.name)
-            fetch_failed = isinstance(result, BaseException) or result is None or not result
+            # S1: an empty list is NOT a breaker failure. A healthy source can
+            # legitimately return [] (niche board, keyword mismatch, quiet day).
+            # Only a genuine failure — exception, None, or timeout — trips the
+            # breaker. Counting [] as a failure opened the breaker after 5 quiet
+            # cycles and stopped polling a healthy source.
+            fetch_failed = isinstance(result, BaseException) or result is None
             if fetch_failed:
                 breaker.record_failure()
             else:

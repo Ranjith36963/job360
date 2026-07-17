@@ -13,6 +13,12 @@ _JOB_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# S4: structural health check. If a non-trivially large page comes back but
+# the anchor regex above matches ZERO raw job-link candidates, the site's
+# markup changed — not a real zero-listing day — and the parser is silently
+# blind.
+_MIN_STRUCTURAL_HTML_LEN = 2000
+
 
 class AIJobsAISource(BaseJobSource):
     """aijobs.ai — dedicated AI job board with server-rendered listings."""
@@ -46,8 +52,10 @@ class AIJobsAISource(BaseJobSource):
         try:
             jobs = []
             now = datetime.now(timezone.utc).isoformat()
+            raw_matches = 0
 
             for match in _JOB_LINK_RE.finditer(html):
+                raw_matches += 1
                 path, title = match.group(1), match.group(2).strip()
 
                 # Skip navigation/non-job links
@@ -78,6 +86,13 @@ class AIJobsAISource(BaseJobSource):
                     date_confidence="low",
                     date_posted_raw=None,
                 ))
+
+            if raw_matches == 0 and len(html) > _MIN_STRUCTURAL_HTML_LEN:
+                logger.error(
+                    "[aijobs_ai] STRUCTURE CHANGED: expected job-link anchor pattern "
+                    "not found in a %d-byte response — parser may be broken",
+                    len(html),
+                )
 
             return jobs
         except Exception as e:

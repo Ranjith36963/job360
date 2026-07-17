@@ -44,7 +44,17 @@ class EightyKHoursSource(BaseJobSource):
                 "hitsPerPage": 50,
             }
             data = await self._post_json(_ALGOLIA_URL, body=body, headers=headers)
-            if not data or "hits" not in data:
+            if not data:
+                continue
+            if "hits" not in data:
+                # S4: structural health check. A real Algolia query response
+                # always has a "hits" key (empty list on zero matches). If the
+                # server answered but that key is gone, the Algolia index/API
+                # contract changed — not a real zero-results query.
+                logger.error(
+                    "[eightykhours] STRUCTURE CHANGED: expected 'hits' key not "
+                    "found in Algolia response — parser may be broken"
+                )
                 continue
 
             for hit in data["hits"]:

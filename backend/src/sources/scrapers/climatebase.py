@@ -11,6 +11,13 @@ logger = logging.getLogger("job360.sources.climatebase")
 # Regex to extract Next.js embedded JSON data
 _NEXT_DATA_RE = re.compile(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.DOTALL)
 
+# S4: structural health check. The `__NEXT_DATA__` script tag is Next.js's
+# own SSR data island — it renders on every page load (0 results or not).
+# If a non-trivially large response arrives with no `__NEXT_DATA__` tag at
+# all, Climatebase changed its rendering (or the whole page layout), not
+# just its job count.
+_MIN_STRUCTURAL_HTML_LEN = 500
+
 
 class ClimatebaseSource(BaseJobSource):
     """Climatebase — climate tech jobs. Extracts from Next.js embedded JSON."""
@@ -50,6 +57,13 @@ class ClimatebaseSource(BaseJobSource):
 
             match = _NEXT_DATA_RE.search(html)
             if not match:
+                if len(html) > _MIN_STRUCTURAL_HTML_LEN:
+                    logger.error(
+                        "[climatebase] STRUCTURE CHANGED: expected __NEXT_DATA__ "
+                        "script tag not found in a %d-byte response — parser may "
+                        "be broken",
+                        len(html),
+                    )
                 # Fallback to HTML scraping if __NEXT_DATA__ not found
                 return self._parse_html_fallback(html)
 

@@ -676,3 +676,23 @@ mypy `continue-on-error`.
 | **M9** (IP-in-logs) | OPEN (the original FABLE M9) | `utils/logger.py::mask_ip` (sha256 → `ip_<hex>`) applied in `api/middleware.py` so the access log stores a stable non-reversible token, never the raw client IP. user_id kept (internal opaque uuid). Test: `test_request_id_middleware.py`. |
 
 **Deferred to owner (infrastructure — per the /goal boundary):** **M10** — editing `docker-compose.prod.yml` (drop the hardcoded `job360dev` password) and changing prod secret-defaulting is a production-deploy config change; the safety review correctly flagged it as needing your sign-off. Recommendation ready: env-ref the compose password + generate ephemeral dev secrets. Awaiting your go.
+
+---
+
+## ✅ CLOSED in Batch 2 — Sources / pipeline reliability (2026-07-17)
+
+| ID | Was | Now fixed at |
+|---|---|---|
+| **S1** | OPEN_BUG (breaker counts empty result as failure) | `services/scheduler.py:179` — dropped the `not result` clause: an empty `[]` records SUCCESS, only exception/None/timeout count as breaker failures. A legitimately-quiet source no longer trips OPEN after 5 cycles. Tests: `test_scheduler.py` (empty never opens; exception still does). |
+| **S2** | OPEN_BUG (Reed/Adzuna fan-out always exceeds timeout) | `sources/apis_keyed/adzuna.py:30` `self.job_titles[:8]` (was unbounded); `reed.py:33` `[:8]` (was `[:12]`). Caps title fan-out like siblings so a long title list no longer guarantees a per-tick timeout+cancel. Tests: `test_sources.py` (20 titles → ≤8 queries). |
+| **S4** | OPEN_ACCEPTED (scrapers die silently on layout change) | `sources/scrapers/{linkedin,bcs_jobs,aijobs_ai,climatebase,eightykhours}.py` — each now runs a cheap structural health check: on a real (non-trivial) response missing its parser anchor, logs a distinct `STRUCTURE CHANGED … parser may be broken` at ERROR (greppable/alertable), instead of the same "found 0 jobs" as a quiet day. Still returns `[]` (pipeline continues). 10 tests in `test_sources.py`. |
+
+**Deferred to owner (Pillar-2 hands-off — per standing rule):** **SI5** (prefilter
+experience band) is scoring/search code the safety review correctly declined to edit
+without explicit per-item authorization. Same category as **M8** (dim clamp). Fix is
+specified and ready on your word.
+
+**Kept as accepted (not worth the risk):** **S8** (dead `glassdoor` RATE_LIMITS entry) —
+harmless (never read; `JobSpySource.name` is hardcoded `"indeed"`), and removing it risks
+the five-surface source-count contract (rule #8) for zero functional gain. **S5** (JobSpy
+thread leak on timeout) needs a killable process pool — a larger dedicated change.
