@@ -51,7 +51,17 @@ FORBIDDEN_PHRASES = [
     ("async SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
 ]
 
-_STAMP_RE = re.compile(r"<!--\s*last-verified:\s*(\d{4}-\d{2}-\d{2})")
+# Header spec (DOC-MAINTENANCE.md): one HTML comment near the top of a doc,
+# e.g.  <!-- doc: LIVING | last-verified: 2026-07-15 by /sync -->
+#       <!-- doc: PLAN | status: ACTIVE -->
+_STAMP_RE = re.compile(r"last-verified:\s*(\d{4}-\d{2}-\d{2})")
+_TYPE_RE = re.compile(r"<!--\s*doc:\s*(LIVING|PLAN|LOG|REFERENCE)\b")
+
+# Relative markdown links to check for dead targets: [text](path.md) style.
+_LINK_RE = re.compile(r"\]\(([^)#\s]+?\.md)(?:#[^)]*)?\)")
+
+# Dirs holding docs whose links we sweep (node_modules etc. excluded).
+LINK_SWEEP_DIRS = [".", "docs", "backend", "frontend"]
 
 
 def registry_counts() -> tuple[int, int]:
@@ -94,6 +104,26 @@ def migration_head() -> int:
     if not nums:
         raise RuntimeError("no NNNN_*.sql migrations found")
     return max(nums)
+
+
+def dead_links() -> list[tuple[str, str]]:
+    """(doc, broken target) for every relative .md link pointing at a missing file."""
+    files: list[Path] = []
+    for d in LINK_SWEEP_DIRS:
+        base = ROOT / d
+        if not base.is_dir():
+            continue
+        files.extend(base.rglob("*.md") if d == "docs" else base.glob("*.md"))
+    broken = []
+    for f in files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for m in _LINK_RE.finditer(text):
+            target = m.group(1)
+            if "://" in target or target.startswith("mailto:"):
+                continue
+            if not (f.parent / target).exists():
+                broken.append((str(f.relative_to(ROOT)).replace("\\", "/"), target))
+    return broken
 
 
 def main() -> int:
@@ -145,6 +175,16 @@ def main() -> int:
             age = (today - _dt.date.fromisoformat(stamp.group(1))).days
             if age > STALE_DAYS:
                 drift.append((rel, "-", "freshness", f"verified {age} days ago", f"max {STALE_DAYS} — run /sync"))
+
+        type_tag = _TYPE_RE.search(text)
+        if not type_tag:
+            drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
+        elif type_tag.group(1) != "LIVING":
+            drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # Dead relative links anywhere in the doc tree (archive moves, renames).
+    for doc, target in dead_links():
+        drift.append((doc, "-", "dead-link", f"→ {target}", "target file does not exist"))
 
     # A fact nobody claims anymore = the claim was reworded/deleted and this
     # checker just went blind to it. That is drift, not success.
