@@ -14,6 +14,9 @@
     "gen:types": "bash ../scripts/gen-api-types.sh",
     "check:types-drift": "bash ../scripts/gen-api-types.sh && git diff --exit-code -- openapi.json src/lib/api-types.ts"
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@dnd-kit/core": "^6.3.1",
