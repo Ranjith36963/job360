@@ -35,13 +35,17 @@ export async function middleware(request: NextRequest) {
   const session = request.cookies.get("job360_session");
   if (!session?.value) return bounceToLogin();
 
-  // E2E test bypass — NEVER active in production. When the Playwright webServer
-  // sets E2E_TEST_MODE=1 (and NODE_ENV is not "production"), a PRESENT cookie is
-  // trusted without the server-side /api/auth/me round-trip, so the hermetic
-  // (mocked, no live backend) specs pass the guard deterministically instead of
-  // relying on the fail-open catch below. Double-gated (env flag + non-prod) so
-  // it can never weaken the real auth guard in a deployed build.
-  if (process.env.NODE_ENV !== "production" && process.env.E2E_TEST_MODE === "1") {
+  // E2E test bypass — gated SOLELY on E2E_TEST_MODE, which is set ONLY by
+  // playwright.config.ts's webServer env. It is never in .env.example, Railway,
+  // or any real deploy, so it cannot weaken a deployed auth guard. We must NOT
+  // also gate on NODE_ENV: the CI e2e runs a PRODUCTION build (npm run build &&
+  // start) for speed, so NODE_ENV==="production" there too — a non-prod gate
+  // silently disables this bypass in CI, and only the (now removed) fail-open
+  // catch was masking it. With the catch failing CLOSED (F4), that mask is gone,
+  // so the NODE_ENV gate turns every protected-route spec into a /login redirect.
+  // With E2E_TEST_MODE=1 a PRESENT cookie is trusted without the /api/auth/me
+  // round-trip, so hermetic (mocked, no live backend) specs pass deterministically.
+  if (process.env.E2E_TEST_MODE === "1") {
     return NextResponse.next();
   }
 

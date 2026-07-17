@@ -9,12 +9,23 @@ name: CI — offline suite (automated Loop 2 + full backend)
 # To enable: just turn on GitHub Actions for the repo (Settings → Actions). No
 # secrets needed — tests inject SESSION_SECRET / channel key themselves.
 
+# Unfiltered `push` + `pull_request` double-fires: a push to a branch with an open
+# PR runs the same commit twice. Filtering push to main gives branches exactly one
+# run (via the PR) and main exactly one run (via the push).
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC daily
   workflow_dispatch: {}
+
+# A newer push supersedes the run it replaces; don't pay for the stale one.
+# run_id keeps each scheduled/dispatched run in its own group so a push to main
+# can never cancel the nightly suite.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   offline-suite:

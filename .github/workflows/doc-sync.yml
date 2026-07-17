@@ -1,0 +1,195 @@
+name: doc-sync
+
+# Loop 3 — code↔docs drift check (report-only).
+# Reads hard facts from the code and compares them to the claims in the docs.
+# On drift (scheduled runs) it opens/updates ONE GitHub issue — it NEVER edits
+# files. Read-only by design: see docs/maintenance/loop1_safe_reenable.md.
+#
+# Also runs on every PR as a NON-BLOCKING report (step summary only) so a
+# stale-branch clobber is visible at review time, not 24h later.
+#
+# Scheduled-run realities (not bugs, just facts):
+# - cron only fires on the DEFAULT branch — this does nothing until merged;
+# - cron timing is best-effort (the 06:30 slot may slip);
+# - GitHub auto-disables schedules after ~60 days without repo activity —
+#   if the repo goes quiet, re-enable under Actions or run workflow_dispatch.
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # 06:30 UTC daily — after ci-offline (06:00, best effort)
+  workflow_dispatch: {}
+  pull_request: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: doc-sync
+  cancel-in-progress: false
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.check.outputs.drift }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run doc drift check
+        id: check
+        run: |
+          set +e
+          python scripts/doc_sync_check.py > drift.md 2>&1
+          code=$?
+          set -e
+          cat drift.md
+          cat drift.md >> "$GITHUB_STEP_SUMMARY"
+          echo "drift=$code" >> "$GITHUB_OUTPUT"
+          # exit 2 = the checker itself crashed — fail the workflow loudly
+          [ "$code" -le 1 ] || exit "$code"
+
+      # PR runs stop here: the report is in the step summary, non-blocking.
+
+      - name: Find existing drift issue (exact title)
+        id: issue
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Doc drift detected (Loop 3 doc-sync)"
+          # Exact-match on title in jq — `gh --search` tokenizes and can hit
+          # unrelated issues; `.[0].number` on [] yields the string "null".
+          num=$(gh issue list --state open --json number,title \
+                 -q ".[] | select(.title == \"$title\") | .number" | head -1)
+          echo "num=$num" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update drift issue (only when the report changed)
+        if: github.event_name != 'pull_request' && steps.check.outputs.drift == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          num="${{ steps.issue.outputs.num }}"
+          title="${{ steps.issue.outputs.title }}"
+          if [ -z "$num" ] || [ "$num" = "null" ]; then
+            gh issue create --title "$title" --body-file drift.md
+            exit 0
+          fi
+          # No daily spam: comment only if the report differs from the last
+          # posted body (issue body or newest comment, whichever is later).
+          gh issue view "$num" --json body,comments \
+            -q 'if (.comments | length) > 0 then .comments[-1].body else .body end' \
+            > last_posted.md || true
+          if ! diff -q <(tr -d '\r' < drift.md) <(tr -d '\r' < last_posted.md) >/dev/null 2>&1; then
+            gh issue comment "$num" --body-file drift.md
+          else
+            echo "drift unchanged since last post — not commenting"
+          fi
+
+      - name: Close drift issue when resolved
+        if: github.event_name != 'pull_request' && steps.check.outputs.drift == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          num="${{ steps.issue.outputs.num }}"
+          if [ -n "$num" ] && [ "$num" != "null" ]; then
+            gh issue close "$num" --comment "Drift resolved — docs match code again. (Loop 3 auto-close)"
+          fi
+
+  # ────────────────────────────────────────────────────────────────────
+  # Auto-fixer (deterministic-ship design, learned from runs 29584302854 +
+  # 29587661254): Claude ONLY EDITS files in the workspace — it has no git,
+  # no gh, no push (Bash restricted to python). Everything mechanical is
+  # plain workflow bash afterwards: assert the diff is 100% *.md, branch,
+  # commit, push, PR, merge. The docs-only guarantee is enforced by dumb
+  # code, never by the LLM's promise. Claude's full transcript is uploaded
+  # as an artifact so any failure is diagnosable.
+  # Needs the CLAUDE_CODE_OAUTH_TOKEN repo secret (one-time setup:
+  # run `claude setup-token` locally, then
+  # `gh secret set CLAUDE_CODE_OAUTH_TOKEN`). Skips politely if absent.
+  # ────────────────────────────────────────────────────────────────────
+  auto-fix:
+    needs: drift-check
+    if: >
+      github.event_name != 'pull_request' &&
+      needs.drift-check.outputs.drift == '1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Check fixer token present
+        id: token
+        run: echo "have=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.have == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Claude edits the docs (edit-only — no git, no gh)
+        if: steps.token.outputs.have == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the automated Tier-2 doc fixer (Loop 3). Fix the files in
+            the current workspace ONLY — do NOT run git, do NOT push, do NOT
+            open PRs; a later workflow step ships your edits.
+            - Run `python scripts/doc_sync_check.py` first; fix EVERY drift
+              row it reports (numbers, stale phrases) in the LIVING docs.
+            - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
+              stamp on line 2 of all six LIVING docs (today's date, UTC).
+            - If a doc claims something the code does not do, add the gap to
+              docs/maintenance/PARKED.md — and leave that source doc untouched.
+            - Edit ONLY *.md files. Never touch code, configs, or workflows.
+            - Finish by re-running `python scripts/doc_sync_check.py`; keep
+              fixing until only findings you cannot fix in markdown remain.
+          claude_args: --allowedTools Bash(python:*),Edit,Write,Read,Glob,Grep
+
+      - name: Upload Claude transcript (always — for diagnosis)
+        if: always() && steps.token.outputs.have == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-fixer-transcript-${{ github.run_id }}
+          path: /home/runner/work/_temp/claude-execution-output.json
+          if-no-files-found: ignore
+
+      - name: Ship the edits (deterministic — docs-only enforced by bash)
+        if: steps.token.outputs.have == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          changed=$(git status --porcelain | awk '{print $2}')
+          # Fail LOUD if the fixer made no edits — drift exists, so silence = broken fixer.
+          [ -n "$changed" ] || { echo "::error::fixer made NO edits despite drift — check the transcript artifact"; exit 1; }
+          # Docs-only cage: any non-markdown change kills the ship. Dumb code, not LLM promises.
+          nonmd=$(echo "$changed" | grep -vc '\.md$' || true)
+          [ "$nonmd" -eq 0 ] || { echo "::error::fixer touched $nonmd non-markdown file(s) — refusing to ship: $(echo "$changed" | grep -v '\.md$' | tr '\n' ' ')"; exit 1; }
+          branch="docs/sync-auto-${{ github.run_id }}"
+          git config user.name "loop3-doc-sync[bot]"
+          git config user.email "loop3@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "docs: auto-sync (Loop 3) — drift fixed by CI fixer run ${{ github.run_id }}"
+          git push -u origin "$branch"
+          python scripts/doc_sync_check.py > after.md 2>&1 || true
+          gh pr create --base main --head "$branch" \
+            --title "docs: auto-sync (Loop 3)" \
+            --body-file after.md
+          # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
+          # The docs-only assert above IS the gate — merge directly.
+          gh pr merge "$branch" --squash --delete-branch
+          echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Note when fixer is not configured
+        if: steps.token.outputs.have != 'true'
+        run: echo "CLAUDE_CODE_OAUTH_TOKEN secret not set — drift issue filed, auto-fix skipped." >> "$GITHUB_STEP_SUMMARY"

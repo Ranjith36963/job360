@@ -1,4 +1,5 @@
 # Job360 Frontend
+<!-- doc: LIVING | last-verified: 2026-07-17 by /sync -->
 
 Next.js 16 + React 19 dashboard for Job360. Talks to the FastAPI backend for
 job listings, profile, pipeline, and search.
