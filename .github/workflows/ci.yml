@@ -4,9 +4,18 @@ name: CI
 # Replaces ci-offline.yml as the canonical per-commit gate.
 # ci-offline.yml (automated Loop-2 + Playwright) continues to run independently.
 
+# Unfiltered `push` + `pull_request` double-fires: a push to a branch with an open
+# PR runs the same commit twice. Filtering push to main gives branches exactly one
+# run (via the PR) and main exactly one run (via the push).
 on:
   push:
+    branches: [main]
   pull_request:
+
+# A newer push supersedes the run it replaces; don't pay for the stale one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
