@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload Claude transcript (always — for diagnosis)
         if: always() && steps.token.outputs.have == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: claude-fixer-transcript-${{ github.run_id }}
           path: /home/runner/work/_temp/claude-execution-output.json
