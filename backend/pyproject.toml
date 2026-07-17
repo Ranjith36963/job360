@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Automated UK job search system supporting any professional domain"
 requires-python = ">=3.9"
 dependencies = [
-    "aiohttp>=3.9.0,<3.14",  # <3.14: 3.14 broke aioresponses 0.7.8 (test HTTP mocking). Lift once aioresponses supports 3.14.
+    "aiohttp>=3.9.0,<3.15",  # <3.14: 3.14 broke aioresponses 0.7.8 (test HTTP mocking). Lift once aioresponses supports 3.14.
     "defusedxml>=0.7.1",  # M18: XXE-safe parsing of untrusted RSS/XML job feeds
     "psycopg[binary]>=3.2",  # async Postgres driver (Phase 1 migration)
     "python-dotenv>=1.0.0",
