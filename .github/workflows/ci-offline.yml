@@ -59,7 +59,7 @@ jobs:
       SESSION_SECRET: ci-test-secret-not-used-in-prod
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -139,7 +139,7 @@ jobs:
       SESSION_SECRET: ci-test-secret-not-used-in-prod
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
