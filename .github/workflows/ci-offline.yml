@@ -60,7 +60,7 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install backend (with dev extras)
@@ -140,7 +140,7 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install backend (with dev extras)
