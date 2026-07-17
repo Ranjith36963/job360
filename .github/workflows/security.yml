@@ -8,12 +8,23 @@ name: Security scanning
 # blocking once the current backlog is triaged. gitleaks + bandit are advisory
 # too until the codebase is clean.
 
+# Unfiltered `push` + `pull_request` double-fires: a push to a branch with an open
+# PR runs the same commit twice. Filtering push to main gives branches exactly one
+# run (via the PR) and main exactly one run (via the push).
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 4 * * 1" # 04:00 UTC every Monday
   workflow_dispatch: {}
+
+# A newer push supersedes the run it replaces; don't pay for the stale one.
+# run_id keeps each scheduled/dispatched run in its own group so a push to main
+# can never cancel the weekly scan.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
