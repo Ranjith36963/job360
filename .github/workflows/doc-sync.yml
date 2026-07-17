@@ -141,7 +141,7 @@ jobs:
             .claude/skills/sync/SKILL.md exactly, with these constraints:
             - Run `python scripts/doc_sync_check.py` first; fix EVERY drift
               row it reports (numbers, stale phrases) in the LIVING docs.
-            - Add/update the `<!-- last-verified: YYYY-MM-DD by /sync -->`
+            - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
               stamp on line 2 of all six LIVING docs.
             - If a doc claims something the code does not do, add it to
               docs/maintenance/PARKED.md — never describe missing code as real.

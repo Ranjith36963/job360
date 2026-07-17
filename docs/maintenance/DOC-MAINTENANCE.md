@@ -14,6 +14,23 @@
 | **LOG** | `docs/IMPLEMENTATION_LOG.md`, `docs/maintenance/JOURNAL.md` | Append-only. Never rewritten, so never stale by definition. |
 | **REFERENCE** | decision records (`docs/plans/batch-2-decisions.md`), research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
 
+### Every doc carries its type on line 2 (machine + human readable)
+
+One HTML comment — invisible when the doc renders, parseable by the tripwire:
+
+```markdown
+<!-- doc: LIVING | last-verified: 2026-07-15 by /sync -->   ← written by /sync
+<!-- doc: PLAN | status: ACTIVE -->                          ← written by /doc-audit
+<!-- doc: LOG | append-only -->
+<!-- doc: REFERENCE -->
+```
+
+LIVING headers (tag + freshness date) are owned by the `/sync` auto-fixer.
+All other headers are applied by `/doc-audit` Phase B after the user approves
+the classification. The daily tripwire verifies LIVING docs carry the right
+tag and a fresh date; untagged non-living docs surface in the next audit, not
+as daily alarms.
+
 ## 2. Plan lifecycle (fixes the "implemented docs still lying around" problem)
 
 ```

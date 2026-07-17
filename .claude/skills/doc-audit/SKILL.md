@@ -12,7 +12,12 @@ contract. The code is the only truth.
   RECOMMENDED action (archive / banner / fix / park / write-doc / delete).
   Then STOP and wait for the user's decisions.
 - **Phase B — APPLY (only what the user approved).** Execute exactly the
-  approved items, nothing more, on a `docs/audit-<YYYYMMDD>-<HHMM>` branch
+  approved items, nothing more. When the user approves the classification,
+  also write each doc's type header on line 2 (spec in DOC-MAINTENANCE.md):
+  `<!-- doc: PLAN | status: ACTIVE -->`, `<!-- doc: LOG | append-only -->`,
+  `<!-- doc: REFERENCE -->` (LIVING headers are owned by /sync — skip them;
+  an untouchable AHEAD doc gets NO header unless the user approves that
+  specific doc). Work on a `docs/audit-<YYYYMMDD>-<HHMM>` branch
   (time suffix — parallel sessions must not collide), ending in ONE docs-only
   PR — never commit to main. Rebase on freshly-fetched `origin/main` right
   before pushing. **Only one doc-writing session (sync or audit) at a time** —

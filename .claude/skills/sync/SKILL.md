@@ -54,10 +54,11 @@ For each mismatch found in Step 2:
 - Keep the same structure and tone of the existing document
 
 **Then stamp every LIVING doc you verified** (even ones needing no fix):
-add or update `<!-- last-verified: YYYY-MM-DD by /sync -->` on line 2 of
-CLAUDE.md, README.md, ARCHITECTURE.md, STATUS.md, backend/CLAUDE.md,
+add or update `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->` on
+line 2 of CLAUDE.md, README.md, ARCHITECTURE.md, STATUS.md, backend/CLAUDE.md,
 frontend/README.md. The daily Loop-3 tripwire (`scripts/doc_sync_check.py`)
-reads these stamps and flags any doc not verified within 45 days.
+reads both the type tag and the date, and flags any doc not verified within
+45 days.
 
 **If a doc claims something the code does NOT do** (code is behind the doc —
 an "AHEAD" doc): **leave that doc completely untouched** (user's rule —
