@@ -2,9 +2,19 @@
 # Without this, nothing tells us a dependency has a published CVE — the audit
 # flagged it as the cheapest security win available.
 #
-# Weekly (not daily) and grouped, so this surfaces real signal instead of a
-# constant PR drip. Security updates still arrive immediately regardless of
-# schedule — GitHub raises those out-of-band.
+# Weekly + grouped so this surfaces real signal, not a PR drip. Security
+# updates still arrive IMMEDIATELY regardless of schedule/groups/ignores —
+# GitHub raises those out-of-band from GHSA advisories.
+#
+# Flood control (2026-07-17): the first run opened 9 PRs because Dependabot
+# never groups MAJOR bumps by default — each major spawns its own PR. Fix:
+#   - a `*-major` group per ecosystem → all majors land as ONE PR, not N.
+#   - `ignore` rules for majors that are BLOCKED upstream (they'd reopen every
+#     week and always fail CI). These are DEV-TOOLING only (not shipped runtime),
+#     so ignoring them carries no security downside. Take them deliberately by
+#     deleting the ignore line when the toolchain catches up.
+#   - aiohttp is a RUNTIME lib → never ignore the whole dep; pin only the exact
+#     broken range (>=3.14 breaks aioresponses in tests — see backend/pyproject.toml).
 version: 2
 updates:
   # Backend — Python deps declared in backend/pyproject.toml
@@ -15,10 +25,19 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     groups:
-      python-minor-and-patch:
+      pip-minor-and-patch:
         update-types:
           - "minor"
           - "patch"
+      pip-major:
+        update-types:
+          - "major"
+    ignore:
+      # aiohttp 3.14 requires a stream_writer kwarg that aioresponses 0.7.8
+      # doesn't pass → every mocked-HTTP test fails. Lift when aioresponses
+      # supports 3.14+. (PR #59 held for this reason.)
+      - dependency-name: "aiohttp"
+        versions: [">=3.14"]
     commit-message:
       prefix: "chore(deps)"
 
@@ -34,15 +53,35 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      npm-major:
+        update-types:
+          - "major"
+    ignore:
+      # TypeScript 7 (Go-native compiler) — openapi-typescript, eslint-config-next,
+      # msw all still peer-require ^5. Un-ignore when the toolchain ships ^7. (PR #61)
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # eslint 10 — eslint-config-next@16 pulls eslint-plugin-jsx-a11y which caps
+      # at eslint 9. Un-ignore when Vercel's config supports eslint 10. (PR #64)
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # vitest 4 — needs @vitest/coverage-v8 co-bumped to 4.x; low-value dev
+      # tooling, take deliberately. Un-ignore + co-bump when wanted. (PR #62)
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
 
-  # CI workflow actions (pinned action versions go stale + carry their own CVEs)
+  # CI workflow actions (pinned action versions go stale + carry their own CVEs).
+  # Actions rarely break — group everything into one PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    groups:
+      actions-all:
+        patterns: ["*"]
     commit-message:
       prefix: "chore(ci)"
