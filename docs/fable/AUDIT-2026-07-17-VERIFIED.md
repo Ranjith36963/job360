@@ -718,3 +718,42 @@ thread leak on timeout) needs a killable process pool — a larger dedicated cha
 | **T6-T9** | PARTIAL (weak assertions unfixed) | `test_database.py` + `test_tenancy_isolation.py`: `pytest.raises(Exception)` → `pytest.raises(pg.IntegrityError)`, setup insert moved outside the block (so only the duplicate is asserted). `test_discovery.py` + `test_profile_versions_endpoint.py`: shape-only `"changed_fields" in body` strengthened to assert the specific changed field NAME is present (a diff returning `[]` now fails). |
 | **T12** | OPEN_ACCEPTED (no real concurrent-write test) | `tests/test_concurrent_writes.py` — two real `pg.connect()` connections race `upsert_feed_row` (INSERT…ON CONFLICT) on the same `user_feed` row via `asyncio.gather`; asserts neither raises, exactly one row survives, and the final state is one of the two valid writes (never a corrupt hybrid). |
 | **T5** | OPEN_ACCEPTED (rule #28 lists a live file as "being removed") | root `CLAUDE.md` rule #28 — `skill_synonyms.py` removed from the "offenders being removed" list and scoped OUT with a stated reason (it's scoring/keyword-generation vocabulary in `skill_matcher`/`keyword_generator`, NOT profile extraction under `services/profile/`). Rule text now matches reality. |
+
+---
+
+## 📊 Campaign result (2026-07-18) — self-fixable work COMPLETE
+
+**Confirmed-fixed: 50 → 73** (+23 across 5 batches, each gated + CI-verified on PR #78):
+- Batch 0 (8): M12, N4, N5, N8, N9, S9, T10, RULECOUNT
+- Batch 1 (4): M1, M3, LOCKOUT, M9
+- Batch 2 (3): S1, S2, S4
+- Batch 3 (4): N6, M7, M16, M17
+- Batch 4 (4): T4, T6-T9, T12, T5
+
+Everything else needs an OWNER decision, an infrastructure change, or is accepted-by-design.
+The fixes below are **specified and ready** — I implement the Pillar-2 ones on your word;
+the infra/legal ones are yours.
+
+### 🔴 NEEDS YOU — decisions / infra / legal
+
+**Pillar-2 / scoring (hands-off rule — need explicit per-item OK; I'll implement on your go):**
+- **SI5** prefilter experience band → make one-directional (senior sees junior roles)
+- **M8** clamp stored per-dim scores to [0,100] (radar draw-clamp already done; this is the persisted columns)
+- **N3** job-detail: use single-row `load_enrichment` instead of loading the ENTIRE `job_enrichment` table
+- **N7** batch the N+1 queries in `main.py` feed-write + `tasks.py` notification tick
+
+**Infrastructure (deploy/config — your sign-off):**
+- **M10** drop hardcoded `job360dev` password in `docker-compose.prod.yml` + require secrets / ephemeral dev fallback
+- **H6** run migrations as a release/pre-deploy step, not inside the FastAPI serving lifespan
+- **H7** make the CI security scanners (pip-audit/npm-audit/bandit/gitleaks) BLOCKING, not advisory
+- **M4** worker Dockerfile `HEALTHCHECK` + ARQ `health_check_interval` + Railway restart trigger
+- **L6** Next.js standalone Docker image (smaller, less attack surface)
+- **SI1** notification pipeline: I can wire the enqueue in CODE, but it only fires once you add a Railway **worker service** + **Redis** + SMTP/channel creds
+
+**Business / legal (your decision, no code):**
+- Scraping LinkedIn/Indeed/Glassdoor (drop or accept-in-writing), privacy/terms, subprocessor list, MFA, breach-notification plan, single-region backups
+
+**Ops env (you set on Railway):** `APP_ENV`/`JOB360_ENV` (cookie Secure), `RATE_LIMIT_REDIS=true` + `REDIS_URL`.
+
+### ⚪ Accepted-by-design (left intentionally)
+S5 (thread leak — needs process pool), S8 (dead glassdoor RATE_LIMITS — five-surface risk), V2 (RETURNING id — minor), mypy `continue-on-error` (395 grandfathered), the 4 dead score columns + dormant penalty card (PR-2, owner-declined earlier), M2 register-409 (deliberate).
