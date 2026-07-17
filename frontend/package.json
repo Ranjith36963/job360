@@ -58,6 +58,6 @@
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.3"
+    "vitest": "^3.2.7"
   }
 }
