@@ -39,7 +39,7 @@ async def test_purge_old_jobs_logs_deletion(caplog):
 
 
 @pytest.mark.asyncio
-async def test_purge_deletes_derived_children_but_keeps_user_records():
+async def test_purge_deletes_derived_children_but_keeps_user_records(migrated_db_path):
     """docs/fable/02 D4 — purging a job must not orphan its catalog-derived rows.
 
     The pg shim strips every FK clause (incl. ON DELETE CASCADE), so nothing
@@ -50,8 +50,12 @@ async def test_purge_deletes_derived_children_but_keeps_user_records():
     The flip side (rule #3): the USER's own records must SURVIVE the catalog
     purge. An application (Kanban entry) must not vanish because the shared job
     listing aged out.
+
+    Uses ``migrated_db_path`` (full schema): this test inserts into
+    job_enrichment / job_embeddings / user_feed / user_notification_digests,
+    which are MIGRATION tables — ``init_db()`` alone does not create them.
     """
-    db = JobDatabase(":memory:")
+    db = JobDatabase(migrated_db_path)
     await db.init_db()
     try:
         old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()

@@ -31,8 +31,8 @@ async def _mk_user(db: JobDatabase, email: str, pw_hash: str = "h") -> str:
 
 
 @pytest.mark.asyncio
-async def test_export_includes_own_rows_and_redacts_secrets():
-    db = JobDatabase(":memory:")
+async def test_export_includes_own_rows_and_redacts_secrets(migrated_db_path):
+    db = JobDatabase(migrated_db_path)
     await db.init_db()
     try:
         email = f"{uuid.uuid4().hex}@example.com"
@@ -54,9 +54,9 @@ async def test_export_includes_own_rows_and_redacts_secrets():
 
 
 @pytest.mark.asyncio
-async def test_export_is_scoped_to_the_requested_user_only():
+async def test_export_is_scoped_to_the_requested_user_only(migrated_db_path):
     """rule #12 — one user's export must never contain another user's rows."""
-    db = JobDatabase(":memory:")
+    db = JobDatabase(migrated_db_path)
     await db.init_db()
     try:
         my_email = f"{uuid.uuid4().hex}@example.com"
@@ -72,9 +72,9 @@ async def test_export_is_scoped_to_the_requested_user_only():
 
 
 @pytest.mark.asyncio
-async def test_export_never_includes_the_shared_catalog():
+async def test_export_never_includes_the_shared_catalog(migrated_db_path):
     """rules #10/#17 — the export is the USER's data, not the whole jobs table."""
-    db = JobDatabase(":memory:")
+    db = JobDatabase(migrated_db_path)
     await db.init_db()
     try:
         uid = await _mk_user(db, f"{uuid.uuid4().hex}@example.com")

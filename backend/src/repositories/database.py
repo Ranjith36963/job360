@@ -594,7 +594,35 @@ class JobDatabase:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         stale = "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?"
         # Children first (the subquery needs the jobs rows to still exist).
+        #
+        # Skip a child table that does not exist IN THIS SCHEMA. EVERY table in
+        # _PURGE_CASCADE_TABLES is created by a MIGRATION (job_enrichment is 0008,
+        # user_feed is 0011 …), but ``init_db()`` above only creates the legacy
+        # pre-Batch-2 tables — migration 0000's header spells this split out. So a
+        # DB built by init_db() ALONE, with no runner.up(), is a legitimate state
+        # (several tests do exactly that) in which these children are absent, and
+        # an unguarded DELETE dies with UndefinedTable. Production always migrates
+        # on boot (api/dependencies.py lifespan), so this skips nothing there.
+        #
+        # ``current_schema()``, NOT to_regclass(): to_regclass resolves through the
+        # whole search_path, which in test mode is ``"t_xxx", public``. An
+        # init_db-only test in its own ``mem_*``/``t_*`` schema would then resolve
+        # ``user_feed`` via the PUBLIC fallback the moment a dev has run
+        # ``python main.py`` (default DSN → same Postgres, writes ``public``) — and
+        # the DELETE would silently wipe real ``public`` rows whose job_id collides
+        # with the test's ids (1–2 in a fresh schema — near-certain). Pinning to the
+        # ACTIVE schema means "exists here", never "exists somewhere on the path".
+        # Same current_schema() discipline as runner.py's sequence resync. NOT a
+        # try/except UndefinedTable: an explicit check can't also swallow a REAL
+        # error from the DELETE.
+        existing = await self._conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema()"
+        )
+        present = {r[0] for r in await existing.fetchall()}
         for table in _PURGE_CASCADE_TABLES:
+            if table not in present:
+                continue
             await self._conn.execute(
                 f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
             )

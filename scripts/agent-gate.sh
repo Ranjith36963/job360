@@ -113,8 +113,18 @@ trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
 
 if [ "$BACKEND_CHANGED" -gt 0 ]; then
   if [ "$MODE" = "full" ]; then
-    echo "[gate] backend suite (full)... (~12min, quiet; heartbeat every 30s)"
+    echo "[gate] backend suite (full)... (~30min, quiet; heartbeat every 30s)"
     (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+    # ruff over the WHOLE backend. This used to run ONLY in targeted mode, which
+    # made --full strictly WEAKER than the fast path on lint — backwards, and it
+    # cost a red CI: `aiosqlite.Connection` survived as a type annotation in
+    # workers/tasks.py. 1,826 tests passed straight over it, because
+    # `from __future__ import annotations` makes annotations lazy strings that
+    # are never evaluated — no test can ever catch that class of bug. Only a
+    # static check can, so --full must run one. CI runs `ruff check .`; match it
+    # exactly, or the gate keeps passing things CI rejects.
+    echo "[gate] ruff (full backend)..."
+    (cd backend && python -m ruff check . 2>&1 | tee -a "$GATE_LOG")
   else
     # Map each changed backend .py file to its test file by name.
     # backend/src/**/foo.py -> tests/test_foo.py; changed test files run as-is.
@@ -133,12 +143,17 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
       echo "[gate] backend targeted tests: $TARGETS"
       (cd backend && python -m pytest -q -p no:randomly $TARGETS 2>&1 | tee -a "$GATE_LOG")
       if [ -n "${LINT_FILES// /}" ]; then
+        # `python -m ruff`, never bare `ruff`: it is a dev-extra, so a bare call
+        # can hit a PATH miss and vanish instead of gating (it was once missing
+        # from deps entirely — PR #33 drained 329 findings it had been hiding).
         echo "[gate] ruff on changed files..."
-        (cd backend && ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
+        (cd backend && python -m ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
       fi
     else
       echo "[gate] no changed file maps to a test — running FULL backend suite (conservative fallback)"
       (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+      echo "[gate] ruff (full backend)..."
+      (cd backend && python -m ruff check . 2>&1 | tee -a "$GATE_LOG")
     fi
   fi
 fi

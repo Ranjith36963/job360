@@ -745,7 +745,7 @@ def _in_quiet_window(rule: dict, now_utc: datetime, user_tz: str) -> bool:
         return False
 
 
-async def _has_pending_digests(db: aiosqlite.Connection, user_id: str) -> bool:
+async def _has_pending_digests(db: pg.Connection, user_id: str) -> bool:
     """True when the user has unsent ``user_notification_digests`` rows."""
     try:
         cur = await db.execute(

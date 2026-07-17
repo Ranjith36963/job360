@@ -36,20 +36,33 @@ def _rows(db_path: str, where: str, params: tuple) -> list:
 
 @pytest.fixture
 def audit_db(tmp_path, monkeypatch):
-    """Point DB_PATH at a fresh per-test schema and apply the audit DDL."""
+    """Point DB_PATH at a fresh per-test schema with the FULL migrated schema.
+
+    Runs ``init_db()`` + every migration, not just the 0025 audit DDL: the
+    hard-delete erasure test also touches ``users`` (migration 0001), which the
+    old audit-only fixture could never provide. Letting the migrations create
+    ``audit_log`` themselves (0025) also keeps ``_schema_migrations`` honest —
+    the old fixture hand-created the table via raw DDL without recording the
+    stem. Migration 0025 is ``CREATE TABLE IF NOT EXISTS``, so it stays a no-op
+    for the audit-only tests. A tmp FILE path (not ``:memory:``) hashes to a
+    stable schema, so the bootstrap and the test's later connects share it.
+    """
+    import asyncio
+
+    from migrations import runner
+
     db_path = str(tmp_path / "audit_test.db")
     from src.core import settings
 
     monkeypatch.setattr(settings, "DB_PATH", db_path, raising=True)
-    from pathlib import Path
 
-    ddl = (Path("migrations") / "0025_audit_log.up.sql").read_text()
-    conn = pgsync.connect(db_path)
-    try:
-        conn.executescript(ddl)
-        conn.commit()
-    finally:
-        conn.close()
+    async def _boot():
+        db = JobDatabase(db_path)
+        await db.init_db()
+        await db.close()
+        await runner.up(db_path)
+
+    asyncio.run(_boot())
     return db_path
 
 
