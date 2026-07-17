@@ -1,4 +1,5 @@
 # Job360 Architecture
+<!-- doc: LIVING | last-verified: 2026-07-17 by /sync -->
 
 > **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
 
@@ -39,7 +40,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 22 forward/reverse SQL migrations (0000 → 0021) + runner.py
+│   ├── migrations/                   # 25 forward/reverse SQL migrations (0000 → 0024) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
@@ -77,7 +78,7 @@ job360/
 │   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Async SQLite + 22-migration forward-compat schema
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 25-migration forward-compat schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -706,7 +707,8 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | Package | Purpose |
 |---------|---------|
 | aiohttp >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite >=0.19.0 | Async SQLite for job storage |
+| psycopg[binary] >=3.2 | Postgres driver — actual job storage backend since 2026-07-02 |
+| aiosqlite >=0.19.0 | Legacy driver-shaped API only; `pg.py` shims it over Postgres (real storage is not SQLite) |
 | python-dotenv >=1.0.0 | .env file loading |
 | jinja2 >=3.1.0 | HTML report templates |
 | click >=8.1.0 | CLI framework |

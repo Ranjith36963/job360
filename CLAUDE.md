@@ -1,4 +1,5 @@
 # CLAUDE.md
+<!-- doc: LIVING | last-verified: 2026-07-17 by /sync -->
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -99,7 +100,8 @@ Job360 is an automated UK job search system supporting **any professional domain
 | Package | Version | Purpose |
 |---------|---------|---------|
 | aiohttp | >=3.9.0 | Async HTTP client for source fetching |
-| aiosqlite | >=0.19.0 | Async SQLite for job storage |
+| psycopg[binary] | >=3.2 | Postgres driver — actual job storage backend since 2026-07-02 |
+| aiosqlite | >=0.19.0 | Legacy driver-shaped API only; `pg.py` shims it over Postgres (real storage is not SQLite) |
 | python-dotenv | >=1.0.0 | .env file loading |
 | jinja2 | >=3.1.0 | HTML report templates |
 | click | >=8.1.0 | CLI framework |
