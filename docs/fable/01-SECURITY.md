@@ -20,7 +20,8 @@
 - **Fix (P1, 5 min):** Set `JOB360_ENV=prod` in Railway **today** as the stop-gap, then unify the check on the same helper the rest of the app uses (`APP_ENV`/`RAILWAY_ENVIRONMENT`) so it can't drift again. Also confirm the cookie sets `HttpOnly` + `SameSite=Lax` (it does).
 
 ## P2 — Auth rate-limits & brute-force lockout are per-process in-memory
-> **STATUS: FIXED (opt-in)** — `5cfe292`. Redis-backed sliding window behind `RATE_LIMIT_REDIS` (atomic Lua `EVAL`, shared across replicas), falling back to in-memory on ANY Redis error. Default OFF = byte-identical to before; set `RATE_LIMIT_REDIS=true` + `REDIS_URL` to activate in prod.
+> **STATUS: PARTIAL** — `5cfe292`. Redis-backed sliding window behind `RATE_LIMIT_REDIS` (atomic Lua `EVAL`, shared across replicas), falling back to in-memory on ANY Redis error. Default OFF = byte-identical to before; set `RATE_LIMIT_REDIS=true` + `REDIS_URL` to activate in prod.
+> **⚠️ AUDIT 2026-07-17:** the replica-sharing half is genuinely fixed, but `/register` is **still un-throttled** (`auth.py:132-172` makes no rate-limit call → mass account creation is open), and the Redis half only helps if `RATE_LIMIT_REDIS=true` is actually set on the live service. See `AUDIT-2026-07-17-VERIFIED.md` (M3).
 - **What I saw:** `backend/src/services/auth/rate_limit.py:25-30` — module-level dicts guarded by a `threading.Lock`. Drives login lockout, magic-link, password-reset, verify-email limits. Docstring admits "not race-safe across processes … a restart wipes the buckets."
 - **Why it matters:** With multiple uvicorn workers or Railway replicas, an attacker's attempts fan out across processes → effective limit is `N × configured`. Every deploy resets all counters. Weakens brute-force and SMTP-amplification guards.
 - **Fix:** Back the limiter with **Redis** (already a dependency via ARQ; `REDIS_URL` exists). The `check_and_record` API was designed for exactly this swap.
@@ -50,7 +51,8 @@
 - **Fix:** Make state-changing endpoints non-GET, and add an Origin allowlist check (reuse `FRONTEND_ORIGIN`) on unsafe methods.
 
 ## P2 — Lockout DoS + IP-only reset limit enable targeted harassment
-> **STATUS: FIXED** — `1b3519f`. Lockout keyed `login:<email>:<ip>`, so an attacker only locks their own (email, IP) bucket — the real user on another IP still signs in.
+> **STATUS: PARTIAL** — `1b3519f`. Lockout keyed `login:<email>:<ip>`, so an attacker only locks their own (email, IP) bucket — the real user on another IP still signs in.
+> **⚠️ AUDIT 2026-07-17:** only the LOGIN-lockout key was fixed. The **password-reset** throttle is still keyed on IP-hash only (`auth.py:445` `password-reset:<ip_hash>`, no email dimension), so an attacker rotating IPs can still email-bomb a victim's inbox. See `AUDIT-2026-07-17-VERIFIED.md` (LOCKOUT).
 - **What I saw:** lockout keyed on **email only** (`rate_limit.py:90-119`); password-reset limited per **IP hash** 1/min (`auth.py:386-390`).
 - **Why it matters:** (a) an attacker can keep any victim permanently locked out by spamming failures for their email; (b) IP-only reset key is bypassed by IP rotation → email-bomb a victim's inbox.
 - **Fix:** Add an IP dimension to lockout (email+IP); key reset throttling on email as well as IP.

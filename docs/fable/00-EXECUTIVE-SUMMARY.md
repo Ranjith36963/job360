@@ -1,5 +1,11 @@
 # 00 — Executive Summary
 
+> ## 🔎 VERIFIED 2026-07-17 → [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)
+> All 101 findings re-verified against live `main` by 11 parallel agents reading the real
+> code. **50 fixed · 12 partial · 20 open · 14 accepted · 2 needs-you · 2 were claimed-fixed
+> but NOT in code (now being closed).** That file is authoritative; the STATUS lines below
+> are corrected inline where they over-claimed.
+
 > ## STATUS AS OF 2026-07-16 — READ THIS FIRST
 > **The audit below is the ORIGINAL findings, preserved as written. Most are now FIXED.**
 > Each finding in `01`–`09` now carries its own **STATUS** line with the commit — trust

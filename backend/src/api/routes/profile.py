@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import save_upload_to_temp
@@ -438,7 +438,7 @@ async def upload_github(
 
 @router.get("/profile/versions", response_model=ProfileVersionsListResponse)
 async def list_versions(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ):
     """Step-1.5 S3-A — list the most-recent ``user_profile_versions`` rows

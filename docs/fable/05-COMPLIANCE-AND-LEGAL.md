@@ -41,7 +41,8 @@ blocks you from operating, but each item is a real regulator or enterprise-buyer
 
 ## P1 — Plaintext emails written to on-disk logs (MISSED BY THIS AUDIT — found externally)
 
-> **STATUS: FIXED** — `mask_email()` in `utils/logger.py`, applied to all 6 sites.
+> **STATUS: FIXED (email-in-logs) — but this is NOT the original Fable "M9"** — `mask_email()` in `utils/logger.py`, applied to all 6 email-logging sites.
+> **⚠️ AUDIT 2026-07-17:** two different "M9"s got conflated. The email-address leak (this one) IS fixed. But the **original FABLE_FINDINGS.md M9** — raw **client IP + user_id** written to `data/logs/*.jsonl` by the access-log middleware (`api/middleware.py`) — is **still un-redacted / OPEN**. Different code path, different PII, not addressed by `mask_email`. See `AUDIT-2026-07-17-VERIFIED.md` (M9).
 
 **Honest note: this audit did not find this.** An external audit (M9) did. Recording
 it here rather than quietly patching it, because the *gap in coverage* is the more

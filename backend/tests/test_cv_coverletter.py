@@ -184,6 +184,37 @@ async def test_generate_400_when_no_cv(authenticated_async_context, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_generate_503_hides_internal_error_detail(authenticated_async_context, monkeypatch, caplog):
+    """N5 — an LLM/provider failure must not leak raw exception text (which can
+    contain API keys / internal details) to the client. The real error still
+    goes to the server-side logger."""
+    import logging
+
+    async def _raising_llm(prompt: str, system: str = "") -> dict:
+        raise RuntimeError("upstream 500: api_key=sk-supersecret-leak-me")
+
+    import src.api.routes.tailor as tailor
+    monkeypatch.setattr(tailor, "llm_extract", _raising_llm)
+    monkeypatch.setattr(tailor, "load_profile", _fake_load_profile)
+
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+
+    with caplog.at_level(logging.ERROR, logger="job360.api.tailor"):
+        async with authenticated_async_context() as client:
+            resp = await client.post(f"/api/tailor/{job_id}/generate")
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail == "Generation failed, please try again."
+    assert "sk-supersecret-leak-me" not in detail
+    # the real error reached the server-side logger, just not the client
+    assert any("sk-supersecret-leak-me" in rec.getMessage() or
+               (rec.exc_info and "sk-supersecret-leak-me" in str(rec.exc_info[1]))
+               for rec in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_generate_402_when_quota_exhausted(authenticated_async_context, monkeypatch):
     import src.api.routes.tailor as tailor
     _patch_route(monkeypatch, [])

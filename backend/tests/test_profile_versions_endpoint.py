@@ -65,6 +65,31 @@ async def test_list_versions_returns_user_snapshots(authenticated_async_context)
 
 
 @pytest.mark.asyncio
+async def test_list_versions_limit_over_max_is_rejected(authenticated_async_context):
+    """N9 — an absurd `limit` on /profile/versions must be rejected with 422,
+    not served (unbounded-limit guard, same shape as the /jobs N4 fix)."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/profile/versions?limit=10000000")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_versions_limit_zero_is_rejected(authenticated_async_context):
+    """N9 — `limit=0` must be rejected with 422 (lower bound is 1)."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/profile/versions?limit=0")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_versions_limit_within_bound_still_works(authenticated_async_context):
+    """Positive control: an in-bound `limit` (the upper allowed value) still 200s."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/profile/versions?limit=100")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_restore_version_404_when_missing(authenticated_async_context):
     """Restoring a non-existent version id is a 404 (existence-hiding pattern)."""
     async with authenticated_async_context() as client:

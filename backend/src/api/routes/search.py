@@ -18,7 +18,9 @@ from src.api.auth_deps import CurrentUser, require_user, require_verified_user
 from src.api.models import SearchStartResponse, SearchStatusResponse
 from src.core import settings
 from src.main import run_search
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, get_logger
+
+logger = get_logger("api.search")
 
 router = APIRouter(tags=["search"])
 
@@ -79,7 +81,8 @@ async def start_search(
                 extra={"event": "search_completed", "run_id": run_id, "user_id": user.id, "status": "ok"},
             )
         except Exception as e:
-            _runs[run_id].update(status="failed", progress=str(e))
+            logger.exception("search run %s failed for user=%s", run_id, user.id)
+            _runs[run_id].update(status="failed", progress="Search failed, please try again.")
             get_audit_logger().warning(
                 "search_failed",
                 extra={"event": "search_failed", "run_id": run_id, "user_id": user.id, "error": str(e)},

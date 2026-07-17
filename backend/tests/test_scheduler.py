@@ -204,6 +204,23 @@ def test_slow_source_times_out_without_blocking_batch():
     assert len(by_name["fast"]) == 2
 
 
+def test_cancelled_error_propagates_not_treated_as_source_failure():
+    """N8 — asyncio.CancelledError must propagate out of tick(), not be
+    swallowed as a plain source failure. Before the fix, `_safe_fetch`'s
+    ``except BaseException`` caught CancelledError too, which would silently
+    eat real task/shutdown cancellation and record it as a breaker failure."""
+    src = _FakeSource("cancels", "ats", raise_exc=asyncio.CancelledError())
+    registry = BreakerRegistry()
+    sched = TieredScheduler([src], registry, clock=lambda: 1000.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        _run(sched.tick())
+
+    # Cancellation must NOT be recorded as a breaker failure.
+    breaker = registry.get("cancels")
+    assert breaker._consecutive_failures == 0
+
+
 # ---------------------------------------------------------------------------
 # Per-category fetch timeout resolution
 # ---------------------------------------------------------------------------

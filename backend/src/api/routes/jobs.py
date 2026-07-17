@@ -434,7 +434,7 @@ async def export_jobs(
 
 @router.get("/jobs", response_model=JobListResponse)
 async def list_jobs(
-    hours: Optional[int] = Query(None),
+    hours: Optional[int] = Query(None, ge=0),
     min_score: Optional[int] = Query(None),
     source: Optional[str] = Query(None),
     bucket: Optional[str] = Query(None),

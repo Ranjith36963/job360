@@ -1,5 +1,14 @@
 # Progress — fixes shipped vs pending
 
+> ## 🔎 SOURCE OF TRUTH → [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)
+> On 2026-07-17 all **101** findings across the three Fable locations were re-verified
+> against the **live `main`** code by 11 parallel agents (each opening the real file, not
+> trusting this tracker's line numbers). Result: **50 CONFIRMED FIXED · 12 PARTIAL ·
+> 20 OPEN BUG · 14 OPEN (accepted) · 2 NEEDS-YOU · 2 NOT-CONFIRMED (claimed fixed, not
+> in code — now being closed) · 1 dead-code.** The verified doc has the current file:line
+> proof for every one. Where a STATUS line below over-claimed, an **⚠️ AUDIT 2026-07-17**
+> note now corrects it inline.
+
 > Live tracker for the audit findings. Updated as fixes land. Each shipped item
 > names the commit-level change + how it was verified. Honest status only — a thing
 > is "✅ Fixed" only when it's coded AND verified, not when it's planned.

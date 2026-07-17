@@ -163,6 +163,10 @@ class TieredScheduler:
                 logger.warning("[%s] fetch timed out after %ss — treating as failure",
                                src.name, timeout)
                 return e
+            except asyncio.CancelledError:
+                # Propagate cancellation — it is not a source failure and must
+                # not be recorded against the breaker (N8).
+                raise
             except BaseException as e:  # noqa: BLE001 — we want circuit trips on any failure
                 logger.warning("[%s] fetch raised %s", src.name, type(e).__name__)
                 return e

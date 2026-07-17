@@ -359,3 +359,57 @@ def test_nhs_jobs_xml_uses_conditional_fetch():
         finally:
             await session.close()
     _run(_t())
+
+
+# ---------------------------------------------------------------------------
+# S9 — auth failures (401/403) logged louder than routine 404/422
+# ---------------------------------------------------------------------------
+
+
+def test_auth_failure_statuses_logged_at_warning(caplog):
+    """S9 — a 401/403 from upstream (expired/bad API key) must be visible at
+    WARNING, not buried at DEBUG like a routine 404/422."""
+    import logging
+
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://api.example.test/401", status=401)
+                src = _Probe(session)
+                with caplog.at_level(logging.WARNING, logger="job360.sources"):
+                    result = await src._request("GET", "https://api.example.test/401")
+            assert result is None
+        finally:
+            await session.close()
+    _run(_t())
+
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("401" in r.getMessage() for r in warning_records), (
+        f"expected a WARNING-level log for the 401 status; saw {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_not_found_status_stays_at_debug(caplog):
+    """S9 (negative control) — a routine 404 must NOT be promoted to WARNING;
+    only 401/403 (auth failures) get the louder log level."""
+    import logging
+
+    async def _t():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get("https://api.example.test/404", status=404)
+                src = _Probe(session)
+                with caplog.at_level(logging.DEBUG, logger="job360.sources"):
+                    result = await src._request("GET", "https://api.example.test/404")
+            assert result is None
+        finally:
+            await session.close()
+    _run(_t())
+
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not any("404" in r.getMessage() for r in warning_records), (
+        f"a 404 must stay at DEBUG, not be promoted to WARNING; saw {[r.getMessage() for r in warning_records]}"
+    )
+    _run(_t())

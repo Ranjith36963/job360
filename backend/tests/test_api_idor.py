@@ -429,6 +429,41 @@ def test_search_status_for_unknown_run_id_returns_404(api, monkeypatch):
     assert r.status_code == 404
 
 
+def test_search_failed_progress_hides_internal_error(api, monkeypatch):
+    """N5 — when the background search run blows up, the client-visible
+    `progress` field must be a generic message, not the raw exception text
+    (which can contain secrets like DB DSNs / API keys)."""
+    import time
+
+    async def _raising_run_search(**kwargs):
+        raise RuntimeError("DATABASE_URL=postgresql://job360:supersecret@host/db")
+
+    import src.api.routes.search as search_route
+    monkeypatch.setattr(search_route, "run_search", _raising_run_search)
+    monkeypatch.setattr(search_route, "_runs", {}, raising=True)
+
+    _register(api, "alice@example.com")
+    r = api.post("/api/search")
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+
+    # The failure happens in a fire-and-forget background task; poll briefly
+    # for it to land instead of assuming instant completion.
+    body = None
+    for _ in range(50):
+        status_resp = api.get(f"/api/search/{run_id}/status")
+        assert status_resp.status_code == 200
+        body = status_resp.json()
+        if body["status"] == "failed":
+            break
+        time.sleep(0.05)
+
+    assert body is not None and body["status"] == "failed", f"run never reached failed state: {body}"
+    assert body["progress"] == "Search failed, please try again."
+    assert "supersecret" not in body["progress"]
+    assert "DATABASE_URL" not in body["progress"]
+
+
 # ---------------------------------------------------------------------------
 # Batch 3.5.2 — HTTP-level profile tenancy (per-user user_profiles table)
 # ---------------------------------------------------------------------------

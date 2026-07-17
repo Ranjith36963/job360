@@ -19,6 +19,11 @@ logger = logging.getLogger("job360.sources")
 # HTTP status codes that indicate a bad request format — retrying won't help
 _NO_RETRY_STATUSES = (401, 403, 404, 422)
 
+# Auth-failure statuses within _NO_RETRY_STATUSES — an expired/bad API key is an
+# operational problem (S9), not a routine "not found"/"unprocessable" response,
+# so these get logged louder than 404/422.
+_AUTH_FAIL_STATUSES = (401, 403)
+
 
 def _sanitize_xml(text: str) -> str:
     """Fix common XML issues: unescaped &, invalid chars."""
@@ -127,7 +132,11 @@ class BaseJobSource(ABC):
 
                 async with self._session.request(method, url, **kwargs) as resp:
                     if resp.status in _NO_RETRY_STATUSES:
-                        logger.debug("[%s] HTTP %s from %s", self.name, resp.status, url)
+                        if resp.status in _AUTH_FAIL_STATUSES:
+                            logger.warning("[%s] HTTP %s from %s — likely an expired/invalid API key",
+                                           self.name, resp.status, url)
+                        else:
+                            logger.debug("[%s] HTTP %s from %s", self.name, resp.status, url)
                         return None
                     if resp.status == 429:
                         retry_after = resp.headers.get("Retry-After")

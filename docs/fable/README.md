@@ -1,5 +1,10 @@
 # Fable Docs — Job360 Enterprise Production-Grade Audit & Plan
 
+> **🔎 VERIFIED STATUS (2026-07-17): [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)** —
+> every one of the 101 findings across all three Fable locations was re-checked against the
+> live `main` code (real file:line, not the docs' stale numbers). That file is the source of
+> truth for what is actually fixed in production vs still open.
+
 > Orchestrated by Claude (Fable 5) on 2026-07-11. Six specialist sub-agents (Opus +
 > Sonnet) swept every corner of the codebase, ops, compliance, and the Claude Code
 > harness. Fable judged their findings, cut the noise, and wrote this folder.
