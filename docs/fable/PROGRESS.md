@@ -266,3 +266,29 @@ Writing this very section was **blocked by the hook** — because the prose cont
 - **Wire `scripts/gate-fresh-db.sh`** — you already built it: a throwaway DB per gate. One `DROP DATABASE` replaces ~1,000 schema drops; a killed run leaks one easily-listed database instead of invisible schemas; cross-worktree interference vanishes. Changes the canonical command → your call.
 - **Scope the sweep to own-run schemas** (`conftest.py`), so a finishing suite stops nuking other worktrees' live schemas (M2). Keep the global sweep as an opt-in janitor.
 - **Real git `pre-commit` hook** to close the TOCTOU properly (fires inside git, at commit time, on the actual tree). Keep the PreToolUse hook for the friendly early error. Affects human commits too → your call.
+
+---
+
+## Session update 10 — 2026-07-17 — PR #48 inherits the PR-44 clobber (surfaced by `scrapingdesccion.md` §11b)
+
+### What
+This branch's history contains `3f532b2` — the stale-base commit that deleted 4,348 lines when PR #44 merged. Verified against this worktree: `.github/workflows/security.yml` (bandit/gitleaks/pip-audit CI), `frontend/src/lib/security-headers.ts` (M15), `test_xxe_hardening.py`, `test_security_hardening.py`, `test_pg_translate.py` and `docs/FABLE_FINDINGS.md` are all **absent here**, and the restore `b465fca` is in **neither** this branch nor `main`.
+
+Uncomfortable detail: this session **cites `3f532b2` as the fix** for timing-safe login in `docs/fable/01`. That claim is true — and the same commit silently reverted newer work. Both facts hold at once.
+
+### Verified, not assumed
+- **This PR deletes nothing.** The merge base with the restore branch **is `3f532b2` itself**, which already lacks those files — so relative to the base this branch removes nothing, and `git merge-tree` shows it never touches `security.yml`. Once the restore lands, the files survive a #48 merge.
+- **Not a live security hole.** `grep defusedxml` → 0 on main, but `_sanitize_xml()` (`sources/base.py`) strips `<!DOCTYPE>`/`<!ENTITY>` before parsing and billion-laughs needs an entity declaration. Confirmed present on this branch (4 hits). The other doc's §11b reaches the same conclusion independently.
+- **Re-verified my own claims** that the clobber could have invalidated: gitleaks is real here (pre-commit config — the *CI* gitleaks is the clobbered one, a different thing); the XML guard is real.
+
+### Action taken
+PR #48 retitled **`[MERGE #47 FIRST]`** + a comment documenting the dependency, the evidence, and the 12 files that will conflict (`runner.py`, `pg.py`, `pgsync.py`, `api/main.py`, `routes/{auth,jobs,tailor}.py`, `email_sender.py`, `workers/tasks.py`, `tests/{test_api,test_account_mgmt,test_api_idor}.py`). PR #47 (`fix/restore-clobbered-by-pr44`, already titled "MERGE FIRST") restores everything and **keeps** 3f532b2's three genuinely-new pieces re-applied cleanly.
+
+### What was NOT done, deliberately
+**I did not merge #47 into this branch or resolve its 12 conflicts.** Saved memory: *"my cross-worktree merge caused a clobber another session had to restore"* — **that clobber is this clobber.** Resolving another session's work across worktrees, under an "urgent" label, is exactly the move that created the problem. Doing it again faster is not a fix. The restore's owner has it under control; the merge order is the fix.
+
+### Merge order
+1. **PR #47** — restores security CI, M15, 3 test files, FABLE_FINDINGS.md
+2. **PR #48** — this work (resolve the 12 conflicts against the restored base)
+
+Merging #48 alone is safe for *its own* content but leaves main without security CI.
