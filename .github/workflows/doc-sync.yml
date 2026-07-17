@@ -102,10 +102,13 @@ jobs:
           fi
 
   # ────────────────────────────────────────────────────────────────────
-  # Auto-fixer: when the scheduled check finds drift, a Claude session
-  # runs IN CI, follows .claude/skills/sync/SKILL.md, fixes the docs,
-  # stamps them, and opens a docs-only PR. If the diff is 100% *.md files
-  # it enables auto-merge (squash) — code can never ride this train.
+  # Auto-fixer (deterministic-ship design, learned from runs 29584302854 +
+  # 29587661254): Claude ONLY EDITS files in the workspace — it has no git,
+  # no gh, no push (Bash restricted to python). Everything mechanical is
+  # plain workflow bash afterwards: assert the diff is 100% *.md, branch,
+  # commit, push, PR, merge. The docs-only guarantee is enforced by dumb
+  # code, never by the LLM's promise. Claude's full transcript is uploaded
+  # as an artifact so any failure is diagnosable.
   # Needs the CLAUDE_CODE_OAUTH_TOKEN repo secret (one-time setup:
   # run `claude setup-token` locally, then
   # `gh secret set CLAUDE_CODE_OAUTH_TOKEN`). Skips politely if absent.
@@ -130,48 +133,62 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Claude fixes the docs (Loop 3 Tier-2, automated)
+      - name: Claude edits the docs (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are the automated Tier-2 doc fixer (Loop 3). Follow
-            .claude/skills/sync/SKILL.md exactly, with these constraints:
+            You are the automated Tier-2 doc fixer (Loop 3). Fix the files in
+            the current workspace ONLY — do NOT run git, do NOT push, do NOT
+            open PRs; a later workflow step ships your edits.
             - Run `python scripts/doc_sync_check.py` first; fix EVERY drift
               row it reports (numbers, stale phrases) in the LIVING docs.
             - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
-              stamp on line 2 of all six LIVING docs.
-            - If a doc claims something the code does not do, add it to
-              docs/maintenance/PARKED.md — never describe missing code as real.
+              stamp on line 2 of all six LIVING docs (today's date, UTC).
+            - If a doc claims something the code does not do, add the gap to
+              docs/maintenance/PARKED.md — and leave that source doc untouched.
             - Edit ONLY *.md files. Never touch code, configs, or workflows.
-            - Branch: docs/sync-auto-${{ github.run_id }}. Commit, push, then
-              open a PR titled "docs: auto-sync (Loop 3)" whose body is the
-              before/after drift report. Do NOT merge it.
-            - Re-run scripts/doc_sync_check.py at the end; include its output
-              in the PR body as proof (should report freshness-only or clean).
-          # No inner quotes — the action passes this string verbatim; quoted
-          # tool names never match and every call gets DENIED (learned from
-          # run 29584302854: 3 denials, $1.94 spent, nothing shipped, job green).
-          claude_args: --allowedTools Bash,Edit,Write,Read,Glob,Grep
+            - Finish by re-running `python scripts/doc_sync_check.py`; keep
+              fixing until only findings you cannot fix in markdown remain.
+          claude_args: --allowedTools Bash(python:*),Edit,Write,Read,Glob,Grep
 
-      - name: Enable auto-merge only if the PR is 100% markdown
+      - name: Upload Claude transcript (always — for diagnosis)
+        if: always() && steps.token.outputs.have == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-fixer-transcript-${{ github.run_id }}
+          path: /home/runner/work/_temp/claude-execution-output.json
+          if-no-files-found: ignore
+
+      - name: Ship the edits (deterministic — docs-only enforced by bash)
         if: steps.token.outputs.have == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pr=$(gh pr list --head "docs/sync-auto-${{ github.run_id }}" --json number -q '.[0].number')
-          # The fixer ran because drift EXISTS — no PR means it silently failed
-          # (e.g. tool permissions). Fail LOUD so a broken fixer is never green.
-          [ -n "$pr" ] && [ "$pr" != "null" ] || { echo "::error::auto-fixer produced no PR despite drift — check the Claude step log"; exit 1; }
-          nonmd=$(gh pr view "$pr" --json files -q '.files[].path' | grep -vc '\.md$' || true)
-          if [ "$nonmd" -eq 0 ]; then
-            gh pr merge "$pr" --auto --squash \
-              || gh pr comment "$pr" --body "Docs-only diff verified, but auto-merge is unavailable (no branch protection?). Merge manually."
-          else
-            gh pr comment "$pr" --body "⚠️ Auto-merge REFUSED: this PR touches $nonmd non-markdown file(s). A doc-sync PR must be 100% docs — review carefully."
-          fi
+          set -euo pipefail
+          changed=$(git status --porcelain | awk '{print $2}')
+          # Fail LOUD if the fixer made no edits — drift exists, so silence = broken fixer.
+          [ -n "$changed" ] || { echo "::error::fixer made NO edits despite drift — check the transcript artifact"; exit 1; }
+          # Docs-only cage: any non-markdown change kills the ship. Dumb code, not LLM promises.
+          nonmd=$(echo "$changed" | grep -vc '\.md$' || true)
+          [ "$nonmd" -eq 0 ] || { echo "::error::fixer touched $nonmd non-markdown file(s) — refusing to ship: $(echo "$changed" | grep -v '\.md$' | tr '\n' ' ')"; exit 1; }
+          branch="docs/sync-auto-${{ github.run_id }}"
+          git config user.name "loop3-doc-sync[bot]"
+          git config user.email "loop3@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "docs: auto-sync (Loop 3) — drift fixed by CI fixer run ${{ github.run_id }}"
+          git push -u origin "$branch"
+          python scripts/doc_sync_check.py > after.md 2>&1 || true
+          gh pr create --base main --head "$branch" \
+            --title "docs: auto-sync (Loop 3)" \
+            --body-file after.md
+          # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
+          # The docs-only assert above IS the gate — merge directly.
+          gh pr merge "$branch" --squash --delete-branch
+          echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Note when fixer is not configured
         if: steps.token.outputs.have != 'true'
