@@ -1,4 +1,5 @@
 # backend/ — Claude Code pointer
+<!-- doc: LIVING | last-verified: 2026-07-17 by /sync -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
 > (the 26 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
@@ -14,7 +15,7 @@ means in one short line). No walls of text — say what happened, what I did, wh
 
 ## What this is
 
-The Job360 backend: Python 3.9+, FastAPI, async SQLite (aiosqlite), ARQ worker.
+The Job360 backend: Python 3.9+, FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/`, `chroma/`).
 
@@ -52,7 +53,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 - `src/main.py` — orchestrator + `SOURCE_REGISTRY` (47) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
-- `src/repositories/database.py` — async SQLite · `migrations/` — forward/reverse SQL pairs
+- `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.
