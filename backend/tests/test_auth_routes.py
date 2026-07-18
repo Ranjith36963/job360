@@ -46,7 +46,7 @@ def temp_db(monkeypatch, tmp_path):
             await db.commit()
         await runner.up(db_path)
 
-    asyncio.get_event_loop().run_until_complete(_bootstrap()) if False else asyncio.run(_bootstrap())
+    asyncio.run(_bootstrap())
 
     # Patch every module that has already imported DB_PATH.
     from pathlib import Path

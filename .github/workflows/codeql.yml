@@ -36,7 +36,12 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           language: ${{ matrix.language }}
-          queries: security-and-quality # broader than the default security pack
+          # security-extended, NOT security-and-quality: the quality half
+          # duplicates ruff (which already governs style/dead-code and documents
+          # deliberate suppressions like S110 empty-except). Running both meant
+          # 97 "note" alerts re-flagging patterns ruff sanctions — noise that
+          # trains you to ignore the tool. One tool per job.
+          queries: security-extended
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
