@@ -160,7 +160,11 @@ async def generate(
         except EmptyCVError:
             raise HTTPException(status_code=400, detail="No CV text to reshape.")
         except Exception:  # noqa: BLE001 — surface LLM failure clearly, don't 500 silently
-            logger.exception("tailor generation failed for user=%s job_id=%s", user.id, job_id)
+            # No user/job interpolation in the message — logger.exception already
+            # captures the full traceback; keeping user-controlled values out of
+            # the log line avoids the CodeQL log-injection flag (they're a UUID +
+            # int, so harmless, but the scanner can't prove that).
+            logger.exception("tailor generation failed")
             raise HTTPException(status_code=503, detail="Generation failed, please try again.")
         await db.upsert_tailored_doc(
             user.id, job_id, kind, doc.document,

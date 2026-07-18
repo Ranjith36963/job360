@@ -371,14 +371,18 @@ def test_auth_failure_statuses_logged_at_warning(caplog):
     WARNING, not buried at DEBUG like a routine 404/422."""
     import logging
 
+    # Use a URL carrying a secret api_key in the query string — keyed sources
+    # (Adzuna/SerpApi) do exactly this — to prove the redaction (CodeQL fix).
+    _url = "https://api.example.test/401?api_key=SUPERSECRET123"
+
     async def _t():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.get("https://api.example.test/401", status=401)
+                m.get(_url, status=401)
                 src = _Probe(session)
                 with caplog.at_level(logging.WARNING, logger="job360.sources"):
-                    result = await src._request("GET", "https://api.example.test/401")
+                    result = await src._request("GET", _url)
             assert result is None
         finally:
             await session.close()
@@ -388,6 +392,10 @@ def test_auth_failure_statuses_logged_at_warning(caplog):
     assert any("401" in r.getMessage() for r in warning_records), (
         f"expected a WARNING-level log for the 401 status; saw {[r.getMessage() for r in caplog.records]}"
     )
+    # The api_key MUST NOT leak into the log line (clear-text-logging / CodeQL).
+    for r in caplog.records:
+        assert "SUPERSECRET123" not in r.getMessage(), "api_key leaked into the source log"
+        assert "api_key" not in r.getMessage()
 
 
 def test_not_found_status_stays_at_debug(caplog):
