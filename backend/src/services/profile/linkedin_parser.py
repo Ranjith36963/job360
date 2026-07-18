@@ -272,7 +272,21 @@ def _extract_inline_tech_skills(text: str) -> list[str]:
     return out
 
 
-_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+\-]+)@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# ReDoS-safe (CodeQL py/polynomial-redos, same class as channels.py). This runs
+# via finditer over UPLOADED CV / LinkedIn text — attacker-supplied file content,
+# a bigger and less trusted surface than the channels.py case.
+#
+# The original ``@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`` let ``.`` match inside the
+# domain class AND as the literal TLD separator → O(n) split points → quadratic
+# (measured 1.8 s on an 8 k payload). Note a "one dot excluded" rewrite is NOT
+# enough: ``(?:\.[label])*\.[A-Za-z]{2,}`` is still ambiguous because the star
+# group can also consume the final ``.tld`` — that variant still took 1.8 s.
+#
+# The trailing ``\.[A-Za-z]{2,}`` TLD assertion is therefore dropped entirely:
+# each ``.label`` is now consumed exactly once (linear, 0.001 s — 1800× faster),
+# and nothing is lost because the caller below only reads ``m.group(1)`` (the
+# local part) and already filters on ``len(local) >= 5``.
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+\-]+)@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
 _LINKEDIN_SLUG_RE = re.compile(r"linkedin\.com/in/([A-Za-z0-9\-]+)", re.IGNORECASE)
 
 

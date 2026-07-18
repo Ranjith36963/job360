@@ -35,13 +35,20 @@ _VALID_TYPES = {"email", "slack", "discord", "telegram", "webhook"}
 _CONNECT_ONLY_TYPES = {"slack", "discord", "telegram"}
 
 # Simple email regex — intentionally lenient; catches obvious non-emails.
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# ReDoS-safe (CodeQL py/polynomial-redos): the original
+# ``^[^@\s]+@[^@\s]+\.[^@\s]+$`` let ``.`` match inside BOTH domain classes, so
+# the engine had O(n) ways to split the domain → quadratic backtracking on a
+# non-matching tail (8 000 chars took 3.4 s and pinned an API worker). Excluding
+# ``.`` from the label class makes the split unambiguous → linear.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 
 class ChannelIn(BaseModel):
     channel_type: str = Field(pattern="^(email|slack|discord|telegram|webhook)$")
     display_name: str = Field(min_length=1, max_length=120)
-    credential: str = Field(min_length=1)  # interpreted per channel_type
+    # max_length caps the regex/parse work per request — defence in depth behind
+    # the ReDoS-safe _EMAIL_RE above. Webhook URLs and bot tokens fit well under 512.
+    credential: str = Field(min_length=1, max_length=512)  # interpreted per channel_type
 
 
 class ChannelOut(BaseModel):
