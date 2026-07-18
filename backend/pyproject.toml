@@ -4,7 +4,18 @@ version = "1.0.0"
 description = "Automated UK job search system supporting any professional domain"
 requires-python = ">=3.9"
 dependencies = [
-    "aiohttp>=3.14.1",  # >=3.14.1 closes 11 CVEs (PYSEC-2026-237, -2104..-2113). The old <3.14 pin was for aioresponses 0.7.8, which broke on 3.14; aioresponses>=0.7.9 (dev extra) supports it.
+    # STILL PINNED <3.14, and the reason is now measured rather than assumed.
+    # 3.14.1 would close 11 CVEs (PYSEC-2026-237, -2104..-2113), but aiohttp 3.14
+    # made `stream_writer` a REQUIRED kwarg of ClientResponse.__init__, and
+    # aioresponses (our offline HTTP mock, rule #4) does not pass it:
+    #   TypeError: ClientResponse.__init__() missing 1 required keyword-only
+    #   argument: 'stream_writer'   (aioresponses/core.py:197, build_response)
+    # aioresponses 0.7.9 declares aiohttp>=3.8,<4.0 so it LOOKS compatible — it
+    # is not; CI proved it (PR #90, run 29657510744). 0.7.9 is the latest release.
+    # The 11 CVEs are waived explicitly in .github/workflows/security.yml so
+    # pip-audit still BLOCKS on anything new. Lift this pin when aioresponses
+    # ships aiohttp 3.14 support, or when the mock is replaced.
+    "aiohttp>=3.9.0,<3.14",
     "defusedxml>=0.7.1",  # M18: XXE-safe parsing of untrusted RSS/XML job feeds
     "psycopg[binary]>=3.2",  # async Postgres driver (Phase 1 migration)
     "python-dotenv>=1.0.0",
@@ -42,7 +53,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "aioresponses>=0.7.9",  # first release compatible with aiohttp 3.14 (see the aiohttp pin above)
+    "aioresponses>=0.7.9",  # latest; still NOT aiohttp-3.14 compatible — see the aiohttp pin above
     "fpdf2>=2.7.0",
     # Batch 3.5.4 — test-order flake hunter. Loaded on demand via
     # `pytest -p randomly --randomly-seed=<n>`; do NOT enable by
