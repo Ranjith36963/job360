@@ -27,6 +27,11 @@ logger = get_logger("api.search")
 router = APIRouter(tags=["search"])
 
 
+# Hard ceiling on connecting to Redis when starting a search. Notifications are
+# best-effort, so a slow/dead queue must never add latency to a user's search.
+_ENQUEUE_CONNECT_TIMEOUT_SECONDS = 2
+
+
 async def _make_notification_enqueue():
     """SI1 — build the ARQ enqueue hook that turns a search into notifications.
 
@@ -48,19 +53,49 @@ async def _make_notification_enqueue():
     redis_url = os.environ.get("REDIS_URL", "").strip()
     if not redis_url:
         return None, None
-    try:
-        from arq import create_pool  # noqa: PLC0415 — lazy import (rule #11)
-        from arq.connections import RedisSettings  # noqa: PLC0415
 
-        pool = await create_pool(RedisSettings.from_dsn(redis_url))
-    except Exception as exc:  # noqa: BLE001 — Redis down must never fail a search
-        logger.warning(
-            "SI1: notifications skipped for this run — Redis/arq unavailable (%s)",
-            type(exc).__name__,
-        )
-        return None, None
+    # `pool` is created on FIRST ACTUAL ENQUEUE, not here. Connecting eagerly put
+    # Redis on the critical path of every search: a configured-but-dead Redis
+    # stalled the run before it started, and most runs never notify anyone at
+    # all, so the connection was usually pure waste. Connecting lazily means a
+    # dead queue costs nothing until there is genuinely something to send.
+    state: dict = {"pool": None, "broken": False}
+
+    async def _enqueue(function_name: str, *args, **kwargs):
+        """Queue one notification. Never raises — returns None if it can't."""
+        if state["broken"]:
+            return None
+        if state["pool"] is None:
+            try:
+                from arq import create_pool  # noqa: PLC0415 — lazy import (rule #11)
+                from arq.connections import RedisSettings  # noqa: PLC0415
+
+                # Fail fast: arq defaults to conn_retries=5 / conn_retry_delay=1,
+                # i.e. ~10s of retrying. wait_for is a hard ceiling on top.
+                redis_settings = RedisSettings.from_dsn(redis_url)
+                redis_settings.conn_retries = 0
+                redis_settings.conn_timeout = _ENQUEUE_CONNECT_TIMEOUT_SECONDS
+                state["pool"] = await asyncio.wait_for(
+                    create_pool(redis_settings),
+                    timeout=_ENQUEUE_CONNECT_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:  # noqa: BLE001 — Redis down must never fail a search
+                state["broken"] = True  # don't retry per-job for the rest of the run
+                logger.warning(
+                    "SI1: notifications skipped for this run — Redis/arq unavailable (%s)",
+                    type(exc).__name__,
+                )
+                return None
+        try:
+            return await state["pool"].enqueue_job(function_name, *args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — a failed send must not fail the search
+            logger.warning("SI1: enqueue failed (%s)", type(exc).__name__)
+            return None
 
     async def _close() -> None:
+        pool = state["pool"]
+        if pool is None:  # never connected — nothing to clean up
+            return
         # redis-py 5 renamed close() -> aclose(); support both.
         closer = getattr(pool, "aclose", None) or getattr(pool, "close", None)
         if closer is None:
@@ -69,7 +104,7 @@ async def _make_notification_enqueue():
         if hasattr(result, "__await__"):
             await result
 
-    return pool.enqueue_job, _close
+    return _enqueue, _close
 
 # Module-level in-memory store. Pure-process, not persisted across
 # restarts — search runs are ephemeral poll targets. Each record carries
