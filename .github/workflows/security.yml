@@ -3,27 +3,22 @@ name: Security scanning
 # H7 — continuous security scanning: dependency CVEs (backend + frontend),
 # leaked secrets, and Python static analysis. Runs on every push/PR and weekly.
 #
-# H7 follow-up (2026-07-18): THREE OF FOUR JOBS ARE NOW BLOCKING. They were all
-# advisory "until the codebase is clean"; nobody came back to check whether that
-# day had arrived. It had — verified against a clean CI runner (run 29648821735,
-# PR #88), which is the only trustworthy source here (a local pip-audit reads
-# whatever else shares your interpreter):
-#   npm audit  — "found 0 vulnerabilities"   -> BLOCKING
-#   gitleaks   — "no leaks found"            -> BLOCKING
-#   bandit     — "No issues identified" (22,619 lines) -> BLOCKING
-#   pip-audit  — 11 CVEs, ALL in aiohttp 3.13.5 -> still advisory, see below
-#
-# pip-audit is the one real gap, and it is a single stale pin: aiohttp is held at
-# <3.14 because 3.14 broke aioresponses 0.7.8 (our offline HTTP mock, rule #4).
-# aioresponses 0.7.9 supports aiohttp 3.14, so the bump closes all 11 CVEs. That
-# is deliberately a SEPARATE change — a dependency bump must be verified by the
-# full suite against the NEW version, which only CI can do (it installs clean;
-# a local run tests whatever is already installed, i.e. the old version).
-# Flip pip-audit to blocking in the same PR as that bump.
+# H7 (closed 2026-07-18): ALL FOUR JOBS ARE BLOCKING. They were all advisory
+# "until the codebase is clean"; nobody came back to check whether that day had
+# arrived. It had — verified against a clean CI runner (run 29648821735, PR #88),
+# which is the only trustworthy source here (a local pip-audit reads whatever
+# else shares your interpreter):
+#   npm audit  — "found 0 vulnerabilities"
+#   gitleaks   — "no leaks found"
+#   bandit     — "No issues identified" (22,619 lines)
+#   pip-audit  — 11 CVEs, ALL in aiohttp 3.13.5; closed by the >=3.14.1 bump
+#                (backend/pyproject.toml) that landed with this flag flip.
 #
 # Do NOT reintroduce `continue-on-error` or `|| true` to turn a red build green.
 # A scanner that cannot fail the build is a scanner nobody reads: all four
-# reported "pass" for months while pip-audit sat on 11 known CVEs.
+# reported "pass" for months while pip-audit sat on 11 known CVEs. If a new CVE
+# lands, fix or explicitly waive it (pip-audit --ignore-vuln <ID> with a comment
+# saying why) — never re-mute the whole scanner.
 
 # Unfiltered `push` + `pull_request` double-fires: a push to a branch with an open
 # PR runs the same commit twice. Filtering push to main gives branches exactly one
@@ -51,9 +46,6 @@ jobs:
     name: pip-audit (backend deps)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # ADVISORY — the ONLY non-blocking scanner left, and only because of the
-    # aiohttp<3.14 pin (11 CVEs). Flip to blocking together with that bump.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -67,9 +59,8 @@ jobs:
           python -m pip install pip-audit
       - name: Audit installed dependencies
         working-directory: backend
-        # Advisory until the aiohttp bump lands (see header). `|| true` keeps the
-        # step green; the findings are still printed in the log every run.
-        run: python -m pip_audit --progress-spinner off || true
+        # BLOCKING. A new CVE in any backend dependency now fails the build.
+        run: python -m pip_audit --progress-spinner off
 
   npm-audit:
     name: npm audit (frontend deps)
