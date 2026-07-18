@@ -46,6 +46,26 @@ describe("ApiError", () => {
     expect(new ApiError(404, "").isServerError).toBe(false);
   });
 
+  it("isEmailNotVerified for a 403 with the structured code", () => {
+    expect(
+      new ApiError(403, "not verified", "email_not_verified").isEmailNotVerified
+    ).toBe(true);
+  });
+
+  it("isEmailNotVerified for a 403 with the legacy bare detail", () => {
+    expect(new ApiError(403, "email_not_verified").isEmailNotVerified).toBe(true);
+  });
+
+  it("isEmailNotVerified is false for an ordinary 403", () => {
+    expect(new ApiError(403, "forbidden").isEmailNotVerified).toBe(false);
+  });
+
+  it("isEmailNotVerified is false when the code appears on a non-403", () => {
+    expect(
+      new ApiError(401, "email_not_verified", "email_not_verified").isEmailNotVerified
+    ).toBe(false);
+  });
+
   it("default code is api_error", () => {
     const err = new ApiError(400, "Bad request");
     expect(err.code).toBe("api_error");

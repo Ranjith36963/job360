@@ -348,3 +348,42 @@ def test_jobscorer_dim_bonus_caps_at_100():
     )
     scorer = JobScorer(config, user_preferences=prefs, enrichment_lookup=lambda job: perfect)
     assert scorer.score(job).match_score == 100
+
+
+def test_jobscorer_clamps_stored_dims_to_non_negative():
+    """M8 — a negative per-dimension score (a poor-fit seniority PENALTY) must be
+    clamped to 0 in the STORED/reported ScoreBreakdown, so the raw dim columns
+    that feed the radar/API are never out-of-range. The penalty still lands in
+    the composite match_score (rule #27), so no scoring signal is lost."""
+    from datetime import datetime, timezone
+
+    from src.models import Job
+    from src.services.profile.models import SearchConfig, UserPreferences
+    from src.services.skill_matcher import JobScorer
+
+    today = datetime.now(timezone.utc).isoformat()
+    job = Job(
+        title="Director of Engineering",
+        company="Acme",
+        apply_url="https://example.com",
+        source="greenhouse",
+        location="London, UK",
+        description="Lead the whole org.",
+        date_found=today,
+    )
+    config = SearchConfig(job_titles=["Engineer"], primary_skills=["python"])
+    # A junior user against a DIRECTOR-level job → seniority_score() returns a
+    # negative penalty (see test_junior_user_penalised_for_senior_job above).
+    prefs = UserPreferences(experience_level="junior")
+    bad_fit = _enrichment(seniority=SeniorityLevel.DIRECTOR)
+    scorer = JobScorer(config, user_preferences=prefs, enrichment_lookup=lambda j: bad_fit)
+
+    breakdown = scorer.score(job)
+    # The stored dim is clamped to [0,100] — never negative.
+    assert breakdown.seniority_score >= 0
+    assert breakdown.salary_score >= 0
+    assert breakdown.visa_score >= 0
+    assert breakdown.workplace_score >= 0
+    # And the raw seniority penalty was still applied to the composite.
+    from src.services.scoring_dimensions import seniority_score as _raw_sen
+    assert _raw_sen(bad_fit, "junior") < 0  # raw is genuinely negative

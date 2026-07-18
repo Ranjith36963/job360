@@ -766,21 +766,25 @@ class JobDatabase:
         per-user learning signal is preserved.
         """
         now = datetime.now(timezone.utc).isoformat()
+        import json as _json
         # DELETE + INSERT (not `INSERT OR REPLACE` — the Postgres shim doesn't
         # translate `OR REPLACE`, only `OR IGNORE`). A regenerate is a fresh draft.
-        await self._conn.execute(
-            "DELETE FROM tailored_documents WHERE user_id = ? AND job_id = ? AND doc_kind = ?",
-            (user_id, job_id, doc_kind),
-        )
-        import json as _json
-        await self._conn.execute(
-            """INSERT INTO tailored_documents
-               (user_id, job_id, doc_kind, ai_draft, polished, status, model,
-                profile_version, created_at, updated_at, kept_at, flagged_terms)
-               VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, ?, NULL, ?)""",
-            (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now,
-             _json.dumps(flagged_terms or [])),
-        )
+        # Both statements run in ONE explicit transaction: if the INSERT fails
+        # (or the process dies) between the two, the DELETE rolls back so the
+        # user's existing tailored document is never lost (M7 data-loss fix).
+        async with self._conn.transaction():
+            await self._conn.execute(
+                "DELETE FROM tailored_documents WHERE user_id = ? AND job_id = ? AND doc_kind = ?",
+                (user_id, job_id, doc_kind),
+            )
+            await self._conn.execute(
+                """INSERT INTO tailored_documents
+                   (user_id, job_id, doc_kind, ai_draft, polished, status, model,
+                    profile_version, created_at, updated_at, kept_at, flagged_terms)
+                   VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, ?, NULL, ?)""",
+                (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now,
+                 _json.dumps(flagged_terms or [])),
+            )
         await self._conn.commit()
         doc = await self.get_tailored_doc(user_id, job_id, doc_kind)
         return doc or {}

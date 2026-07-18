@@ -167,7 +167,7 @@ class TestTenantIsolation:
                 ("tenant-a", 7, "liked", now),
             )
             await db.commit()
-            with pytest.raises(Exception):  # IntegrityError
+            with pytest.raises(pg.IntegrityError):
                 await db.execute(
                     "INSERT INTO user_actions(user_id, job_id, action, created_at) VALUES(?, ?, ?, ?)",
                     ("tenant-a", 7, "applied", now),

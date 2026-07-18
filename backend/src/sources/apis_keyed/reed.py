@@ -30,7 +30,7 @@ class ReedSource(BaseJobSource):
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
         # Search top job titles in key locations
-        queries = self.job_titles[:12]
+        queries = self.job_titles[:8]
         locations = ["London", "UK", "Remote"]
         for query in queries:
             for loc in locations:

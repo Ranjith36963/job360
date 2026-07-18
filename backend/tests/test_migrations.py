@@ -433,6 +433,120 @@ async def test_0020_adds_deadline_columns(tmp_db_path):
     assert "deadline_source" in cols, "jobs table missing 'deadline_source' column after migration 0020"
 
 
+@pytest.mark.asyncio
+async def test_0020_notification_rules_rebuild_preserves_existing_row(tmp_db_path):
+    """Finding H2/H6 guard: every other migration test in this file creates
+    EMPTY tables before running a migration, so a data-losing ALTER/rebuild
+    would pass unnoticed on a populated prod table. Migration 0020 rebuilds
+    notification_rules (DROP + recreate under a new UNIQUE(user_id) shape) to
+    fold the old per-channel rows into one row per user — exactly the kind of
+    data-dependent transform this class of bug hides in.
+
+    This test seeds a REAL pre-migration row on the OLD schema (migration
+    0012's 'channel' + 'digest_send_time' columns, notify_mode='digest') and
+    asserts it survives the rebuild: old values carried over correctly
+    ('digest' -> 'daily', score_threshold/quiet-hours preserved), and the new
+    NOT-NULL columns the rebuild's INSERT omits (interval_hours,
+    daily_send_time) come out correctly DEFAULTed — not NULL.
+    """
+    async with pg.connect(tmp_db_path) as db:
+        await db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'applied',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id)
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                jobs_found INTEGER NOT NULL DEFAULT 0,
+                jobs_new INTEGER NOT NULL DEFAULT 0,
+                duration_s REAL
+            );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                description TEXT,
+                apply_url TEXT,
+                source TEXT,
+                date_found TEXT,
+                match_score INTEGER DEFAULT 0,
+                normalized_key TEXT UNIQUE,
+                visa_flag INTEGER DEFAULT 0,
+                date_posted TEXT
+            );
+            """
+        )
+        await db.commit()
+
+    # Build the DB up to (and including) 0019 — the PRE-0020 schema, where
+    # notification_rules still has the old per-channel shape from 0012.
+    await runner.up(tmp_db_path, target="0019_channel_oauth")
+
+    # Seed one real pre-migration row: a user with a 'digest' rule on the
+    # old per-channel schema, BEFORE the rebuild migration ever runs.
+    async with pg.connect(tmp_db_path) as db:
+        await db.execute(
+            "INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)",
+            ("u-notif-h2", "h2-guard@example.com", "x"),
+        )
+        await db.execute(
+            "INSERT INTO notification_rules "
+            "(user_id, channel, score_threshold, notify_mode, "
+            " quiet_hours_start, quiet_hours_end, digest_send_time, enabled) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("u-notif-h2", "email", 75, "digest", "22:00", "07:00", "19:45", 1),
+        )
+        await db.commit()
+
+    # Apply the rest of the chain, including 0020's table rebuild.
+    await runner.up(tmp_db_path)
+
+    async with pg.connect(tmp_db_path) as conn:
+        cur = await conn.execute(
+            "SELECT score_threshold, notify_mode, quiet_hours_start, "
+            "quiet_hours_end, daily_send_time, interval_hours, enabled "
+            "FROM notification_rules WHERE user_id = ?",
+            ("u-notif-h2",),
+        )
+        rows = await cur.fetchall()
+
+    assert len(rows) == 1, (
+        f"expected the pre-migration row to survive the 0020 rebuild exactly once, got {rows!r}"
+    )
+    score_threshold, notify_mode, q_start, q_end, daily_send_time, interval_hours, enabled = rows[0]
+    assert score_threshold == 75, "old row's score_threshold was lost in the rebuild"
+    assert notify_mode == "daily", "old 'digest' value was not translated to 'daily'"
+    assert q_start == "22:00" and q_end == "07:00", "quiet hours were lost in the rebuild"
+    assert int(enabled) == 1, "enabled flag was lost in the rebuild"
+    # New NOT NULL columns the rebuild's INSERT omits for carried-over rows
+    # must come out correctly DEFAULTed, not NULL (the H2/H6 class of bug).
+    assert daily_send_time == "08:00", (
+        f"daily_send_time should default to '08:00' for a carried-over row, got {daily_send_time!r}"
+    )
+    assert interval_hours == 6, (
+        f"interval_hours should default to 6 for a carried-over row, got {interval_hours!r}"
+    )
+
+
 def test_split_sql_statements_ignores_semicolon_in_inline_comment():
     """Regression: an inline ``--`` comment containing ``;`` must NOT split the
     statement it trails. 0015's ``-- NULL = not yet used; set on consume`` did,

@@ -28,6 +28,19 @@ export class ApiError extends Error {
     return this.status === 401 || this.status === 403;
   }
 
+  /**
+   * A signed-in user whose email is not yet verified hit a verified-only route.
+   * Distinct from a genuine 401 (not signed in at all). The low-level fetch
+   * client throws this instead of navigating; a top-level handler decides the
+   * redirect. Matches both the structured `code` and the legacy bare `detail`.
+   */
+  get isEmailNotVerified() {
+    return (
+      this.status === 403 &&
+      (this.code === "email_not_verified" || this.detail === "email_not_verified")
+    );
+  }
+
   get isNotFound() {
     return this.status === 404;
   }

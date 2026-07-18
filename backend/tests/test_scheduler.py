@@ -157,6 +157,44 @@ def test_scheduler_respects_circuit_breaker_open():
     assert healthy.fetch_calls == 1  # dispatched
 
 
+def test_empty_result_does_not_open_breaker():
+    """S1 — a source that legitimately returns [] (niche board, keyword
+    mismatch, quiet day) must NOT be counted as a failure. Before the fix the
+    `not result` clause tripped the breaker OPEN after 5 quiet cycles and
+    stopped polling a perfectly healthy source."""
+    now = [1000.0]
+    registry = BreakerRegistry(failure_threshold=5, clock=lambda: now[0])
+    empty = _FakeSource("quiet_board", "ats", payload=[])
+    sched = TieredScheduler([empty], registry, clock=lambda: now[0])
+
+    # 8 quiet cycles — well past the 5-failure threshold.
+    for _ in range(8):
+        _run(sched.tick(force=True))
+
+    breaker = registry.get("quiet_board")
+    assert empty.fetch_calls == 8
+    assert breaker.state.value == "closed"
+    assert breaker._consecutive_failures == 0
+    assert breaker.can_proceed() is True
+
+
+def test_exception_still_opens_breaker():
+    """S1 guard — dropping the empty-list clause must not stop genuine
+    failures from tripping the breaker. A source raising every cycle still
+    opens OPEN after the failure threshold."""
+    now = [1000.0]
+    registry = BreakerRegistry(failure_threshold=5, clock=lambda: now[0])
+    broken = _FakeSource("broken", "ats", raise_exc=RuntimeError("boom"))
+    sched = TieredScheduler([broken], registry, clock=lambda: now[0])
+
+    for _ in range(5):
+        _run(sched.tick(force=True))
+
+    breaker = registry.get("broken")
+    assert breaker.state.value == "open"
+    assert breaker.can_proceed() is False
+
+
 def test_scheduler_honors_manual_source_filter():
     """CLI `--source` single-run path bypasses tier windows (run_once=True)."""
     now = [1000.0]
@@ -202,6 +240,23 @@ def test_slow_source_times_out_without_blocking_batch():
     assert isinstance(by_name["hang"], asyncio.TimeoutError), by_name["hang"]
     assert by_name["fast"] == fast._payload  # fast source result preserved
     assert len(by_name["fast"]) == 2
+
+
+def test_cancelled_error_propagates_not_treated_as_source_failure():
+    """N8 — asyncio.CancelledError must propagate out of tick(), not be
+    swallowed as a plain source failure. Before the fix, `_safe_fetch`'s
+    ``except BaseException`` caught CancelledError too, which would silently
+    eat real task/shutdown cancellation and record it as a breaker failure."""
+    src = _FakeSource("cancels", "ats", raise_exc=asyncio.CancelledError())
+    registry = BreakerRegistry()
+    sched = TieredScheduler([src], registry, clock=lambda: 1000.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        _run(sched.tick())
+
+    # Cancellation must NOT be recorded as a breaker failure.
+    breaker = registry.get("cancels")
+    assert breaker._consecutive_failures == 0
 
 
 # ---------------------------------------------------------------------------

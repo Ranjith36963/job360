@@ -24,6 +24,7 @@ from src.core.settings import DB_PATH
 from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.channels import crypto, dispatcher
+from src.services.channels.ssrf_guard import assert_public_http_url
 from src.utils.logger import get_audit_logger
 
 router = APIRouter(prefix="/settings/channels", tags=["channels"])
@@ -130,6 +131,16 @@ async def create_channel(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="webhook must be an http(s) URL",
             )
+        # SSRF guard: reject URLs whose host resolves to a private/internal IP
+        # (loopback, link-local incl. 169.254.169.254 metadata, RFC1918, …).
+        # Re-checked at send time in the dispatcher (DNS-rebinding defence).
+        try:
+            assert_public_http_url(cred)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         # Convert to Apprise JSON webhook scheme:
         # https://example.com/hook → jsons://example.com/hook
         # http://example.com/hook  → json://example.com/hook

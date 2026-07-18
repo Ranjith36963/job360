@@ -163,6 +163,10 @@ class TieredScheduler:
                 logger.warning("[%s] fetch timed out after %ss — treating as failure",
                                src.name, timeout)
                 return e
+            except asyncio.CancelledError:
+                # Propagate cancellation — it is not a source failure and must
+                # not be recorded against the breaker (N8).
+                raise
             except BaseException as e:  # noqa: BLE001 — we want circuit trips on any failure
                 logger.warning("[%s] fetch raised %s", src.name, type(e).__name__)
                 return e
@@ -172,7 +176,12 @@ class TieredScheduler:
         for src, result in zip(due, results):
             self._last_run[src.name] = now_val
             breaker = self._breakers.get(src.name)
-            fetch_failed = isinstance(result, BaseException) or result is None or not result
+            # S1: an empty list is NOT a breaker failure. A healthy source can
+            # legitimately return [] (niche board, keyword mismatch, quiet day).
+            # Only a genuine failure — exception, None, or timeout — trips the
+            # breaker. Counting [] as a failure opened the breaker after 5 quiet
+            # cycles and stopped polling a healthy source.
+            fetch_failed = isinstance(result, BaseException) or result is None
             if fetch_failed:
                 breaker.record_failure()
             else:

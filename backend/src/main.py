@@ -397,6 +397,43 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
         logger.warning("matcher stage failed (run continues): %s", e)
 
 
+async def _enqueue_notifications(conn, user_id: str, written, enqueue) -> int:
+    """SI1 — enqueue ``send_notification`` for feed rows above the user's
+    score_threshold, so a per-user search actually produces notifications.
+
+    ``written`` is a list of ``(job_id, score)``. Pre-filters on the enabled
+    ``notification_rules`` row's ``score_threshold`` (dispatch() still applies
+    the definitive score/quiet-hours/mode gate) so we don't flood the queue with
+    rows the dispatcher would skip. Accepts sync OR async enqueue hooks. Never
+    raises into the pipeline — a notification failure must not fail the run.
+    Returns the number enqueued.
+    """
+    try:
+        cur = await conn.execute(
+            "SELECT score_threshold FROM notification_rules WHERE user_id = ? AND enabled = 1",
+            (user_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return 0  # no enabled rule → nothing to notify
+        threshold = int(row[0]) if row[0] is not None else 0
+        enqueued = 0
+        for job_id, score in written:
+            if score >= threshold:
+                res = enqueue("send_notification", user_id, job_id, "instant")
+                if hasattr(res, "__await__"):
+                    await res
+                enqueued += 1
+        logger.info(
+            "SI1: enqueued %s notification(s) for user %s (threshold %s)",
+            enqueued, user_id, threshold,
+        )
+        return enqueued
+    except Exception as e:  # notifications must never break the run
+        logger.warning("notification enqueue failed for user %s: %s", user_id, e)
+        return 0
+
+
 async def run_search(
     db_path: str | None = None,
     source_filter: str | None = None,
@@ -404,7 +441,18 @@ async def run_search(
     log_level: str | None = None,
     no_notify: bool = False,
     user_id: str | None = None,
+    enqueue=None,
 ) -> dict:
+    # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
+    # path historically wrote user_feed but NEVER triggered a notification, so no
+    # user ever got a job-match email/Slack/Discord (the whole score_threshold
+    # gate was dead). When a caller (the ARQ worker / an API path with Redis)
+    # passes an ``enqueue(function_name, *args)`` callable, run_search enqueues
+    # ``send_notification`` for above-threshold feed rows after writing them.
+    # Defaults to None = no-op, so the CLI / any caller without a worker+Redis is
+    # byte-identical to before. dispatch() still applies the fine-grained
+    # score/quiet-hours/mode gating; run_search only pre-filters on the rule's
+    # score_threshold to avoid flooding the queue with rows dispatch() would skip.
     setup_logging(log_level)
     # Step-1 S1 — set the per-run correlation id BEFORE the first log line so
     # every subsequent record carries it via the contextvar formatter.
@@ -753,26 +801,35 @@ async def run_search(
                 feed = FeedService(db._conn)
                 feed_written = 0
                 feed_profile_version = current_profile_version_id(user_id)
+                _written_for_notify: list[tuple[int, int]] = []  # (job_id, score)
                 for job in unique_jobs:
                     try:
-                        cur = await db._conn.execute(
-                            "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
-                            job.normalized_key(),
-                        )
-                        r = await cur.fetchone()
-                        if r is None:
+                        # N7 — reuse the id already resolved in the scoring loop
+                        # above (job.id set from the same `SELECT id FROM jobs`);
+                        # re-querying it here doubled the point-queries per run.
+                        if job.id is None:
                             continue
+                        _score = int(job.match_score or 0)
                         await feed.upsert_feed_row(
                             user_id=user_id,
-                            job_id=r[0],
-                            score=int(job.match_score or 0),
+                            job_id=job.id,
+                            score=_score,
                             bucket=_recency_bucket(job.date_found),
                             profile_version=feed_profile_version,
                         )
                         feed_written += 1
+                        _written_for_notify.append((job.id, _score))
                     except Exception as e:  # never let a feed write fail the whole run
                         logger.warning("user_feed write failed for %r: %s", job.title, e)
                 logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)
+
+                # SI1 — trigger notifications for the rows just written. Only when
+                # a caller supplied an ``enqueue`` hook (worker/Redis present) and
+                # notifications aren't suppressed.
+                if enqueue is not None and not no_notify and _written_for_notify:
+                    await _enqueue_notifications(
+                        db._conn, user_id, _written_for_notify, enqueue
+                    )
 
             # Funnel -> judge (LLM matcher). Per-user, post-feed-write so the
             # verdict UPDATE always finds its user_feed row. Default OFF.

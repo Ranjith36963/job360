@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.models import Job
+from src.repositories import pg
 from src.repositories.database import JobDatabase
 
 
@@ -311,15 +312,19 @@ def test_notification_rules_single_per_user_schema(db):
 def test_notification_rules_unique_user(db):
     """A second insert for the same user must conflict (UNIQUE(user_id))."""
 
-    async def _insert_twice():
+    async def _insert_first():
         await db._conn.execute(
             "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','instant')"
         )
         await db._conn.commit()
+
+    async def _insert_duplicate():
         await db._conn.execute(
             "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','daily')"
         )
         await db._conn.commit()
 
-    with pytest.raises(Exception):
-        asyncio.run(_insert_twice())
+    asyncio.run(_insert_first())
+
+    with pytest.raises(pg.IntegrityError):
+        asyncio.run(_insert_duplicate())

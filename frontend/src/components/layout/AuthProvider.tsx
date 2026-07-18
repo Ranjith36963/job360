@@ -8,9 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import posthog from "posthog-js";
-import { me, logout as apiLogout } from "@/lib/api";
+import { me, logout as apiLogout, onEmailNotVerified } from "@/lib/api";
 import type { User } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -31,9 +31,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchingRef = useRef(false);
+
+  // Keep the latest pathname readable from the (stable) notifier callback
+  // without re-subscribing on every navigation.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
 
   const refresh = useCallback(async () => {
     if (fetchingRef.current) return;
@@ -62,6 +68,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
   }, [refresh]);
+
+  // Top-level decision point for email-not-verified auth failures (M16). The
+  // fetch client no longer navigates itself; it notifies here. This is the ONE
+  // place that redirects an unverified user to the verification page — unless
+  // they are already on it.
+  useEffect(() => {
+    return onEmailNotVerified(() => {
+      if (!pathnameRef.current?.startsWith("/verify-email")) {
+        router.push("/verify-email");
+      }
+    });
+  }, [router]);
 
   const logout = useCallback(async () => {
     await apiLogout();

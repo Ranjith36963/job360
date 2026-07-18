@@ -136,6 +136,24 @@ async def register(
     request: Request,
     background_tasks: BackgroundTasks,
 ) -> UserResponse:
+    # M3 — per-IP registration throttle. Without this, register had ZERO rate
+    # limit, so a single host could mass-create accounts. Derive the client IP
+    # the SAME way login does: request.client.host, trusting the first
+    # X-Forwarded-For hop ONLY behind the JOB360_TRUST_PROXY gate (else XFF is
+    # spoofable). Do NOT leak whether the email exists — this fires before any
+    # DB lookup.
+    _ip = request.client.host if request.client else "unknown"
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if _xff:
+            _ip = _xff
+    if not auth_rate_limit.check_and_record(
+        f"register:{_ip}", max_in_window=10, window_seconds=3600
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts, please try again later.",
+        )
     user_id = uuid.uuid4().hex
     pw_hash = hash_password(req.password)
     async with open_db(str(DB_PATH)) as db:
@@ -443,7 +461,20 @@ async def password_reset_request(
     client_ip = request.client.host if request.client else "unknown"
     ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
     key = f"password-reset:{ip_hash}"
-    if not auth_rate_limit.check_and_record(key, max_in_window=1, window_seconds=60):
+    # Two dimensions, both must pass. The IP throttle alone lets an attacker who
+    # rotates IPs email-bomb ONE address (each fresh IP is a fresh bucket). The
+    # per-email throttle caps total reset emails to a single address regardless
+    # of source IP. Evaluate both eagerly so both counters record this attempt.
+    email_hash = hashlib.sha256(str(req.email).lower().encode("utf-8")).hexdigest()[:16]
+    email_key = f"password-reset-email:{email_hash}"
+    ip_ok = auth_rate_limit.check_and_record(key, max_in_window=1, window_seconds=60)
+    email_ok = auth_rate_limit.check_and_record(
+        email_key, max_in_window=3, window_seconds=3600
+    )
+    # If EITHER limit is exceeded, behave exactly as the existing over-limit
+    # path: return 204 silently (no token, no email) so the throttle stays
+    # indistinguishable from an unknown-email response (no enumeration).
+    if not (ip_ok and email_ok):
         logger.info("password-reset rate-limited ip_hash=%s", ip_hash)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 

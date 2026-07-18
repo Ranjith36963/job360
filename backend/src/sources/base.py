@@ -19,6 +19,11 @@ logger = logging.getLogger("job360.sources")
 # HTTP status codes that indicate a bad request format — retrying won't help
 _NO_RETRY_STATUSES = (401, 403, 404, 422)
 
+# Auth-failure statuses within _NO_RETRY_STATUSES — an expired/bad API key is an
+# operational problem (S9), not a routine "not found"/"unprocessable" response,
+# so these get logged louder than 404/422.
+_AUTH_FAIL_STATUSES = (401, 403)
+
 
 def _sanitize_xml(text: str) -> str:
     """Fix common XML issues: unescaped &, invalid chars."""
@@ -127,7 +132,15 @@ class BaseJobSource(ABC):
 
                 async with self._session.request(method, url, **kwargs) as resp:
                     if resp.status in _NO_RETRY_STATUSES:
-                        logger.debug("[%s] HTTP %s from %s", self.name, resp.status, url)
+                        # Never log the request URL — keyed sources embed
+                        # app_key/api_key in the query string, and these lines go
+                        # to on-disk logs (CodeQL: clear-text-logging). self.name
+                        # already identifies which source failed.
+                        if resp.status in _AUTH_FAIL_STATUSES:
+                            logger.warning("[%s] HTTP %s — likely an expired/invalid API key",
+                                           self.name, resp.status)
+                        else:
+                            logger.debug("[%s] HTTP %s (no-retry status)", self.name, resp.status)
                         return None
                     if resp.status == 429:
                         retry_after = resp.headers.get("Retry-After")
@@ -144,7 +157,7 @@ class BaseJobSource(ABC):
                             continue
                         return None
                     if resp.status >= 400:
-                        logger.warning("[%s] HTTP %s from %s", self.name, resp.status, url)
+                        logger.warning("[%s] HTTP %s", self.name, resp.status)  # no URL — may embed api_key
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(RETRY_BACKOFF[attempt])
                             continue
@@ -230,7 +243,7 @@ class BaseJobSource(ABC):
                                  self.name, url)
                     return entry.body
                 if resp.status >= 400:
-                    logger.warning("[%s] HTTP %s from %s", self.name, resp.status, url)
+                    logger.warning("[%s] HTTP %s", self.name, resp.status)  # no URL — may embed api_key
                     return None
                 body = (
                     await resp.text() if as_text

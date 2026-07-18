@@ -26,9 +26,11 @@ from src.services.tailoring.generator import EmptyCVError
 from src.services.tailoring.patterns import derive_patterns, summarize_patterns
 from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, get_logger
 
 router = APIRouter(tags=["tailor"])
+
+logger = get_logger("api.tailor")
 
 
 # ── Response / request models ─────────────────────────────────────────────────
@@ -157,8 +159,13 @@ async def generate(
             )
         except EmptyCVError:
             raise HTTPException(status_code=400, detail="No CV text to reshape.")
-        except Exception as exc:  # noqa: BLE001 — surface LLM failure clearly, don't 500 silently
-            raise HTTPException(status_code=503, detail=f"Generation failed: {exc}")
+        except Exception:  # noqa: BLE001 — surface LLM failure clearly, don't 500 silently
+            # No user/job interpolation in the message — logger.exception already
+            # captures the full traceback; keeping user-controlled values out of
+            # the log line avoids the CodeQL log-injection flag (they're a UUID +
+            # int, so harmless, but the scanner can't prove that).
+            logger.exception("tailor generation failed")
+            raise HTTPException(status_code=503, detail="Generation failed, please try again.")
         await db.upsert_tailored_doc(
             user.id, job_id, kind, doc.document,
             model=doc.model, flagged_terms=doc.flagged_terms,

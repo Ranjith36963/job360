@@ -91,6 +91,23 @@ async def test_jobs_list_limit_within_bound_still_works(authenticated_async_cont
 
 
 @pytest.mark.asyncio
+async def test_jobs_list_negative_hours_is_rejected(authenticated_async_context):
+    """N4 — a negative `hours` must be rejected with 422, not silently produce a
+    future cutoff timestamp."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?hours=-1")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_jobs_list_hours_zero_still_works(authenticated_async_context):
+    """Positive control: `hours=0` (the lower allowed bound) still 200s."""
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?hours=0")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_actions_counts_empty(authenticated_async_context):
     async with authenticated_async_context() as client:
         resp = await client.get("/api/actions/counts")

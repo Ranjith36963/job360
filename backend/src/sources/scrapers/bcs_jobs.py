@@ -13,6 +13,13 @@ _JOB_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# S4: structural health check. A real BCS jobs-board page is a substantial
+# listing document; if it comes back non-trivially large but the anchor
+# regex above matches ZERO raw `<a href="...job...">` candidates (before any
+# nav-link filtering), the page markup changed and the parser is silently
+# blind rather than looking at a genuine zero-results day.
+_MIN_STRUCTURAL_HTML_LEN = 2000
+
 
 class BCSJobsSource(BaseJobSource):
     """BCS (Chartered Institute for IT) Job Board — UK IT professional jobs."""
@@ -46,8 +53,10 @@ class BCSJobsSource(BaseJobSource):
             jobs = []
             now = datetime.now(timezone.utc).isoformat()
             seen_urls = set()
+            raw_matches = 0
 
             for match in _JOB_LINK_RE.finditer(html):
+                raw_matches += 1
                 path, title = match.group(1), match.group(2).strip()
 
                 # Skip navigation links
@@ -77,6 +86,13 @@ class BCSJobsSource(BaseJobSource):
                     date_confidence="low",
                     date_posted_raw=None,
                 ))
+
+            if raw_matches == 0 and len(html) > _MIN_STRUCTURAL_HTML_LEN:
+                logger.error(
+                    "[bcs_jobs] STRUCTURE CHANGED: expected job-link anchor pattern "
+                    "not found in a %d-byte response — parser may be broken",
+                    len(html),
+                )
 
             return jobs
         except Exception as e:

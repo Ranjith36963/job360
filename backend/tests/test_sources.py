@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 
 import aiohttp
@@ -135,6 +136,29 @@ def test_reed_skips_without_key():
     _run(_test())
 
 
+def test_reed_caps_title_fanout():
+    """S2 regression: Reed used to loop job_titles[:12] x 3 locations (36
+    requests, >72s of limiter sleeps). A 20-title profile must not exceed
+    the capped 8 distinct title queries."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"), payload=REED_PAYLOAD, repeat=True)
+                titles = [f"Job Title {i}" for i in range(20)]
+                sc = SearchConfig(job_titles=titles, relevance_keywords=["python"])
+                source = ReedSource(session, api_key="test-key", search_config=sc)
+                await source.fetch_jobs()
+                queried_titles = {
+                    call.kwargs.get("params", {}).get("keywords")
+                    for calls in m.requests.values() for call in calls
+                }
+                assert len(queried_titles) <= 8, f"expected <=8 distinct titles, got {queried_titles}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 # DfE "Find an apprenticeship" Display Advert API v2 (keyed). Real contract:
 # GET https://api.apprenticeships.education.gov.uk/vacancies/vacancy
 # headers Ocp-Apim-Subscription-Key + X-Version: 2; response {"vacancies": [...]}.
@@ -252,6 +276,29 @@ def test_adzuna_parses_response():
                 assert len(jobs) >= 1
                 assert jobs[0].title == "ML Engineer"
                 assert jobs[0].source == "adzuna"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_adzuna_caps_title_fanout():
+    """S2 regression: Adzuna used to loop the ENTIRE unbounded job_titles
+    list with no slice. A 20-title profile must not exceed the capped
+    8 distinct title queries (matches jsearch[:4]/careerjet[:6]/jooble[:8])."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.adzuna\.com/v1/api/jobs/gb/search/1.*"), payload=ADZUNA_PAYLOAD, repeat=True)
+                titles = [f"Job Title {i}" for i in range(20)]
+                sc = SearchConfig(job_titles=titles, relevance_keywords=["python"])
+                source = AdzunaSource(session, app_id="test-id", app_key="test-key", search_config=sc)
+                await source.fetch_jobs()
+                queried_titles = {
+                    call.kwargs.get("params", {}).get("what")
+                    for calls in m.requests.values() for call in calls
+                }
+                assert len(queried_titles) <= 8, f"expected <=8 distinct titles, got {queried_titles}"
         finally:
             await session.close()
     _run(_test())
@@ -585,6 +632,59 @@ def test_linkedin_skips_without_queries():
             source = LinkedInSource(session)
             jobs = await source.fetch_jobs()
             assert jobs == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_structure_changed_logs_error(caplog):
+    # S4: a big, real-looking response with the base-search-card__title
+    # anchor missing (DOM layout changed) must log a distinct, greppable
+    # STRUCTURE CHANGED error — not just the normal "found 0 relevant jobs".
+    html = "<div>" + ("<p>LinkedIn redesigned this page.</p>" * 30) + "</div>"
+    assert len(html) > 500
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
+                      body=html, content_type="text/html", repeat=True)
+                sc = _make_search_config(["AI engineer UK"])
+                source = LinkedInSource(session, search_config=sc)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.linkedin"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_normal_page_logs_no_structure_warning(caplog):
+    # S4 counterpart: a normal, well-formed page must NOT trigger the
+    # structure-changed alarm.
+    html = """
+    <div>
+        <h3 class="base-search-card__title">AI Engineer</h3>
+        <h4 class="base-search-card__subtitle">DeepTech Ltd</h4>
+        <span class="job-search-card__location">London, UK</span>
+        <a href="https://uk.linkedin.com/jobs/view/1234567890">View</a>
+    </div>
+    """
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
+                      body=html, content_type="text/html", repeat=True)
+                sc = _make_search_config(["AI engineer UK"])
+                source = LinkedInSource(session, search_config=sc)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.linkedin"):
+                    jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert not any("STRUCTURE CHANGED" in r.message for r in caplog.records)
         finally:
             await session.close()
     _run(_test())
@@ -1713,6 +1813,47 @@ def test_climatebase_parses_html():
     _run(_test())
 
 
+def test_climatebase_structure_changed_logs_error(caplog):
+    # S4: a big, real-looking response missing the __NEXT_DATA__ SSR island
+    # (Climatebase changed its rendering) must log a distinct STRUCTURE
+    # CHANGED error, not just silently fall back to 0 jobs.
+    html = "<html><body>" + ("<p>Climatebase redesigned this page.</p>" * 30) + "</body></html>"
+    assert len(html) > 500
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://climatebase\.org/jobs.*"),
+                      body=html, content_type="text/html", repeat=True)
+                source = ClimatebaseSource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.climatebase"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_climatebase_normal_page_logs_no_structure_warning(caplog):
+    # S4 counterpart: a normal __NEXT_DATA__ page must NOT trigger the alarm.
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://climatebase\.org/jobs.*"),
+                      body=CLIMATEBASE_HTML, content_type="text/html", repeat=True)
+                source = ClimatebaseSource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.climatebase"):
+                    jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert not any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
 # ---- 80,000 Hours ----
 
 EIGHTYKHOURS_ALGOLIA_RESPONSE = {
@@ -1760,6 +1901,47 @@ def test_eightykhours_skips_without_queries():
     _run(_test())
 
 
+def test_eightykhours_structure_changed_logs_error(caplog):
+    # S4: a real Algolia response always carries a "hits" key (empty list on
+    # zero matches). If that key is gone, the Algolia index/response schema
+    # changed, not just a real zero-results query — must be logged loudly.
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"),
+                       payload={"nbHits": 0}, repeat=True)
+                sc = _make_search_config(["AI safety researcher"])
+                source = EightyKHoursSource(session, search_config=sc)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.eightykhours"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_eightykhours_normal_response_logs_no_structure_warning(caplog):
+    # S4 counterpart: a normal Algolia response (with "hits") must NOT
+    # trigger the alarm, even on a genuine zero-results query.
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(re.compile(r"https://w6km1udib3-dsn\.algolia\.net/.*"),
+                       payload={"hits": [], "nbHits": 0}, repeat=True)
+                sc = _make_search_config(["AI safety researcher"])
+                source = EightyKHoursSource(session, search_config=sc)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.eightykhours"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert not any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
 # ---- BCS Jobs ----
 
 BCS_HTML = """<html><body>
@@ -1785,6 +1967,60 @@ def test_bcs_jobs_parses_html():
                 assert isinstance(jobs, list)
                 if jobs:
                     assert jobs[0].source == "bcs_jobs"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_bcs_jobs_structure_changed_logs_error(caplog):
+    # S4: a big, real-looking board page with ZERO job|vacanc|career|
+    # position|opportunity anchors (BCS changed its markup) must log a
+    # distinct STRUCTURE CHANGED error, not just the normal "found 0" log.
+    html = (
+        "<html><body>"
+        + ("<a href=\"/about\">About us</a><p>filler content here</p>" * 60)
+        + "</body></html>"
+    )
+    assert len(html) > 2000
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.bcs\.org/jobs.*"),
+                      body=html, content_type="text/html", repeat=True)
+                source = BCSJobsSource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.bcs_jobs"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_bcs_jobs_normal_page_logs_no_structure_warning(caplog):
+    # S4 counterpart: a page with real job anchors must NOT trigger the alarm,
+    # even padded past the structural-check size threshold.
+    html = (
+        "<html><body>"
+        + ("<p>filler content here</p>" * 90)
+        + BCS_HTML
+        + "</body></html>"
+    )
+    assert len(html) > 2000
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.bcs\.org/jobs.*"),
+                      body=html, content_type="text/html", repeat=True)
+                source = BCSJobsSource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.bcs_jobs"):
+                    jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert not any("STRUCTURE CHANGED" in r.message for r in caplog.records)
         finally:
             await session.close()
     _run(_test())
@@ -1884,6 +2120,60 @@ def test_aijobs_ai_parses_html():
                 assert isinstance(jobs, list)
                 if jobs:
                     assert all(j.source == "aijobs_ai" for j in jobs)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_aijobs_ai_structure_changed_logs_error(caplog):
+    # S4: a big, real-looking page with ZERO /job/ or /jobs/ link anchors
+    # (site changed its markup) must log a distinct STRUCTURE CHANGED error,
+    # not just the normal "found 0" log.
+    html = (
+        "<html><body>"
+        + ("<a href=\"/about\">About us</a><p>filler content here</p>" * 60)
+        + "</body></html>"
+    )
+    assert len(html) > 2000
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.ai/.*"),
+                      body=html, content_type="text/html", repeat=True)
+                source = AIJobsAISource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.aijobs_ai"):
+                    jobs = await source.fetch_jobs()
+                assert jobs == []
+                assert any("STRUCTURE CHANGED" in r.message for r in caplog.records)
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_aijobs_ai_normal_page_logs_no_structure_warning(caplog):
+    # S4 counterpart: a page with real job link anchors must NOT trigger the
+    # alarm, even padded past the structural-check size threshold.
+    html = (
+        "<html><body>"
+        + ("<p>filler content here</p>" * 90)
+        + AIJOBS_AI_HTML
+        + "</body></html>"
+    )
+    assert len(html) > 2000
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.ai/.*"),
+                      body=html, content_type="text/html", repeat=True)
+                source = AIJobsAISource(session)
+                with caplog.at_level(logging.ERROR, logger="job360.sources.aijobs_ai"):
+                    jobs = await source.fetch_jobs()
+                assert isinstance(jobs, list)
+                assert not any("STRUCTURE CHANGED" in r.message for r in caplog.records)
         finally:
             await session.close()
     _run(_test())
