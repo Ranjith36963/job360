@@ -13,6 +13,11 @@ on:
     - cron: "0 */6 * * *" # every 6h; tune to taste (authed run makes a real LLM call)
   workflow_dispatch: {}
 
+# Least-privilege token (CodeQL actions/missing-workflow-permissions):
+# these jobs only check out code and run tests/uploads — no repo writes.
+permissions:
+  contents: read
+
 jobs:
   live-smoke:
     runs-on: ubuntu-latest

@@ -12,6 +12,11 @@ on:
     - cron: "0 3 * * *" # 03:00 UTC nightly
   workflow_dispatch: {}
 
+# Least-privilege token (CodeQL actions/missing-workflow-permissions):
+# these jobs only check out code and run tests/uploads — no repo writes.
+permissions:
+  contents: read
+
 jobs:
   live-e2e:
     runs-on: ubuntu-latest
