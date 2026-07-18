@@ -48,6 +48,46 @@ def get_request_id() -> str | None:
 from src.core.settings import LOGS_DIR  # noqa: E402  — after the ContextVar so importers see helpers
 
 
+def _scrub(value: object) -> object:
+    """Escape CR/LF (and other control chars) in a value destined for a log line.
+
+    Non-strings pass through untouched so ``%d``/``%s`` formatting still works.
+    """
+    if not isinstance(value, str):
+        return value
+    if "\r" not in value and "\n" not in value:
+        return value
+    return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
+class CRLFScrubFilter(logging.Filter):
+    """Neutralise log-injection (CodeQL py/log-injection) for EVERY call site.
+
+    User-controlled values — emails, usernames, GitHub handles, channel
+    credentials — reach ``logger.info("... %s", value)`` in ~30 places. A value
+    containing a newline lets an attacker forge whole log lines ("…login
+    status=success…"), poisoning the audit trail an operator reads during an
+    incident.
+
+    Fixing 30 call sites individually is unmaintainable and the 31st would slip
+    through, so the escaping happens once here: attached to the ``job360``
+    logger, this filter escapes CR/LF in the message and in every ``%``-style
+    argument before any handler formats the record. The JSON handler was already
+    safe (json.dumps escapes newlines); this closes the plain-text console/file
+    handlers, which are what operators actually read.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 — short
+        if isinstance(record.msg, str):
+            record.msg = _scrub(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = {k: _scrub(v) for k, v in record.args.items()}
+            else:
+                record.args = tuple(_scrub(a) for a in record.args)
+        return True  # never drop a record — this filter only sanitises
+
+
 class _RunUuidFormatter(logging.Formatter):
     """Formatter that appends ``[run_uuid:...]`` when the contextvar is set."""
 
@@ -117,6 +157,13 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
     )
     json_handler.setFormatter(JSONFormatter())
     logger.addHandler(json_handler)
+    # Log-injection guard. MUST be attached to the HANDLERS, not to the logger:
+    # a logger-level filter only sees records logged directly on that logger,
+    # while every finding lives on CHILD loggers (job360.api.auth, …) whose
+    # records merely propagate to these handlers. Handler filters see them all.
+    _scrubber = CRLFScrubFilter()
+    for _h in (console, file_handler, json_handler):
+        _h.addFilter(_scrubber)
     return logger
 
 
@@ -145,6 +192,11 @@ def setup_audit_logger() -> logging.Logger:
         LOGS_DIR / "audit.log", maxBytes=5_000_000, backupCount=5
     )
     handler.setFormatter(JSONFormatter())
+    # The audit trail is the MOST injection-sensitive stream — it records login
+    # attempts with attacker-supplied emails, and it is what an operator reads
+    # during an incident. propagate=False means it never reaches the main
+    # handlers' scrubber, so it needs its own.
+    handler.addFilter(CRLFScrubFilter())
     audit.addHandler(handler)
     # docs/fable/05 C8 — tee the same records into the audit_log DB table so
     # audit history survives file rotation and is queryable with SQL. Lazy
