@@ -190,6 +190,27 @@ jobs:
           gh pr merge "$branch" --squash --delete-branch
           echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
 
+          # Close the drift issue NOW, in this run. Previously the issue was
+          # only closed by the NEXT scheduled run's drift==0 branch, so a
+          # fully-fixed issue sat open ~22h looking unresolved (observed:
+          # issue #79 fixed by PR #80 two minutes later, still open next day).
+          # Re-verify against the merged result before closing — if the fixer
+          # only fixed *some* rows, the issue must stay open.
+          git fetch origin main --quiet
+          git checkout --quiet origin/main -- . 2>/dev/null || true
+          if python scripts/doc_sync_check.py > verify.md 2>&1; then
+            title="Doc drift detected (Loop 3 doc-sync)"
+            num=$(gh issue list --state open --json number,title \
+                   -q ".[] | select(.title == \"$title\") | .number" | head -1)
+            if [ -n "$num" ]; then
+              gh issue close "$num" --comment "Auto-fixed and verified clean by run ${{ github.run_id }}. $(head -1 verify.md)"
+              echo "closed drift issue #$num" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "drift REMAINS after the fix — leaving the issue open" >> "$GITHUB_STEP_SUMMARY"
+            cat verify.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Note when fixer is not configured
         if: steps.token.outputs.have != 'true'
         run: echo "CLAUDE_CODE_OAUTH_TOKEN secret not set — drift issue filed, auto-fix skipped." >> "$GITHUB_STEP_SUMMARY"
