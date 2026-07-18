@@ -137,8 +137,17 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
         *) [ -f "backend/tests/test_${base}.py" ] && TARGETS="$TARGETS tests/test_${base}.py" ;;
       esac
     done
-    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
-    LINT_FILES="$(echo "$CHANGED" | grep '^backend/.*\.py$' | sed 's|^backend/||' | while read -r p; do [ -f "backend/$p" ] && echo "$p"; done | tr '\n' ' ')"
+    # `|| true` is load-bearing: grep exits 1 on no match, and under `set -o
+    # pipefail` that killed the whole gate — silently, exit 1 with NO output —
+    # whenever a backend change mapped to zero test files (e.g. a pyproject.toml
+    # or Dockerfile-only change). The conservative full-suite fallback below was
+    # therefore unreachable in exactly the case it exists for, making any
+    # non-.py backend change impossible to commit. Found via H7 (bumping
+    # aiohttp in backend/pyproject.toml).
+    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)"
+    # Same `|| true` requirement as TARGETS above — no changed .py files means
+    # grep exits 1, which under `set -o pipefail` killed the gate outright.
+    LINT_FILES="$(echo "$CHANGED" | grep '^backend/.*\.py$' | sed 's|^backend/||' | while read -r p; do [ -f "backend/$p" ] && echo "$p"; done | tr '\n' ' ' || true)"
     if [ -n "${TARGETS// /}" ]; then
       echo "[gate] backend targeted tests: $TARGETS"
       (cd backend && python -m pytest -q -p no:randomly $TARGETS 2>&1 | tee -a "$GATE_LOG")
