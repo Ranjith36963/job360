@@ -27,6 +27,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege token (CodeQL actions/missing-workflow-permissions):
+# these jobs only check out code and run tests/uploads — no repo writes.
+permissions:
+  contents: read
+
 jobs:
   offline-suite:
     runs-on: ubuntu-latest
