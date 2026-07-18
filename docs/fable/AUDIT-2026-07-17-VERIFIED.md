@@ -772,3 +772,22 @@ rule-#9 suites (test_scorer + test_profile + test_scoring_dimensions + test_pref
 | **M8** | OPEN_BUG (negative dims persisted) | `services/skill_matcher.py:557-560` — the stored/reported per-dim scores are clamped to [0,100]; `total`/`match_score` still use the RAW points (rule #27 composite clamp untouched), so a negative seniority PENALTY still lands in the score but the dim COLUMN feeding the radar is never negative. Test: `test_jobscorer_clamps_stored_dims_to_non_negative`. |
 | **N3** | OPEN_BUG (job-detail full-table enrichment scan) | `api/routes/jobs.py:625` — replaced `_build_enrichment_lookup(db._conn)` (deserialised the ENTIRE `job_enrichment` table on every authed GET /jobs/{id}) with the single-row `load_enrichment(db._conn, row["id"])` wrapped in a 1-entry lookup. Same `JobEnrichment` type/columns, identical scorer wiring. |
 | **N7** | OPEN_BUG (N+1 in hot paths) | `main.py:756` feed-write loop reuses the already-resolved `job.id` instead of re-running `SELECT id FROM jobs` per job (the "doubles point-queries per run" case). `workers/tasks.py:553` `send_bundle` batches job details with one `WHERE id IN (…)` instead of one SELECT per job_id (runs every 5 min). Remaining minor: the per-rule `SELECT timezone` in `notification_tick` could be a JOIN — left as low-value. |
+
+---
+
+## 🟡 Batch 6 — SI1 notification pipeline CODE-WIRED (2026-07-18, owner-authorized code half)
+
+**SI1** was the highest-impact finding: the per-user search wrote `user_feed` but NEVER
+triggered a notification, so no user ever received a job-match alert and the whole
+`score_threshold` gate was dead code.
+
+**Code half — DONE (this batch):**
+- `main.run_search()` gains an optional `enqueue` hook (default None = no-op → CLI byte-identical).
+- New `main._enqueue_notifications(conn, user_id, written, enqueue)` — after the feed write, enqueues `send_notification` for rows clearing the user's enabled `notification_rules.score_threshold` (dispatch() still does the definitive score/quiet-hours/mode gate). Accepts sync OR async enqueue; never raises into the pipeline.
+- Tests: `test_si1_notification_wiring.py` (4) — above-threshold-only, no-rule no-op, disabled-rule no-op, async-enqueue.
+- Activation point documented at `api/routes/search.py:119`.
+
+**Deploy half — STILL YOURS (as agreed):** it stays INERT until you (1) run a Railway
+**worker service** (`arq src.workers.settings.WorkerSettings`) + **Redis**, (2) have SMTP/
+channel creds, and (3) flip the API call to `run_search(..., no_notify=False,
+enqueue=<redis.enqueue_job>)`. The code is ready; only the deploy-side wiring is missing.

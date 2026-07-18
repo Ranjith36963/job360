@@ -116,6 +116,15 @@ async def start_search(
             _runs[run_id]["progress"] = "Fetching from sources..."
             # Pass the logged-in user so the pipeline scores against THEIR
             # profile, not the default tenant's (E2E_TEST_REPORT #1).
+            #
+            # SI1 activation (OWNER DEPLOY STEP): notifications are wired in
+            # main.run_search via its ``enqueue`` hook + _enqueue_notifications,
+            # but they are INERT here on purpose — this HTTP path passes
+            # no_notify=True and no enqueue, so nothing fires without a worker.
+            # To turn on per-search notifications once a Railway worker + Redis
+            # exist: build an ARQ enqueue (e.g. redis.enqueue_job) and call
+            # run_search(..., no_notify=False, enqueue=<enqueue_job>). The code
+            # is ready; only the deploy-side Redis/worker wiring is missing.
             result = await run_search(source_filter=source, no_notify=True, user_id=user.id)
             _runs[run_id].update(status="completed", progress="Done", result=result)
             get_audit_logger().info(
