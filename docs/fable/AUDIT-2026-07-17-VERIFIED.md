@@ -791,3 +791,30 @@ triggered a notification, so no user ever received a job-match alert and the who
 **worker service** (`arq src.workers.settings.WorkerSettings`) + **Redis**, (2) have SMTP/
 channel creds, and (3) flip the API call to `run_search(..., no_notify=False,
 enqueue=<redis.enqueue_job>)`. The code is ready; only the deploy-side wiring is missing.
+
+---
+
+## 🏁 FINAL — everything owner-authorized is DONE (2026-07-18)
+
+**Confirmed-fixed: 50 → 77** (+27), plus SI1 code-wired (deploy half is owner's).
+7 gated commits on PR #78, each CI-verified against the full Linux suite.
+
+| Batch | Findings closed |
+|---|---|
+| 0 | M12, N4, N5, N8, N9, S9, T10, rule-count |
+| 1 | M1, M3, LOCKOUT, M9 |
+| 2 | S1, S2, S4 |
+| 3 | N6, M7, M16, M17 |
+| 4 | T4, T6-T9, T12, T5 |
+| 5 (Pillar-2, authorized) | SI5, M8, N3, N7 |
+| 6 (authorized) | SI1 (code half) |
+
+### Now genuinely YOURS — nothing more I can do without you
+**Infrastructure (deploy/config):** M10 (compose password + secrets), H6 (release-step
+migrations), H7 (blocking CI scanners), M4 (worker healthcheck), L6 (standalone image),
+SI1-deploy (worker + Redis + SMTP + flip the API call).
+**Business/legal:** scraping sources, privacy/terms, subprocessors, MFA, breach plan,
+single-region backups.
+**Ops env (Railway):** APP_ENV/JOB360_ENV (cookie Secure), RATE_LIMIT_REDIS=true + REDIS_URL.
+**Accepted-by-design:** S5, S8, V2, mypy grandfather, the 4 dead score columns (PR-2
+owner-declined), M2 register-409.
