@@ -92,6 +92,13 @@ def parse(output: str) -> Dict[Signature, int]:
         if not m:
             continue  # notes, summaries, config warnings
         path = m.group("file").replace("\\", "/").strip()
+        # Only OUR source. mypy also reports errors inside third-party stubs,
+        # which depend on the machine, not on this repo: CI hit
+        #   numpy/__init__.pyi: Type statement is only supported in Python 3.12+
+        # from site-packages. Those are unfixable here and differ per
+        # environment, so a baseline containing them could never match twice.
+        if "site-packages" in path or "hostedtoolcache" in path or path.startswith("/"):
+            continue
         counts[(path, m.group("code"), m.group("msg"))] += 1
     return counts
 

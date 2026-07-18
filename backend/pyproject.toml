@@ -30,6 +30,20 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
     "httpx>=0.27.0",
+    # UNDECLARED UNTIL NOW — a real production bug, caught by the mypy ratchet's
+    # first CI run ("Cannot find implementation or library stub for module named
+    # 'openai'", llm_provider.py). OpenAI is the documented PRIMARY CV-parsing
+    # provider (CLAUDE.md; default gpt-4o-mini) and llm_provider.py:297 does
+    # `from openai import AsyncOpenAI` — but no install path ever installed it:
+    # backend/Dockerfile:20 runs `pip install ".[semantic]" arq`, Dockerfile.worker
+    # runs `pip install .`, and it was in neither pyproject nor a requirements.txt.
+    # In production the import raised ImportError, which llm_provider.py:154's
+    # `except Exception` swallowed as "provider failed, try the next one" — so
+    # OpenAI silently NEVER ran and every parse quietly used a free-tier fallback.
+    # NOTE: declaring it means OpenAI now actually runs when OPENAI_API_KEY is
+    # set — i.e. real paid usage begins. That is the documented intent; unset the
+    # key to keep using the free tiers.
+    "openai>=1.0.0",
     "google-generativeai>=0.8.0",
     "groq>=0.11.0",
     "cerebras-cloud-sdk>=1.0.0",
