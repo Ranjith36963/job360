@@ -1,5 +1,5 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-07-17 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
 
 ## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
 
