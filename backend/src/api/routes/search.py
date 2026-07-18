@@ -9,6 +9,7 @@ hiding so run_id enumeration gives no oracle.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -24,6 +25,51 @@ from src.utils.logger import get_audit_logger, get_logger
 logger = get_logger("api.search")
 
 router = APIRouter(tags=["search"])
+
+
+async def _make_notification_enqueue():
+    """SI1 — build the ARQ enqueue hook that turns a search into notifications.
+
+    Returns ``(enqueue, close)`` where ``enqueue(function_name, *args)`` queues a
+    job for the ARQ worker, or ``(None, None)`` when notifications cannot be
+    delivered — no ``REDIS_URL``, arq missing, or Redis unreachable.
+
+    ``(None, None)`` is the SAFE default and the pre-SI1 behaviour: run_search
+    then skips the notification step entirely, so a deployment without a worker
+    (or a Redis outage) degrades to "search works, nobody is notified" rather
+    than failing the search. Conversely, the moment a worker + Redis exist this
+    lights up with NO code change.
+
+    A short-lived per-run pool (rather than an app-wide one) is deliberate: a
+    search is user-triggered and infrequent, and this avoids sharing one Redis
+    connection across concurrent background tasks. arq is imported lazily per
+    CLAUDE.md rule #11 (never pay the import cost on an unrelated request).
+    """
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if not redis_url:
+        return None, None
+    try:
+        from arq import create_pool  # noqa: PLC0415 — lazy import (rule #11)
+        from arq.connections import RedisSettings  # noqa: PLC0415
+
+        pool = await create_pool(RedisSettings.from_dsn(redis_url))
+    except Exception as exc:  # noqa: BLE001 — Redis down must never fail a search
+        logger.warning(
+            "SI1: notifications skipped for this run — Redis/arq unavailable (%s)",
+            type(exc).__name__,
+        )
+        return None, None
+
+    async def _close() -> None:
+        # redis-py 5 renamed close() -> aclose(); support both.
+        closer = getattr(pool, "aclose", None) or getattr(pool, "close", None)
+        if closer is None:
+            return
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result
+
+    return pool.enqueue_job, _close
 
 # Module-level in-memory store. Pure-process, not persisted across
 # restarts — search runs are ephemeral poll targets. Each record carries
@@ -112,20 +158,24 @@ async def start_search(
     }
 
     async def _run():
+        # SI1 — build the notification fan-out hook. Returns (None, None) when
+        # REDIS_URL is unset or Redis is unreachable, in which case the search
+        # runs exactly as before (no notifications). Once a worker + Redis are
+        # deployed this lights up automatically — no code change needed.
+        enqueue, close_pool = await _make_notification_enqueue()
         try:
             _runs[run_id]["progress"] = "Fetching from sources..."
             # Pass the logged-in user so the pipeline scores against THEIR
             # profile, not the default tenant's (E2E_TEST_REPORT #1).
-            #
-            # SI1 activation (OWNER DEPLOY STEP): notifications are wired in
-            # main.run_search via its ``enqueue`` hook + _enqueue_notifications,
-            # but they are INERT here on purpose — this HTTP path passes
-            # no_notify=True and no enqueue, so nothing fires without a worker.
-            # To turn on per-search notifications once a Railway worker + Redis
-            # exist: build an ARQ enqueue (e.g. redis.enqueue_job) and call
-            # run_search(..., no_notify=False, enqueue=<enqueue_job>). The code
-            # is ready; only the deploy-side Redis/worker wiring is missing.
-            result = await run_search(source_filter=source, no_notify=True, user_id=user.id)
+            # no_notify mirrors enqueue availability: with a live queue we WANT
+            # main.run_search to call _enqueue_notifications for the feed rows
+            # it writes; without one there is nothing to enqueue to.
+            result = await run_search(
+                source_filter=source,
+                no_notify=enqueue is None,
+                user_id=user.id,
+                enqueue=enqueue,
+            )
             _runs[run_id].update(status="completed", progress="Done", result=result)
             get_audit_logger().info(
                 "search_completed",
@@ -138,6 +188,12 @@ async def start_search(
                 "search_failed",
                 extra={"event": "search_failed", "run_id": run_id, "user_id": user.id, "error": str(e)},
             )
+        finally:
+            if close_pool is not None:
+                try:
+                    await close_pool()
+                except Exception:  # noqa: BLE001 — never fail a run on cleanup
+                    logger.debug("notification pool close failed", exc_info=True)
 
     asyncio.create_task(_run())
     get_audit_logger().info(

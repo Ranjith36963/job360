@@ -262,6 +262,7 @@
             "type": "string"
           },
           "credential": {
+            "maxLength": 512,
             "minLength": 1,
             "title": "Credential",
             "type": "string"
