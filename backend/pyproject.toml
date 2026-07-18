@@ -55,7 +55,13 @@ dev = [
     # `pytest -n auto`. Off by default; opt-in during long-running
     # cycles to cut wall-clock time on the 600+ test suite.
     "pytest-xdist>=3.0.0",
-    "mypy>=1.10.0",
+    # PINNED, same rationale as ruff below: the mypy ratchet baseline
+    # (backend/mypy_baseline.txt) is only meaningful against the version it was
+    # generated with. Unpinned, CI resolved 2.3.0 while a dev machine had 1.20.0
+    # — different versions report different error sets, so "clean locally" said
+    # nothing about CI. Bump deliberately: raise the pin, run
+    # `python scripts/mypy_ratchet.py --update`, review the delta.
+    "mypy==1.20.0",
     # Linter — MUST be in dev extras so the CI "Lint (ruff)" blocking gate can run
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags

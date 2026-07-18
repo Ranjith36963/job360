@@ -95,13 +95,17 @@ jobs:
         working-directory: backend
         run: python -m pytest -q -p no:randomly
 
-      - name: Type-check (mypy)
-        # mypy has a documented backlog of 395 errors (docs/mypy_backlog.md).
-        # Strict mode is active for new code; existing errors are grandfathered.
-        # Non-blocking until the backlog is drained.
+      - name: Type-check (mypy ratchet)
+        # BLOCKING (H7). Was `continue-on-error: true` with a comment claiming
+        # "existing errors are grandfathered" — but nothing implemented that, so
+        # the result was discarded entirely and new code could add type errors
+        # freely. The ratchet is the missing mechanism: backend/mypy_baseline.txt
+        # records the pre-existing errors, and the build fails on any NEW one, so
+        # the count can only go down. Fixed errors are reported as progress.
+        # mypy is pinned in pyproject.toml — a baseline only means something
+        # against the version that produced it.
         working-directory: backend
-        run: python -m mypy src/
-        continue-on-error: true
+        run: python scripts/mypy_ratchet.py
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:
