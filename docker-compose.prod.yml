@@ -6,7 +6,9 @@
 #   docker compose -f docker-compose.prod.yml up -d
 #
 # Required env vars (set in .env or your deploy platform):
-#   SESSION_SECRET, CHANNEL_ENCRYPTION_KEY
+#   POSTGRES_PASSWORD, SESSION_SECRET, CHANNEL_ENCRYPTION_KEY
+# POSTGRES_PASSWORD has NO default on purpose (M10) — compose refuses to start
+# without it rather than fall back to a committed password.
 # Optional LLM keys: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, etc.
 # See .env.example for the full list.
 
@@ -19,7 +21,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: job360
-      POSTGRES_PASSWORD: job360dev
+      # M10 — never commit a production password. `:?` makes compose FAIL LOUDLY
+      # if POSTGRES_PASSWORD is unset, rather than silently starting Postgres
+      # with an empty/!default password. Set it in the deploy environment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: job360
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -55,7 +60,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://job360:job360dev@postgres:5432/job360
+      DATABASE_URL: postgresql://job360:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/job360
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET}
       CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
@@ -94,7 +99,7 @@ services:
     # ARQ worker — confirmed entry point: arq src.workers.settings.WorkerSettings
     command: ["arq", "src.workers.settings.WorkerSettings"]
     environment:
-      DATABASE_URL: postgresql://job360:job360dev@postgres:5432/job360
+      DATABASE_URL: postgresql://job360:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/job360
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET}
       CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
