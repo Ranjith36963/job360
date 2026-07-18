@@ -135,7 +135,7 @@ async def channel_db():
     try:
         os.unlink(path)
     except OSError:
-        pass
+        pass  # best-effort temp-file cleanup — a missing/locked file is harmless
 
 
 async def _insert_webhook(db_path, apprise_url):
