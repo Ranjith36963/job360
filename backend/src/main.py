@@ -755,16 +755,14 @@ async def run_search(
                 feed_profile_version = current_profile_version_id(user_id)
                 for job in unique_jobs:
                     try:
-                        cur = await db._conn.execute(
-                            "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
-                            job.normalized_key(),
-                        )
-                        r = await cur.fetchone()
-                        if r is None:
+                        # N7 — reuse the id already resolved in the scoring loop
+                        # above (job.id set from the same `SELECT id FROM jobs`);
+                        # re-querying it here doubled the point-queries per run.
+                        if job.id is None:
                             continue
                         await feed.upsert_feed_row(
                             user_id=user_id,
-                            job_id=r[0],
+                            job_id=job.id,
                             score=int(job.match_score or 0),
                             bucket=_recency_bucket(job.date_found),
                             profile_version=feed_profile_version,

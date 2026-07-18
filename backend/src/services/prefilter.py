@@ -107,10 +107,14 @@ def experience_ok(profile: FilterProfile, job: Job) -> bool:
     if job_level is None:
         return True  # no signal in title — keep the job
 
-    # Keep jobs within ±1 band (junior accepts entry/junior/mid; senior
-    # accepts mid/senior/staff). Blueprint §2's pre-filter rule is
-    # "junior candidates skip senior roles" — not the reverse.
-    return abs(job_level - user_level) <= 1
+    # SI5 — ONE-DIRECTIONAL band, matching the docstring/Blueprint §2 rule
+    # "junior candidates skip senior roles — NOT the reverse." Reject only when
+    # the JOB is more than one level ABOVE the user (too senior). A senior user
+    # is NOT filtered out of entry/junior roles they may still want — the old
+    # symmetric `abs(...) <= 1` wrongly excluded them. `job_level - user_level`:
+    # positive = job more senior than user (cap at +1); negative/zero = job at or
+    # below the user's level (always kept).
+    return (job_level - user_level) <= 1
 
 
 def skill_overlap_ok(profile: FilterProfile, job: Job, *, min_overlap: int = 1) -> bool:

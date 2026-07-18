@@ -547,17 +547,25 @@ class JobScorer:
                 visa_pts = visa_score(enrichment, prefs.needs_visa)
                 workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
 
+        # The composite uses the RAW points (incl. a negative seniority penalty)
+        # then clamps once to [0,100] — rule #27, unchanged.
         total = base + seniority_pts + salary_pts + visa_pts + workplace_pts
         match = min(max(total, 0), 100)
+        # M8 — clamp each STORED/REPORTED per-dim score to [0,100]. seniority_score
+        # can be negative (a poor-fit penalty, e.g. -8), and these columns feed the
+        # radar chart / API directly; a negative dim renders out-of-range. The
+        # penalty is already reflected in `total` above, so clamping the dim COLUMN
+        # loses no scoring signal — it only keeps the raw columns in range for any
+        # reader. Does NOT touch `total`/`match` (rule #27's composite clamp).
         return ScoreBreakdown(
             title_score=title_pts,
             skill_score=skill_pts,
             location_score=location_pts,
             recency_score=recency_pts,
-            seniority_score=seniority_pts,
-            salary_score=salary_pts,
-            visa_score=visa_pts,
-            workplace_score=workplace_pts,
+            seniority_score=min(max(seniority_pts, 0), 100),
+            salary_score=min(max(salary_pts, 0), 100),
+            visa_score=min(max(visa_pts, 0), 100),
+            workplace_score=min(max(workplace_pts, 0), 100),
             match_score=match,
         )
 

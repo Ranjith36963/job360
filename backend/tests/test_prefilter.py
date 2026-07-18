@@ -63,6 +63,16 @@ def test_senior_candidate_accepts_senior_role():
     assert experience_ok(p, _job(title="Senior Software Engineer"))
 
 
+def test_senior_candidate_accepts_junior_role():
+    # SI5 — one-directional band: a senior user is NOT filtered out of junior
+    # roles they may still want. The old symmetric `abs(job-user) <= 1` wrongly
+    # excluded a senior user from a >1-level-below role; the fix only rejects
+    # jobs MORE senior than the user.
+    p = FilterProfile(experience_level="senior")
+    assert experience_ok(p, _job(title="Junior Software Engineer"))
+    assert experience_ok(p, _job(title="Graduate Software Engineer"))
+
+
 def test_mid_candidate_within_one_band_of_senior():
     p = FilterProfile(experience_level="mid")
     assert experience_ok(p, _job(title="Senior Python Engineer"))

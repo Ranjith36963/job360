@@ -607,7 +607,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     from src.services.feed import FeedService  # noqa: PLC0415
     from src.services.job_enrichment import (  # noqa: PLC0415
         ENRICHMENT_ENABLED,
-        _build_enrichment_lookup,
+        load_enrichment,
     )
     from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
@@ -622,7 +622,14 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     # unchanged profile reproduces the stored feed score (CLAUDE.md rule #19).
     # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
     enrichment_on = ENGINE2_ENABLED or ENRICHMENT_ENABLED
-    enrichment_lookup_dict = await _build_enrichment_lookup(db._conn) if enrichment_on else {}
+    # N3 — this recompute scores exactly ONE job (row["id"]), so load only THAT
+    # job's enrichment via the single-row load_enrichment(). The old
+    # _build_enrichment_lookup(db._conn) deserialised the ENTIRE job_enrichment
+    # table on every authenticated GET /jobs/{id} — a full-table scan that grows
+    # with the 30-day catalog, to use one row. Build a 1-entry lookup so the
+    # scorer's `enrichment_lookup` and `dims_active` below are unchanged.
+    _this_enrichment = await load_enrichment(db._conn, row["id"]) if enrichment_on else None
+    enrichment_lookup_dict = {row["id"]: _this_enrichment} if _this_enrichment is not None else {}
     scorer = JobScorer(
         search_config,
         user_preferences=profile.preferences,

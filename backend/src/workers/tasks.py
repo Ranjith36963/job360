@@ -550,15 +550,24 @@ async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     for r in pending:
         by_channel.setdefault(r["channel"], []).append(r["job_id"])
 
-    # Fetch job details for every queued job_id (deduped).
+    # Fetch job details for every queued job_id (deduped). N7 — one batched
+    # `WHERE id IN (...)` instead of a per-job_id SELECT in a loop (this cron
+    # runs every 5 min forever). Placeholders are generated from the id count
+    # only — no user input in the SQL text.
     job_details: dict[int, dict] = {}
-    for jid in {r["job_id"] for r in pending}:
+    _job_ids = {r["job_id"] for r in pending}
+    if _job_ids:
+        _placeholders = ",".join("?" for _ in _job_ids)
         cur = await db.execute(
-            "SELECT title, company, apply_url FROM jobs WHERE id = ?", (jid,)
+            f"SELECT id, title, company, apply_url FROM jobs WHERE id IN ({_placeholders})",  # noqa: S608 — placeholders only
+            tuple(_job_ids),
         )
-        row = await cur.fetchone()
-        if row:
-            job_details[jid] = {"title": row["title"], "company": row["company"], "apply_url": row["apply_url"]}
+        for row in await cur.fetchall():
+            job_details[row["id"]] = {
+                "title": row["title"],
+                "company": row["company"],
+                "apply_url": row["apply_url"],
+            }
 
     jobs_count = len(job_details)
     if jobs_count == 0:

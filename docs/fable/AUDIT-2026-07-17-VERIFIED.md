@@ -757,3 +757,18 @@ the infra/legal ones are yours.
 
 ### ⚪ Accepted-by-design (left intentionally)
 S5 (thread leak — needs process pool), S8 (dead glassdoor RATE_LIMITS — five-surface risk), V2 (RETURNING id — minor), mypy `continue-on-error` (395 grandfathered), the 4 dead score columns + dormant penalty card (PR-2, owner-declined earlier), M2 register-409 (deliberate).
+
+---
+
+## ✅ CLOSED in Batch 5 — Pillar-2 / scoring (2026-07-18, owner-authorized)
+
+Owner explicitly green-lit these hands-off scoring/search items. Verified with the
+rule-#9 suites (test_scorer + test_profile + test_scoring_dimensions + test_prefilter =
+177 passed) and the pipeline suites (test_main/notification_tick/worker_tasks/api = 75).
+
+| ID | Was | Now fixed at |
+|---|---|---|
+| **SI5** | OPEN_BUG (symmetric prefilter band) | `services/prefilter.py:113` — `abs(job-user) <= 1` → `(job_level - user_level) <= 1` (one-directional): a senior user is no longer filtered out of junior/entry roles; junior users still skip senior roles. Test: `test_senior_candidate_accepts_junior_role`. |
+| **M8** | OPEN_BUG (negative dims persisted) | `services/skill_matcher.py:557-560` — the stored/reported per-dim scores are clamped to [0,100]; `total`/`match_score` still use the RAW points (rule #27 composite clamp untouched), so a negative seniority PENALTY still lands in the score but the dim COLUMN feeding the radar is never negative. Test: `test_jobscorer_clamps_stored_dims_to_non_negative`. |
+| **N3** | OPEN_BUG (job-detail full-table enrichment scan) | `api/routes/jobs.py:625` — replaced `_build_enrichment_lookup(db._conn)` (deserialised the ENTIRE `job_enrichment` table on every authed GET /jobs/{id}) with the single-row `load_enrichment(db._conn, row["id"])` wrapped in a 1-entry lookup. Same `JobEnrichment` type/columns, identical scorer wiring. |
+| **N7** | OPEN_BUG (N+1 in hot paths) | `main.py:756` feed-write loop reuses the already-resolved `job.id` instead of re-running `SELECT id FROM jobs` per job (the "doubles point-queries per run" case). `workers/tasks.py:553` `send_bundle` batches job details with one `WHERE id IN (…)` instead of one SELECT per job_id (runs every 5 min). Remaining minor: the per-rule `SELECT timezone` in `notification_tick` could be a JOIN — left as low-value. |
