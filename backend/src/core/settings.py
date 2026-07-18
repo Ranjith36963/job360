@@ -266,9 +266,21 @@ SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))
 # discarding their results, so the "ats" category gets its own ceiling.
 SOURCE_FETCH_TIMEOUT_ATS = int(os.getenv("SOURCE_FETCH_TIMEOUT_ATS", "240"))
 
-# Auth / encryption secrets (required in production only).
-SESSION_SECRET = os.getenv("SESSION_SECRET", "")
-CHANNEL_ENCRYPTION_KEY = os.getenv("CHANNEL_ENCRYPTION_KEY", "")
+# Auth / encryption secrets — deliberately NOT bound as module constants here.
+#
+# M10: this file used to define
+#     SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+#     CHANNEL_ENCRYPTION_KEY = os.getenv("CHANNEL_ENCRYPTION_KEY", "")
+# Both were DEAD (nothing imported them — verified across src/ and tests/) and
+# actively misleading: the `""` default reads as "an empty secret is a valid
+# state". It is not. The real consumers read the env var at CALL time and
+# FAIL CLOSED:
+#   * api/auth_deps.py::_secret()          -> raises if SESSION_SECRET unset
+#   * services/channels/crypto.py::_key()  -> raises if CHANNEL_ENCRYPTION_KEY unset
+# Keeping a defaulted-to-empty binding around invites a future caller to read it
+# and silently sign/encrypt with "". If you need a secret, call the accessor —
+# never re-add a module constant with an empty default.
+# (Their NAMES still appear in _REQUIRED_PROD_VARS below for the prod check.)
 
 # Sentry error tracking (Phase 3). Empty string → Sentry is disabled (no-op
 # at init time). Populate in production via the SENTRY_DSN env var.
