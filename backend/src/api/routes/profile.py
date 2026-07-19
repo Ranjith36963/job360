@@ -22,6 +22,8 @@ from src.api.models import (
     ProfileVersionsListResponse,
     ProfileVersionSummary,
 )
+from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
+from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
@@ -323,7 +325,41 @@ async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
 
     Used by every profile-input route so the merged single-extraction flow is
     defined once.
+
+    COST CAP (docs/fable/08 "Cost economics — NOT audited"):
+    Each call fans out to 4+ paid LLM passes, and ANY profile change re-runs ALL
+    of them from stored data. Nothing bounded how often a user could trigger that
+    — five routes reach this function, and a user editing their profile in a loop
+    was an unbounded spend vector.
+
+    This became real rather than theoretical on 2026-07-19: `openai` had never
+    actually been installed in production (the import raised, a broad `except`
+    swallowed it, and every parse silently fell back to a free tier). Declaring
+    the dependency turned the primary PAID provider on for the first time — so the
+    uncapped loop that previously cost nothing now bills.
+
+    Reuses the existing limiter rather than inventing a counter: it already
+    supports a shared Redis backend (RATE_LIMIT_REDIS), so the cap holds across
+    replicas instead of being multiplied by replica count.
     """
+    if PROFILE_EXTRACT_MAX_PER_HOUR > 0 and not auth_rate_limit.check_and_record(
+        f"profile_extract:{user_id}",
+        max_in_window=PROFILE_EXTRACT_MAX_PER_HOUR,
+        window_seconds=3600,
+    ):
+        logger.warning(
+            "profile_extract_rate_limited",
+            extra={"event": "profile_extract_rate_limited", "user_id": user_id},
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many profile updates in the last hour "
+                f"(limit {PROFILE_EXTRACT_MAX_PER_HOUR}). Each update re-runs AI "
+                "extraction over your CV, LinkedIn and GitHub — please wait a "
+                "few minutes and try again."
+            ),
+        )
     await run_two_pass_extraction(profile)
     save_profile(profile, user_id)
     await _maybe_trigger_rescore(user_id)
