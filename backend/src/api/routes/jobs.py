@@ -583,7 +583,7 @@ def _row_to_scoring_job(row: dict[str, Any]) -> "Job":
         posted_at=row.get("posted_at"),
         date_confidence=row.get("date_confidence") or "low",
     )
-    job.id = row.get("id")  # type: ignore[attr-defined]
+    job.id = row.get("id")
     return job
 
 

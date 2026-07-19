@@ -1,12 +1,26 @@
-"""FeedService — single source of truth for per-user job view.
+"""FeedService — helpers over the per-user ``user_feed`` table.
 
-Both the FastAPI dashboard endpoints AND the notification worker read from
-the same ``user_feed`` rows via this service, guaranteeing parity.
+SI4 — WHAT THIS IS, ACCURATELY:
+This module used to describe itself as "the single source of truth for the
+per-user job view", read by "both the FastAPI dashboard endpoints AND the
+notification worker". That was aspirational, not true, and the gap was
+invisible because the docstring sounded authoritative:
 
-Blueprint §3 rationale: "one PostgreSQL table (user_feed) serving both
-dashboard and notifications ... both surfaces always see identical data."
+  * ``list_for_user`` has NO production callers — only tests. The dashboard
+    reads ``user_feed`` through ``database.py`` (see the join at
+    database.py:1217), not through this class.
+  * ``get_score`` / the write helpers ARE used in production (api/routes/jobs.py,
+    workers/tasks.py), so this module is not dead as a whole — only that one
+    read method is.
 
-Phase 3 ships the read surface. Phase 4 adds ``ingest_job`` (write path).
+Blueprint §3 still describes the intended end state ("one Postgres table serving
+both dashboard and notifications"). Keeping ``list_for_user`` is deliberate: it
+is the read surface that end state needs. But it is documented here as NOT the
+live path, so nobody again assumes parity that does not exist.
+
+If you wire it up, check it still matches database.py's ordering — the two are
+kept in sync by hand, and a divergence there is exactly the kind of silent
+inconsistency that produces "the dashboard and the email disagree" bugs.
 """
 from __future__ import annotations
 
@@ -65,7 +79,20 @@ class FeedService:
         status: str = "active",
         limit: int = 200,
     ) -> list[FeedRow]:
-        """Dashboard query: active rows for a user, newest-highest-score first."""
+        """Active rows for a user, ranked the way the live dashboard ranks them.
+
+        NOT currently called in production (see the module docstring) — the
+        dashboard reads via database.py. Kept as the intended read surface.
+
+        SI4: the ordering used to be plain ``score DESC``, which silently
+        disagreed with the live query (database.py:1217), where an LLM judge
+        verdict outranks the keyword score:
+            ORDER BY COALESCE(f.llm_fit_score, f.score) DESC
+        Two orderings over one table is how "the dashboard and the notification
+        disagree" bugs are born, so this now matches. With MATCHER_ENABLED off
+        every ``llm_fit_score`` is NULL and COALESCE collapses to ``score`` —
+        i.e. behaviour is unchanged unless the judge is actually running.
+        """
         query = (
             "SELECT * FROM user_feed "
             "WHERE user_id = ? AND status = ?"
@@ -74,7 +101,7 @@ class FeedService:
         if bucket is not None:
             query += " AND bucket = ?"
             params.append(bucket)
-        query += " ORDER BY score DESC, created_at DESC LIMIT ?"
+        query += " ORDER BY COALESCE(llm_fit_score, score) DESC, created_at DESC LIMIT ?"
         params.append(limit)
         cur = await self._db.execute(query, params)
         return [_row(r) for r in await cur.fetchall()]

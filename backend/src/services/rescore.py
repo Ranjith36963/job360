@@ -60,7 +60,7 @@ def score_catalog_row(scorer: Any, row: dict[str, Any]) -> Any:
     # FIX 5 — set job.id so the enrichment_lookup keyed on job.id can find
     # the enrichment row (project dim-scoring-id-bug: job.id was unset here,
     # causing enrichment dims to always score 0).
-    job.id = row.get("id")  # type: ignore[attr-defined]
+    job.id = row.get("id")
     return scorer.score(job)
 
 
@@ -244,7 +244,7 @@ async def rescore_user_feed(
                             posted_at=row.get("posted_at"),
                             date_confidence=row.get("date_confidence") or "low",
                         )
-                        job.id = jid  # type: ignore[attr-defined]
+                        job.id = jid
                         job.match_score = int(ms)
                         shortlist_jobs.append(job)  # type: ignore[union-attr]
                 except Exception as exc:  # noqa: BLE001

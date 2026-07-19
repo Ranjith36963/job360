@@ -168,6 +168,27 @@ class WorkerSettings:
     # hung LLM call tie up the (single) worker slot indefinitely.
     job_timeout = 600  # seconds
 
+    # M4 — liveness. arq writes a heartbeat key to Redis every
+    # ``health_check_interval`` seconds and `arq --check` reads it back; the key
+    # is set with a TTL of interval+1, so a dead worker stops looking alive one
+    # interval after it dies.
+    #
+    # arq's default is 3600, which means a worker that died at 00:01 still
+    # reported healthy at 00:59. That is not hypothetical here — this worker has
+    # died silently in production before (commit 7f906c6, "revive dead ARQ
+    # worker (P0)"), and nothing noticed because nothing was watching. 30s makes
+    # death observable within roughly one minute.
+    #
+    # Cost is one small Redis SET per interval — negligible next to the queue
+    # traffic itself.
+    health_check_interval = 30  # seconds
+
+    # M4 — explicit retry ceiling. arq's default is also 5, but stating it means
+    # a future arq upgrade cannot change our retry behaviour silently, and it
+    # documents that a poisoned job gives up rather than looping forever on the
+    # single (max_jobs=1) worker slot.
+    max_tries = 5
+
     # Periodic / cron jobs — Step-3 B-14.
     # ARQ cron format: ``cron(func, *, hour=None, minute=None, ...)``.
     # IMPORTANT: newer arq reads ``WorkerSettings.__dict__['cron_jobs']`` directly

@@ -218,6 +218,17 @@ RATE_LIMITS: dict[str, RateLimitConfig] = {
     "pinpoint": {"concurrent": 2, "delay": 1.5},
     "recruitee": {"concurrent": 2, "delay": 1.5},
     "indeed": {"concurrent": 1, "delay": 3.0},
+    # S8 — NEVER READ AT RUNTIME, and kept deliberately. `indeed` and `glassdoor`
+    # are two SOURCE_REGISTRY keys pointing at ONE class (JobSpySource), which
+    # hardcodes `name = "indeed"` (sources/other/indeed.py:16). base.py:82 looks
+    # up RATE_LIMITS by `self.name`, so this row is unreachable — a single
+    # instance fetches both sites through the "indeed" limiter, which is the
+    # correct behaviour for one instance making one stream of requests.
+    # It stays because tests/test_cli.py:49 names the RATE_LIMITS entry as one of
+    # the FIVE surfaces that must move together when a source is added/removed
+    # (CLAUDE.md rule #8) — deleting it would break that contract for a row that
+    # costs nothing. Job rows are still labelled "glassdoor" correctly: that comes
+    # per-row from JobSpy's own `site` column, not from `self.name`.
     "glassdoor": {"concurrent": 1, "delay": 3.0},
     "workday": {"concurrent": 2, "delay": 1.5},
     "google_jobs": {"concurrent": 1, "delay": 2.0},

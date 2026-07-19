@@ -225,10 +225,13 @@ async def save_edit(
     if existing is None:
         raise HTTPException(status_code=404, detail="No draft to edit — generate first.")
     row = await db.save_tailored_polished(user.id, job_id, doc_kind, body.text)
-    # LATENT: save_tailored_polished re-reads the row and can return None if it
-    # was deleted between the check above and the UPDATE (would TypeError -> 500).
-    # Left as-is deliberately — fixing it is a behaviour change, not a type fix.
-    return _doc_out(row)  # type: ignore[arg-type]
+    if row is None:
+        # The doc existed at the check above but was deleted before the UPDATE
+        # landed. save_tailored_polished re-reads the row, so it returns None.
+        # Without this guard _doc_out(None) raised TypeError -> HTTP 500, which
+        # tells the user "we broke" for what is really "it's gone".
+        raise HTTPException(status_code=404, detail="Draft no longer exists.")
+    return _doc_out(row)
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut)
@@ -244,12 +247,16 @@ async def keep(
     if existing is None:
         raise HTTPException(status_code=404, detail="Nothing to keep — generate first.")
     row = await db.keep_tailored_doc(user.id, job_id, doc_kind)
-    # Same latent None as save_edit above (row deleted mid-request).
+    if row is None:
+        # Deleted between the existence check and the UPDATE — same race as
+        # save_edit. Guarding here also protects _learn_universal, which would
+        # otherwise be fed None and pollute the learned-patterns store.
+        raise HTTPException(status_code=404, detail="Document no longer exists.")
     await _learn_universal(db, doc_kind, row)
     get_audit_logger().info(
         "tailor_keep", extra={"user_id": user.id, "job_id": job_id, "doc_kind": doc_kind}
     )
-    return _doc_out(row)  # type: ignore[arg-type]
+    return _doc_out(row)
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/download")

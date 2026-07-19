@@ -766,7 +766,7 @@ async def run_search(
                     job.normalized_key(),
                 )
                 r = await cur.fetchone()
-                job.id = r[0] if r is not None else None  # type: ignore[attr-defined]
+                job.id = r[0] if r is not None else None
 
             # Step-1 B7 — gate LLM enrichment by score. No-op when the flag is
             # OFF (CLAUDE.md rule #18). B7-2 fix: this runs AFTER insert so the
@@ -842,18 +842,18 @@ async def run_search(
                         # re-querying it here doubled the point-queries per run.
                         # (job.id is a dynamically-set attribute, not a declared
                         # dataclass field — see note earlier in this function.)
-                        if job.id is None:  # type: ignore[attr-defined]
+                        if job.id is None:
                             continue
                         _score = int(job.match_score or 0)
                         await feed.upsert_feed_row(
                             user_id=user_id,
-                            job_id=job.id,  # type: ignore[attr-defined]
+                            job_id=job.id,
                             score=_score,
                             bucket=_recency_bucket(job.date_found),
                             profile_version=feed_profile_version,
                         )
                         feed_written += 1
-                        _written_for_notify.append((job.id, _score))  # type: ignore[attr-defined]
+                        _written_for_notify.append((job.id, _score))
                     except Exception as e:  # never let a feed write fail the whole run
                         logger.warning("user_feed write failed for %r: %s", job.title, e)
                 logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)

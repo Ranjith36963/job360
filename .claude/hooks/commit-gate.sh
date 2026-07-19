@@ -9,6 +9,28 @@ set -uo pipefail
 INPUT="$(cat)"
 CMD="$(echo "$INPUT" | python -c "import sys,json;print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)"
 
+# P4 — do not fail OPEN when the parse fails.
+#
+# Previously an empty CMD (python missing, JSON shape changed, malformed input)
+# fell straight through the `*)` arm below and ALLOWED the commit. The one input
+# the gate could not understand was the one it waved through — and silently,
+# because 2>/dev/null hides the reason.
+#
+# We cannot block on every unparseable Bash call (this hook sees ALL of them, so
+# that would wedge the session). Instead, fall back to scanning the RAW payload:
+# if the words "git commit" appear anywhere in it, treat it as a commit and let
+# the stamp check decide. Worst case we gate a command that merely mentions the
+# phrase — annoying, but it fails toward safety instead of away from it.
+if [ -z "$CMD" ]; then
+  case "$INPUT" in
+    *"git commit"*)
+      echo "[commit-gate] WARNING: could not parse tool_input; recovered 'git commit' from raw payload." >&2
+      CMD="git commit"
+      ;;
+    *) exit 0 ;;
+  esac
+fi
+
 case "$CMD" in
   *"git commit"*) ;;
   *) exit 0 ;;

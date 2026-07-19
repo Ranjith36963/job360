@@ -192,14 +192,18 @@ async def _fetch_repo_frameworks(
     skills: list[str] = []
     seen: set[str] = set()
     for (filename, _), content in zip(MANIFEST_FILES, contents):
-        if isinstance(content, Exception) or not content:
+        # BaseException, not Exception: gather(return_exceptions=True) also
+        # returns BaseExceptions such as CancelledError, and those are truthy,
+        # so `not content` would NOT catch them either. Narrowing to Exception
+        # let a cancelled fetch through to be parsed as if it were file text.
+        if isinstance(content, BaseException) or not content:
             continue
         # The guard above drops every ``Exception`` gather returned, so this is a
         # real ``str``. mypy can't subtract ``Exception`` from ``BaseException``,
         # hence the narrow ignore. (A bare ``BaseException`` — e.g. CancelledError
         # — would slip past the guard, but that is pre-existing behaviour and is
         # left untouched here rather than silently changed.)
-        _ecosystem, dep_names = parse_manifest(filename, content)  # type: ignore[arg-type]
+        _ecosystem, dep_names = parse_manifest(filename, content)
         for dep in dep_names:
             d = (dep or "").strip()
             if d and d.lower() not in seen:
@@ -303,13 +307,15 @@ async def fetch_github_profile(
         frameworks_inferred: list[str] = []
         seen_framework: set[str] = set()
         for result in dep_results:
-            if isinstance(result, Exception):
+            # BaseException for the same reason as _fetch_repo_frameworks above:
+            # a cancelled task returns a BaseException that Exception misses.
+            if isinstance(result, BaseException):
                 logger.debug("Dep fetch failed: %s", result)
                 continue
             # Same narrowing gap as in ``_fetch_repo_frameworks``: the guard above
             # removes every ``Exception``, leaving a real ``list[str]``, but mypy
             # cannot subtract ``Exception`` from ``BaseException``.
-            for skill in result or []:  # type: ignore[union-attr]
+            for skill in result or []:
                 if skill.lower() not in seen_framework:
                     frameworks_inferred.append(skill)
                     seen_framework.add(skill.lower())

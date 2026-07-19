@@ -62,6 +62,22 @@ class Job:
     recency: int = 0
     semantic: int = 0
     penalty: int = 0
+    # Database row id, populated AFTER the row is inserted (None for a Job that
+    # has not been persisted yet). Declared last so positional construction is
+    # unaffected.
+    #
+    # This field was previously absent and stapled on at runtime
+    # (`job.id = row[0]`), which worked only because the dataclass isn't
+    # slotted. The cost was real: every reader had to guess with
+    # `getattr(job, "id", None)`, and when the attribute was missing at scoring
+    # time the enrichment lookup silently missed, scoring every enrichment
+    # dimension 0 — the documented dim-scoring bug.
+    #
+    # Declaring it does NOT by itself fix that bug (the ordering of "set id"
+    # vs "score" is the real defect, and lives in the scoring path). It removes
+    # the mine: the attribute now always exists, so a missing id is a visible
+    # None instead of an AttributeError dodged by getattr.
+    id: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Decode HTML entities in title and company
