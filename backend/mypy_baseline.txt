@@ -1,0 +1,352 @@
+# mypy ratchet baseline — DO NOT hand-edit to silence a new error.
+# Regenerate with: python scripts/mypy_ratchet.py --update
+# Only run --update to record errors you FIXED. See scripts/mypy_ratchet.py.
+# total errors: 803
+
+1	migrations/runner.py	arg-type	Argument 1 to "run" has incompatible type "Coroutine[Any, Any, str | None]"; expected "Coroutine[Any, Any, list[str]]"
+3	migrations/runner.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+2	migrations/runner.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+1	migrations/runner.py	no-untyped-call	Call to untyped function "transaction" in typed context
+1	src/api/auth_deps.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+2	src/api/dependencies.py	no-untyped-call	Call to untyped function "close" in typed context
+1	src/api/dependencies.py	no-untyped-call	Call to untyped function "init_db" in typed context
+2	src/api/dependencies.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/dependencies.py	return-value	Incompatible return value type (got "JobDatabase | None", expected "JobDatabase")
+1	src/api/errors.py	arg-type	Argument 2 to "add_exception_handler" of "Starlette" has incompatible type "Callable[[Request[State], HTTPException], Coroutine[Any, Any, JSONResponse]]"; expected "Callable[[Request[State], Exception], Response | Awaitable[Response]] | Callable[[WebSocket, Exception], Awaitable[None]]"
+1	src/api/errors.py	arg-type	Argument 2 to "add_exception_handler" of "Starlette" has incompatible type "Callable[[Request[State], RequestValidationError], Coroutine[Any, Any, JSONResponse]]"; expected "Callable[[Request[State], Exception], Response | Awaitable[Response]] | Callable[[WebSocket, Exception], Awaitable[None]]"
+1	src/api/errors.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/main.py	no-untyped-call	Call to untyped function "close_db" in typed context
+1	src/api/main.py	no-untyped-def	Function is missing a return type annotation
+4	src/api/middleware.py	no-any-return	Returning Any from function declared to return "Response"
+4	src/api/middleware.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+10	src/api/models.py	type-arg	Missing type arguments for generic type "dict"
+4	src/api/routes/actions.py	no-untyped-def	Function is missing a return type annotation
+2	src/api/routes/auth.py	type-arg	Missing type arguments for generic type "dict"
+2	src/api/routes/channels.py	no-any-return	Returning Any from function declared to return "dict[Any, Any]"
+1	src/api/routes/channels.py	no-any-return	Returning Any from function declared to return "list[dict[Any, Any]]"
+1	src/api/routes/channels.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+3	src/api/routes/channels.py	type-arg	Missing type arguments for generic type "dict"
+1	src/api/routes/health.py	no-untyped-call	Call to untyped function "from_url" in typed context
+5	src/api/routes/health.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/routes/health.py	unused-ignore	Unused "type: ignore" comment
+1	src/api/routes/jobs.py	arg-type	Argument 1 to "FeedService" has incompatible type "Connection | None"; expected "Connection"
+1	src/api/routes/jobs.py	arg-type	Argument 1 to "load_enrichment" has incompatible type "Connection | None"; expected "Connection"
+1	src/api/routes/jobs.py	arg-type	Argument 1 to "loads" has incompatible type "object"; expected "str | bytes | bytearray"
+1	src/api/routes/jobs.py	call-overload	No overload variant of "dict" matches argument type "object"
+1	src/api/routes/jobs.py	no-untyped-call	Call to untyped function "JobScorer" in typed context
+5	src/api/routes/jobs.py	no-untyped-def	Function is missing a return type annotation
+4	src/api/routes/jobs.py	no-untyped-def	Function is missing a type annotation
+4	src/api/routes/jobs.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+8	src/api/routes/jobs.py	type-arg	Missing type arguments for generic type "dict"
+1	src/api/routes/jobs.py	type-arg	Missing type arguments for generic type "set"
+1	src/api/routes/notification_rules.py	type-arg	Missing type arguments for generic type "dict"
+1	src/api/routes/notifications.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/routes/notifications.py	type-arg	Missing type arguments for generic type "dict"
+7	src/api/routes/pipeline.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/routes/pipeline.py	type-arg	Missing type arguments for generic type "dict"
+1	src/api/routes/profile.py	no-any-return	Returning Any from function declared to return "dict[Any, Any]"
+10	src/api/routes/profile.py	no-untyped-def	Function is missing a return type annotation
+5	src/api/routes/profile.py	type-arg	Missing type arguments for generic type "dict"
+1	src/api/routes/profile.py	type-arg	Missing type arguments for generic type "set"
+2	src/api/routes/runs.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/routes/search.py	no-untyped-call	Call to untyped function "_make_notification_enqueue" in typed context
+1	src/api/routes/search.py	no-untyped-call	Call to untyped function "_run" in typed context
+5	src/api/routes/search.py	no-untyped-def	Function is missing a return type annotation
+1	src/api/routes/search.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+2	src/api/routes/search.py	type-arg	Missing type arguments for generic type "dict"
+2	src/api/routes/tailor.py	arg-type	Argument 1 to "_doc_out" has incompatible type "dict[Any, Any] | None"; expected "dict[Any, Any]"
+6	src/api/routes/tailor.py	no-untyped-def	Function is missing a return type annotation
+2	src/api/routes/tailor.py	type-arg	Missing type arguments for generic type "dict"
+2	src/cli.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+3	src/cli.py	no-untyped-def	Function is missing a return type annotation
+4	src/cli.py	no-untyped-def	Function is missing a type annotation
+1	src/cli_view.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+1	src/cli_view.py	no-untyped-def	Function is missing a return type annotation
+3	src/cli_view.py	type-arg	Missing type arguments for generic type "dict"
+1	src/core/observability.py	no-untyped-def	Function is missing a type annotation
+1	src/core/observability.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/main.py	arg-type	Argument 1 to "FeedService" has incompatible type "Connection | None"; expected "Connection"
+2	src/main.py	arg-type	Argument 1 to "_build_enrichment_lookup" has incompatible type "Connection | None"; expected "Connection"
+2	src/main.py	arg-type	Argument 1 to "get" of "dict" has incompatible type "Any | None"; expected "int"
+1	src/main.py	arg-type	Argument 1 to "load_enrichment" has incompatible type "Connection | None"; expected "Connection"
+4	src/main.py	attr-defined	"Job" has no attribute "id"
+2	src/main.py	no-untyped-call	Call to untyped function "JobScorer" in typed context
+1	src/main.py	no-untyped-call	Call to untyped function "_instrument" in typed context
+1	src/main.py	no-untyped-call	Call to untyped function "close" in typed context
+4	src/main.py	no-untyped-call	Call to untyped function "commit" in typed context
+1	src/main.py	no-untyped-call	Call to untyped function "init_db" in typed context
+2	src/main.py	no-untyped-def	Function is missing a return type annotation
+1	src/main.py	no-untyped-def	Function is missing a type annotation
+5	src/main.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+2	src/main.py	type-arg	Missing type arguments for generic type "dict"
+3	src/main.py	type-arg	Missing type arguments for generic type "list"
+3	src/main.py	union-attr	Item "None" of "Connection | None" has no attribute "execute"
+1	src/main.py	unused-ignore	Unused "type: ignore" comment
+1	src/models.py	no-untyped-def	Function is missing a return type annotation
+1	src/repositories/database.py	no-any-return	Returning Any from function declared to return "int"
+1	src/repositories/database.py	no-untyped-call	Call to untyped function "_migrate" in typed context
+5	src/repositories/database.py	no-untyped-def	Function is missing a return type annotation
+1	src/repositories/database.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+44	src/repositories/database.py	type-arg	Missing type arguments for generic type "dict"
+2	src/repositories/database.py	type-arg	Missing type arguments for generic type "list"
+23	src/repositories/database.py	union-attr	Item "None" of "Connection | None" has no attribute "commit"
+92	src/repositories/database.py	union-attr	Item "None" of "Connection | None" has no attribute "execute"
+3	src/repositories/database.py	union-attr	Item "None" of "Connection | None" has no attribute "executescript"
+1	src/repositories/database.py	union-attr	Item "None" of "Connection | None" has no attribute "transaction"
+1	src/repositories/db_retry.py	no-untyped-def	Function is missing a return type annotation
+1	src/repositories/pg.py	no-any-return	Returning Any from function declared to return "str"
+1	src/repositories/pg.py	no-untyped-call	Call to untyped function "close" in typed context
+10	src/repositories/pg.py	no-untyped-def	Function is missing a return type annotation
+4	src/repositories/pg.py	no-untyped-def	Function is missing a type annotation
+4	src/repositories/pg.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/repositories/pg.py	return-value	Incompatible return value type (got "AsyncConnection[Row]", expected "AsyncConnection[tuple[Any, ...]]")
+1	src/repositories/pg.py	type-arg	Missing type arguments for generic type "dict"
+1	src/repositories/pg.py	unused-ignore	Unused "type: ignore" comment
+1	src/repositories/pgsync.py	arg-type	Argument 1 to "Connection" has incompatible type "Connection[Row]"; expected "Connection[tuple[Any, ...]]"
+1	src/repositories/pgsync.py	no-any-return	Returning Any from function declared to return "int"
+2	src/repositories/pgsync.py	no-untyped-call	Call to untyped function "_read_lastval" in typed context
+5	src/repositories/pgsync.py	no-untyped-def	Function is missing a return type annotation
+3	src/repositories/pgsync.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+2	src/services/audit_trail.py	type-arg	Missing type arguments for generic type "tuple"
+1	src/services/auth/email_sender.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/auth/email_verification.py	no-any-return	Returning Any from function declared to return "str | None"
+1	src/services/auth/password_reset.py	no-any-return	Returning Any from function declared to return "str | None"
+1	src/services/auth/passwords.py	no-any-return	Returning Any from function declared to return "bool"
+1	src/services/auth/passwords.py	no-any-return	Returning Any from function declared to return "str"
+1	src/services/auth/rate_limit.py	arg-type	Argument 1 to "append" of "deque" has incompatible type "float"; expected "datetime"
+1	src/services/auth/rate_limit.py	assignment	Incompatible types in assignment (expression has type "datetime", variable has type "float")
+4	src/services/auth/rate_limit.py	no-untyped-call	Call to untyped function "_redis_client" in typed context
+1	src/services/auth/rate_limit.py	no-untyped-call	Call to untyped function "from_url" in typed context
+1	src/services/auth/rate_limit.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/auth/rate_limit.py	operator	Unsupported operand types for - ("float" and "timedelta")
+1	src/services/auth/sessions.py	no-any-return	Returning Any from function declared to return "int"
+1	src/services/auth/sessions.py	no-any-return	Returning Any from function declared to return "str | None"
+2	src/services/channels/dispatcher.py	arg-type	Argument 1 to "time" has incompatible type "*map[int]"; expected "tzinfo | None"
+1	src/services/channels/dispatcher.py	no-any-return	Returning Any from function declared to return "str"
+2	src/services/channels/dispatcher.py	no-untyped-call	Call to untyped function "_get_apprise_cls" in typed context
+1	src/services/channels/dispatcher.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+3	src/services/channels/dispatcher.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+1	src/services/channels/dispatcher.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/channels/dispatcher.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/channels/dispatcher.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/channels/dispatcher.py	type-arg	Missing type arguments for generic type "list"
+1	src/services/channels/dispatcher.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/channels/ssrf_guard.py	union-attr	Item "int" of "str | int" has no attribute "split"
+3	src/services/conditional_cache.py	type-arg	Missing type arguments for generic type "tuple"
+1	src/services/deduplicator.py	arg-type	Argument "key" to "min" has incompatible type "Callable[[Job], str | None]"; expected "Callable[[Job], SupportsDunderLT[Any] | SupportsDunderGT[Any]]"
+1	src/services/deduplicator.py	no-any-return	Returning Any from function declared to return "float"
+2	src/services/deduplicator.py	no-untyped-call	Call to untyped function "find" in typed context
+1	src/services/deduplicator.py	no-untyped-call	Call to untyped function "union" in typed context
+1	src/services/deduplicator.py	no-untyped-def	Function is missing a return type annotation
+2	src/services/deduplicator.py	no-untyped-def	Function is missing a type annotation
+3	src/services/deduplicator.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/deduplicator.py	return-value	Incompatible return value type (got "str | None", expected "SupportsDunderLT[Any] | SupportsDunderGT[Any]")
+4	src/services/deduplicator.py	type-arg	Missing type arguments for generic type "dict"
+3	src/services/deduplicator.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/embeddings.py	attr-defined	"object" has no attribute "encode"
+2	src/services/embeddings.py	no-any-return	Returning Any from function declared to return "list[float]"
+1	src/services/embeddings.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/embeddings.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/embeddings.py	unused-ignore	Unused "type: ignore" comment
+2	src/services/feed.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+2	src/services/feed.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+1	src/services/feed.py	type-arg	Missing type arguments for generic type "list"
+1	src/services/ghost_detection.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/job_enrichment.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+2	src/services/job_enrichment.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+1	src/services/llm_matcher.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+2	src/services/llm_matcher.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+4	src/services/llm_matcher.py	type-arg	Missing type arguments for generic type "dict"
+2	src/services/metrics_exporter.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+3	src/services/notifications/report_generator.py	type-arg	Missing type arguments for generic type "dict"
+2	src/services/profile/_llm_utils.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+3	src/services/profile/cv_parser.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/cv_parser.py	type-arg	Missing type arguments for generic type "set"
+1	src/services/profile/dep_file_parser.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/profile/github_enricher.py	arg-type	Argument 1 to "_fetch_repo_frameworks" has incompatible type "ClientSession | None"; expected "ClientSession"
+2	src/services/profile/github_enricher.py	arg-type	Argument 1 to "_get_json" has incompatible type "ClientSession | None"; expected "ClientSession"
+1	src/services/profile/github_enricher.py	arg-type	Argument 2 to "parse_manifest" has incompatible type "str | BaseException"; expected "str"
+5	src/services/profile/github_enricher.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/github_enricher.py	union-attr	Item "BaseException" of "list[str] | BaseException" has no attribute "__iter__" (not iterable)
+1	src/services/profile/github_enricher.py	union-attr	Item "None" of "ClientSession | None" has no attribute "close"
+1	src/services/profile/github_enricher.py	var-annotated	Need type annotation for "empty"
+6	src/services/profile/layout.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/linkedin_parser.py	no-untyped-def	Function is missing a return type annotation
+25	src/services/profile/linkedin_parser.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/linkedin_parser.py	var-annotated	Need type annotation for "empty"
+1	src/services/profile/llm_curate.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/profile/llm_provider.py	call-overload	No overload variant of "create" of "AsyncCompletions" matches argument types "str", "list[dict[str, str]]", "float", "dict[str, str]"
+4	src/services/profile/llm_provider.py	no-any-return	Returning Any from function declared to return "dict[str, Any]"
+1	src/services/profile/llm_provider.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/profile/llm_provider.py	return	Missing return statement
+8	src/services/profile/models.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/preferences.py	type-arg	Missing type arguments for generic type "dict"
+3	src/services/profile/schemas.py	no-untyped-call	Call to untyped function "_coerce_to_str_list" in typed context
+8	src/services/profile/schemas.py	no-untyped-def	Function is missing a type annotation
+1	src/services/profile/skill_entry.py	assignment	Incompatible types in assignment (expression has type "def normalize_skill(_raw: str) -> None", variable has type "def normalize_skill(raw: str) -> ESCOMatch | None")
+1	src/services/profile/skill_entry.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/profile/skill_normalizer.py	no-untyped-call	Call to untyped function "_get_encoder" in typed context
+1	src/services/profile/skill_normalizer.py	no-untyped-def	Function is missing a return type annotation
+2	src/services/profile/skill_normalizer.py	type-arg	Missing type arguments for generic type "dict"
+2	src/services/profile/skill_normalizer.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/profile/skill_tiering.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/profile/skill_tiering.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/storage.py	no-any-return	Returning Any from function declared to return "bool"
+2	src/services/profile/storage.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+5	src/services/profile/storage.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+1	src/services/profile/storage.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+3	src/services/profile/storage.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/profile/two_pass.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/rescore.py	arg-type	Argument 1 to "FeedService" has incompatible type "Connection | None"; expected "Connection"
+1	src/services/rescore.py	arg-type	Argument 1 to "_build_enrichment_lookup" has incompatible type "Connection | None"; expected "Connection"
+1	src/services/rescore.py	arg-type	Argument 1 to "clear_user_verdicts" has incompatible type "Connection | None"; expected "Connection"
+1	src/services/rescore.py	arg-type	Argument 1 to "get" of "dict" has incompatible type "Any | None"; expected "int"
+1	src/services/rescore.py	misc	Cannot infer type of lambda
+1	src/services/rescore.py	no-untyped-call	Call to untyped function "JobScorer" in typed context
+1	src/services/rescore.py	no-untyped-call	Call to untyped function "close" in typed context
+1	src/services/rescore.py	no-untyped-call	Call to untyped function "init_db" in typed context
+1	src/services/rescore.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/rescore.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+3	src/services/rescore.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/rescore.py	type-arg	Missing type arguments for generic type "set"
+1	src/services/rescore.py	union-attr	Item "None" of "Connection | None" has no attribute "execute"
+3	src/services/rescore.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/rescore.py	var-annotated	Need type annotation for "shortlist_jobs" (hint: "shortlist_jobs: list[<type>] = ...")
+1	src/services/retrieval.py	attr-defined	"object" has no attribute "predict"
+1	src/services/retrieval.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/retrieval.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/salary.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/salary.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/salary.py	operator	Unsupported left operand type for > ("None")
+1	src/services/salary.py	operator	Unsupported operand types for < ("int" and "None")
+1	src/services/salary.py	operator	Unsupported operand types for > ("int" and "None")
+1	src/services/salary.py	return-value	Incompatible return value type (got "tuple[int | None, int | None]", expected "tuple[int, int] | None")
+1	src/services/scheduler.py	no-untyped-call	Call to untyped function "_safe_fetch" in typed context
+1	src/services/scheduler.py	no-untyped-def	Function is missing a type annotation
+3	src/services/scheduler.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/scheduler.py	type-arg	Missing type arguments for generic type "Iterable"
+2	src/services/scheduler.py	type-arg	Missing type arguments for generic type "list"
+1	src/services/skill_gap.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/services/skill_gap.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/skill_matcher.py	no-untyped-def	Function is missing a type annotation
+1	src/services/skill_matcher.py	type-arg	Missing type arguments for generic type "Pattern"
+1	src/services/skill_matcher.py	type-arg	Missing type arguments for generic type "list"
+1	src/services/tailoring/generator.py	type-arg	Missing type arguments for generic type "dict"
+2	src/services/tailoring/patterns.py	type-arg	Missing type arguments for generic type "dict"
+2	src/services/tailoring/provenance.py	type-arg	Missing type arguments for generic type "dict"
+4	src/services/vector_index.py	no-untyped-call	Call to untyped function "_ensure_collection" in typed context
+2	src/services/vector_index.py	no-untyped-def	Function is missing a return type annotation
+1	src/services/vector_index.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+2	src/services/vector_index.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/vector_index.py	unused-ignore	Unused "type: ignore" comment
+1	src/sources/apis_free/arbeitnow.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_free/himalayas.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_free/hn_jobs.py	arg-type	Argument 1 to "_parse_item" of "HNJobsSource" has incompatible type "dict[Any, Any] | list[Any] | BaseException"; expected "dict[Any, Any]"
+1	src/sources/apis_free/hn_jobs.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/apis_free/jobicy.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_free/remotive.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/adzuna.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/adzuna.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/careerjet.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/careerjet.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/findwork.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/findwork.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/google_jobs.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/google_jobs.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/gov_apprenticeships.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/gov_apprenticeships.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/apis_keyed/gov_apprenticeships.py	type-arg	Missing type arguments for generic type "set"
+1	src/sources/apis_keyed/jooble.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/jooble.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/jsearch.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/jsearch.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/apis_keyed/reed.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/apis_keyed/reed.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/ashby.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/ashby.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/greenhouse.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/greenhouse.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/lever.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/personio.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/ats/personio.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/pinpoint.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/recruitee.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/recruitee.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/rippling.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/rippling.py	misc	Generator has incompatible item type "Any | str | None"; expected "str"
+1	src/sources/ats/rippling.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/smartrecruiters.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/smartrecruiters.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/successfactors.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/ats/successfactors.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/successfactors.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/ats/workable.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/workable.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/workday.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/ats/workday.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/workday.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/base.py	arg-type	Argument "concurrent" to "RateLimiter" has incompatible type "float"; expected "int"
+1	src/sources/base.py	assignment	Incompatible types in assignment (expression has type "tuple[type[ClientError], type[TimeoutError], type[JSONDecodeError]]", variable has type "tuple[type[ClientError], type[TimeoutError]]")
+2	src/sources/base.py	no-any-return	Returning Any from function declared to return "dict[Any, Any] | list[Any] | None"
+1	src/sources/base.py	no-any-return	Returning Any from function declared to return "dict[Any, Any] | list[Any] | str | None"
+3	src/sources/base.py	no-any-return	Returning Any from function declared to return "list[str]"
+1	src/sources/base.py	no-any-return	Returning Any from function declared to return "str | None"
+2	src/sources/base.py	no-untyped-call	Call to untyped function "acquire" in typed context
+2	src/sources/base.py	no-untyped-call	Call to untyped function "release" in typed context
+1	src/sources/base.py	no-untyped-def	Function is missing a return type annotation
+1	src/sources/base.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/base.py	return-value	Incompatible return value type (got "dict[Any, Any] | list[Any] | str | None", expected "dict[Any, Any] | list[Any] | None")
+1	src/sources/base.py	return-value	Incompatible return value type (got "dict[Any, Any] | list[Any] | str | None", expected "str | None")
+17	src/sources/base.py	type-arg	Missing type arguments for generic type "dict"
+4	src/sources/base.py	type-arg	Missing type arguments for generic type "list"
+1	src/sources/feeds/biospace.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/jobs_ac_uk.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/nhs_jobs.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/nhs_jobs.py	type-arg	Missing type arguments for generic type "tuple"
+1	src/sources/feeds/nhs_jobs_xml.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/realworkfromanywhere.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/uni_jobs.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/weworkremotely.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/feeds/workanywhere.py	import-untyped	Library stubs not installed for "defusedxml.ElementTree"
+1	src/sources/other/hackernews.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/other/hackernews.py	type-arg	Missing type arguments for generic type "dict"
+2	src/sources/other/hackernews.py	union-attr	Item "list[Any]" of "dict[Any, Any] | list[Any]" has no attribute "get"
+1	src/sources/other/indeed.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/other/themuse.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/sources/scrapers/eightykhours.py	call-overload	No overload variant of "__getitem__" of "list" matches argument type "str"
+1	src/utils/logger.py	type-arg	Missing type arguments for generic type "Token"
+1	src/utils/logger.py	type-arg	Missing type arguments for generic type "dict"
+1	src/utils/logger.py	type-arg	Missing type arguments for generic type "frozenset"
+1	src/utils/rate_limiter.py	no-untyped-call	Call to untyped function "acquire" in typed context
+1	src/utils/rate_limiter.py	no-untyped-call	Call to untyped function "release" in typed context
+3	src/utils/rate_limiter.py	no-untyped-def	Function is missing a return type annotation
+1	src/utils/rate_limiter.py	no-untyped-def	Function is missing a type annotation
+1	src/utils/telemetry.py	type-arg	Missing type arguments for generic type "dict"
+3	src/utils/time_buckets.py	type-arg	Missing type arguments for generic type "dict"
+1	src/utils/time_buckets.py	var-annotated	Need type annotation for "result"
+2	src/workers/settings.py	type-arg	Missing type arguments for generic type "dict"
+1	src/workers/tasks.py	arg-type	Argument "date_found" to "Job" has incompatible type "datetime"; expected "str"
+1	src/workers/tasks.py	arg-type	Argument 1 to "get" of "dict" has incompatible type "Any | None"; expected "int"
+2	src/workers/tasks.py	arg-type	Argument 1 to "time" has incompatible type "*map[int]"; expected "tzinfo | None"
+1	src/workers/tasks.py	assignment	Incompatible types in assignment (expression has type "ChannelSendResult | Any", variable has type "dict[Any, Any]")
+1	src/workers/tasks.py	attr-defined	"Job" has no attribute "id"
+3	src/workers/tasks.py	attr-defined	"dict[Any, Any]" has no attribute "channel_type"
+2	src/workers/tasks.py	attr-defined	"dict[Any, Any]" has no attribute "error"
+1	src/workers/tasks.py	attr-defined	"dict[Any, Any]" has no attribute "ok"
+2	src/workers/tasks.py	attr-defined	"dict[Any, Any]" has no attribute "skipped"
+1	src/workers/tasks.py	no-untyped-call	Call to untyped function "JobScorer" in typed context
+5	src/workers/tasks.py	no-untyped-call	Call to untyped function "fetchall" in typed context
+5	src/workers/tasks.py	no-untyped-call	Call to untyped function "fetchone" in typed context
+2	src/workers/tasks.py	no-untyped-call	Call to untyped function "keys" in typed context
+1	src/workers/tasks.py	no-untyped-def	Function is missing a return type annotation
+2	src/workers/tasks.py	no-untyped-def	Function is missing a type annotation
+1	src/workers/tasks.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+11	src/workers/tasks.py	type-arg	Missing type arguments for generic type "dict"
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "enrich_job_task" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "mark_ledger_failed_task" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "mark_ledger_sent_task" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "nightly_ghost_sweep" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "notification_tick" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "score_and_ingest" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "send_bundle" untyped
+1	src/workers/tasks.py	untyped-decorator	Untyped decorator makes function "send_notification" untyped
