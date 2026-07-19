@@ -260,6 +260,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
+| `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
 | `ENRICHMENT_THRESHOLD` | No (default `60`) | Min match_score for a job to be LLM-enriched |

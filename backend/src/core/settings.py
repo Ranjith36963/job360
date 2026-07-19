@@ -157,6 +157,18 @@ WORKPLACE_WEIGHT = int(os.getenv("WORKPLACE_WEIGHT", "6"))
 # cap (no plan column exists yet — everyone is on the free cap for now).
 TAILOR_FREE_PER_MONTH = int(os.getenv("TAILOR_FREE_PER_MONTH", "10"))
 
+# Cost cap on profile re-extraction (docs/fable/08 "Cost economics — NOT audited").
+# Every profile change re-runs the FULL two-pass extraction — 4+ paid LLM calls
+# over CV / LinkedIn / GitHub / about_me — from stored data. Nothing bounded how
+# often a user could trigger that, and five routes reach the same code path.
+#
+# 12/hour is deliberately generous: a person genuinely setting up a profile edits
+# it a handful of times in a sitting, so this should never be felt by a real user.
+# It exists to stop a loop (or a bored user) from running up a bill.
+#
+# Set 0 to disable the cap entirely.
+PROFILE_EXTRACT_MAX_PER_HOUR = int(os.getenv("PROFILE_EXTRACT_MAX_PER_HOUR", "12"))
+
 # Pillar 2 Batch 2.6 — semantic stack feature flag.
 # When false (default), embeddings + ChromaDB + ESCO normalisation all skip.
 # When true, callers that check this flag activate the semantic retrieval path.
