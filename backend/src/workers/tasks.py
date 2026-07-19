@@ -153,12 +153,12 @@ async def score_and_ingest(
     # share across the per-user scorer cache. Empty dict ⇒ no rows ⇒
     # multi-dim contributes 0 (legacy 4-component path preserved).
     enrichment_lookup_dict = await _build_enrichment_lookup(db)
-    # getattr(job, "id", None) -> Optional[int] at runtime (Job has no
-    # declared `id` field; see the enrich_job_task note below on the same
-    # pattern), but mypy can only see `Any | None`, hence the ignore. This is
-    # the documented call pattern from job_enrichment._build_enrichment_lookup's
-    # own docstring — dict.get(None) safely returns None, not a crash.
-    enrichment_lookup_fn = lambda job: enrichment_lookup_dict.get(getattr(job, "id", None))  # type: ignore[arg-type]  # noqa: E731
+    # `Job.id` is a declared field now (models.py) and _job_from_row populates
+    # it from the row, so this lookup actually finds enrichment instead of
+    # always calling get(None). Reads `job.id` directly rather than through
+    # getattr — the getattr dance existed only because the field was previously
+    # stapled on at runtime and might genuinely be absent.
+    enrichment_lookup_fn = lambda job: enrichment_lookup_dict.get(job.id)  # noqa: E731
 
     def _scorer_for(user_id: str) -> JobScorer:
         if user_id not in user_scorers:
@@ -442,6 +442,23 @@ def _job_from_row(job_row: Any) -> Job:
     shape. Pinned by tests/test_recency_date_type.py.
     """
     return Job(
+        # H1 — carry the row id onto the Job. The enrichment lookup is keyed on
+        # it (`enrichment_lookup_dict.get(getattr(job, "id", None))`), so an
+        # unset id meant `get(None)`, which ALWAYS misses — silently scoring
+        # every enrichment dimension (seniority / salary / visa / workplace) as
+        # 0 for every job ingested through the worker. Nothing raised: dict.get
+        # on a missing key returns None, and the scorer treats None as "no
+        # enrichment", which is indistinguishable from "this job genuinely has
+        # none".
+        #
+        # This is the documented dim-scoring-id bug, in the worker path.
+        # enrich_job_task already does it right (`job.id = row["id"]`); this
+        # call site was simply never given the same treatment.
+        #
+        # Scope note: with ENRICHMENT_ENABLED off the lookup dict is empty, so
+        # every get() misses either way and behaviour is unchanged. With it on,
+        # the dimensions finally contribute what they were always meant to.
+        id=job_row["id"],
         title=job_row["title"],
         company=job_row["company"],
         apply_url=job_row["apply_url"],
