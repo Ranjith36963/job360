@@ -16,6 +16,7 @@ imported at module top so tests can monkeypatch them by name.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -42,6 +43,15 @@ from src.services.profile.preferences import (
 )
 
 logger = logging.getLogger("job360.profile.two_pass")
+
+
+async def _none() -> None:
+    """Placeholder coroutine for an input that is absent.
+
+    gather() needs a coroutine in every slot so the results unpack positionally;
+    this keeps the call site readable instead of building the list conditionally.
+    """
+    return None
 
 
 def _merge_str_list(dst: list[str], src: list[str]) -> None:
@@ -174,26 +184,48 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     # feeds the other — so whatever one pass misses the other can still catch.
     # Deterministic = STRUCTURE only (CLAUDE.md rule #28); LLM = meaning.
 
+    # ── N2 — run the FOUR LLM passes concurrently ──────────────────────
+    # The four inputs (CV / LinkedIn / GitHub / about_me) are independent: none
+    # reads what another produced. They used to be four sequential `await`s, so
+    # the caller waited for the SUM of four network round-trips. This route is
+    # awaited inline by the profile-upload endpoints, so that sum was wall-clock
+    # time the user spent watching a spinner.
+    #
+    # Only the CALLS are parallel. The merges below still run one at a time, in
+    # exactly the original order, because they all mutate the same CVData and a
+    # later merge can depend on what an earlier one wrote. Same inputs, same
+    # merge sequence, same output — just without the queuing.
+    #
+    # return_exceptions=True keeps the existing contract that one failing LLM
+    # pass never sinks the others: each result is unpacked below with the same
+    # "log it and keep the deterministic result" handling it had before.
+    async def _safe(coro: Any, label: str) -> Any:
+        try:
+            return await coro
+        except Exception as e:  # noqa: BLE001 — deterministic result still stands
+            logger.warning("two_pass: %s LLM pass skipped: %s", label, e)
+            return None
+
+    _llm_cv_res, _llm_li_res, _llm_gh_res, _llm_pr_res = await asyncio.gather(
+        _safe(llm_cv_fields_from_text(cv.raw_text), "CV") if cv.raw_text else _none(),
+        _safe(llm_linkedin_fields(cv.linkedin_raw_text), "LinkedIn") if cv.linkedin_raw_text else _none(),
+        _safe(llm_infer_github_skills(cv.github_repos_brief), "GitHub") if cv.github_repos_brief else _none(),
+        _safe(llm_infer_from_about_me(prefs.about_me), "about_me") if prefs.about_me else _none(),
+    )
+
     # ── ① CV ── raw = cv.raw_text ──────────────────────────────────────
     if cv.raw_text:
         det_cv = deterministic_cv_fields(cv.raw_text)           # det-CV-output
         _merge_str_list(cv.skills, det_cv.get("skills", []))
         if not cv.summary and det_cv.get("summary"):
             cv.summary = det_cv["summary"]
-        try:
-            llm_cv = await llm_cv_fields_from_text(cv.raw_text)  # llm-CV-output
-            _merge_cv_llm_into(cv, llm_cv)                       # → MERGED CV
-        except Exception as e:  # noqa: BLE001 — deterministic result still stands
-            logger.warning("two_pass: CV LLM pass skipped: %s", e)
+        if _llm_cv_res is not None:                          # llm-CV-output
+            _merge_cv_llm_into(cv, _llm_cv_res)                  # → MERGED CV
 
     # ── ② LinkedIn ── raw = cv.linkedin_raw_text ───────────────────────
     if cv.linkedin_raw_text:
         det_li = deterministic_linkedin_fields(cv.linkedin_raw_text)  # det-LI-output
-        llm_li: dict[str, Any] = {}
-        try:
-            llm_li = await llm_linkedin_fields(cv.linkedin_raw_text)  # llm-LI-output
-        except Exception as e:  # noqa: BLE001 — deterministic result still stands
-            logger.warning("two_pass: LinkedIn LLM pass skipped: %s", e)
+        llm_li: dict[str, Any] = _llm_li_res or {}                   # llm-LI-output
         merged_li = merge_linkedin_fields(det_li, llm_li)            # → MERGED LI
         enrich_cv_from_linkedin(cv, merged_li)
 
@@ -201,21 +233,15 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     if cv.github_repos_brief:
         det_gh = deterministic_github_fields(cv.github_repos_brief)  # det-GH-output
         _merge_str_list(cv.github_skills_inferred, det_gh)
-        try:
-            llm_gh = await llm_infer_github_skills(cv.github_repos_brief)  # llm-GH-output
-            _merge_str_list(cv.github_llm_skills, llm_gh)                  # → MERGED GH
-        except Exception as e:  # noqa: BLE001 — deterministic result still stands
-            logger.warning("two_pass: GitHub LLM pass skipped: %s", e)
+        if _llm_gh_res is not None:                                        # llm-GH-output
+            _merge_str_list(cv.github_llm_skills, _llm_gh_res)             # → MERGED GH
 
     # ── ④ Preferences ── raw = prefs.about_me ──────────────────────────
     if prefs.about_me:
         det_pr = deterministic_about_me_fields(prefs.about_me)   # det-PR-output
         _merge_str_list(cv.about_me_inferred_skills, det_pr)
-        try:
-            llm_pr = await llm_infer_from_about_me(prefs.about_me)  # llm-PR-output
-            _merge_str_list(cv.about_me_inferred_skills, llm_pr)    # → MERGED PR
-        except Exception as e:  # noqa: BLE001 — deterministic result still stands
-            logger.warning("two_pass: about_me LLM pass skipped: %s", e)
+        if _llm_pr_res is not None:                                # llm-PR-output
+            _merge_str_list(cv.about_me_inferred_skills, _llm_pr_res)  # → MERGED PR
 
     # Collapse line-wrap fragments + cross-source duplicates in the free-text
     # lists so the profile shows each certification / qualification ONCE (a CV +

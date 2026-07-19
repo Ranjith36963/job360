@@ -275,6 +275,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `MATCHER_MAX_JOBS` | No (default `30`) | Max jobs per user per run sent to the judge |
 | `SOURCE_FETCH_TIMEOUT` | No (default `60`) | Per-source fetch ceiling in seconds |
 | `SOURCE_FETCH_TIMEOUT_ATS` | No (default `240`) | ATS category fetch ceiling in seconds |
+| `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
 
 ## Important Patterns
 
