@@ -5,6 +5,7 @@ from typing import Any, Optional, cast
 
 import aiohttp
 
+from src.core.settings import RATE_LIMITS, SOURCE_FETCH_TIMEOUT
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -31,9 +32,25 @@ class ReedSource(BaseJobSource):
         jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
-        # Search top job titles in key locations
-        queries = self.job_titles[:8]
+        # S2 — size the fan-out from the actual time budget instead of a
+        # hand-picked constant. Reed is rate-limited to one request every
+        # RATE_LIMITS["reed"]["delay"] seconds, so N requests cost at LEAST
+        # N * delay before any network time. At the previous 8 titles x 3
+        # locations that was 24 * 2.0s = 48s of pure waiting against a 60s
+        # SOURCE_FETCH_TIMEOUT — it did not always blow the ceiling, which is
+        # worse than always failing: the source died intermittently, and a
+        # timeout looks identical to "Reed had nothing today".
+        #
+        # Deriving the cap means a later change to the delay or the timeout
+        # cannot silently push this back over the edge.
         locations = ["London", "UK", "Remote"]
+        _reed_limits = RATE_LIMITS.get("reed")
+        _delay = float(_reed_limits["delay"]) if _reed_limits else 2.0
+        # Spend at most 60% of the budget on enforced delay, leaving the rest
+        # for real HTTP latency and parsing.
+        _max_requests = max(1, int((SOURCE_FETCH_TIMEOUT * 0.6) / _delay))
+        _max_titles = max(1, _max_requests // len(locations))
+        queries = self.job_titles[:_max_titles]
         for query in queries:
             for loc in locations:
                 params = {

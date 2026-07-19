@@ -124,24 +124,7 @@ async def score_and_ingest(
     if job_row is None:
         return {"ingested": 0, "notifications_queued": 0}
 
-    job = Job(
-        title=job_row["title"],
-        company=job_row["company"],
-        apply_url=job_row["apply_url"],
-        source=job_row["source"],
-        # FINDING (not fixed — logic change, out of scope): _parse_dt returns
-        # datetime, but Job.date_found is typed `str` everywhere else in the
-        # codebase (models.py:23, main.py). Downstream, skill_matcher.py's
-        # `_recency_score(date_found: str)` does
-        # `datetime.fromisoformat(date_found)`, which raises TypeError on a
-        # datetime object — caught by its own `except (ValueError, TypeError):
-        # return 0`, so this doesn't crash, it silently zeroes the recency
-        # component whenever score_and_ingest scores a job via this path.
-        date_found=_parse_dt(job_row["date_found"]),  # type: ignore[arg-type]
-        location=job_row["location"] or "",
-        description=job_row["description"] or "",
-        match_score=job_row["match_score"],
-    )
+    job = _job_from_row(job_row)
 
     feed = FeedService(db)
     ingested = 0
@@ -441,6 +424,33 @@ def _default_search_config() -> SearchConfig:
     from src.core.tenancy import DEFAULT_TENANT_ID
 
     return _search_config_for(DEFAULT_TENANT_ID)
+
+
+def _job_from_row(job_row: Any) -> Job:
+    """Build a ``Job`` from a ``jobs`` row.
+
+    ``date_found`` is normalised to an ISO **string**. That is not cosmetic:
+    ``Job.date_found`` is typed ``str`` (models.py:23) and
+    ``skill_matcher._recency_score`` calls ``datetime.fromisoformat(date_found)``
+    on it. Passing the ``datetime`` that ``_parse_dt`` returns raised TypeError
+    there, which that function's own ``except (ValueError, TypeError): return 0``
+    swallowed — silently zeroing the recency component of EVERY job scored
+    through ``score_and_ingest``. Nothing errored; the score was just wrong.
+
+    Postgres hands back a ``datetime`` for this column, so the conversion has to
+    happen somewhere; doing it here keeps every Job in the codebase the same
+    shape. Pinned by tests/test_recency_date_type.py.
+    """
+    return Job(
+        title=job_row["title"],
+        company=job_row["company"],
+        apply_url=job_row["apply_url"],
+        source=job_row["source"],
+        date_found=_parse_dt(job_row["date_found"]).isoformat(),
+        location=job_row["location"] or "",
+        description=job_row["description"] or "",
+        match_score=job_row["match_score"],
+    )
 
 
 def _parse_dt(value: Any) -> datetime:
@@ -820,7 +830,18 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
     now_utc = datetime.now(timezone.utc)
 
     try:
-        cur = await db.execute("SELECT * FROM notification_rules WHERE enabled = 1")
+        # N7 — one LEFT JOIN instead of a per-rule `SELECT timezone FROM users`.
+        # This cron fires every 5 minutes, so the old shape cost 1 + N queries
+        # per tick and grew linearly with the number of users who have
+        # notifications enabled. LEFT (not INNER) so a rule whose user row is
+        # missing still gets evaluated, exactly as before — it just falls back
+        # to UTC, which is what the old per-row `except` did.
+        cur = await db.execute(
+            "SELECT r.*, u.timezone AS _user_timezone "
+            "FROM notification_rules r "
+            "LEFT JOIN users u ON u.id = r.user_id "
+            "WHERE r.enabled = 1"
+        )
         rules = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
         return {"checked": 0, "enqueued": 0}
@@ -828,13 +849,7 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
     enqueued = 0
     for rule in rules:
         user_id = rule["user_id"]
-        # Get user timezone
-        try:
-            cur = await db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
-            row = await cur.fetchone()
-            user_tz = (row["timezone"] if row and row["timezone"] else "UTC")
-        except Exception:  # noqa: BLE001
-            user_tz = "UTC"
+        user_tz = rule.get("_user_timezone") or "UTC"
 
         due = _bundle_due(rule, now_utc=now_utc, user_tz=user_tz)
         # SI2 — quiet-hours flush. An instant-mode user's matches are queued
@@ -906,7 +921,7 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
     # set correctly *before* the enrich_job call that reads it — unlike the
     # previously-identified "dim scoring id bug" (job.id unset at scoring
     # time in main.py/jobs.py), this call site looks correct, just untyped.
-    job.id = row["id"]  # type: ignore[attr-defined]
+    job.id = row["id"]
 
     try:
         enrichment = await enrich_job(

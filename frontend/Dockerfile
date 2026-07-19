@@ -38,16 +38,32 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Non-root user
 RUN addgroup --system nodejs && adduser --system --ingroup nodejs nextjs
 
-# Next.js standalone output is NOT configured in next.config.ts, so we
-# ship the full .next/ build output + production node_modules.
-COPY --from=builder  --chown=nextjs:nodejs /app/.next        ./.next
-COPY --from=builder  --chown=nextjs:nodejs /app/public       ./public
-COPY --from=builder  --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
-COPY --from=builder  --chown=nextjs:nodejs /app/package.json  ./package.json
-COPY --from=prod-deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+# L6 — standalone output (next.config.ts `output: "standalone"`).
+#
+# Next traces the modules actually reachable at runtime and emits a
+# self-contained server in `.next/standalone`, including its own minimal
+# node_modules. So the runner copies three things instead of the whole
+# dependency tree:
+#   .next/standalone  — the server + only the modules it really needs
+#   .next/static      — hashed build assets (NOT included in standalone)
+#   public            — static files served as-is
+#
+# The prod-deps stage is intentionally no longer copied from: shipping the full
+# production node_modules was the finding (L6). Keep that stage for now — it is
+# still a useful cache layer and a fallback if standalone is ever reverted.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static     ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public           ./public
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# standalone emits its own server.js — `npm start` (next start) is NOT used
+# here and would fail, since the Next CLI is not part of the traced bundle.
+# PORT/HOSTNAME are read by that server; bind 0.0.0.0 so the container is
+# reachable from outside (default would be localhost only).
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "server.js"]

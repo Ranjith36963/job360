@@ -257,7 +257,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
-| `JOB360_ENV` | No | **Separate** prod gate — session cookie `Secure` flag is on ONLY when `JOB360_ENV=="prod"` (auth.py:109). ⚠️ Does NOT follow `APP_ENV`/`RAILWAY_ENVIRONMENT` — set it explicitly on Railway or cookies ship without `Secure` |
+| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |

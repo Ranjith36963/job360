@@ -7,6 +7,17 @@ import { SECURITY_HEADERS } from "./src/lib/security-headers";
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  // L6 — emit a self-contained server bundle in `.next/standalone`, so the
+  // runtime image copies just that plus static assets instead of the whole
+  // `node_modules` tree. Next traces the modules actually reached at runtime;
+  // dev/build-only dependencies never make it into the image.
+  //
+  // This is purely a packaging change: same code paths, same rewrites, same
+  // headers — the app is byte-identical, it just ships without the build
+  // toolchain riding along. Smaller image = faster deploys and a smaller
+  // surface for dependency CVEs to be reported against.
+  output: "standalone",
+
   // Same-origin proxy: the browser calls `/api/*` on the frontend origin and
   // Next forwards it to the backend. This keeps frontend + backend same-origin
   // so the host-only session cookie is always sent and the middleware auth gate

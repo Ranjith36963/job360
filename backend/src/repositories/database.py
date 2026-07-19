@@ -486,39 +486,47 @@ class JobDatabase:
         rows = await cursor.fetchall()
         now = datetime.now(timezone.utc)
         missed_count = 0
-        for row in rows:
-            job_id = row[0]
-            key = (row[1], row[2])
-            if key in seen_keys:
-                continue
-            current_state = row[5] or StalenessState.ACTIVE.value
-            # Sticky: confirmed_expired never demoted by absence sweep.
-            if current_state == StalenessState.CONFIRMED_EXPIRED.value:
+        # M7 — wrap the whole sweep in ONE transaction. Under autocommit each
+        # UPDATE committed on its own, so a crash (or a connection drop) part-way
+        # through left the source half-swept: some jobs with an incremented
+        # consecutive_misses and a new staleness_state, the rest untouched. The
+        # next run would then re-increment only the survivors, drifting the two
+        # halves apart. A ghost sweep is one logical decision about one source;
+        # it should land completely or not at all.
+        async with self._db.transaction():
+            for row in rows:
+                job_id = row[0]
+                key = (row[1], row[2])
+                if key in seen_keys:
+                    continue
+                current_state = row[5] or StalenessState.ACTIVE.value
+                # Sticky: confirmed_expired never demoted by absence sweep.
+                if current_state == StalenessState.CONFIRMED_EXPIRED.value:
+                    await self._db.execute(
+                        "UPDATE jobs SET consecutive_misses = consecutive_misses + 1 WHERE id = ?",
+                        (job_id,),
+                    )
+                    missed_count += 1
+                    continue
+
+                new_misses = int(row[3] or 0) + 1
+                last_seen = row[4]
+                age_hours = 0.0
+                if last_seen:
+                    try:
+                        last_seen_dt = datetime.fromisoformat(last_seen)
+                        if last_seen_dt.tzinfo is None:
+                            last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
+                        age_hours = (now - last_seen_dt).total_seconds() / 3600
+                    except (ValueError, TypeError):
+                        age_hours = 0.0
+                next_state = transition(new_misses, age_hours).value
                 await self._db.execute(
-                    "UPDATE jobs SET consecutive_misses = consecutive_misses + 1 WHERE id = ?",
-                    (job_id,),
+                    "UPDATE jobs SET consecutive_misses = ?, staleness_state = ? " "WHERE id = ?",
+                    (new_misses, next_state, job_id),
                 )
                 missed_count += 1
-                continue
-
-            new_misses = int(row[3] or 0) + 1
-            last_seen = row[4]
-            age_hours = 0.0
-            if last_seen:
-                try:
-                    last_seen_dt = datetime.fromisoformat(last_seen)
-                    if last_seen_dt.tzinfo is None:
-                        last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-                    age_hours = (now - last_seen_dt).total_seconds() / 3600
-                except (ValueError, TypeError):
-                    age_hours = 0.0
-            next_state = transition(new_misses, age_hours).value
-            await self._db.execute(
-                "UPDATE jobs SET consecutive_misses = ?, staleness_state = ? " "WHERE id = ?",
-                (new_misses, next_state, job_id),
-            )
-            missed_count += 1
-        await self._db.commit()
+        # (transaction() above commits on exit — no explicit commit here)
         return missed_count
 
     async def commit(self) -> None:
