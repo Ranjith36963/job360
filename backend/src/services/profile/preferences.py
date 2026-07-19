@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from src.services.profile.models import UserPreferences
 
@@ -126,7 +127,7 @@ def _split_and_clean(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def validate_preferences(data: dict) -> UserPreferences:
+def validate_preferences(data: dict[str, Any]) -> UserPreferences:
     """Convert a raw form dict into a validated UserPreferences."""
     # Handle both list and comma-separated string inputs
     def to_list(key: str) -> list[str]:

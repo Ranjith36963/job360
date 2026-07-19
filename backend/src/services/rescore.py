@@ -12,7 +12,7 @@ Both helpers are lazy-import-first (CLAUDE.md rule #16).
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional, cast
 
 from src.repositories.db_retry import with_write_retry
 
@@ -20,10 +20,10 @@ logger = logging.getLogger("job360.services.rescore")
 
 # FIX 4 — per-user asyncio.Lock dict so two concurrent re-scores for the
 # SAME user serialise; different users still run in parallel.
-_user_rescore_locks: dict = {}
+_user_rescore_locks: dict[str, Any] = {}
 
 
-def score_catalog_row(scorer, row: dict):
+def score_catalog_row(scorer: Any, row: dict[str, Any]) -> Any:
     """Score one stored catalog row against a prepared JobScorer.
 
     Reconstructs a Job exactly like api/routes/jobs.py does, then calls
@@ -67,7 +67,7 @@ def score_catalog_row(scorer, row: dict):
 async def rescore_user_feed(
     user_id: str,
     db_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Re-score the whole catalog against the user's current profile.
 
     Steps:
@@ -120,24 +120,32 @@ async def rescore_user_feed(
 
             search_config = generate_search_config(profile)
             # Engine 2 switch (ENGINE2_ENABLED) OR the legacy ENRICHMENT_ENABLED flag.
+            # `db._db` is the connection property that narrows the Optional
+            # `_conn` in one place (see JobDatabase._db docstring).
+            enrichment_lookup_dict: dict[Any, Any]
             if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
-                enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
+                enrichment_lookup_dict = await _build_enrichment_lookup(db._db)
             else:
                 enrichment_lookup_dict = {}
             scorer = JobScorer(
                 search_config,
                 user_preferences=profile.preferences,
-                enrichment_lookup=lambda j: enrichment_lookup_dict.get(getattr(j, "id", None)),
+                # cast: the lookup is keyed by job id; `getattr` widens to
+                # Any|None and a missing id simply misses the dict (unchanged
+                # runtime behaviour — `cast` is a no-op).
+                enrichment_lookup=lambda j: enrichment_lookup_dict.get(
+                    cast(int, getattr(j, "id", None))
+                ),
             )
 
             # 5. Load catalog rows + existing feed job ids
             rows = await db.get_catalog_jobs_for_rescore()
 
-            cur = await db._conn.execute(
+            cur = await db._db.execute(
                 "SELECT job_id FROM user_feed WHERE user_id = ?",
                 (user_id,),
             )
-            existing_feed_ids: set = {r[0] for r in await cur.fetchall()}
+            existing_feed_ids: set[Any] = {r[0] for r in await cur.fetchall()}
 
             # recency bucket — try to import from main; replicate tiny logic on cycle
             try:
@@ -145,7 +153,7 @@ async def rescore_user_feed(
             except Exception:  # noqa: BLE001
                 from datetime import datetime, timezone  # noqa: PLC0415
 
-                def _recency_bucket(date_found: Optional[str]) -> str:  # type: ignore[misc]
+                def _recency_bucket(date_found: Optional[str]) -> str:
                     try:
                         from src.utils.time_buckets import parse_date_safe  # noqa: PLC0415
                         dt = parse_date_safe(date_found or "")
@@ -161,7 +169,7 @@ async def rescore_user_feed(
 
             from src.services.feed import FeedService  # noqa: PLC0415
 
-            feed = FeedService(db._conn)
+            feed = FeedService(db._db)
             rescored = 0
 
             # FIX 1 — read MATCHER_ENABLED lazily, ONLY to decide whether to
@@ -180,14 +188,15 @@ async def rescore_user_feed(
             # FIX 1 — only import Job and build the shortlist when the judge
             # will actually run.  When matcher_on is False, shortlist_jobs is
             # never allocated and clear_user_verdicts is never called.
+            shortlist_jobs: Optional[list[Any]]
             if matcher_on:
                 from src.models import Job as _Job  # noqa: PLC0415
                 from src.services.llm_matcher import clear_user_verdicts  # noqa: PLC0415
-                await clear_user_verdicts(db._conn, user_id)
+                await clear_user_verdicts(db._db, user_id)
                 shortlist_jobs = []
             else:
                 _Job = None  # type: ignore[assignment,misc]  # unused branch
-                shortlist_jobs = None  # type: ignore[assignment]  # unused branch
+                shortlist_jobs = None
 
             for row in rows:
                 jid = row.get("id")
@@ -208,7 +217,9 @@ async def rescore_user_feed(
                             # THIS iteration's values (B023); the callback is
                             # awaited inline here, but the explicit binding keeps
                             # it correct if it ever becomes deferred.
-                            lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(
+                            # ignore[misc]: a default-arg lambda is not a bare
+                            # zero-arg Callable, so mypy can't infer its type.
+                            lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(  # type: ignore[misc]
                                 user_id=user_id,
                                 job_id=jid,
                                 score=int(ms),
@@ -220,7 +231,7 @@ async def rescore_user_feed(
 
                     # Collect shortlist for LLM judge (FIX 1: only when matcher_on)
                     if matcher_on and ms >= MATCHER_THRESHOLD:
-                        job = _Job(  # type: ignore[misc]
+                        job = _Job(
                             title=row.get("title", "") or "",
                             company=row.get("company", "") or "",
                             apply_url=row.get("apply_url", "") or "",

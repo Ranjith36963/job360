@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from statistics import median
-from typing import Iterable
+from typing import Any, Iterable
 
 logger = logging.getLogger("job360.profile.layout")
 
@@ -32,7 +32,7 @@ HEADER_DELTA_PT = 1.5  # header = body_size + HEADER_DELTA_PT
 LINE_TOLERANCE_PT = 2.0  # words within this vertical distance count as the same line
 
 
-def _group_into_lines(words: list[dict]) -> list[list[dict]]:
+def _group_into_lines(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Group words into visual lines using their ``top`` coordinate.
 
     pdfplumber emits words with ``top`` (y-coord from page top) and
@@ -54,8 +54,8 @@ def _group_into_lines(words: list[dict]) -> list[list[dict]]:
         ),
     )
 
-    lines: list[list[dict]] = []
-    current: list[dict] = []
+    lines: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
     current_top: float | None = None
     current_page: int | None = None
 
@@ -87,7 +87,7 @@ def _group_into_lines(words: list[dict]) -> list[list[dict]]:
     return lines
 
 
-def _line_size(line: list[dict]) -> float:
+def _line_size(line: list[dict[str, Any]]) -> float:
     """Return the median ``size`` of the words in a line (0.0 if missing)."""
     sizes = []
     for w in line:
@@ -98,13 +98,13 @@ def _line_size(line: list[dict]) -> float:
     return median(sizes) if sizes else 0.0
 
 
-def _line_text(line: list[dict]) -> str:
+def _line_text(line: list[dict[str, Any]]) -> str:
     """Concatenate words on a line with single spaces."""
     parts = [str(w.get("text", "")) for w in line if w.get("text")]
     return " ".join(parts).strip()
 
 
-def segment_sections_from_words(words: Iterable[dict]) -> dict[str, str]:
+def segment_sections_from_words(words: Iterable[dict[str, Any]]) -> dict[str, str]:
     """Segment a word stream into ``{heading: body}`` by font-size clustering.
 
     Returns a dict with lowercase heading keys and their accumulated

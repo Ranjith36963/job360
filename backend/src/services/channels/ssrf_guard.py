@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from typing import cast
 from urllib.parse import urlparse
 
 # Ports we allow. ``None`` (scheme default) is always allowed; an explicit port
@@ -70,7 +71,9 @@ def assert_public_http_url(url: str) -> None:
         candidates = []
         for info in infos:
             sockaddr = info[4]
-            ip_str = sockaddr[0].split("%", 1)[0]  # strip IPv6 scope id
+            # getaddrinfo sockaddr[0] is always the address string for the
+            # AF_INET/AF_INET6 families; cast is a no-op at runtime.
+            ip_str = cast(str, sockaddr[0]).split("%", 1)[0]  # strip IPv6 scope id
             try:
                 candidates.append(ipaddress.ip_address(ip_str))
             except ValueError:

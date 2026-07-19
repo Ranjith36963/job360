@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from src.core.settings import DATA_DIR
 
@@ -29,10 +29,14 @@ _DEFAULT_PATH = DATA_DIR / "chroma"
 _COLLECTION_NAME = "jobs"
 
 
-def _make_client(persist_dir: Path):
-    """Lazy ChromaDB PersistentClient. CLAUDE.md rule #11."""
+def _make_client(persist_dir: Path) -> Any:
+    """Lazy ChromaDB PersistentClient. CLAUDE.md rule #11.
+
+    Returns `Any`: chromadb is lazily imported (rule #11) so its client type
+    cannot be named at module level, and tests inject a duck-typed fake.
+    """
     try:
-        import chromadb  # type: ignore
+        import chromadb
     except ImportError as e:
         raise RuntimeError(
             "chromadb is not installed — run `pip install '.[semantic]'`"
@@ -60,15 +64,15 @@ class VectorIndex:
         self,
         persist_dir: Optional[Path] = None,
         *,
-        client=None,
+        client: Any = None,
         collection_name: str = _COLLECTION_NAME,
-    ):
+    ) -> None:
         self._persist_dir = persist_dir or _DEFAULT_PATH
-        self._client = client
+        self._client: Any = client
         self._collection_name = collection_name
-        self._collection = None
+        self._collection: Any = None
 
-    def _ensure_collection(self):
+    def _ensure_collection(self) -> Any:
         if self._collection is not None:
             return self._collection
         if self._client is None:
@@ -82,7 +86,7 @@ class VectorIndex:
         self,
         job_id: int,
         vector: list[float],
-        metadata: Optional[dict] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """Insert-or-replace an embedding for a given job_id."""
         col = self._ensure_collection()
@@ -100,12 +104,12 @@ class VectorIndex:
         self,
         vector: list[float],
         k: int = 10,
-        filter_metadata: Optional[dict] = None,
+        filter_metadata: Optional[dict[str, Any]] = None,
     ) -> list[tuple[int, float]]:
         """Nearest-neighbour query. Returns ``[(job_id, distance), ...]``
         sorted ascending by distance (Chroma default)."""
         col = self._ensure_collection()
-        kwargs = {"query_embeddings": [list(vector)], "n_results": k}
+        kwargs: dict[str, Any] = {"query_embeddings": [list(vector)], "n_results": k}
         if filter_metadata:
             kwargs["where"] = filter_metadata
         result = col.query(**kwargs)

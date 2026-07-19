@@ -11,7 +11,7 @@ the existing tests — which simulate a lock by raising ``OperationalError`` wit
 """
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Awaitable, Callable, TypeVar
+from typing import Any, AsyncIterator, Awaitable, Callable, TypeVar
 
 import psycopg
 
@@ -24,7 +24,7 @@ T = TypeVar("T")
 
 
 @asynccontextmanager
-async def open_db(db_path: str, *, busy_timeout_ms: int = 30000):
+async def open_db(db_path: str, *, busy_timeout_ms: int = 30000) -> AsyncIterator[Any]:
     """Open a short-lived Postgres connection (aiosqlite-shaped).
 
     ``busy_timeout_ms`` is accepted for signature compatibility but ignored —

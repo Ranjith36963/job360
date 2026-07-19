@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class StalenessState(str, Enum):
@@ -51,7 +51,7 @@ def should_exclude_from_24h(state: StalenessState) -> bool:
 
 
 def evaluate_job_state(
-    row: dict,
+    row: dict[str, Any],
     now: Optional[datetime] = None,
 ) -> StalenessState:
     """Compute the state of a single DB row.

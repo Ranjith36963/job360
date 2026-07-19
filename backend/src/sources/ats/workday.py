@@ -1,11 +1,13 @@
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, WORKDAY_COMPANIES
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.workday")
@@ -34,7 +36,7 @@ class WorkdaySource(BaseJobSource):
     name = "workday"
     category = "ats"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[dict] | None = None, search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, companies: list[dict[str, Any]] | None = None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else WORKDAY_COMPANIES
 
@@ -73,7 +75,7 @@ class WorkdaySource(BaseJobSource):
                     continue
                 if "jobPostings" not in data:
                     continue
-                for item in data["jobPostings"]:
+                for item in cast(dict[str, Any], data)["jobPostings"]:
                     title = item.get("title", "")
                     location = item.get("locationsText", "")
                     if not _is_uk_or_remote(location):

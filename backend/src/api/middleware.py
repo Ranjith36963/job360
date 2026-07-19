@@ -5,7 +5,7 @@ import os
 import time
 import uuid
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -53,7 +53,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     # Max id length — prevents oversized upstream values from bloating log lines.
     _MAX_RID_LEN = 64
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         raw = request.headers.get("X-Request-Id", "").strip()
         rid = raw[: self._MAX_RID_LEN] if raw else uuid.uuid4().hex[:16]
         # Stash on request.state too: the contextvar is reset in `finally`
@@ -81,7 +83,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
     guarantees a line even when the route raises (recorded as status 500).
     """
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         start = time.perf_counter()
         status = 500
         try:
@@ -126,7 +130,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     would break plain-HTTP local development.
     """
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -153,7 +159,9 @@ class OriginCheckMiddleware(BaseHTTPMiddleware):
 
     _UNSAFE = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if request.method in self._UNSAFE:
             origin = request.headers.get("origin")
             if origin:

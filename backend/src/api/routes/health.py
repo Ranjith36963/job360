@@ -28,12 +28,12 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check() -> HealthResponse:
     return HealthResponse(status="ok", version="1.0.0")
 
 
 @router.get("/livez", response_model=LivezResponse)
-async def livez():
+async def livez() -> LivezResponse:
     """Liveness probe — returns 200 as long as the process is running.
 
     No dependency checks. Kubernetes/Railway liveness must not fail because
@@ -43,7 +43,7 @@ async def livez():
 
 
 @router.get("/readyz")
-async def readyz():
+async def readyz() -> JSONResponse:
     """Readiness probe — checks real dependencies before accepting traffic.
 
     Checks:
@@ -74,9 +74,11 @@ async def readyz():
         checks["redis"] = "skipped"
     else:
         try:
-            import redis.asyncio as aioredis  # type: ignore[import]  # noqa: PLC0415
+            import redis.asyncio as aioredis  # noqa: PLC0415
 
-            r = aioredis.from_url(redis_url, socket_connect_timeout=2)
+            # redis-py ships py.typed but `from_url` itself carries no
+            # annotations, so strict mode flags the call, not the import.
+            r = aioredis.from_url(redis_url, socket_connect_timeout=2)  # type: ignore[no-untyped-call]
             await r.ping()
             await r.aclose()
             checks["redis"] = "ok"
@@ -99,7 +101,7 @@ async def readyz():
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status(db: JobDatabase = Depends(get_request_db)):
+async def status(db: JobDatabase = Depends(get_request_db)) -> StatusResponse:
     jobs_total = await db.count_jobs()
     run_logs = await db.get_run_logs(limit=1)
     last_run = run_logs[0] if run_logs else None
@@ -124,6 +126,6 @@ async def status(db: JobDatabase = Depends(get_request_db)):
 
 
 @router.get("/sources", response_model=SourcesResponse)
-async def sources():
+async def sources() -> SourcesResponse:
     source_list = [SourceInfo(name=name, type="free", health={}) for name in sorted(SOURCE_REGISTRY.keys())]
     return SourcesResponse(sources=source_list)

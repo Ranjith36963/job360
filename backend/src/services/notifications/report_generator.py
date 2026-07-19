@@ -1,5 +1,6 @@
 import html as html_mod
 from datetime import datetime, timezone
+from typing import Any
 
 from src.models import Job
 from src.utils.time_buckets import (
@@ -20,7 +21,7 @@ def _format_salary(job: Job) -> str:
     return "N/A"
 
 
-def _jobs_to_dicts(jobs: list[Job]) -> list[dict]:
+def _jobs_to_dicts(jobs: list[Job]) -> list[dict[str, Any]]:
     """Convert Job objects to dicts for bucket_jobs()."""
     return [
         {
@@ -34,7 +35,7 @@ def _jobs_to_dicts(jobs: list[Job]) -> list[dict]:
     ]
 
 
-def generate_markdown_report(jobs: list[Job], stats: dict) -> str:
+def generate_markdown_report(jobs: list[Job], stats: dict[str, Any]) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         f"# Job360 Report - {now}",
@@ -89,7 +90,7 @@ def generate_markdown_report(jobs: list[Job], stats: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_html_report(jobs: list[Job], stats: dict) -> str:
+def generate_html_report(jobs: list[Job], stats: dict[str, Any]) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     # Bucket jobs

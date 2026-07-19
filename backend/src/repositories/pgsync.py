@@ -28,14 +28,14 @@ Row = pg.Row
 
 
 class _Cursor:
-    def __init__(self, cur, lastrowid: Optional[int]):
+    def __init__(self, cur: psycopg.Cursor[pg.Row], lastrowid: Optional[int]):
         self._cur = cur
         self.lastrowid = lastrowid
 
-    def fetchone(self):
+    def fetchone(self) -> Any:
         return self._cur.fetchone()
 
-    def fetchall(self):
+    def fetchall(self) -> list[Any]:
         return self._cur.fetchall()
 
     @property
@@ -43,19 +43,19 @@ class _Cursor:
         return self._cur.rowcount
 
     @property
-    def description(self):
+    def description(self) -> Optional[list[psycopg.Column]]:
         return self._cur.description
 
-    def close(self):
+    def close(self) -> None:
         self._cur.close()
 
 
 class Connection:
-    def __init__(self, raw: psycopg.Connection):
+    def __init__(self, raw: psycopg.Connection[pg.Row]):
         self._raw = raw
         self.row_factory = pg.Row
 
-    def _read_lastval(self):
+    def _read_lastval(self) -> Optional[int]:
         c2 = self._raw.cursor()
         try:
             c2.execute("SELECT lastval()")
@@ -131,13 +131,13 @@ class Connection:
     def __enter__(self) -> Connection:
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: Any) -> None:
         # sqlite3 leaves the connection open on __exit__, but we must close to
         # avoid exhausting Postgres connections across the suite.
         self.close()
 
 
-def connect(path: Optional[str] = None, *args, **kwargs) -> Connection:
+def connect(path: Optional[str] = None, *args: Any, **kwargs: Any) -> Connection:
     schema = pg.schema_for_path(str(path) if path is not None else None)
     raw = psycopg.connect(pg.DEFAULT_DSN, autocommit=True, row_factory=pg._row_factory)
     if schema != "public":

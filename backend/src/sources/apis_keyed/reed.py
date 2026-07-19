@@ -1,10 +1,12 @@
 import base64
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.reed")
@@ -14,7 +16,7 @@ class ReedSource(BaseJobSource):
     name = "reed"
     category = "keyed_api"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
@@ -46,7 +48,7 @@ class ReedSource(BaseJobSource):
                 )
                 if not data or "results" not in data:
                     continue
-                for item in data["results"]:
+                for item in cast(dict[str, Any], data)["results"]:
                     now_iso = datetime.now(timezone.utc).isoformat()
                     raw_date = item.get("date") or item.get("datePosted")
                     posted_at = raw_date if raw_date else None

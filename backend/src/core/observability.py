@@ -10,12 +10,13 @@ one implementation instead of the API being the only observed process.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 # H4 — request headers that must NEVER reach Sentry (credentials / session).
 _SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie"})
 
 
-def _strip_password_fields(obj) -> None:
+def _strip_password_fields(obj: Any) -> None:
     """Recursively delete any ``password`` key (case-insensitive) in-place."""
     if isinstance(obj, dict):
         for key in [k for k in obj if isinstance(k, str) and k.lower() == "password"]:
@@ -27,7 +28,7 @@ def _strip_password_fields(obj) -> None:
             _strip_password_fields(item)
 
 
-def _scrub_pii(event, _hint):
+def _scrub_pii(event: Any, _hint: Any) -> Any:
     """Strip auth headers, cookies, request bodies, and password fields before an
     event leaves the box (H4).
 

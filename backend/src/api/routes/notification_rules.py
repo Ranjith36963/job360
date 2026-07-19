@@ -9,7 +9,7 @@ All routes gate on ``require_user`` (CLAUDE.md rule #12).
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
 
@@ -22,7 +22,7 @@ from src.utils.logger import get_audit_logger
 router = APIRouter(tags=["notification-rules"])
 
 
-def _rule_from_row(row: dict) -> NotificationRule:
+def _rule_from_row(row: dict[str, Any]) -> NotificationRule:
     """Convert a DB row dict to a NotificationRule response model."""
     return NotificationRule(
         user_id=row["user_id"],

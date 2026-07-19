@@ -40,7 +40,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("job360.profile.skill_normalizer")
 
@@ -77,7 +77,7 @@ class _ESCOIndex:
     def __init__(self, data_dir: Path = _DEFAULT_ESCO_DIR):
         self.data_dir = data_dir
         self.available: bool = False
-        self.labels: list[dict] = []
+        self.labels: list[dict[str, Any]] = []
         self.embeddings = None  # numpy.ndarray when loaded
         self._encoder = None
         self._loaded_once = False
@@ -95,7 +95,7 @@ class _ESCOIndex:
             return
 
         try:
-            import numpy as np  # type: ignore
+            import numpy as np
         except ImportError:
             logger.info("numpy not installed — ESCO normalizer disabled")
             return
@@ -121,12 +121,12 @@ class _ESCOIndex:
         self.available = True
         logger.info("ESCO index loaded: %d concepts from %s", len(self.labels), self.data_dir)
 
-    def _get_encoder(self):
+    def _get_encoder(self) -> Any:
         """Lazy-import sentence-transformers. ``None`` if extra not installed."""
         if self._encoder is not None:
             return self._encoder
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore
+            from sentence_transformers import SentenceTransformer
         except ImportError:
             logger.debug("sentence-transformers not installed; encode path disabled")
             return None
@@ -208,7 +208,7 @@ def is_available() -> bool:
     return _INDEX.available
 
 
-def index_status() -> dict:
+def index_status() -> dict[str, Any]:
     """Return a small dict describing current index state. Used by ops surfaces."""
     _INDEX._load()
     return {

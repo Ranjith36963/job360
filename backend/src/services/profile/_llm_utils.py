@@ -9,8 +9,10 @@ can rely on clean, typed values.
 
 from __future__ import annotations
 
+from typing import Any
 
-def coerce_str_list(value) -> list[str]:
+
+def coerce_str_list(value: Any) -> list[str]:
     """Coerce LLM output to a clean list[str]. Never raises."""
     if value is None:
         return []
@@ -34,7 +36,7 @@ def coerce_str_list(value) -> list[str]:
     return []
 
 
-def coerce_str(value) -> str:
+def coerce_str(value: Any) -> str:
     """Coerce LLM output to a string. Returns '' for wrong types."""
     if value is None:
         return ""

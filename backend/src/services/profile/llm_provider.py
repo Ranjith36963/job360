@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import time as _time
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,6 +19,9 @@ from src.core.settings import (
     OPENAI_API_KEY,
     OPENAI_MODEL,
 )
+
+if TYPE_CHECKING:  # annotation-only — the SDK stays lazily imported at call sites
+    from openai.types.chat import ChatCompletionMessageParam
 
 logger = logging.getLogger("job360.profile.llm_provider")
 
@@ -95,7 +98,16 @@ def _retry_after_seconds(exc: BaseException, default: float) -> float:
     return default
 
 
-async def _attempt(call, prompt: str, system: str, provider: str) -> dict[str, Any]:
+# ``[return]`` ignore: every path through the loop body returns or raises. The
+# function can only fall off the end if ``LLM_RATE_LIMIT_RETRIES`` is configured
+# below -1 (an empty ``range``), and adding a trailing raise for that case would
+# change runtime behaviour, so the mismatch is silenced instead.
+async def _attempt(  # type: ignore[return]
+    call: Callable[[str, str], Awaitable[dict[str, Any]]],
+    prompt: str,
+    system: str,
+    provider: str,
+) -> dict[str, Any]:
     """Run ONE provider with a hard timeout + bounded backoff on SHORT rate-limits.
 
     - Hard timeout (``_LLM_TIMEOUT_S``) so a hung call can't block the request.
@@ -300,7 +312,7 @@ async def _call_openai(prompt: str, system: str) -> dict[str, Any]:
     t0 = _time.monotonic()
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-        messages: list[dict[str, str]] = []
+        messages: list[ChatCompletionMessageParam] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
@@ -318,7 +330,13 @@ async def _call_openai(prompt: str, system: str) -> dict[str, Any]:
             extra={"provider": "openai", "model": _model, "latency_ms": latency_ms,
                    "total_tokens": total_tokens, "outcome": "ok"},
         )
-        return json.loads(response.choices[0].message.content)
+        # ``message.content`` is Optional in the SDK types: it is None only on a
+        # refusal / tool-call reply, which JSON mode does not produce here. If it
+        # ever is None, ``json.loads`` raises TypeError, which the ``except``
+        # below logs and re-raises so the caller fails over to the next provider
+        # — the existing, intended behaviour. Narrow ignore, no logic change.
+        data: dict[str, Any] = json.loads(response.choices[0].message.content)  # type: ignore[arg-type]
+        return data
     except Exception as exc:
         latency_ms = round((_time.monotonic() - t0) * 1000)
         logger.warning(
@@ -353,7 +371,8 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
             extra={"provider": "gemini", "model": _model, "latency_ms": latency_ms,
                    "total_tokens": total_tokens, "outcome": "ok"},
         )
-        return json.loads(response.text)
+        data: dict[str, Any] = json.loads(response.text)
+        return data
     except Exception as exc:
         latency_ms = round((_time.monotonic() - t0) * 1000)
         logger.warning(
@@ -390,7 +409,8 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
             extra={"provider": "groq", "model": _model, "latency_ms": latency_ms,
                    "total_tokens": total_tokens, "outcome": "ok"},
         )
-        return json.loads(response.choices[0].message.content)
+        data: dict[str, Any] = json.loads(response.choices[0].message.content)
+        return data
     except Exception as exc:
         latency_ms = round((_time.monotonic() - t0) * 1000)
         logger.warning(
@@ -433,7 +453,8 @@ async def _call_cerebras(prompt: str, system: str) -> dict[str, Any]:
             extra={"provider": "cerebras", "model": _model, "latency_ms": latency_ms,
                    "total_tokens": total_tokens, "outcome": "ok"},
         )
-        return json.loads(response.choices[0].message.content)
+        data: dict[str, Any] = json.loads(response.choices[0].message.content)
+        return data
     except Exception as exc:
         latency_ms = round((_time.monotonic() - t0) * 1000)
         logger.warning(

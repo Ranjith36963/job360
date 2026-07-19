@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -57,7 +58,7 @@ class EightyKHoursSource(BaseJobSource):
                 )
                 continue
 
-            for hit in data["hits"]:
+            for hit in cast(dict[str, Any], data)["hits"]:
                 obj_id = hit.get("objectID", "")
                 if obj_id in seen_ids:
                     continue

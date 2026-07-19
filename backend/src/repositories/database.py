@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from src.repositories import pg
 
@@ -39,6 +40,29 @@ class JobDatabase:
         self._path = db_path
         self._conn: pg.Connection | None = None
 
+    @property
+    def _db(self) -> "pg.Connection":
+        """The live connection, or a clear error if there isn't one.
+
+        ``_conn`` is legitimately ``Optional`` — it is None before ``connect()``
+        and after ``close()`` — but all ~119 query methods used it directly, so
+        every one of them was an unguarded ``None`` dereference to the type
+        checker (and to production: a missed ``connect()`` surfaced as
+        ``AttributeError: 'NoneType' object has no attribute 'execute'``, which
+        says nothing about the real cause).
+
+        Going through this property narrows the type in one place instead of 119
+        and turns that mystery AttributeError into a message that names the bug.
+        Assignment sites, the declaration, and the ``if self._conn:`` guards
+        still use ``_conn`` directly — only attribute ACCESS goes through here.
+        """
+        if self._conn is None:
+            raise RuntimeError(
+                "JobDatabase has no open connection — call await connect() "
+                "(or init_db()) before querying, and don't use it after close()."
+            )
+        return self._conn
+
     async def connect(self) -> None:
         """Open a connection WITHOUT running the schema DDL (docs/fable/02).
 
@@ -52,7 +76,7 @@ class JobDatabase:
         self._conn = await pg.connect(self._path)
         self._conn.row_factory = pg.Row
 
-    async def init_db(self):
+    async def init_db(self) -> None:
         # Postgres connection (schema selected from self._path in test mode;
         # always ``public`` in production). No PRAGMAs / WAL / busy_timeout —
         # Postgres handles concurrency natively (no "database is locked").
@@ -122,7 +146,7 @@ class JobDatabase:
         await self._conn.commit()
         await self._migrate()
 
-    async def _migrate(self):
+    async def _migrate(self) -> None:
         """Add any missing columns to existing tables (forward-compatible schema migration).
 
         Runs every init_db(). Safe on both fresh schemas (just created above)
@@ -181,7 +205,7 @@ class JobDatabase:
         await self._add_missing_columns("applications", applications_migrations)
 
         # Ensure application_stage_history table exists (migration 0014).
-        await self._conn.executescript("""
+        await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS application_stage_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL,
@@ -198,7 +222,7 @@ class JobDatabase:
         # Ensure notification_rules + user_notification_digests exist (migration 0012 / 0013).
         # Mirrors the forward direction of the SQL migration files so tests that
         # call init_db() directly (without the external runner) see the full schema.
-        await self._conn.executescript("""
+        await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS notification_rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -232,7 +256,7 @@ class JobDatabase:
         # Cover Letter). Mirrors 0023_tailored_documents.up.sql so init_db()-only
         # tests see the full schema. tailoring_patterns has NO user_id/content by
         # design (universal layer = patterns only, spec §7 privacy).
-        await self._conn.executescript("""
+        await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS tailored_documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -279,17 +303,17 @@ class JobDatabase:
         # Add timezone column to users table if it was created before migration 0012.
         # users table may not exist in all test DB instances (auth tests create it;
         # non-auth tests skip it).  Guard with table existence check.
-        cursor = await self._conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        cursor = await self._db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         if await cursor.fetchone():
             await self._add_missing_columns("users", [("timezone", "TEXT NOT NULL DEFAULT 'UTC'")])
 
-        await self._conn.commit()
+        await self._db.commit()
 
     async def _add_missing_columns(self, table: str, migrations: list[tuple[str, str]]) -> None:
         """Apply `ALTER TABLE ... ADD COLUMN` for each entry not yet present."""
         if not _VALID_COL_NAME.match(table):
             raise ValueError(f"Invalid migration table name: {table}")
-        cursor = await self._conn.execute(f"PRAGMA table_info({table})")
+        cursor = await self._db.execute(f"PRAGMA table_info({table})")
         existing = {row[1] for row in await cursor.fetchall()}
         for col_name, col_def in migrations:
             if col_name in existing:
@@ -299,16 +323,16 @@ class JobDatabase:
             col_type_word = col_def.split()[0].upper()
             if col_type_word not in _VALID_COL_TYPES:
                 raise ValueError(f"Invalid migration column type: {col_type_word}")
-            await self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+            await self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
 
     async def get_tables(self) -> list[str]:
-        cursor = await self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        cursor = await self._db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
 
     async def is_job_seen(self, normalized_key: tuple[str, str]) -> bool:
         company, title = normalized_key
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT 1 FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
             (company, title),
         )
@@ -328,7 +352,7 @@ class JobDatabase:
         now = datetime.now(timezone.utc).isoformat()
         first_seen_at = job.first_seen_at if job.first_seen_at is not None else now
         last_seen_at = job.last_seen_at if job.last_seen_at is not None else now
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
              apply_url, source, date_found, match_score, visa_flag,
@@ -386,7 +410,7 @@ class JobDatabase:
         job_id = getattr(job, "id", None)
         if job_id is None:
             return
-        await self._conn.execute(
+        await self._db.execute(
             """UPDATE jobs SET
                    match_score = ?, role = ?, skill = ?, seniority_score = ?,
                    experience = ?, credentials = ?, location_score = ?,
@@ -411,13 +435,13 @@ class JobDatabase:
     async def update_last_seen(self, normalized_key: tuple[str, str]) -> None:
         """Mark a job as re-seen this scrape cycle. Resets ghost-detection counters."""
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE jobs SET last_seen_at = ?, consecutive_misses = 0, "
             "staleness_state = 'active' "
             "WHERE normalized_company = ? AND normalized_title = ?",
             (now, normalized_key[0], normalized_key[1]),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
     async def update_staleness_state(self, job_id: int, new_state: str) -> None:
         """Persist a single job's staleness_state. Step-1.5 S1.5-B helper.
@@ -425,7 +449,7 @@ class JobDatabase:
         No commit here — the caller batches commits (see
         :meth:`mark_missed_for_source`) so a multi-job sweep stays atomic.
         """
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE jobs SET staleness_state = ? WHERE id = ?",
             (new_state, job_id),
         )
@@ -453,7 +477,7 @@ class JobDatabase:
         # of services-layer top-level imports.
         from src.services.ghost_detection import StalenessState, transition  # noqa: PLC0415
 
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT id, normalized_company, normalized_title, "
             "consecutive_misses, last_seen_at, staleness_state "
             "FROM jobs WHERE source = ?",
@@ -470,7 +494,7 @@ class JobDatabase:
             current_state = row[5] or StalenessState.ACTIVE.value
             # Sticky: confirmed_expired never demoted by absence sweep.
             if current_state == StalenessState.CONFIRMED_EXPIRED.value:
-                await self._conn.execute(
+                await self._db.execute(
                     "UPDATE jobs SET consecutive_misses = consecutive_misses + 1 WHERE id = ?",
                     (job_id,),
                 )
@@ -489,35 +513,35 @@ class JobDatabase:
                 except (ValueError, TypeError):
                     age_hours = 0.0
             next_state = transition(new_misses, age_hours).value
-            await self._conn.execute(
+            await self._db.execute(
                 "UPDATE jobs SET consecutive_misses = ?, staleness_state = ? " "WHERE id = ?",
                 (new_misses, next_state, job_id),
             )
             missed_count += 1
-        await self._conn.commit()
+        await self._db.commit()
         return missed_count
 
-    async def commit(self):
+    async def commit(self) -> None:
         """Commit pending changes."""
         if self._conn:
             await self._conn.commit()
 
     async def count_jobs(self) -> int:
-        cursor = await self._conn.execute("SELECT COUNT(*) FROM jobs")
+        cursor = await self._db.execute("SELECT COUNT(*) FROM jobs")
         row = await cursor.fetchone()
-        return row[0]
+        return int(row[0])
 
     async def log_run(
         self,
-        stats: dict,
+        stats: dict[str, Any],
         *,
         run_uuid: str | None = None,
-        per_source_errors: dict | None = None,
-        per_source_duration: dict | None = None,
+        per_source_errors: dict[str, Any] | None = None,
+        per_source_duration: dict[str, Any] | None = None,
         total_duration: float | None = None,
         user_id: str | None = None,
-        matcher_stats: dict | None = None,
-    ):
+        matcher_stats: dict[str, Any] | None = None,
+    ) -> None:
         """Insert a run-log row.
 
         Extra keyword-only params were added by migration 0010
@@ -531,7 +555,7 @@ class JobDatabase:
         errors_json = json.dumps(per_source_errors) if per_source_errors is not None else None
         duration_json = json.dumps(per_source_duration) if per_source_duration is not None else None
         matcher_json = json.dumps(matcher_stats) if matcher_stats is not None else None
-        await self._conn.execute(
+        await self._db.execute(
             "INSERT INTO run_log ("
             " timestamp, total_found, new_jobs, sources_queried, per_source,"
             " run_uuid, per_source_errors, per_source_duration,"
@@ -551,10 +575,10 @@ class JobDatabase:
                 matcher_json,
             ),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
-    async def get_run_logs(self, limit: int = 100) -> list[dict]:
-        cursor = await self._conn.execute(
+    async def get_run_logs(self, limit: int = 100) -> list[dict[str, Any]]:
+        cursor = await self._db.execute(
             "SELECT timestamp, total_found, new_jobs, per_source FROM run_log ORDER BY id DESC LIMIT ?",
             (limit,),
         )
@@ -569,9 +593,9 @@ class JobDatabase:
             for row in rows
         ]
 
-    async def get_new_jobs_since(self, hours: int = 12) -> list[dict]:
+    async def get_new_jobs_since(self, hours: int = 12) -> list[dict[str, Any]]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT * FROM jobs WHERE first_seen >= ? ORDER BY match_score DESC",
             (cutoff,),
         )
@@ -615,7 +639,7 @@ class JobDatabase:
         # Same current_schema() discipline as runner.py's sequence resync. NOT a
         # try/except UndefinedTable: an explicit check can't also swallow a REAL
         # error from the DELETE.
-        existing = await self._conn.execute(
+        existing = await self._db.execute(
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_schema = current_schema()"
         )
@@ -623,20 +647,20 @@ class JobDatabase:
         for table in _PURGE_CASCADE_TABLES:
             if table not in present:
                 continue
-            await self._conn.execute(
+            await self._db.execute(
                 f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
             )
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
         )
-        await self._conn.commit()
+        await self._db.commit()
         _log.info(
             "purge_old_jobs",
             extra={"event": "purge_old_jobs", "deleted": cursor.rowcount, "days": days, "cutoff": cutoff},
         )
         return cursor.rowcount
 
-    async def get_recent_jobs(self, days: int = 7, min_score: int = 0) -> list[dict]:
+    async def get_recent_jobs(self, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
         """Return jobs from the last `days` with match_score >= min_score.
 
         Step-1 B9: filters out rows marked ``staleness_state='expired'`` by
@@ -645,7 +669,7 @@ class JobDatabase:
         writer lands in Batch S1.5).
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT * FROM jobs WHERE first_seen >= ? AND match_score >= ? "
             "AND (staleness_state IS NULL OR staleness_state = 'active') "
             "ORDER BY date_found DESC",
@@ -654,14 +678,14 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def get_catalog_jobs_for_rescore(self, limit: int = 5000) -> list[dict]:
+    async def get_catalog_jobs_for_rescore(self, limit: int = 5000) -> list[dict[str, Any]]:
         """Return the most-recently-found jobs from the shared catalog for rescoring.
 
         Read-only. Returns a list of plain dicts with the columns that
         ``score_catalog_row`` (``src/services/rescore.py``) needs to reconstruct
         a ``Job`` for scoring. Respects ``limit`` so callers can cap memory use.
         """
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT id, title, company, apply_url, source, date_found, location, "
             "description, salary_min, salary_max, posted_at, date_confidence "
             "FROM jobs ORDER BY date_found DESC LIMIT ?",
@@ -672,7 +696,7 @@ class JobDatabase:
 
     async def get_last_source_counts(self, n: int = 5) -> dict[str, list[int]]:
         """Get per-source job counts from the last N runs for health tracking."""
-        cursor = await self._conn.execute("SELECT per_source FROM run_log ORDER BY id DESC LIMIT ?", (n,))
+        cursor = await self._db.execute("SELECT per_source FROM run_log ORDER BY id DESC LIMIT ?", (n,))
         rows = await cursor.fetchall()
         source_history: dict[str, list[int]] = {}
         for row in rows:
@@ -687,9 +711,9 @@ class JobDatabase:
     # queries by it. Schema UNIQUE(user_id, job_id) is from migration
     # 0002_multi_tenant; this layer is the matching read/write surface.
 
-    async def insert_action(self, job_id: int, action: str, user_id: str, notes: str = "") -> dict:
+    async def insert_action(self, job_id: int, action: str, user_id: str, notes: str = "") -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             """INSERT INTO user_actions (user_id, job_id, action, notes, created_at)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(user_id, job_id)
@@ -698,18 +722,18 @@ class JobDatabase:
                              created_at = excluded.created_at""",
             (user_id, job_id, action, notes, now),
         )
-        await self._conn.commit()
+        await self._db.commit()
         return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
 
     async def delete_action(self, job_id: int, user_id: str) -> None:
-        await self._conn.execute(
+        await self._db.execute(
             "DELETE FROM user_actions WHERE user_id = ? AND job_id = ?",
             (user_id, job_id),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
-    async def get_actions(self, user_id: str) -> list[dict]:
-        cursor = await self._conn.execute(
+    async def get_actions(self, user_id: str) -> list[dict[str, Any]]:
+        cursor = await self._db.execute(
             """SELECT job_id, action, notes, created_at
                FROM user_actions
                WHERE user_id = ?
@@ -719,7 +743,7 @@ class JobDatabase:
         return [{"job_id": r[0], "action": r[1], "notes": r[2], "created_at": r[3]} for r in await cursor.fetchall()]
 
     async def get_action_counts(self, user_id: str) -> dict[str, int]:
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """SELECT action, COUNT(*) FROM user_actions
                WHERE user_id = ? GROUP BY action""",
             (user_id,),
@@ -727,7 +751,7 @@ class JobDatabase:
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
     async def get_action_for_job(self, job_id: int, user_id: str) -> str | None:
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT action FROM user_actions WHERE user_id = ? AND job_id = ?",
             (user_id, job_id),
         )
@@ -740,7 +764,7 @@ class JobDatabase:
 
     # ── Tailored CV / cover letter (migration 0023) ──────────────────────────
 
-    def _tailored_row_to_dict(self, row) -> dict:
+    def _tailored_row_to_dict(self, row: Any) -> dict[str, Any]:
         import json as _json
         try:
             flagged = _json.loads(row[11]) if len(row) > 11 and row[11] else []
@@ -758,7 +782,7 @@ class JobDatabase:
         self, user_id: str, job_id: int, doc_kind: str, ai_draft: str,
         *, model: str | None = None, profile_version: int | None = None,
         flagged_terms: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Insert/replace the AI draft for (user, job, kind); resets it to 'draft'.
 
         Regenerating a doc is a fresh draft — old polished/kept state for THIS
@@ -772,12 +796,12 @@ class JobDatabase:
         # Both statements run in ONE explicit transaction: if the INSERT fails
         # (or the process dies) between the two, the DELETE rolls back so the
         # user's existing tailored document is never lost (M7 data-loss fix).
-        async with self._conn.transaction():
-            await self._conn.execute(
+        async with self._db.transaction():
+            await self._db.execute(
                 "DELETE FROM tailored_documents WHERE user_id = ? AND job_id = ? AND doc_kind = ?",
                 (user_id, job_id, doc_kind),
             )
-            await self._conn.execute(
+            await self._db.execute(
                 """INSERT INTO tailored_documents
                    (user_id, job_id, doc_kind, ai_draft, polished, status, model,
                     profile_version, created_at, updated_at, kept_at, flagged_terms)
@@ -785,12 +809,12 @@ class JobDatabase:
                 (user_id, job_id, doc_kind, ai_draft, model, profile_version, now, now,
                  _json.dumps(flagged_terms or [])),
             )
-        await self._conn.commit()
+        await self._db.commit()
         doc = await self.get_tailored_doc(user_id, job_id, doc_kind)
         return doc or {}
 
-    async def get_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict | None:
-        cursor = await self._conn.execute(
+    async def get_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict[str, Any] | None:
+        cursor = await self._db.execute(
             """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
                       profile_version, created_at, updated_at, kept_at, flagged_terms
                FROM tailored_documents
@@ -800,8 +824,8 @@ class JobDatabase:
         row = await cursor.fetchone()
         return self._tailored_row_to_dict(row) if row else None
 
-    async def get_tailored_docs(self, user_id: str, job_id: int) -> list[dict]:
-        cursor = await self._conn.execute(
+    async def get_tailored_docs(self, user_id: str, job_id: int) -> list[dict[str, Any]]:
+        cursor = await self._db.execute(
             """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
                       profile_version, created_at, updated_at, kept_at, flagged_terms
                FROM tailored_documents
@@ -812,25 +836,25 @@ class JobDatabase:
 
     async def save_tailored_polished(
         self, user_id: str, job_id: int, doc_kind: str, polished: str
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             """UPDATE tailored_documents SET polished = ?, updated_at = ?
                WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
             (polished, now, user_id, job_id, doc_kind),
         )
-        await self._conn.commit()
+        await self._db.commit()
         return await self.get_tailored_doc(user_id, job_id, doc_kind)
 
-    async def keep_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict | None:
+    async def keep_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict[str, Any] | None:
         """Mark KEPT (finalized/downloaded/used) — the only status we learn from (§5)."""
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             """UPDATE tailored_documents SET status = 'kept', kept_at = ?, updated_at = ?
                WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
             (now, now, user_id, job_id, doc_kind),
         )
-        await self._conn.commit()
+        await self._db.commit()
         return await self.get_tailored_doc(user_id, job_id, doc_kind)
 
     async def count_tailored_usage_month(self, user_id: str) -> int:
@@ -838,7 +862,7 @@ class JobDatabase:
         start = datetime.now(timezone.utc).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         ).isoformat()
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT COUNT(*) FROM tailored_usage WHERE user_id = ? AND created_at >= ?",
             (user_id, start),
         )
@@ -847,16 +871,16 @@ class JobDatabase:
 
     async def record_tailored_usage(self, user_id: str, job_id: int) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             "INSERT INTO tailored_usage (user_id, job_id, created_at) VALUES (?, ?, ?)",
             (user_id, job_id, now),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
     async def get_user_kept_docs(self, user_id: str, doc_kind: str, limit: int = 3) -> list[str]:
         """Layer 2 (per-user, §6): the user's recent KEPT polished docs of this kind —
         few-shot 'write like me' examples. Only KEPT docs (§5 learn-from-kept-only)."""
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """SELECT polished FROM tailored_documents
                WHERE user_id = ? AND doc_kind = ? AND status = 'kept'
                  AND polished IS NOT NULL AND polished != ''
@@ -868,19 +892,19 @@ class JobDatabase:
     async def record_tailoring_pattern(self, doc_kind: str, features_json: str) -> None:
         """Layer 1 (universal, §6): store a privacy-scrubbed pattern — NO user_id/content."""
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             "INSERT INTO tailoring_patterns (doc_kind, features, created_at) VALUES (?, ?, ?)",
             (doc_kind, features_json, now),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
-    async def get_tailoring_patterns(self, doc_kind: str, limit: int = 200) -> list[dict]:
+    async def get_tailoring_patterns(self, doc_kind: str, limit: int = 200) -> list[dict[str, Any]]:
         import json as _json
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT features FROM tailoring_patterns WHERE doc_kind = ? ORDER BY id DESC LIMIT ?",
             (doc_kind, limit),
         )
-        out: list[dict] = []
+        out: list[dict[str, Any]] = []
         for r in await cursor.fetchall():
             try:
                 out.append(_json.loads(r[0]))
@@ -890,17 +914,17 @@ class JobDatabase:
 
     async def get_tailored_summary_for_jobs(
         self, user_id: str, job_ids: list[int]
-    ) -> dict[int, dict]:
+    ) -> dict[int, dict[str, Any]]:
         """For the Kanban attach: {job_id: {doc_kind: status}} for the given jobs."""
         if not job_ids:
             return {}
         placeholders = ",".join("?" for _ in job_ids)
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             f"""SELECT job_id, doc_kind, status FROM tailored_documents
                 WHERE user_id = ? AND job_id IN ({placeholders})""",
             (user_id, *job_ids),
         )
-        result: dict[int, dict] = {}
+        result: dict[int, dict[str, Any]] = {}
         for jid, kind, status in await cursor.fetchall():
             result.setdefault(jid, {})[kind] = status
         return result
@@ -912,7 +936,7 @@ class JobDatabase:
         row (returns '') so tailoring works even before the judge has run.
         """
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT llm_reason FROM user_feed WHERE user_id = ? AND job_id = ?",
                 (user_id, job_id),
             )
@@ -921,14 +945,14 @@ class JobDatabase:
         row = await cursor.fetchone()
         return (row[0] or "") if row else ""
 
-    async def get_user_feed_verdict(self, user_id: str, job_id: int) -> dict:
+    async def get_user_feed_verdict(self, user_id: str, job_id: int) -> dict[str, Any]:
         """The judge's (E4) per-user verdict for (user, job): ``llm_fit_score``,
         ``llm_verdict``, ``llm_reason``. Returns an empty dict when the job isn't in
         this user's feed or the judge hasn't run — so the single-job read stays
         None-safe (mirrors the list read's ``get_user_feed_jobs`` llm columns).
         """
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT llm_fit_score, llm_verdict, llm_reason FROM user_feed "
                 "WHERE user_id = ? AND job_id = ?",
                 (user_id, job_id),
@@ -944,21 +968,21 @@ class JobDatabase:
             "llm_reason": row[2],
         }
 
-    async def create_application(self, job_id: int, user_id: str) -> dict:
+    async def create_application(self, job_id: int, user_id: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await self._db.execute(
             """INSERT OR IGNORE INTO applications
                (user_id, job_id, stage, created_at, updated_at)
                VALUES (?, ?, 'applied', ?, ?)""",
             (user_id, job_id, now, now),
         )
-        await self._conn.commit()
+        await self._db.commit()
         return await self._get_application(job_id, user_id)
 
-    async def advance_application(self, job_id: int, stage: str, user_id: str) -> dict:
+    async def advance_application(self, job_id: int, stage: str, user_id: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         # Fetch current stage before updating, to record it in history.
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT stage FROM applications WHERE user_id = ? AND job_id = ?",
             (user_id, job_id),
         )
@@ -971,34 +995,34 @@ class JobDatabase:
         # tolerance for a missing application_stage_history table (init_db-only
         # test flows, pre-0014) skips JUST the history — without the savepoint
         # that error would abort the whole transaction and undo the UPDATE.
-        await self._conn.execute("BEGIN")
+        await self._db.execute("BEGIN")
         try:
-            await self._conn.execute(
+            await self._db.execute(
                 """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
                    WHERE user_id = ? AND job_id = ?""",
                 (stage, now, now, user_id, job_id),
             )
-            await self._conn.execute("SAVEPOINT _adv_hist")
+            await self._db.execute("SAVEPOINT _adv_hist")
             try:
-                await self._conn.execute(
+                await self._db.execute(
                     """INSERT INTO application_stage_history
                        (job_id, user_id, from_stage, to_stage, transitioned_at)
                        VALUES (?, ?, ?, ?, ?)""",
                     (job_id, user_id, from_stage, stage, now),
                 )
-                await self._conn.execute("RELEASE SAVEPOINT _adv_hist")
+                await self._db.execute("RELEASE SAVEPOINT _adv_hist")
             except Exception:  # noqa: BLE001
                 # Table not yet created (migration 0014 not run) — keep the
                 # stage move, skip only the history row.
-                await self._conn.execute("ROLLBACK TO SAVEPOINT _adv_hist")
-            await self._conn.execute("COMMIT")
+                await self._db.execute("ROLLBACK TO SAVEPOINT _adv_hist")
+            await self._db.execute("COMMIT")
         except Exception:
-            await self._conn.execute("ROLLBACK")
+            await self._db.execute("ROLLBACK")
             raise
         return await self._get_application(job_id, user_id)
 
-    async def _get_application(self, job_id: int, user_id: str) -> dict:
-        cursor = await self._conn.execute(
+    async def _get_application(self, job_id: int, user_id: str) -> dict[str, Any]:
+        cursor = await self._db.execute(
             """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                       j.title, j.company
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
@@ -1018,9 +1042,9 @@ class JobDatabase:
             "company": row[6] or "",
         }
 
-    async def get_applications(self, user_id: str, stage: str | None = None) -> list[dict]:
+    async def get_applications(self, user_id: str, stage: str | None = None) -> list[dict[str, Any]]:
         if stage:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                           j.title, j.company
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
@@ -1029,7 +1053,7 @@ class JobDatabase:
                 (user_id, stage),
             )
         else:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                           j.title, j.company
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
@@ -1051,16 +1075,16 @@ class JobDatabase:
         ]
 
     async def get_application_counts(self, user_id: str) -> dict[str, int]:
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """SELECT stage, COUNT(*) FROM applications
                WHERE user_id = ? GROUP BY stage""",
             (user_id,),
         )
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
-    async def get_stale_applications(self, user_id: str, days: int = 7) -> list[dict]:
+    async def get_stale_applications(self, user_id: str, days: int = 7) -> list[dict[str, Any]]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
                       j.title, j.company
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
@@ -1083,11 +1107,16 @@ class JobDatabase:
             for r in await cursor.fetchall()
         ]
 
-    async def get_job_by_id(self, job_id: int) -> dict | None:
-        cursor = await self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    async def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
+        cursor = await self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = await cursor.fetchone()
         if not row:
             return None
+        # `description` is Optional on the cursor protocol, but a row was just
+        # fetched above, so it is always populated here. Assert rather than
+        # `or []`: if this ever IS None something is badly wrong, and silently
+        # returning {} would hide it.
+        assert cursor.description is not None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row))
 
@@ -1122,7 +1151,7 @@ class JobDatabase:
         "je.seniority AS enr_seniority"
     )
 
-    async def get_recent_jobs_with_enrichment(self, days: int = 7, min_score: int = 0) -> list[dict]:
+    async def get_recent_jobs_with_enrichment(self, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
         """Same as :meth:`get_recent_jobs` plus a LEFT JOIN to job_enrichment.
 
         Returns one row per job; enrichment columns appear with the ``enr_``
@@ -1144,13 +1173,13 @@ class JobDatabase:
             "ORDER BY j.date_found DESC"
         )
         try:
-            cursor = await self._conn.execute(sql, (cutoff, min_score))
+            cursor = await self._db.execute(sql, (cutoff, min_score))
         except pg.OperationalError:
             return await self.get_recent_jobs(days=days, min_score=min_score)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def get_user_feed_jobs(self, user_id: str, days: int = 7, min_score: int = 0) -> list[dict]:
+    async def get_user_feed_jobs(self, user_id: str, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
         """Per-user dashboard read: the user's OWN ``user_feed`` rows joined to
         the shared ``jobs`` catalog (+ enrichment).
 
@@ -1180,11 +1209,11 @@ class JobDatabase:
             "ORDER BY COALESCE(f.llm_fit_score, f.score) DESC, j.date_found DESC"
         )
         try:
-            cursor = await self._conn.execute(sql, (user_id, cutoff, min_score))
+            cursor = await self._db.execute(sql, (user_id, cutoff, min_score))
         except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
-        out: list[dict] = []
+        out: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             # Surface the per-user feed score as the job's match_score.
@@ -1192,7 +1221,7 @@ class JobDatabase:
             out.append(d)
         return out
 
-    async def get_job_by_id_with_enrichment(self, job_id: int) -> dict | None:
+    async def get_job_by_id_with_enrichment(self, job_id: int) -> dict[str, Any] | None:
         """Same as :meth:`get_job_by_id` plus a LEFT JOIN to job_enrichment.
 
         C-1 fix: mirrors the staleness filter from
@@ -1209,17 +1238,22 @@ class JobDatabase:
             "AND (j.staleness_state IS NULL OR j.staleness_state = 'active')"
         )
         try:
-            cursor = await self._conn.execute(sql, (job_id,))
+            cursor = await self._db.execute(sql, (job_id,))
         except pg.OperationalError:
             # Fallback for fresh DBs without migration 0008 — still apply
             # the staleness filter so the read path stays consistent.
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM jobs WHERE id = ? " "AND (staleness_state IS NULL OR staleness_state = 'active')",
                 (job_id,),
             )
             row = await cursor.fetchone()
             if not row:
                 return None
+            # `description` is Optional on the cursor protocol, but a row was
+            # just fetched above, so it is always populated here. Assert rather
+            # than `or []`: if this ever IS None something is badly wrong, and
+            # silently returning {} would hide it.
+            assert cursor.description is not None
             cols = [d[0] for d in cursor.description]
             return dict(zip(cols, row))
         row = await cursor.fetchone()
@@ -1248,7 +1282,7 @@ class JobDatabase:
         job_id: int | None = None,
         start_time: str | None = None,
         end_time: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Return a paginated slice of the user's notification ledger,
         newest first. Empty list when the table is missing (legacy DB
         without migration 0004) — matches the graceful-degrade pattern
@@ -1262,7 +1296,7 @@ class JobDatabase:
             "FROM notification_ledger "
             "WHERE user_id = ?"
         )
-        params: list = [user_id]
+        params: list[Any] = [user_id]
         if channel:
             sql += " AND channel = ?"
             params.append(channel)
@@ -1281,7 +1315,7 @@ class JobDatabase:
         sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
-            cursor = await self._conn.execute(sql, tuple(params))
+            cursor = await self._db.execute(sql, tuple(params))
         except pg.OperationalError:
             return []
         rows = await cursor.fetchall()
@@ -1303,7 +1337,7 @@ class JobDatabase:
         Step-3 O-01: added ``job_id``, ``start_time``, ``end_time`` filters.
         """
         sql = "SELECT COUNT(*) FROM notification_ledger WHERE user_id = ?"
-        params: list = [user_id]
+        params: list[Any] = [user_id]
         if channel:
             sql += " AND channel = ?"
             params.append(channel)
@@ -1320,7 +1354,7 @@ class JobDatabase:
             sql += " AND created_at <= ?"
             params.append(end_time)
         try:
-            cursor = await self._conn.execute(sql, tuple(params))
+            cursor = await self._db.execute(sql, tuple(params))
         except pg.OperationalError:
             return 0
         row = await cursor.fetchone()
@@ -1332,11 +1366,11 @@ class JobDatabase:
         """Set deleted_at to now — auth middleware rejects soft-deleted users."""
         from datetime import datetime, timezone  # noqa: PLC0415
 
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE users SET deleted_at = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), user_id),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
     # Table names are internal constants (never user input) — the placeholders
     # below are still parameterized. S608 is a false positive here (ignored for
@@ -1370,13 +1404,13 @@ class JobDatabase:
     })
 
     @classmethod
-    def _scrub_export_row(cls, row: dict) -> dict:
+    def _scrub_export_row(cls, row: dict[str, Any]) -> dict[str, Any]:
         return {
             k: ("[redacted]" if k in cls._EXPORT_REDACT_COLUMNS and v is not None else v)
             for k, v in row.items()
         }
 
-    async def export_user_data(self, user_id: str) -> dict:
+    async def export_user_data(self, user_id: str) -> dict[str, Any]:
         """GDPR Article 20 — return everything we hold on this user, as plain data.
 
         Read-only counterpart to :meth:`hard_delete_user`. Scoped strictly by
@@ -1387,15 +1421,15 @@ class JobDatabase:
         Secrets are redacted (see ``_EXPORT_REDACT_COLUMNS``) and token tables are
         omitted entirely, so this is safe to hand to the user as a file.
         """
-        out: dict = {}
-        cur = await self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        out: dict[str, Any] = {}
+        cur = await self._db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = await cur.fetchone()
         out["user"] = self._scrub_export_row(dict(row)) if row else None
 
         incomplete: list[str] = []
         for tbl in self._EXPORT_TABLES:
             try:
-                cur = await self._conn.execute(
+                cur = await self._db.execute(
                     f"SELECT * FROM {tbl} WHERE user_id = ?", (user_id,)  # noqa: S608 — name from a module constant
                 )
                 out[tbl] = [self._scrub_export_row(dict(r)) for r in await cur.fetchall()]
@@ -1430,19 +1464,19 @@ class JobDatabase:
         orphaned child rows (fable/02), and soft-delete resurrection (fable/01).
         """
         # magic_link_tokens is keyed by email, not user_id — look it up first.
-        cur = await self._conn.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+        cur = await self._db.execute("SELECT email FROM users WHERE id = ?", (user_id,))
         row = await cur.fetchone()
         email = row["email"] if row else None
 
         for tbl in self._PER_USER_TABLES:
             try:
-                await self._conn.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
+                await self._db.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
             except Exception:  # noqa: BLE001 — tolerate a table absent in a partial test schema
                 pass
 
         # run_log is shared observability: anonymise rather than delete.
         try:
-            await self._conn.execute(
+            await self._db.execute(
                 "UPDATE run_log SET user_id = NULL WHERE user_id = ?", (user_id,)
             )
         except Exception:  # noqa: BLE001
@@ -1453,7 +1487,7 @@ class JobDatabase:
         # interest, but the personal link is severed. detail never holds email
         # (audit_trail denylists it), so NULLing user_id fully anonymises.
         try:
-            await self._conn.execute(
+            await self._db.execute(
                 "UPDATE audit_log SET user_id = NULL WHERE user_id = ?", (user_id,)
             )
         except Exception:  # noqa: BLE001
@@ -1461,36 +1495,36 @@ class JobDatabase:
 
         if email is not None:
             try:
-                await self._conn.execute(
+                await self._db.execute(
                     "DELETE FROM magic_link_tokens WHERE email = ?", (email,)
                 )
             except Exception:  # noqa: BLE001
                 pass
 
         # The account row itself, last.
-        await self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        await self._conn.commit()
+        await self._db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        await self._db.commit()
 
     async def update_user_password(self, user_id: str, new_hash: str) -> None:
         """Replace the stored password hash for the given user."""
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE users SET password_hash = ? WHERE id = ?",
             (new_hash, user_id),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
     async def update_user_email(self, user_id: str, new_email: str) -> None:
         """Replace the email address for the given user."""
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE users SET email = ? WHERE id = ?",
             (new_email, user_id),
         )
-        await self._conn.commit()
+        await self._db.commit()
 
     # ── Application timeline (Step-3 B-07) ───────────────────────────────────────
-    async def get_application_timeline(self, job_id: int, user_id: str) -> list[dict]:
+    async def get_application_timeline(self, job_id: int, user_id: str) -> list[dict[str, Any]]:
         """Return stage history for a job+user, ordered by transitioned_at ASC."""
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT * FROM application_stage_history WHERE job_id = ? AND user_id = ? ORDER BY transitioned_at ASC",
             (job_id, user_id),
         )
@@ -1498,9 +1532,11 @@ class JobDatabase:
         return [dict(row) for row in rows]
 
     # ── Discovery (Step-3 B-09, B-15) ────────────────────────────────────────────
-    async def get_duplicate_jobs(self, job_id: int, normalized_company: str, normalized_title: str) -> list[dict]:
+    async def get_duplicate_jobs(
+        self, job_id: int, normalized_company: str, normalized_title: str
+    ) -> list[dict[str, Any]]:
         """Return jobs with same normalized key, excluding the given job_id."""
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             """SELECT id, title, company, source, location, match_score, apply_url, date_found
                FROM jobs
                WHERE normalized_company = ? AND normalized_title = ? AND id != ?
@@ -1511,13 +1547,13 @@ class JobDatabase:
         return [dict(row) for row in rows]
 
     # ── Application notes update (Step-3 B-08) ───────────────────────────────────
-    async def update_application_notes(self, job_id: int, user_id: str, new_notes: str) -> dict | None:
+    async def update_application_notes(self, job_id: int, user_id: str, new_notes: str) -> dict[str, Any] | None:
         """Append current notes to notes_history, set notes = new_notes."""
         import json
         from datetime import datetime, timezone
 
         # Fetch current notes
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT notes, notes_history FROM applications WHERE job_id = ? AND user_id = ?",
             (job_id, user_id),
         )
@@ -1528,13 +1564,13 @@ class JobDatabase:
         history = json.loads(row[1] or "[]") if row[1] else []
         if current_notes:  # only append if there's something to archive
             history.append({"note": current_notes, "timestamp": datetime.now(timezone.utc).isoformat()})
-        await self._conn.execute(
+        await self._db.execute(
             "UPDATE applications SET notes = ?, notes_history = ?, updated_at = ? WHERE job_id = ? AND user_id = ?",
             (new_notes, json.dumps(history), datetime.now(timezone.utc).isoformat(), job_id, user_id),
         )
-        await self._conn.commit()
+        await self._db.commit()
         # Return updated row
-        cursor = await self._conn.execute(
+        cursor = await self._db.execute(
             "SELECT a.*, j.title, j.company "
             "FROM applications a LEFT JOIN jobs j ON a.job_id = j.id "
             "WHERE a.job_id = ? AND a.user_id = ?",
@@ -1545,10 +1581,10 @@ class JobDatabase:
 
     # ── Notification rules ───────────────────────────────────────────────────────
 
-    async def get_notification_rules(self, user_id: str) -> list[dict]:
+    async def get_notification_rules(self, user_id: str) -> list[dict[str, Any]]:
         """Return all notification rules for a user, ordered by channel."""
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM notification_rules WHERE user_id = ? ORDER BY channel",
                 (user_id,),
             )
@@ -1557,10 +1593,10 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def get_user_notification_rule(self, user_id: str) -> dict | None:
+    async def get_user_notification_rule(self, user_id: str) -> dict[str, Any] | None:
         """Return the single notification rule for user_id, or None."""
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM notification_rules WHERE user_id = ?",
                 (user_id,),
             )
@@ -1569,7 +1605,7 @@ class JobDatabase:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def save_user_notification_rule(self, user_id: str, data: dict) -> dict:
+    async def save_user_notification_rule(self, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Upsert the single notification rule for user_id. Returns the full row."""
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         score_threshold = data.get("score_threshold", 60)
@@ -1580,7 +1616,7 @@ class JobDatabase:
         quiet_hours_end = data.get("quiet_hours_end")
         enabled = int(data.get("enabled", True))
 
-        await self._conn.execute(
+        await self._db.execute(
             """
             INSERT INTO notification_rules
                 (user_id, score_threshold, notify_mode, interval_hours,
@@ -1610,8 +1646,8 @@ class JobDatabase:
                 now,
             ),
         )
-        await self._conn.commit()
-        cursor = await self._conn.execute(
+        await self._db.commit()
+        cursor = await self._db.execute(
             "SELECT * FROM notification_rules WHERE user_id = ?",
             (user_id,),
         )
@@ -1621,18 +1657,18 @@ class JobDatabase:
     async def set_rule_last_sent(self, user_id: str, ts: str) -> None:
         """Update last_sent_at for the user's notification rule."""
         try:
-            await self._conn.execute(
+            await self._db.execute(
                 "UPDATE notification_rules SET last_sent_at = ? WHERE user_id = ?",
                 (ts, user_id),
             )
-            await self._conn.commit()
+            await self._db.commit()
         except pg.OperationalError:
             pass
 
-    async def get_users_with_rules(self) -> list[dict]:
+    async def get_users_with_rules(self) -> list[dict[str, Any]]:
         """Return all enabled notification rules (one per user)."""
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM notification_rules WHERE enabled = 1"
             )
         except pg.OperationalError:
@@ -1644,11 +1680,11 @@ class JobDatabase:
         """Delete sent digest rows older than `days` days. Returns count deleted."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "DELETE FROM user_notification_digests WHERE sent = 1 AND sent_at < ?",
                 (cutoff,),
             )
-            await self._conn.commit()
+            await self._db.commit()
             return cursor.rowcount
         except pg.OperationalError:
             return 0
@@ -1661,18 +1697,18 @@ class JobDatabase:
         in the digest sender via the sent=0 filter.
         """
         try:
-            await self._conn.execute(
+            await self._db.execute(
                 "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?, ?, ?)",
                 (user_id, channel, job_id),
             )
-            await self._conn.commit()
+            await self._db.commit()
         except pg.OperationalError:
             pass  # Table missing on legacy DB — graceful no-op.
 
-    async def get_pending_digests(self, user_id: str, channel: str) -> list[dict]:
+    async def get_pending_digests(self, user_id: str, channel: str) -> list[dict[str, Any]]:
         """Return all un-sent digest rows for (user_id, channel)."""
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
                 (user_id, channel),
             )
@@ -1688,7 +1724,7 @@ class JobDatabase:
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "UPDATE user_notification_digests "
                 "SET sent = 1, sent_at = ? "
                 "WHERE user_id = ? AND channel = ? AND sent = 0",
@@ -1696,7 +1732,7 @@ class JobDatabase:
             )
         except pg.OperationalError:
             return 0
-        await self._conn.commit()
+        await self._db.commit()
         return cursor.rowcount
 
     # ── Notification ledger stats ────────────────────────────────────────────
@@ -1709,7 +1745,7 @@ class JobDatabase:
         pattern as the rest of the notification_ledger surface.
         """
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT channel, status, COUNT(*) as cnt "
                 "FROM notification_ledger "
                 "WHERE user_id = ? "
@@ -1729,14 +1765,14 @@ class JobDatabase:
 
     async def get_recent_runs(
         self, user_id: str, limit: int = 20, offset: int = 0
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Return recent pipeline runs scoped to ``user_id``, newest first.
 
         Per CLAUDE.md rule #12 the run_log is per-user operational metadata —
         rows without a user_id (legacy, pre-Batch-2) are not exposed.
         """
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT * FROM run_log WHERE user_id = ? "
                 "ORDER BY timestamp DESC LIMIT ? OFFSET ?",
                 (user_id, limit, offset),
@@ -1749,7 +1785,7 @@ class JobDatabase:
     async def count_recent_runs(self, user_id: str) -> int:
         """Return run_log row count for the given user."""
         try:
-            cursor = await self._conn.execute(
+            cursor = await self._db.execute(
                 "SELECT COUNT(*) FROM run_log WHERE user_id = ?",
                 (user_id,),
             )
@@ -1758,6 +1794,6 @@ class JobDatabase:
         except pg.OperationalError:
             return 0
 
-    async def close(self):
+    async def close(self) -> None:
         if self._conn:
             await self._conn.close()

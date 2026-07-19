@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable
 
 # Structural skill-shape guard (rule #28: shape, NOT a skill vocabulary). A skill
 # is a short noun phrase — not a sentence, a date, or a section header. This is
@@ -54,7 +54,7 @@ _SECTION_HEADERS = {
 }
 
 
-def significant_github_languages(languages: dict) -> list[str]:
+def significant_github_languages(languages: dict[str, Any]) -> list[str]:
     """The user's real programming languages from the GitHub language-byte map.
 
     GitHub reports config-file 'languages' (Makefile, Dockerfile, Procfile,
@@ -203,7 +203,7 @@ def tier_skills_by_evidence(
     return primary, secondary, tertiary
 
 
-def collect_evidence_from_profile(profile) -> list[SkillEvidence]:
+def collect_evidence_from_profile(profile: Any) -> list[SkillEvidence]:
     """Walk the five known skill fields and build ``SkillEvidence`` rows.
 
     Dedup key is ``name.casefold()``. The first sighting wins for the

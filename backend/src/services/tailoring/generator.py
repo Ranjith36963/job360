@@ -9,7 +9,7 @@ route/storage layer does the DB I/O and passes data in. The LLM call is injectab
 from __future__ import annotations
 
 import os
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 
@@ -20,7 +20,7 @@ from src.services.tailoring.prompts import SYSTEM_BY_KIND, build_user_prompt
 DOC_KINDS = ("cv", "cover_letter")
 
 # (prompt, system) -> {"document": "..."} ; matches llm_provider.llm_extract.
-LlmFn = Callable[[str, str], Awaitable[dict]]
+LlmFn = Callable[[str, str], Awaitable[dict[str, Any]]]
 
 
 class GeneratedDoc(BaseModel):

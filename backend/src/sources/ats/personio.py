@@ -2,12 +2,17 @@ import asyncio
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
-from defusedxml.ElementTree import fromstring as _safe_fromstring  # M18: XXE-safe parse of untrusted feed XML
+
+# M18: XXE-safe parse of untrusted feed XML. defusedxml ships no type stubs
+# and types-defusedxml is not a project dependency, hence the import ignore.
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, PERSONIO_COMPANIES
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
 logger = logging.getLogger("job360.sources.personio")
@@ -21,7 +26,7 @@ class PersonioSource(BaseJobSource):
     name = "personio"
     category = "ats"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies or PERSONIO_COMPANIES
 

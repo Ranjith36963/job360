@@ -3,6 +3,7 @@
 import argparse
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from src.repositories import pgsync
 
@@ -24,7 +25,9 @@ from src.utils.time_buckets import (
 console = Console()
 
 
-def _load_jobs_sync(db_path: str | None = None, days: int = 7, min_score: int = 30) -> list[dict]:
+def _load_jobs_sync(
+    db_path: str | None = None, days: int = 7, min_score: int = 30
+) -> list[dict[str, Any]]:
     """Load recent jobs from SQLite synchronously."""
     path = db_path or str(DB_PATH)
     conn = pgsync.connect(path)
@@ -43,7 +46,7 @@ def _load_jobs_sync(db_path: str | None = None, days: int = 7, min_score: int = 
         conn.close()
 
 
-def _format_salary(job: dict) -> str:
+def _format_salary(job: dict[str, Any]) -> str:
     """Format salary for terminal display."""
     smin = job.get("salary_min")
     smax = job.get("salary_max")
@@ -56,7 +59,7 @@ def _format_salary(job: dict) -> str:
     return "N/A"
 
 
-def _build_bucket_table(jobs: list[dict], bucket_idx: int) -> Table:
+def _build_bucket_table(jobs: list[dict[str, Any]], bucket_idx: int) -> Table:
     """Build a Rich table for one time bucket."""
     label, _, rich_emoji, _, _ = BUCKETS[bucket_idx]
     table = Table(
@@ -98,7 +101,7 @@ def display_jobs(
     source: str | None = None,
     visa_only: bool = False,
     db_path: str | None = None,
-):
+) -> None:
     """Load jobs, apply filters, bucket them, and print to terminal."""
     days = max(hours / 24, 1)
     jobs = _load_jobs_sync(db_path=db_path, days=int(days), min_score=min_score)

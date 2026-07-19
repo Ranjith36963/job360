@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
+from typing import Any, Callable
 
 from src.core.keywords import (
     JOB_TITLES,
@@ -194,7 +195,7 @@ _VISA_NEGATIONS = (
 )
 
 
-def _has_visa_keyword(text: str, keywords: list) -> bool:
+def _has_visa_keyword(text: str, keywords: list[str]) -> bool:
     """Check for visa keywords while respecting negation phrases."""
     text_lower = text.lower()
     if any(neg in text_lower for neg in _VISA_NEGATIONS):
@@ -203,7 +204,7 @@ def _has_visa_keyword(text: str, keywords: list) -> bool:
 
 
 @lru_cache(maxsize=512)
-def _word_boundary_pattern(term: str) -> re.Pattern:
+def _word_boundary_pattern(term: str) -> re.Pattern[str]:
     """Build a compiled word-boundary regex for a skill term."""
     return re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
 
@@ -436,7 +437,14 @@ class JobScorer:
     the old 100, clamped to 100 post-addition.
     """
 
-    def __init__(self, config, *, user_preferences=None, enrichment_lookup=None, engine1=None):
+    def __init__(
+        self,
+        config: Any,
+        *,
+        user_preferences: Any = None,
+        enrichment_lookup: Callable[[Any], Any] | None = None,
+        engine1: bool | None = None,
+    ) -> None:
         """Accept a SearchConfig (from src.services.profile.models).
 
         Optional kwargs (Batch 2.9):

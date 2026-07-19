@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional, cast
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -366,7 +366,7 @@ def _slack_oauth_enabled() -> bool:
     )
 
 
-async def _exchange_slack_code(code: str) -> dict:
+async def _exchange_slack_code(code: str) -> dict[str, Any]:
     """POST the authorization code to Slack and return the parsed JSON body.
 
     This is the ONLY function that makes live HTTP to Slack — isolated here
@@ -386,7 +386,7 @@ async def _exchange_slack_code(code: str) -> dict:
             },
         )
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
 
 @router.get("/connect/slack", include_in_schema=False)
@@ -512,7 +512,7 @@ def _discord_oauth_enabled() -> bool:
     )
 
 
-async def _exchange_discord_code(code: str) -> dict:
+async def _exchange_discord_code(code: str) -> dict[str, Any]:
     """POST the authorization code to Discord and return the parsed JSON body.
 
     This is the ONLY function that makes live HTTP to Discord — isolated here
@@ -536,7 +536,7 @@ async def _exchange_discord_code(code: str) -> dict:
             },
         )
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
 
 @router.get("/connect/discord", include_in_schema=False)
@@ -656,7 +656,7 @@ def _telegram_enabled() -> bool:
     return bool(_settings.TELEGRAM_BOT_TOKEN and _settings.TELEGRAM_BOT_USERNAME)
 
 
-async def _telegram_get_updates() -> list[dict]:
+async def _telegram_get_updates() -> list[dict[str, Any]]:
     """GET /getUpdates from the Telegram Bot API and return the result list.
 
     This is the ONLY function that makes live HTTP to Telegram — isolated here
@@ -669,7 +669,7 @@ async def _telegram_get_updates() -> list[dict]:
             timeout=10.0,
         )
         resp.raise_for_status()
-        return resp.json().get("result", [])
+        return cast("list[dict[str, Any]]", resp.json().get("result", []))
 
 
 @router.get("/connect/telegram", response_model=TelegramConnectOut)

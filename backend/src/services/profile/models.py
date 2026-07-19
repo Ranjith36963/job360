@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -23,7 +23,7 @@ class CVData:
     location: str = ""
     achievements: list[str] = field(default_factory=list)
     # LinkedIn-sourced data
-    linkedin_positions: list[dict] = field(default_factory=list)
+    linkedin_positions: list[dict[str, Any]] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
     linkedin_industry: str = ""
     # Two-pass extraction — the raw text pdfplumber pulled from the LinkedIn
@@ -36,10 +36,10 @@ class CVData:
     # fields: they inform the CV viewer and feed relevance keywords
     # but do NOT contribute to ``skills`` — they're separate signals
     # so downstream can opt-in rather than polluting primary tiering.
-    linkedin_languages: list[dict] = field(default_factory=list)
-    linkedin_projects: list[dict] = field(default_factory=list)
-    linkedin_volunteer: list[dict] = field(default_factory=list)
-    linkedin_courses: list[dict] = field(default_factory=list)
+    linkedin_languages: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_projects: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_volunteer: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_courses: list[dict[str, Any]] = field(default_factory=list)
     # GitHub-sourced data
     github_languages: dict[str, int] = field(default_factory=dict)
     github_topics: list[str] = field(default_factory=list)
@@ -52,7 +52,7 @@ class CVData:
     # Two-pass extraction — a compact list of {name, description, topics}
     # for the user's public repos. Stored so the GitHub LLM pass can re-run
     # offline (no re-fetch) on a later profile change.
-    github_repos_brief: list[dict] = field(default_factory=list)
+    github_repos_brief: list[dict[str, Any]] = field(default_factory=list)
     # Two-pass extraction — skills the LLM inferred by reading repo prose
     # (names/descriptions/topics) that the hard-coded language/topic lookup
     # tables can't recognise (e.g. "LangChain", "RAG"). Separate field so
@@ -88,7 +88,7 @@ class CVData:
     suggested_skills: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_json_resume(cls, data: dict) -> CVData:
+    def from_json_resume(cls, data: dict[str, Any]) -> CVData:
         """Batch 1.8b — inverse of ``to_json_resume``. Build a CVData
         from a JSON Resume–shaped dict.
 
@@ -201,7 +201,7 @@ class CVData:
             career_domain=meta.get("career_domain") if isinstance(meta, dict) else None,
         )
 
-    def to_json_resume(self) -> dict:
+    def to_json_resume(self) -> dict[str, Any]:
         """Batch 1.8 — return a JSON Resume canonical-schema dict.
 
         Additive export (read-only). Does NOT rename existing fields,

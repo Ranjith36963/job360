@@ -9,6 +9,7 @@ what came from their CV vs what the AI wrote, before they trust and send it.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 _WORD = re.compile(r"[A-Za-z0-9]+")
 # >= this share of a line's words appearing in the source => it's grounded (your fact).
@@ -19,7 +20,7 @@ def _tokens(text: str) -> set[str]:
     return {m.group(0).lower() for m in _WORD.finditer(text or "")}
 
 
-def annotate_provenance(output_text: str, source_text: str) -> list[dict]:
+def annotate_provenance(output_text: str, source_text: str) -> list[dict[str, Any]]:
     """Split ``output_text`` into lines; label each grounded (your fact) or AI-added.
 
     A line is ``grounded`` when at least ``_GROUND_THRESHOLD`` of its content words also
@@ -28,7 +29,7 @@ def annotate_provenance(output_text: str, source_text: str) -> list[dict]:
     Returns one ``{"text": str, "grounded": bool}`` per line, preserving text verbatim.
     """
     source = _tokens(source_text)
-    segments: list[dict] = []
+    segments: list[dict[str, Any]] = []
     for line in (output_text or "").split("\n"):
         line_tokens = _tokens(line)
         if not line_tokens:

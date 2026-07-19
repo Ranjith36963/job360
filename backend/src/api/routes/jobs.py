@@ -4,8 +4,9 @@ import csv
 import io
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,9 @@ from src.api.auth_deps import CurrentUser, optional_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobListResponse, JobResponse
 from src.repositories.database import JobDatabase
+
+if TYPE_CHECKING:  # annotation-only; the real import stays lazy (rule #16)
+    from src.models import Job
 
 logger = logging.getLogger("job360.api.jobs")
 
@@ -33,7 +37,7 @@ def _parse_enr_salary(raw: object) -> tuple[Optional[int], Optional[int], Option
     if not raw:
         return (None, None, None, None)
     try:
-        obj = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw)
+        obj = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(cast(Any, raw))
     except (json.JSONDecodeError, TypeError, ValueError):
         return (None, None, None, None)
     if not isinstance(obj, dict):
@@ -57,7 +61,7 @@ def _parse_json_list(raw: object) -> Optional[list[str]]:
     if isinstance(raw, list):
         return [str(x) for x in raw]
     try:
-        decoded = json.loads(raw)
+        decoded = json.loads(cast(Any, raw))
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(decoded, list):
@@ -90,7 +94,7 @@ def _compute_bucket(date_found: str) -> str:
         return "7d"
 
 
-def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
+def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobResponse:
     """Build a `JobResponse` from a single LEFT-JOIN row.
 
     Step-1 B6: ``row`` may carry both ``jobs.*`` columns and ``enr_*``-prefixed
@@ -179,7 +183,7 @@ def _row_to_job_response(row: dict, action: str | None = None) -> JobResponse:
     )
 
 
-def _profile_query_text(profile) -> str:
+def _profile_query_text(profile: Any) -> str:
     """Build a semantic-query string from the user's profile — job titles +
     skills + summary. LinkedIn/GitHub data is already merged into ``cv_data`` by
     the upload routes, so this naturally includes it. Returns "" when there's
@@ -197,13 +201,13 @@ def _profile_query_text(profile) -> str:
 
 
 def _hybrid_reorder_rows(
-    rows: list[dict],
+    rows: list[dict[str, Any]],
     query_text: str,
     *,
     semantic_ids: Optional[list[int]] = None,
-    rerank_fn=None,
+    rerank_fn: Optional[Callable[[list[int]], list[int]]] = None,
     rrf_k: int = 60,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Pure engine-3 reorder core (offline-testable).
 
     Fuses three rankings via ``retrieve_for_user``:
@@ -228,20 +232,20 @@ def _hybrid_reorder_rows(
         if r.get("id") is not None
     ]
 
-    def keyword_fn(_profile, _limit):
+    def keyword_fn(_profile: Any, _limit: int) -> list[int]:
         return keyword_ids
 
     bm25_fn = None
     if query_text:
 
-        def bm25_fn(_profile, _limit):  # noqa: F811 — conditional definition
+        def bm25_fn(_profile: Any, _limit: int) -> list[int]:  # noqa: F811 — conditional definition
             return [jid for jid, _score in bm25_rank(query_text, docs)]
 
     semantic_fn = None
     if semantic_ids:
         _sem = list(semantic_ids)
 
-        def semantic_fn(_profile, _limit):  # noqa: F811
+        def semantic_fn(_profile: Any, _limit: int) -> list[int]:  # noqa: F811
             return _sem
 
     fused_ids = retrieve_for_user(
@@ -255,8 +259,8 @@ def _hybrid_reorder_rows(
     )
 
     by_id = {r["id"]: r for r in rows if r.get("id") is not None}
-    reordered: list[dict] = []
-    seen: set = set()
+    reordered: list[dict[str, Any]] = []
+    seen: set[Any] = set()
     for jid in fused_ids:
         if jid in by_id and jid not in seen:
             reordered.append(by_id[jid])
@@ -270,7 +274,7 @@ def _hybrid_reorder_rows(
     return reordered
 
 
-def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]:
+def _maybe_apply_hybrid_reorder(rows: list[dict[str, Any]], *, profile: Any = None) -> list[dict[str, Any]]:
     """Engine 3 — when ``?mode=hybrid`` is requested, fuse keyword + BM25 +
     semantic rankings via RRF, cross-encoder rerank the top survivors, and
     reorder ``rows`` accordingly (delegates to the tested ``_hybrid_reorder_rows``).
@@ -355,7 +359,7 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
     rerank_fn = None
     if query_text:
 
-        def rerank_fn(ids):  # noqa: F811 — conditional definition
+        def rerank_fn(ids: list[int]) -> list[int]:  # noqa: F811 — conditional definition
             try:
                 from src.services.retrieval import (  # noqa: PLC0415
                     _load_cross_encoder,
@@ -384,7 +388,7 @@ def _maybe_apply_hybrid_reorder(rows: list[dict], *, profile=None) -> list[dict]
 async def export_jobs(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> StreamingResponse:
     """Download all recent jobs as CSV (catalog is shared; auth gates access)."""
     rows = await db.get_recent_jobs(days=7, min_score=0)
     output = io.StringIO()
@@ -445,7 +449,7 @@ async def list_jobs(
     offset: int = Query(0, ge=0),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; sitemap + unfurl bots read unauthenticated
-):
+) -> JobListResponse:
     # Step-1 B8 — wire ?mode=hybrid through services.retrieval. Falls back
     # to the keyword path silently when SEMANTIC_ENABLED is off, the vector
     # index is empty, or the semantic stack isn't installed.
@@ -514,7 +518,7 @@ async def list_jobs(
 
     jobs = [_row_to_job_response(row, action_map.get(row["id"])) for row in page]
 
-    filters_applied: dict = {}
+    filters_applied: dict[str, Any] = {}
     if hours is not None:
         filters_applied["hours"] = hours
     if min_score is not None:
@@ -536,7 +540,7 @@ async def get_job_duplicates(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — public: shared catalog
-):
+) -> dict[str, Any]:
     """Return alternate listings for the same job across sources (Option A: query-time grouping).
 
     Uses normalized_key() grouping: jobs with same normalized company + normalized title
@@ -555,7 +559,7 @@ async def get_job_duplicates(
     return {"job_id": job_id, "duplicates": duplicates, "total": len(duplicates)}
 
 
-def _row_to_scoring_job(row: dict):
+def _row_to_scoring_job(row: dict[str, Any]) -> "Job":
     """Reconstruct a ``Job`` from a stored DB row for re-scoring.
 
     CRUCIAL: sets ``job.id`` from the row. The scorer's ``enrichment_lookup``
@@ -583,7 +587,7 @@ def _row_to_scoring_job(row: dict):
     return job
 
 
-async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> dict:
+async def _personalize_dims(row: dict[str, Any], db: JobDatabase, user: CurrentUser) -> dict[str, Any]:
     """Rewrite the per-dimension breakdown on ``row`` to reflect ``user``'s
     own profile, returning a shallow copy with the dim columns overridden.
 
@@ -628,7 +632,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     # table on every authenticated GET /jobs/{id} — a full-table scan that grows
     # with the 30-day catalog, to use one row. Build a 1-entry lookup so the
     # scorer's `enrichment_lookup` and `dims_active` below are unchanged.
-    _this_enrichment = await load_enrichment(db._conn, row["id"]) if enrichment_on else None
+    _this_enrichment = await load_enrichment(db._db, row["id"]) if enrichment_on else None
     enrichment_lookup_dict = {row["id"]: _this_enrichment} if _this_enrichment is not None else {}
     scorer = JobScorer(
         search_config,
@@ -641,7 +645,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     job = _row_to_scoring_job(row)
     breakdown = scorer.score(job)
 
-    feed_score = await FeedService(db._conn).get_score(user.id, row["id"])
+    feed_score = await FeedService(db._db).get_score(user.id, row["id"])
 
     out = dict(row)
     # Dim columns map ScoreBreakdown -> JobResponse exactly as run_search does
@@ -672,7 +676,7 @@ async def _personalize_dims(row: dict, db: JobDatabase, user: CurrentUser) -> di
     return out
 
 
-def _user_skill_names(profile) -> list[str]:
+def _user_skill_names(profile: Any) -> list[str]:
     """All of the user's skill names, deduped case-insensitively (CV + LinkedIn +
     GitHub-inferred + about-me-inferred). Empty when there's no profile."""
     cv = getattr(profile, "cv_data", None) if profile is not None else None
@@ -696,7 +700,7 @@ async def get_job(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; generateMetadata reads unauthenticated
-):
+) -> JobResponse:
     # Step-1 B6: single LEFT JOIN — JobResponse surfaces enrichment fields.
     row = await db.get_job_by_id_with_enrichment(job_id)
     if not row:

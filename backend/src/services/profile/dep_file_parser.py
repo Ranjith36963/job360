@@ -119,7 +119,7 @@ def _parse_pyproject_via_tomllib(content: str) -> set[str] | None:
         import tomllib  # type: ignore[import-not-found]
     except ImportError:
         try:
-            import tomli as tomllib  # type: ignore[import-not-found]
+            import tomli as tomllib  # type: ignore[import-not-found, unused-ignore]
         except ImportError:
             return None
     try:

@@ -1,10 +1,12 @@
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.google_jobs")
@@ -32,7 +34,7 @@ class GoogleJobsSource(BaseJobSource):
     name = "google_jobs"
     category = "keyed_api"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
@@ -62,7 +64,7 @@ class GoogleJobsSource(BaseJobSource):
             if not data or "jobs_results" not in data:
                 continue
 
-            for item in data["jobs_results"]:
+            for item in cast(dict[str, Any], data)["jobs_results"]:
                 title = item.get("title", "")
                 company = item.get("company_name", "")
                 description = item.get("description", "")

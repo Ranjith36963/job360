@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Callable
 
 import aiohttp
 
@@ -27,6 +28,7 @@ from src.core.settings import (
 )
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.models import Job
+from src.repositories import pg
 from src.repositories.csv_export import export_to_csv
 from src.repositories.database import JobDatabase
 from src.services.circuit_breaker import BreakerState
@@ -44,6 +46,7 @@ from src.services.job_enrichment import (
 from src.services.metrics_exporter import export_notification_metrics, export_pipeline_metrics
 from src.services.notifications.report_generator import generate_markdown_report
 from src.services.profile.keyword_generator import generate_search_config
+from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.scheduler import TieredScheduler
 from src.services.skill_matcher import JobScorer, detect_experience_level, salary_in_range
@@ -78,6 +81,7 @@ from src.sources.ats.smartrecruiters import SmartRecruitersSource
 from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.ats.workable import WorkableSource
 from src.sources.ats.workday import WorkdaySource
+from src.sources.base import BaseJobSource
 from src.sources.feeds.biospace import BioSpaceSource
 from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
 from src.sources.feeds.nhs_jobs import NHSJobsSource
@@ -164,9 +168,9 @@ SOURCE_INSTANCE_COUNT = 46
 
 
 async def _ghost_detection_pass(
-    db,
-    sources,
-    results,
+    db: JobDatabase,
+    sources: list[BaseJobSource],
+    results: list[list[Job] | BaseException | None],
     history: dict[str, list[int]],
     completeness_threshold: float = 0.7,
 ) -> dict[str, int]:
@@ -226,8 +230,11 @@ def _format_date(date_str: str) -> str:
 
 
 def _build_sources(
-    session: aiohttp.ClientSession, source_filter: str | None = None, search_config=None, user_profile=None
-) -> list:
+    session: aiohttp.ClientSession,
+    source_filter: str | None = None,
+    search_config: SearchConfig | None = None,
+    user_profile: UserProfile | None = None,
+) -> list[BaseJobSource]:
     """Build source instances, optionally filtered to a single source or by
     the user's classified professional domain(s).
 
@@ -327,7 +334,7 @@ def _recency_bucket(date_found: str | None) -> str:
     return "older"
 
 
-async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
+async def _run_matcher_stage(db: JobDatabase, *, user_id: str, jobs: list[Job]) -> None:
     """Funnel -> judge: LLM-match the top shortlisted jobs for THIS user.
 
     Gated on MATCHER_ENABLED (default off — rule #18 analog: OFF must be a
@@ -373,6 +380,7 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
             len(shortlist),
             user_id,
         )
+        assert db._conn is not None  # set by init_db() before this stage runs (see run_search)
         results = await match_batch(
             shortlist,
             user_id=user_id,
@@ -397,7 +405,12 @@ async def _run_matcher_stage(db, *, user_id: str, jobs: list) -> None:
         logger.warning("matcher stage failed (run continues): %s", e)
 
 
-async def _enqueue_notifications(conn, user_id: str, written, enqueue) -> int:
+async def _enqueue_notifications(
+    conn: pg.Connection,
+    user_id: str,
+    written: list[tuple[int, int]],
+    enqueue: Callable[..., Any],
+) -> int:
     """SI1 — enqueue ``send_notification`` for feed rows above the user's
     score_threshold, so a per-user search actually produces notifications.
 
@@ -441,8 +454,8 @@ async def run_search(
     log_level: str | None = None,
     no_notify: bool = False,
     user_id: str | None = None,
-    enqueue=None,
-) -> dict:
+    enqueue: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
     # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
     # path historically wrote user_feed but NEVER triggered a notification, so no
     # user ever got a job-match email/Slack/Discord (the whole score_threshold
@@ -508,6 +521,14 @@ async def run_search(
     await db.init_db()
 
     try:
+        # Narrow db._conn from `Connection | None` to `Connection` once, up front:
+        # init_db() above always opens a connection (never leaves it None) and
+        # nothing in this function resets it before db.close() in the `finally`
+        # below, so this assert can never actually fail — it exists purely so
+        # mypy can track the non-Optional type through the rest of this function.
+        assert db._conn is not None, "init_db() always opens a connection"
+        conn = db._conn
+
         # Auto-purge old jobs (>30 days)
         purged = await db.purge_old_jobs(days=30)
         if purged:
@@ -523,13 +544,18 @@ async def run_search(
         from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
 
         if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
-            enrichment_lookup_dict = await _build_enrichment_lookup(db._conn)
+            enrichment_lookup_dict = await _build_enrichment_lookup(conn)
         else:
             enrichment_lookup_dict = {}
         scorer = JobScorer(
             search_config,
             user_preferences=profile.preferences if profile else None,
-            enrichment_lookup=lambda job: enrichment_lookup_dict.get(getattr(job, "id", None)),
+            # job.id is set dynamically at runtime (src/main.py ~line 745) but is NOT a
+            # declared field on the Job dataclass (src/models.py) — a known Pillar-2
+            # scoring issue (see project memory: dim-scoring id bug). getattr(...) makes
+            # the runtime safe; the ignore below is only for the resulting dict.get() key
+            # type. Not fixed here: models.py is out of scope and Pillar 2 is hands-off.
+            enrichment_lookup=lambda job: enrichment_lookup_dict.get(getattr(job, "id", None)),  # type: ignore[arg-type]
         )
 
         # Create session
@@ -576,10 +602,10 @@ async def run_search(
             per_source_duration: dict[str, int] = {}
             per_source_errors: dict[str, int] = {}
 
-            def _instrument(src):
+            def _instrument(src: BaseJobSource) -> None:
                 original_fetch = src.fetch_jobs
 
-                async def _timed_fetch():
+                async def _timed_fetch() -> list[Job]:
                     started_ns = time.perf_counter_ns()
                     try:
                         with source_timer(src.name):
@@ -599,7 +625,9 @@ async def run_search(
             scheduler = TieredScheduler(sources, registry)
             paired = await scheduler.tick(force=True)
 
-            results_by_name: dict = {name: None for name in (s.name for s in sources)}
+            results_by_name: dict[str, list[Job] | BaseException | None] = {
+                name: None for name in (s.name for s in sources)
+            }
             for src, result in paired:
                 results_by_name[src.name] = result
 
@@ -728,13 +756,17 @@ async def run_search(
             # normalized key). The Job dataclass carries no id until now, and
             # enrich_batch persists keyed on ``job.id`` — so this MUST happen
             # before enrichment or every result is silently dropped.
+            # NOTE (real bug, reported not fixed — Job.id is a dynamically-set
+            # attribute, not a declared dataclass field in src/models.py; see
+            # project memory "Dim scoring id bug". Out of scope: models.py is
+            # not part of this fix and Pillar 2 scoring is hands-off.)
             for job in unique_jobs:
-                cur = await db._conn.execute(
+                cur = await conn.execute(
                     "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
                     job.normalized_key(),
                 )
                 r = await cur.fetchone()
-                job.id = r[0] if r is not None else None
+                job.id = r[0] if r is not None else None  # type: ignore[attr-defined]
 
             # Step-1 B7 — gate LLM enrichment by score. No-op when the flag is
             # OFF (CLAUDE.md rule #18). B7-2 fix: this runs AFTER insert so the
@@ -763,7 +795,7 @@ async def run_search(
                     # (Cerebras) and small token/min budgets (Groq). A burst of 10
                     # concurrent × retries 429s every provider at once. 3 keeps the
                     # batch under the per-minute limits while still parallelising.
-                    await enrich_batch(high_scored, semaphore_limit=3, conn=db._conn)
+                    await enrich_batch(high_scored, semaphore_limit=3, conn=conn)
                     await db.commit()
 
                     # Engine 2 dim-scoring fix: the first score() (above) ran
@@ -772,11 +804,12 @@ async def run_search(
                     # Now they have both — re-score with a rebuilt lookup so the
                     # dims fold into match_score, and persist so the feed write
                     # below + the catalog reflect the dim-inclusive score.
-                    fresh_lookup = await _build_enrichment_lookup(db._conn)
+                    fresh_lookup = await _build_enrichment_lookup(conn)
                     dim_scorer = JobScorer(
                         search_config,
                         user_preferences=profile.preferences if profile else None,
-                        enrichment_lookup=lambda job: fresh_lookup.get(getattr(job, "id", None)),
+                        # See note above on job.id (dynamic attr, Pillar-2 hands-off).
+                        enrichment_lookup=lambda job: fresh_lookup.get(getattr(job, "id", None)),  # type: ignore[arg-type]
                     )
                     for job in high_scored:
                         bd = dim_scorer.score(job)
@@ -798,7 +831,7 @@ async def run_search(
             if user_id is not None and unique_jobs:
                 from src.services.feed import FeedService  # noqa: PLC0415 — avoid import cycle at module load
 
-                feed = FeedService(db._conn)
+                feed = FeedService(conn)
                 feed_written = 0
                 feed_profile_version = current_profile_version_id(user_id)
                 _written_for_notify: list[tuple[int, int]] = []  # (job_id, score)
@@ -807,18 +840,20 @@ async def run_search(
                         # N7 — reuse the id already resolved in the scoring loop
                         # above (job.id set from the same `SELECT id FROM jobs`);
                         # re-querying it here doubled the point-queries per run.
-                        if job.id is None:
+                        # (job.id is a dynamically-set attribute, not a declared
+                        # dataclass field — see note earlier in this function.)
+                        if job.id is None:  # type: ignore[attr-defined]
                             continue
                         _score = int(job.match_score or 0)
                         await feed.upsert_feed_row(
                             user_id=user_id,
-                            job_id=job.id,
+                            job_id=job.id,  # type: ignore[attr-defined]
                             score=_score,
                             bucket=_recency_bucket(job.date_found),
                             profile_version=feed_profile_version,
                         )
                         feed_written += 1
-                        _written_for_notify.append((job.id, _score))
+                        _written_for_notify.append((job.id, _score))  # type: ignore[attr-defined]
                     except Exception as e:  # never let a feed write fail the whole run
                         logger.warning("user_feed write failed for %r: %s", job.title, e)
                 logger.info("Wrote %s jobs to user_feed for user %s", feed_written, user_id)
@@ -828,7 +863,7 @@ async def run_search(
                 # notifications aren't suppressed.
                 if enqueue is not None and not no_notify and _written_for_notify:
                     await _enqueue_notifications(
-                        db._conn, user_id, _written_for_notify, enqueue
+                        conn, user_id, _written_for_notify, enqueue
                     )
 
             # Funnel -> judge (LLM matcher). Per-user, post-feed-write so the
@@ -856,7 +891,7 @@ async def run_search(
                     for j in new_jobs:
                         try:
                             # Look up the persisted row id (insert_job returned bool only).
-                            row_cursor = await db._conn.execute(
+                            row_cursor = await conn.execute(
                                 "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
                                 j.normalized_key(),
                             )
@@ -865,7 +900,7 @@ async def run_search(
                                 continue
                             job_id = row[0]
                             try:
-                                enrichment = await load_enrichment(db._conn, job_id)
+                                enrichment = await load_enrichment(conn, job_id)
                             except Exception:
                                 enrichment = None
                             vec = encode_job(j, enrichment)
@@ -874,7 +909,7 @@ async def run_search(
                                 vector=vec,
                                 metadata={"title": j.title, "company": j.company},
                             )
-                            await db._conn.execute(
+                            await conn.execute(
                                 "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, ?) "
                                 "ON CONFLICT(job_id) DO UPDATE SET model_version = EXCLUDED.model_version",
                                 (job_id, MODEL_NAME),
@@ -945,7 +980,7 @@ async def run_search(
     return stats
 
 
-def _print_bucketed_summary(jobs: list, label: str = "Results"):
+def _print_bucketed_summary(jobs: list[Job], label: str = "Results") -> None:
     """Print a time-bucketed summary of jobs to the console."""
     from src.utils.time_buckets import BUCKETS, bucket_jobs, bucket_summary_counts
 

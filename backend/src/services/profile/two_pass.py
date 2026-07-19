@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from src.services.profile.cv_parser import (
     deterministic_cv_fields,
@@ -188,7 +189,7 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     # ── ② LinkedIn ── raw = cv.linkedin_raw_text ───────────────────────
     if cv.linkedin_raw_text:
         det_li = deterministic_linkedin_fields(cv.linkedin_raw_text)  # det-LI-output
-        llm_li: dict = {}
+        llm_li: dict[str, Any] = {}
         try:
             llm_li = await llm_linkedin_fields(cv.linkedin_raw_text)  # llm-LI-output
         except Exception as e:  # noqa: BLE001 — deterministic result still stands

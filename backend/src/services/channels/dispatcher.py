@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from src.repositories import pg
 from src.services.channels.crypto import decrypt
@@ -42,10 +42,10 @@ logger = get_logger("channels.dispatcher")  # job360.channels.dispatcher → dat
 _apprise = None
 
 
-def _get_apprise_cls():
+def _get_apprise_cls() -> Any:
     global _apprise
     if _apprise is None:
-        import apprise  # type: ignore
+        import apprise
 
         _apprise = apprise
     return _apprise
@@ -66,7 +66,7 @@ async def load_user_channels(
 ) -> list[dict[str, Any]]:
     db.row_factory = pg.Row
     query = "SELECT * FROM user_channels WHERE user_id = ?"
-    params: list = [user_id]
+    params: list[Any] = [user_id]
     if enabled_only:
         query += " AND enabled = 1"
     cur = await db.execute(query, params)
@@ -133,8 +133,10 @@ def _is_in_quiet_window(
 
         tz = ZoneInfo(user_tz)
         now_local = datetime.now(tz).time().replace(second=0, microsecond=0)
-        start = time(*map(int, quiet_start_str.split(":")))
-        end = time(*map(int, quiet_end_str.split(":")))
+        # mypy cannot match a starred ``map[int]`` against time()'s overloads;
+        # the runtime call is unchanged.
+        start = time(*map(int, quiet_start_str.split(":")))  # type: ignore[arg-type]
+        end = time(*map(int, quiet_end_str.split(":")))  # type: ignore[arg-type]
         if start <= end:
             return start <= now_local < end
         # Wraparound: e.g. 23:00–07:00
@@ -143,7 +145,7 @@ def _is_in_quiet_window(
         return False
 
 
-async def _load_notification_rule(db: pg.Connection, user_id: str) -> dict | None:
+async def _load_notification_rule(db: pg.Connection, user_id: str) -> Optional[dict[str, Any]]:
     """Return the single notification_rules row for user_id or None."""
     try:
         db.row_factory = pg.Row
@@ -164,7 +166,7 @@ async def _load_user_timezone(db: pg.Connection, user_id: str) -> str:
         cur = await db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
         row = await cur.fetchone()
         if row and row["timezone"]:
-            return row["timezone"]
+            return cast(str, row["timezone"])
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not load timezone for user %s: %s", user_id, exc)
     return "UTC"
@@ -347,7 +349,7 @@ async def dispatch(
     return results
 
 
-async def _notify_async(ap, *, title: str, body: str) -> bool:
+async def _notify_async(ap: Any, *, title: str, body: str) -> bool:
     """Run apprise.notify — prefer async if present, else call sync.
 
     Apprise has async_notify in recent versions; fallback keeps us

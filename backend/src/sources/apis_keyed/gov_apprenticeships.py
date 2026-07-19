@@ -19,11 +19,12 @@ Rate limit: 150 requests per 5-minute rolling window.
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource
 
 logger = logging.getLogger("job360.sources.gov_apprenticeships")
@@ -47,7 +48,7 @@ class GovApprenticeshipsSource(BaseJobSource):
         self,
         session: aiohttp.ClientSession,
         api_key: str = "",
-        search_config=None,
+        search_config: Optional[SearchConfig] = None,
     ):
         super().__init__(session, search_config=search_config)
         self._api_key = api_key
@@ -92,7 +93,7 @@ class GovApprenticeshipsSource(BaseJobSource):
         logger.info("GovApprenticeships: found %s jobs", len(jobs))
         return jobs
 
-    def _parse_vacancy(self, item: dict, seen: set) -> Optional[Job]:
+    def _parse_vacancy(self, item: dict[str, Any], seen: set[str]) -> Optional[Job]:
         ref = item.get("vacancyReference") or ""
         # Prefer the employer's external apply link; fall back to the gov.uk page.
         apply_url = item.get("applicationUrl") or item.get("vacancyUrl") or ""

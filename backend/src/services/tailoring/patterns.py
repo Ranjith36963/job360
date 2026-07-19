@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from typing import Any
 
 _BULLET_RE = re.compile(r"^\s*[-•*•]\s+")
 # A "section header" heuristic: a short line that is mostly UPPERCASE letters.
@@ -31,7 +32,7 @@ def _band(n: int, edges: tuple[int, ...]) -> str:
     return f"{edges[-1]}+"
 
 
-def derive_patterns(text: str, doc_kind: str) -> dict:
+def derive_patterns(text: str, doc_kind: str) -> dict[str, Any]:
     """Return structural features only — no content, no PII.
 
     Safe to store in the shared universal layer.
@@ -58,7 +59,7 @@ def derive_patterns(text: str, doc_kind: str) -> dict:
     }
 
 
-def summarize_patterns(rows: list[dict], doc_kind: str) -> str:
+def summarize_patterns(rows: list[dict[str, Any]], doc_kind: str) -> str:
     """Aggregate stored pattern dicts into a short prompt-guidance string.
 
     Used mostly for cold-start (a user with no history of their own). Returns "" when

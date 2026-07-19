@@ -1,11 +1,13 @@
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, GREENHOUSE_COMPANIES
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.greenhouse")
@@ -17,7 +19,7 @@ class GreenhouseSource(BaseJobSource):
     name = "greenhouse"
     category = "ats"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else GREENHOUSE_COMPANIES
 
@@ -29,7 +31,7 @@ class GreenhouseSource(BaseJobSource):
             if not data or "jobs" not in data:
                 continue
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
-            for item in data["jobs"]:
+            for item in cast(dict[str, Any], data)["jobs"]:
                 title = item.get("title", "")
                 content = item.get("content", "")
                 plain = _HTML_TAG_RE.sub(" ", content)

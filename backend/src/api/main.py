@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 # psycopg async requires the selector event loop on Windows (the default
 # ProactorEventLoop never signals socket readiness for libpq -> the DB lifespan
@@ -97,7 +98,7 @@ def _init_sentry() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Phase 3 — Sentry must be up before anything else so boot errors are captured.
     _init_sentry()
     # Tier-A Step-0 #9 — honour LOG_LEVEL env var at process boot.

@@ -1,9 +1,11 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.adzuna")
@@ -13,7 +15,7 @@ class AdzunaSource(BaseJobSource):
     name = "adzuna"
     category = "keyed_api"
 
-    def __init__(self, session: aiohttp.ClientSession, app_id: str = "", app_key: str = "", search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, app_id: str = "", app_key: str = "", search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._app_id = app_id
         self._app_key = app_key
@@ -43,7 +45,7 @@ class AdzunaSource(BaseJobSource):
             )
             if not data or "results" not in data:
                 continue
-            for item in data["results"]:
+            for item in cast(dict[str, Any], data)["results"]:
                 company = item.get("company", {})
                 location = item.get("location", {})
                 now_iso = datetime.now(timezone.utc).isoformat()

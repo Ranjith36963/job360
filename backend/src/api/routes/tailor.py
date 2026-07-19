@@ -11,6 +11,8 @@ tests monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)`
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
@@ -65,7 +67,7 @@ class ProvenanceSegment(BaseModel):
     grounded: bool  # True = grounded in the user's CV/job (their fact); False = AI-added
 
 
-def _doc_out(row: dict) -> TailoredDocOut:
+def _doc_out(row: dict[str, Any]) -> TailoredDocOut:
     return TailoredDocOut(
         doc_kind=row["doc_kind"],
         ai_draft=row.get("ai_draft", ""),
@@ -110,7 +112,7 @@ async def generate(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> TailorBundle:
     """Generate a tailored CV + cover letter for (caller, job). Quota-gated."""
     job = await db.get_job_by_id(job_id)
     if job is None:
@@ -184,7 +186,7 @@ async def get_tailored(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> TailorBundle:
     """Return the caller's tailored docs for a job (empty list if none generated)."""
     return await _bundle(db, user.id, job_id)
 
@@ -195,7 +197,7 @@ async def provenance(
     doc_kind: str,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> list[dict[str, Any]]:
     """Per-line provenance for the doc: which lines are the user's OWN facts (grounded
     in their CV + the job) vs lines the AI added. Deterministic, no LLM — shown before
     download so the user can verify what's real (user request / guardrail #2)."""
@@ -216,14 +218,17 @@ async def save_edit(
     body: TailorSaveRequest,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> TailoredDocOut:
     """Save the user's edited/polished version (guardrail #3 — always editable)."""
     _check_kind(doc_kind)
     existing = await db.get_tailored_doc(user.id, job_id, doc_kind)
     if existing is None:
         raise HTTPException(status_code=404, detail="No draft to edit — generate first.")
     row = await db.save_tailored_polished(user.id, job_id, doc_kind, body.text)
-    return _doc_out(row)
+    # LATENT: save_tailored_polished re-reads the row and can return None if it
+    # was deleted between the check above and the UPDATE (would TypeError -> 500).
+    # Left as-is deliberately — fixing it is a behaviour change, not a type fix.
+    return _doc_out(row)  # type: ignore[arg-type]
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut)
@@ -232,18 +237,19 @@ async def keep(
     doc_kind: str,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> TailoredDocOut:
     """Mark KEPT → the learning trigger (§5 learn-from-kept-only)."""
     _check_kind(doc_kind)
     existing = await db.get_tailored_doc(user.id, job_id, doc_kind)
     if existing is None:
         raise HTTPException(status_code=404, detail="Nothing to keep — generate first.")
     row = await db.keep_tailored_doc(user.id, job_id, doc_kind)
+    # Same latent None as save_edit above (row deleted mid-request).
     await _learn_universal(db, doc_kind, row)
     get_audit_logger().info(
         "tailor_keep", extra={"user_id": user.id, "job_id": job_id, "doc_kind": doc_kind}
     )
-    return _doc_out(row)
+    return _doc_out(row)  # type: ignore[arg-type]
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/download")
@@ -253,7 +259,7 @@ async def download(
     fmt: str = "pdf",
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
-):
+) -> Response:
     """Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
 
     ``fmt`` = ``pdf`` (default) | ``docx``.
@@ -293,7 +299,7 @@ async def download(
     )
 
 
-async def _learn_universal(db: JobDatabase, doc_kind: str, row: dict | None) -> None:
+async def _learn_universal(db: JobDatabase, doc_kind: str, row: dict[str, Any] | None) -> None:
     """Layer 1 (§6/§7): store PATTERNS ONLY from a kept doc — never content/PII."""
     if not row:
         return

@@ -6,7 +6,7 @@ valid session and queries are filtered by user.id.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ router = APIRouter(tags=["pipeline"])
 _VALID_STAGES = {"applied", "outreach", "interview", "offer", "rejected"}
 
 
-def _to_pipeline_application(row: dict) -> PipelineApplication:
+def _to_pipeline_application(row: dict[str, Any]) -> PipelineApplication:
     return PipelineApplication(
         job_id=row["job_id"],
         stage=row["stage"],
@@ -46,7 +46,7 @@ async def list_pipeline(
     stage: Optional[str] = Query(None),
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> PipelineListResponse:
     """List caller's tracked job applications, optionally filtered by stage."""
     rows = await db.get_applications(user.id, stage)
     return PipelineListResponse(applications=[_to_pipeline_application(r) for r in rows])
@@ -56,7 +56,7 @@ async def list_pipeline(
 async def pipeline_counts(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> dict[str, int]:
     """Return application counts per pipeline stage, scoped to caller."""
     counts = await db.get_application_counts(user.id)
     defaults = {stage: 0 for stage in _VALID_STAGES}
@@ -68,7 +68,7 @@ async def pipeline_counts(
 async def pipeline_reminders(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> PipelineRemindersResponse:
     """Return the caller's stale applications (no update in 7+ days)."""
     rows = await db.get_stale_applications(user.id, days=7)
     return PipelineRemindersResponse(reminders=[_to_pipeline_application(r) for r in rows])
@@ -79,7 +79,7 @@ async def create_application(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> PipelineApplication:
     """Add a job to the caller's application pipeline (stage: applied).
 
     R-2: ``get_job_by_id`` does not filter on ``staleness_state`` (only
@@ -109,7 +109,7 @@ async def advance_application(
     body: PipelineAdvanceRequest,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> PipelineApplication:
     """Advance the caller's application to the specified pipeline stage."""
     if body.stage not in _VALID_STAGES:
         raise HTTPException(
@@ -131,7 +131,7 @@ async def get_pipeline_timeline(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> ApplicationTimelineResponse:
     """Return the stage history for this application, scoped to caller."""
     rows = await db.get_application_timeline(job_id, user.id)
     if not rows:
@@ -152,7 +152,7 @@ async def update_notes(
     body: NotesUpdateRequest,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> PipelineApplication:
     """Update the latest notes for an application, archiving the previous value."""
     row = await db.update_application_notes(job_id, user.id, body.notes)
     if not row:

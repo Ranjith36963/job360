@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from typing import Any, Optional, Union, cast
 
 import aiohttp
 
@@ -11,6 +12,7 @@ from src.core.keywords import RELEVANCE_KEYWORDS as _DEFAULT_RELEVANCE_KEYWORDS
 from src.core.settings import MAX_RETRIES, RATE_LIMITS, REQUEST_TIMEOUT, RETRY_BACKOFF, USER_AGENT
 from src.models import Job
 from src.services.conditional_cache import CachedEntry, ConditionalCache
+from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import FOREIGN_INDICATORS, REMOTE_TERMS, UK_TERMS
 from src.utils.rate_limiter import RateLimiter
 
@@ -72,7 +74,9 @@ class BaseJobSource(ABC):
     # zero-profile user (no CV) bypasses the filter and gets every source.
     DOMAINS: set[str] = {"general"}
 
-    def __init__(self, session: aiohttp.ClientSession, search_config=None):
+    def __init__(
+        self, session: aiohttp.ClientSession, search_config: Optional[SearchConfig] = None
+    ) -> None:
         self._session = session
         self._search_config = search_config
         cfg = RATE_LIMITS.get(self.name, {"concurrent": 2, "delay": 1.0})
@@ -97,7 +101,7 @@ class BaseJobSource(ABC):
             return self._search_config.search_queries
         return []
 
-    def _headers(self, extra: dict | None = None) -> dict:
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Build request headers with User-Agent default."""
         h = {"User-Agent": USER_AGENT}
         if extra:
@@ -108,13 +112,15 @@ class BaseJobSource(ABC):
     async def fetch_jobs(self) -> list[Job]:
         ...
 
-    async def _request(self, method: str, url: str, *,
-                       params: dict | None = None,
-                       body: dict | None = None,
-                       headers: dict | None = None,
-                       as_text: bool = False):
+    async def _request(
+        self, method: str, url: str, *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        as_text: bool = False,
+    ) -> Optional[Union[dict[str, Any], list[Any], str]]:
         """Shared retry/rate-limit logic for all HTTP methods."""
-        exceptions = (aiohttp.ClientError, asyncio.TimeoutError)
+        exceptions: tuple[type[BaseException], ...] = (aiohttp.ClientError, asyncio.TimeoutError)
         if not as_text:
             exceptions = (*exceptions, json.JSONDecodeError)
 
@@ -164,7 +170,8 @@ class BaseJobSource(ABC):
                         return None
                     if as_text:
                         return await resp.text()
-                    return await resp.json(content_type=None)
+                    json_body: Union[dict[str, Any], list[Any]] = await resp.json(content_type=None)
+                    return json_body
             except exceptions as e:
                 logger.warning("[%s] Request error: %s", self.name, e)
                 if attempt < MAX_RETRIES - 1:
@@ -173,42 +180,64 @@ class BaseJobSource(ABC):
                 self._rate_limiter.release()
         return None
 
-    async def _get_json(self, url: str, params: dict | None = None,
-                        headers: dict | None = None) -> dict | list | None:
-        return await self._request("GET", url, params=params, headers=headers)
+    async def _get_json(self, url: str, params: dict[str, Any] | None = None,
+                        headers: dict[str, str] | None = None) -> dict[str, Any] | list[Any] | None:
+        # cast: _request's return type also covers `str` (the as_text=True path),
+        # which this GET-JSON call never takes — narrow it back for callers.
+        return cast(
+            Optional[Union[dict[str, Any], list[Any]]],
+            await self._request("GET", url, params=params, headers=headers),
+        )
 
-    async def _post_json(self, url: str, body: dict | None = None,
-                         headers: dict | None = None) -> dict | list | None:
-        return await self._request("POST", url, body=body, headers=headers)
+    async def _post_json(self, url: str, body: dict[str, Any] | None = None,
+                         headers: dict[str, str] | None = None) -> dict[str, Any] | list[Any] | None:
+        # cast: see _get_json — narrows _request's `str`-inclusive union back down.
+        return cast(
+            Optional[Union[dict[str, Any], list[Any]]],
+            await self._request("POST", url, body=body, headers=headers),
+        )
 
-    async def _get_text(self, url: str, params: dict | None = None,
-                        headers: dict | None = None) -> str | None:
-        return await self._request("GET", url, params=params, headers=headers, as_text=True)
+    async def _get_text(self, url: str, params: dict[str, Any] | None = None,
+                        headers: dict[str, str] | None = None) -> str | None:
+        # cast: _request's return type also covers dict/list (the JSON path),
+        # which this GET-text call (as_text=True) never takes.
+        return cast(
+            Optional[str],
+            await self._request("GET", url, params=params, headers=headers, as_text=True),
+        )
 
-    async def _get_json_conditional(self, url: str, params: dict | None = None,
-                                     headers: dict | None = None) -> dict | list | None:
+    async def _get_json_conditional(self, url: str, params: dict[str, Any] | None = None,
+                                     headers: dict[str, str] | None = None) -> dict[str, Any] | list[Any] | None:
         """Conditional GET returning JSON — see :meth:`_conditional_fetch`."""
-        return await self._conditional_fetch(url, params=params,
-                                              headers=headers, as_text=False)
+        # cast: _conditional_fetch's return type also covers `str` (the
+        # as_text=True path), which this call (as_text=False) never takes.
+        return cast(
+            Optional[Union[dict[str, Any], list[Any]]],
+            await self._conditional_fetch(url, params=params, headers=headers, as_text=False),
+        )
 
-    async def _get_text_conditional(self, url: str, params: dict | None = None,
-                                     headers: dict | None = None) -> str | None:
+    async def _get_text_conditional(self, url: str, params: dict[str, Any] | None = None,
+                                     headers: dict[str, str] | None = None) -> str | None:
         """Conditional GET returning text (RSS/XML).
 
         Batch 3.5.3 sibling of :meth:`_get_json_conditional`; same
         semantics with ``resp.text()`` instead of ``resp.json()``.
         """
-        return await self._conditional_fetch(url, params=params,
-                                              headers=headers, as_text=True)
+        # cast: _conditional_fetch's return type also covers dict/list (the
+        # JSON path), which this call (as_text=True) never takes.
+        return cast(
+            Optional[str],
+            await self._conditional_fetch(url, params=params, headers=headers, as_text=True),
+        )
 
     async def _conditional_fetch(
         self,
         url: str,
         *,
-        params: dict | None = None,
-        headers: dict | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         as_text: bool = False,
-    ) -> dict | list | str | None:
+    ) -> dict[str, Any] | list[Any] | str | None:
         """Shared body for the conditional JSON/text helpers.
 
         On first call, captures any ETag/Last-Modified header returned by
@@ -241,7 +270,10 @@ class BaseJobSource(ABC):
                 if resp.status == 304 and entry is not None:
                     logger.debug("[%s] 304 Not Modified — using cached body for %s",
                                  self.name, url)
-                    return entry.body
+                    # cast: CachedEntry.body is stored as Any (it can hold the
+                    # dict/list/str shapes of any past response) — narrow it
+                    # back to this method's declared return type.
+                    return cast(Union[dict[str, Any], list[Any], str, None], entry.body)
                 if resp.status >= 400:
                     logger.warning("[%s] HTTP %s", self.name, resp.status)  # no URL — may embed api_key
                     return None

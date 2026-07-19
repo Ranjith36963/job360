@@ -1,7 +1,7 @@
 """Shared time-bucketing utilities for CLI and email views."""
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import humanize
 
@@ -70,12 +70,14 @@ def assign_bucket(age_hours: float) -> Optional[int]:
     return None
 
 
-def bucket_jobs(jobs: list[dict], min_score: int = 30) -> dict[int, list[dict]]:
+def bucket_jobs(
+    jobs: list[dict[str, Any]], min_score: int = 30
+) -> dict[int, list[dict[str, Any]]]:
     """Group job dicts into 4 time buckets, sorted by score DESC within each.
 
     Jobs older than 7 days or below min_score are excluded.
     """
-    buckets: dict[int, list[dict]] = {i: [] for i in range(4)}
+    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(4)}
     for job in jobs:
         score = job.get("match_score", 0)
         if score < min_score:
@@ -92,7 +94,7 @@ def bucket_jobs(jobs: list[dict], min_score: int = 30) -> dict[int, list[dict]]:
     return buckets
 
 
-def bucket_summary_counts(bucketed: dict[int, list[dict]]) -> dict:
+def bucket_summary_counts(bucketed: dict[int, list[dict[str, Any]]]) -> dict[str, int]:
     """Return summary counts for bucketed jobs."""
     total = sum(len(v) for v in bucketed.values())
     return {
@@ -132,7 +134,7 @@ def extract_matched_skills(text: str, primary: list[str] | None = None,
     if not text:
         return {"primary": [], "secondary": [], "tertiary": []}
     text_lower = text.lower()
-    result = {"primary": [], "secondary": [], "tertiary": []}
+    result: dict[str, list[str]] = {"primary": [], "secondary": [], "tertiary": []}
     for skill in (primary if primary is not None else PRIMARY_SKILLS):
         if skill.lower() in text_lower:
             result["primary"].append(skill)

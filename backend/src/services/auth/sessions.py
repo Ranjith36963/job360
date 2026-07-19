@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, cast
 
 from itsdangerous import BadSignature, TimestampSigner
 
@@ -90,7 +90,7 @@ async def resolve_session(
             "UPDATE sessions SET last_seen = ? WHERE id = ?", (now, sid)
         )
         await db.commit()
-    return row["user_id"]
+    return cast(Optional[str], row["user_id"])
 
 
 async def revoke_session(db_path: str, cookie: str, *, secret: str) -> None:
@@ -116,4 +116,4 @@ async def revoke_all_for_user(db_path: str, user_id: str) -> int:
             "sessions_revoked_all",
             extra={"event": "sessions_revoked_all", "user_id": user_id, "count": cur.rowcount},
         )
-        return cur.rowcount
+        return cast(int, cur.rowcount)

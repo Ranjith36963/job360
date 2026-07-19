@@ -47,7 +47,17 @@ import os
 import re
 import sys
 import uuid
-from typing import Any, Iterable, Optional, Sequence
+from typing import (
+    Any,
+    AsyncContextManager,
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    KeysView,
+    Optional,
+    Sequence,
+)
 
 import psycopg
 from psycopg import pq
@@ -125,29 +135,32 @@ def configure(dsn: str) -> None:
 # ==========================================================================
 # Row: dict subclass with positional access (aiosqlite.Row parity)
 # ==========================================================================
-class Row(dict):
+class Row(dict[str, Any]):
     """A mapping row that also supports ``row[0]`` positional indexing."""
 
     def __init__(self, seq: Sequence[Any], columns: Sequence[str]):
         super().__init__(zip(columns, seq))
         self._seq = tuple(seq)
 
-    def __getitem__(self, key):  # type: ignore[override]
+    def __getitem__(self, key: Any) -> Any:
         if isinstance(key, int):
             return self._seq[key]
         return dict.__getitem__(self, key)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         # aiosqlite.Row iterates VALUES (so ``zip(cols, row)`` and ``list(row)``
         # work). dict(row) still yields {col: value} because that path uses
         # keys(), not __iter__.
         return iter(self._seq)
 
-    def keys(self):
+    # dict.keys() actually returns dict_keys[str, Any] (not nameable here without
+    # importing a private typeshed symbol); KeysView[str] accurately describes
+    # this shim's contract, hence the narrow, deliberate override ignore.
+    def keys(self) -> KeysView[str]:  # type: ignore[override]
         return dict.keys(self)
 
 
-def _row_factory(cursor) -> RowMaker[Row]:
+def _row_factory(cursor: Any) -> RowMaker[Row]:
     desc = cursor.description
     cols = [c.name for c in desc] if desc else []
 
@@ -283,7 +296,7 @@ def _split_string_literals(sql: str) -> list[tuple[str, bool]]:
     return chunks
 
 
-def _apply_outside_string_literals(sql: str, fn) -> str:
+def _apply_outside_string_literals(sql: str, fn: Callable[[str], str]) -> str:
     """Apply ``fn`` to every non-string-literal region of ``sql``.
 
     Fast-paths the common no-quote statement so the tokenizer only runs when a
@@ -390,7 +403,7 @@ def _is_dsn(path: Optional[str]) -> bool:
     return p.startswith("postgresql://") or p.startswith("postgres://")
 
 
-async def _open_raw(schema: str) -> psycopg.AsyncConnection:
+async def _open_raw(schema: str) -> psycopg.AsyncConnection[Row]:
     try:
         conn = await psycopg.AsyncConnection.connect(
             DEFAULT_DSN, autocommit=True, row_factory=_row_factory
@@ -425,14 +438,14 @@ async def _open_raw(schema: str) -> psycopg.AsyncConnection:
 class Cursor:
     """Thin async wrapper over a psycopg cursor with aiosqlite semantics."""
 
-    def __init__(self, cur: psycopg.AsyncCursor, lastrowid: Optional[int]):
+    def __init__(self, cur: psycopg.AsyncCursor[Row], lastrowid: Optional[int]):
         self._cur = cur
         self.lastrowid = lastrowid
 
-    async def fetchone(self):
+    async def fetchone(self) -> Any:
         return await self._cur.fetchone()
 
-    async def fetchall(self):
+    async def fetchall(self) -> list[Any]:
         return await self._cur.fetchall()
 
     @property
@@ -440,16 +453,16 @@ class Cursor:
         return self._cur.rowcount
 
     @property
-    def description(self):
+    def description(self) -> Optional[list[psycopg.Column]]:
         return self._cur.description
 
-    async def close(self):
+    async def close(self) -> None:
         await self._cur.close()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Cursor:
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, *exc: Any) -> None:
         await self.close()
 
 
@@ -459,17 +472,17 @@ class Cursor:
 class Connection:
     """aiosqlite-shaped async connection backed by psycopg3."""
 
-    def __init__(self, raw: psycopg.AsyncConnection):
+    def __init__(self, raw: psycopg.AsyncConnection[Row]):
         self._raw = raw
         self._row_factory = Row  # settable no-op (rows are always Row)
 
     # ``db.row_factory = aiosqlite.Row`` is a no-op — we always yield Row.
     @property
-    def row_factory(self):
+    def row_factory(self) -> Any:
         return self._row_factory
 
     @row_factory.setter
-    def row_factory(self, value):
+    def row_factory(self, value: Any) -> None:
         self._row_factory = value
 
     async def _read_lastval(self) -> Optional[int]:
@@ -530,7 +543,7 @@ class Connection:
                 lastrowid = None
         return Cursor(cur, lastrowid)
 
-    async def executemany(self, sql: str, seq_of_params: Iterable[Iterable[Any]]):
+    async def executemany(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> Cursor:
         translated = translate(sql)
         cur = self._raw.cursor()
         await cur.executemany(translated, [tuple(p) for p in seq_of_params])
@@ -542,7 +555,7 @@ class Connection:
             await cur.execute(translate(stmt))
             await cur.close()
 
-    def transaction(self):
+    def transaction(self) -> AsyncContextManager[psycopg.AsyncTransaction]:
         """Explicit transaction block (psycopg passthrough).
 
         aiosqlite has no direct analog — our connection is autocommit. The
@@ -569,7 +582,7 @@ class Connection:
     async def __aenter__(self) -> Connection:
         return self
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, *exc: Any) -> None:
         await self.close()
 
 
@@ -587,13 +600,13 @@ class _Connector:
         self._conn = Connection(raw)
         return self._conn
 
-    def __await__(self):
+    def __await__(self) -> Generator[Any, None, Connection]:
         return self._open().__await__()
 
     async def __aenter__(self) -> Connection:
         return await self._open()
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, *exc: Any) -> None:
         if self._conn is not None:
             await self._conn.close()
 

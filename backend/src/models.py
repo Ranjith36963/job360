@@ -63,7 +63,7 @@ class Job:
     semantic: int = 0
     penalty: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Decode HTML entities in title and company
         self.title = html.unescape(self.title)
         self.company = html.unescape(self.company)

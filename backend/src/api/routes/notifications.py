@@ -40,7 +40,7 @@ async def list_notifications(
     end_time: Optional[str] = Query(None, description="ISO-8601 upper bound on created_at"),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> NotificationLedgerListResponse:
     """Return the caller's most recent notification ledger entries,
     paginated by ``limit`` + ``offset``. Sorted by created_at DESC.
 
@@ -81,7 +81,7 @@ async def list_notifications(
 async def notification_stats(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
-) -> dict:
+) -> dict[str, dict[str, int]]:
     """Step-3 O-02 — per-channel success/failure aggregation.
 
     Returns ``{channel: {sent: N, failed: M, queued: P, ...}}``.

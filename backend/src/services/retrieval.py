@@ -148,7 +148,7 @@ def bm25_rank(
 
 
 def retrieve_for_user(
-    profile,
+    profile: Any,
     *,
     k: int = 100,
     keyword_fn: Optional[Callable[[Any, int], list[int]]] = None,
@@ -280,7 +280,7 @@ def _load_cross_encoder() -> object:
     if _CROSS_ENCODER is not None:
         return _CROSS_ENCODER
     try:
-        from sentence_transformers import CrossEncoder  # type: ignore
+        from sentence_transformers import CrossEncoder
     except ImportError as e:
         raise RuntimeError(
             "sentence-transformers is not installed — run " "`pip install '.[semantic]'` and retry."
@@ -327,7 +327,9 @@ def cross_encoder_rerank(
     head = candidates[:top_n]
     tail = candidates[top_n:]
 
-    encoder = encoder_factory() if encoder_factory else _load_cross_encoder()
+    # `Any`: the encoder is a duck-typed CrossEncoder-compatible object (the
+    # real class is lazily imported, tests inject a stub) exposing `.predict`.
+    encoder: Any = encoder_factory() if encoder_factory else _load_cross_encoder()
     pairs = [(query, text) for _id, text in head]
     scores = encoder.predict(pairs)
     # Normalise to a plain Python list[float] in case a numpy array comes back.

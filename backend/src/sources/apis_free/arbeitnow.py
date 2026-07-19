@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -16,7 +17,7 @@ class ArbeitnowSource(BaseJobSource):
         data = await self._get_json("https://www.arbeitnow.com/api/job-board-api")
         if not data or "data" not in data:
             return []
-        for item in data["data"]:
+        for item in cast(dict[str, Any], data)["data"]:
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_created = item.get("created_at")
             posted_at = raw_created if raw_created else None
