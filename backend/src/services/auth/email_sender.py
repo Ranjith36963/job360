@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from src.utils.logger import mask_email
 
@@ -66,7 +66,7 @@ async def send_system_email(
         try:
             import httpx
 
-            payload: dict = {"from": from_addr, "to": [to_email], "subject": subject, "text": body_text}
+            payload: dict[str, Any] = {"from": from_addr, "to": [to_email], "subject": subject, "text": body_text}
             if body_html:
                 payload["html"] = body_html
             async with httpx.AsyncClient(timeout=15) as client:

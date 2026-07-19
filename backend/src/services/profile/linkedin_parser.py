@@ -67,12 +67,12 @@ _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.IGNORECASE)
 _COLUMN_GUTTER_MIN = 24
 
 
-def _words_to_lines(words: list[dict]) -> str:
+def _words_to_lines(words: list[dict[str, Any]]) -> str:
     """Rebuild text from words: group by ``top`` (3px tolerance), sort lines
     top→bottom and words left→right within a line."""
     from collections import defaultdict
 
-    rows: dict = defaultdict(list)
+    rows: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for w in words:
         rows[round(float(w.get("top", 0)) / 3.0)].append(w)
     out: list[str] = []
@@ -82,7 +82,7 @@ def _words_to_lines(words: list[dict]) -> str:
     return "\n".join(out)
 
 
-def _dewrap_columns(words: list[dict], page_width: float) -> str | None:
+def _dewrap_columns(words: list[dict[str, Any]], page_width: float) -> str | None:
     """De-interleave a two-column page so each column reads top-to-bottom.
 
     LinkedIn's "Save to PDF" puts a sidebar (Contact / Top Skills /
@@ -527,11 +527,11 @@ async def _llm_json(prompt: str) -> dict[str, Any]:
         return {}
 
 
-def _coerce_positions(raw: Any) -> list[dict]:
+def _coerce_positions(raw: Any) -> list[dict[str, str]]:
     """Shape a list-of-dicts LLM result into the canonical positions schema."""
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -548,10 +548,10 @@ def _coerce_positions(raw: Any) -> list[dict]:
     return out
 
 
-def _coerce_education(raw: Any) -> list[dict]:
+def _coerce_education(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -568,10 +568,10 @@ def _coerce_education(raw: Any) -> list[dict]:
     return out
 
 
-def _coerce_certifications(raw: Any) -> list[dict]:
+def _coerce_certifications(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -589,10 +589,10 @@ def _coerce_certifications(raw: Any) -> list[dict]:
 
 # Batch 1.5 coercers — one per new section ───────────────────────────
 
-def _coerce_languages(raw: Any) -> list[dict]:
+def _coerce_languages(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -606,10 +606,10 @@ def _coerce_languages(raw: Any) -> list[dict]:
     return out
 
 
-def _coerce_projects(raw: Any) -> list[dict]:
+def _coerce_projects(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -626,10 +626,10 @@ def _coerce_projects(raw: Any) -> list[dict]:
     return out
 
 
-def _coerce_volunteer(raw: Any) -> list[dict]:
+def _coerce_volunteer(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -648,10 +648,10 @@ def _coerce_volunteer(raw: Any) -> list[dict]:
     return out
 
 
-def _coerce_courses(raw: Any) -> list[dict]:
+def _coerce_courses(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -666,7 +666,7 @@ def _coerce_courses(raw: Any) -> list[dict]:
     return out
 
 
-def _empty_linkedin_data() -> dict:
+def _empty_linkedin_data() -> dict[str, Any]:
     return {
         "positions": [],
         "skills": [],
@@ -687,7 +687,7 @@ def _empty_linkedin_data() -> dict:
 
 # ── Public async/sync parse API ───────────────────────────────────
 
-async def parse_linkedin_pdf_async(file_path: str) -> dict:
+async def parse_linkedin_pdf_async(file_path: str) -> dict[str, Any]:
     """Parse a LinkedIn 'Save to PDF' export into the canonical dict schema.
 
     Returns an empty-data dict on failure (missing pdfplumber, corrupt PDF,
@@ -702,7 +702,7 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict:
     return await parse_linkedin_from_text(text)
 
 
-def deterministic_linkedin_fields(text: str) -> dict:
+def deterministic_linkedin_fields(text: str) -> dict[str, Any]:
     """Pass 1 for LinkedIn — STRUCTURE only, NO LLM.
 
     Splits sections, reads the header (name/headline/industry), the "Top Skills"
@@ -757,7 +757,7 @@ def deterministic_linkedin_fields(text: str) -> dict:
     }
 
 
-async def llm_linkedin_fields(text: str) -> dict:
+async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     """Pass 2 for LinkedIn — LLM ONLY.
 
     Runs the seven per-section LLM extractions (experience/education/…) PLUS the
@@ -765,7 +765,7 @@ async def llm_linkedin_fields(text: str) -> dict:
     deterministic pass read. Returns the LLM-owned fields; the orchestrator (and
     ``parse_linkedin_from_text``) merge this with the deterministic dict.
     """
-    empty = {
+    empty: dict[str, list[Any]] = {
         "positions": [], "education": [], "certifications": [],
         "languages": [], "projects": [], "volunteer": [], "courses": [], "skills": [],
     }
@@ -787,7 +787,7 @@ async def llm_linkedin_fields(text: str) -> dict:
 
     # Seven section LLM calls + the prose-skills pass, in parallel — only the
     # ones with text actually hit a provider (``_maybe`` short-circuits blanks).
-    async def _maybe(prompt_template: str, text: str, key: str):
+    async def _maybe(prompt_template: str, text: str, key: str) -> dict[str, Any]:
         if not text.strip():
             return {key: []}
         return await _llm_json(prompt_template.format(text=text))
@@ -821,7 +821,7 @@ async def llm_linkedin_fields(text: str) -> dict:
     }
 
 
-def merge_linkedin_fields(det: dict, llm: dict) -> dict:
+def merge_linkedin_fields(det: dict[str, Any], llm: dict[str, Any]) -> dict[str, Any]:
     """Merge the two independent LinkedIn passes into ONE canonical dict.
 
     ``det`` (structure: skills/summary/header) + ``llm`` (LLM: positions/
@@ -854,7 +854,7 @@ def merge_linkedin_fields(det: dict, llm: dict) -> dict:
     }
 
 
-async def parse_linkedin_from_text(text: str) -> dict:
+async def parse_linkedin_from_text(text: str) -> dict[str, Any]:
     """Parse already-extracted LinkedIn text into the canonical dict schema.
 
     Thin merge of the two independent passes — ``deterministic_linkedin_fields``
@@ -873,7 +873,7 @@ async def parse_linkedin_from_text(text: str) -> dict:
     return merged
 
 
-def parse_linkedin_pdf(file_path: str) -> dict:
+def parse_linkedin_pdf(file_path: str) -> dict[str, Any]:
     """Synchronous wrapper for ``parse_linkedin_pdf_async`` (used by CLI + route)."""
     try:
         loop = asyncio.get_running_loop()
@@ -889,7 +889,7 @@ def parse_linkedin_pdf(file_path: str) -> dict:
 
 # ── Merge into CVData (UNCHANGED — contract with downstream) ─────
 
-def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict) -> CVData:
+def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData:
     """Merge LinkedIn data into existing CVData, deduplicating."""
     # Skills
     seen_skills = {s.lower() for s in cv.skills}

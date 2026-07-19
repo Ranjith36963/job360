@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from src.workers.tasks import (
@@ -83,7 +83,7 @@ def _load_arq_redis_settings() -> object:
     return RedisSettings(host=rs.host, port=rs.port, database=rs.database)
 
 
-async def worker_startup(ctx: dict) -> None:
+async def worker_startup(ctx: dict[str, Any]) -> None:
     """ARQ ``on_startup`` — populate ``ctx`` with what every task needs.
 
     WITHOUT this hook, real ARQ only injects ``job_id``/``redis``/etc. into
@@ -125,7 +125,7 @@ async def worker_startup(ctx: dict) -> None:
     ctx["enqueue"] = _enqueue
 
 
-async def worker_shutdown(ctx: dict) -> None:
+async def worker_shutdown(ctx: dict[str, Any]) -> None:
     """ARQ ``on_shutdown`` — close the connection opened in ``worker_startup``."""
     db = ctx.get("db")
     if db is not None:

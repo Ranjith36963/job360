@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.jooble")
@@ -14,7 +16,7 @@ class JoobleSource(BaseJobSource):
     name = "jooble"
     category = "keyed_api"
 
-    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, api_key: str = "", search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._api_key = api_key
 
@@ -41,7 +43,7 @@ class JoobleSource(BaseJobSource):
             )
             if not data or "jobs" not in data:
                 continue
-            for item in data["jobs"]:
+            for item in cast(dict[str, Any], data)["jobs"]:
                 job_id = item.get("id", "")
                 if job_id in seen_ids:
                     continue

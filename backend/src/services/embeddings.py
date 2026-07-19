@@ -19,7 +19,7 @@ import logging
 import os
 import time
 from collections.abc import Iterable
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 logger = logging.getLogger("job360.services.embeddings")
 
@@ -51,7 +51,7 @@ def _load_encoder() -> object:
     if _ENCODER is not None:
         return _ENCODER
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
+        from sentence_transformers import SentenceTransformer
     except ImportError as e:
         raise RuntimeError(
             "sentence-transformers is not installed — run " "`pip install '.[semantic]'` and retry."
@@ -60,7 +60,7 @@ def _load_encoder() -> object:
     return _ENCODER
 
 
-def _encode_text(text: str, encoder: object):
+def _encode_text(text: str, encoder: Any) -> list[float]:
     """Wrap a single-text .encode() call. Returns a list[float] for JSON safety."""
     import numpy as np  # Local import — same CLAUDE.md rule pattern.
 
@@ -69,7 +69,9 @@ def _encode_text(text: str, encoder: object):
         vec = vec.tolist()
     elif isinstance(vec, list) and vec and isinstance(vec[0], np.ndarray):
         vec = vec[0].tolist()
-    return vec
+    # The encoder is duck-typed (real model or a test stub); every branch above
+    # lands on a plain list of floats.
+    return cast("list[float]", vec)
 
 
 def _chunk_words(text: str, size: int, overlap: int) -> list[str]:
@@ -111,8 +113,8 @@ def _pool_chunk_vectors(vectors: Iterable[list[float]]) -> list[float]:
 
 
 def encode_job(
-    job,
-    enrichment,
+    job: Any,
+    enrichment: Any,
     *,
     encoder_factory: Optional[Callable[[], object]] = None,
 ) -> list[float]:

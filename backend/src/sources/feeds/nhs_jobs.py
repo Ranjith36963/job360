@@ -1,8 +1,11 @@
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from typing import Optional
 
-from defusedxml.ElementTree import fromstring as _safe_fromstring  # M18: XXE-safe parse of untrusted feed XML
+# M18: XXE-safe parse of untrusted feed XML. defusedxml ships no type stubs
+# and types-defusedxml is not a project dependency, hence the import ignore.
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
@@ -88,7 +91,7 @@ class NHSJobsSource(BaseJobSource):
         return jobs
 
     @staticmethod
-    def _parse_salary(salary_str: str) -> tuple:
+    def _parse_salary(salary_str: str) -> tuple[Optional[float], Optional[float]]:
         if not salary_str:
             return None, None
         import re

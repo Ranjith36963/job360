@@ -25,7 +25,7 @@ import logging
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
@@ -201,7 +201,7 @@ def restore_profile_version(user_id: str, version_id: int) -> Optional[UserProfi
     return restored
 
 
-def list_profile_versions(user_id: str, limit: int = 10) -> list[dict]:
+def list_profile_versions(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
     """Return the most-recent snapshots for ``user_id``, newest first.
 
     Each row is a dict with ``id`` / ``created_at`` / ``source_action``
@@ -220,7 +220,7 @@ def list_profile_versions(user_id: str, limit: int = 10) -> list[dict]:
             (user_id, limit),
         )
         rows = cur.fetchall()
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for row in rows:
         out.append({
             "id": row[0],
@@ -290,7 +290,8 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
     if len(rows) == 1:
         return True
     # Two rows: newest first. Changed if either column differs.
-    return rows[0][0] != rows[1][0] or rows[0][1] != rows[1][1]
+    changed: bool = rows[0][0] != rows[1][0] or rows[0][1] != rows[1][1]
+    return changed
 
 
 def load_profile(user_id: str) -> Optional[UserProfile]:
@@ -333,7 +334,7 @@ def profile_exists(user_id: str) -> bool:
         return cur.fetchone() is not None
 
 
-def _filter_fields(d: dict, cls) -> dict:
+def _filter_fields(d: dict[str, Any], cls: type[Any]) -> dict[str, Any]:
     """Drop keys not present as dataclass fields on ``cls``.
 
     Guards against schema drift where the JSON payload carries fields

@@ -18,7 +18,7 @@ async def set_action(
     body: ActionRequest,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> ActionResponse:
     if body.action not in _VALID_ACTIONS:
         raise HTTPException(
             status_code=422,
@@ -40,7 +40,7 @@ async def delete_action(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> ActionResponse:
     await db.delete_action(job_id, user.id)
     get_audit_logger().info(
         "job_action_delete",
@@ -53,7 +53,7 @@ async def delete_action(
 async def list_actions(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> ActionsListResponse:
     rows = await db.get_actions(user.id)
     actions = [
         ActionResponse(ok=True, job_id=r["job_id"], action=r["action"])
@@ -66,7 +66,7 @@ async def list_actions(
 async def action_counts(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
-):
+) -> dict[str, int]:
     counts = await db.get_action_counts(user.id)
     return {
         "liked": counts.get("liked", 0),

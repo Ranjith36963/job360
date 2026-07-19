@@ -23,7 +23,7 @@ from src.utils.logger import get_logger, get_request_id
 _err_log = get_logger("error")  # "job360.error" → main job360 handlers (data/logs/)
 
 
-def _rid(request: Request):
+def _rid(request: Request) -> str | None:
     # The middleware resets the contextvar before the outermost handler runs,
     # so prefer the copy stashed on request.state.
     return getattr(getattr(request, "state", None), "request_id", None) or get_request_id()
@@ -87,5 +87,8 @@ async def log_validation_error(request: Request, exc: RequestValidationError) ->
 def register_exception_logging(app: FastAPI) -> None:
     """Attach the exception + HTTP-error loggers to the app."""
     app.add_exception_handler(Exception, log_unhandled_exception)
-    app.add_exception_handler(StarletteHTTPException, log_http_exception)
-    app.add_exception_handler(RequestValidationError, log_validation_error)
+    # Starlette types the handler arg as taking a bare ``Exception``; handlers
+    # narrowed to a specific exception subclass are the documented pattern but
+    # are not expressible in that signature.
+    app.add_exception_handler(StarletteHTTPException, log_http_exception)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, log_validation_error)  # type: ignore[arg-type]

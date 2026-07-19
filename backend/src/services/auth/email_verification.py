@@ -30,7 +30,7 @@ from __future__ import annotations
 import html
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, cast
 from urllib.parse import quote as urlquote
 
 from src.repositories import pg
@@ -180,7 +180,7 @@ async def confirm_email_verification(
         )
         await db.commit()
         logger.info("email verification confirm: ok user=%s", row["user_id"])
-        return row["user_id"]
+        return cast(Optional[str], row["user_id"])
 
 
 async def is_email_verified(*, db_path: str, user_id: str) -> bool:

@@ -8,7 +8,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
@@ -96,7 +96,7 @@ class UserResponse(BaseModel):
     email: str
 
 
-def _client_meta(request: Request) -> dict:
+def _client_meta(request: Request) -> dict[str, Any]:
     """Extract safe client metadata for audit log extra fields.
 
     X-Forwarded-For is only trusted when ``JOB360_TRUST_PROXY=1`` is set —
@@ -665,7 +665,7 @@ async def magic_link_consume(
 @router.get("/me/email-verified")
 async def get_email_verified(
     user: CurrentUser = Depends(require_user),
-) -> dict:
+) -> dict[str, bool]:
     """Cheap read for the dashboard to render a 'verify email' banner."""
     verified = await auth_email_verification.is_email_verified(
         db_path=str(DB_PATH), user_id=user.id

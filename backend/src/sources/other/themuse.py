@@ -1,6 +1,7 @@
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -32,7 +33,7 @@ class TheMuseSource(BaseJobSource):
             if not data or "results" not in data:
                 break
 
-            results = data["results"]
+            results = cast(dict[str, Any], data)["results"]
             if not results:
                 break
 

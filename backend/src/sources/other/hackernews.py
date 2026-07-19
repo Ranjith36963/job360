@@ -1,6 +1,7 @@
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -11,7 +12,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
 
-def _parse_hn_comment(text: str) -> dict | None:
+def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     """Parse a HN 'Who is Hiring' comment into job fields.
 
     First line typically follows: Company | Location | Remote | URL
@@ -66,11 +67,11 @@ class HackerNewsSource(BaseJobSource):
             "https://hn.algolia.com/api/v1/search",
             params=params,
         )
-        if not data or not data.get("hits"):
+        if not data or not cast(dict[str, Any], data).get("hits"):
             logger.info("HackerNews: no 'Who is Hiring' thread found")
             return []
 
-        story_id = data["hits"][0].get("objectID")
+        story_id = cast(dict[str, Any], data)["hits"][0].get("objectID")
         if not story_id:
             return []
 
@@ -82,7 +83,7 @@ class HackerNewsSource(BaseJobSource):
             return []
 
         jobs = []
-        children = comments_data.get("children", [])
+        children = cast(dict[str, Any], comments_data).get("children", [])
 
         for child in children[:200]:  # Cap at 200 comments
             comment_text = child.get("text", "")

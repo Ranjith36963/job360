@@ -9,6 +9,8 @@ This is read-time analysis, not scoring — it does not touch the scorer or enri
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from typing import Optional
 
 # >= this ratio => the user effectively has the skill (e.g. Postgres ~ PostgreSQL).
 _FUZZY_MATCH = 88
@@ -18,7 +20,10 @@ def _tokens(s: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", s.lower()))
 
 
-def compute_skill_gap(user_skills, required_skills) -> dict:
+def compute_skill_gap(
+    user_skills: Optional[Iterable[Optional[str]]],
+    required_skills: Optional[Iterable[Optional[str]]],
+) -> dict[str, list[str]]:
     """Return ``{"matched": [...], "missing": [...], "transferable": [...]}``.
 
     - **matched**: required skills the user has (exact case-insensitive OR fuzzy >= 88).

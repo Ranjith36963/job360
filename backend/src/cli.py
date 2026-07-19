@@ -1,6 +1,7 @@
 """Job360 CLI — command-line interface for the job search system."""
 
 import asyncio
+from typing import Optional
 
 import click
 
@@ -9,7 +10,7 @@ from src.main import SOURCE_REGISTRY, run_search
 
 @click.group()
 @click.version_option(version="1.0.0", prog_name="job360")
-def cli():
+def cli() -> None:
     """Job360 — Automated UK job search aggregator."""
 
 
@@ -21,7 +22,13 @@ def cli():
               default="INFO", help="Set logging verbosity.")
 @click.option("--db-path", default=None, help="Override database file path.")
 @click.option("--no-email", is_flag=True, help="Skip all notifications (email, Slack, Discord).")
-def run(source, dry_run, log_level, db_path, no_email):
+def run(
+    source: Optional[str],
+    dry_run: bool,
+    log_level: str,
+    db_path: Optional[str],
+    no_email: bool,
+) -> None:
     """Run the job search pipeline."""
     try:
         stats = asyncio.run(run_search(
@@ -45,7 +52,7 @@ def run(source, dry_run, log_level, db_path, no_email):
 
 
 @cli.command()
-def status():
+def status() -> None:
     """Show the last run stats from the database."""
     from src.core.settings import DB_PATH
     from src.repositories import pgsync
@@ -76,7 +83,13 @@ def status():
 @click.option("--source", default=None, help="Filter by source name.")
 @click.option("--visa-only", is_flag=True, help="Show only visa-flagged jobs.")
 @click.option("--db-path", default=None, help="Override database file path.")
-def view(hours, min_score, source, visa_only, db_path):
+def view(
+    hours: int,
+    min_score: int,
+    source: Optional[str],
+    visa_only: bool,
+    db_path: Optional[str],
+) -> None:
     """View jobs in a time-bucketed Rich terminal table."""
     from src.cli_view import display_jobs
     display_jobs(hours=hours, min_score=min_score, source=source,
@@ -86,7 +99,7 @@ def view(hours, min_score, source, visa_only, db_path):
 @cli.command()
 @click.option("--port", default=8000, help="Port to run the API server on.")
 @click.option("--host", default="127.0.0.1", help="Host to bind to.")
-def api(port, host):
+def api(port: int, host: str) -> None:
     """Start the FastAPI backend server."""
     import uvicorn
     click.echo(f"Starting Job360 API on {host}:{port}")
@@ -94,7 +107,7 @@ def api(port, host):
 
 
 @cli.command("sources")
-def list_sources():
+def list_sources() -> None:
     """List all available job sources."""
     click.echo("Available sources:")
     for name in sorted(SOURCE_REGISTRY.keys()):
@@ -108,7 +121,11 @@ def list_sources():
               help="Path to LinkedIn profile PDF (profile page → More → Save to PDF).")
 @click.option("--github", "github_username", default=None,
               help="GitHub username to fetch public repos.")
-def setup_profile(cv_path, linkedin_path, github_username):
+def setup_profile(
+    cv_path: Optional[str],
+    linkedin_path: Optional[str],
+    github_username: Optional[str],
+) -> None:
     """Set up your user profile for personalised job search.
 
     The CLI is single-tenant by design — every ``python -m src.cli``

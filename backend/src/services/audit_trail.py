@@ -25,7 +25,11 @@ import logging
 import logging.handlers
 import queue
 import time
-from typing import Optional
+from typing import Any, Optional
+
+# One audit_log row: (event, status, user_id, client_ip, user_agent, detail).
+# The middle three come out of LogRecord extras, so they stay `Any`.
+_AuditRow = tuple[str, str, Any, Any, Any, Optional[str]]
 
 # Attributes every LogRecord carries — everything else in record.__dict__ was
 # passed via ``extra=`` and belongs in the audit row.
@@ -63,7 +67,7 @@ class _DBAuditHandler(logging.Handler):
         return str(settings.DB_PATH)
 
     @staticmethod
-    def _row_from(record: logging.LogRecord) -> tuple:
+    def _row_from(record: logging.LogRecord) -> _AuditRow:
         extras = {
             k: v for k, v in record.__dict__.items() if k not in _STD_RECORD_ATTRS
         }
@@ -78,7 +82,7 @@ class _DBAuditHandler(logging.Handler):
         detail = json.dumps(detail_src, default=str) if detail_src else None
         return (str(event), str(status), user_id, client_ip, user_agent, detail)
 
-    def _write(self, row: tuple) -> None:
+    def _write(self, row: _AuditRow) -> None:
         from src.repositories import pgsync
 
         conn = pgsync.connect(self._db_path())

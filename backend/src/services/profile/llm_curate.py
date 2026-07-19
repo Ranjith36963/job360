@@ -17,6 +17,7 @@ raise) so a provider outage can't break extraction.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger("job360.profile.llm_curate")
 
@@ -61,7 +62,7 @@ include any skill they already listed.
 Return JSON: {{"suggestions": ["Skill A", "Skill B", ...]}}"""
 
 
-def _clean_list(raw) -> list[str]:
+def _clean_list(raw: Any) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     if not isinstance(raw, list):

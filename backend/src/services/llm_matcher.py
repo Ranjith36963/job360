@@ -22,7 +22,7 @@ import json
 import logging
 import os
 from collections.abc import Awaitable
-from typing import Callable
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
@@ -70,7 +70,7 @@ _MATCH_RUBRIC = (
 )
 
 
-def profile_to_matcher_text(profile) -> str:
+def profile_to_matcher_text(profile: Any) -> str:
     """The permanent 'left side': titles + skills + summary from cv_data
     (LinkedIn/GitHub are already merged into cv_data by the upload routes)
     plus explicit preferences."""
@@ -94,7 +94,7 @@ def profile_to_matcher_text(profile) -> str:
     )
 
 
-def _build_match_prompt(profile_txt: str, job: Job, facts: dict | None) -> str:
+def _build_match_prompt(profile_txt: str, job: Job, facts: dict[str, Any] | None) -> str:
     """Assemble the full judge prompt: rubric + candidate profile + job facts + description."""
     hint = ""
     if facts:
@@ -110,10 +110,10 @@ def _build_match_prompt(profile_txt: str, job: Job, facts: dict | None) -> str:
     )
 
 
-def _facts_hint(job: Job, enrichment) -> dict | None:
+def _facts_hint(job: Job, enrichment: Any) -> dict[str, Any] | None:
     """Cheap deterministic hints for the judge. Enrichment wins when present;
     salary always comes from structured fields (never from an LLM)."""
-    facts: dict = {}
+    facts: dict[str, Any] = {}
     if enrichment is not None:
         facts["seniority"] = getattr(enrichment.seniority, "value", enrichment.seniority)
         facts["workplace_type"] = getattr(enrichment.workplace_type, "value", enrichment.workplace_type)
@@ -131,7 +131,7 @@ def _facts_hint(job: Job, enrichment) -> dict | None:
 async def match_job(
     profile_txt: str,
     job: Job,
-    facts: dict | None,
+    facts: dict[str, Any] | None,
     *,
     llm_extract_validated_fn: LLMExtractFn | None = None,
 ) -> MatchVerdict:

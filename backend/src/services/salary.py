@@ -10,7 +10,7 @@ recommendation to avoid punishing jobs for missing pay info.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from src.core.fx import to_gbp
 
@@ -25,7 +25,7 @@ _FREQUENCY_ANNUAL: dict[str, int] = {
 }
 
 
-def _pick(obj: Any, key: str, default=None):
+def _pick(obj: Any, key: str, default: Any = None) -> Any:
     """Tolerate both Pydantic models and plain dicts."""
     if obj is None:
         return default
@@ -87,8 +87,13 @@ def normalize_salary(
     if max_gbp is None:
         max_gbp = min_gbp
 
-    # Guarantee min <= max even if the upstream had them swapped.
-    if min_gbp > max_gbp:
-        min_gbp, max_gbp = max_gbp, min_gbp
+    # Both bounds are non-None here: we returned early when raw_min and
+    # raw_max were both None, and the backfill above mirrors the survivor.
+    lo = cast(int, min_gbp)
+    hi = cast(int, max_gbp)
 
-    return (min_gbp, max_gbp)
+    # Guarantee min <= max even if the upstream had them swapped.
+    if lo > hi:
+        lo, hi = hi, lo
+
+    return (lo, hi)

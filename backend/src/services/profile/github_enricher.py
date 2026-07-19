@@ -194,7 +194,12 @@ async def _fetch_repo_frameworks(
     for (filename, _), content in zip(MANIFEST_FILES, contents):
         if isinstance(content, Exception) or not content:
             continue
-        _ecosystem, dep_names = parse_manifest(filename, content)
+        # The guard above drops every ``Exception`` gather returned, so this is a
+        # real ``str``. mypy can't subtract ``Exception`` from ``BaseException``,
+        # hence the narrow ignore. (A bare ``BaseException`` — e.g. CancelledError
+        # — would slip past the guard, but that is pre-existing behaviour and is
+        # left untouched here rather than silently changed.)
+        _ecosystem, dep_names = parse_manifest(filename, content)  # type: ignore[arg-type]
         for dep in dep_names:
             d = (dep or "").strip()
             if d and d.lower() not in seen:
@@ -205,7 +210,7 @@ async def _fetch_repo_frameworks(
 
 async def fetch_github_profile(
     username: str, session: aiohttp.ClientSession | None = None
-) -> dict:
+) -> dict[str, Any]:
     """Fetch public repos, languages, topics, and framework dependencies.
 
     Returns a dict with keys:
@@ -215,7 +220,7 @@ async def fetch_github_profile(
       ``skills_inferred`` — language + topic → skill list (Batch 1 pre-deps signal)
       ``frameworks_inferred`` — dependency-file → skill list (Batch 1.2)
     """
-    empty = {
+    empty: dict[str, Any] = {
         "repositories": [],
         "languages": {},
         "topics": [],
@@ -230,7 +235,10 @@ async def fetch_github_profile(
         return empty
 
     own_session = session is None
-    if own_session:
+    # Same condition as ``own_session`` (which is never reassigned) — spelled
+    # out so the type checker can narrow ``session`` to a non-None ClientSession
+    # for the rest of the function.
+    if session is None:
         session = aiohttp.ClientSession()
 
     try:
@@ -239,7 +247,7 @@ async def fetch_github_profile(
         if not repos_data or not isinstance(repos_data, list):
             return empty
 
-        repositories: list[dict] = []
+        repositories: list[dict[str, Any]] = []
         all_topics: set[str] = set()
 
         for repo in repos_data:
@@ -298,7 +306,10 @@ async def fetch_github_profile(
             if isinstance(result, Exception):
                 logger.debug("Dep fetch failed: %s", result)
                 continue
-            for skill in result or []:
+            # Same narrowing gap as in ``_fetch_repo_frameworks``: the guard above
+            # removes every ``Exception``, leaving a real ``list[str]``, but mypy
+            # cannot subtract ``Exception`` from ``BaseException``.
+            for skill in result or []:  # type: ignore[union-attr]
                 if skill.lower() not in seen_framework:
                     frameworks_inferred.append(skill)
                     seen_framework.add(skill.lower())
@@ -360,7 +371,7 @@ def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
     return skills
 
 
-def deterministic_github_fields(repos_brief: list[dict]) -> list[str]:
+def deterministic_github_fields(repos_brief: list[dict[str, Any]]) -> list[str]:
     """Pass 1 for GitHub over the STORED repo briefs — STRUCTURE only, NO LLM.
 
     Surfaces the repo *topics* the GitHub API attached to each repo (cosmetic
@@ -424,7 +435,7 @@ REPOSITORIES:
 ---"""
 
 
-async def llm_infer_github_skills(repos_brief: list[dict]) -> list[str]:
+async def llm_infer_github_skills(repos_brief: list[dict[str, Any]]) -> list[str]:
     """Pass 2 for GitHub — ask the LLM to read repo prose and name skills the
     hard-coded ``LANGUAGE_TO_SKILL`` / ``TOPIC_TO_SKILL`` tables can't know.
 
@@ -468,7 +479,7 @@ async def llm_infer_github_skills(repos_brief: list[dict]) -> list[str]:
     return out
 
 
-def enrich_cv_from_github(cv: CVData, github_data: dict) -> CVData:
+def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
     """Merge GitHub-inferred skills into CVData, deduplicating.
 
     Batch 1.2 — also writes ``github_frameworks`` from

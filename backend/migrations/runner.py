@@ -397,8 +397,8 @@ def _cli() -> int:
         result = asyncio.run(up(db_path))
         print("applied:", result or "<none>")
     elif cmd == "down":
-        result = asyncio.run(down(db_path))
-        print("reverted:", result or "<none>")
+        reverted = asyncio.run(down(db_path))
+        print("reverted:", reverted or "<none>")
     elif cmd == "status":
         rows, had_table = asyncio.run(_status_rows(db_path))
         if not had_table:

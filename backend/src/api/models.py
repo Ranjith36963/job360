@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,7 @@ class ReadyzResponse(BaseModel):
 class SourceInfo(BaseModel):
     name: str
     type: str
-    health: dict
+    health: dict[Any, Any]
 
 
 class SourcesResponse(BaseModel):
@@ -38,7 +38,7 @@ class SourcesResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     jobs_total: int
-    last_run: Optional[dict]
+    last_run: Optional[dict[Any, Any]]
     sources_active: int
     sources_total: int
     profile_exists: bool
@@ -138,7 +138,7 @@ class JobResponse(BaseModel):
 class JobListResponse(BaseModel):
     jobs: list[JobResponse]
     total: int
-    filters_applied: dict
+    filters_applied: dict[Any, Any]
 
 
 class ActionRequest(BaseModel):
@@ -190,7 +190,7 @@ class CVDetail(BaseModel):
 
 class ProfileResponse(BaseModel):
     summary: ProfileSummary
-    preferences: dict
+    preferences: dict[Any, Any]
     cv_detail: CVDetail | None = None
     # Step-1.5 S1.5-F — evidence-based skill tiering surfaced via
     # ``services.profile.skill_tiering.tier_skills_by_evidence``. Maps
@@ -219,11 +219,11 @@ class ProfileResponse(BaseModel):
     # ``services.profile.linkedin_parser`` — see CVData fields with the
     # same names. UI flattens for display; backend keeps the raw shape
     # so callers can format independently.
-    linkedin_subsections: dict[str, list[dict]] = {}
+    linkedin_subsections: dict[str, list[dict[Any, Any]]] = {}
     # Step-1.5 S3-E — GitHub temporal data: per-language byte counts
     # (top-K by volume) + topic frequencies. Pure metric surface — UI
     # renders trend graphs without backend re-shaping.
-    github_temporal: dict[str, dict] = {}
+    github_temporal: dict[str, dict[Any, Any]] = {}
     # Step-1.5 S3-E — newest snapshot id from ``user_profile_versions``;
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
@@ -242,8 +242,8 @@ class ProfileVersionSummary(BaseModel):
     id: int
     created_at: str
     source_action: str
-    cv_data: dict
-    preferences: dict
+    cv_data: dict[Any, Any]
+    preferences: dict[Any, Any]
 
 
 class ProfileVersionsListResponse(BaseModel):
@@ -258,7 +258,7 @@ class JsonResumeResponse(BaseModel):
     dict (https://jsonresume.org/schema/) under a ``resume`` key so the
     response is a JSON object, not a bare list."""
 
-    resume: dict
+    resume: dict[Any, Any]
 
 
 class NotificationLedgerEntry(BaseModel):
@@ -315,7 +315,7 @@ class SearchStatusResponse(BaseModel):
     run_id: str
     status: str
     progress: str
-    result: Optional[dict] = None
+    result: Optional[dict[Any, Any]] = None
 
 
 class PipelineApplication(BaseModel):

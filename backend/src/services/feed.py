@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from src.repositories import pg
 
@@ -70,7 +70,7 @@ class FeedService:
             "SELECT * FROM user_feed "
             "WHERE user_id = ? AND status = ?"
         )
-        params: list = [user_id, status]
+        params: list[Any] = [user_id, status]
         if bucket is not None:
             query += " AND bucket = ?"
             params.append(bucket)

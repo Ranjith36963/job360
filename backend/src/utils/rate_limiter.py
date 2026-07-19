@@ -1,4 +1,6 @@
 import asyncio
+from types import TracebackType
+from typing import Optional, Type
 
 
 class RateLimiter:
@@ -6,7 +8,7 @@ class RateLimiter:
         self._semaphore = asyncio.Semaphore(concurrent)
         self._delay = delay
 
-    async def acquire(self):
+    async def acquire(self) -> None:
         await self._semaphore.acquire()
         try:
             await asyncio.sleep(self._delay)
@@ -14,12 +16,17 @@ class RateLimiter:
             self._semaphore.release()
             raise
 
-    def release(self):
+    def release(self) -> None:
         self._semaphore.release()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "RateLimiter":
         await self.acquire()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         self.release()

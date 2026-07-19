@@ -26,7 +26,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from typing import Callable
+from typing import Any, Callable
 
 from src.core.settings import SOURCE_FETCH_TIMEOUT, SOURCE_FETCH_TIMEOUT_ATS
 from src.services.circuit_breaker import BreakerRegistry
@@ -59,7 +59,7 @@ NAME_TIER: dict[str, str] = {
 }
 
 
-def resolve_tier_seconds(source) -> float:
+def resolve_tier_seconds(source: Any) -> float:
     """Return this source's polling interval in seconds."""
     name_override = NAME_TIER.get(source.name)
     if name_override is not None:
@@ -87,7 +87,7 @@ class TieredScheduler:
 
     def __init__(
         self,
-        sources: Iterable,
+        sources: Iterable[Any],
         breaker_registry: BreakerRegistry,
         clock: Callable[[], float] | None = None,
         fetch_timeout: float | None = None,
@@ -102,7 +102,7 @@ class TieredScheduler:
         # the bound entirely (kept for tests that want unbounded fetches).
         self._fetch_timeout_override = fetch_timeout
 
-    def resolve_fetch_timeout(self, source) -> float:
+    def resolve_fetch_timeout(self, source: Any) -> float:
         """Per-source fetch ceiling.
 
         ATS slug-sweeps measured at 138s+ get their own budget
@@ -118,22 +118,24 @@ class TieredScheduler:
             return SOURCE_FETCH_TIMEOUT_ATS
         return SOURCE_FETCH_TIMEOUT
 
-    def due_sources(self, now: float | None = None) -> list:
+    def due_sources(self, now: float | None = None) -> list[Any]:
         now_val = now if now is not None else self._clock()
         return [s for s in self._sources if self._is_due(s, now_val)]
 
-    def _is_due(self, source, now: float) -> bool:
+    def _is_due(self, source: Any, now: float) -> bool:
         last = self._last_run.get(source.name)
         if last is None:
             return True
         return now - last >= resolve_tier_seconds(source)
 
-    async def tick(self, now: float | None = None, *, force: bool = False) -> list:
+    async def tick(
+        self, now: float | None = None, *, force: bool = False
+    ) -> list[tuple[Any, Any]]:
         """One scheduler pass. Returns [(source, result|Exception), ...]."""
         now_val = now if now is not None else self._clock()
         candidates = self._sources if force else self.due_sources(now_val)
 
-        due = []
+        due: list[Any] = []
         for src in candidates:
             breaker = self._breakers.get(src.name)
             if not breaker.can_proceed():
@@ -149,7 +151,7 @@ class TieredScheduler:
         if not due:
             return []
 
-        async def _safe_fetch(src):
+        async def _safe_fetch(src: Any) -> Any:
             timeout = self.resolve_fetch_timeout(src)
             try:
                 if timeout and timeout > 0:
@@ -172,7 +174,7 @@ class TieredScheduler:
                 return e
 
         results = await asyncio.gather(*[_safe_fetch(s) for s in due])
-        paired = []
+        paired: list[tuple[Any, Any]] = []
         for src, result in zip(due, results):
             self._last_run[src.name] = now_val
             breaker = self._breakers.get(src.name)

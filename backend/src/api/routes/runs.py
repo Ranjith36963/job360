@@ -66,7 +66,7 @@ async def recent_runs(
     offset: int = Query(0, ge=0),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — rule #12
-):
+) -> RunsListResponse:
     """Return paginated pipeline run history from run_log, newest first.
 
     Step-3 B-15.  Requires authentication (rule #12) — the run log is
@@ -152,7 +152,7 @@ async def source_health(
     runs: int = Query(20, ge=1, le=100, description="How many recent runs to aggregate over."),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
-):
+) -> SourceHealthResponse:
     """Aggregate per-source job-count + error stats across recent runs.
 
     Reads existing run_log columns (per_source, per_source_errors,

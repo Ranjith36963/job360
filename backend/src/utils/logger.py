@@ -5,7 +5,7 @@ import sys
 import uuid
 from contextvars import ContextVar, Token
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import Any, Optional
 
 _RUN_ID = uuid.uuid4().hex[:8]
 
@@ -33,7 +33,7 @@ def current_run_uuid() -> str | None:
 _request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
-def set_request_id(rid: str) -> Token:
+def set_request_id(rid: str) -> Token[str | None]:
     """Set the per-request id; returns the token needed to reset it."""
 
     return _request_id_var.set(rid)
@@ -101,7 +101,7 @@ class _RunUuidFormatter(logging.Formatter):
 
 class JSONFormatter(logging.Formatter):
     # Standard LogRecord attributes — never re-emit these as extra fields.
-    _SKIP: frozenset = frozenset({
+    _SKIP: frozenset[str] = frozenset({
         "name", "msg", "args", "created", "filename", "funcName",
         "levelname", "levelno", "lineno", "module", "msecs", "message",
         "pathname", "process", "processName", "relativeCreated",
@@ -110,7 +110,7 @@ class JSONFormatter(logging.Formatter):
     })
 
     def format(self, record: logging.LogRecord) -> str:
-        entry: dict = {
+        entry: dict[str, Any] = {
             "timestamp": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,

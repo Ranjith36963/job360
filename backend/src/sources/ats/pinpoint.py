@@ -1,10 +1,12 @@
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, PINPOINT_COMPANIES
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.pinpoint")
@@ -14,7 +16,7 @@ class PinpointSource(BaseJobSource):
     name = "pinpoint"
     category = "ats"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, companies: list[str] | None = None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else PINPOINT_COMPANIES
 

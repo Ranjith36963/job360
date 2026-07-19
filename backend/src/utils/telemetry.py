@@ -35,7 +35,7 @@ import logging
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("job360.utils.telemetry")
 
@@ -106,7 +106,7 @@ class MatcherTelemetry:
         """Mean fit_score across judged jobs (0.0 when none judged)."""
         return (self.fit_sum / self.judged) if self.judged else 0.0
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         """Serialize for persistence into the ``run_log.matcher_stats`` column
         (backlog #9 — judge telemetry). Empty-run friendly (all zeros)."""
         return {

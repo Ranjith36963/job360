@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -19,7 +20,7 @@ class RemotiveSource(BaseJobSource):
         )
         if not data or "jobs" not in data:
             return []
-        for item in data["jobs"]:
+        for item in cast(dict[str, Any], data)["jobs"]:
             title = item.get("title", "")
             desc = item.get("description", "")
             now_iso = datetime.now(timezone.utc).isoformat()

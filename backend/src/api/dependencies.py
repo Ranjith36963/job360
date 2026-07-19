@@ -1,6 +1,7 @@
 """Shared dependencies for FastAPI routes."""
 import os
 import tempfile
+from typing import AsyncIterator, cast
 
 from src.core.settings import DB_PATH
 from src.repositories.database import JobDatabase
@@ -27,10 +28,11 @@ async def get_db() -> JobDatabase:
     Routes should depend on ``get_request_db`` instead (per-request connection)."""
     if _db is None:
         await init_db()
-    return _db
+    # cast: init_db() always assigns the module-global; mypy cannot narrow it.
+    return cast(JobDatabase, _db)
 
 
-async def get_request_db():
+async def get_request_db() -> AsyncIterator[JobDatabase]:
     """Per-request DB connection dependency (docs/fable/02 — the P0 fix).
 
     Each request gets its OWN short-lived connection instead of the process-wide
@@ -51,7 +53,7 @@ async def get_request_db():
         await db.close()
 
 
-async def close_db():
+async def close_db() -> None:
     global _db
     if _db is not None:
         await _db.close()

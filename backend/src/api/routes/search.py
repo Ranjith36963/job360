@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import Awaitable
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -32,7 +33,10 @@ router = APIRouter(tags=["search"])
 _ENQUEUE_CONNECT_TIMEOUT_SECONDS = 2
 
 
-async def _make_notification_enqueue():
+async def _make_notification_enqueue() -> tuple[
+    Optional[Callable[..., Awaitable[Any]]],
+    Optional[Callable[[], Awaitable[None]]],
+]:
     """SI1 — build the ARQ enqueue hook that turns a search into notifications.
 
     Returns ``(enqueue, close)`` where ``enqueue(function_name, *args)`` queues a
@@ -59,9 +63,9 @@ async def _make_notification_enqueue():
     # stalled the run before it started, and most runs never notify anyone at
     # all, so the connection was usually pure waste. Connecting lazily means a
     # dead queue costs nothing until there is genuinely something to send.
-    state: dict = {"pool": None, "broken": False}
+    state: dict[str, Any] = {"pool": None, "broken": False}
 
-    async def _enqueue(function_name: str, *args, **kwargs):
+    async def _enqueue(function_name: str, *args: Any, **kwargs: Any) -> Any:
         """Queue one notification. Never raises — returns None if it can't."""
         if state["broken"]:
             return None
@@ -109,7 +113,7 @@ async def _make_notification_enqueue():
 # Module-level in-memory store. Pure-process, not persisted across
 # restarts — search runs are ephemeral poll targets. Each record carries
 # a `user_id` so GET can reject cross-user reads with a 404.
-_runs: dict[str, dict] = {}
+_runs: dict[str, dict[str, Any]] = {}
 
 # Statuses that count toward the per-user concurrent cap. A run that has
 # transitioned to `completed` or `failed` no longer holds compute budget,
@@ -164,7 +168,7 @@ def _prune_runs(now: Optional[datetime] = None) -> None:
 async def start_search(
     source: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_verified_user),  # noqa: B008 — #15: verified email required
-):
+) -> SearchStartResponse:
     """Start an async job search run. Returns a run_id to poll for status.
 
     The run_id record is tagged with `user.id`; only the creating user
@@ -192,7 +196,7 @@ async def start_search(
         "created_at": datetime.now(timezone.utc),
     }
 
-    async def _run():
+    async def _run() -> None:
         # SI1 — build the notification fan-out hook. Returns (None, None) when
         # REDIS_URL is unset or Redis is unreachable, in which case the search
         # runs exactly as before (no notifications). Once a worker + Redis are
@@ -242,7 +246,7 @@ async def start_search(
 async def search_status(
     run_id: str,
     user: CurrentUser = Depends(require_user),  # noqa: B008  # FastAPI dep idiom
-):
+) -> SearchStatusResponse:
     """Poll the status of a running or completed search.
 
     Existence-hiding: unknown run_id OR run owned by a different user

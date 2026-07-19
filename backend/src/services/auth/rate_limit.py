@@ -33,7 +33,7 @@ import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("job360.rate_limit")
 
@@ -78,11 +78,11 @@ redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]) - tonumber(ARGV[2])
 return redis.call('ZCARD', KEYS[1])
 """
 
-_redis_singleton = None
+_redis_singleton: Any = None
 _redis_init_done = False
 
 
-def _redis_client():
+def _redis_client() -> Any:
     """Return a cached sync Redis client, or None when Redis is unavailable.
 
     None means "use the in-memory path" — the caller treats it as the normal
@@ -104,7 +104,8 @@ def _redis_client():
     try:
         import redis  # noqa: PLC0415 — heavy/optional, lazy per rules #11/#16
 
-        _redis_singleton = redis.from_url(
+        # redis-py ships py.typed but from_url() itself is unannotated.
+        _redis_singleton = redis.from_url(  # type: ignore[no-untyped-call]
             redis_url,
             socket_connect_timeout=0.5,
             socket_timeout=0.5,
@@ -155,13 +156,13 @@ def check_and_record(
     client = _redis_client()
     if client is not None:
         try:
-            now = datetime.now(timezone.utc).timestamp()
-            member = f"{now}:{uuid.uuid4().hex}"
+            now_ts = datetime.now(timezone.utc).timestamp()
+            member = f"{now_ts}:{uuid.uuid4().hex}"
             allowed = client.eval(
                 _LUA_CHECK_AND_RECORD,
                 1,
                 f"rl:req:{key}",
-                now,
+                now_ts,
                 window_seconds,
                 max_in_window,
                 member,

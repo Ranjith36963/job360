@@ -21,7 +21,7 @@ optionals.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -49,7 +49,7 @@ class CareerDomain(str, Enum):
     OTHER = "other"
 
 
-def _coerce_to_str_list(value):
+def _coerce_to_str_list(value: Any) -> list[str]:
     """Normalise LLM list fields to ``list[str]``.
 
     Weaker LLMs return ``None``, a single string, comma-joined prose, or
@@ -88,12 +88,12 @@ class ExperienceEntry(BaseModel):
 
     @field_validator("bullets", mode="before")
     @classmethod
-    def _bullets_list(cls, v):
+    def _bullets_list(cls, v: Any) -> list[str]:
         return _coerce_to_str_list(v)
 
     @field_validator("company", "title", "dates", "location", mode="before")
     @classmethod
-    def _strings_empty(cls, v):
+    def _strings_empty(cls, v: Any) -> str:
         if v is None:
             return ""
         return str(v)
@@ -109,12 +109,12 @@ class EducationEntry(BaseModel):
 
     @field_validator("details", mode="before")
     @classmethod
-    def _details_list(cls, v):
+    def _details_list(cls, v: Any) -> list[str]:
         return _coerce_to_str_list(v)
 
     @field_validator("degree", "institution", "dates", mode="before")
     @classmethod
-    def _strings_empty(cls, v):
+    def _strings_empty(cls, v: Any) -> str:
         if v is None:
             return ""
         return str(v)
@@ -156,12 +156,12 @@ class CVSchema(BaseModel):
         mode="before",
     )
     @classmethod
-    def _lists_of_strings(cls, v):
+    def _lists_of_strings(cls, v: Any) -> list[str]:
         return _coerce_to_str_list(v)
 
     @field_validator("name", "headline", "location", "summary", "experience_level", mode="before")
     @classmethod
-    def _str_or_empty(cls, v):
+    def _str_or_empty(cls, v: Any) -> str:
         if v is None:
             return ""
         if isinstance(v, (list, dict)):
@@ -170,7 +170,7 @@ class CVSchema(BaseModel):
 
     @field_validator("career_domain", mode="before")
     @classmethod
-    def _domain_nullable(cls, v):
+    def _domain_nullable(cls, v: Any) -> Any:
         """Treat empty/unknown strings as None rather than failing validation.
 
         This is the one enum-coercion we allow: LLMs commonly write

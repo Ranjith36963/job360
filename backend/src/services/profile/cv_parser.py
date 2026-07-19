@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from src.services.profile.models import CVData
 
@@ -138,7 +139,7 @@ def extract_sections_from_pdf(file_path: str) -> dict[str, str] | None:
 
     from src.services.profile.layout import segment_sections_from_words
 
-    all_words: list[dict] = []
+    all_words: list[dict[str, Any]] = []
     try:
         with pdfplumber.open(file_path) as pdf:
             for page_idx, page in enumerate(pdf.pages):
@@ -377,7 +378,7 @@ def _det_heading_key(line: str) -> str:
 
 
 def _det_collect_section(
-    lines: list[str], heading_set: set, *, stem_skills: bool = False
+    lines: list[str], heading_set: set[str], *, stem_skills: bool = False
 ) -> list[str]:
     """Return the body lines under the first matching heading, stopping at the
     next recognised section heading. Empty list when absent.
@@ -452,7 +453,7 @@ def _det_merge_wrapped_lines(skill_lines: list[str]) -> list[str]:
     return logical
 
 
-def deterministic_cv_fields(raw_text: str) -> dict:
+def deterministic_cv_fields(raw_text: str) -> dict[str, Any]:
     """Pass 1 for the CV — pull base fields from text with NO LLM.
 
     Conservative by design: only the clearly-delimited "Skills" and
@@ -630,7 +631,7 @@ def _maybe_normalise_skills_via_esco(
     return canonical, esco_map
 
 
-def _llm_result_to_cvdata(raw_text: str, result: dict) -> CVData:
+def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
     """Convert LLM JSON response to CVData dataclass.
 
     Defensive: all fields are type-guarded so weaker LLMs (Cerebras llama3.1-8b,

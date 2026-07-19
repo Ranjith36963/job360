@@ -2503,7 +2503,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Action Counts Api Actions Counts Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -2761,7 +2767,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
                   "title": "Response Get Email Verified Api Auth Me Email Verified Get",
                   "type": "object"
                 }
@@ -3708,7 +3716,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Job Duplicates Api Jobs  Job Id  Duplicates Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -3942,7 +3954,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "type": "object"
+                  },
                   "title": "Response Notification Stats Api Notifications Stats Get",
                   "type": "object"
                 }
@@ -4059,7 +4076,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Pipeline Counts Api Pipeline Counts Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -4890,7 +4913,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Diff Profile Versions Api Profile Versions  Version Id1  Diff  Version Id2  Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"

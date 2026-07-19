@@ -6,11 +6,13 @@ No documented rate limit — polled on the 60s ATS tier; slugs are bounded
 """
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.core.companies import COMPANY_NAME_OVERRIDES, RIPPLING_COMPANIES
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.rippling")
@@ -24,7 +26,7 @@ class RipplingSource(BaseJobSource):
         self,
         session: aiohttp.ClientSession,
         companies: list[str] | None = None,
-        search_config=None,
+        search_config: Optional[SearchConfig] = None,
     ):
         super().__init__(session, search_config=search_config)
         self._companies = companies if companies is not None else RIPPLING_COMPANIES
@@ -39,12 +41,14 @@ class RipplingSource(BaseJobSource):
             company_name = COMPANY_NAME_OVERRIDES.get(
                 slug, slug.replace("-", " ").title()
             )
-            for item in data["jobs"]:
+            for item in cast(dict[str, Any], data)["jobs"]:
                 title = item.get("name") or item.get("title") or ""
                 locations = item.get("locations") or []
                 if isinstance(locations, list) and locations:
                     location = " ".join(
-                        loc.get("name") if isinstance(loc, dict) else str(loc)
+                        # cast: dict.get() widens to Optional[Any]; every Rippling location dict
+                        # carries a string "name" — narrow it back for str.join().
+                        cast(str, loc.get("name")) if isinstance(loc, dict) else str(loc)
                         for loc in locations
                     )
                 else:

@@ -1,9 +1,11 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.careerjet")
@@ -13,7 +15,7 @@ class CareerjetSource(BaseJobSource):
     name = "careerjet"
     category = "keyed_api"
 
-    def __init__(self, session: aiohttp.ClientSession, affid: str = "", search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, affid: str = "", search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._affid = affid
 
@@ -46,7 +48,7 @@ class CareerjetSource(BaseJobSource):
             if not data or "jobs" not in data:
                 continue
 
-            for item in data["jobs"]:
+            for item in cast(dict[str, Any], data)["jobs"]:
                 title = item.get("title", "")
                 description = item.get("description", "")
 

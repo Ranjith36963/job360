@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from dataclasses import asdict
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
@@ -52,7 +53,7 @@ logger = logging.getLogger("job360.api.profile")
 # FIX 2 — keep a strong reference to every background re-score task so the
 # GC cannot collect it before it finishes (asyncio.create_task returns a weak
 # ref; without this set the task can be garbage-collected mid-run).
-_rescore_bg_tasks: set = set()
+_rescore_bg_tasks: set[Any] = set()
 
 
 async def _maybe_trigger_rescore(user_id: str) -> None:
@@ -187,13 +188,13 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     ai_suggestions: list[str] = list(getattr(cv, "suggested_skills", []) or [])
 
     # Step-1.5 S3-E — LinkedIn sub-sections + GitHub temporal map.
-    linkedin_subsections: dict[str, list[dict]] = {
+    linkedin_subsections: dict[str, list[dict[str, Any]]] = {
         "languages": list(getattr(cv, "linkedin_languages", []) or []),
         "projects": list(getattr(cv, "linkedin_projects", []) or []),
         "volunteer": list(getattr(cv, "linkedin_volunteer", []) or []),
         "courses": list(getattr(cv, "linkedin_courses", []) or []),
     }
-    github_temporal: dict[str, dict] = {
+    github_temporal: dict[str, dict[str, Any]] = {
         "languages": dict(getattr(cv, "github_languages", {}) or {}),
         "topics": {t: 1 for t in (getattr(cv, "github_topics", []) or [])},
     }
@@ -237,7 +238,7 @@ def _user_id_for(profile: UserProfile) -> str:
 
 
 @router.get("/profile", response_model=ProfileResponse)
-async def get_profile(user: CurrentUser = Depends(require_user)):  # noqa: B008 — FastAPI dependency-injection idiom
+async def get_profile(user: CurrentUser = Depends(require_user)) -> ProfileResponse:  # noqa: B008 — FastAPI dependency-injection idiom
     """Return the caller's profile summary.
 
     Per-user storage landed in Batch 3.5.2 — each user has their own row
@@ -332,7 +333,7 @@ async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
 async def upload_cv(
     cv: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
-):
+) -> ProfileResponse:
     """Set the caller's CV (PDF/DOCX) — one input, one dedicated route."""
     profile = load_profile(user.id) or UserProfile()
     # Bounded read: cap memory even for a malicious oversized upload.
@@ -346,7 +347,7 @@ async def upload_cv(
 async def upsert_preferences(
     preferences: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
-):
+) -> ProfileResponse:
     """Set the caller's preferences form — one input, one dedicated route."""
     profile = load_profile(user.id) or UserProfile()
     _apply_preferences(preferences, profile)
@@ -359,7 +360,7 @@ async def upsert_profile(
     cv: UploadFile = File(None),  # noqa: B008 — FastAPI dependency-injection idiom
     preferences: str = Form(None),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> ProfileResponse:
     """Combined CV + preferences (backward-compatible with the frontend form).
 
     The dedicated single-input routes are POST /profile/cv and
@@ -379,7 +380,7 @@ async def upsert_profile(
 async def upload_linkedin(
     file: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> LinkedInResponse:
     """Enrich user profile with a LinkedIn 'Save to PDF' profile export."""
     # Bounded read — see the CV endpoint: caps memory for oversized uploads.
     content = await file.read(10 * 1024 * 1024 + 1)
@@ -415,7 +416,7 @@ async def upload_linkedin(
 async def upload_github(
     username: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> GitHubResponse:
     """Enrich the caller's profile with GitHub public data.
 
     Accepts a full profile URL or @handle, not just a bare username —
@@ -440,7 +441,7 @@ async def upload_github(
 async def list_versions(
     limit: int = Query(20, ge=1, le=100),
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> ProfileVersionsListResponse:
     """Step-1.5 S3-A — list the most-recent ``user_profile_versions`` rows
     for the caller, newest first. Each save_profile() also writes a
     snapshot here (Pillar 1 Batch 1.8) so the list is non-empty whenever
@@ -462,7 +463,7 @@ async def list_versions(
 async def restore_version(
     version_id: int,
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> ProfileResponse:
     """Step-1.5 S3-B — atomic rollback to ``version_id``.
 
     Tenant-scoped: ``restore_profile_version`` returns ``None`` when the
@@ -476,7 +477,7 @@ async def restore_version(
     return _build_profile_response(restored)
 
 
-def _get_profile_version_for_user(version_id: int, user_id: str) -> dict | None:
+def _get_profile_version_for_user(version_id: int, user_id: str) -> dict[str, Any] | None:
     """Fetch a single profile version row scoped to ``user_id``.
 
     Returns None when the version does not exist or belongs to another user
@@ -508,7 +509,7 @@ async def diff_profile_versions(
     version_id1: int,
     version_id2: int,
     user: CurrentUser = Depends(require_user),  # noqa: B008 — rule #12
-):
+) -> dict[str, Any]:
     """Return per-field differences between two profile versions, scoped to caller.
 
     Step-3 B-10. Compares cv_data JSON blobs from both versions. Only fields
@@ -525,10 +526,10 @@ async def diff_profile_versions(
         raise HTTPException(status_code=404, detail=f"Version {version_id2} not found")
 
     # Diff cv_data (most interesting for users)
-    def _parse(raw: object) -> dict:
+    def _parse(raw: object) -> dict[str, Any]:
         if isinstance(raw, str):
             try:
-                return json.loads(raw)
+                return cast(dict[str, Any], json.loads(raw))
             except json.JSONDecodeError:
                 return {}
         if isinstance(raw, dict):
@@ -538,7 +539,7 @@ async def diff_profile_versions(
     d1 = _parse(v1.get("profile_json"))
     d2 = _parse(v2.get("profile_json"))
 
-    changes: dict[str, dict] = {}
+    changes: dict[str, dict[str, Any]] = {}
     for k in set(d1.keys()) | set(d2.keys()):
         old_val = d1.get(k)
         new_val = d2.get(k)
@@ -556,7 +557,7 @@ async def diff_profile_versions(
 @router.get("/profile/json-resume", response_model=JsonResumeResponse)
 async def get_json_resume(
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
-):
+) -> JsonResumeResponse:
     """Step-1.5 S3-C — export the caller's CV as a JSON Resume document
     (https://jsonresume.org/schema/). Wraps the existing
     ``CVData.to_json_resume()`` helper Batch 1.8 shipped — additive,

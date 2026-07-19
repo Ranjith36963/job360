@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import TypedDict
 
 from dotenv import load_dotenv
 
@@ -191,7 +192,14 @@ TARGET_SALARY_MIN = int(os.getenv("TARGET_SALARY_MIN", "40000"))
 TARGET_SALARY_MAX = int(os.getenv("TARGET_SALARY_MAX", "120000"))
 
 # Rate limits (requests per second)
-RATE_LIMITS = {
+class RateLimitConfig(TypedDict):
+    """Per-source rate-limit knobs: max in-flight requests + sleep between them."""
+
+    concurrent: int
+    delay: float
+
+
+RATE_LIMITS: dict[str, RateLimitConfig] = {
     "reed": {"concurrent": 1, "delay": 2.0},
     "adzuna": {"concurrent": 1, "delay": 2.0},
     "jsearch": {"concurrent": 1, "delay": 3.0},

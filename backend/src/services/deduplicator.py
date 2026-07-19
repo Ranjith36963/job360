@@ -1,6 +1,11 @@
 import re
+from typing import Any, Callable, cast
 
 from src.models import Job
+
+# The ordering tuple produced by `_rank_key`: (match_score, enrichment bonus,
+# completeness). Layers 2–4 receive it as an injected callable.
+RankKey = Callable[[Job], "tuple[int, int, int]"]
 
 # Seniority prefixes to strip for fuzzy title matching
 _SENIORITY_RE = re.compile(
@@ -59,7 +64,7 @@ def _completeness(job: Job) -> int:
     return score
 
 
-def _enrichment_bonus(job: Job, enrichments: dict | None) -> int:
+def _enrichment_bonus(job: Job, enrichments: dict[int, Any] | None) -> int:
     """Pillar 2 Batch 2.5 tiebreaker — reward jobs whose `id` has an LLM
     enrichment row, so when two candidates in a dedup group tie on
     match_score + completeness, the enriched one wins and carries the
@@ -78,12 +83,12 @@ def _enrichment_bonus(job: Job, enrichments: dict | None) -> int:
 
 def deduplicate(
     jobs: list[Job],
-    enrichments: dict | None = None,
+    enrichments: dict[int, Any] | None = None,
     *,
     enable_fuzzy: bool = True,
     enable_tfidf: bool = True,
     enable_embedding_repost: bool = False,
-    embedding_lookup: "dict | None" = None,
+    embedding_lookup: "dict[int, list[float]] | None" = None,
 ) -> list[Job]:
     """Group jobs by normalized (company, title) and keep the best per group.
 
@@ -114,7 +119,7 @@ def deduplicate(
         key = (company, title)
         groups.setdefault(key, []).append(job)
 
-    def _rank_key(j: Job):
+    def _rank_key(j: Job) -> "tuple[int, int, int]":
         return (
             j.match_score,
             _enrichment_bonus(j, enrichments),
@@ -150,7 +155,7 @@ def _norm_location(loc: str) -> str:
     return (loc or "").strip().lower()
 
 
-def _merge_fuzzy(jobs: list[Job], *, rank_key) -> list[Job]:
+def _merge_fuzzy(jobs: list[Job], *, rank_key: RankKey) -> list[Job]:
     """Collapse fuzzy duplicates using RapidFuzz.
 
     Lazy-imports `rapidfuzz` so Layer-1-only callers don't pay the import
@@ -160,7 +165,7 @@ def _merge_fuzzy(jobs: list[Job], *, rank_key) -> list[Job]:
       - normalized location matches.
     """
     try:
-        from rapidfuzz import fuzz  # type: ignore
+        from rapidfuzz import fuzz
     except ImportError:
         # Degraded — keep Layer-1 result.
         return jobs
@@ -202,14 +207,14 @@ def _tfidf_doc(job: Job) -> str:
     return f"{job.company} {job.title} {desc}".lower()
 
 
-def _merge_tfidf(jobs: list[Job], *, rank_key) -> list[Job]:
+def _merge_tfidf(jobs: list[Job], *, rank_key: RankKey) -> list[Job]:
     """Collapse near-duplicates using TF-IDF cosine on
     company + title + description[:200]. Lazy-imports scikit-learn."""
     if len(jobs) <= 1:
         return jobs
     try:
-        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
-        from sklearn.metrics.pairwise import cosine_similarity  # type: ignore
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
     except ImportError:
         return jobs
 
@@ -226,13 +231,13 @@ def _merge_tfidf(jobs: list[Job], *, rank_key) -> list[Job]:
     n = len(jobs)
     parent = list(range(n))
 
-    def find(i):
+    def find(i: int) -> int:
         while parent[i] != i:
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
 
-    def union(i, j):
+    def union(i: int, j: int) -> None:
         ri, rj = find(i), find(j)
         if ri != rj:
             parent[rj] = ri
@@ -260,9 +265,9 @@ _EMBEDDING_REPOST_THRESHOLD = 0.92
 def _cosine(v1: list[float], v2: list[float]) -> float:
     if not v1 or not v2 or len(v1) != len(v2):
         return 0.0
-    dot = sum(a * b for a, b in zip(v1, v2))
-    n1 = sum(a * a for a in v1) ** 0.5
-    n2 = sum(a * a for a in v2) ** 0.5
+    dot: float = sum(a * b for a, b in zip(v1, v2))
+    n1: float = sum(a * a for a in v1) ** 0.5
+    n2: float = sum(a * a for a in v2) ** 0.5
     if n1 == 0 or n2 == 0:
         return 0.0
     return dot / (n1 * n2)
@@ -271,8 +276,8 @@ def _cosine(v1: list[float], v2: list[float]) -> float:
 def _merge_embedding_reposts(
     jobs: list[Job],
     *,
-    rank_key,
-    embedding_lookup: dict,
+    rank_key: RankKey,
+    embedding_lookup: dict[int, list[float]],
 ) -> list[Job]:
     """Within each company, collapse jobs whose embedding cosine ≥ 0.92.
     Chosen survivor keeps the earliest ``first_seen_at`` to preserve the
@@ -313,7 +318,9 @@ def _merge_embedding_reposts(
                 # Preserve the earliest first_seen_at across the merged pair.
                 earliest = min(
                     (j for j in (existing, job) if getattr(j, "first_seen_at", None)),
-                    key=lambda j: j.first_seen_at,
+                    # cast: the generator above filters out falsy first_seen_at,
+                    # so the key is always a str here.
+                    key=lambda j: cast(str, j.first_seen_at),
                     default=None,
                 )
                 if earliest is not None:

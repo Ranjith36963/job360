@@ -35,12 +35,16 @@ class ConditionalCache:
     """
 
     def __init__(self, max_entries: int = 256) -> None:
-        self._store: OrderedDict[tuple[str, tuple], CachedEntry] = OrderedDict()
+        self._store: OrderedDict[
+            tuple[str, tuple[tuple[str, Any], ...]], CachedEntry
+        ] = OrderedDict()
         self._max_entries = max_entries
         self.hit_count: int = 0
         self.miss_count: int = 0
 
-    def get(self, key: tuple[str, tuple]) -> CachedEntry | None:
+    def get(
+        self, key: tuple[str, tuple[tuple[str, Any], ...]]
+    ) -> CachedEntry | None:
         entry = self._store.get(key)
         if entry is None:
             self.miss_count += 1
@@ -48,7 +52,9 @@ class ConditionalCache:
             self.hit_count += 1
         return entry
 
-    def set(self, key: tuple[str, tuple], entry: CachedEntry) -> None:
+    def set(
+        self, key: tuple[str, tuple[tuple[str, Any], ...]], entry: CachedEntry
+    ) -> None:
         if key in self._store:
             self._store.move_to_end(key)
         self._store[key] = entry

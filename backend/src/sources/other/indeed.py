@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
 
 from src.models import Job
+from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.indeed")
@@ -14,7 +16,7 @@ class JobSpySource(BaseJobSource):
     name = "indeed"
     category = "other"
 
-    def __init__(self, session: aiohttp.ClientSession, sites: list[str] | None = None, search_config=None):
+    def __init__(self, session: aiohttp.ClientSession, sites: list[str] | None = None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         # Glassdoor disabled by default 2026-06-11: Glassdoor fronts the
         # findPopularLocationAjax.htm location lookup with an anti-bot 403

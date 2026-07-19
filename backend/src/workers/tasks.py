@@ -15,7 +15,10 @@ import hashlib
 import time
 from datetime import datetime, timezone
 from datetime import time as _time
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+
+if TYPE_CHECKING:
+    from src.services.profile.models import UserProfile
 
 from src.core.settings import ENRICHMENT_THRESHOLD
 from src.models import Job
@@ -30,17 +33,27 @@ from src.utils.logger import get_logger
 _log = get_logger("worker")  # "job360.worker" → data/logs/
 
 
-def _logged_task(fn):
+_TaskFn = Callable[..., Awaitable[Any]]
+
+
+def _logged_task(fn: _TaskFn) -> _TaskFn:
     """Wrap an ARQ task with start / done(+duration) / error(+traceback) logging.
 
     Gap H — the background worker layer ran completely dark. Every task now
     emits a structured line so "why didn't my notification fire / cron run?" is
     answerable. ``functools.wraps`` keeps ``__name__`` so ARQ's registry and the
     direct-call test usage are unaffected.
+
+    Typed as ``Callable[..., Awaitable[Any]] -> Callable[..., Awaitable[Any]]``
+    rather than via a signature-preserving ``ParamSpec`` — ``ParamSpec`` needs
+    Python 3.10's ``typing.ParamSpec`` at runtime (this module still runs on
+    3.9) or a new ``typing_extensions`` dependency, neither of which this
+    annotation-only pass may introduce. The loosened signature is why every
+    decorated task below keeps its own explicit parameter/return annotations.
     """
 
     @functools.wraps(fn)
-    async def _wrapped(ctx, *args, **kwargs):
+    async def _wrapped(ctx: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
         start = time.perf_counter()
         _log.info("task_start", extra={"event": "task_start", "task": fn.__name__})
         try:
@@ -85,7 +98,7 @@ async def _load_users(db: pg.Connection) -> list[dict[str, Any]]:
 
 @_logged_task
 async def score_and_ingest(
-    ctx: dict,
+    ctx: dict[str, Any],
     job_id: int,
     *,
     users_override: Optional[list[tuple[str, FilterProfile, int]]] = None,
@@ -116,7 +129,15 @@ async def score_and_ingest(
         company=job_row["company"],
         apply_url=job_row["apply_url"],
         source=job_row["source"],
-        date_found=_parse_dt(job_row["date_found"]),
+        # FINDING (not fixed — logic change, out of scope): _parse_dt returns
+        # datetime, but Job.date_found is typed `str` everywhere else in the
+        # codebase (models.py:23, main.py). Downstream, skill_matcher.py's
+        # `_recency_score(date_found: str)` does
+        # `datetime.fromisoformat(date_found)`, which raises TypeError on a
+        # datetime object — caught by its own `except (ValueError, TypeError):
+        # return 0`, so this doesn't crash, it silently zeroes the recency
+        # component whenever score_and_ingest scores a job via this path.
+        date_found=_parse_dt(job_row["date_found"]),  # type: ignore[arg-type]
         location=job_row["location"] or "",
         description=job_row["description"] or "",
         match_score=job_row["match_score"],
@@ -149,7 +170,12 @@ async def score_and_ingest(
     # share across the per-user scorer cache. Empty dict ⇒ no rows ⇒
     # multi-dim contributes 0 (legacy 4-component path preserved).
     enrichment_lookup_dict = await _build_enrichment_lookup(db)
-    enrichment_lookup_fn = lambda job: enrichment_lookup_dict.get(getattr(job, "id", None))  # noqa: E731
+    # getattr(job, "id", None) -> Optional[int] at runtime (Job has no
+    # declared `id` field; see the enrich_job_task note below on the same
+    # pattern), but mypy can only see `Any | None`, hence the ignore. This is
+    # the documented call pattern from job_enrichment._build_enrichment_lookup's
+    # own docstring — dict.get(None) safely returns None, not a crash.
+    enrichment_lookup_fn = lambda job: enrichment_lookup_dict.get(getattr(job, "id", None))  # type: ignore[arg-type]  # noqa: E731
 
     def _scorer_for(user_id: str) -> JobScorer:
         if user_id not in user_scorers:
@@ -266,7 +292,7 @@ async def mark_ledger_failed(
 
 @_logged_task
 async def send_notification(
-    ctx: dict,
+    ctx: dict[str, Any],
     user_id: str,
     job_id: int,
     urgency: str = "instant",
@@ -346,13 +372,13 @@ async def send_notification(
 
 
 @_logged_task
-async def mark_ledger_sent_task(ctx: dict, user_id: str, job_id: int, channel: str) -> None:
+async def mark_ledger_sent_task(ctx: dict[str, Any], user_id: str, job_id: int, channel: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_sent`."""
     await mark_ledger_sent(ctx["db"], user_id=user_id, job_id=job_id, channel=channel)
 
 
 @_logged_task
-async def mark_ledger_failed_task(ctx: dict, user_id: str, job_id: int, channel: str, error: str) -> None:
+async def mark_ledger_failed_task(ctx: dict[str, Any], user_id: str, job_id: int, channel: str, error: str) -> None:
     """ARQ ctx wrapper around :func:`mark_ledger_failed`."""
     await mark_ledger_failed(
         ctx["db"],
@@ -366,7 +392,7 @@ async def mark_ledger_failed_task(ctx: dict, user_id: str, job_id: int, channel:
 # ---------- helpers ----------------------------------------------------
 
 
-def _user_profile_for(user_id: str):
+def _user_profile_for(user_id: str) -> Optional[UserProfile]:
     """Load the user's full ``UserProfile`` from the user_profiles table.
 
     Returns ``None`` on any failure — no row, schema drift, JSON decode
@@ -417,7 +443,7 @@ def _default_search_config() -> SearchConfig:
     return _search_config_for(DEFAULT_TENANT_ID)
 
 
-def _parse_dt(value) -> datetime:
+def _parse_dt(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
@@ -430,9 +456,13 @@ def _parse_dt(value) -> datetime:
 
 def _bucket_for_row(row: pg.Row) -> str:
     """Compute time bucket from the 5-column date model (Batch 1) with fallbacks."""
-    first_seen_raw = row["first_seen_at"] if "first_seen_at" in row.keys() else None
+    # `x in row` (dict.__contains__) is equivalent to `x in row.keys()` here —
+    # Row doesn't override __contains__, only keys() — and is typed in the
+    # stdlib stubs, avoiding a no-untyped-call on Row.keys() (pg.py is
+    # unannotated and out of scope for this file-scoped pass).
+    first_seen_raw = row["first_seen_at"] if "first_seen_at" in row else None
     if not first_seen_raw:
-        first_seen_raw = row["first_seen"] if "first_seen" in row.keys() else None
+        first_seen_raw = row["first_seen"] if "first_seen" in row else None
     if not first_seen_raw:
         return "3_7d"
     first_seen = _parse_dt(first_seen_raw)
@@ -450,7 +480,7 @@ def _bucket_for_row(row: pg.Row) -> str:
 
 
 @_logged_task
-async def nightly_ghost_sweep(ctx: dict) -> dict:
+async def nightly_ghost_sweep(ctx: dict[str, Any]) -> dict[str, int]:
     """ARQ periodic task: advance ghost detection state for stale jobs.
 
     Evaluates every non-expired job in the DB using the pure-function state
@@ -513,7 +543,7 @@ MAX_BUNDLE_RETRIES = 5
 
 
 @_logged_task
-async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
+async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
     """ARQ task: send all queued digest notifications for user_id across all channels.
 
     Called by notification_tick when a bundle is due for the user.
@@ -554,7 +584,7 @@ async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     # `WHERE id IN (...)` instead of a per-job_id SELECT in a loop (this cron
     # runs every 5 min forever). Placeholders are generated from the id count
     # only — no user input in the SQL text.
-    job_details: dict[int, dict] = {}
+    job_details: dict[int, dict[str, Any]] = {}
     _job_ids = {r["job_id"] for r in pending}
     if _job_ids:
         _placeholders = ",".join("?" for _ in _job_ids)
@@ -589,14 +619,20 @@ async def send_bundle(ctx: dict, user_id: str) -> dict[str, int]:
     results = await dispatcher_fn(db, user_id=user_id, title=digest_title, body=digest_body, force=True)
 
     # Map each channel_type to ('sent'|'failed'|'skipped', error).
+    # Named `res` (not `r`) deliberately — `r` is already bound above (the
+    # `for r in pending:` loop, `r: dict[str, Any]`) and Python doesn't scope
+    # for-loop variables to the loop, so reusing `r` here made mypy infer this
+    # loop's element as the earlier dict type, producing 8 false-positive
+    # attr-defined errors on ChannelSendResult attributes. Pure rename, same
+    # values, same control flow.
     status_by_channel: dict[str, tuple[str, str]] = {}
-    for r in results:
-        if r.ok and not r.skipped and not getattr(r, "queued_digest", False):
-            status_by_channel[r.channel_type] = ("sent", "")
-        elif r.skipped:
-            status_by_channel[r.channel_type] = ("skipped", r.error or "")
+    for res in results:
+        if res.ok and not res.skipped and not getattr(res, "queued_digest", False):
+            status_by_channel[res.channel_type] = ("sent", "")
+        elif res.skipped:
+            status_by_channel[res.channel_type] = ("skipped", res.error or "")
         else:
-            status_by_channel[r.channel_type] = ("failed", r.error or "delivery failed")
+            status_by_channel[res.channel_type] = ("failed", res.error or "delivery failed")
 
     sent = failed = 0
     any_sent = False
@@ -672,7 +708,7 @@ async def _mark_digest_rows_sent(db: pg.Connection, user_id: str) -> None:
         _log.debug("Could not mark digests sent for user %s: %s", user_id, exc)
 
 
-def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
+def _bundle_due(rule: dict[str, Any], *, now_utc: datetime, user_tz: str = "UTC") -> bool:
     """Return True when it is time to send a bundle for this rule.
 
     - notify_mode == 'instant': never bundle here (always immediate; the
@@ -729,7 +765,7 @@ def _bundle_due(rule: dict, *, now_utc: datetime, user_tz: str = "UTC") -> bool:
     return False
 
 
-def _in_quiet_window(rule: dict, now_utc: datetime, user_tz: str) -> bool:
+def _in_quiet_window(rule: dict[str, Any], now_utc: datetime, user_tz: str) -> bool:
     """True when ``now_utc`` falls inside the rule's quiet-hours window.
 
     ``quiet_hours_start`` / ``quiet_hours_end`` are HH:MM strings in the user's
@@ -745,8 +781,14 @@ def _in_quiet_window(rule: dict, now_utc: datetime, user_tz: str) -> bool:
         from zoneinfo import ZoneInfo
         tz = ZoneInfo(user_tz)
         now_local = now_utc.astimezone(tz).time().replace(second=0, microsecond=0)
-        start = _time(*map(int, qs.split(":")))
-        end = _time(*map(int, qe.split(":")))
+        # Explicit 2-tuple unpack (not `_time(*map(int, ...))`) — mypy can't
+        # verify a starred `map[int]` iterator fills exactly (hour, minute)
+        # and not e.g. the 5th `tzinfo` slot, so the star-unpack call was
+        # flagged as an arg-type mismatch. Same values, same call, no `*`.
+        qs_h, qs_m = (int(p) for p in qs.split(":"))
+        qe_h, qe_m = (int(p) for p in qe.split(":"))
+        start = _time(qs_h, qs_m)
+        end = _time(qe_h, qe_m)
         if start <= end:
             return start <= now_local < end
         return now_local >= start or now_local < end
@@ -767,7 +809,7 @@ async def _has_pending_digests(db: pg.Connection, user_id: str) -> bool:
 
 
 @_logged_task
-async def notification_tick(ctx: dict) -> dict[str, int]:
+async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
     """ARQ cron task: check all users with notification rules, enqueue send_bundle when due.
 
     Runs every 5 minutes (configured in WorkerSettings.get_cron_jobs).
@@ -816,7 +858,7 @@ async def notification_tick(ctx: dict) -> dict[str, int]:
 
 
 @_logged_task
-async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:
+async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | str]:
     """Produce a :class:`JobEnrichment` row for ``job_id``.
 
     Skips work if the row already exists (idempotence). The LLM call itself
@@ -855,7 +897,16 @@ async def enrich_job_task(ctx: dict, job_id: int) -> dict[str, bool | str]:
         location=row["location"] or "",
         description=row["description"] or "",
     )
-    job.id = row["id"]
+    # FINDING (not fixed — models.py is out of scope for this file-scoped
+    # pass): `Job` (src/models.py) has no declared `id` field, so this is a
+    # dynamic attribute stapled onto a plain (non-slotted) @dataclass — it
+    # works at runtime but mypy can't see it. This is the SAME pattern
+    # job_enrichment._build_enrichment_lookup's docstring documents as the
+    # standard call convention (`getattr(job, 'id', None)`), and here it's
+    # set correctly *before* the enrich_job call that reads it — unlike the
+    # previously-identified "dim scoring id bug" (job.id unset at scoring
+    # time in main.py/jobs.py), this call site looks correct, just untyped.
+    job.id = row["id"]  # type: ignore[attr-defined]
 
     try:
         enrichment = await enrich_job(

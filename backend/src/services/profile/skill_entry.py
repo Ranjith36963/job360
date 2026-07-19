@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 # Source → confidence map. Values anchored to pillar_1_report.md §8 guidance:
 #   * ``user_declared``  — explicit self-attestation, highest trust
@@ -137,7 +137,7 @@ def merge_skill_entries(entries: Iterable[SkillEntry]) -> list[SkillEntry]:
 
 
 def build_skill_entries_from_profile(
-    profile,
+    profile: Any,
     last_seen: Optional[str] = None,
     normalize: bool = True,
 ) -> list[SkillEntry]:
@@ -167,7 +167,10 @@ def build_skill_entries_from_profile(
     if normalize:
         from src.services.profile.skill_normalizer import normalize_skill
     else:
-        normalize_skill = lambda _raw: None  # noqa: E731
+        # Deliberate no-op stand-in for the real normalizer (normalize=False):
+        # it always returns None, which is a narrower type than the imported
+        # function's ``ESCOMatch | None`` — expected, not a bug.
+        normalize_skill = lambda _raw: None  # type: ignore[assignment]  # noqa: E731
 
     out: list[SkillEntry] = []
     seen_per_source: set[tuple[str, str]] = set()
