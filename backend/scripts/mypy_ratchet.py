@@ -149,10 +149,13 @@ def main() -> int:
         print(f"baseline updated: {total} errors" + (f" ({delta:+d} vs previous {old})" if old else ""))
         return 0
 
-    baseline = load_baseline()
-    if not baseline:
+    # Presence of the FILE is the check, not truthiness of the parsed dict.
+    # An empty baseline is the goal state (zero known errors), and treating it
+    # as "missing" made the ratchet fail the build the moment the backlog hit 0.
+    if not BASELINE.exists():
         print("no baseline found — create one with: python scripts/mypy_ratchet.py --update", file=sys.stderr)
         return 1
+    baseline = load_baseline()
 
     new: List[Tuple[Signature, int]] = []
     for sig, n in sorted(current.items()):
