@@ -175,7 +175,7 @@ async def consume_magic_link(
             (new_id, email, hash_password(random_pw), now),
         )
         # Read back the real id: the row we just inserted, or the existing owner.
-        cur = await db.execute("SELECT id FROM users WHERE email = ?", (email,))
+        cur = await db.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         user_id = (await cur.fetchone())["id"]
         # Prove ownership: verify (keep any existing timestamp) AND reactivate a
         # soft-deleted account — magic-link sign-in brings you back in.

@@ -206,6 +206,11 @@ export function PreferencesForm({
   const [aboutMe, setAboutMe] = useState("");
   const [excludedCompanies, setExcludedCompanies] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // Distinct from `saving`: a failed auto-save used to fall back to the same
+  // green "Changes save automatically" line as a successful one, so once the
+  // parent's toast faded the user had NO way to tell their edit had not
+  // persisted. They would navigate away believing it was saved.
+  const [saveFailed, setSaveFailed] = useState(false);
 
   // Serialized snapshot of the last-saved (or just-hydrated) preferences.
   // Auto-save compares against this so hydration and no-op renders don't save.
@@ -280,9 +285,12 @@ export function PreferencesForm({
       try {
         await onSave(buildPrefs());
         baselineRef.current = snapshot; // commit baseline only on success
+        setSaveFailed(false);
       } catch {
         // Parent surfaces the error via toast; leave the baseline unchanged so
-        // the next edit retries the save.
+        // the next edit retries the save. Also flag it persistently — the toast
+        // disappears in seconds, the status line does not.
+        setSaveFailed(true);
       } finally {
         setSaving(false);
       }
@@ -482,6 +490,13 @@ export function PreferencesForm({
               <>
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
                 <span>Saving…</span>
+              </>
+            ) : saveFailed ? (
+              <>
+                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                <span className="text-destructive">
+                  Couldn&apos;t save — your next edit will retry
+                </span>
               </>
             ) : (
               <>

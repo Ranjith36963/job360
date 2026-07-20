@@ -307,9 +307,25 @@ async def down(
             return None
         last = applied[-1]
         sql = (mdir / f"{last}.down.sql").read_text()
-        await db.executescript(sql)
-        await db.execute("DELETE FROM _schema_migrations WHERE id = ?", (last,))
-        await db.commit()
+        # Atomic, for the same reason up() is (finding H2) — the fix was applied
+        # there and never mirrored here.
+        #
+        # The connection is autocommit and executescript() runs each statement on
+        # its own committed cursor. A down-migration like 0011 rebuilds `jobs`:
+        # DROP INDEX x5 -> CREATE jobs_old -> INSERT SELECT -> DROP TABLE ->
+        # RENAME -> CREATE INDEX x5. If any statement after the first fails, the
+        # already-dropped indexes stay dropped, the exception propagates, and the
+        # `DELETE FROM _schema_migrations` below never runs — so the migration is
+        # still recorded as APPLIED while the schema is silently missing its
+        # indexes. up() will never re-run it to repair, precisely because it is
+        # marked applied. Nothing errors afterwards; queries just get slower
+        # forever.
+        #
+        # One transaction: the schema change and the bookkeeping row commit
+        # together or not at all.
+        async with db.transaction():
+            await db.executescript(sql)
+            await db.execute("DELETE FROM _schema_migrations WHERE id = ?", (last,))
         return last
 
 
