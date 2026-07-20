@@ -24,16 +24,41 @@ rather than that the code contains a try/except — a structural test would pass
 against a handler that still silently swallowed everything.
 """
 
+import uuid
+
 import pytest
 
+from migrations import runner
 from src.repositories.database import JobDatabase
 
 
+def _fresh_db_path(tmp_path) -> str:
+    """A unique FILE path, deliberately not ``:memory:``.
+
+    ``pg.schema_for_path`` hashes a file path to a STABLE schema, so every
+    connect to it shares state. ``:memory:`` gets a FRESH schema per connect —
+    so ``init_db()`` would create ``users`` in one schema and the next connect
+    would land in an empty one.
+
+    That bug passed locally and only failed on CI: locally ``search_path`` falls
+    back to ``public``, which had tables left over from earlier runs, so the
+    residue silently satisfied the query. A clean database has no such residue.
+    The uuid keeps runs from colliding with each other.
+    """
+    return str(tmp_path / f"erasure_{uuid.uuid4().hex[:8]}.db")
+
+
 @pytest.mark.asyncio
-async def test_erasure_raises_when_rows_survive(monkeypatch):
+async def test_erasure_raises_when_rows_survive(tmp_path, monkeypatch):
     """If a per-user table still holds rows afterwards, erasure must FAIL LOUD."""
-    db = JobDatabase(":memory:")
+    db_path = _fresh_db_path(tmp_path)
+    db = JobDatabase(db_path)
     await db.init_db()
+    # `users` is created by a MIGRATION (Batch 2), not by init_db() — init_db()
+    # only builds the legacy catalog tables. Without this the table is absent.
+    # This passed locally purely because `search_path` falls back to `public`,
+    # which still held `users` from earlier runs; on a clean database it fails.
+    await runner.up(db_path)
 
     try:
         # Real erasure of a non-existent user is a no-op and must not raise:
@@ -74,14 +99,20 @@ async def test_erasure_raises_when_rows_survive(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_erasure_tolerates_a_genuinely_absent_table():
+async def test_erasure_tolerates_a_genuinely_absent_table(tmp_path):
     """A table missing from this schema is skipped — the original, correct tolerance.
 
     This is the case the old `except Exception: pass` existed for, and it must
     keep working: erasure on a partial schema should not explode.
     """
-    db = JobDatabase(":memory:")
+    db_path = _fresh_db_path(tmp_path)
+    db = JobDatabase(db_path)
     await db.init_db()
+    # `users` is created by a MIGRATION (Batch 2), not by init_db() — init_db()
+    # only builds the legacy catalog tables. Without this the table is absent.
+    # This passed locally purely because `search_path` falls back to `public`,
+    # which still held `users` from earlier runs; on a clean database it fails.
+    await runner.up(db_path)
     try:
         # No exception even though several _PER_USER_TABLES are created by later
         # migrations and may not exist in this bare schema.

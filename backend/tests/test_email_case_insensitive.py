@@ -27,17 +27,41 @@ import uuid
 
 import pytest
 
+from migrations import runner
+
+
+def _fresh_db_path(tmp_path) -> str:
+    """A unique FILE path, deliberately not ``:memory:``.
+
+    ``pg.schema_for_path`` hashes a file path to a STABLE schema, so every
+    connect shares state. ``:memory:`` gets a FRESH schema per connect, so
+    ``init_db()`` creates ``users`` in one schema and the next connect lands in
+    an empty one.
+
+    That bug passed locally and failed only on CI: locally ``search_path`` falls
+    back to ``public``, which still held tables from earlier runs, so leftover
+    residue satisfied the query. A clean database has none.
+    """
+    return str(tmp_path / f"email_{uuid.uuid4().hex[:8]}.db")
+
+
 
 @pytest.mark.asyncio
-async def test_login_finds_user_regardless_of_email_case():
+async def test_login_finds_user_regardless_of_email_case(tmp_path):
     """The core lockout: stored mixed-case, typed lowercase, must still match."""
     from src.repositories import pg
     from src.repositories.database import JobDatabase
 
     tag = uuid.uuid4().hex[:8]
     uid = f"u-{tag}"
-    db = JobDatabase(":memory:")
+    db_path = _fresh_db_path(tmp_path)
+    db = JobDatabase(db_path)
     await db.init_db()
+    # `users` is created by a MIGRATION (Batch 2), not by init_db() — init_db()
+    # only builds the legacy catalog tables. Without this the table is absent.
+    # This passed locally purely because `search_path` falls back to `public`,
+    # which still held `users` from earlier runs; on a clean database it fails.
+    await runner.up(db_path)
     try:
         conn = db._db
         conn.row_factory = pg.Row
@@ -74,7 +98,7 @@ async def test_login_finds_user_regardless_of_email_case():
 
 
 @pytest.mark.asyncio
-async def test_password_reset_finds_user_regardless_of_case():
+async def test_password_reset_finds_user_regardless_of_case(tmp_path):
     """Forgot-password must not silently no-op on a case variant.
 
     This is the cruellest half: the route returns 204 either way (deliberate
@@ -85,8 +109,14 @@ async def test_password_reset_finds_user_regardless_of_case():
 
     tag = uuid.uuid4().hex[:8]
     uid = f"u-{tag}"
-    db = JobDatabase(":memory:")
+    db_path = _fresh_db_path(tmp_path)
+    db = JobDatabase(db_path)
     await db.init_db()
+    # `users` is created by a MIGRATION (Batch 2), not by init_db() — init_db()
+    # only builds the legacy catalog tables. Without this the table is absent.
+    # This passed locally purely because `search_path` falls back to `public`,
+    # which still held `users` from earlier runs; on a clean database it fails.
+    await runner.up(db_path)
     try:
         conn = db._db
         conn.row_factory = pg.Row
@@ -109,7 +139,7 @@ async def test_password_reset_finds_user_regardless_of_case():
 
 
 @pytest.mark.asyncio
-async def test_new_registrations_store_lowercase():
+async def test_new_registrations_store_lowercase(tmp_path):
     """New rows are canonical, so UNIQUE actually blocks case-variant duplicates.
 
     Without this, "Alice@x.com" and "alice@x.com" are two separate accounts that
@@ -120,8 +150,14 @@ async def test_new_registrations_store_lowercase():
 
     tag = uuid.uuid4().hex[:8]
     uid = f"u-{tag}"
-    db = JobDatabase(":memory:")
+    db_path = _fresh_db_path(tmp_path)
+    db = JobDatabase(db_path)
     await db.init_db()
+    # `users` is created by a MIGRATION (Batch 2), not by init_db() — init_db()
+    # only builds the legacy catalog tables. Without this the table is absent.
+    # This passed locally purely because `search_path` falls back to `public`,
+    # which still held `users` from earlier runs; on a clean database it fails.
+    await runner.up(db_path)
     try:
         conn = db._db
         conn.row_factory = pg.Row
