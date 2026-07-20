@@ -75,6 +75,11 @@ def test_score_and_ingest_builds_job_with_string_date_found() -> None:
     from src.workers.tasks import _job_from_row, _parse_dt
 
     row = {
+        # Real rows come from `SELECT * FROM jobs WHERE id = ?`, so `id` is
+        # always present. _job_from_row indexes it directly (not .get) on
+        # purpose: a missing id must be LOUD, because a silently-None id is
+        # exactly what zeroed every enrichment dimension (H1).
+        "id": 1,
         "title": "Data Engineer",
         "company": "Acme",
         "apply_url": "https://example.test/1",
