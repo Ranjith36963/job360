@@ -1476,11 +1476,49 @@ class JobDatabase:
         row = await cur.fetchone()
         email = row["email"] if row else None
 
+        # Erasure must never SILENTLY half-succeed. Every DELETE below used to be
+        # wrapped in `except Exception: pass`, whose stated intent — tolerate a
+        # table that does not exist in a partial test schema — is reasonable, but
+        # which also swallowed permission errors, FK violations, deadlocks and a
+        # dropped connection. The user was then told "your data is deleted" while
+        # rows survived. For a GDPR Art.17 erasure that is not a bug, it is a
+        # false statement to a data subject.
+        #
+        # Exception-type filtering alone cannot fix it: pg.py:512 converts
+        # UndefinedTable into OperationalError, which is ALSO what a lost
+        # connection raises — so "missing table" and "database went away" are
+        # indistinguishable by type here.
+        #
+        # So this verifies the OUTCOME instead of trusting that nothing threw:
+        # remember every failure, then prove afterwards that no rows remain.
+        # Resolve which tables actually carry a `user_id` column IN THIS SCHEMA
+        # first, so "this table has nothing of the user's" is separated from
+        # "the delete failed" BEFORE anything is attempted. Without this split,
+        # a legacy table (pre-tenancy `user_actions` / `applications`, which get
+        # their user_id from a later migration) raises UndefinedColumn on the
+        # DELETE and looks identical to a permission error.
+        #
+        # current_schema() is deliberate, NOT to_regclass(): to_regclass resolves
+        # through search_path and would match a same-named table in `public`
+        # while the caller operates inside a per-test schema.
+        erasable: list[str] = []
         for tbl in self._PER_USER_TABLES:
+            cur = await self._db.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = ? AND column_name = 'user_id'",
+                (tbl,),
+            )
+            has_col = await cur.fetchone()
+            if has_col and has_col[0]:
+                erasable.append(tbl)
+
+        deletion_errors: list[str] = []
+        for tbl in erasable:
             try:
                 await self._db.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
-            except Exception:  # noqa: BLE001 — tolerate a table absent in a partial test schema
-                pass
+            except Exception as exc:  # noqa: BLE001 — recorded, then verified below
+                deletion_errors.append(f"{tbl}: {type(exc).__name__}: {exc}")
 
         # run_log is shared observability: anonymise rather than delete.
         try:
@@ -1504,7 +1542,7 @@ class JobDatabase:
         if email is not None:
             try:
                 await self._db.execute(
-                    "DELETE FROM magic_link_tokens WHERE email = ?", (email,)
+                    "DELETE FROM magic_link_tokens WHERE LOWER(email) = LOWER(?)", (email,)
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -1512,6 +1550,36 @@ class JobDatabase:
         # The account row itself, last.
         await self._db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         await self._db.commit()
+
+        # ── PROVE the erasure actually happened ─────────────────────────────
+        # Outcome check, not an exception check. For every per-user table that
+        # EXISTS in this schema, assert zero rows remain for the user. A table
+        # that is genuinely absent is skipped — that was the original tolerance
+        # and it stays — but a table that exists and still holds rows is a
+        # failed erasure and must be loud.
+        #
+        # current_schema() is deliberate, NOT to_regclass(): to_regclass
+        # resolves through search_path and would happily match a same-named
+        # table in `public` while the caller is operating inside a per-test
+        # schema — checking the wrong table entirely.
+        survivors: list[str] = []
+        for tbl in erasable:  # only tables that actually hold per-user rows
+            try:
+                cur = await self._db.execute(
+                    f"SELECT COUNT(*) FROM {tbl} WHERE user_id = ?", (user_id,)
+                )
+                left = await cur.fetchone()
+                if left and left[0]:
+                    survivors.append(f"{tbl}={left[0]}")
+            except Exception as exc:  # noqa: BLE001 — a failed CHECK is itself a failure
+                survivors.append(f"{tbl}: verification failed ({type(exc).__name__})")
+
+        if survivors or deletion_errors:
+            raise RuntimeError(
+                "account erasure did not complete — data may remain for this user. "
+                f"rows still present: {survivors or 'none'}; "
+                f"delete errors: {deletion_errors or 'none'}"
+            )
 
     async def update_user_password(self, user_id: str, new_hash: str) -> None:
         """Replace the stored password hash for the given user."""

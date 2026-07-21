@@ -154,13 +154,32 @@ async def has_verdict(conn: pg.Connection, user_id: str, job_id: int) -> bool:
 async def save_verdict(
     conn: pg.Connection, user_id: str, job_id: int, verdict: MatchVerdict
 ) -> None:
-    """Persist the judge's verdict onto the user's feed row (per-user state)."""
-    await conn.execute(
+    """Persist the judge's verdict onto the user's feed row (per-user state).
+
+    Warns when the UPDATE matches nothing. That happens when the feed row was
+    never written — e.g. `upsert_feed_row` raised in run_search, which is caught
+    and logged there so one bad row cannot fail a whole run, while the job stays
+    in the list handed to the matcher. The judge then pays for an LLM call and
+    the result lands nowhere: no error, no row, just money spent on a verdict
+    that is discarded.
+
+    Not raised, only logged: a lost verdict must not fail the run, and the next
+    run will re-judge. But it is now visible instead of silent.
+    """
+    cur = await conn.execute(
         "UPDATE user_feed SET llm_fit_score = ?, llm_verdict = ?, llm_reason = ?, "
         "llm_matched_at = datetime('now') WHERE user_id = ? AND job_id = ?",
         (verdict.fit_score, verdict.verdict, verdict.reason, user_id, job_id),
     )
     await conn.commit()
+    if getattr(cur, "rowcount", 1) == 0:
+        logger.warning(
+            "llm verdict discarded — no user_feed row to attach it to "
+            "(user=%s job=%s). The LLM call was paid for and the result lost; "
+            "the feed row write for this job probably failed earlier in the run.",
+            user_id,
+            job_id,
+        )
 
 
 async def clear_user_verdicts(conn: pg.Connection, user_id: str) -> int:

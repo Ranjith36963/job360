@@ -68,6 +68,47 @@ _RATE_LIMIT_MARKERS = (
 )
 
 
+_PERMANENT_FAILURE_MARKERS = (
+    "no module named",           # package not installed  <- the openai incident
+    "cannot import name",        # SDK moved/renamed a symbol
+    "incorrect api key",
+    "invalid api key",
+    "invalid_api_key",
+    "authentication",            # auth/authentication error
+    "unauthorized",
+    "does not exist",            # model name typo'd or deprecated
+    "model_not_found",
+    "permission",                # key lacks access to the model
+)
+
+
+def _is_permanent_provider_failure(exc: BaseException) -> bool:
+    """True when the provider will fail on EVERY call until a human intervenes.
+
+    Distinguishes "this provider is broken" from "this provider had a bad
+    minute". Both fall through to the next provider — the difference is only how
+    loudly it is reported — but that difference is the whole reason the `openai`
+    outage lasted months: a missing package produced the same WARNING line as a
+    transient 429, so nothing ever stood out.
+
+    Deliberately conservative: an unrecognised error is treated as TRANSIENT, so
+    a genuine blip is never mislabelled as a config error. Missing a permanent
+    failure costs a log level; crying wolf on every transient one would make the
+    ERROR signal worthless, which is the failure mode being fixed.
+    """
+    if isinstance(exc, (ImportError, ModuleNotFoundError)):
+        return True
+    status = (
+        getattr(exc, "status_code", None)
+        or getattr(exc, "status", None)
+        or getattr(exc, "code", None)
+    )
+    if status in (401, "401", 403, "403", 404, "404"):
+        return True
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _PERMANENT_FAILURE_MARKERS)
+
+
 def _is_rate_limit(exc: BaseException) -> bool:
     """True if the exception looks like a provider rate-limit / quota error."""
     status = (
@@ -166,7 +207,30 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
             rate_limited = rate_limited or _is_rate_limit(e)
-            logger.warning("%s failed, trying next provider: %s", name, e)
+            # A CONFIGURATION failure is not a bad minute — it fails on EVERY
+            # call until a human changes something. Logging it at WARNING beside
+            # genuine 429s is exactly how the `openai` outage stayed invisible:
+            # the package was never installed, the ImportError was caught here,
+            # and "openai failed, trying next provider" scrolled past while every
+            # parse silently used a free tier. The documented PRIMARY provider
+            # never ran once, and nothing said so above the noise.
+            #
+            # Escalating to ERROR does not change control flow — the chain still
+            # falls through, which is the right resilience behaviour — it makes a
+            # permanently-dead provider visible (Sentry, log scans) instead of
+            # indistinguishable from a transient blip.
+            if _is_permanent_provider_failure(e):
+                logger.error(
+                    "LLM provider '%s' looks PERMANENTLY misconfigured (%s: %s). "
+                    "Falling back to the next provider, but this will fail on EVERY "
+                    "call until fixed — check the package is installed, the API key "
+                    "is valid, and the model name exists.",
+                    name,
+                    type(e).__name__,
+                    e,
+                )
+            else:
+                logger.warning("%s failed, trying next provider: %s", name, e)
 
     if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
@@ -208,7 +272,30 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
             rate_limited = rate_limited or _is_rate_limit(e)
-            logger.warning("%s failed, trying next provider: %s", name, e)
+            # A CONFIGURATION failure is not a bad minute — it fails on EVERY
+            # call until a human changes something. Logging it at WARNING beside
+            # genuine 429s is exactly how the `openai` outage stayed invisible:
+            # the package was never installed, the ImportError was caught here,
+            # and "openai failed, trying next provider" scrolled past while every
+            # parse silently used a free tier. The documented PRIMARY provider
+            # never ran once, and nothing said so above the noise.
+            #
+            # Escalating to ERROR does not change control flow — the chain still
+            # falls through, which is the right resilience behaviour — it makes a
+            # permanently-dead provider visible (Sentry, log scans) instead of
+            # indistinguishable from a transient blip.
+            if _is_permanent_provider_failure(e):
+                logger.error(
+                    "LLM provider '%s' looks PERMANENTLY misconfigured (%s: %s). "
+                    "Falling back to the next provider, but this will fail on EVERY "
+                    "call until fixed — check the package is installed, the API key "
+                    "is valid, and the model name exists.",
+                    name,
+                    type(e).__name__,
+                    e,
+                )
+            else:
+                logger.warning("%s failed, trying next provider: %s", name, e)
 
     if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(

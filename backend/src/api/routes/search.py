@@ -129,6 +129,13 @@ _ACTIVE_STATUSES = frozenset({"pending", "running"})
 _RUNS_MAX = 500
 _RUNS_TTL_SECONDS = 3600
 
+# Strong references to in-flight background search tasks. Without this the event
+# loop's weak reference is the ONLY one, and the garbage collector may reclaim a
+# running search. Entries remove themselves via add_done_callback, so this stays
+# bounded by the number of concurrently-running searches (already capped per user
+# by MAX_CONCURRENT_SEARCHES_PER_USER).
+_search_bg_tasks: set[asyncio.Task[None]] = set()
+
 
 def _active_run_count_for_user(user_id: str) -> int:
     """Count runs in `_runs` owned by `user_id` that are still in flight."""
@@ -234,7 +241,19 @@ async def start_search(
                 except Exception:  # noqa: BLE001 — never fail a run on cleanup
                     logger.debug("notification pool close failed", exc_info=True)
 
-    asyncio.create_task(_run())
+    # Hold a STRONG reference to the task. asyncio keeps only a weak one, so a
+    # task nobody references "may get garbage collected at any time, even before
+    # it is done" (CPython docs). `_run()` is the ENTIRE pipeline — fetch, score,
+    # dedup, feed write, notify — so losing it mid-flight stops the search with
+    # no exception and no log line, while `_runs[run_id]["status"]` stays
+    # "running" forever and the user watches a spinner that will never resolve.
+    #
+    # profile.py:55-90 already does exactly this for its background re-score,
+    # and its comment describes the pattern as a "mirror of search.py" — the fix
+    # was written one file over and never applied to the file it was named after.
+    task = asyncio.create_task(_run())
+    _search_bg_tasks.add(task)
+    task.add_done_callback(_search_bg_tasks.discard)
     get_audit_logger().info(
         "search_started",
         extra={"event": "search_started", "run_id": run_id, "user_id": user.id, "source": source},

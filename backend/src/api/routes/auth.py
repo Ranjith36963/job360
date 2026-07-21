@@ -160,7 +160,9 @@ async def register(
         try:
             await db.execute(
                 "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
-                (user_id, req.email, pw_hash),
+                # Store the canonical lowercase form so the UNIQUE constraint actually
+                # prevents case-variant duplicate accounts (see LOWER() reads).
+                (user_id, req.email.lower(), pw_hash),
             )
             await db.commit()
         except pg.IntegrityError:
@@ -224,7 +226,8 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     async with open_db(str(DB_PATH)) as db:
         db.row_factory = pg.Row
         cur = await db.execute(
-            "SELECT id, email, password_hash FROM users " "WHERE email = ? AND deleted_at IS NULL",
+            "SELECT id, email, password_hash FROM users "
+            "WHERE LOWER(email) = LOWER(?) AND deleted_at IS NULL",
             (req.email,),
         )
         row = await cur.fetchone()
@@ -405,7 +408,7 @@ async def change_email(
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = pg.Row
         cursor = await adb.execute(
-            "SELECT id FROM users WHERE email = ? AND id != ?",
+            "SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id != ?",
             (str(req.new_email), user.id),
         )
         if await cursor.fetchone():

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import posthog from "posthog-js";
+import { toast } from "@/lib/toast";
 import {
   ArrowLeft,
   ExternalLink,
@@ -188,8 +189,11 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
           await setJobAction(job.id, { action, notes: "" });
           setJob((prev) => (prev ? { ...prev, action } : prev));
         }
-      } catch {
-        // Silently fail — user can retry
+      } catch (err) {
+        // Was a silent catch: the button simply did not change state, with no
+        // toast and no error text, so a failed save was indistinguishable from
+        // a click that never registered. Users re-click or assume it is broken.
+        toast.apiError(err, "Couldn't update this job — please try again.");
       } finally {
         setActionLoading(false);
       }

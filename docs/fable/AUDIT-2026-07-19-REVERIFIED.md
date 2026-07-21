@@ -21,6 +21,15 @@ in PR #94.
 
 The previous doc claimed **83 OPEN**. The true number was **9**, and is now **3**.
 
+**The table counts only the 75 original findings, and is unchanged by the later
+erasure/silent-failure batch** (branch `fix/erasure-and-data-integrity`, section
+immediately below). That batch fixed **8 further bugs that no finding had named** —
+including a GDPR-relevant one where account erasure could report success while data
+survived. They are counted separately on purpose: quietly folding them into "FIXED"
+would inflate the audit's score with work the audit never found. Two items on that
+batch's own list turned out **not to be bugs** and were left alone, which is recorded
+there too.
+
 **Everything still open needs a decision or infrastructure that code cannot
 supply** — see "Genuinely yours" at the bottom.
 
@@ -49,6 +58,128 @@ have re-done finished work.
 **Rule going forward: re-verify against code before acting on any finding here.**
 
 ---
+
+---
+
+# IT IS FIXED — erasure + silent-failure batch (2026-07-19, branch `fix/erasure-and-data-integrity`)
+
+Theme of this batch: **the dominant bug class in this codebase is silence.** Every
+item below was code that failed without saying so. Nothing here changes a happy
+path; each change makes an already-broken case audible.
+
+Each fix has a test that was **verified to fail against the un-fixed code**. That
+check is the point — two tests in this batch passed against the broken code on the
+first try and were rewritten. A test that cannot fail is not coverage, it is
+decoration.
+
+### Account erasure could silently leave data behind — IT IS FIXED ⚠️ GDPR
+`hard_delete_user` deleted from each per-user table inside a loop. A failure on one
+table was swallowed, the function returned normally, and the user was told their
+account was erased while rows survived. Under GDPR that is a false statement to a
+data subject, and nothing anywhere recorded it.
+- `backend/src/repositories/database.py:1516-1521` — per-table failures are now
+  **collected** (`deletion_errors`) instead of discarded.
+- `backend/src/repositories/database.py:1565-1575` — after the commit, every table
+  is **re-counted** (`survivors`); the code checks the outcome rather than trusting
+  that the DELETE it issued did anything.
+- `backend/src/repositories/database.py:1577-1579` — if anything failed *or*
+  anything survived, it **raises**. Erasure now either completes or says it didn't.
+- Test: `backend/tests/test_erasure_is_verified.py` (2) — asserts the OUTCOME
+  (rows gone / exception raised), not that the code contains a try/except.
+- **Why verify instead of trusting the DELETE:** the count is the only evidence that
+  survives a partial failure. A DELETE that matched zero rows and a DELETE that was
+  never reached look identical from the caller's side.
+
+### Signing up with `Ranjith@…` then logging in with `ranjith@…` locked you out — IT IS FIXED
+Email was compared with `=`, which is case-sensitive in Postgres (unlike SQLite,
+where this code originally ran). A user who typed their address with different
+capitalisation was told "no such account" — for login, magic-link, and
+password-reset alike. Reset and magic-link fail **silently by design** (they must
+not reveal whether an address exists), so the user had no way to tell the difference
+between a typo and a real lockout.
+- `backend/src/api/routes/auth.py:230` — login lookup → `WHERE LOWER(email) = LOWER(?)`
+- `backend/src/api/routes/auth.py:411` — email-change uniqueness check, same
+- `backend/src/services/auth/magic_link.py:178` — magic-link lookup, same
+- `backend/src/services/auth/password_reset.py:103` — reset lookup, same
+- Registration now stores `req.email.lower()`, so new rows are canonical.
+- Test: `backend/tests/test_email_case_insensitive.py` (3)
+- **Deliberately not done:** no migration to lowercase existing rows. That is a
+  destructive one-way write over live user data and belongs to the owner, not to me.
+  The `LOWER()` reads make existing mixed-case rows findable *without* touching them.
+
+### A failed down-migration left the schema half-reverted, forever — IT IS FIXED
+`up()` already had this fix (finding H2); `down()` never did, and it is the more
+dangerous of the two. The connection is autocommit, so `executescript()` commits
+each statement separately. Migration 0011's down path is
+`DROP INDEX ×5 → rebuild jobs → CREATE INDEX ×5`. If anything after the first
+statement failed, the dropped indexes stayed dropped, the exception propagated, and
+the `DELETE FROM _schema_migrations` never ran — so the migration was still recorded
+as **applied** and `up()` would never re-run it to repair. Nothing errors afterwards.
+Every query against `jobs` just does a sequential scan from then on.
+- `backend/migrations/runner.py:326` — body + bookkeeping now commit in **one**
+  `async with db.transaction():`. Either both move or neither does.
+- Test: `backend/tests/test_migration_down_atomic.py` (2)
+- **This is the near-miss worth recording.** The first two versions of that test
+  passed against the broken code. The mock raised *before* anything committed, so
+  both versions behaved identically and the bookkeeping assertion could never fire.
+  Only a mock that **partially applies and then fails** — and an assertion on the
+  leaked table rather than on the migration row — actually separates the two.
+
+### A search's notification enqueue could vanish mid-flight — IT IS FIXED
+`asyncio.create_task(...)` was called without keeping a reference. Python's garbage
+collector is free to collect a task nothing holds, so the notification enqueue could
+disappear part-way with no error. Rare, load-dependent, and completely invisible —
+the worst combination to debug from a bug report.
+- `backend/src/api/routes/search.py:137` — module-level `_search_bg_tasks` set
+- `backend/src/api/routes/search.py:255-256` — task added to the set, and
+  `add_done_callback(_search_bg_tasks.discard)` removes it on completion so the set
+  cannot grow without bound.
+
+### The PRIMARY LLM provider was never installed, and the log looked normal — IT IS FIXED
+`openai` was absent in production. The import raised, the provider chain caught it
+with `except Exception`, logged `"openai failed, trying next provider: No module
+named 'openai'"` at **WARNING**, and fell through to a free tier. The documented
+primary provider ran zero times for months. That line was indistinguishable from a
+provider having a bad minute.
+- `backend/src/services/profile/llm_provider.py:71-109` —
+  `_is_permanent_provider_failure()` separates *will recur until a human acts*
+  (missing module, 401/403/404, bad key, wrong model name) from *transient*
+  (429/500/503, timeouts).
+- `backend/src/services/profile/llm_provider.py:222,287` — permanent failures log at
+  **ERROR** so Sentry sees them; transient stay at WARNING.
+- **Control flow is unchanged.** Falling through to the next provider is correct
+  resilience and stays. Only the volume changes.
+- The classifier is deliberately **conservative**: anything unrecognised counts as
+  transient. Missing a permanent failure costs one log level; crying wolf on every
+  blip would make ERROR worthless, which is the exact failure being fixed.
+- Test: `backend/tests/test_provider_failure_classification.py` (13), including an
+  explicit case asserting an unknown error is *not* flagged permanent.
+
+### A paid LLM verdict could be written nowhere — IT IS FIXED
+`save_verdict` issued an UPDATE and never checked whether it matched a row. If the
+`user_feed` row had been purged between the judge call and the write, the money was
+spent, the verdict was discarded, and the logs said nothing.
+- `backend/src/services/llm_matcher.py:175` — warns when `rowcount == 0`.
+
+### Frontend: four silent failures — IT IS FIXED
+- `frontend/src/app/dashboard/page.tsx` — the search poll had no ceiling. A stuck run
+  polled forever. Now bounded by `MAX_POLL_MS` (10 min) and 20 consecutive errors.
+- `frontend/src/app/jobs/[id]/JobDetailClient.tsx` — an empty `catch` meant a failed
+  action looked like a successful one. Now toasts.
+- `frontend/src/app/pipeline/page.tsx:129-136` — advancing a stage **succeeded**, then
+  a blip on the follow-up counts request threw into the outer catch and showed
+  "Failed to advance stage". Users saw the card move *and* a red error, so they either
+  distrusted the board or re-advanced the same application twice. The cosmetic counts
+  refresh now has its own try/catch and stays silent — the user's action worked.
+- `frontend/src/components/profile/PreferencesForm.tsx` — a failed save left the form
+  looking saved. Now tracks `saveFailed`.
+
+### Two items from the goal list — NOT BUGS (checked, not assumed)
+- **`applications` rows "orphaned" by erasure.** Not a defect. `database.py:24-29`
+  excludes them **deliberately** under hard rule #3. "Fixing" it would delete users'
+  job-application history — real data loss dressed as a cleanup.
+- **"Two different date formats."** Cosmetic only. Every expiry write and every
+  comparison uses the same `Z`-suffixed format, so nothing mis-compares. Left alone.
 
 ---
 

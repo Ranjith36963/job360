@@ -120,9 +120,20 @@ export default function PipelinePage() {
       setApplications((prev) =>
         prev.map((a) => (a.job_id === jobId ? { ...a, ...updated } : a))
       );
-      // Refresh counts
-      const newCounts = await getPipelineCounts();
-      setCounts(newCounts);
+      // The move has SUCCEEDED by this point. Refreshing the counts is a
+      // cosmetic follow-up, so it gets its own try/catch — previously a blip on
+      // this second request threw into the outer catch and showed
+      // "Failed to advance stage" for an action that actually worked. The user
+      // saw the card move AND a red error, so they either distrusted the board
+      // or re-tried and advanced the application twice.
+      try {
+        const newCounts = await getPipelineCounts();
+        setCounts(newCounts);
+      } catch {
+        // Counts are derived state and self-heal on the next fetch. Staying
+        // silent is right here: the user's action succeeded and the header
+        // numbers being briefly stale is not something to alarm them about.
+      }
       const label = stage.charAt(0).toUpperCase() + stage.slice(1);
       toast.success(`Moved to ${label}`);
     } catch (err) {

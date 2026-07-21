@@ -100,7 +100,7 @@ async def request_password_reset(
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
         cur = await db.execute(
-            "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL",
+            "SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND deleted_at IS NULL",
             (email,),
         )
         row = await cur.fetchone()

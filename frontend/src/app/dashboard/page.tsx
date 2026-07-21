@@ -277,10 +277,37 @@ export default function DashboardPage() {
       // Clear any existing poll before starting new one
       if (pollRef.current) clearInterval(pollRef.current);
 
+      // Bound the polling. Without a ceiling this retried every 3s forever on a
+      // backend crash/deploy/network blip: the page sat on "Search running..."
+      // with the Refresh button disabled, and the user had no way to tell
+      // "still working" from "silently broken" short of reloading. 10 minutes
+      // is well past the slowest observed run (the ATS tier alone is capped at
+      // 240s) while still failing in a human timeframe.
+      const POLL_INTERVAL_MS = 3000;
+      const MAX_POLL_MS = 10 * 60 * 1000;
+      const pollStartedAt = Date.now();
+      let consecutiveErrors = 0;
+
       // Poll for status (use filtersRef to avoid stale closure)
       pollRef.current = setInterval(async () => {
+        const stopPolling = (message: string) => {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setSearching(false);
+          setSearchProgress("");
+          toast.error(message);
+        };
+
+        if (Date.now() - pollStartedAt > MAX_POLL_MS) {
+          stopPolling(
+            "Search is taking longer than expected — we stopped waiting. Your results may still appear; try refreshing."
+          );
+          return;
+        }
+
         try {
           const status = await getSearchStatus(run_id);
+          consecutiveErrors = 0;
           setSearchProgress(status.progress || status.status);
 
           if (status.status === "completed" || status.status === "failed") {
@@ -301,9 +328,18 @@ export default function DashboardPage() {
             setTimeout(() => setSearchProgress(""), 4000);
           }
         } catch {
-          // Polling error — keep trying
+          // Transient errors are expected (a deploy, a blip) so keep trying —
+          // but not forever. After ~1 minute of consecutive failures the
+          // backend is not coming back within this run, and leaving the user
+          // on a spinner is worse than telling them.
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= 20) {
+            stopPolling(
+              "Lost contact with the server while searching. Please try again."
+            );
+          }
         }
-      }, 3000);
+      }, POLL_INTERVAL_MS);
     } catch (err) {
       setSearching(false);
       setSearchProgress("");
