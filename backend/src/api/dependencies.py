@@ -4,6 +4,7 @@ import tempfile
 from typing import AsyncIterator, cast
 
 from src.core.settings import DB_PATH
+from src.repositories import pg, pool
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_logger
 
@@ -61,22 +62,45 @@ async def get_db() -> JobDatabase:
 async def get_request_db() -> AsyncIterator[JobDatabase]:
     """Per-request DB connection dependency (docs/fable/02 — the P0 fix).
 
-    Each request gets its OWN short-lived connection instead of the process-wide
-    shared singleton. psycopg3 forbids using one async connection from two coroutines
-    at once, so the shared connection could interleave/corrupt concurrent requests
-    ("another operation is already in progress") and never recovered after a DB
-    restart. A fresh connection per request is concurrency-safe and self-healing.
-    Schema + migrations still run ONCE at boot via ``init_db()``; this only opens a
-    connection (no DDL). FastAPI closes it after the response via the finally block.
+    Each request gets its OWN connection instead of one process-wide shared one.
+    psycopg3 forbids using a single async connection from two coroutines at once,
+    so a shared connection could interleave/corrupt concurrent requests ("another
+    operation is already in progress") and never recovered after a DB restart. A
+    per-request connection is concurrency-safe and self-healing. Schema +
+    migrations still run ONCE at boot via ``init_db()``; this opens no DDL.
+
+    Production borrows that connection from a bounded pool instead of opening a
+    fresh one every request. The correctness guarantee is identical (each request
+    still gets its own connection for the duration of the request — the pool never
+    hands the same connection to two requests at once), but the TCP + auth
+    handshake is paid once at startup instead of on every call, and the number of
+    real Postgres backends is capped at the pool's ``max_size``.
+
+    Test mode keeps opening a fresh connection per request. The schema-per-test
+    isolation depends on it: each test's connection selects that test's schema
+    from ``DB_PATH`` (``pg.schema_for_path``), whereas a pooled connection is
+    fixed to ``public``. Routing test requests through the pool would hand every
+    isolated test the wrong schema.
     """
     if _db is None:
         await init_db()  # ensure schema + migrations applied once (idempotent)
-    db = JobDatabase(str(DB_PATH))
-    await db.connect()
-    try:
-        yield db
-    finally:
-        await db.close()
+
+    if pg.TEST_MODE:
+        # Per-test schema isolation — one fresh connection per request, closed
+        # after. Unchanged from the original P0 fix.
+        db = JobDatabase(str(DB_PATH))
+        await db.connect()
+        try:
+            yield db
+        finally:
+            await db.close()
+    else:
+        # Production — borrow a warm connection from the pool and return it after
+        # the response. ``acquire`` returns the connection to the pool on exit, so
+        # we must NOT close the JobDatabase (it does not own the connection).
+        request_pool = await pool.get_pool()
+        async with pool.acquire(request_pool) as conn:
+            yield JobDatabase.from_connection(str(DB_PATH), conn)
 
 
 async def close_db() -> None:

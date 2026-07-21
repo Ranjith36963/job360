@@ -42,6 +42,7 @@ from src.api.routes import (
     tailor,
 )
 from src.core.settings import LOG_LEVEL, validate_required_env
+from src.repositories import pg, pool
 from src.utils.logger import setup_audit_logger, setup_logging
 
 
@@ -111,8 +112,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Fail fast in production when required env vars are absent (no-op in dev).
     validate_required_env()
     await init_db()
+    # Open the request-path connection pool at boot (production only). Doing it
+    # here surfaces a bad DSN / unreachable DB at startup instead of on the first
+    # request, and warms min_size connections. In TEST_MODE the request path does
+    # not use the pool (schema-per-test isolation needs a fresh connection each
+    # time), so opening it would just tie up connections it never serves.
+    if not pg.TEST_MODE:
+        await pool.get_pool()
     yield
     await close_db()
+    # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
+    await pool.close_pool()
 
 
 app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
