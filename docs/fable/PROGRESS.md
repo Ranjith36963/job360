@@ -1,3 +1,8 @@
+> **⚠️ CLOSED / SUPERSEDED (2026-07-23).** This is a historical snapshot. The
+> current verified status of every finding lives in **[AUDIT-2026-07-23-FULL-REVERIFY.md](AUDIT-2026-07-23-FULL-REVERIFY.md)** — the fable backlog
+> is closed there (92 of 106 fixed; the rest are owner decisions or scheduled audit
+> areas). Do NOT treat any item below as still-open without checking that doc first.
+
 # Progress — fixes shipped vs pending
 
 > ## 🔎 SOURCE OF TRUTH → [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)

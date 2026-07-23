@@ -213,6 +213,15 @@ async def match_batch(
     if not jobs:
         return []
     sem = asyncio.Semaphore(semaphore_limit)
+    # Finding C2: every _one() coroutine shares this ONE psycopg connection, and
+    # psycopg3 forbids using a single async connection from two coroutines at
+    # once ("another operation is already in progress"). Up to `semaphore_limit`
+    # judges run concurrently, so without serialising DB access two of them could
+    # overlap on `conn` — the resulting error fell into the `except` below and
+    # was swallowed as "judge failed", silently dropping a PAID verdict. This
+    # lock serialises only the DB touches; the expensive LLM call (match_job)
+    # stays OUTSIDE it, so the batch keeps its concurrency.
+    db_lock = asyncio.Lock()
 
     # Judge telemetry (backlog #9). Local import keeps the module import-light;
     # the counters only move while match_batch runs, which is itself flag-gated.
@@ -226,18 +235,21 @@ async def match_batch(
             return None
         async with sem:
             try:
-                if skip_existing and await has_verdict(conn, user_id, job_id):
-                    tel.skipped_existing += 1
-                    return None
-                enrichment = None
-                try:
-                    from src.services.job_enrichment import (  # noqa: PLC0415
-                        load_enrichment,
-                    )
-
-                    enrichment = await load_enrichment(conn, job_id)
-                except Exception:  # noqa: BLE001 — hints are optional
+                async with db_lock:
+                    if skip_existing and await has_verdict(conn, user_id, job_id):
+                        tel.skipped_existing += 1
+                        return None
                     enrichment = None
+                    try:
+                        from src.services.job_enrichment import (  # noqa: PLC0415
+                            load_enrichment,
+                        )
+
+                        enrichment = await load_enrichment(conn, job_id)
+                    except Exception:  # noqa: BLE001 — hints are optional
+                        enrichment = None
+                # LLM call touches no DB — kept outside db_lock so judges run
+                # concurrently (the whole point of the semaphore).
                 verdict = await match_job(
                     profile_text,
                     job,
@@ -247,9 +259,10 @@ async def match_batch(
                 # Finding #11: retry on 'database is locked' so a transient lock
                 # under concurrent writes doesn't drop this verdict (the except
                 # below used to swallow it as "judge failed").
-                await with_write_retry(
-                    lambda: save_verdict(conn, user_id, job_id, verdict)
-                )
+                async with db_lock:
+                    await with_write_retry(
+                        lambda: save_verdict(conn, user_id, job_id, verdict)
+                    )
                 tel.record_verdict(verdict.fit_score)
                 return verdict
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run

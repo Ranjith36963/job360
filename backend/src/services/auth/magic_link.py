@@ -39,6 +39,7 @@ from src.services.auth import sessions as auth_sessions
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
+from src.utils.logger import mask_email
 
 logger = logging.getLogger("job360.auth.magic_link")
 
@@ -111,7 +112,7 @@ async def request_magic_link(
             to_email=email, subject=subject, body_text=text, body_html=html_body
         )
     except Exception as exc:  # noqa: BLE001 — never raise to the auth flow
-        logger.warning("request_magic_link failed: email=%s err=%s", email, exc)
+        logger.warning("request_magic_link failed: email=%s err=%s", mask_email(email), exc)
         return False
 
 
