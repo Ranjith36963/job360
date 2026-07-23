@@ -128,3 +128,50 @@ async def test_lastval_probe_is_savepoint_safe_inside_transaction(tmp_path):
         row = await check.fetchone()
         assert row is not None and row[0] == "val"
     await pg.drop_schema(path)
+
+
+# --- SPLIT-P3: statement splitter must not sever $$ bodies / string literals ---
+
+
+def test_split_statements_keeps_dollar_quoted_function_body_intact():
+    """SPLIT-P3: a ';' inside a $$...$$ Postgres function body must NOT split.
+
+    A naive `.split(';')` would sever this CREATE FUNCTION into 3 broken pieces,
+    each an incomplete statement that errors at migration boot. The $$-aware
+    splitter keeps the whole function as one statement.
+    """
+    script = """
+    CREATE TABLE t (id int);
+    CREATE FUNCTION bump() RETURNS trigger AS $$
+    BEGIN
+        NEW.updated_at := now();
+        INSERT INTO audit(msg) VALUES ('changed; logged');
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE INDEX idx ON t (id);
+    """
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 3, f"expected 3 statements, got {len(stmts)}: {stmts}"
+    body = stmts[1]
+    assert body.startswith("CREATE FUNCTION")
+    # the semicolons inside the body survived as one statement
+    assert "NEW.updated_at := now();" in body
+    assert "RETURN NEW;" in body
+    assert "END;" in body
+    assert body.rstrip().endswith("LANGUAGE plpgsql")
+
+
+def test_split_statements_keeps_semicolon_inside_string_literal():
+    """A ';' inside a '...' string literal must not split the statement."""
+    script = "INSERT INTO t(msg) VALUES ('a; b; c'); SELECT 1;"
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "INSERT INTO t(msg) VALUES ('a; b; c')"
+    assert stmts[1] == "SELECT 1"
+
+
+def test_split_statements_normal_multi_statement_unchanged():
+    """Ordinary multi-statement scripts still split exactly as before."""
+    stmts = pg.split_statements("CREATE TABLE a(x int); CREATE TABLE b(y int);")
+    assert stmts == ["CREATE TABLE a(x int)", "CREATE TABLE b(y int)"]

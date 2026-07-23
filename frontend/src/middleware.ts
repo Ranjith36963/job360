@@ -35,17 +35,19 @@ export async function middleware(request: NextRequest) {
   const session = request.cookies.get("job360_session");
   if (!session?.value) return bounceToLogin();
 
-  // E2E test bypass — gated SOLELY on E2E_TEST_MODE, which is set ONLY by
-  // playwright.config.ts's webServer env. It is never in .env.example, Railway,
-  // or any real deploy, so it cannot weaken a deployed auth guard. We must NOT
-  // also gate on NODE_ENV: the CI e2e runs a PRODUCTION build (npm run build &&
-  // start) for speed, so NODE_ENV==="production" there too — a non-prod gate
-  // silently disables this bypass in CI, and only the (now removed) fail-open
-  // catch was masking it. With the catch failing CLOSED (F4), that mask is gone,
-  // so the NODE_ENV gate turns every protected-route spec into a /login redirect.
-  // With E2E_TEST_MODE=1 a PRESENT cookie is trusted without the /api/auth/me
-  // round-trip, so hermetic (mocked, no live backend) specs pass deterministically.
-  if (process.env.E2E_TEST_MODE === "1") {
+  // E2E test bypass — with E2E_TEST_MODE=1 a PRESENT cookie is trusted without
+  // the /api/auth/me round-trip, so hermetic (mocked, no live backend) specs pass
+  // deterministically. Set ONLY by playwright.config.ts's webServer env.
+  //
+  // F2 hardening — a single `E2E_TEST_MODE==="1"` gate meant one stray env var in
+  // a real deploy would silently disable auth for everyone. NODE_ENV can't be the
+  // guard (CI e2e runs a PROD build, so NODE_ENV==="production" there too — it
+  // would kill the bypass in CI). RAILWAY_ENVIRONMENT is the right signal: Railway
+  // injects it into every deployed service, and CI/local never have it. So we ALSO
+  // require its ABSENCE — an accidental E2E_TEST_MODE=1 on Railway can no longer
+  // bypass auth, while CI (no RAILWAY_ENVIRONMENT) still works. Same prod signal
+  // the backend gates cookie-Secure/HSTS on, kept in sync deliberately.
+  if (process.env.E2E_TEST_MODE === "1" && !process.env.RAILWAY_ENVIRONMENT) {
     return NextResponse.next();
   }
 

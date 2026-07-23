@@ -355,12 +355,82 @@ def translate(sql: str) -> str:
     return out
 
 
+def _match_dollar_tag(s: str, i: int) -> Optional[str]:
+    """If ``s[i:]`` opens a Postgres dollar-quote tag (``$$`` or ``$tag$``),
+    return the tag text, else None. Tag body is ``[A-Za-z0-9_]*``."""
+    if i >= len(s) or s[i] != "$":
+        return None
+    j = i + 1
+    while j < len(s) and (s[j].isalnum() or s[j] == "_"):
+        j += 1
+    if j < len(s) and s[j] == "$":
+        return s[i : j + 1]
+    return None
+
+
+def _split_on_unquoted_semicolons(cleaned: str) -> list[str]:
+    """Split on ``;`` that sits OUTSIDE a single-quoted string or a dollar-quoted
+    body. SPLIT-P3: Postgres function bodies / DO blocks use ``$$ ... ; ... $$``
+    and a naive ``.split(';')`` would sever them mid-body."""
+    statements: list[str] = []
+    buf: list[str] = []
+    i, n = 0, len(cleaned)
+    in_single = False
+    dollar_tag: Optional[str] = None
+    while i < n:
+        ch = cleaned[i]
+        if dollar_tag is not None:
+            if cleaned.startswith(dollar_tag, i):  # closing tag
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                dollar_tag = None
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+        if in_single:
+            buf.append(ch)
+            if ch == "'":
+                if i + 1 < n and cleaned[i + 1] == "'":  # escaped '' inside a string
+                    buf.append("'")
+                    i += 2
+                    continue
+                in_single = False
+            i += 1
+            continue
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+        tag = _match_dollar_tag(cleaned, i)
+        if tag is not None:
+            dollar_tag = tag
+            buf.append(tag)
+            i += len(tag)
+            continue
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 def split_statements(script: str) -> list[str]:
     """Split a multi-statement script on ``;`` boundaries.
 
     Strips full-line and inline ``--`` comments first (a ``;`` inside a trailing
-    comment must not sever a statement). Naive about ``;`` inside string
-    literals, but no repo SQL has one.
+    comment must not sever a statement), then splits on ``;`` that is NOT inside
+    a single-quoted string or a ``$$``/``$tag$`` dollar-quoted body (SPLIT-P3 —
+    a Postgres function body or DO block would otherwise be severed mid-statement).
     """
     stripped: list[str] = []
     for line in script.splitlines():
@@ -369,7 +439,7 @@ def split_statements(script: str) -> list[str]:
             line = line[:c]
         stripped.append(line)
     cleaned = "\n".join(stripped)
-    return [s.strip() for s in cleaned.split(";") if s.strip()]
+    return _split_on_unquoted_semicolons(cleaned)
 
 
 # ==========================================================================

@@ -140,28 +140,16 @@ def _discover_pairs(migrations_dir: Path) -> list[str]:
 
 
 def _split_sql_statements(sql: str) -> list[str]:
-    """Split a SQL script into statements on naive ``;`` boundaries.
+    """Split a SQL script into statements on ``;`` boundaries.
 
-    Strips both full-line AND inline ``--`` comments before splitting, so a
-    ``;`` inside a trailing comment doesn't sever a statement mid-way. (0015's
-    ``-- NULL = not yet used; set on successful consume`` did exactly that,
-    producing ``pgsync.OperationalError: incomplete input``.)
-
-    Still naive about ``;`` inside string literals — but no repo migration has
-    one, and none has ``--`` inside a string literal either (verified against
-    ``migrations/*.sql``), so line-wise comment stripping is safe here. If a
-    future migration needs either, route it through ``executescript`` instead.
+    Delegates to ``pg.split_statements`` (single source of truth) which strips
+    ``--`` comments, then splits on ``;`` that is NOT inside a single-quoted
+    string or a ``$$``/``$tag$`` dollar-quoted body. SPLIT-P3: this used to be a
+    plain ``cleaned.split(";")`` here and in pg.py — safe for today's migrations
+    but a future one with a Postgres function body / DO block (``$$ ... ; ... $$``)
+    would have been severed mid-statement at boot.
     """
-    stripped: list[str] = []
-    for line in sql.splitlines():
-        # Drop everything from the first ``--`` to end of line (full-line and
-        # inline comments alike). Safe given no string literal contains ``--``.
-        comment = line.find("--")
-        if comment != -1:
-            line = line[:comment]
-        stripped.append(line)
-    cleaned = "\n".join(stripped)
-    return [s.strip() for s in cleaned.split(";") if s.strip()]
+    return pg.split_statements(sql)
 
 
 async def _apply_up_sql(db: pg.Connection, sql: str) -> None:
