@@ -18,22 +18,30 @@ only in a feature branch counts as NOT fixed.
 
 ## Headline
 
+Counts below reflect BOTH passes: the first (C2 + MASKEMAIL, PR #105) and the
+second (H1 + L2 + N2/S5/H6 decisions, 2026-07-23, PR #106).
+
 | Verdict | Count | Meaning |
 |---|---:|---|
 | **VERIFIED FIXED on main** | **86** | fix present on `origin/main` and genuinely closes it |
-| STILL OPEN (code) | 6 | not fixed anywhere — detail below |
-| CAN'T VERIFY | 2 | no proof location given (L2, L5) — assessed below |
+| **FIXED this session** | **4** | C2, 05-P1-MASKEMAIL (PR #105) · H1, L2 (PR #106) |
+| RESOLVED / DECIDED | 3 | N2 (already fixed, kept as-is), S5 (won't-fix), H6 (code done) |
+| CAN'T VERIFY | 1 | L5 — covered by T3 |
 | NEEDS OWNER | 9 | legal / infra / product decision, not a code edit |
 | NOT A BUG / WON'T FIX | 3 | reasoned below |
 
-**Two facts worth stating plainly:**
+**Facts worth stating plainly:**
 1. **The adversarial pass overturned ZERO fixed claims.** Every HIGH/CRITICAL fix
    held up under an agent actively trying to break it.
 2. **Nothing was stranded in a branch** (`not_on_main = 0`). Everything claimed
    fixed is genuinely merged to `origin/main`.
+3. The audit **caught FOUR claims that were wrong or stale** and closed each with a
+   fail-without-fix test: C2 ("not a bug" → real), MASKEMAIL ("applied everywhere"
+   → two sites missed), H1 + L2 (were "reserved/report-only" → now fixed).
 
-The audit also **caught two claims that were wrong** — and I fixed both this pass
-(see next section). So the docs' "fixed" list was not blindly trusted.
+**After both passes there is NO open engineering debt.** What remains is 9 owner
+decisions (legal/infra/product) + 3 won't-fix/not-a-bug — none of it code an agent
+should write unilaterally.
 
 ---
 
@@ -70,23 +78,76 @@ PII in logs is a GDPR concern, so this matters even though it's low-severity.
 
 ---
 
-# STILL OPEN — code (6)
+# IT IS FIXED — second pass, 2026-07-23 (branch `fix/pillar2-l2-h1`, PR #106)
 
-| ID | Sev | What's left | Can an agent fix it? |
-|---|---|---|---|
-| **N2** | HIGH | Profile extraction still runs **4+ sequential paid LLM calls inline in the HTTP request** (`routes/profile.py:322`). Only a rate cap was added; the real fix is moving extraction to the ARQ background worker. | Yes, but it's a real feature (background job + status polling), not a patch — worth your go-ahead on approach. |
-| **H1** | HIGH | Worker path is fixed, but the **main.py orchestrator** still calls `scorer.score(job)` *before* `job.id` is set (`main.py:702` vs `:769`), so dim-scoring enrichment lookups silently miss on CLI/pipeline runs. | **No — Pillar-2 scoring code you've flagged hands-off.** Report only. |
-| **H6** | MED | Migrations still auto-apply inside the request process on boot (`RUN_MIGRATIONS_ON_BOOT` defaults true). Opt-out exists but needs a Railway release-phase step. | **No — deploy/infra decision.** |
-| **S5** | MED | JobSpy (`indeed.py`) leaks an OS thread on timeout via `asyncio.to_thread`. Documented **accepted-by-design** (the pipeline detaches the thread). | No — design choice; leave unless you want it changed. |
-| **C2** | — | ~~open~~ **FIXED this pass** (above). | — |
-| **05-P1-MASKEMAIL** | LOW | ~~open~~ **FIXED this pass** (above). | — |
+The owner **lifted the Pillar-2 hands-off restriction** for this pass, so the two
+scoring items previously marked "report-only" are now fixed. Each has a test
+**verified to fail against the pre-fix code**.
 
-# CAN'T VERIFY (2)
+### H1 — orchestrator scored returning jobs with `id=None` → dims silently 0 — IT IS FIXED
+`main.py` scored every job *before* resolving `job.id`, so the multi-dim enrichment
+lookup (keyed on `job.id`, rules #19/#20) missed a **returning** job's prior-run
+enrichment and the seniority/salary/visa/workplace dims scored 0. If that dims-blind
+score then missed `ENRICHMENT_THRESHOLD`, the job never reached the post-enrich
+re-score pass, so its persisted `match_score` stayed wrong.
+- `backend/src/main.py` — an early pass now loads the (≤30-day, bounded) catalog's
+  `normalized-key → id` map in ONE query and stamps `job.id` on every returning job
+  **before** the scoring loop; brand-new jobs correctly stay `id=None` (no enrichment
+  yet). The stale "reported not fixed / Pillar-2 hands-off" comment was removed.
+- The read-time (`jobs.py`) and worker (`tasks.py`) paths were already fixed; this
+  closes the orchestrator path — the last of the four call sites.
+- **Test:** `tests/test_main.py::test_run_search_returning_job_carries_id_before_scoring`
+  — **verified: without the fix the returning job is scored with `id=None`** (fails).
+
+### L2 — future-dated jobs scored MAX freshness — IT IS FIXED
+`_recency_score` computed `(now - posted).days`, which went **negative** for a
+future date and slipped through the `<= 1` gate → MAX recency band. A job dated next
+year outranked a genuinely fresh one.
+- `backend/src/services/skill_matcher.py` — a date >~1 day in the future is treated
+  as untrustworthy (0 recency); within ~1 day (clock skew) it's clamped to 0 and
+  still scores fresh. Fixes **both** the legacy path and the 5-column
+  `recency_score_for_job` (they share the helper).
+- **Tests:** `test_recency_far_future_date_gets_zero_not_max` (**scored 10 without
+  the fix**) + `test_recency_slight_future_clock_skew_still_counts_as_fresh`.
+
+---
+
+# RESOLVED / DECIDED — 2026-07-23 (no longer open)
+
+### N2 — profile extraction slowness — RESOLVED (already fixed; owner kept it as-is)
+The cross-check corrected the premise. N2's real complaint was **slowness**, and
+that was **already fixed** in PR #96: the 4 LLM passes run **concurrently**
+(`asyncio.gather` in `two_pass.py`), so an upload waits ~1 call, not 4. The only
+remaining part — making the upload fully non-blocking (return immediately + poll) —
+is a **breaking UX change** the owner **deliberately chose not to do** (2026-07-23),
+same reasoning as PR #96. A working backend prototype was built and reverted. **N2
+is considered addressed by the parallelization.** Not open.
+
+### S5 — JobSpy thread leak — WON'T FIX (library limitation, tied to the scraping decision)
+Confirmed real but **not cleanly fixable in code**: JobSpy's synchronous
+`scrape_jobs` can't be cancelled (Python cannot force-kill a thread), so
+`asyncio.wait_for` detaches the thread. The only real fix is a subprocess-isolated
+rewrite (kill the process on timeout) — disproportionate risk for **one** source
+already bounded by a 60s ceiling and a 32-slot thread pool. It also **disappears
+entirely if the scraping sources are dropped** (finding 05-P0-LEGAL — the owner's
+legal call). Left as accepted-by-design; the subprocess rewrite is available on
+request.
+
+### H6 — migrations on boot — CODE DONE; infra step is the owner's deploy decision
+The **code half is already shipped**: `RUN_MIGRATIONS_ON_BOOT` (default `true`) lets
+a deploy pipeline opt the app process out of running migrations. The remaining part —
+adding a Railway release-phase step that runs `python -m migrations.runner up` and
+flips the flag to `false` — is a **Railway service-config change**, not a code edit.
+Existing mitigations (advisory lock serialises replicas; healthcheck + `ON_FAILURE`
+restart) already bound the blast radius. Owner's deploy decision.
+
+---
+
+# CAN'T VERIFY (1 remaining)
 - **L5** — ".env.example missing ops-critical vars." Effectively covered by **T3**
   (VERIFIED FIXED: `.env.example` now has `DATABASE_URL` + `OPENAI_API_KEY`). No
   distinct gap identified. Treat as closed via T3.
-- **L2** — "future-dated posts get maximum recency." No proof location; recency is
-  **Pillar-2 scoring** — report-only, your domain. Flagged for you to confirm.
+- **L2** — ~~can't verify~~ **now IT IS FIXED** (see the second-pass section above).
 
 # NEEDS OWNER — not a code edit (9)
 
