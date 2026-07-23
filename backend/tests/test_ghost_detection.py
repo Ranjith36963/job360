@@ -218,3 +218,44 @@ def test_pass_skips_failed_sources(db):
         missed = await _ghost_detection_pass(db, [source], [None], {})
         assert missed == {}
     asyncio.run(_run())
+
+
+# --- M6: NULL last_seen_at must not permanently short-circuit to ACTIVE ---
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def test_m6_null_last_seen_with_misses_and_no_timestamp_goes_stale():
+    """M6: a row with NULL last_seen_at AND no first_seen_at, but many misses,
+    used to be forced ACTIVE forever (never swept). It must now transition on
+    consecutive_misses alone."""
+    row = {"staleness_state": "active", "consecutive_misses": 3, "last_seen_at": None}
+    assert evaluate_job_state(row) == StalenessState.LIKELY_STALE
+    row2 = {"staleness_state": "active", "consecutive_misses": 2, "last_seen_at": None}
+    assert evaluate_job_state(row2) == StalenessState.POSSIBLY_STALE
+
+
+def test_m6_null_last_seen_falls_back_to_first_seen_at():
+    """When last_seen_at is NULL, first_seen_at is used as the age proxy."""
+    old = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    row = {
+        "staleness_state": "active",
+        "consecutive_misses": 3,
+        "last_seen_at": None,
+        "first_seen_at": old,
+    }
+    # 3 misses + 48h old (via first_seen fallback) => likely stale
+    assert evaluate_job_state(row) == StalenessState.LIKELY_STALE
+
+
+def test_m6_brand_new_job_with_null_last_seen_stays_active():
+    """A just-discovered job (recent first_seen_at, NULL last_seen_at, few misses)
+    must NOT be wrongly marked stale by the fallback."""
+    fresh = datetime.now(timezone.utc).isoformat()
+    row = {
+        "staleness_state": "active",
+        "consecutive_misses": 0,
+        "last_seen_at": None,
+        "first_seen_at": fresh,
+    }
+    assert evaluate_job_state(row) == StalenessState.ACTIVE
