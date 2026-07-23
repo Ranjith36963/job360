@@ -269,6 +269,12 @@ def authenticated_async_context(monkeypatch, tmp_path):
         json={"email": "test@example.com", "password": "s3cretpassword"},
     )
     assert r.status_code == 201, r.text
+    # M2 — register no longer auto-logs-in (no-enumeration); sign in for the cookie.
+    lr = sync_client.post(
+        "/api/auth/login",
+        json={"email": "test@example.com", "password": "s3cretpassword"},
+    )
+    assert lr.status_code == 200, lr.text
     session_cookie = sync_client.cookies.get("job360_session")
     assert session_cookie, "authenticated_async_context: failed to capture session cookie"
     # Step-1.5 — capture the registered user's id BEFORE closing the

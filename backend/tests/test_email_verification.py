@@ -136,10 +136,12 @@ def _register_capture_token(client, monkeypatch, email, password="s3cretpassword
     monkeypatch.setattr(tokens, "generate_token", _spy)
     r = client.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
-    # Register currently issues exactly one verification token; if that
-    # changes (e.g. password-reset auto-issue) the test will tell us.
+    # Register (for a new email) still issues exactly one verification token.
     assert len(captured["raws"]) == 1, captured["raws"]
-    return r.json()["id"], captured["raws"][0]
+    # M2 — register no longer auto-logs-in or returns the id; sign in to read it.
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
+    return lr.json()["id"], captured["raws"][0]
 
 
 # ─── register flow auto-issues a token ──────────────────────────────────────

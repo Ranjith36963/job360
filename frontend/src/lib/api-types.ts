@@ -2174,6 +2174,19 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** RegisterResponse */
+        RegisterResponse: {
+            /**
+             * Message
+             * @default Account request received. Please sign in to continue.
+             */
+            message: string;
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+        };
         /**
          * RunEntry
          * @description Single ``run_log`` row exposed over the API.
@@ -2744,7 +2757,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserResponse"];
+                    "application/json": components["schemas"]["RegisterResponse"];
                 };
             };
             /** @description Validation Error */

@@ -121,6 +121,9 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
+  // M2 — set after /register. The message is deliberately neutral: it does NOT
+  // reveal whether the email was newly created or already existed.
+  const justRegistered = searchParams.get("registered") === "1";
 
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -142,6 +145,11 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">
+      {justRegistered && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Almost there — please sign in to continue.
+        </p>
+      )}
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input

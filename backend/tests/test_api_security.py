@@ -139,6 +139,12 @@ def _register_user_and_get_cookie(app, email: str) -> str:
         json={"email": email, "password": "s3cretpassword"},
     )
     assert r.status_code == 201, r.text
+    # M2 — register no longer auto-logs-in; sign in for the session cookie.
+    lr = sync_client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "s3cretpassword"},
+    )
+    assert lr.status_code == 200, lr.text
     cookie = sync_client.cookies.get("job360_session")
     sync_client.close()
     assert cookie

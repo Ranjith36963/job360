@@ -141,6 +141,9 @@ def _register(client, email, password="s3cretpassword"):
     )
     _c.commit()
     _c.close()
+    # M2 — register no longer auto-logs-in; sign in so the client is authenticated.
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
 
 
 # ---------------------------------------------------------------------------

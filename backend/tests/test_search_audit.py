@@ -78,6 +78,9 @@ def _register_verified(client, db_path, email):
     con.execute("UPDATE users SET email_verified_at=datetime('now') WHERE email=?", (email,))
     con.commit()
     con.close()
+    # M2 — register no longer auto-logs-in; sign in so the client is authenticated.
+    lr = client.post("/api/auth/login", json={"email": email, "password": "Correct-Horse-9"})
+    assert lr.status_code == 200, lr.text
 
 
 def test_search_emits_started_audit(client, temp_db, caplog, monkeypatch):

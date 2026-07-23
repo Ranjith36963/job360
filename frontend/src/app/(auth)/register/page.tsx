@@ -58,7 +58,11 @@ function RegisterForm() {
     try {
       await registerUser(data.email, data.password);
       posthog.capture("signup_completed");
-      router.push(safeNext(next));
+      // M2 — register no longer signs you in (that would leak whether an email
+      // already exists). Send the user to sign in; preserve their intended
+      // destination. This message is identical whether or not the email existed.
+      const dest = safeNext(next);
+      router.push(`/login?registered=1&next=${encodeURIComponent(dest)}`);
     } catch (err) {
       setServerError(friendlyAuthError(err, "Sign-up failed. Please try again."));
     }

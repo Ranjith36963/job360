@@ -93,26 +93,46 @@ async def _noop_lifespan(app):
 
 # ----- register --------------------------------------------------------
 
-def test_register_creates_user_and_returns_cookie(client):
+def test_register_creates_user_but_does_not_auto_login(client):
+    """M2 — register succeeds (201) but no longer sets a session cookie. A cookie
+    for a new user but none for a duplicate would itself enumerate accounts, so
+    NEITHER path sets one; the user signs in next. The user IS created — they can
+    log in immediately."""
     r = client.post(
         "/api/auth/register",
         json={"email": "alice@example.com", "password": "s3cretpassword"},
     )
     assert r.status_code == 201, r.text
-    assert r.json()["email"] == "alice@example.com"
-    assert "job360_session" in r.cookies
+    assert "job360_session" not in r.cookies
+    # The account was really created — login works.
+    lr = client.post(
+        "/api/auth/login",
+        json={"email": "alice@example.com", "password": "s3cretpassword"},
+    )
+    assert lr.status_code == 200, lr.text
+    assert "job360_session" in lr.cookies
 
 
-def test_register_rejects_duplicate_email(client):
-    client.post(
+def test_register_does_not_reveal_existing_email(client):
+    """M2 — registering a NEW email and re-registering an EXISTING one must be
+    indistinguishable (same status, same body, no cookie) so /register can't be
+    used to enumerate accounts. The existing account is NOT modified."""
+    new = client.post(
         "/api/auth/register",
         json={"email": "dup@example.com", "password": "s3cretpassword"},
     )
-    r = client.post(
+    dup = client.post(
         "/api/auth/register",
         json={"email": "dup@example.com", "password": "anothers3cretpassword"},
     )
-    assert r.status_code == 409
+    assert new.status_code == dup.status_code == 201
+    assert new.json() == dup.json(), "responses differ → email existence is observable"
+    assert "job360_session" not in dup.cookies
+    # The existing account's password was NOT overwritten by the duplicate attempt.
+    ok = client.post("/api/auth/login", json={"email": "dup@example.com", "password": "s3cretpassword"})
+    assert ok.status_code == 200
+    bad = client.post("/api/auth/login", json={"email": "dup@example.com", "password": "anothers3cretpassword"})
+    assert bad.status_code == 401
 
 
 def test_register_rejects_short_password(client):
@@ -163,6 +183,11 @@ def test_me_returns_user_with_valid_session(client):
         "/api/auth/register",
         json={"email": "z@example.com", "password": "s3cretpassword"},
     )
+    # M2 — register no longer auto-logs-in; sign in for the session.
+    client.post(
+        "/api/auth/login",
+        json={"email": "z@example.com", "password": "s3cretpassword"},
+    )
     r = client.get("/api/auth/me")
     assert r.status_code == 200
     assert r.json()["email"] == "z@example.com"
@@ -171,6 +196,11 @@ def test_me_returns_user_with_valid_session(client):
 def test_logout_revokes_session(client):
     client.post(
         "/api/auth/register",
+        json={"email": "lo@example.com", "password": "s3cretpassword"},
+    )
+    # M2 — register no longer auto-logs-in; sign in so there's a real session to revoke.
+    client.post(
+        "/api/auth/login",
         json={"email": "lo@example.com", "password": "s3cretpassword"},
     )
     r1 = client.post("/api/auth/logout")

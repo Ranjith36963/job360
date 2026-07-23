@@ -96,6 +96,15 @@ class UserResponse(BaseModel):
     email: str
 
 
+class RegisterResponse(BaseModel):
+    # M2 — deliberately generic and IDENTICAL whether or not the email was already
+    # registered, so /register cannot be used to enumerate accounts. Carries no
+    # id/email (returning the real ones for a new user but not a duplicate would
+    # itself leak existence).
+    status: str = "ok"
+    message: str = "Account request received. Please sign in to continue."
+
+
 def _client_meta(request: Request) -> dict[str, Any]:
     """Extract safe client metadata for audit log extra fields.
 
@@ -129,13 +138,13 @@ def _set_session_cookie(response: Response, cookie: str) -> None:
     )
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     req: RegisterRequest,
     response: Response,
     request: Request,
     background_tasks: BackgroundTasks,
-) -> UserResponse:
+) -> RegisterResponse:
     # M3 — per-IP registration throttle. Without this, register had ZERO rate
     # limit, so a single host could mass-create accounts. Derive the client IP
     # the SAME way login does: request.client.host, trusting the first
@@ -156,6 +165,7 @@ async def register(
         )
     user_id = uuid.uuid4().hex
     pw_hash = hash_password(req.password)
+    created = False
     async with open_db(str(DB_PATH)) as db:
         try:
             await db.execute(
@@ -165,31 +175,41 @@ async def register(
                 (user_id, req.email.lower(), pw_hash),
             )
             await db.commit()
+            created = True
         except pg.IntegrityError:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="email already registered",
-            )
-    cookie = await auth_sessions.create_session(str(DB_PATH), user_id=user_id, secret=_secret())
-    _set_session_cookie(response, cookie)
-    get_audit_logger().info(
-        "auth",
-        extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)},
-    )
-    # Phase −2 item B + post-review fix #1 + #2: schedule the verification
-    # email as a FastAPI BackgroundTask. The task runs AFTER the response
-    # is queued so register isn't blocked on SMTP I/O (300ms–30s), and the
-    # _safe_ wrapper guarantees a DB error in the verification path can't
-    # propagate as HTTP 500 after the user row was already committed
-    # (orphan-account avoidance).
-    background_tasks.add_task(
-        _safe_request_email_verification,
-        db_path=str(DB_PATH),
-        user_id=user_id,
-        email=str(req.email),
-        frontend_origin=_frontend_origin(),
-    )
-    return UserResponse(id=user_id, email=req.email)
+            # M2 — the email already exists. Do NOT reveal that and do NOT touch the
+            # existing account; fall through to the SAME response a new signup gets.
+            created = False
+
+    # M2 — /register no longer auto-logs-in and no longer 409s on a taken email, so
+    # it can't be used to enumerate accounts. A session cookie for a new user but
+    # none for a duplicate would itself leak existence, so NEITHER path sets one —
+    # the user signs in next (sign up → sign in). Response body + status are
+    # identical whether the account was just created or already existed.
+    if created:
+        get_audit_logger().info(
+            "auth",
+            extra={"event": "register", "user_id": user_id, "status": "ok", **_client_meta(request)},
+        )
+        # Schedule the verification email as a FastAPI BackgroundTask so register
+        # isn't blocked on SMTP I/O, and the _safe_ wrapper keeps a DB error in the
+        # verification path from 500-ing after the user row was committed.
+        background_tasks.add_task(
+            _safe_request_email_verification,
+            db_path=str(DB_PATH),
+            user_id=user_id,
+            email=str(req.email),
+            frontend_origin=_frontend_origin(),
+        )
+    else:
+        # A duplicate — audited server-side (never surfaced to the caller). The real
+        # owner already has an account and can sign in / reset; we send no signal
+        # that would confirm the address is registered.
+        get_audit_logger().info(
+            "auth",
+            extra={"event": "register_duplicate", "status": "ok", **_client_meta(request)},
+        )
+    return RegisterResponse()
 
 
 @router.post("/login", response_model=UserResponse)
