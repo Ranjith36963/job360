@@ -188,11 +188,67 @@ re-confirmed against the current tree this pass.
 - **Scoring guards (non-hands-off):** M8
 - **Partial→closed / docs:** M2 (timing fixed; 409-on-register is your accepted trade-off), M9 (IP hashed; user_id deliberate), T2, T3, T5, T6-T9, T10 (marked test-only), T11, P6, L1, FF-L1
 
-## Bottom line
+---
 
-Of 106 findings, **88 are now fixed on main or fixed this pass** (86 + C2 + MASKEMAIL).
-The rest are **not engineering debt you're behind on** — they're **6 owner decisions**
-(scraping, legal text, MFA, breach runbook, prod secrets, deploying the worker), **1
-HIGH that's a real feature to schedule** (N2 → background extraction), and **a
-handful of Pillar-2 scoring items you've reserved for yourself** (H1, L2). Nothing
-critical is silently broken.
+# THIRD PASS — full doc-set completion, 2026-07-23 (PR #107)
+
+The whole fable doc set (`docs/FABLE_FINDINGS.md`, `fable-harness-plan.md`, and all
+14 `docs/fable/*` files) was re-scanned by 3 parallel agents to catch any finding
+the 106-item inventory missed. Result: **the numbered docs + FABLE_FINDINGS.md hold
+NO uncaptured finding** — every numbered item maps 1:1 onto the inventory. But two
+items in the THEMATIC docs had **no ID** (they fell through the finding
+renumbering). Both were real and are now fixed.
+
+### F2 — E2E auth bypass could be enabled in a real deploy — IT IS FIXED
+`frontend/src/middleware.ts` gated the auth bypass **solely** on
+`E2E_TEST_MODE === "1"`. One stray env var on a live deploy would have disabled auth
+for everyone. `NODE_ENV` can't guard it (CI e2e runs a prod build). Fix: also require
+`!process.env.RAILWAY_ENVIRONMENT` — Railway injects that into every deployed
+service, CI/local never have it, so an accidental `E2E_TEST_MODE=1` on Railway can no
+longer bypass auth while CI still works. (Was doc ID **F2**, lost in renumbering.)
+
+### SPLIT-P3 — migration splitter would sever `$$` function bodies — IT IS FIXED
+`pg.py` + `runner.py` split migration SQL on a naive `.split(";")`. Safe for today's
+migrations, but a future one with a Postgres function body / DO block
+(`$$ ... ; ... $$`) or a `;` inside a string literal would be **severed
+mid-statement at boot**. `pg.split_statements` now skips `;` inside single-quoted
+strings and `$$`/`$tag$` bodies; `runner.py` delegates to it. Tests verified to fail
+on the naive split (the `$$` body split into 8 pieces instead of 1). (Had no ID.)
+
+## `08-GAPS-NOT-YET-AUDITED.md` — audit AREAS, not bugs (owner-scheduled)
+
+This file lists dimensions **never swept**, not specific defects. They can't be
+"closed" by a code edit — each is a dedicated effort. Current status:
+
+| Area | Status |
+|---|---|
+| Performance & scale (load test, N+1, pool-under-load) | Not audited — schedule a k6/Locust pass. Pool fix (C1) shipped; its behaviour under load is unverified. |
+| Cost economics | **Partially covered** — profile-extract cost cap shipped (`PROFILE_EXTRACT_MAX_PER_HOUR`). A spend dashboard / alerting is owner ops. |
+| Test-suite quality (mocked vs real) | Not audited — a real effort; the suite is green but branch-coverage on critical paths is unmeasured. |
+| Email deliverability (DMARC/DKIM/SPF) | Owner — DNS/ops, not code. |
+| Supply-chain scanning | **Done** — `security.yml` runs pip-audit/npm-audit/gitleaks/bandit blocking (H7). |
+| Observability depth (tracing, latency histograms) | **Partially covered** — request-id + access log + Sentry shipped; per-user latency histograms not. |
+| Product & UX quality | Owner — schedule a UX pass. |
+
+## Minor harness polish (`06-HARNESS-AND-WORKFLOW.md`) — noted, low value
+
+Genuine but cosmetic/tooling items, not product risk: dormant worker/integrator/scout
+skills read as live (add a "DORMANT — loop disabled" banner); the `/commit` skill's
+Co-Author trailer + trufflehog v2 call drifted; the `sync` skill scan misses the
+CLAUDE.md rule-count. Left for a harness-tidy pass — none affects the running app.
+
+## Bottom line — the fable backlog is closed
+
+Across all three passes, of the 106 findings **90 are fixed** (86 verified on main +
+C2, MASKEMAIL, H1, L2) plus the 2 previously-un-IDed ones (F2, SPLIT-P3) = **92
+fixed**. Everything else is **not engineering debt**:
+- **N2** — resolved (slowness already fixed; full backgrounding declined by owner).
+- **S5, V2, P3, P5** — won't-fix, with reasons.
+- **H6** — code done; the deploy step is yours.
+- **9 owner decisions** — scraping stance, privacy/terms text, subprocessor list,
+  MFA, breach runbook, prod secrets, deploying the worker, status page/SLA, the
+  migrations release step.
+- **`08-GAPS`** — audit *areas* to schedule (perf, cost dashboard, UX), not bugs.
+
+**No open, code-fixable finding remains in any of the 15 fable docs.** What's left is
+owner decisions and scheduled audit efforts — this backlog is complete.

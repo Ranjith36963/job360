@@ -19,7 +19,13 @@
 - **Fix (P1, small):** replace both call sites with `friendlyAuthError(err, fallback)` (already imported elsewhere), or `apiErrorMessage(err, fallback)`.
 
 ## P1/P2 — E2E_TEST_MODE auth bypass: correctly gated today, but a single-env-var trust chain
-> **STATUS: OPEN (accepted)** — still double-gated (`NODE_ENV !== 'production'` AND `E2E_TEST_MODE=1`) and the Dockerfile hardcodes `NODE_ENV=production`. No constant-time `E2E_TEST_TOKEN` added. Accepted risk.
+> **STATUS: IT IS FIXED (2026-07-23, F2, PR #107).** The description below is now
+> historical. By the time this was revisited the code had actually been simplified
+> to gate SOLELY on `E2E_TEST_MODE=1` (the `NODE_ENV` half was dropped because CI
+> e2e runs a prod build) — so the risk had grown, not shrunk. Fixed by additionally
+> requiring `!process.env.RAILWAY_ENVIRONMENT` (`middleware.ts`): Railway injects
+> that into every deployed service and CI/local never have it, so an accidental
+> `E2E_TEST_MODE=1` on a real deploy can no longer bypass auth, while CI still works.
 - **What I saw:** `middleware.ts:44-46` lets any request through when `NODE_ENV !== "production" && E2E_TEST_MODE === "1"`. Playwright sets `E2E_TEST_MODE=1` on a real prod build in CI. **The mitigation that makes this safe:** `frontend/Dockerfile:35` hardcodes `ENV NODE_ENV=production`, and `E2E_TEST_MODE` is never set in any deploy config (confirmed across workflows + `.env` examples).
 - **Why it matters:** the gate's *entire* security rests on `NODE_ENV` staying `"production"` at runtime. Railway service variables **take precedence over Dockerfile `ENV`** — if someone ever copies a CI/staging `.env` (with `E2E_TEST_MODE=1`) into an environment where `NODE_ENV` is also unset/misconfigured, **any client can set `job360_session=anything` and walk past the guard** on every protected route. Backend `Depends(require_user)` still protects the *data* (rule #12), but the shell renders.
 - **Fix (P2, harden):** don't trust a boolean guarded only by `NODE_ENV`. Gate the bypass behind a random build-time `E2E_TEST_TOKEN` baked into the Playwright-only build and compared constant-time — a value that simply never exists in the production build.
