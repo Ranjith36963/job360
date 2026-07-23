@@ -252,3 +252,54 @@ fixed**. Everything else is **not engineering debt**:
 
 **No open, code-fixable finding remains in any of the 15 fable docs.** What's left is
 owner decisions and scheduled audit efforts — this backlog is complete.
+
+---
+
+# FOURTH PASS — re-verify vs CURRENT main (post-merge), 2026-07-23 (PR #110)
+
+After #104–#108 all merged, the whole 108-finding set was re-verified against the
+**current** `origin/main` (HEAD `bf823e6`) by 13 parallel agents reading real code,
+plus an adversarial refutation pass. This pass superseded the "backlog closed"
+claim above — because it caught **two findings the earlier docs had recorded WRONG.**
+
+- **94 VERIFIED FIXED** on current main. The previously-in-PR fixes (C1 pool, C2,
+  H1, L2, F2, SPLIT-P3, MASKEMAIL) now confirm fixed **on main**.
+- **Adversarial pass overturned ZERO** fixed claims.
+- **Nothing stranded in a branch** (`not_on_main = 0`) — every fix is genuinely on main.
+
+### The docs were wrong on two — code proof beat the doc claim:
+
+### M6 — doc said "UNKNOWN"; it was a real bug — IT IS FIXED (PR #110)
+`ghost_detection.evaluate_job_state` returned `ACTIVE` whenever `last_seen_at` was
+NULL, so a job missed many times but lacking that timestamp could **never** go stale
+— `nightly_ghost_sweep` excluded it forever. Fixed: fall back to `first_seen_at`,
+then to `consecutive_misses` alone (3+ = stale); the sweep query now SELECTs
+`first_seen_at`. 3 new tests (the NULL+misses row now returns `LIKELY_STALE`).
+
+### L5 — doc claimed "covered by T3"; it was FALSE — IT IS FIXED (PR #110)
+`backend/scripts/check_env_example.py` **failed** on origin/main: 15 env vars the
+backend reads were missing from `.env.example` (RESEND_API_KEY, SMTP_HOST/PORT/USER/
+FROM, REQUIRE_EMAIL_VERIFICATION, RATE_LIMIT_REDIS, JOB360_TRUST_PROXY, LLM_* tuning,
+CEREBRAS_MODEL, RAILWAY_ENVIRONMENT). Added all 15; the check now passes (74/74, exit 0).
+
+### M2 — still open, your prior accepted decision (unchanged)
+`/register` returns 409 on a taken email → an unauthenticated caller can tell whether
+an email is registered. The login timing side-channel IS fixed (constant-time verify
+against `_DUMMY_PW_HASH`); only the register-409 enumeration remains, which you
+previously accepted (revealing email-taken is a deliberate UX choice). Left flagged,
+not silently changed.
+
+## Current bottom line (as of this session)
+
+Of 108 findings: **96 fixed** (94 verified on current main + M6, L5 fixed this pass).
+Remaining:
+- **M2** — open by your prior decision (register email-enumeration UX trade-off).
+- **N2, S5, V2, P3, P5, H6** — resolved / won't-fix / code-done-deploy-yours (as above).
+- **7 owner decisions** — SI1 (deploy worker+Redis+SMTP), 05-P0-LEGAL (scraping),
+  05-P1-POLICIES (privacy/terms), 05-P1-SUBPROC, 05-P2-MFA, 05-P2-BREACH,
+  PS-P1-ml-sentry (external dashboard), PLAN (behavioral), M10 (prod secret).
+- **`08-GAPS`** — audit areas to schedule (perf, cost dashboard, UX).
+
+**Every code-fixable finding is now fixed on main or in an open PR (#110). The only
+open item that is code AND not an owner decision is M2 — and that one you already
+decided. Nothing is silently broken.**
