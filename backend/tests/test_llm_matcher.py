@@ -5,6 +5,7 @@ All LLM traffic is mocked via the injected ``llm_extract_validated_fn``
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -602,3 +603,91 @@ async def test_matcher_stage_logs_fit_spread(stage_db, monkeypatch, caplog):
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "fit" in msgs.lower()
     assert "77" in msgs  # single job → min == avg == max == 77
+
+
+@pytest.mark.asyncio
+async def test_match_batch_never_uses_the_shared_connection_concurrently(mem_db):
+    """Finding C2: match_batch judges run concurrently but share ONE psycopg
+    connection. psycopg3 forbids using one async connection from two coroutines
+    at once ("another operation is already in progress"); that error fell into
+    match_batch's broad except and was swallowed as "judge failed" — silently
+    dropping a PAID verdict.
+
+    A detector wraps the shared connection's execute() and records the MAX
+    number of in-flight execute() calls. With the db_lock serialising DB access
+    it stays 1; without it, two judges overlap on the connection and it climbs
+    past 1. Verified to FAIL against the pre-fix code (reached 2).
+    """
+    conn = mem_db
+    uid = "user-conc-c2"
+    N = 6
+
+    job_ids = []
+    for i in range(N):
+        cur = await conn.execute(
+            "INSERT INTO jobs(title, company, apply_url, source, date_found) VALUES (?,?,?,?,?)",
+            (f"Job {i}", "Corp", f"https://x.com/{i}", "greenhouse", _NOW),
+        )
+        job_ids.append(cur.lastrowid)
+    await conn.commit()
+    for jid in job_ids:
+        await conn.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+            (uid, jid, 50, "top"),
+        )
+    await conn.commit()
+
+    jobs = []
+    for i, jid in enumerate(job_ids):
+        j = _make_job(title=f"Job {i}", company="Corp")
+        j.id = jid  # type: ignore[attr-defined]
+        jobs.append(j)
+
+    in_flight = 0
+    max_in_flight = 0
+    real_execute = conn.execute
+
+    async def watched_execute(sql, params=()):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            return await real_execute(sql, params)
+        finally:
+            in_flight -= 1
+
+    conn.execute = watched_execute  # type: ignore[assignment]
+
+    async def fake(prompt, schema, system):
+        # Yield control so sibling coroutines get a chance to interleave on the
+        # shared connection — this is what exposes the missing serialisation.
+        await asyncio.sleep(0)
+        return MatchVerdict(fit_score=77, verdict="good", reason="r")
+
+    try:
+        out = await match_batch(
+            jobs,
+            user_id=uid,
+            profile_text="p",
+            conn=conn,
+            semaphore_limit=N,  # max concurrency pressure
+            llm_extract_validated_fn=fake,
+        )
+    finally:
+        conn.execute = real_execute  # restore before assertions / teardown
+
+    assert max_in_flight == 1, (
+        f"the shared psycopg connection was used by {max_in_flight} coroutines at "
+        "once — match_batch is not serialising DB access (finding C2). psycopg3 "
+        "raises 'another operation is already in progress', which the batch "
+        "swallows as a failed judge, silently dropping a paid verdict."
+    )
+    # And every verdict was persisted — nothing dropped.
+    assert sum(1 for v in out if v is not None) == N
+    for jid in job_ids:
+        cur = await real_execute(
+            "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+            (uid, jid),
+        )
+        row = await cur.fetchone()
+        assert row["llm_fit_score"] == 77
