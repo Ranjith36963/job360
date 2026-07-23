@@ -40,6 +40,19 @@ class JobDatabase:
         self._path = db_path
         self._conn: pg.Connection | None = None
 
+    @classmethod
+    def from_connection(cls, db_path: str, conn: "pg.Connection") -> "JobDatabase":
+        """Build a JobDatabase around an ALREADY-OPEN connection.
+
+        Used by the pooled request path: a connection is borrowed from the pool
+        and handed here, so the instance never opens (or closes) one of its own —
+        the pool owns the connection's lifecycle. Callers must NOT call
+        ``close()`` on the result; returning it to the pool is the caller's job.
+        """
+        db = cls(db_path)
+        db._conn = conn
+        return db
+
     @property
     def _db(self) -> "pg.Connection":
         """The live connection, or a clear error if there isn't one.
