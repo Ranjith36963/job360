@@ -734,3 +734,90 @@ def test_metrics_export_uses_resolved_path_not_none_string():
                 pass
 
     _run(_test())
+
+
+def test_run_search_returning_job_carries_id_before_scoring():
+    """H1: a job already in the catalog (a RETURNING job) must carry its DB id
+    when run_search scores it — otherwise the multi-dim enrichment lookup (keyed
+    on job.id, rules #19/#20) misses its prior-run enrichment and the
+    seniority/salary/visa/workplace dims silently score 0.
+
+    Before the fix, run_search scored every job with job.id still None (id was
+    only resolved AFTER scoring + insert). This seeds the exact job the arbeitnow
+    mock returns, then captures job.id at score() time. Verified to FAIL against
+    the pre-fix code (id was None).
+    """
+    import os as _os
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    from src.models import Job as _Job
+    from src.repositories.database import JobDatabase as _JobDatabase
+    from src.services.profile.models import CVData as _CVData
+    from src.services.skill_matcher import JobScorer as _RealScorer
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    _os.close(fd)
+
+    async def _seed() -> int:
+        db = _JobDatabase(db_path)
+        await db.init_db()
+        from migrations import runner  # noqa: PLC0415
+
+        await runner.up(db_path)
+        # The SAME job MOCK_JOB_PAYLOAD returns → it is a "returning" job.
+        job = _Job(
+            title="AI Engineer",
+            company="TestCo",
+            apply_url="https://example.com/ai-1",
+            source="arbeitnow",
+            date_found=_dt.now(_tz.utc).isoformat(),
+            location="London, UK",
+            description="Python role",
+        )
+        await db.insert_job(job)
+        await db.commit()
+        conn = db._conn
+        cur = await conn.execute(
+            "SELECT id FROM jobs WHERE normalized_company=? AND normalized_title=?",
+            job.normalized_key(),
+        )
+        seeded = (await cur.fetchone())[0]
+        await db.close()
+        return seeded
+
+    seeded_id = _run(_seed())
+
+    captured: dict = {}
+
+    class _SpyScorer(_RealScorer):
+        def score(self, job):
+            if job.title == "AI Engineer" and job.company == "TestCo":
+                captured["id_at_score"] = getattr(job, "id", "MISSING")
+            return super().score(job)
+
+    fake_profile = UserProfile(
+        cv_data=_CVData(raw_text="dummy CV content"),
+        preferences=UserPreferences(target_job_titles=["AI Engineer"]),
+    )
+
+    async def _test():
+        with aioresponses() as m:
+            _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
+            with (
+                _patch_no_notifications(),
+                patch("src.main.load_profile", return_value=fake_profile),
+                patch("src.main.JobScorer", _SpyScorer),
+            ):
+                await run_search(db_path=db_path, dry_run=True)
+
+    try:
+        _run(_test())
+    finally:
+        _os.unlink(db_path)
+
+    assert captured.get("id_at_score") == seeded_id, (
+        f"the returning job was scored with id={captured.get('id_at_score')!r}, "
+        f"expected the catalog id {seeded_id} — with id=None the enrichment lookup "
+        "misses and the multi-dim scores silently fall to 0 (finding H1)."
+    )

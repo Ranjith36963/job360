@@ -690,6 +690,25 @@ async def run_search(
 
             logger.info("Total raw jobs: %s", len(all_jobs))
 
+            # H1: attach each job's catalog id BEFORE scoring, so the multi-dim
+            # enrichment lookup (keyed on job.id, rules #19/#20) actually finds a
+            # RETURNING job's enrichment from a prior run. Previously score() ran
+            # here with job.id still None, so seniority/salary/visa/workplace dims
+            # silently scored 0; and if that dims-blind score missed
+            # ENRICHMENT_THRESHOLD, the job never reached the post-enrich re-score
+            # pass — so its persisted match_score stayed wrong forever. One query
+            # loads the whole (bounded, <=30-day) catalog's normalized-key → id map;
+            # brand-new jobs aren't in it and correctly stay id=None (they have no
+            # enrichment yet — scoring them dims-blind is right).
+            _catalog_ids: dict[tuple[str, str], int] = {}
+            _cur = await conn.execute(
+                "SELECT normalized_company, normalized_title, id FROM jobs"
+            )
+            for _row in await _cur.fetchall():
+                _catalog_ids[(_row[0], _row[1])] = _row[2]
+            for job in all_jobs:
+                job.id = _catalog_ids.get(job.normalized_key())
+
             # Score all jobs using the user's profile (scorer always exists — guarded at start).
             # Step-1 B4: JobScorer.score() now returns a ScoreBreakdown — surface
             # the scalar match_score on the Job so the MIN_MATCH_SCORE filter still works.
@@ -752,14 +771,11 @@ async def run_search(
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)
             logger.info("New jobs: %s", len(new_jobs))
 
-            # Attach each job's DB id (the PK assigned by INSERT, resolved via
-            # normalized key). The Job dataclass carries no id until now, and
-            # enrich_batch persists keyed on ``job.id`` — so this MUST happen
-            # before enrichment or every result is silently dropped.
-            # NOTE (real bug, reported not fixed — Job.id is a dynamically-set
-            # attribute, not a declared dataclass field in src/models.py; see
-            # project memory "Dim scoring id bug". Out of scope: models.py is
-            # not part of this fix and Pillar 2 scoring is hands-off.)
+            # Re-resolve the DB id for the jobs we just inserted this run (brand-new
+            # jobs had no catalog id during the pre-scoring H1 pass above). Returning
+            # jobs already carry their id from that earlier pass; re-setting it here
+            # is a harmless no-op. enrich_batch persists keyed on ``job.id``, so this
+            # MUST cover the just-inserted rows before enrichment runs.
             for job in unique_jobs:
                 cur = await conn.execute(
                     "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",

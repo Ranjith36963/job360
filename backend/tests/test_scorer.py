@@ -5,6 +5,7 @@ import pytest
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import (
+    RECENCY_WEIGHT,
     JobScorer,
     ScoreBreakdown,
     _foreign_location_penalty,
@@ -206,6 +207,25 @@ def test_recency_invalid_date_no_crash():
     assert _recency_score("") == 0
     assert _recency_score("not-a-date") == 0
     assert _recency_score("2025-13-99") == 0
+
+
+def test_recency_far_future_date_gets_zero_not_max():
+    """L2: a job dated well in the future is implausible/fabricated data and must
+    NOT earn maximum freshness. Before the fix, `(now - posted).days` went
+    negative and slipped through the `<= 1` gate, so a future-dated job scored
+    the MAX recency band — outranking genuinely fresh jobs. It now scores 0."""
+    future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    assert _recency_score(future) == 0
+    # A year in the future — the extreme case that most clearly should not win.
+    far_future = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+    assert _recency_score(far_future) == 0
+
+
+def test_recency_slight_future_clock_skew_still_counts_as_fresh():
+    """A just-posted job whose source timestamp is a few hours ahead of our clock
+    (normal skew) should still score as fresh, not be penalised to 0."""
+    skewed = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    assert _recency_score(skewed) == RECENCY_WEIGHT
 
 
 def test_score_can_reach_100():

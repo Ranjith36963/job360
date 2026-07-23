@@ -294,9 +294,19 @@ def _recency_score(date_found: str) -> int:
         posted = datetime.fromisoformat(date_found)
         if posted.tzinfo is None:
             posted = posted.replace(tzinfo=timezone.utc)
-        days_old = (datetime.now(timezone.utc) - posted).days
+        delta_days = (datetime.now(timezone.utc) - posted).days
     except (ValueError, TypeError):
         return 0
+    # L2: a posting date in the FUTURE is implausible/fabricated data. The old
+    # `(now - posted).days` produced a NEGATIVE number for future dates, which
+    # slipped through the `<= 1` gate below and scored MAX freshness — so a job
+    # dated next year outranked a genuinely fresh one. Beyond ~1 day of clock
+    # skew, treat a future date as untrustworthy and give it no freshness boost.
+    # Within a day (source/clock skew on a just-posted job) it's clamped to 0 and
+    # still scores as fresh.
+    if delta_days < -1:
+        return 0
+    days_old = max(0, delta_days)
     if days_old <= 1:
         return RECENCY_WEIGHT
     if days_old <= 3:
