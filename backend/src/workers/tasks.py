@@ -533,7 +533,7 @@ async def nightly_ghost_sweep(ctx: dict[str, Any]) -> dict[str, int]:
     # Load all non-expired jobs (CONFIRMED_EXPIRED is sticky; skip it).
     cursor = await db.execute(
         """
-        SELECT id, staleness_state, consecutive_misses, last_seen_at
+        SELECT id, staleness_state, consecutive_misses, last_seen_at, first_seen_at
         FROM jobs
         WHERE staleness_state IS NULL OR staleness_state != 'confirmed_expired'
         """

@@ -66,7 +66,20 @@ def evaluate_job_state(
     misses = int(row.get("consecutive_misses") or 0)
     last_seen = row.get("last_seen_at")
     if not last_seen:
-        return StalenessState.ACTIVE
+        # M6: a NULL last_seen_at used to short-circuit to ACTIVE, so a job missed
+        # many times but lacking that timestamp could NEVER transition to stale —
+        # the nightly sweep silently excluded it forever. Fall back to
+        # first_seen_at as the age proxy; if there's no timestamp at all, let
+        # consecutive_misses alone decide (a job missed 3+ times is stale
+        # regardless of when we last saw it). A brand-new job has a recent
+        # first_seen_at, so it correctly stays ACTIVE.
+        last_seen = row.get("first_seen_at") or row.get("first_seen")
+        if not last_seen:
+            if misses >= 3:
+                return StalenessState.LIKELY_STALE
+            if misses >= 2:
+                return StalenessState.POSSIBLY_STALE
+            return StalenessState.ACTIVE
 
     now = now or datetime.now(timezone.utc)
     try:
