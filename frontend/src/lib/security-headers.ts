@@ -16,6 +16,11 @@ export const CONTENT_SECURITY_POLICY = [
   // 'unsafe-eval' is required in dev (React Refresh) and harmless to keep in
   // prod since 'self' already scopes script origins.
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  // PostHog spawns a blob: Web Worker (session-independent processing). With no
+  // explicit worker-src the browser falls back to script-src, which lacks blob:
+  // — so the worker was blocked with a console error on every page. Scope blob:
+  // to WORKERS only; page scripts above stay locked to 'self'.
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
