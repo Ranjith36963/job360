@@ -221,6 +221,37 @@ def test_consume_existing_user_verifies_no_duplicate(client, monkeypatch, temp_d
     assert user["email_verified_at"] is not None
 
 
+def test_consume_mixed_case_email_does_not_duplicate_user(client, monkeypatch, temp_db):
+    """EMAIL-CASE residual: users.email UNIQUE is case-SENSITIVE, so a magic-link
+    request typed as 'Alice@Example.COM' against an existing 'alice@example.com'
+    account used to sail past INSERT OR IGNORE (no conflict — different case) and
+    mint a SECOND user for the same mailbox. The request path must normalize the
+    email before storing/creating."""
+    async def _seed():
+        async with pg.connect(temp_db) as db:
+            await db.execute(
+                "INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)",
+                ("alice-id", "alice@example.com", "!"),
+            )
+            await db.commit()
+
+    asyncio.run(_seed())
+
+    raw = _request_capture_token(client, monkeypatch, "Alice@Example.COM")
+    r = client.post("/api/auth/magic-link/consume", json={"token": raw})
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == "alice-id"  # the EXISTING account, not a new one
+
+    async def _count_case_insensitive():
+        async with pg.connect(temp_db) as db:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'alice@example.com'"
+            )
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_count_case_insensitive()) == 1  # exactly ONE account
+
+
 def test_consume_reuses_soft_deleted_user(client, monkeypatch, temp_db):
     # Regression: a soft-deleted row still owns the email (users.email UNIQUE
     # ignores deleted_at). consume must REUSE + reactivate it, not INSERT a

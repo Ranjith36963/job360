@@ -92,6 +92,11 @@ async def request_magic_link(
     Returns True if the email was actually sent, False otherwise. Never
     raises — the route returns 204 regardless (no-enumeration contract).
     """
+    # EMAIL-CASE: normalize before storing. users.email UNIQUE is case-
+    # SENSITIVE, so a token minted for 'Alice@Example.COM' used to flow raw
+    # into consume's INSERT OR IGNORE, sail past the conflict check (different
+    # case ≠ conflict), and mint a SECOND account for the same mailbox.
+    email = email.strip().lower()
     try:
         raw, h = tokens.generate_token()
         expires = (
@@ -152,7 +157,11 @@ async def consume_magic_link(
             logger.info("magic link consume: token expired")
             return None
 
-        email = row["email"]
+        # EMAIL-CASE belt-and-suspenders: tokens minted BEFORE the request-path
+        # normalization shipped may still hold a raw-case address — lowercase
+        # here too so the find-or-create below can never split one mailbox
+        # into two accounts.
+        email = (row["email"] or "").strip().lower()
         # Mark the token used first — single-use enforcement.
         await db.execute(
             "UPDATE magic_link_tokens SET used_at = ? WHERE id = ?",

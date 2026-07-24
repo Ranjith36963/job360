@@ -49,8 +49,12 @@ export async function middleware(request: NextRequest) {
   // Docker / bare VM, where APP_ENV=production is the general signal) with a stray
   // E2E_TEST_MODE=1 also fails closed. CI/local set neither, so the bypass still
   // works there.
+  // Case-insensitive like the backend's _is_production() (.lower() there) —
+  // APP_ENV=Production must count as prod on BOTH sides, or the bypass gate
+  // and the cookie-Secure/HSTS gate disagree about what "production" means.
   const isProduction =
-    process.env.APP_ENV === "production" || !!process.env.RAILWAY_ENVIRONMENT;
+    (process.env.APP_ENV ?? "").toLowerCase() === "production" ||
+    !!process.env.RAILWAY_ENVIRONMENT;
   if (process.env.E2E_TEST_MODE === "1" && !isProduction) {
     return NextResponse.next();
   }

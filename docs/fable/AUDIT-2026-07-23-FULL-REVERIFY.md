@@ -160,7 +160,7 @@ These are genuinely blocked on your decision/infra, not on engineering:
 | **05-P0-LEGAL** | **DECIDED (2026-07-24) — measure-first, cut before public launch.** Owner's decision recorded in `docs/fable/SCRAPING-DECISION.md`: keep all sources for now, run the §8 prod `run_log`/`jobs` queries to learn how many jobs *only* LinkedIn carries (dedup may make it near-zero), then remove LinkedIn (Indeed/Glassdoor are already inert in prod — `python-jobspy` isn't in the image) before public release; restore that coverage later via licensed paid APIs (Fantastic Jobs/TheirStack) at the pricing tier. **No source removed yet — the pending action is the owner running the §8 queries against prod (`railway connect postgres`).** |
 | **05-P1-POLICIES** | Privacy (48 lines) + Terms (47 lines) pages are stubs ending "will be expanded before public launch." Needs real legal text. |
 | **05-P1-SUBPROC** | No subprocessor disclosure (CV → Groq/Cerebras/Resend/OpenAI). Legal disclosure tied to the privacy policy. |
-| **05-P2-MFA** | No MFA/TOTP feature exists — a product decision + new auth flow. |
+| **05-P2-MFA** | **DECIDED (2026-07-24) — WON'T BUILD.** Magic-link email login is the chosen auth factor (possession of the inbox — functionally what an email-code MFA proves). No TOTP flow will be scoped. Closed as an owner product decision; do not re-raise. |
 | **05-P2-BREACH** | No breach-notification runbook (GDPR 72-hour). A policy doc for you to author. |
 | **PLAN** | `fable-harness-plan.md` is behavioral coaching about your own workflow habits — not a code defect. |
 | **PS-P1-ml-sentry** | "Magic-link Sentry issue resolved" is an external dashboard state — nothing in the repo to verify. |
@@ -408,3 +408,93 @@ risk), but "fully fixed" overstated it. Status: **PARTIAL (2/3 lenses).**
 
 **No code-fixable finding is silently broken. The three the fourth pass missed are
 the only new engineering work this pass produced — and they are fixed.**
+
+---
+
+# OWNER-ITEM CLOSURES — 2026-07-24 (post-fifth-pass)
+
+The owner-decision list above kept shrinking the same day. Verified against real
+code/infra, not claims:
+
+- **SI1 — CLOSED.** Prod was 121 commits stale (manual CLI deploys only, nothing
+  GitHub-connected; live worker predated the #94 `ctx['db']` fix and crash-looped
+  `KeyError: 'db'` on every 5-min tick). All three services redeployed from main
+  `3935417` on 2026-07-24: backend healthy (`/api/readyz` db+redis ok), **worker's
+  first clean tick at 13:00:00** (`j_complete=1 j_failed=0`), frontend live.
+  Notifications infrastructure is ON; end-to-end send awaits a user-connected
+  channel + rule. Deploy recipe + traps recorded (worker upload must exclude
+  `railway.json` — its `/api/health` healthcheck can't pass on a non-HTTP arq
+  process).
+- **05-P1-POLICIES + 05-P1-SUBPROC — CLOSED (PR #114).** Privacy 277 lines (was a
+  48-line stub) incl. the subprocessor disclosure; Terms 161 lines.
+- **05-P2-BREACH — CLOSED (PR #114).** `docs/BREACH-RUNBOOK.md` exists.
+- **05-P2-MFA — DECIDED: WON'T BUILD (2026-07-24).** Magic-link is the auth factor
+  (see the table row above). Not a gap; do not re-raise.
+- **M10 — CLOSED for the live deployment.** Prod DB is Railway-managed Postgres
+  with a Railway-generated password; the compose-file fix (#83) covers the
+  self-host path. No action remains for the running product.
+
+**Still open (all small):** external Sentry config sanity-check (dashboard),
+GitHub auto-deploy connection (kills the drift class permanently — backend +
+frontend ready to connect; worker blocked on its healthcheck config), the §8
+scraping measurement (owner, prod SQL), and the `08-GAPS` audit areas (schedule
+the perf/load test before public launch; rest can wait).
+
+---
+
+# SIXTH PASS — post-deploy re-verify vs main `7aea468`, 2026-07-24
+
+Prod itself was redeployed this day (see OWNER-ITEM CLOSURES above), so this pass
+re-checked the full set against the main that is now actually LIVE, plus a
+**stranded-work sweep across all 16 unmerged remote branches** and 6 adversarial
+refuters. Numbers: **82 re-confirmed FIXED, zero regressions** in the spot-checked
+5-pass survivors — and the refuters broke three residuals AGAIN (the third pass
+in a row where "held under refutation" didn't survive the next refuter).
+
+## Three residuals broken by refuters — FIXED this session (each with a fail-first test)
+
+### EMAIL-CASE residual — magic-link could split one mailbox into two accounts
+Login/reset/consume lookups used `LOWER()` (the #99 fix) — but the magic-link
+REQUEST path stored the raw-case email, and consume's `INSERT OR IGNORE` conflicts
+on the case-SENSITIVE `users.email` UNIQUE. `Alice@Example.COM` vs existing
+`alice@example.com` → no conflict → **second account minted for the same mailbox**
+(test proved it: 2 rows). Fixed: normalize at request AND consume
+(`magic_link.py`); consume-side covers raw-case tokens already in the DB.
+Test: `test_consume_mixed_case_email_does_not_duplicate_user` (failed `2 == 1`).
+
+### SPLIT-P3 residual #2 — `/* block comments */` still severed scripts
+The one-scanner fix (fifth pass) handled `'...'`, `$$...$$`, and `--` — but not
+`/* ... */`. A `;` inside a block comment split the script and shipped a bare
+comment fragment to Postgres as its own "statement". Fixed in the same scanner
+with Postgres-style NESTED comment support; `/*` inside a string literal stays
+data. Tests: 3 new block-comment cases (pre-fix: split into 3–4 pieces).
+
+### F2 residual #2 — prod detection disagreed about case
+`middleware.ts` compared `APP_ENV === "production"` strictly; the backend's
+`_is_production()` lowercases. `APP_ENV=Production` = prod for cookie-Secure/HSTS
+but NOT for the bypass gate. Now `.toLowerCase()` on both sides.
+Test: "APP_ENV=Production also fails closed" (pre-fix: bypassed).
+
+## Stranded-work sweep — 16 unmerged branches examined
+**One real stranded fix found** — `backup/account-error-messages`: the four
+`settings/account` catch blocks show raw `err.message` instead of the mapped
+`apiErrorMessage(...)`. Rescued (the same branch's VerifyEmailCard removal was
+unrelated and deliberately NOT carried over). The other 15 branches: backups,
+superseded work, deliberate holds (`rescue/pillar1-extraction` = tp-final), or
+docs — **nothing else stranded.**
+
+## Also verified this pass
+- The pasted earlier-session items: SEARCH-TASK (strong task ref held), EMAIL-CASE
+  base fix, DOWN-ATOMIC (`runner.down()` transaction wrap), HARD-DELETE-VERIFY
+  (erasure counts survivors + raises), APPS-ORPHANS (still correctly NOT-a-bug),
+  DATE-FORMATS (still cosmetic — but note `sessions.py` uses offset-ISO, not Z;
+  each file is internally consistent so no functional bug), C1-POOL (real
+  `psycopg_pool` in the request path).
+- #114 policies + #115 magic-consume verified on main. CSP worker-src is in open
+  PR #117.
+
+## Sixth-pass bottom line
+The audit's steady state: **every re-verified finding holds; each new refuter
+generation finds ~2–3 residuals in the newest fixes; they are fixed same-day with
+fail-first tests.** Remaining owner actions are unchanged (connect GitHub
+auto-deploy, set `SENTRY_DSN`, merge open PRs, §8 measurement, channel test).

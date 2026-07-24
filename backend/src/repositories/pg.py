@@ -416,6 +416,24 @@ def _split_on_unquoted_semicolons(script: str) -> list[str]:
                 break  # comment runs to end of script — nothing more to keep
             i = nl
             continue
+        # ``/* ... */`` block comment — same hazard as ``--``: a ``;`` inside one
+        # must not sever a statement (pre-fix, the comment fragment was shipped
+        # to Postgres as its own "statement"). Postgres NESTS block comments, so
+        # track depth rather than stopping at the first ``*/``. Like ``--``,
+        # reached only outside strings/dollar bodies, so '/*' in a literal is data.
+        if script.startswith("/*", i):
+            depth = 1
+            i += 2
+            while i < n and depth:
+                if script.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif script.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            continue
         if ch == "'":
             in_single = True
             buf.append(ch)
