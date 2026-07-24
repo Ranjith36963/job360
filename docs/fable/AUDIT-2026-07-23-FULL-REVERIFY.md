@@ -157,7 +157,7 @@ These are genuinely blocked on your decision/infra, not on engineering:
 |---|---|
 | **SI1** | Notification pipeline is **wired in code** (`main.py` enqueue → ARQ) but inert until a **live ARQ worker + Redis + SMTP/Apprise channel** are deployed. Ops. |
 | **M10** | Hardcoded DB password in `docker-compose.prod.yml` — prod-secret/infra sign-off. |
-| **05-P0-LEGAL** | LinkedIn/Indeed/Glassdoor scrapers still in `SOURCE_REGISTRY` — a ToS/legal call only you can make. |
+| **05-P0-LEGAL** | **DECIDED (2026-07-24) — measure-first, cut before public launch.** Owner's decision recorded in `docs/fable/SCRAPING-DECISION.md`: keep all sources for now, run the §8 prod `run_log`/`jobs` queries to learn how many jobs *only* LinkedIn carries (dedup may make it near-zero), then remove LinkedIn (Indeed/Glassdoor are already inert in prod — `python-jobspy` isn't in the image) before public release; restore that coverage later via licensed paid APIs (Fantastic Jobs/TheirStack) at the pricing tier. **No source removed yet — the pending action is the owner running the §8 queries against prod (`railway connect postgres`).** |
 | **05-P1-POLICIES** | Privacy (48 lines) + Terms (47 lines) pages are stubs ending "will be expanded before public launch." Needs real legal text. |
 | **05-P1-SUBPROC** | No subprocessor disclosure (CV → Groq/Cerebras/Resend/OpenAI). Legal disclosure tied to the privacy policy. |
 | **05-P2-MFA** | No MFA/TOTP feature exists — a product decision + new auth flow. |
