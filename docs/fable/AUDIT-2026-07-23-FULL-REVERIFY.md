@@ -439,3 +439,62 @@ GitHub auto-deploy connection (kills the drift class permanently — backend +
 frontend ready to connect; worker blocked on its healthcheck config), the §8
 scraping measurement (owner, prod SQL), and the `08-GAPS` audit areas (schedule
 the perf/load test before public launch; rest can wait).
+
+---
+
+# SIXTH PASS — post-deploy re-verify vs main `7aea468`, 2026-07-24
+
+Prod itself was redeployed this day (see OWNER-ITEM CLOSURES above), so this pass
+re-checked the full set against the main that is now actually LIVE, plus a
+**stranded-work sweep across all 16 unmerged remote branches** and 6 adversarial
+refuters. Numbers: **82 re-confirmed FIXED, zero regressions** in the spot-checked
+5-pass survivors — and the refuters broke three residuals AGAIN (the third pass
+in a row where "held under refutation" didn't survive the next refuter).
+
+## Three residuals broken by refuters — FIXED this session (each with a fail-first test)
+
+### EMAIL-CASE residual — magic-link could split one mailbox into two accounts
+Login/reset/consume lookups used `LOWER()` (the #99 fix) — but the magic-link
+REQUEST path stored the raw-case email, and consume's `INSERT OR IGNORE` conflicts
+on the case-SENSITIVE `users.email` UNIQUE. `Alice@Example.COM` vs existing
+`alice@example.com` → no conflict → **second account minted for the same mailbox**
+(test proved it: 2 rows). Fixed: normalize at request AND consume
+(`magic_link.py`); consume-side covers raw-case tokens already in the DB.
+Test: `test_consume_mixed_case_email_does_not_duplicate_user` (failed `2 == 1`).
+
+### SPLIT-P3 residual #2 — `/* block comments */` still severed scripts
+The one-scanner fix (fifth pass) handled `'...'`, `$$...$$`, and `--` — but not
+`/* ... */`. A `;` inside a block comment split the script and shipped a bare
+comment fragment to Postgres as its own "statement". Fixed in the same scanner
+with Postgres-style NESTED comment support; `/*` inside a string literal stays
+data. Tests: 3 new block-comment cases (pre-fix: split into 3–4 pieces).
+
+### F2 residual #2 — prod detection disagreed about case
+`middleware.ts` compared `APP_ENV === "production"` strictly; the backend's
+`_is_production()` lowercases. `APP_ENV=Production` = prod for cookie-Secure/HSTS
+but NOT for the bypass gate. Now `.toLowerCase()` on both sides.
+Test: "APP_ENV=Production also fails closed" (pre-fix: bypassed).
+
+## Stranded-work sweep — 16 unmerged branches examined
+**One real stranded fix found** — `backup/account-error-messages`: the four
+`settings/account` catch blocks show raw `err.message` instead of the mapped
+`apiErrorMessage(...)`. Rescued (the same branch's VerifyEmailCard removal was
+unrelated and deliberately NOT carried over). The other 15 branches: backups,
+superseded work, deliberate holds (`rescue/pillar1-extraction` = tp-final), or
+docs — **nothing else stranded.**
+
+## Also verified this pass
+- The pasted earlier-session items: SEARCH-TASK (strong task ref held), EMAIL-CASE
+  base fix, DOWN-ATOMIC (`runner.down()` transaction wrap), HARD-DELETE-VERIFY
+  (erasure counts survivors + raises), APPS-ORPHANS (still correctly NOT-a-bug),
+  DATE-FORMATS (still cosmetic — but note `sessions.py` uses offset-ISO, not Z;
+  each file is internally consistent so no functional bug), C1-POOL (real
+  `psycopg_pool` in the request path).
+- #114 policies + #115 magic-consume verified on main. CSP worker-src is in open
+  PR #117.
+
+## Sixth-pass bottom line
+The audit's steady state: **every re-verified finding holds; each new refuter
+generation finds ~2–3 residuals in the newest fixes; they are fixed same-day with
+fail-first tests.** Remaining owner actions are unchanged (connect GitHub
+auto-deploy, set `SENTRY_DSN`, merge open PRs, §8 measurement, channel test).
