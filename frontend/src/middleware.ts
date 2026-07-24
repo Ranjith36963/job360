@@ -42,12 +42,16 @@ export async function middleware(request: NextRequest) {
   // F2 hardening — a single `E2E_TEST_MODE==="1"` gate meant one stray env var in
   // a real deploy would silently disable auth for everyone. NODE_ENV can't be the
   // guard (CI e2e runs a PROD build, so NODE_ENV==="production" there too — it
-  // would kill the bypass in CI). RAILWAY_ENVIRONMENT is the right signal: Railway
-  // injects it into every deployed service, and CI/local never have it. So we ALSO
-  // require its ABSENCE — an accidental E2E_TEST_MODE=1 on Railway can no longer
-  // bypass auth, while CI (no RAILWAY_ENVIRONMENT) still works. Same prod signal
-  // the backend gates cookie-Secure/HSTS on, kept in sync deliberately.
-  if (process.env.E2E_TEST_MODE === "1" && !process.env.RAILWAY_ENVIRONMENT) {
+  // would kill the bypass in CI). So we require the ABSENCE of a production signal,
+  // matching the backend's OWN prod-detection exactly (api/middleware.py
+  // `_is_production`): APP_ENV==="production" OR RAILWAY_ENVIRONMENT set. Checking
+  // both — not just RAILWAY_ENVIRONMENT — means a non-Railway prod deploy (Vercel /
+  // Docker / bare VM, where APP_ENV=production is the general signal) with a stray
+  // E2E_TEST_MODE=1 also fails closed. CI/local set neither, so the bypass still
+  // works there.
+  const isProduction =
+    process.env.APP_ENV === "production" || !!process.env.RAILWAY_ENVIRONMENT;
+  if (process.env.E2E_TEST_MODE === "1" && !isProduction) {
     return NextResponse.next();
   }
 

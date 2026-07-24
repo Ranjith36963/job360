@@ -175,3 +175,45 @@ def test_split_statements_normal_multi_statement_unchanged():
     """Ordinary multi-statement scripts still split exactly as before."""
     stmts = pg.split_statements("CREATE TABLE a(x int); CREATE TABLE b(y int);")
     assert stmts == ["CREATE TABLE a(x int)", "CREATE TABLE b(y int)"]
+
+
+# SPLIT-P3 gap — the comment stripper was quote-BLIND: a '--' inside a string
+# literal (or $$ body) truncated the line, silently dropping every later
+# statement at migration boot. These lock in that comment-stripping is now
+# quote/dollar aware, closing the same bug class one step earlier.
+
+
+def test_split_statements_double_dash_inside_string_does_not_drop_next_statement():
+    """A literal '--' inside a string value must NOT be treated as a comment.
+
+    Pre-fix: `line.find('--')` truncated at the '--' inside 'see --note here',
+    deleting the trailing `CREATE TABLE u(...)` entirely — no error, just missing
+    SQL. The quote-aware stripper keeps both statements.
+    """
+    script = "INSERT INTO t(msg) VALUES ('see --note here'); CREATE TABLE u(id int);"
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "INSERT INTO t(msg) VALUES ('see --note here')"
+    assert stmts[1] == "CREATE TABLE u(id int)"
+
+
+def test_split_statements_double_dash_inside_dollar_body_survives():
+    """A '--' inside a $$ function body must not corrupt the body text."""
+    script = (
+        "CREATE FUNCTION f() RETURNS void AS $$ BEGIN "
+        "RAISE NOTICE 'a--b'; END; $$ LANGUAGE plpgsql; SELECT 1;"
+    )
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert "RAISE NOTICE 'a--b'" in stmts[0]
+    assert stmts[1] == "SELECT 1"
+
+
+def test_split_statements_real_comment_outside_string_still_stripped():
+    """A genuine trailing '--' comment (outside any string) is still removed,
+    and a ';' inside that comment must not sever the statement."""
+    script = "SELECT 1  -- trailing; comment with semicolon\n; SELECT 2;"
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "SELECT 1"
+    assert stmts[1] == "SELECT 2"

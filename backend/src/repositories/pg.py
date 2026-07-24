@@ -368,19 +368,27 @@ def _match_dollar_tag(s: str, i: int) -> Optional[str]:
     return None
 
 
-def _split_on_unquoted_semicolons(cleaned: str) -> list[str]:
-    """Split on ``;`` that sits OUTSIDE a single-quoted string or a dollar-quoted
-    body. SPLIT-P3: Postgres function bodies / DO blocks use ``$$ ... ; ... $$``
-    and a naive ``.split(';')`` would sever them mid-body."""
+def _split_on_unquoted_semicolons(script: str) -> list[str]:
+    """Split ``script`` on ``;`` that sits OUTSIDE a single-quoted string, a
+    dollar-quoted body, or a ``--`` line comment — using ONE quote/dollar-aware
+    scanner for all three.
+
+    SPLIT-P3: Postgres function bodies / DO blocks use ``$$ ... ; ... $$`` and a
+    naive ``.split(';')`` would sever them mid-body. Its follow-up gap: comment
+    stripping must be quote-aware too — a literal ``--`` inside a string value
+    (``VALUES ('see --note')``) or a ``$$`` body is NOT a comment, and treating
+    it as one truncated the line and silently dropped every later statement at
+    migration boot. Both hazards are handled here in the same pass.
+    """
     statements: list[str] = []
     buf: list[str] = []
-    i, n = 0, len(cleaned)
+    i, n = 0, len(script)
     in_single = False
     dollar_tag: Optional[str] = None
     while i < n:
-        ch = cleaned[i]
+        ch = script[i]
         if dollar_tag is not None:
-            if cleaned.startswith(dollar_tag, i):  # closing tag
+            if script.startswith(dollar_tag, i):  # closing tag
                 buf.append(dollar_tag)
                 i += len(dollar_tag)
                 dollar_tag = None
@@ -391,19 +399,29 @@ def _split_on_unquoted_semicolons(cleaned: str) -> list[str]:
         if in_single:
             buf.append(ch)
             if ch == "'":
-                if i + 1 < n and cleaned[i + 1] == "'":  # escaped '' inside a string
+                if i + 1 < n and script[i + 1] == "'":  # escaped '' inside a string
                     buf.append("'")
                     i += 2
                     continue
                 in_single = False
             i += 1
             continue
+        # Outside any string/dollar body: a ``--`` starts a line comment. Skip to
+        # (but keep) the newline so a ``;`` inside the comment can't sever a
+        # statement. Reached only when NOT in_single and NOT in a dollar body, so
+        # a ``--`` inside a literal is left untouched by the branches above.
+        if script.startswith("--", i):
+            nl = script.find("\n", i)
+            if nl == -1:
+                break  # comment runs to end of script — nothing more to keep
+            i = nl
+            continue
         if ch == "'":
             in_single = True
             buf.append(ch)
             i += 1
             continue
-        tag = _match_dollar_tag(cleaned, i)
+        tag = _match_dollar_tag(script, i)
         if tag is not None:
             dollar_tag = tag
             buf.append(tag)
@@ -427,19 +445,13 @@ def _split_on_unquoted_semicolons(cleaned: str) -> list[str]:
 def split_statements(script: str) -> list[str]:
     """Split a multi-statement script on ``;`` boundaries.
 
-    Strips full-line and inline ``--`` comments first (a ``;`` inside a trailing
-    comment must not sever a statement), then splits on ``;`` that is NOT inside
-    a single-quoted string or a ``$$``/``$tag$`` dollar-quoted body (SPLIT-P3 —
-    a Postgres function body or DO block would otherwise be severed mid-statement).
+    Splits on ``;`` that is NOT inside a single-quoted string, a ``$$``/``$tag$``
+    dollar-quoted body, or a ``--`` line comment. Comment stripping and statement
+    splitting share ONE quote/dollar-aware scanner (SPLIT-P3), so a literal
+    ``--`` or ``;`` inside a string or function body can neither sever a
+    statement nor silently drop a later one.
     """
-    stripped: list[str] = []
-    for line in script.splitlines():
-        c = line.find("--")
-        if c != -1:
-            line = line[:c]
-        stripped.append(line)
-    cleaned = "\n".join(stripped)
-    return _split_on_unquoted_semicolons(cleaned)
+    return _split_on_unquoted_semicolons(script)
 
 
 # ==========================================================================
