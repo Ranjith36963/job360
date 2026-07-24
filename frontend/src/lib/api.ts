@@ -363,8 +363,15 @@ export async function getPipelineCounts(): Promise<Record<string, number>> {
 
 export type User = { id: string; email: string };
 
-export async function register(email: string, password: string): Promise<User> {
-  return request<User>("/api/auth/register", {
+// M2 — register no longer returns the user or a session (no account-enumeration:
+// a new-user response that differs from a duplicate would leak whether an email
+// exists). It returns a generic acknowledgement; the caller sends the user to
+// sign in.
+export async function register(
+  email: string,
+  password: string,
+): Promise<{ status: string; message: string }> {
+  return request<{ status: string; message: string }>("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),

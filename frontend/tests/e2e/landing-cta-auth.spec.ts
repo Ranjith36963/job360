@@ -123,7 +123,7 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 1: new visitor → create account → /profile ────────────────────
 
-  test("new visitor creating an account lands on /profile", async ({
+  test("new visitor creating an account is sent to sign in", async ({
     page,
     context,
   }) => {
@@ -133,7 +133,8 @@ test.describe("Landing CTA → profile journeys", () => {
       route.fulfill({
         status: 201,
         contentType: "application/json",
-        body: JSON.stringify(USER),
+        // M2 — register now returns a generic body (no user), and no cookie.
+        body: JSON.stringify({ status: "ok", message: "Please sign in to continue." }),
       })
     );
 
@@ -142,7 +143,9 @@ test.describe("Landing CTA → profile journeys", () => {
     await page.getByLabel(/password/i).fill("Password123");
     await page.getByRole("button", { name: /create account/i }).click();
 
-    // register's safeNext defaults to /profile, so a fresh sign-up lands there.
-    await expect(page).toHaveURL(/\/profile/, { timeout: 40_000 });
+    // M2 — register no longer auto-logs-in (that would leak whether an email
+    // exists), so a fresh sign-up is sent to /login to sign in. `next` is
+    // preserved so they still land on /profile after signing in.
+    await expect(page).toHaveURL(/\/login\?registered=1/, { timeout: 40_000 });
   });
 });

@@ -124,8 +124,11 @@ def test_register_returns_201_even_if_verification_email_raises(
     )
     # Pre-fix this would have been 500; post-fix it's still 201.
     assert r.status_code == 201, r.text
-    assert r.json()["email"] == "alice@example.com"
-    assert "job360_session" in r.cookies
+    # M2 — register now returns a generic body (no email) and sets no cookie.
+    # This test's point is that a failing verification email doesn't turn register
+    # into a 500; the sibling test asserts the user row persists.
+    assert r.json().get("status") == "ok"
+    assert "job360_session" not in r.cookies
 
 
 def test_register_user_row_persists_after_simulated_verification_error(
@@ -175,6 +178,11 @@ def test_verify_email_resend_rate_limited_to_429(client, monkeypatch):
         "/api/auth/register",
         json={"email": "alice@example.com", "password": "s3cretpassword"},
     )
+    # M2 — register no longer auto-logs-in; verify-email/request needs a session.
+    client.post(
+        "/api/auth/login",
+        json={"email": "alice@example.com", "password": "s3cretpassword"},
+    )
     # The register itself triggers one verification email — that consumed
     # the user's bucket too? No: register routes through register, not
     # verify-email/request, so the bucket is fresh on first resend.
@@ -190,6 +198,11 @@ def test_verify_email_resend_429_does_not_issue_token(client, monkeypatch, temp_
     """Rate-limited request must not consume an issue: no row added on 429."""
     client.post(
         "/api/auth/register",
+        json={"email": "alice@example.com", "password": "s3cretpassword"},
+    )
+    # M2 — register no longer auto-logs-in; verify-email/request needs a session.
+    client.post(
+        "/api/auth/login",
         json={"email": "alice@example.com", "password": "s3cretpassword"},
     )
     client.post("/api/auth/verify-email/request")  # 204

@@ -102,10 +102,13 @@ def client(temp_db):
 
 
 def _register(client: TestClient, email: str, password: str = "s3cretpassword") -> dict:
-    """Register a user and return the JSON body. Cookie is set on client."""
+    """Register then sign in — register no longer auto-logs-in (M2, no-enumeration).
+    Leaves the client authenticated (session cookie set)."""
     r = client.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
-    return r.json()
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
+    return lr.json()
 
 
 def _login(client: TestClient, email: str, password: str = "s3cretpassword") -> int:

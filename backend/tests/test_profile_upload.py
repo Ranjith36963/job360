@@ -70,6 +70,9 @@ def api(monkeypatch, tmp_path):
 def _register_and_login(client: TestClient, email: str = "user@example.com") -> None:
     r = client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
     assert r.status_code == 201, r.text
+    # M2 — register no longer auto-logs-in; sign in so the client is authenticated.
+    lr = client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
+    assert lr.status_code == 200, lr.text
 
 
 # ---------------------------------------------------------------------------

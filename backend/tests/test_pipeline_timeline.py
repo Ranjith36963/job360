@@ -162,6 +162,12 @@ async def test_timeline_idor(authenticated_async_context):
         json={"email": "userb_idor_timeline@example.com", "password": "password_B_123"},
     )
     assert r.status_code == 201, r.text
+    # M2 — register no longer auto-logs-in; sign in for User B's session.
+    lr = sync_client_b.post(
+        "/api/auth/login",
+        json={"email": "userb_idor_timeline@example.com", "password": "password_B_123"},
+    )
+    assert lr.status_code == 200, lr.text
     session_b = sync_client_b.cookies.get("job360_session")
     sync_client_b.close()
 

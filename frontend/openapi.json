@@ -1758,6 +1758,22 @@
         "title": "RegisterRequest",
         "type": "object"
       },
+      "RegisterResponse": {
+        "properties": {
+          "message": {
+            "default": "Account request received. Please sign in to continue.",
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "RegisterResponse",
+        "type": "object"
+      },
       "RunEntry": {
         "description": "Single ``run_log`` row exposed over the API.\n\nMaps every column from the baseline + migration-0010 schema.  Optional\nfields may be NULL on rows inserted before the observability migration\nran; Pydantic coerces them to None rather than raising.",
         "properties": {
@@ -2882,7 +2898,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/RegisterResponse"
                 }
               }
             },

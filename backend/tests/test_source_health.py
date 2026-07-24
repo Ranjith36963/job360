@@ -127,7 +127,10 @@ async def _seed_run(
 def _register(client, email="alice@example.com", password="s3cretpassword"):
     r = client.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    # M2 — register no longer auto-logs-in or returns the id; sign in for both.
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
+    return lr.json()["id"]
 
 
 # ─── Anonymous → 401 ────────────────────────────────────────────────────────

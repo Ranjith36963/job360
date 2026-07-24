@@ -95,6 +95,9 @@ def api(monkeypatch, tmp_path):
 def _register(client: TestClient, email: str, password: str = "s3cretpassword") -> None:
     r = client.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
+    # M2 — register no longer auto-logs-in; sign in so the client is authenticated.
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
 
 
 _FAKE_SLACK_DATA = {

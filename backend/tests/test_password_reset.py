@@ -142,7 +142,10 @@ async def _count_sessions(db_path, user_id):
 def _register(client, email, password="s3cretpassword"):
     r = client.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    # M2 — register no longer auto-logs-in or returns the id; sign in for both.
+    lr = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert lr.status_code == 200, lr.text
+    return lr.json()["id"]
 
 
 def _issue_reset_and_get_raw_token(client, monkeypatch, email, db_path):

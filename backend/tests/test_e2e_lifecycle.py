@@ -87,7 +87,10 @@ def client(app_db):
 def _register(client, email) -> str:
     r = client.post("/api/auth/register", json={"email": email, "password": _PW})
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    # M2 — register no longer auto-logs-in or returns the id; sign in for both.
+    lr = client.post("/api/auth/login", json={"email": email, "password": _PW})
+    assert lr.status_code == 200, lr.text
+    return lr.json()["id"]
 
 
 def _mark_verified(db_path, email):
