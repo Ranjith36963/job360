@@ -30,6 +30,7 @@ import {
   logout,
   resendVerificationEmail,
 } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/api-error";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -93,7 +94,7 @@ function ChangePasswordCard() {
       setSuccess("Password updated successfully.");
       reset();
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Failed to change password.");
+      setServerError(apiErrorMessage(err, "Failed to change password."));
     }
   }
 
@@ -175,7 +176,7 @@ function ChangeEmailCard() {
       await logout();
       router.push("/login");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Failed to change email.");
+      setServerError(apiErrorMessage(err, "Failed to change email."));
     }
   }
 
@@ -250,7 +251,7 @@ function DeleteAccountCard() {
       await deleteAccount(data.currentPassword);
       router.push("/login");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Failed to delete account.");
+      setServerError(apiErrorMessage(err, "Failed to delete account."));
     }
   }
 
@@ -358,7 +359,7 @@ function VerifyEmailCard() {
       await resendVerificationEmail();
       setSuccess("Verification email sent. Check your inbox (and Spam), then click the link.");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Failed to send verification email.");
+      setServerError(apiErrorMessage(err, "Failed to send verification email."));
     } finally {
       setSending(false);
     }

@@ -130,4 +130,20 @@ describe("middleware — E2E bypass fails closed in production (F2)", () => {
     expect(res.status).toBe(200); // trusted, no verify round-trip
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("prod detection is case-insensitive — APP_ENV=Production also fails closed", async () => {
+    // The backend's _is_production() lowercases before comparing; a strict
+    // === "production" here would treat APP_ENV=Production as NOT prod and
+    // re-open the bypass the backend would refuse. Both sides must agree.
+    vi.stubEnv("E2E_TEST_MODE", "1");
+    vi.stubEnv("RAILWAY_ENVIRONMENT", "");
+    vi.stubEnv("APP_ENV", "Production"); // capital P — still production
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(protectedRequest());
+    expect(fetchMock).toHaveBeenCalled(); // bypass did NOT short-circuit
+    expect(res.status).toBe(307);
+  });
 });

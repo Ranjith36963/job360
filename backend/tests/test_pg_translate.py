@@ -217,3 +217,39 @@ def test_split_statements_real_comment_outside_string_still_stripped():
     assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
     assert stmts[0] == "SELECT 1"
     assert stmts[1] == "SELECT 2"
+
+
+# SPLIT-P3 residual #2 — /* block comments */. A ';' inside one severed the
+# statement and shipped a bare comment fragment to Postgres as its own
+# "statement" (syntax error at migration boot).
+
+
+def test_split_statements_semicolon_inside_block_comment_does_not_split():
+    script = (
+        "CREATE TABLE a (x int);\n"
+        "/* block comment; with a semicolon */\n"
+        "CREATE TABLE b (y int);"
+    )
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "CREATE TABLE a (x int)"
+    assert stmts[1] == "CREATE TABLE b (y int)"
+
+
+def test_split_statements_nested_block_comment_postgres_style():
+    """Postgres (unlike standard SQL) NESTS block comments — /* /* */ */ must be
+    consumed fully, not closed at the first */."""
+    script = "SELECT 1; /* outer /* inner; */ still comment; */ SELECT 2;"
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "SELECT 1"
+    assert stmts[1] == "SELECT 2"
+
+
+def test_split_statements_block_comment_opener_inside_string_is_literal():
+    """'/*' inside a quoted value is DATA, not a comment opener."""
+    script = "INSERT INTO t(msg) VALUES ('see /* not a comment'); SELECT 1;"
+    stmts = pg.split_statements(script)
+    assert len(stmts) == 2, f"expected 2, got {len(stmts)}: {stmts}"
+    assert stmts[0] == "INSERT INTO t(msg) VALUES ('see /* not a comment')"
+    assert stmts[1] == "SELECT 1"
