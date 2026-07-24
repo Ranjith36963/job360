@@ -93,3 +93,41 @@ describe("middleware — backend outage (F4)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// F2 hardening — the E2E bypass must fail CLOSED in ANY production, not just on
+// Railway. The original guard checked only `!RAILWAY_ENVIRONMENT`, so a non-Railway
+// prod deploy (Vercel / Docker / bare VM, where APP_ENV=production is the general
+// prod signal) with a stray E2E_TEST_MODE=1 would fully bypass auth. This mirrors
+// the backend's own prod-detection: APP_ENV==="production" OR RAILWAY_ENVIRONMENT.
+describe("middleware — E2E bypass fails closed in production (F2)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT bypass on a non-Railway prod deploy (APP_ENV=production)", async () => {
+    vi.stubEnv("E2E_TEST_MODE", "1");
+    vi.stubEnv("RAILWAY_ENVIRONMENT", ""); // not on Railway
+    vi.stubEnv("APP_ENV", "production"); // but still production
+    // If the bypass wrongly triggered, no fetch happens and status is 200 with no
+    // redirect. Fail-closed means it must VERIFY (call the backend) instead.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(protectedRequest());
+    expect(fetchMock).toHaveBeenCalled(); // bypass did NOT short-circuit
+    expect(res.status).toBe(307); // 401 → bounce to login
+  });
+
+  it("still bypasses in CI/local (no prod signal set)", async () => {
+    vi.stubEnv("E2E_TEST_MODE", "1");
+    vi.stubEnv("RAILWAY_ENVIRONMENT", "");
+    vi.stubEnv("APP_ENV", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(protectedRequest());
+    expect(res.status).toBe(200); // trusted, no verify round-trip
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

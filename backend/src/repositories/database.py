@@ -492,7 +492,7 @@ class JobDatabase:
 
         cursor = await self._db.execute(
             "SELECT id, normalized_company, normalized_title, "
-            "consecutive_misses, last_seen_at, staleness_state "
+            "consecutive_misses, last_seen_at, staleness_state, first_seen_at "
             "FROM jobs WHERE source = ?",
             (source,),
         )
@@ -523,9 +523,23 @@ class JobDatabase:
                     continue
 
                 new_misses = int(row[3] or 0) + 1
-                last_seen = row[4]
-                age_hours = 0.0
-                if last_seen:
+                # M6 (second path): last_seen_at can be NULL. Pre-fix, age_hours
+                # stayed 0.0, so transition(misses, 0.0) could NEVER promote and a
+                # repeatedly-missed job stayed ACTIVE forever — the same bug the
+                # nightly sweep's evaluate_job_state was fixed for, here in the
+                # more-frequent pipeline path. Mirror that fallback: use
+                # first_seen_at as the age proxy, and if there is no timestamp at
+                # all, let consecutive_misses alone decide.
+                last_seen = row[4] or row[6]  # last_seen_at, else first_seen_at
+                if not last_seen:
+                    if new_misses >= 3:
+                        next_state = StalenessState.LIKELY_STALE.value
+                    elif new_misses >= 2:
+                        next_state = StalenessState.POSSIBLY_STALE.value
+                    else:
+                        next_state = StalenessState.ACTIVE.value
+                else:
+                    age_hours = 0.0
                     try:
                         last_seen_dt = datetime.fromisoformat(last_seen)
                         if last_seen_dt.tzinfo is None:
@@ -533,7 +547,7 @@ class JobDatabase:
                         age_hours = (now - last_seen_dt).total_seconds() / 3600
                     except (ValueError, TypeError):
                         age_hours = 0.0
-                next_state = transition(new_misses, age_hours).value
+                    next_state = transition(new_misses, age_hours).value
                 await self._db.execute(
                     "UPDATE jobs SET consecutive_misses = ?, staleness_state = ? " "WHERE id = ?",
                     (new_misses, next_state, job_id),

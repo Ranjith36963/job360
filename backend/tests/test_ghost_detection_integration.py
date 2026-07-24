@@ -113,6 +113,55 @@ def _id_for(db: JobDatabase, key: tuple[str, str]) -> int:
     return asyncio.run(_q())
 
 
+def _null_timestamps(db: JobDatabase, key: tuple[str, str], *, null_first: bool) -> None:
+    """Force last_seen_at (and optionally first_seen_at) to NULL for one row —
+    reproduces the M6 premise: catalog rows that lack the timestamp."""
+    # Two fixed literal statements (no interpolation) so this stays SQL-injection
+    # free even under ruff S608 — the WHERE values are still bound params.
+    async def _q():
+        await db._conn.execute(
+            "UPDATE jobs SET last_seen_at = NULL "
+            "WHERE normalized_company = ? AND normalized_title = ?",
+            key,
+        )
+        if null_first:
+            await db._conn.execute(
+                "UPDATE jobs SET first_seen_at = NULL "
+                "WHERE normalized_company = ? AND normalized_title = ?",
+                key,
+            )
+        await db._conn.commit()
+
+    asyncio.run(_q())
+
+
+def test_null_last_seen_still_advances_by_misses_alone(db):
+    """M6 (second path): a job with NULL last_seen_at AND NULL first_seen_at must
+    still go stale on repeated misses via the pipeline sweep. Pre-fix,
+    mark_missed_for_source computed age_hours=0.0 and transition(misses, 0.0)
+    could NEVER promote, so the job stayed 'active' forever — the same M6 bug the
+    nightly sweep was fixed for, in the more-frequent pipeline path."""
+    job = _aged_job(hours_old=30.0)
+    asyncio.run(db.insert_job(job))
+    _null_timestamps(db, job.normalized_key(), null_first=True)
+    for _ in range(3):
+        asyncio.run(db.mark_missed_for_source("acme_ats", seen_keys=set()))
+    assert _staleness_for(db, job.normalized_key()) == "likely_stale"
+
+
+def test_null_last_seen_falls_back_to_first_seen_age(db):
+    """When last_seen_at is NULL but first_seen_at is old, the sweep must use
+    first_seen_at as the age proxy (not 0.0), so an old, repeatedly-missed job
+    promotes. Pre-fix it stayed 'active' because age was pinned to 0.0."""
+    job = _aged_job(hours_old=30.0)
+    asyncio.run(db.insert_job(job))
+    _null_timestamps(db, job.normalized_key(), null_first=False)  # first_seen_at kept (30h old)
+    asyncio.run(db.mark_missed_for_source("acme_ats", seen_keys=set()))
+    asyncio.run(db.mark_missed_for_source("acme_ats", seen_keys=set()))
+    asyncio.run(db.mark_missed_for_source("acme_ats", seen_keys=set()))
+    assert _staleness_for(db, job.normalized_key()) == "likely_stale"
+
+
 def test_seen_job_not_marked_missed(db):
     """A job present in seen_keys must be skipped entirely by the sweep."""
     job = _aged_job(hours_old=30.0)
