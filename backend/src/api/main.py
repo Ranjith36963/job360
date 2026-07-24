@@ -100,8 +100,9 @@ def _init_sentry() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Phase 3 — Sentry must be up before anything else so boot errors are captured.
-    _init_sentry()
+    # Sentry init moved to MODULE scope (below, before `app = FastAPI(...)`) —
+    # see the comment there. Initialising it here was too late for the tracing
+    # integration and left backend performance monitoring silently dead.
     # Tier-A Step-0 #9 — honour LOG_LEVEL env var at process boot.
     # setup_logging() configures the "job360" subtree; we also set the root
     # logger so libraries (uvicorn, fastapi, httpx) inherit the same level
@@ -124,6 +125,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()
 
+
+# Sentry MUST initialise BEFORE the FastAPI/Starlette app object is created:
+# Starlette builds its middleware stack at construction time, and Sentry's
+# Starlette/FastAPI tracing integration patches at `sentry_sdk.init` time.
+# When init ran inside the lifespan (post-construction), error capture still
+# worked (global logging hooks) but performance tracing could NEVER emit a
+# request transaction — the prod Sentry project had arq-worker transactions
+# yet zero backend http.server transactions in its entire history. Prod-gated
+# inside init_sentry, so this is a no-op in dev/tests.
+_init_sentry()
 
 app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
 
