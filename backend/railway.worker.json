@@ -1,6 +1,5 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
-  "//": "Config for the WORKER service ONLY — set 'Config file path' to this file in the worker's Railway settings. The worker is a background arq process with NO HTTP server, so the sibling railway.json's healthcheckPath (/api/health) can never pass and rolled back every worker deploy (seen live 2026-07-24). Liveness is covered instead by Dockerfile.worker's `arq --check` HEALTHCHECK plus the restart policy below.",
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile.worker"
