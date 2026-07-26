@@ -2108,7 +2108,85 @@ AIJOBS_AI_HTML = """<html><body>
 </body></html>"""
 
 
+# The CURRENT (2026-07) aijobs.ai markup: each listing is a card whose <a>
+# wraps nested <div>s instead of plain text. The old regex required
+# `>text</a>` with no tags inside, so it matched ZERO and the source went
+# silently blind in prod (Sentry PYTHON-FASTAPI-7). Structure below is copied
+# from the live page — title div, age, job type, then company in a
+# `*card-title*` span. Note: the live page carries NO location in the card.
+AIJOBS_AI_CARD_HTML = """<html><body>
+<div class="col-xl-4 col-md-6 fade-in-bottom rt-mb-24 cat-1 cat-3">
+  <div class="tw-relative tw-h-full">
+    <a href="https://aijobs.ai/job/senior-robotics-systems-engineer"
+       class="tw-h-full card tw-card tw-block jobcardStyle1 ">
+      <div class="tw-p-6 tw-h-full">
+        <div class="tw-mb-1.5 d-flex justify-content-between">
+          <div class="tw-text-[#18191C] tw-text-lg tw-font-medium">
+            Senior Robotics Systems Engineer
+          </div>
+          <div class="tw-text-sm tw-text-[#767F8C] mt-1 tw-pl-3">0D</div>
+        </div>
+        <div class="tw-text-sm">Full Time</div>
+        <span class="iconbox-icon"><div><img src="/x.jpeg" alt="" draggable="false"></div></span>
+        <div class="iconbox-content"><div class="tw-mb-1 tw-inline-flex">
+          <span class="tw-text-base tw-font-medium tw-card-title">RoboForce</span>
+        </div></div>
+      </div>
+    </a>
+  </div>
+</div>
+<div class="col-xl-4">
+  <a href="/job/mission-operations-lead" class="card jobcardStyle1">
+    <div class="tw-p-6">
+      <div class="tw-text-lg tw-font-medium">Mission Operations &amp; AI Enablement Lead</div>
+      <div class="tw-text-sm">2D</div>
+      <div class="iconbox-content">
+        <span class="tw-card-title">OceanX</span>
+      </div>
+    </div>
+  </a>
+</div>
+<a href="/about">About us</a>
+</body></html>"""
+
+
+def test_aijobs_ai_parses_card_layout():
+    """VALUE-presence (rule #21): the live card markup must yield real jobs.
+
+    Regression pin for the 2026-07 breakage — asserting a non-empty list with
+    correct field VALUES, not merely `isinstance(jobs, list)`.
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://aijobs\.ai/.*"),
+                      body=AIJOBS_AI_CARD_HTML, content_type="text/html", repeat=True)
+                source = AIJobsAISource(session)
+                jobs = await source.fetch_jobs()
+
+            assert len(jobs) == 2, f"expected 2 cards parsed, got {len(jobs)}"
+            by_title = {j.title: j for j in jobs}
+
+            first = by_title["Senior Robotics Systems Engineer"]
+            assert first.company == "RoboForce"
+            assert first.apply_url == "https://aijobs.ai/job/senior-robotics-systems-engineer"
+            assert first.source == "aijobs_ai"
+
+            # HTML entities decoded, and a relative href absolutised.
+            second = by_title["Mission Operations & AI Enablement Lead"]
+            assert second.company == "OceanX"
+            assert second.apply_url == "https://aijobs.ai/job/mission-operations-lead"
+
+            # The nav link must never become a job.
+            assert all("/about" not in j.apply_url for j in jobs)
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_aijobs_ai_parses_html():
+    """Legacy plain-text anchor layout must keep working (backward compat)."""
     async def _test():
         session = aiohttp.ClientSession()
         try:
@@ -2117,9 +2195,13 @@ def test_aijobs_ai_parses_html():
                       body=AIJOBS_AI_HTML, content_type="text/html", repeat=True)
                 source = AIJobsAISource(session)
                 jobs = await source.fetch_jobs()
-                assert isinstance(jobs, list)
-                if jobs:
-                    assert all(j.source == "aijobs_ai" for j in jobs)
+
+            # Previously `if jobs:` — which passed on ZERO jobs and is exactly
+            # why the prod breakage never turned a test red.
+            assert len(jobs) == 1
+            assert jobs[0].title == "Deep Learning Researcher"
+            assert jobs[0].apply_url == "https://aijobs.ai/job/deep-learning-researcher-456"
+            assert all(j.source == "aijobs_ai" for j in jobs)
         finally:
             await session.close()
     _run(_test())
