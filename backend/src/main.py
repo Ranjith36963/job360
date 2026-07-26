@@ -447,6 +447,50 @@ async def _enqueue_notifications(
         return 0
 
 
+def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
+    """Score every job, extract deadlines, dedup, and score-filter — the whole
+    SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
+
+    Invoked from ``run_search`` via ``asyncio.to_thread`` so it runs OFF the
+    event loop. Inline (the old code) this same block blocked the single backend
+    process for ~a minute on a few thousand raw jobs — per-job regex scoring
+    plus an O(n^2) TF-IDF/fuzzy dedup — during which the ``/search/{id}/status``
+    polls could not be answered, so the UI reported "Lost contact with the
+    server while searching" even though nothing had crashed. Threading it keeps
+    the loop free to service those polls. **No scoring behaviour changes** — the
+    exact same functions run, just not on the loop.
+
+    Mutates each Job in ``all_jobs`` in place (scores/deadline) and returns the
+    deduplicated, score-filtered subset. Contains no ``await`` — safe to thread.
+    """
+    for job in all_jobs:
+        breakdown = scorer.score(job)
+        job.match_score = breakdown.match_score
+        job.role = breakdown.title_score
+        job.skill = breakdown.skill_score
+        job.location_score = breakdown.location_score
+        job.recency = breakdown.recency_score
+        job.seniority_score = breakdown.seniority_score
+        job.visa_flag = scorer.check_visa_flag(job)
+        job.experience_level = detect_experience_level(job.title)
+
+    # Deadline extraction — fill any job lacking a structured deadline from its
+    # description text. Lazy-imported to keep the top-level import surface small.
+    from src.services.deadline import extract_deadline  # noqa: PLC0415
+
+    for job in all_jobs:
+        if job.deadline is None and job.description:
+            result = extract_deadline(job.description)
+            if result is not None:
+                job.deadline, job.deadline_source = result
+
+    unique_jobs = deduplicate(all_jobs)
+    logger.info("After dedup: %s unique jobs", len(unique_jobs))
+    unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+    logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
+    return unique_jobs
+
+
 async def run_search(
     db_path: str | None = None,
     source_filter: str | None = None,
@@ -709,44 +753,15 @@ async def run_search(
             for job in all_jobs:
                 job.id = _catalog_ids.get(job.normalized_key())
 
-            # Score all jobs using the user's profile (scorer always exists — guarded at start).
-            # Step-1 B4: JobScorer.score() now returns a ScoreBreakdown — surface
-            # the scalar match_score on the Job so the MIN_MATCH_SCORE filter still works.
-            # Step-1.5 S1.1-C: capture every dim component so the breakdown survives
-            # the round-trip to the API. Names map ScoreBreakdown → JobResponse:
-            # title_score → role; recency_score → recency; *_score fields kept
-            # as-is. Engine doesn't currently produce experience/credentials/
-            # semantic/penalty — those columns persist as 0 until later batches.
-            for job in all_jobs:
-                breakdown = scorer.score(job)
-                job.match_score = breakdown.match_score
-                job.role = breakdown.title_score
-                job.skill = breakdown.skill_score
-                job.location_score = breakdown.location_score
-                job.recency = breakdown.recency_score
-                job.seniority_score = breakdown.seniority_score
-                job.visa_flag = scorer.check_visa_flag(job)
-                job.experience_level = detect_experience_level(job.title)
-
-            # Deadline extraction — fill in any job that didn't get a structured
-            # deadline (e.g. from JSON-LD validThrough) from its description text.
-            # Runs after scoring, before dedup, so every raw job is covered.
-            # Lazy-imported to keep the top-level import surface small.
-            from src.services.deadline import extract_deadline  # noqa: PLC0415
-
-            for job in all_jobs:
-                if job.deadline is None and job.description:
-                    result = extract_deadline(job.description)
-                    if result is not None:
-                        job.deadline, job.deadline_source = result
-
-            # Deduplicate
-            unique_jobs = deduplicate(all_jobs)
-            logger.info("After dedup: %s unique jobs", len(unique_jobs))
-
-            # Filter by minimum score
-            unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
-            logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
+            # Score → deadline-extract → dedup → score-filter. This whole stage is
+            # synchronous and CPU-heavy (per-job regex scoring across skill-synonym
+            # aliases + an O(n^2) TF-IDF/fuzzy dedup over every raw job). Run it in a
+            # WORKER THREAD via asyncio.to_thread so it never blocks the event loop —
+            # inline it froze this single backend process for ~a minute on a few
+            # thousand raw jobs, starving the /search/{id}/status polls, which the UI
+            # surfaced as "Lost contact with the server while searching" (the search
+            # had not crashed — the loop was just busy). Scores are unchanged.
+            unique_jobs = await asyncio.to_thread(_score_dedup_and_filter, all_jobs, scorer)
 
             if dry_run:
                 # Dry run: show results without DB writes or notifications
