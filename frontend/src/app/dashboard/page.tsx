@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { JobList } from "@/components/jobs/JobList";
 import { TimeBuckets } from "@/components/jobs/TimeBuckets";
-import { FilterPanel } from "@/components/jobs/FilterPanel";
+import { FilterPanel, DEFAULT_MIN_SCORE } from "@/components/jobs/FilterPanel";
 import {
   getJobs,
   getStatus,
@@ -75,7 +75,7 @@ export default function DashboardPage() {
   // is off or the vector index is empty — so this is always safe to request.
   const [filters, setFilters] = useState<JobFilters>({
     hours: 168,
-    min_score: 30,
+    min_score: DEFAULT_MIN_SCORE,
     mode: "hybrid",
   });
 
@@ -151,7 +151,7 @@ export default function DashboardPage() {
   // ---------------------------------------------------------------------------
 
   const allJobsKey = useMemo<JobFilters>(
-    () => ({ min_score: filters.min_score ?? 30, hours: 168 }),
+    () => ({ min_score: filters.min_score ?? DEFAULT_MIN_SCORE, hours: 168 }),
     [filters.min_score]
   );
 
@@ -207,7 +207,7 @@ export default function DashboardPage() {
   // Count active non-default filters (excluding hours/bucket)
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (filters.min_score && filters.min_score !== 30) count++;
+    if (filters.min_score && filters.min_score !== DEFAULT_MIN_SCORE) count++;
     if (filters.source) count++;
     if (filters.visa_only) count++;
     if (filters.action) count++;
