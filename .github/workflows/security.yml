@@ -120,3 +120,47 @@ jobs:
         # positive for query-builder/translator code. Bandit still blocks on every
         # other rule (real high/medium findings surface loudly).
         run: bandit -r backend/src -ll -s B608
+
+  # ── Make this loop LOUD ───────────────────────────────────────────────────
+  # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
+  # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
+  # unnoticed over a 6-line config gap. A watcher nobody reads is worse than no
+  # watcher, so every scheduled loop now produces an OBJECT with a lifecycle:
+  # fail -> open/comment one deduped issue; pass -> auto-close it.
+  # Deliberately silent on pull_request: a red PR is already visible in the PR,
+  # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
+  notify:
+    name: Report failure as an issue
+    needs: [pip-audit, npm-audit, gitleaks, bandit]
+    if: >-
+      always() && (github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Loop RED: security scanning is failing"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            {
+              echo "\`security.yml\` failed on **${{ github.event_name }}** (\`${{ github.ref_name }}\`)."
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "- Commit: \`${{ github.sha }}\`"
+            } > notify-body.md
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file notify-body.md
+            else
+              gh issue comment "$num" --body-file notify-body.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" \
+              --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+          fi
