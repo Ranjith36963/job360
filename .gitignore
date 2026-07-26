@@ -61,3 +61,20 @@ backend/data/experiment/
 
 # Loop round lock - transient, never committable
 docs/maintenance/.lock
+
+# ── Repo-hygiene hardening (2026-07-26 audit) ────────────────────────────────
+# mypy's own cache DBs. 27 MB of these were committed by accident in PR #92 —
+# the two cache.db files were the largest tracked files in the whole repo.
+.mypy_cache*/
+backend/.mypy_cache*/
+
+# Ad-hoc local tool output that lands at repo root (graphify codebase-graph, 5+ MB).
+# Untracked but unignored is one `git add -A` away from entering history.
+graphify-out/
+
+# Claude settings backups. The pre-existing `backup-*` rule never matched: every
+# backup actually written uses the `bak-before-*` shape.
+.claude/settings.local.json.bak-*
+
+# Playwright MCP scratch output (screenshots/snapshots from browser verification).
+.playwright-mcp/
