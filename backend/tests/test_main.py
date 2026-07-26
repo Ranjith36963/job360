@@ -271,6 +271,87 @@ def test_run_search_completes_without_keys():
     _run(_test())
 
 
+def test_run_search_offloads_scoring_dedup_to_a_worker_thread():
+    """The score → dedup → filter stage is synchronous and CPU-heavy, so run_search
+    MUST run it via asyncio.to_thread — never inline on the event loop.
+
+    Inline (the bug), that block froze the single backend process for ~a minute on
+    a few-thousand-job batch (O(n^2) TF-IDF dedup + per-job regex scoring). During
+    that freeze the /search/{id}/status polls could not be answered, so the UI
+    reported "Lost contact with the server while searching" even though nothing had
+    crashed. This guards that the offload stays wired at the real call site.
+    """
+
+    async def _test():
+        offloaded: list[str] = []
+        real_to_thread = asyncio.to_thread
+
+        async def _spy(fn, *args, **kwargs):
+            offloaded.append(getattr(fn, "__name__", ""))
+            return await real_to_thread(fn, *args, **kwargs)
+
+        with aioresponses() as m:
+            _mock_free_sources(m, arbeitnow_payload=MOCK_JOB_PAYLOAD)
+            with _patch_no_notifications():
+                with patch("asyncio.to_thread", _spy):
+                    await run_search(db_path=":memory:")
+
+        assert "_score_dedup_and_filter" in offloaded, (
+            "scoring/dedup was NOT offloaded to a worker thread (would block the "
+            f"event loop / starve the /search status polls). to_thread saw: {offloaded}"
+        )
+
+    _run(_test())
+
+
+def test_score_dedup_and_filter_preserves_scoring_and_filtering():
+    """The extracted CPU stage scores every job (mapping all dim components), dedups,
+    and drops sub-threshold jobs — byte-identical behaviour to the old inline block,
+    just now threadable. No scoring change."""
+    import types
+
+    from src.main import MIN_MATCH_SCORE, _score_dedup_and_filter
+    from src.models import Job
+
+    class _FakeScorer:
+        def __init__(self, score: int) -> None:
+            self._s = score
+
+        def score(self, job):  # noqa: ANN001
+            return types.SimpleNamespace(
+                match_score=self._s,
+                title_score=40,
+                skill_score=41,
+                location_score=10,
+                recency_score=9,
+                seniority_score=8,
+            )
+
+        def check_visa_flag(self, job) -> bool:  # noqa: ANN001
+            return False
+
+    def _job(title: str, company: str, url: str) -> Job:
+        return Job(
+            title=title,
+            company=company,
+            apply_url=url,
+            source="test",
+            date_found="2026-07-26T00:00:00Z",
+        )
+
+    # Two clearly-distinct jobs (different company + title so dedup keeps both).
+    passing = [_job("AI Engineer", "Acme", "https://x/1"), _job("Data Scientist", "Globex", "https://x/2")]
+    out = _score_dedup_and_filter(passing, _FakeScorer(70))
+    assert len(out) == 2
+    assert all(j.match_score == 70 for j in out)
+    # Every dim component is surfaced onto the Job (the API round-trip depends on this).
+    assert all(j.role == 40 and j.skill == 41 and j.recency == 9 and j.seniority_score == 8 for j in out)
+
+    # Below-threshold jobs are filtered out entirely.
+    dropped = _score_dedup_and_filter([_job("Cook", "Diner", "https://y/1")], _FakeScorer(MIN_MATCH_SCORE - 1))
+    assert dropped == []
+
+
 def test_run_search_with_mock_jobs():
     """When sources return jobs, they should be scored, deduped, and stored."""
 
