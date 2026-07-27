@@ -139,7 +139,11 @@ def extract_deadline(
     else:
         today = date.today()
 
-    max_future = date(today.year + 2, today.month, today.day)
+    try:
+        max_future = date(today.year + 2, today.month, today.day)
+    except ValueError:
+        # today is Feb 29 (leap day) and today.year + 2 is not a leap year.
+        max_future = date(today.year + 2, today.month, today.day - 1)
 
     for kw_match in _KEYWORD_PAT.finditer(text):
         after_keyword = kw_match.end()
