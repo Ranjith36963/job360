@@ -6,13 +6,25 @@ You are running the full document-lifecycle audit defined in
 `docs/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
 contract. The code is the only truth.
 
-**TWO-PHASE CONTRACT (strict — user's rule):**
-- **Phase A — REPORT ONLY.** Run Steps 1–4 without changing ANY file. Present
-  the findings as a plain-English report: what you found, and for each item a
-  RECOMMENDED action (archive / banner / fix / park / write-doc / delete).
-  Then STOP and wait for the user's decisions.
-- **Phase B — APPLY (only what the user approved).** Execute exactly the
-  approved items, nothing more. When the user approves the classification,
+**TWO-PHASE CONTRACT — AMENDED 2026-07-27.** The old contract made *every*
+action wait on the user. He never ran Phase B, so nothing was ever archived:
+`docs/archive/` stayed empty, zero docs carried an IMPLEMENTED stamp, and 75% of
+plan docs describing shipped work piled up. The gate is now **per-lane**, per
+[`docs/maintenance/DELETION-POLICY.md`](../../../docs/maintenance/DELETION-POLICY.md):
+
+- **Phase A — REPORT.** Run Steps 1–4 without changing ANY file. Present the
+  findings, classifying every item into Lane A (auto-delete), Lane B
+  (auto-archive) or Lane C (human-only). **Anything you cannot classify by a
+  machine-checkable predicate is Lane C** — silence is not permission.
+- **Phase B — APPLY.** Lane A and Lane B items are applied **without waiting for
+  approval** (they are predicate-proven and reversible — reflog/git history).
+  **Lane C items are NEVER applied**: list them in the PR body and stop. The
+  human's only job is deciding Lane C.
+- **While `DELETION-POLICY.md` is marked `DRAFT — NOT IN FORCE`, treat every
+  item as Lane C** — i.e. the old report-only behaviour — until its status
+  reads `ACTIVE`. That one word is the switch.
+
+  When applying the classification,
   also write each doc's type header on line 2 (spec in DOC-MAINTENANCE.md):
   `<!-- doc: PLAN | status: ACTIVE -->`, `<!-- doc: LOG | append-only -->`,
   `<!-- doc: REFERENCE -->` (LIVING headers are owned by /sync — skip them;
@@ -91,6 +103,19 @@ the human merges.
 
 ---
 
-**Never do:** edit code, touch LOG files' history, delete any doc, update an
-archived plan's content, or push to main. If the audit finds something that
-needs a CODE change, it goes to PARKED.md or a GitHub issue — not into this PR.
+**Never do:** edit code, touch LOG files' history, update an archived plan's
+content, or push to main. If the audit finds something that needs a CODE change,
+it goes to PARKED.md or a GitHub issue — not into this PR.
+
+**Deletion — REPEALED 2026-07-27.** This list used to read "delete any doc",
+a blanket ban. That ban is why 75% of plan docs describing already-shipped work
+piled up: destruction was centralised on one human who never ran Phase B, so
+every agent correctly obeyed and the pile grew. Deletion is now governed solely
+by [`docs/maintenance/DELETION-POLICY.md`](../../../docs/maintenance/DELETION-POLICY.md):
+
+- **Lane A / Lane B** (completed work, generated junk, merged-branch artifacts) —
+  act by predicate, no approval needed.
+- **Lane C** (anything unmerged, unpushed, uncommitted, ground truth, permanent
+  record, PII, or needing judgment) — still human-only. Report, never act.
+- **While that policy is marked `DRAFT — NOT IN FORCE`, nothing auto-deletes.**
+  Treat everything as Lane C until its status is `ACTIVE`.
