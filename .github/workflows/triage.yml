@@ -124,6 +124,15 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The action refuses bot-initiated runs by default, and our escalation
+          # is bot-initiated BY DESIGN: a detector dispatches this loop. Without
+          # this, every automatic triage dies with "Workflow initiated by
+          # non-human actor" and only human-opened issues are ever diagnosed —
+          # the same shape of break as the GITHUB_TOKEN one, a layer further in.
+          # NOT '*': the action's own docs warn that on a PUBLIC repo that lets
+          # external Apps invoke it with prompts they control. Naming the one bot
+          # we actually dispatch from keeps that door shut.
+          allowed_bots: "github-actions"
           prompt: |
             You are the TRIAGE loop for Job360. Diagnose ONE freshly-opened
             issue and route it. You do not fix anything here.
