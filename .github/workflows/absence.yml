@@ -27,6 +27,12 @@ on:
 permissions:
   contents: read
   issues: write
+  # actions: write is what lets `gh workflow run triage.yml` hand an alarm to the
+  # triage loop. Without it the dispatch 403s and the issue is raised into silence
+  # — exactly the break this handoff exists to fix, one layer down. Found by drill
+  # run 30309508655: issue #162 was raised, the dispatch failed, and only the
+  # `|| warn` fallback made it visible.
+  actions: write
 
 concurrency:
   group: absence-check
