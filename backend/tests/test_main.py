@@ -306,11 +306,12 @@ def test_run_search_offloads_scoring_dedup_to_a_worker_thread():
 
 def test_score_dedup_and_filter_preserves_scoring_and_filtering():
     """The extracted CPU stage scores every job (mapping all dim components), dedups,
-    and drops sub-threshold jobs — byte-identical behaviour to the old inline block,
-    just now threadable. No scoring change."""
+    and drops only SPAM (below the storage floor) — jobs below the *display* floor
+    are now kept and filtered at read time instead of being destroyed."""
     import types
 
-    from src.main import MIN_MATCH_SCORE, _score_dedup_and_filter
+    from src.core.settings import MIN_MATCH_SCORE, MIN_STORE_SCORE
+    from src.main import _score_dedup_and_filter
     from src.models import Job
 
     class _FakeScorer:
@@ -347,9 +348,17 @@ def test_score_dedup_and_filter_preserves_scoring_and_filtering():
     # Every dim component is surfaced onto the Job (the API round-trip depends on this).
     assert all(j.role == 40 and j.skill == 41 and j.recency == 9 and j.seniority_score == 8 for j in out)
 
-    # Below-threshold jobs are filtered out entirely.
-    dropped = _score_dedup_and_filter([_job("Cook", "Diner", "https://y/1")], _FakeScorer(MIN_MATCH_SCORE - 1))
-    assert dropped == []
+    # REGRESSION (37-vs-4): a job below the DISPLAY floor must still be STORED.
+    # It used to be deleted here, so a thin profile — or simply a posting whose
+    # recency component decayed as it aged — lost jobs permanently with no way to
+    # recover them. Ranking handles precision; storage must not.
+    kept = _score_dedup_and_filter([_job("Cook", "Diner", "https://y/1")], _FakeScorer(MIN_MATCH_SCORE - 1))
+    assert len(kept) == 1, "sub-display-threshold jobs must be kept, filtered at read time"
+    assert kept[0].match_score == MIN_MATCH_SCORE - 1
+
+    # Only genuine spam (below the storage floor) is dropped.
+    spam = _score_dedup_and_filter([_job("Cook", "Diner", "https://y/2")], _FakeScorer(MIN_STORE_SCORE - 1))
+    assert spam == []
 
 
 def test_run_search_with_mock_jobs():
