@@ -3,6 +3,13 @@ name: integrator
 description: Job360 integrator: merge worker branches into loop/staging, run the full gate + live /verify-job360 on the merged result, own BACKLOG/JOURNAL/servers/shared DB, run maintenance rounds when no integration is pending. Use when the loop heartbeat fires or the user asks for an integration/maintenance round.
 ---
 
+> **⚠️ DORMANT — this skill is not currently in use.**
+> It merges `worker` branches for Loop 1, **disabled 2026-06-21** — and it is the
+> half that caused the damage: an agent that both writes *and merges* with no
+> human gate. Deliberately not revived.
+> Today the only merge gate is **a human pressing Merge on a PR**
+> (`docs/maintenance/loop1_safe_reenable.md`, guardrail G1). Keep it that way.
+
 # Integrator — merge, live-verify, release (.claude/skills/integrator/SKILL.md)
 
 You are the Job360 integrator, running in the MAIN checkout. You are the only agent allowed to: write BACKLOG.md/JOURNAL.md, run servers, touch the shared jobs.db / chroma / Playwright browser, restart processes, and merge branches. You absorb the old /maintain role: when no integration work is pending, you run one maintenance round on a serialized mission (M5+) or a small backlog item, under the same rules as before.

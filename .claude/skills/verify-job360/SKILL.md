@@ -7,7 +7,7 @@ description: >-
   API calls, auth) code, before saying something is "done" or "fixed", before opening a
   PR, and whenever the user asks to verify / test / confirm / "does it actually work" /
   "prove it". Drives a real browser with Playwright for UX, hits routes with curl and
-  queries the SQLite DB for backend, and walks the full register→CV→search→jobs journey
+  queries the Postgres DB for backend, and walks the full register→CV→search→jobs journey
   for end-to-end. If you changed Job360 code and haven't run it, this skill applies.
 ---
 
@@ -89,10 +89,14 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 (returns a `set-cookie: job360_session=…`) and pass it with `-b "job360_session=…"`.
 
 **Prove it.** This is the part that catches the real bugs:
-- **Did the row land?** Query the SQLite DB directly:
+- **Did the row land?** Query Postgres directly (SQLite was fully removed — the
+  storage layer is psycopg3; `src/repositories/pg.py` only *shapes* itself like
+  aiosqlite):
   ```
-  cd backend && python -c "import sqlite3;c=sqlite3.connect('data/jobs.db',timeout=10);print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT match_score,title FROM jobs ORDER BY match_score DESC LIMIT 5')]"
+  cd backend && python -c "import os,psycopg; dsn=os.getenv('DATABASE_URL','postgresql://job360:job360dev@localhost:5433/job360'); c=psycopg.connect(dsn); print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT match_score,title FROM jobs ORDER BY match_score DESC LIMIT 5')]"
   ```
+  Against PROD instead of local dev: `railway run -s Postgres python <script>`
+  (never print the DSN).
   Useful tables: `jobs` (shared catalog), `user_feed`, `user_profiles`, `users`, `sessions`, `applications`, `run_log`.
 - **Did the path run?** Read the server's stdout/log. When you launched it as a background
   Bash task, its output goes to a task file — `tail` that file and grep for your route,
@@ -137,15 +141,14 @@ for the format and the two real bugs this methodology already caught.
 
 These cost real time the first time. Reading them here saves the next run.
 
-- **Stale on-disk DB crashes startup.** An old `data/jobs.db` from a previous schema makes
-  boot fail (e.g. `no such column: staleness_state`) because `CREATE TABLE IF NOT EXISTS`
-  is a no-op on the existing table and a later index/query hits the missing column. Fix for
-  local dev: back up and reset — `mv data/jobs.db{,.bak}` (and the `-wal`/`-shm` siblings) —
-  a fresh correct schema is created on next boot.
-- **aiosqlite holds the DB lock after a crash.** A failed-startup `python main.py` often
-  stays alive (a non-daemon aiosqlite worker thread blocks exit) and keeps `jobs.db` locked
-  ("Device or resource busy"). Find it (`tasklist | grep python` / netstat on `:8000`) and
-  `taskkill //PID <pid> //F` before moving the DB or restarting.
+- **Postgres must be up before anything boots.** The dev DB is a container on
+  host port 5433 (`docker-compose.dev.yml`); if it is down the API and the whole
+  test suite fail at startup/collection with
+  `connection to server at "127.0.0.1", port 5433 failed`. That exact error also
+  killed the nightly `live-e2e` workflow for 25 consecutive nights because CI had
+  no Postgres service. Start the container first.
+  (The two SQLite gotchas that used to live here — a stale `data/jobs.db` and an
+  aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
   to mint the session cookie if `SESSION_SECRET` is missing → "Failed to fetch" + a
   half-created account that then 409s "already registered". Both `SESSION_SECRET` and
@@ -187,7 +190,7 @@ These cost real time the first time. Reading them here saves the next run.
 
 Playwright MCP (`browser_navigate`, `browser_snapshot`, `browser_fill_form`, `browser_click`,
 `browser_file_upload`, `browser_take_screenshot`, `browser_console_messages`); Bash for
-background servers, `curl`, and `python`-driven SQLite queries; Read for looking at screenshots.
+background servers, `curl`, and `python`-driven Postgres queries; Read for looking at screenshots.
 
 ## Keep this skill alive (self-improving)
 

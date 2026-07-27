@@ -3,6 +3,17 @@ name: worker
 description: Job360 worker: claim ONE mission from the canonical MISSIONS.md and grind it to done in your own worktree, test-first, gate-stamped commits on your own branch. Use when running as a mission worker in a worker worktree.
 ---
 
+> **⚠️ DORMANT — this skill is not currently in use.**
+> It serves Loop 1 (the ralph-loop worker/integrator), **disabled 2026-06-21**
+> after it wrote straight to `main` and wiped worktrees, and it claims missions
+> from `docs/maintenance/MISSIONS.md`, which has been untouched since 2026-06-17
+> and says "the loop is paused (no active cron)". So following this skill will
+> find an empty queue.
+> **The live replacement is `.github/workflows/repair.yml`**: label a GitHub
+> issue `agent:fix` and a caged agent opens a PR (it can never merge, and can
+> never edit `.github/**` or `.claude/**`). Read this file for the mission
+> protocol and DoD discipline, which remain good — not as a live loop.
+
 # Worker — mission executor (.claude/skills/worker/SKILL.md)
 
 You are a Job360 worker running in YOUR OWN worktree on YOUR OWN branch. You claim one mission and grind it to done — task after task, continuously, no sleeping between tasks. You stop only when the mission's definition of done is fully proven, you hit a blocker, or the human interrupts.
