@@ -13,14 +13,42 @@ on:
   workflow_dispatch: {}
 
 # Least-privilege token (CodeQL actions/missing-workflow-permissions):
-# these jobs only check out code and run tests/uploads — no repo writes.
+# read the code, and raise/close ONE tracking issue so a red night is visible.
 permissions:
   contents: read
+  issues: write
 
 jobs:
   live-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    # test_live_full_pipeline_all_three_pillars drives the REAL pipeline, which
+    # writes to Postgres. Without a DB service this job failed every night from
+    # 2026-07-19 with "connection to server at 127.0.0.1:5433 refused" — it fell
+    # back to the DEV default DSN (settings.py:26) because nothing set
+    # DATABASE_URL here. Same service+env pattern as ci.yml (the proven one).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      # Auth/crypto constants the pipeline touches when it saves a profile.
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+
     steps:
       - uses: actions/checkout@v7
 
@@ -37,4 +65,49 @@ jobs:
       - name: Run live online tests
         working-directory: backend
         # -m live overrides the default "-m 'not live'" addopts.
-        run: python -m pytest -m live -v -p no:randomly
+        # tee + pipefail: keep the real exit code AND keep the output for the
+        # issue body below.
+        run: |
+          set -o pipefail
+          python -m pytest -m live -v -p no:randomly 2>&1 | tee ../live-e2e.log
+
+      # ── Loop 2 must be LOUD ────────────────────────────────────────────────
+      # This job failed 8 nights running (2026-07-19 → 07-26) and nobody knew:
+      # a red cron notifies no one. A watcher nobody reads is worse than none,
+      # so a failure now opens (or updates) ONE tracking issue, and the next
+      # green run closes it. Same open/comment/close pattern as Loop 3.
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Loop 2 RED: nightly live-e2e is failing"
+          {
+            echo "The nightly live pipeline test failed."
+            echo
+            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- When: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo
+            echo '```'
+            tail -40 live-e2e.log 2>/dev/null || echo "(no test output captured)"
+            echo '```'
+          } > issue-body.md
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ -z "$num" ]; then
+            gh issue create --title "$title" --body-file issue-body.md
+          else
+            gh issue comment "$num" --body-file issue-body.md
+          fi
+
+      - name: Close the failure issue when green again
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Loop 2 RED: nightly live-e2e is failing"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ -n "$num" ]; then
+            gh issue close "$num" --comment "Green again — live-e2e passed in run ${{ github.run_id }}. (Loop 2 auto-close)"
+          fi

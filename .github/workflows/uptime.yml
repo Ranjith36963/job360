@@ -35,3 +35,44 @@ jobs:
             echo "::error::Frontend check failed (HTTP $code)"
             exit 1
           fi
+
+  # ── Make this loop LOUD ───────────────────────────────────────────────────
+  # A watcher nobody reads is worse than no watcher: measured 2026-07-26, every
+  # artifact here without a notifier died (MISSIONS.md 39d, STATUS-DAILY.md 5w,
+  # TELEMETRY.jsonl 6w) and live-e2e failed 8 nights unseen. A finding must be an
+  # OBJECT with a lifecycle: fail -> one deduped issue; pass -> auto-close.
+  notify:
+    name: Report failure as an issue
+    needs: [ping]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Loop RED: uptime probe is failing"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            {
+              echo "\`uptime.yml\` failed on its schedule."
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "- Commit: \`${{ github.sha }}\`"
+            } > notify-body.md
+            # Fires every 10 min: comment-per-failure would be spam. Open ONE
+            # issue per outage and stay silent until it recovers.
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file notify-body.md
+            else
+              echo "outage issue #$num already open — staying quiet" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" \
+              --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+          fi
