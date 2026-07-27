@@ -92,3 +92,30 @@ def test_arq_not_imported_at_module_top():
             sys.modules[k] = m
         if "src.workers.settings" in sys.modules:
             del sys.modules["src.workers.settings"]
+
+
+def test_worker_schedules_the_daily_catalog_refresh():
+    """The SHARED job catalog must refill on a schedule, not only when a human
+    clicks Search.
+
+    Measured in prod 2026-07-27: `run_log` held 11 rows in 25 days and the
+    catalog showed 5,827 jobs fetched all-time vs 112 visible — because nothing
+    refills it between user searches while `purge_old_jobs` removes anything
+    older than 30 days. Every instrument stayed green the whole time: this is an
+    ABSENCE failure, which no presence-detector can see.
+    """
+    from src.workers.settings import WorkerSettings
+
+    crons = WorkerSettings.__dict__.get("cron_jobs", [])
+    names = {
+        getattr(getattr(c, "coroutine", None), "__name__", "") for c in crons
+    }
+    assert "refresh_catalog" in names, f"no catalog-refresh cron registered: {names}"
+
+
+def test_worker_settings_functions_includes_refresh_catalog():
+    """ARQ can only run what is registered in `functions`."""
+    from src.workers.settings import WorkerSettings
+
+    names = {getattr(f, "__name__", "") for f in WorkerSettings.functions}
+    assert "refresh_catalog" in names

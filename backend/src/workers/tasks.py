@@ -950,3 +950,48 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
 
     await save_enrichment(db, job_id, enrichment)
     return {"enriched": True}
+
+
+async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
+    """ARQ periodic task: refill the SHARED job catalog on a schedule.
+
+    WHY THIS EXISTS. Nothing fetched jobs on a timer — `run_search` ran only
+    when a human clicked Search. Meanwhile `purge_old_jobs` deletes anything
+    older than 30 days, so the catalog drained. Measured in prod 2026-07-27:
+    `run_log` had 11 rows in 25 days; 5,827 jobs fetched all-time vs 112
+    visible, and most users saw an empty feed. Every instrument stayed GREEN
+    throughout — 200s, no errors, no alerts — because all of them detect
+    PRESENCE (did something break) and none detect ABSENCE (did something
+    stop). This task is the missing production loop.
+
+    COST SAFETY — structural, not a promise. It passes ``user_id=None``, and in
+    ``main.run_search`` every per-user stage is gated behind
+    ``if user_id is not None``: the ``user_feed`` write and, critically,
+    ``_run_matcher_stage``, which makes up to ``MATCHER_MAX_JOBS`` PAID LLM
+    calls *per user per run*. With no user attached those stages are
+    unreachable, so this cron costs worker CPU (already running 24/7) plus
+    keyed-API quota — and never per-user LLM spend. Scoring stays on-demand,
+    where the user's own click pays for it.
+
+    ``no_notify=True``: a catalog refill belongs to nobody, so there is nobody
+    to notify.
+
+    Returns the run stats so a failure is visible in the ARQ log rather than
+    silent.
+    """
+    import logging  # noqa: PLC0415
+
+    from src.main import run_search  # noqa: PLC0415 — lazy (rule #11): heavy import
+
+    stats = await run_search(user_id=None, no_notify=True)
+    logging.getLogger(__name__).info(
+        "catalog refresh: sources=%s found=%s new=%s",
+        stats.get("sources_queried"),
+        stats.get("total_found"),
+        stats.get("new_jobs"),
+    )
+    return {
+        "sources_queried": stats.get("sources_queried", 0),
+        "total_found": stats.get("total_found", 0),
+        "new_jobs": stats.get("new_jobs", 0),
+    }
