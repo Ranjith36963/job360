@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import posthog from "posthog-js";
 import { me, logout as apiLogout, onEmailNotVerified } from "@/lib/api";
 import type { User } from "@/lib/api";
@@ -32,9 +33,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchingRef = useRef(false);
+
+  // Last resolved account id. `undefined` = never resolved (first load);
+  // `null` = resolved as signed-out. Distinguishing the two matters: only a
+  // change between two KNOWN values means the account actually switched.
+  const lastUserIdRef = useRef<string | null | undefined>(undefined);
 
   // Keep the latest pathname readable from the (stable) notifier callback
   // without re-subscribing on every navigation.
@@ -46,6 +53,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchingRef.current = true;
     try {
       const data = await me();
+      const nextId = data?.id ?? null;
+      const prevId = lastUserIdRef.current;
+      lastUserIdRef.current = nextId;
+
+      // WHOSE data is cached? A browser profile has ONE cookie jar, so signing
+      // into a second account in ANOTHER tab replaces the session cookie for
+      // every tab. Without this, the stale tab keeps rendering the previous
+      // account's jobs and profile while the cookie underneath belongs to
+      // someone else — and a click there is sent with the NEW cookie, i.e. the
+      // action lands on the wrong account. Same shape covers the far more
+      // common case: the session expires or is revoked elsewhere.
+      //
+      // `undefined` means "not resolved yet" (first load, nothing cached), so
+      // only a CHANGE between two known values wipes the cache. Same id must
+      // not, or every alt-tab focus would trigger a full refetch storm.
+      const identityChanged = prevId !== undefined && prevId !== nextId;
+      if (identityChanged) {
+        queryClient.clear();
+        // Stop attributing the new account's events to the old identity.
+        if (posthog.__loaded) {
+          posthog.reset();
+        }
+      }
+
       setUser(data);
       // Identify the user in PostHog so events are linked to their account.
       if (data && posthog.__loaded) {
@@ -55,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       fetchingRef.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [queryClient]);
 
   // Initial fetch on mount
   useEffect(() => {
@@ -87,9 +118,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (posthog.__loaded) {
       posthog.reset();
     }
+    // Drop every cached row belonging to the account that just left. Without
+    // this, signing in as someone else in the SAME tab renders the previous
+    // account's jobs and profile until each query happens to refetch.
+    queryClient.clear();
+    lastUserIdRef.current = null;
     setUser(null);
     router.push("/login");
-  }, [router]);
+  }, [router, queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, loading, logout }}>
