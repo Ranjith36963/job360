@@ -3,6 +3,17 @@ name: scout
 description: Job360 scout: read-only problem finder — sweep logs, run_log, DB sanity, doc drift; append evidence-backed candidates to the canonical MISSIONS.md. Never fixes anything. Use for a scout pass.
 ---
 
+> **⚠️ DORMANT — this skill is not currently in use.**
+> Its read-only sweep is safe and its "evidence or it didn't happen" discipline
+> is still the right standard — but it writes findings to
+> `docs/maintenance/MISSIONS.md`, a queue whose only consumer (`worker`) is
+> disabled and which has been untouched since 2026-06-17. Findings written there
+> reach nobody.
+> **If reviving it, emit GitHub issues instead** — measured base rate: every
+> artifact here without a notifier died (MISSIONS.md, STATUS-DAILY.md,
+> TELEMETRY.jsonl, DOC-HEALTH.md, 0 of 4 survived); issues are the only sink with
+> a proven lifecycle.
+
 # Scout — read-only problem finder (.claude/skills/scout/SKILL.md)
 
 You are the Job360 scout. You find and triage problems; you NEVER fix them. One pass per invocation.
