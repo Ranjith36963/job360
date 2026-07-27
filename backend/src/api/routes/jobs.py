@@ -1,5 +1,6 @@
 """Jobs list, export, and detail endpoints."""
 
+import asyncio
 import csv
 import io
 import json
@@ -471,7 +472,17 @@ async def list_jobs(
             from src.services.profile.storage import load_profile  # noqa: PLC0415 — lazy
 
             hybrid_profile = load_profile(user.id)
-        all_rows = _maybe_apply_hybrid_reorder(all_rows, profile=hybrid_profile)
+        # WORKER THREAD (same reasoning as main.py's scoring hand-off): the
+        # hybrid path is CPU-bound — a Chroma query plus a cross-encoder that
+        # scores up to 50 (profile, job) PAIRS one by one. Measured in prod at
+        # `Batches: 2/2 [00:14<00:00, 7.48s/it]`. Run inline it froze the whole
+        # event loop for the duration, so ONE user opening the dashboard stalled
+        # every other request in the process — including the 3-second
+        # /api/search/{id}/status polls, which is how a slow reorder turned into
+        # "Lost contact with the server while searching".
+        all_rows = await asyncio.to_thread(
+            _maybe_apply_hybrid_reorder, all_rows, profile=hybrid_profile
+        )
 
     # Filter by hours cutoff
     if hours is not None:

@@ -93,14 +93,25 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             status = response.status_code
             return response
         finally:
+            duration_ms = round((time.perf_counter() - start) * 1000, 1)
+            # The timing MUST be in the message, not only in `extra`. The console
+            # handler renders `%(message)s`, so an extras-only duration is
+            # invisible wherever logs are actually read — `railway logs` showed
+            # nothing but a bare "http_request" for every request, which made
+            # "the site feels slow" impossible to answer. `extra` is kept for the
+            # structured JSON stream; the message carries it for humans.
             _access_log.info(
-                "http_request",
+                "%s %s %s %sms",
+                request.method,
+                request.url.path,
+                status,
+                duration_ms,
                 extra={
                     "event": "http_request",
                     "method": request.method,
                     "path": request.url.path,
                     "status_code": status,
-                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "duration_ms": duration_ms,
                     "request_id": get_request_id(),
                     # WHO made the request — set on request.state by require_user /
                     # optional_user (None for anonymous routes). Left unmasked: an

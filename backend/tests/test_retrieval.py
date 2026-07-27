@@ -233,6 +233,59 @@ def test_cross_encoder_rerank_empty_candidates():
     assert cross_encoder_rerank("query", []) == []
 
 
+def test_cross_encoder_rerank_caches_pairs_across_calls():
+    """A (query, text) pair is scored ONCE, not once per request.
+
+    The cross-encoder was re-scoring the same profile against the same jobs on
+    every dashboard load — ~7.5 s per batch, on the request path. Both sides of
+    the pair are stable (profile text, immutable catalog row), so the second
+    call must do NO model work at all, and a partially-overlapping call must
+    score only the genuinely new pairs.
+    """
+    from src.services import retrieval as retrieval_mod
+
+    retrieval_mod.reset_cross_encoder_for_testing()  # also clears the pair cache
+
+    # Route through the real (cached) path by installing the fake as the
+    # module-level encoder — encoder_factory deliberately BYPASSES the cache.
+    enc = _FakeCrossEncoder()
+    retrieval_mod._CROSS_ENCODER = enc
+
+    candidates = [(1, "alpha"), (2, "beta"), (3, "gamma")]
+
+    first = cross_encoder_rerank("q", candidates, top_n=10)
+    assert len(enc.calls) == 3, "first call must score every pair"
+
+    second = cross_encoder_rerank("q", candidates, top_n=10)
+    assert len(enc.calls) == 3, "second call must score NOTHING — all cached"
+    assert [r[0] for r in second] == [r[0] for r in first], "cached order must match"
+
+    # Partial overlap: two known pairs + one new one → only the new one runs.
+    cross_encoder_rerank("q", candidates[:2] + [(4, "delta")], top_n=10)
+    assert len(enc.calls) == 4, "only the unseen pair should be scored"
+
+    # A different query is a different pair — cache must not answer for it.
+    cross_encoder_rerank("other query", candidates, top_n=10)
+    assert len(enc.calls) == 7, "changing the query must re-score all pairs"
+
+    retrieval_mod.reset_cross_encoder_for_testing()
+
+
+def test_cross_encoder_rerank_factory_path_is_not_cached():
+    """Injected stubs must never share a cache — tests would leak into each other."""
+    from src.services import retrieval as retrieval_mod
+
+    retrieval_mod.reset_cross_encoder_for_testing()
+    candidates = [(1, "alpha"), (2, "beta")]
+
+    a = _FakeCrossEncoder()
+    cross_encoder_rerank("q", candidates, top_n=10, encoder_factory=lambda: a)
+    b = _FakeCrossEncoder()
+    cross_encoder_rerank("q", candidates, top_n=10, encoder_factory=lambda: b)
+
+    assert len(a.calls) == 2 and len(b.calls) == 2, "each stub scores its own pairs"
+
+
 def test_cross_encoder_rerank_preserves_candidate_ids():
     """Item IDs (first tuple element) must be returned verbatim — no
     implicit int conversion, no reordering by id."""

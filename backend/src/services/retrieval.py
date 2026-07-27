@@ -14,9 +14,11 @@ not installed), the retrieval gracefully falls back to keyword-only.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import re
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any, Callable, Optional
 
@@ -293,6 +295,45 @@ def reset_cross_encoder_for_testing() -> None:
     """Discard the cached cross-encoder — tests call this between swaps."""
     global _CROSS_ENCODER
     _CROSS_ENCODER = None
+    _PAIR_SCORE_CACHE.clear()
+
+
+# --- (query, candidate) score cache -----------------------------------------
+#
+# A cross-encoder score is a pure function of the (query, text) pair, and BOTH
+# sides are stable in this product: `query` is built from the user's profile
+# (changes only when the profile does) and `text` comes from a catalog row
+# (immutable once inserted). So every dashboard load was paying to recompute
+# scores it had already computed — measured in prod at ~7.5 s per batch of
+# pairs, on the request path.
+#
+# Cached per PAIR rather than per result set, so a partial overlap still pays
+# off: refreshing a feed where 45 of 50 jobs are unchanged now scores only the
+# 5 new ones. Keys are digests, not the texts themselves, to bound memory.
+# Process-local and cleared on restart — a model swap can never serve stale
+# scores, because a new process starts with an empty cache.
+_PAIR_SCORE_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
+_PAIR_CACHE_MAX = 4096
+
+
+def _pair_key(query: str, text: str) -> tuple[str, str]:
+    """Digest both sides of the pair — this is a cache key, never a credential.
+
+    blake2b rather than sha1/md5: not flagged by the security linters (S324),
+    faster than sha256, and an 8-byte digest is far more collision-headroom
+    than a few-thousand-entry cache needs.
+    """
+    return (
+        hashlib.blake2b(query.encode("utf-8", "replace"), digest_size=8).hexdigest(),
+        hashlib.blake2b(text.encode("utf-8", "replace"), digest_size=8).hexdigest(),
+    )
+
+
+def _cache_put(key: tuple[str, str], score: float) -> None:
+    _PAIR_SCORE_CACHE[key] = score
+    _PAIR_SCORE_CACHE.move_to_end(key)
+    while len(_PAIR_SCORE_CACHE) > _PAIR_CACHE_MAX:
+        _PAIR_SCORE_CACHE.popitem(last=False)
 
 
 def cross_encoder_rerank(
@@ -329,14 +370,36 @@ def cross_encoder_rerank(
 
     # `Any`: the encoder is a duck-typed CrossEncoder-compatible object (the
     # real class is lazily imported, tests inject a stub) exposing `.predict`.
-    encoder: Any = encoder_factory() if encoder_factory else _load_cross_encoder()
-    pairs = [(query, text) for _id, text in head]
-    scores = encoder.predict(pairs)
-    # Normalise to a plain Python list[float] in case a numpy array comes back.
-    try:
-        scores = [float(s) for s in scores]
-    except TypeError:
-        scores = [float(scores)]
+    #
+    # The cache is BYPASSED whenever a factory is injected: tests swap stub
+    # encoders that return different scores for the same pair, so a shared
+    # cache would leak one test's answers into the next.
+    use_cache = encoder_factory is None
+    keys = [_pair_key(query, text) for _id, text in head] if use_cache else []
+
+    if use_cache:
+        misses = [i for i, k in enumerate(keys) if k not in _PAIR_SCORE_CACHE]
+    else:
+        misses = list(range(len(head)))
+
+    fresh: list[float] = []
+    if misses:
+        encoder: Any = encoder_factory() if encoder_factory else _load_cross_encoder()
+        pairs = [(query, head[i][1]) for i in misses]
+        fresh = encoder.predict(pairs)
+        # Normalise to a plain Python list[float] in case a numpy array comes back.
+        try:
+            fresh = [float(s) for s in fresh]
+        except TypeError:
+            fresh = [float(fresh)]
+        if use_cache:
+            for i, score in zip(misses, fresh):
+                _cache_put(keys[i], score)
+
+    if use_cache:
+        scores = [_PAIR_SCORE_CACHE[k] for k in keys]
+    else:
+        scores = fresh
 
     reranked_head = sorted(
         ((item_id, score) for (item_id, _text), score in zip(head, scores)),
