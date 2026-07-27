@@ -9,6 +9,10 @@ name: Security scanning
 # which is the only trustworthy source here (a local pip-audit reads whatever
 # else shares your interpreter):
 #   npm audit  — "found 0 vulnerabilities"
+#     UPDATE (2026-07-30): GHSA-mh99-v99m-4gvg (brace-expansion DoS) landed and
+#     turned this red. Production deps are FIXED (override -> brace-expansion
+#     5.0.8) and still blocking; the dev-tooling half has no upstream patch and
+#     is split into a separate informational step. Full reasoning at that step.
 #   gitleaks   — "no leaks found"
 #   bandit     — "No issues identified" (22,619 lines)
 #   pip-audit  — was 11 CVEs, ALL in aiohttp 3.13.5. Now ZERO: aiohttp is
@@ -85,8 +89,41 @@ jobs:
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci
-      - name: Audit frontend dependencies (high+)
+
+      # BLOCKING — production dependencies, i.e. everything that actually ships
+      # to a user's browser/server. This must stay green.
+      #
+      # GHSA-mh99-v99m-4gvg (brace-expansion DoS) reached us here through
+      # @sentry/bundler-plugin-core and @ts-morph/common, both on the 5.x line —
+      # fixed by pinning `brace-expansion@^5.0.0` -> `^5.0.8` in frontend
+      # package.json `overrides`. Prod is clean; keep it that way.
+      - name: Audit production dependencies (high+)
         working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+      # NON-BLOCKING — dev/build tooling only (never shipped). Deliberately split
+      # out rather than waived silently, so the finding stays visible.
+      #
+      # What blocks the fix: the SAME advisory also hits brace-expansion 1.x/2.x,
+      # and the ONLY patched release is 5.0.8 — there is no 1.x/2.x patch. Our 1.x
+      # copy is pulled by eslint-plugin-jsx-a11y@6.10.2 (the latest release), which
+      # pins `minimatch: ^3.1.2`; minimatch 3 does `require('brace-expansion')`
+      # expecting a bare function, so forcing 5.x on it dies with
+      # "TypeError: expand is not a function" and ESLint cannot run at all
+      # (verified locally, both via a blanket brace-expansion override and via a
+      # minimatch@10 override — each broke lint).
+      #
+      # What would unblock it: eslint-plugin-jsx-a11y releasing with minimatch >=10
+      # (or eslint-config-next dropping it), OR a backported brace-expansion 1.x/2.x
+      # patch. Re-check this step on any eslint/next major bump — when it passes,
+      # delete it and drop `--omit=dev` from the blocking step above.
+      #
+      # This is NOT a `continue-on-error` on the real gate: the shipping surface is
+      # audited strictly above. Blocking on an unfixable dev-tool CVE would pin CI
+      # permanently red, which just teaches everyone to ignore it.
+      - name: Audit dev dependencies (high+, informational)
+        working-directory: frontend
+        continue-on-error: true
         run: npm audit --audit-level=high
 
   gitleaks:
