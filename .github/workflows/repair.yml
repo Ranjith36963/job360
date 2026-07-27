@@ -199,6 +199,15 @@ jobs:
         id: cage
         run: |
           set -euo pipefail
+          # Remove OUR OWN scratch file before looking at the tree. The capture
+          # step writes agent-test-output.txt to the repo root so the agent can
+          # Read it without a shell — and then the cage below saw an untracked
+          # file outside backend/frontend and refused to ship. Every run. The
+          # workflow was rejecting itself: the loop could never have shipped a
+          # fix no matter what the agent did. Proven by the first real run,
+          # 30306004722, which died here on `agent-test-output.txt` alone.
+          # Deleting it by exact name keeps the cage strict for everything else.
+          rm -f agent-test-output.txt
           changed=$(git status --porcelain | sed 's/^...//' | sed 's/.* -> //')
           if [ -z "$changed" ]; then
             echo "changed=" >> "$GITHUB_OUTPUT"
@@ -272,11 +281,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          # Say WHICH gate stopped it. The old message listed three guesses and
+          # made the reader open the run to find out — which is how a run that
+          # could NEVER have shipped looked like an ordinary "agent couldn't fix
+          # it" for as long as it existed. Each state is knowable here, so state it.
           {
             echo "The repair loop ran but did **not** open a PR."
             echo
+            if [ "${{ steps.cage.outcome }}" = "failure" ]; then
+              echo "**Stopped at: the path cage.** It edited files outside \`backend/\`+\`frontend/\`."
+              echo "Nothing was shipped. This is the guard working, not a fix failing."
+            elif [ -z "${{ steps.cage.outputs.changed }}" ]; then
+              echo "**Stopped at: no edits.** The agent read the failure and changed nothing —"
+              echo "it could not find a fix. The issue may need a human, or a sharper description."
+            elif [ "${{ steps.verify.outcome }}" = "failure" ]; then
+              echo "**Stopped at: independent verification.** It made edits, but the suite the"
+              echo "workflow re-ran itself was still red. Its own claim of success was not trusted."
+            else
+              echo "**Stopped after verification** — see the run for which step failed."
+            fi
+            echo
             echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "- Likely: the agent could not fix it, its tests stayed red, or it tried to edit outside its cage."
             echo
             echo "Re-apply the \`agent:fix\` label to try again, or take it manually."
           } > failed.md
