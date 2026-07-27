@@ -135,7 +135,17 @@ jobs:
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > body.md
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file body.md --label harness
+              new=$(gh issue create --title "$title" --body-file body.md --label harness)
+              # Hand off to the triage loop EXPLICITLY. An issue opened with the
+              # automatic GITHUB_TOKEN raises no `issues: opened` run — GitHub
+              # blocks that to stop workflows recursing — so relying on the event
+              # would leave every alarm undiagnosed. `workflow_dispatch` is the
+              # documented way back in. A failure here must not sink the alarm
+              # itself: a raised-but-undiagnosed issue still reaches a human,
+              # which is the whole point.
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
             else
               gh issue comment "$num" --body-file body.md
             fi
@@ -194,7 +204,10 @@ jobs:
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > wbody.md
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file wbody.md --label harness
+              new=$(gh issue create --title "$title" --body-file wbody.md --label harness)
+              n="${new##*/}"   # same GITHUB_TOKEN recursion block as above
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
             else
               gh issue comment "$num" --body-file wbody.md
             fi
