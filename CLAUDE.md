@@ -16,10 +16,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 If you have time for nothing else: **read this section, the Hard Rules index below, and the Commands section**. Then dive into the task.
 
+> ## 🔴 `main` IS PRODUCTION. MERGING SHIPS TO REAL USERS.
+>
+> Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge auto-deploys** — no manual step, no staging gate. Proven 2026-07-27 (four deploys fired inside 70 seconds as PRs landed), and re-provable any time:
+>
+> ```bash
+> railway deployment list --service backend --json   # read meta.commitHash + meta.branch
+> ```
+>
+> `/api/health` is **useless** for this — it returns a hardcoded `"version": "1.0.0"` with no commit SHA, so the deploy API is the only trustworthy source. Never conclude "prod is running X" from a timestamp alone; a failed deploy or rollback looks identical.
+>
+> **What this means for you:**
+> - Never merge "to tidy up" — merging is a release. Land it because it is ready.
+> - **When the owner reports a problem, he is describing LIVE PRODUCTION.** Not the repo, not your worktree. Diagnose against prod first (below), then read code.
+> - Before asserting how prod behaves, check that prod is on the commit you are reading. Several sessions merge into this repo; `main` moves under you between questions.
+
+- **You can read production directly — do it, don't ask the owner to paste things.** All verified working 2026-07-26/27:
+  | Source | How |
+  |---|---|
+  | Errors | Sentry MCP — `organizationSlug: "job360"`, `regionUrl: "https://de.sentry.io"` |
+  | Logs (5 services: backend, frontend, worker, Postgres, Redis) | `railway logs --service <name>` from the repo root |
+  | Database | `railway run -s Postgres python <script>` using **`DATABASE_PUBLIC_URL`** (plain `DATABASE_URL` points at `postgres.railway.internal`, which only resolves *inside* Railway) |
+  | Product analytics | PostHog MCP (EU) |
+  | Deploys | `railway deployment list --service <svc> --json` |
+
+  **Two traps that cost real time:** `railway logs` *streams*, so piping it to `tail` returns nothing and looks exactly like "no access" — always `| head -N` with a `timeout`. And **never print secret values** (`railway variables` once dumped a live API key into a transcript); filter to key NAMES only.
+
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (~1,716 collected, 2 live tests deselected — always defer to the runtime collected count, this number drifts). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s. **The suite runs against a real Postgres** via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py` (schema-per-test isolation), not SQLite — see the DB note below.
 - **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
-- **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3** — `src/repositories/pg.py` is the aiosqlite-shaped driver; the old SQLite path is gone) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`. **Live on Railway** since 2026-07-02.
+- **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3** — `src/repositories/pg.py` is the aiosqlite-shaped driver; the old SQLite path is gone) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`. **Live on Railway** since 2026-07-02 at **job360.uk**, auto-deployed from `main` (see the banner above). Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but only 46 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
 
 ## Hard Rules (load-bearing, numbered, do not violate)
