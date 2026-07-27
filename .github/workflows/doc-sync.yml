@@ -179,16 +179,47 @@ jobs:
           git config user.email "loop3@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
+          # ── Knowledge-safety cage ──────────────────────────────────────────
+          # The docs-only check above proves only MARKDOWN changed. It does NOT
+          # prove KNOWLEDGE survived: `git status --porcelain` prints
+          # "D  docs/x.md" for a DELETION, and `awk '{print $2}'` yields
+          # "docs/x.md" — which ends in .md, so nonmd=0 and it shipped.
+          # Verified on a clean tree 2026-07-26: deleting a decision doc gave
+          # nonmd=0, i.e. the old code would have squash-merged the deletion of
+          # a recorded decision (scraping stance, MFA won't-build, audit
+          # history) straight to main with NO human review.
+          # Rule: an LLM may EDIT docs freely; it may never DESTROY one
+          # unreviewed. Deletes/renames still get a PR — they just don't
+          # auto-merge. Structural (dumb git plumbing), not an LLM promise.
+          destructive=$(git diff --cached --diff-filter=DR --name-only)
           git commit -m "docs: auto-sync (Loop 3) — drift fixed by CI fixer run ${{ github.run_id }}"
           git push -u origin "$branch"
           python scripts/doc_sync_check.py > after.md 2>&1 || true
+          if [ -n "$destructive" ]; then
+            { echo "> **HUMAN REVIEW REQUIRED — this PR DELETES or RENAMES docs, so it was NOT auto-merged.**"
+              echo ">"
+              echo "> Files removed/renamed:"
+              echo '> ```'
+              echo "$destructive" | sed 's/^/> /'
+              echo '> ```'
+              echo
+              cat after.md
+            } > pr-body.md
+          else
+            cp after.md pr-body.md
+          fi
           gh pr create --base main --head "$branch" \
             --title "docs: auto-sync (Loop 3)" \
-            --body-file after.md
-          # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
-          # The docs-only assert above IS the gate — merge directly.
-          gh pr merge "$branch" --squash --delete-branch
-          echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
+            --body-file pr-body.md
+          if [ -n "$destructive" ]; then
+            echo "::warning::fixer deleted/renamed doc(s) — PR left OPEN for human review: $(echo "$destructive" | tr '\n' ' ')"
+            echo "docs PR opened but NOT merged (deletes/renames need a human): $(echo "$destructive" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
+            # The docs-only + no-destruction asserts above ARE the gate.
+            gh pr merge "$branch" --squash --delete-branch
+            echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           # Close the drift issue NOW, in this run. Previously the issue was
           # only closed by the NEXT scheduled run's drift==0 branch, so a

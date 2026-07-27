@@ -10,6 +10,7 @@ import {
   Trophy,
   XCircle,
   AlertTriangle,
+  Ghost,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -136,11 +137,26 @@ export default function PipelinePage() {
       }
       const label = stage.charAt(0).toUpperCase() + stage.slice(1);
       toast.success(`Moved to ${label}`);
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to advance stage";
       setError(msg);
       toast.error(msg);
+      return false;
     }
+  }
+
+  // ---- Mark as ghosted (no reply) ----
+  // The reminder banner already knows which applications went silent — this
+  // turns that observation into a recorded first-party signal instead of
+  // discarding it. "ghosted" is deliberately NOT "rejected": rejected means the
+  // employer replied no; ghosted means they never replied at all, which is the
+  // only direct evidence that a posting took applications and answered nobody.
+  async function handleMarkGhosted(jobId: number) {
+    const ok = await handleAdvance(jobId, "ghosted");
+    // Only drop it from the reminder list if the write actually landed —
+    // otherwise the user loses the row and the signal with it.
+    if (ok) setReminders((prev) => prev.filter((r) => r.job_id !== jobId));
   }
 
   // ---- Total count ----
@@ -266,6 +282,15 @@ export default function PipelinePage() {
                     <span className="text-muted-foreground/60 ml-auto font-mono">
                       {r.stage}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => handleMarkGhosted(r.job_id)}
+                      title="They never replied — record this as a ghosted application"
+                      className="flex-shrink-0 inline-flex items-center gap-1 rounded-md border border-zinc-500/25 bg-zinc-500/10 px-2 py-0.5 font-medium text-zinc-300 transition-colors hover:bg-zinc-500/20 hover:text-zinc-100"
+                    >
+                      <Ghost className="h-3 w-3" />
+                      No reply
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -28,8 +28,27 @@ import type { JobFilters } from "@/lib/types";
 // Defaults
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimum match score applied before the user touches anything.
+ *
+ * Was 30, which was calibrated against profiles from before
+ * `merge_cv_and_preferences` stopped folding the whole CV into
+ * `preferences.additional_skills`. Those legacy profiles scored every CV skill
+ * as `user_declared` (weight 3.0, the top tier), which floored their scores so
+ * high that EVERY job cleared 30.
+ *
+ * Measured in prod 2026-07-26, two accounts with the same CV:
+ *   legacy profile : 103 feed rows -> 103 at >=30   (nothing is ever filtered)
+ *   current profile: 104 feed rows ->  13 at >=30, 65 at >=20, 103 at >=10
+ *
+ * So a 30 default hides 87% of the feed from every NEW user — the product
+ * looks empty on day one. 20 keeps a real filter (drops the weakest ~38%)
+ * while leaving a populated feed. Change this one constant to re-tune.
+ */
+export const DEFAULT_MIN_SCORE = 20;
+
 const DEFAULT_FILTERS: JobFilters = {
-  min_score: 30,
+  min_score: DEFAULT_MIN_SCORE,
   source: undefined,
   visa_only: false,
   visa_sponsorship: undefined,

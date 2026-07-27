@@ -5,6 +5,14 @@
 > Nothing else is allowed to exist. This file defines how that stays true
 > while the codebase changes every day.
 
+> **Deletion authority (2026-07-27):** what may be removed, and by whom, is
+> governed by [`DELETION-POLICY.md`](DELETION-POLICY.md) — it wins over this
+> file on any deletion question. The rules below stay correct and unchanged:
+> archiving an implemented plan (§2) is that policy's **Lane B** — archived *is*
+> the record, so "never deleted" still holds for archived plans. "Never silently
+> delete an intention" (§4) is **Lane C** — unshipped plans remain human-only,
+> permanently.
+
 ## 1. Doc taxonomy — every doc gets exactly ONE type
 
 | Type | Examples | Rule |

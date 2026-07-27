@@ -447,6 +447,31 @@ async def _enqueue_notifications(
         return 0
 
 
+def _encode_and_upsert(
+    vix: Any,
+    encode_job: Any,
+    job: Job,
+    enrichment: Any,
+    job_id: int,
+) -> None:
+    """Embed one job and push it into the vector index — the SYNCHRONOUS pair.
+
+    Split out purely so ``run_search`` can hand it to ``asyncio.to_thread``.
+    ``encode_job`` runs the sentence-transformer (~7.5 s per batch in prod) and
+    ``vix.upsert`` writes to Chroma; both block. Keeping them together in one
+    thread hop avoids paying the hand-off twice per job.
+
+    Typed ``Any`` deliberately: the heavy modules are lazy-imported inside
+    ``run_search`` (rules #11/#16), so their real types are not importable here.
+    """
+    vec = encode_job(job, enrichment)
+    vix.upsert(
+        job_id=job_id,
+        vector=vec,
+        metadata={"title": job.title, "company": job.company},
+    )
+
+
 def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
     """Score every job, extract deadlines, dedup, and score-filter — the whole
     SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
@@ -934,11 +959,18 @@ async def run_search(
                                 enrichment = await load_enrichment(conn, job_id)
                             except Exception:
                                 enrichment = None
-                            vec = encode_job(j, enrichment)
-                            vix.upsert(
-                                job_id=job_id,
-                                vector=vec,
-                                metadata={"title": j.title, "company": j.company},
+                            # WORKER THREAD — encode_job() runs the sentence
+                            # transformer, and vix.upsert() writes to Chroma;
+                            # both are synchronous and CPU-bound. Inline, this
+                            # loop blocked the event loop once per new job
+                            # (prod: ~7.5s per encode batch), so a run that
+                            # inserted enough jobs starved the 3-second
+                            # /api/search/{id}/status polls for over a minute
+                            # and the dashboard reported "Lost contact with the
+                            # server while searching". Same fix as the scoring
+                            # hand-off at the top of this function.
+                            await asyncio.to_thread(
+                                _encode_and_upsert, vix, encode_job, j, enrichment, job_id
                             )
                             await conn.execute(
                                 "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, ?) "
