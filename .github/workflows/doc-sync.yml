@@ -133,6 +133,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v7
+        if: steps.token.outputs.have == 'true'
+        with:
+          python-version: "3.12"
+
+      # Run the checker HERE and hand the agent a FILE. drift.md from the
+      # drift-check job lives on a different runner, so it is not available —
+      # and this is what lets the agent hold zero Bash (see the security note
+      # on claude_args below).
+      - name: Capture the drift report for the agent to read
+        if: steps.token.outputs.have == 'true'
+        run: |
+          set +e
+          python scripts/doc_sync_check.py > drift.md 2>&1
+          set -e
+          echo "--- captured $(wc -l < drift.md) lines of drift ---"
+
       - name: Claude edits the docs (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
@@ -143,16 +160,25 @@ jobs:
             You are the automated Tier-2 doc fixer (Loop 3). Fix the files in
             the current workspace ONLY — do NOT run git, do NOT push, do NOT
             open PRs; a later workflow step ships your edits.
-            - Run `python scripts/doc_sync_check.py` first; fix EVERY drift
-              row it reports (numbers, stale phrases) in the LIVING docs.
+            - You have NO shell (deliberate — see the security note below the
+              prompt). Read `drift.md` in the repo root: the workflow just ran
+              the checker and captured its report there. Fix EVERY drift row it
+              lists (numbers, stale phrases) in the LIVING docs.
             - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
               stamp on line 2 of all six LIVING docs (today's date, UTC).
             - If a doc claims something the code does not do, add the gap to
               docs/maintenance/PARKED.md — and leave that source doc untouched.
             - Edit ONLY *.md files. Never touch code, configs, or workflows.
-            - Finish by re-running `python scripts/doc_sync_check.py`; keep
-              fixing until only findings you cannot fix in markdown remain.
-          claude_args: --allowedTools Bash(python:*),Edit,Write,Read,Glob,Grep
+            - Work through every row in drift.md. The workflow re-runs the
+              checker immediately after you finish and reports what remains, so
+              fix what markdown can fix and leave the rest.
+          # SECURITY — NO Bash. `Bash(python:*)` was arbitrary code execution in
+          # a job holding a write-scoped GITHUB_TOKEN and a personal
+          # CLAUDE_CODE_OAUTH_TOKEN, on a PUBLIC repo. One
+          # `python -c "...os.environ..."` exfiltrates both. The checker now runs
+          # in a deterministic step above and the agent reads its output as a
+          # file, so nothing dangerous is reachable from the model.
+          claude_args: --allowedTools Edit,Write,Read,Glob,Grep
 
       - name: Upload Claude transcript (always — for diagnosis)
         if: always() && steps.token.outputs.have == 'true'
