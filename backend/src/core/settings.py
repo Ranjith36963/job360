@@ -99,7 +99,18 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
 
 # Search
+# MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
+# threshold used by the CLI viewer and sent by the dashboard as ``min_score``.
+# It is NOT a storage floor: filtering at read time means a job can be recovered
+# by lowering the filter, and a score that drifts (recency decays up to 10 pts
+# as a posting ages) no longer silently destroys the row.
 MIN_MATCH_SCORE = 30
+# MIN_STORE_SCORE is the *storage* floor — the spam cut. A job must beat this to
+# be persisted/fed at all. Deliberately far below MIN_MATCH_SCORE: the pipeline
+# used to hard-DELETE everything under 30 before it was ever stored, so a thin
+# profile (or a job that simply aged past the recency bands) lost jobs forever
+# with no way to get them back. Store broadly, filter at read time.
+MIN_STORE_SCORE = int(os.getenv("MIN_STORE_SCORE", "1"))
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
 

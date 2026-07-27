@@ -20,6 +20,7 @@ from src.core.settings import (
     JOOBLE_API_KEY,
     JSEARCH_API_KEY,
     MIN_MATCH_SCORE,
+    MIN_STORE_SCORE,
     REED_API_KEY,
     REPORTS_DIR,
     REQUEST_TIMEOUT,
@@ -511,9 +512,25 @@ def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]
 
     unique_jobs = deduplicate(all_jobs)
     logger.info("After dedup: %s unique jobs", len(unique_jobs))
-    unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
-    logger.info("After score filter (>=%s): %s jobs", MIN_MATCH_SCORE, len(unique_jobs))
-    return unique_jobs
+    # Storage floor, NOT the display floor. This used to drop everything under
+    # MIN_MATCH_SCORE (30) *before* the job was ever persisted, which meant:
+    #   - a thin extracted profile scored most jobs low -> they were destroyed,
+    #     so the user was permanently stuck with a handful of results;
+    #   - recency decays up to 10 pts as a posting ages, so a job that scored 35
+    #     one week scored 25 the next and silently vanished.
+    # Both are unrecoverable data loss for a *ranked feed* product, where ranking
+    # already handles precision. Store broadly above a spam cut; the dashboard
+    # and CLI still default to min_score=MIN_MATCH_SCORE at READ time.
+    kept = [j for j in unique_jobs if (j.match_score or 0) >= MIN_STORE_SCORE]
+    logger.info(
+        "After store floor (>=%s): %s jobs kept, %s dropped as spam "
+        "(display floor is %s, applied at read time)",
+        MIN_STORE_SCORE,
+        len(kept),
+        len(unique_jobs) - len(kept),
+        MIN_MATCH_SCORE,
+    )
+    return kept
 
 
 async def run_search(
@@ -921,6 +938,26 @@ async def run_search(
                     await _enqueue_notifications(
                         conn, user_id, _written_for_notify, enqueue
                     )
+
+            # Catalog backfill — make a search a READ over the shared catalog,
+            # not just a crawl. The block above only feeds jobs THIS run fetched;
+            # the shared `jobs` table is filled by every user's runs, and none of
+            # those were ever offered to this user unless their own crawl happened
+            # to re-fetch the same posting. That is why two accounts with the same
+            # CV diverged (37 jobs vs 4) purely on how often each had searched.
+            #
+            # Runs even when `unique_jobs` is empty — a run that fetched nothing
+            # (dead source, exhausted API quota) is exactly when the user most
+            # needs the catalog. Never allowed to fail the run.
+            if user_id is not None:
+                try:
+                    from src.services.rescore import (  # noqa: PLC0415 — import cycle
+                        backfill_feed_from_catalog,
+                    )
+
+                    await backfill_feed_from_catalog(user_id, db)
+                except Exception as e:  # noqa: BLE001 — best-effort enrichment of the feed
+                    logger.warning("catalog backfill failed for user %s: %s", user_id, e)
 
             # Funnel -> judge (LLM matcher). Per-user, post-feed-write so the
             # verdict UPDATE always finds its user_feed row. Default OFF.

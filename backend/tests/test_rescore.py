@@ -624,6 +624,124 @@ def test_score_catalog_row_sets_job_id_from_row():
     )
 
 
+@pytest.mark.asyncio
+async def test_backfill_gives_user_catalog_jobs_their_own_run_never_fetched(full_db, monkeypatch):
+    """REGRESSION (the 37-vs-4 bug): a user whose own search fetched NOTHING must
+    still receive matching jobs that are already in the shared catalog.
+
+    Before the fix, ``user_feed`` was written only from the jobs that user's own
+    run happened to fetch, so two accounts with the SAME CV diverged purely on how
+    many times each had searched (observed live: 37 jobs vs 4). The shared catalog
+    could already hold perfect matches the user would never, ever be shown.
+    """
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        # Catalog jobs some OTHER user's run put here. THIS user fetched nothing.
+        await db.insert_job(Job(
+            title="Senior Python Engineer",
+            company="Acme",
+            apply_url="https://example.com/backfill-1",
+            source="reed",
+            date_found=_NOW,
+            location="London, UK",
+            description="Senior python machine learning role. python pytorch.",
+        ))
+        await db.insert_job(Job(
+            title="ML Engineer",
+            company="Globex",
+            apply_url="https://example.com/backfill-2",
+            source="reed",
+            date_found=_NOW,
+            location="London, UK",
+            description="Machine learning engineer. python, pytorch, ml pipelines.",
+        ))
+        await db._conn.commit()
+
+        # Precondition: this user's feed is completely empty.
+        cur = await db._db.execute(
+            "SELECT COUNT(*) FROM user_feed WHERE user_id = ?", (user_id,)
+        )
+        assert (await cur.fetchone())[0] == 0, "precondition: feed must start empty"
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        written = await backfill_feed_from_catalog(user_id, db)
+
+        assert written > 0, "backfill must surface catalog jobs to a user who fetched none"
+        cur = await db._db.execute(
+            "SELECT COUNT(*) FROM user_feed WHERE user_id = ?", (user_id,)
+        )
+        assert (await cur.fetchone())[0] > 0, "user_feed must be populated from the shared catalog"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_does_not_clear_existing_llm_verdicts(full_db, monkeypatch):
+    """Cost guard: the backfill runs on EVERY search, so unlike rescore_user_feed
+    it must NOT clear LLM judge verdicts — doing so would re-pay the per-job LLM
+    bill on every single search."""
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        await db.insert_job(Job(
+            title="Senior Python Engineer",
+            company="Acme",
+            apply_url="https://example.com/verdict-keep",
+            source="reed",
+            date_found=_NOW,
+            location="London, UK",
+            description="Senior python machine learning role. python pytorch.",
+        ))
+        await db._conn.commit()
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        await backfill_feed_from_catalog(user_id, db)
+
+        # Stamp a judge verdict on the row the backfill just created.
+        cur = await db._db.execute(
+            "SELECT job_id FROM user_feed WHERE user_id = ? LIMIT 1", (user_id,)
+        )
+        row = await cur.fetchone()
+        assert row is not None, "backfill should have written at least one feed row"
+        job_id = row[0]
+        await db._db.execute(
+            "UPDATE user_feed SET llm_fit_score = 88, llm_verdict = 'strong fit' "
+            "WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        )
+        await db._db.commit()
+
+        # A second search (second backfill) must leave the verdict intact.
+        await backfill_feed_from_catalog(user_id, db)
+
+        cur = await db._db.execute(
+            "SELECT llm_fit_score, llm_verdict FROM user_feed WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        )
+        kept = await cur.fetchone()
+        assert kept[0] == 88, "backfill must not wipe llm_fit_score (would re-bill the judge)"
+        assert kept[1] == "strong fit", "backfill must not wipe llm_verdict"
+    finally:
+        await db.close()
+
+
 def test_rescore_logger_is_under_job360_namespace():
     """Regression guard: the rescore logger MUST be under the 'job360' namespace
     so setup_logging()'s handlers (stdout/file/JSON) actually emit its records.

@@ -64,6 +64,127 @@ def score_catalog_row(scorer: Any, row: dict[str, Any]) -> Any:
     return scorer.score(job)
 
 
+async def _build_user_scorer(db: Any, profile: Any) -> Any:
+    """Build the ``JobScorer`` for ``profile`` exactly as run_search does.
+
+    Shared by ``rescore_user_feed`` and ``backfill_feed_from_catalog`` so the two
+    paths can never drift apart in how they score (CLAUDE.md rules #19/#20: pass
+    BOTH user_preferences and enrichment_lookup, or neither).
+    """
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+    from src.services.job_enrichment import (  # noqa: PLC0415
+        ENRICHMENT_ENABLED,
+        _build_enrichment_lookup,
+    )
+    from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
+    from src.services.skill_matcher import JobScorer  # noqa: PLC0415
+
+    search_config = generate_search_config(profile)
+    enrichment_lookup_dict: dict[Any, Any]
+    if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
+        enrichment_lookup_dict = await _build_enrichment_lookup(db._db)
+    else:
+        enrichment_lookup_dict = {}
+    return JobScorer(
+        search_config,
+        user_preferences=profile.preferences,
+        enrichment_lookup=lambda j: enrichment_lookup_dict.get(
+            cast(int, getattr(j, "id", None))
+        ),
+    )
+
+
+async def backfill_feed_from_catalog(
+    user_id: str,
+    db: Any,
+    *,
+    profile: Any = None,
+    version: Any = None,
+) -> int:
+    """Score the SHARED catalog for ``user_id`` and upsert the matches into their feed.
+
+    Why this exists
+    ---------------
+    ``run_search`` only ever wrote the jobs *that run itself fetched* into
+    ``user_feed``. The ``jobs`` table is a shared catalog (rule #10) that other
+    users' runs keep filling — but none of those jobs were ever offered to this
+    user unless their own crawl happened to re-fetch the identical posting. Two
+    accounts with the SAME CV could therefore end up with wildly different feeds
+    (observed: 37 jobs vs 4), purely from how many times each had searched.
+    This makes a search a READ over the catalog, not just a crawl of whatever
+    the sources returned in that minute.
+
+    Deliberately NOT ``rescore_user_feed``: that helper clears and re-runs the
+    LLM judge verdicts, which would re-pay the per-job LLM cost on *every*
+    search. This one only scores + upserts, so it is safe to call every run.
+    Existing verdicts are left untouched.
+
+    Args:
+        user_id: the user whose feed to fill.
+        db: an already-open ``JobDatabase`` (reuses the caller's connection).
+        profile: optional pre-loaded profile; loaded if omitted.
+        version: optional profile-version stamp; resolved if omitted.
+
+    Returns:
+        Number of feed rows written/updated. ``0`` when there's no usable profile.
+    """
+    from src.core.settings import MIN_STORE_SCORE  # noqa: PLC0415
+    from src.services.feed import FeedService  # noqa: PLC0415
+    from src.services.profile.storage import (  # noqa: PLC0415
+        current_profile_version_id,
+        load_profile,
+    )
+
+    if profile is None:
+        profile = load_profile(user_id)
+    if not profile or not profile.is_complete:
+        return 0
+    if version is None:
+        version = current_profile_version_id(user_id)
+
+    scorer = await _build_user_scorer(db, profile)
+    rows = await db.get_catalog_jobs_for_rescore()
+
+    # recency bucket — imported lazily to dodge the main.py import cycle
+    from src.main import _recency_bucket  # noqa: PLC0415
+
+    feed = FeedService(db._db)
+    written = 0
+    for row in rows:
+        jid = row.get("id")
+        if jid is None:
+            continue
+        # Per-row guard: one malformed catalog row must never abort the backfill
+        # (mirrors run_search's per-job guard).
+        try:
+            breakdown = score_catalog_row(scorer, row)
+            ms = int(breakdown.match_score or 0)
+            if ms < MIN_STORE_SCORE:
+                continue
+            await with_write_retry(
+                lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(  # type: ignore[misc]
+                    user_id=user_id,
+                    job_id=jid,
+                    score=ms,
+                    bucket=_recency_bucket(row.get("date_found")),
+                    profile_version=version,
+                )
+            )
+            written += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("catalog backfill: skipping job %s: %s", jid, exc)
+            continue
+
+    logger.info(
+        "catalog backfill: user %s matched %s of %s catalog jobs (floor %s)",
+        user_id,
+        written,
+        len(rows),
+        MIN_STORE_SCORE,
+    )
+    return written
+
+
 async def rescore_user_feed(
     user_id: str,
     db_path: Optional[str] = None,
