@@ -85,6 +85,18 @@ def test_seniority_empty_user_experience_neutral():
     assert seniority_score(e, "") == SENIORITY_WEIGHT // 2
 
 
+def test_seniority_executive_matches_director_tier():
+    # "executive" is the top rung of the UI ladder and must land on the same
+    # rank as director/head/vp, not fall through to the neutral half-weight.
+    e = _enrichment(seniority=SeniorityLevel.DIRECTOR)
+    assert seniority_score(e, "executive") == SENIORITY_WEIGHT
+
+
+def test_seniority_executive_vs_intern_is_penalized():
+    e = _enrichment(seniority=SeniorityLevel.INTERN)
+    assert seniority_score(e, "executive") == -SENIORITY_WEIGHT
+
+
 # ---------------------------------------------------------------------------
 # Salary
 # ---------------------------------------------------------------------------
