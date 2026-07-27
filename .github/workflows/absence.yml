@@ -17,7 +17,12 @@ name: Absence check (did anything STOP?)
 on:
   schedule:
     - cron: "0 8 * * *" # 08:00 UTC daily — after the 04:00 catalog refresh
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: "FIRE DRILL — force the check red to prove the escalation path still works end to end"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,7 +62,17 @@ jobs:
         id: check
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DRILL: ${{ inputs.drill }}
         run: |
+          # FIRE DRILL: an alarm nobody has ever heard ring is not known to work.
+          # The canary below proves the DETECTOR can go red; this proves the whole
+          # ESCALATION PATH downstream of it — issue opened, triage woken, human
+          # notified — which otherwise only ever gets exercised during a real
+          # outage, i.e. the worst possible moment to discover it is broken.
+          if [ "$DRILL" = "true" ]; then
+            echo "::warning::FIRE DRILL — forcing the absence check red on purpose. Nothing is actually wrong with production."
+            export ABSENCE_MIN_JOBS=999999999
+          fi
           set +e
           python scripts/absence_check.py > absence.md 2>&1
           code=$?
@@ -96,17 +111,41 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          title="ABSENCE: something in the pipeline has stopped"
+          if [ "${{ inputs.drill }}" = "true" ]; then
+            # A drill gets its OWN title so it can never be mistaken for a real
+            # outage, and can never suppress one by colliding with its issue.
+            title="DRILL: escalation path test — not a real outage"
+          else
+            title="ABSENCE: something in the pipeline has stopped"
+          fi
           num=$(gh issue list --state open --json number,title \
                   --jq ".[] | select(.title==\"$title\") | .number" | head -1)
           if [ "${{ steps.check.outputs.stopped }}" = "1" ]; then
             {
+              if [ "${{ inputs.drill }}" = "true" ]; then
+                echo "> **This is a FIRE DRILL. Production is fine.**"
+                echo ">"
+                echo "> The absence check was forced red on purpose to prove the escalation"
+                echo "> path still works: detector -> issue -> triage -> human. Close this"
+                echo "> issue when the chain has been observed."
+                echo
+              fi
               cat absence.md
               echo
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > body.md
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file body.md --label harness
+              new=$(gh issue create --title "$title" --body-file body.md --label harness)
+              # Hand off to the triage loop EXPLICITLY. An issue opened with the
+              # automatic GITHUB_TOKEN raises no `issues: opened` run — GitHub
+              # blocks that to stop workflows recursing — so relying on the event
+              # would leave every alarm undiagnosed. `workflow_dispatch` is the
+              # documented way back in. A failure here must not sink the alarm
+              # itself: a raised-but-undiagnosed issue still reaches a human,
+              # which is the whole point.
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
             else
               gh issue comment "$num" --body-file body.md
             fi
@@ -165,7 +204,10 @@ jobs:
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > wbody.md
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file wbody.md --label harness
+              new=$(gh issue create --title "$title" --body-file wbody.md --label harness)
+              n="${new##*/}"   # same GITHUB_TOKEN recursion block as above
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
             else
               gh issue comment "$num" --body-file wbody.md
             fi
