@@ -187,7 +187,7 @@ def salary_score(
     # fully inside a wider user range scores full weight (rather than being
     # punished for being narrower than the user's appetite).
     smaller_span = min(job_span, user_span)
-    overlap_span = overlap_max - overlap_min
+    overlap_span = max(overlap_max - overlap_min, 1)
     ratio = min(overlap_span / smaller_span, 1.0)
     return int(round(max_pts * ratio))
 

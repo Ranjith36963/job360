@@ -125,6 +125,21 @@ def test_salary_missing_band_in_enrichment_neutral():
     assert salary_score(e, 60_000, 100_000) == SALARY_WEIGHT // 2
 
 
+def test_salary_single_point_band_inside_user_range_scores_full():
+    """A job quoting one exact figure (zero-width band) inside the user's
+    target range must score full weight, not zero (#156)."""
+    e = _enrichment(salary=SalaryBand(min=60_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
+    assert salary_score(e, 50_000, 70_000) == SALARY_WEIGHT
+    # Scoring worse than "unknown salary" is what actually misleads users.
+    assert salary_score(e, 50_000, 70_000) > salary_score(None, 50_000, 70_000)
+
+
+def test_salary_single_point_band_outside_user_range_still_zero():
+    """A zero-width band nowhere near the target must still score 0."""
+    e = _enrichment(salary=SalaryBand(min=10_000, currency="GBP", frequency=SalaryFrequency.ANNUAL))
+    assert salary_score(e, 50_000, 70_000) == 0
+
+
 # ---------------------------------------------------------------------------
 # Visa
 # ---------------------------------------------------------------------------
