@@ -532,3 +532,41 @@ async def test_worker_startup_populates_ctx(monkeypatch):
     assert ws.WorkerSettings.on_startup is not None
     assert ws.WorkerSettings.on_shutdown is not None
     assert ws.WorkerSettings.max_jobs == 1
+
+
+def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
+    """The scheduled refresh MUST pass user_id=None.
+
+    Cost safety, structural rather than promised: in `main.run_search` every
+    per-user stage — the `user_feed` write AND `_run_matcher_stage`, which makes
+    up to MATCHER_MAX_JOBS PAID LLM calls *per user per run* — sits behind
+    `if user_id is not None` (main.py:904, 952, 964-965). Passing None makes the
+    expensive half unreachable by construction, so a daily cron costs worker CPU
+    and keyed-API quota only, never per-user LLM spend.
+
+    It must also pass no_notify=True: a catalog refill belongs to nobody, so
+    there is no one to notify.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from src.workers import tasks as tasks_mod
+
+    captured: dict = {}
+
+    async def _fake_run_search(**kwargs):
+        captured.update(kwargs)
+        return {"total_found": 120, "new_jobs": 7, "sources_queried": 41}
+
+    async def _go():
+        with patch("src.main.run_search", _fake_run_search):
+            return await tasks_mod.refresh_catalog({})
+
+    result = asyncio.run(_go())
+
+    assert captured.get("user_id") is None, (
+        "catalog refresh passed a user_id — that re-enables the per-user LLM "
+        f"judge and makes the cron cost scale with users: {captured}"
+    )
+    assert captured.get("no_notify") is True
+    assert result["new_jobs"] == 7

@@ -35,6 +35,7 @@ from src.workers.tasks import (
     mark_ledger_sent_task,
     nightly_ghost_sweep,
     notification_tick,
+    refresh_catalog,
     score_and_ingest,
     send_bundle,
     send_notification,
@@ -150,6 +151,8 @@ class WorkerSettings:
         notification_tick,
         # Step-3 B-14 — nightly ghost-detection sweep
         nightly_ghost_sweep,
+        # The production loop: refill the shared catalog on a timer
+        refresh_catalog,
     ]
 
     # Lifecycle hooks — open/close the DB connection tasks read from ``ctx['db']``
@@ -203,6 +206,17 @@ class WorkerSettings:
 
         cron_jobs = [
             _cron(nightly_ghost_sweep, hour=2, minute=0),
+            # THE PRODUCTION LOOP. Nothing fetched jobs on a timer before
+            # this: run_search fired only on a human click, while
+            # purge_old_jobs deleted anything >30 days, so the catalog
+            # drained (prod 2026-07-27: 11 run_log rows in 25 days, 112 jobs
+            # visible of 5,827 fetched). Daily is the right cadence — jobs are
+            # posted daily and the purge window is 30 days — and it keeps
+            # keyed-API quota modest (~30 runs/month, not ~120). 04:00 UTC:
+            # clear of the 02:00 ghost sweep, done before UK morning.
+            # Cost is CPU only; user_id=None makes the paid LLM stages
+            # structurally unreachable (see refresh_catalog's docstring).
+            _cron(refresh_catalog, hour=4, minute=0),
             _cron(notification_tick, minute=set(range(0, 60, 5))),
         ]
         del _cron
