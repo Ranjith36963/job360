@@ -16,7 +16,14 @@ name: doc-sync
 
 on:
   schedule:
-    - cron: "30 6 * * *" # 06:30 UTC daily — after ci-offline (06:00, best effort)
+    # TWO GEARS, two clocks — they fail differently, so they must not share a
+    # cadence. TRUTH ("do the docs match the code?") is a binary bug that appears
+    # whenever code changes, so it runs daily. HYGIENE ("is what the agent reads
+    # usable?") is a slow trend; a daily clutter alarm would repeat the same
+    # numbers every morning and become the thing nobody opens — which is exactly
+    # how STATUS-DAILY.md died. Monthly.
+    - cron: "30 6 * * *" # 06:30 UTC daily   — TRUTH gear (drift)
+    - cron: "0 7 1 * *" # 07:00 UTC, 1st of the month — HYGIENE gear (clutter)
   workflow_dispatch: {}
   pull_request: {}
 
@@ -245,3 +252,71 @@ jobs:
       - name: Note when fixer is not configured
         if: steps.token.outputs.have != 'true'
         run: echo "CLAUDE_CODE_OAUTH_TOKEN secret not set — drift issue filed, auto-fix skipped." >> "$GITHUB_STEP_SUMMARY"
+
+  # ── HYGIENE gear (CURATE) — monthly ────────────────────────────────────────
+  # doc_sync_check.py asks "do the docs match the code?" (TRUTH).
+  # doc_clutter_check.py asks "is what the agent READS usable?" (HYGIENE).
+  # Different failure: a doc can be perfectly true and still be a 1,578-line file
+  # nothing links to — worse than missing, because an agent reads it, trusts it,
+  # and answers confidently from a corner of it (measured here: findings M2/M10
+  # sat recorded as "open" months after the code fixed them).
+  #
+  # It is a RATCHET, not a target: it fires only when the estate gets WORSE than
+  # the committed budget, never on the (large, slow-closing) gap to ideal. A
+  # check that repeats the same complaint every run is a nag, and a nag gets
+  # ignored — the way STATUS-DAILY.md died.
+  #
+  # Report-only, by design. Deleting docs is a judgement call about KNOWLEDGE,
+  # and an auto-fixer here would also ping-pong with the truth gear (which flags
+  # a moved/removed doc as drift and would put it straight back).
+  clutter-check:
+    name: Doc clutter (CURATE gear)
+    # Monthly cron only, or on demand. github.event.schedule carries the cron
+    # that actually fired, so the two gears share a workflow without colliding.
+    if: github.event.schedule == '0 7 1 * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # staleness needs real commit dates, not a shallow clone
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Measure the doc estate
+        id: clutter
+        run: |
+          set +e
+          python scripts/doc_clutter_check.py > clutter.md 2>&1
+          code=$?
+          set -e
+          cat clutter.md
+          cat clutter.md >> "$GITHUB_STEP_SUMMARY"
+          echo "regressed=$code" >> "$GITHUB_OUTPUT"
+          # exit 2 = the checker itself broke — fail LOUD, never silently green
+          [ "$code" -le 1 ] || exit "$code"
+
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Doc estate regressed (Loop 3, CURATE gear)"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ steps.clutter.outputs.regressed }}" = "1" ]; then
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file clutter.md
+            else
+              gh issue comment "$num" --body-file clutter.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" \
+              --comment "Back within budget in run ${{ github.run_id }}. (CURATE auto-close)"
+          fi
