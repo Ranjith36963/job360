@@ -111,6 +111,17 @@ jobs:
         id: base
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # Run the suite BEFORE the agent and hand it the output as a FILE. This is
+      # what lets the agent have zero Bash: it reads real failure output with the
+      # Read tool instead of being granted a shell to produce it.
+      - name: Capture the current test failures for the agent to read
+        if: steps.token.outputs.have == 'true'
+        working-directory: backend
+        continue-on-error: true # red is the normal case here — that's the input
+        run: |
+          python -m pytest -q -p no:randomly 2>&1 | tail -120 > ../agent-test-output.txt
+          echo "--- captured $(wc -l < ../agent-test-output.txt) lines ---"
+
       # ── The LLM half of the sandwich: edit + iterate. No git, no gh. ────────
       - name: Claude repairs the code (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
@@ -134,15 +145,21 @@ jobs:
               test-first where practical, never weaken a test to make it pass,
               and never delete a test to go green.
 
-            THE LOOP you must run (this is the whole job):
-              1. Read the report below and reproduce the problem.
-              2. Run the relevant tests to SEE it fail:
-                 `cd backend && python -m pytest <file> -q -p no:randomly`
-              3. Make the minimal fix.
-              4. Re-run those tests. If still red, inspect the error and fix
-                 again. Repeat until green or you are certain you cannot fix it.
-              5. Finally run the wider suite for the area you touched, so you
-                 do not trade one red for another.
+            You have NO shell. That is deliberate (see the security note in the
+            workflow): this job runs on a PUBLIC repo with a write-scoped token
+            in the environment, so the agent gets no command execution at all.
+            The workflow runs the tests for you, on both sides of your edit.
+
+            THE LOOP:
+              1. Read the report below AND `agent-test-output.txt` in the repo
+                 root — that is the REAL failing-test output, captured by the
+                 workflow moments ago. Use Read/Grep/Glob to investigate.
+              2. Find the root cause in the source.
+              3. Make the minimal fix with Edit/Write.
+              4. Re-read the code you changed and satisfy yourself it addresses
+                 the failure in that output. The workflow re-runs the full suite
+                 immediately after you finish and will refuse to ship if it is
+                 still red — so a guess costs a wasted run, not a bad merge.
 
             If you CANNOT fix it, that is a valid and useful outcome: leave the
             code unchanged and say plainly what you tried and what blocked you.
@@ -154,7 +171,19 @@ jobs:
 
             ${{ github.event.issue.body }}
             ---- END REPORT ----
-          claude_args: --allowedTools Bash(python:*),Bash(cd:*),Bash(ls:*),Bash(cat:*),Bash(npm:*),Edit,Write,Read,Glob,Grep
+          # SECURITY — NO Bash. This repo is PUBLIC and this job runs with a
+          # write-scoped GITHUB_TOKEN plus a personal CLAUDE_CODE_OAUTH_TOKEN in
+          # the environment. The previous grant, `Bash(python:*)`, was arbitrary
+          # code execution: one `python -c "...os.environ..."` exfiltrates both
+          # secrets. Anyone can open an issue on a public repo, and this agent is
+          # fed an issue BODY — and our own notify jobs paste log output (which
+          # can contain scraped, attacker-influenced text) into those bodies. So
+          # prompt injection has a real path to the prompt; the only durable
+          # defence is that there is nothing dangerous to reach.
+          # `Bash(cd:*)`/`Bash(npm:*)` were no better — `cd . && <anything>` and
+          # `npm run <anything>`/postinstall are both arbitrary execution.
+          # The agent now edits only; the workflow runs every command.
+          claude_args: --allowedTools Edit,Write,Read,Glob,Grep
 
       - name: Upload Claude transcript (always — for diagnosis)
         if: always() && steps.token.outputs.have == 'true'
