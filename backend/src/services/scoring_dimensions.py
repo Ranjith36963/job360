@@ -98,6 +98,7 @@ _USER_EXPERIENCE_RANK = {
     "director": 6,
     "head": 6,
     "vp": 6,
+    "executive": 6,
 }
 
 
