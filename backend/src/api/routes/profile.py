@@ -43,7 +43,7 @@ from src.services.profile.storage import (
     restore_profile_version,
     save_profile,
 )
-from src.services.profile.two_pass import run_two_pass_extraction
+from src.services.profile.two_pass import reset_cv_owned_fields, run_two_pass_extraction
 
 router = APIRouter(tags=["profile"])
 
@@ -285,6 +285,21 @@ def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) 
                 status_code=503,
                 detail="Could not extract any text from the CV file",
             )
+        # A NEW CV replaces the old one — it does not merge with it.
+        #
+        # This used to set raw_text alone, leaving every extracted field from the
+        # PREVIOUS CV in place. The enhance merge then fills empty scalars only
+        # and unions the lists, so uploading a different person's CV produced one
+        # profile carrying the FIRST person's name/headline/location/summary and
+        # BOTH people's skills (measured in prod: 104 skills -> 152, name
+        # unchanged). Tailored CVs are generated from this profile, so that put
+        # the wrong name on a document headed to an employer.
+        #
+        # ORDER IS THE SAFETY GUARD: every rejection above (413/415/503) raises
+        # BEFORE this line, so an unreadable or oversized upload leaves the
+        # existing profile completely untouched. We only discard the old CV once
+        # the new one is known to be readable.
+        reset_cv_owned_fields(profile.cv_data)
         profile.cv_data.raw_text = raw_text
     finally:
         try:
