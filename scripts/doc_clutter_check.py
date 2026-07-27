@@ -35,6 +35,7 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
+from datetime import date
 
 # The report contains arrows/box characters. Windows consoles default to cp1252
 # and a UnicodeEncodeError would make the checker exit 2 ("checker broke") on a
@@ -46,11 +47,14 @@ if hasattr(sys.stdout, "reconfigure"):
 # ── The ratchet. Measured 2026-07-26 — these ARE today's real numbers, so any
 # regression fires immediately. May only ever go DOWN. ───────────────────────
 BUDGET = {
-    "orphan_pct": 61,        # docs nothing links to
+    "orphan_pct": 61,        # docs nothing links to (archives excluded — see ARCHIVE_DIRS)
     "stale_pct": 51,         # untouched > STALE_DAYS
     "max_file_lines": 1578,  # largest single living doc (IMPLEMENTATION_LOG.md)
     "dupe_clusters": 7,      # same-topic doc pairs with no cross-reference
     "root_loose": 10,        # stray .md sitting in the repo root
+    "headerless_pct": 99,    # docs with no lifecycle header (137 of 138 today)
+    "stamped_stale": 1,      # STATUS.md today — fires the moment a SECOND doc lies
+    "shipped_living": 0,     # status: IMPLEMENTED docs still outside an archive dir
 }
 
 # Where we actually want to be. Shown, never enforced (see the docstring).
@@ -60,11 +64,33 @@ TARGET = {
     "max_file_lines": 400,
     "dupe_clusters": 0,
     "root_loose": 3,
+    "headerless_pct": 0,
+    "stamped_stale": 0,
+    "shipped_living": 0,
 }
 
 STALE_DAYS = 30
-# Archives and decision logs are SUPPOSED to sit still — ageing is not rot.
-EXEMPT_FROM_STALE = ("docs/_archive/", "docs/fable/AUDIT-", "docs/plans/", "CHANGELOG")
+
+# ── Archive handling — ONE definition, applied to every metric ────────────────
+# v1 treated archives three different ways: max_file_lines excluded `docs/_archive/`,
+# stale exempted it, and orphan_pct excluded NOTHING — while `docs/archive/` (the
+# dir DOC-MAINTENANCE.md actually designates) was exempt from all three.
+# An archived doc is unlinked and unedited BY DESIGN, so counting it as an orphan
+# or as stale meant archiving a shipped plan pushed the numbers toward the failure
+# budget. The ratchet fired on the exact behaviour the doc framework exists to
+# encourage. Archives are excluded from orphan/stale/size everywhere now.
+ARCHIVE_DIRS = ("docs/_archive/", "docs/archive/")
+
+# Docs that are SUPPOSED to sit still — ageing is not rot.
+EXEMPT_FROM_STALE = ARCHIVE_DIRS + ("docs/fable/AUDIT-", "docs/plans/", "CHANGELOG")
+
+# A doc that claims freshness must BE fresh. STATUS.md carried
+# `last-verified: 2026-07-18` above a body reading `Last updated: 2026-06-20` —
+# the numeric TRUTH gear passed it because every number matched; the narrative was
+# five weeks dead. A stamp newer than its own content by more than this is a lie.
+STAMP_DRIFT_DAYS = 14
+_STAMP_RE = re.compile(r"last-verified:\s*(\d{4})-(\d{2})-(\d{2})", re.I)
+_CONTENT_DATE_RE = re.compile(r"last updated:\s*\**\s*(\d{4})-(\d{2})-(\d{2})", re.I)
 ROOT_ALLOWED = {"README.md", "CLAUDE.md", "ARCHITECTURE.md", "CONTRIBUTING.md",
                 "STATUS.md", "SECURITY.md"}
 
@@ -115,8 +141,11 @@ def main() -> int:
             dst = basename.get(leaf)
             if dst and dst != src:
                 inbound[dst] += 1
-    orphans = [f for f in files if inbound[f] == 0]
-    orphan_pct = round(100 * len(orphans) / len(files))
+    # Archives are unlinked by design — counting them here made archiving a shipped
+    # plan LOOK like a regression, so the ratchet punished the fix.
+    linkable = [f for f in files if not f.startswith(ARCHIVE_DIRS)]
+    orphans = [f for f in linkable if inbound[f] == 0]
+    orphan_pct = round(100 * len(orphans) / max(len(linkable), 1))
 
     # ── staleness ──────────────────────────────────────────────────────────
     touched = last_touched()
@@ -127,7 +156,7 @@ def main() -> int:
     stale_pct = round(100 * len(stale) / max(len(considered), 1))
 
     # ── oversized living docs ──────────────────────────────────────────────
-    living = {f: n for f, n in lines.items() if not f.startswith("docs/_archive/")}
+    living = {f: n for f, n in lines.items() if not f.startswith(ARCHIVE_DIRS)}
     biggest = max(living, key=lambda f: living[f]) if living else ""
     max_lines = living.get(biggest, 0)
 
@@ -143,12 +172,46 @@ def main() -> int:
     # ── loose files in the repo root ───────────────────────────────────────
     root_loose = [f for f in files if "/" not in f and f not in ROOT_ALLOWED]
 
+    # ── lifecycle headers: the metric that UNBLOCKS everything ─────────────
+    # Nothing can archive a doc automatically without knowing whether its work
+    # shipped. DOC-MAINTENANCE.md specifies the header that answers that; today
+    # 137 of 138 docs don't carry one, so the lifecycle can never run and plans
+    # for shipped work pile up in the live tree (75% of sampled plan docs).
+    headerless = [f for f in files
+                  if not f.startswith(ARCHIVE_DIRS)
+                  and not text[f].lstrip().startswith("<!-- doc:")]
+    headerless_pct = round(100 * len(headerless) / max(len(linkable), 1))
+
+    # ── shipped work still sitting in the live tree ────────────────────────
+    # Fires once headers exist: a doc that says it's IMPLEMENTED belongs in an
+    # archive dir, not in docs/. Zero today only because headers are missing.
+    shipped_living = [f for f in files
+                      if not f.startswith(ARCHIVE_DIRS)
+                      and re.search(r"status:\s*IMPLEMENTED", text[f][:400], re.I)]
+
+    # ── stamped-but-stale: a doc claiming freshness it doesn't have ────────
+    stamped_stale = []
+    for f, t in text.items():
+        # The stamp lives in the header; the content date can sit anywhere (STATUS.md
+        # keeps its "Last updated:" at line 30 — a head-only scan misses the very case
+        # this check exists for).
+        s, c = _STAMP_RE.search(t[:1500]), _CONTENT_DATE_RE.search(t)
+        if not (s and c):
+            continue
+        stamp = date(int(s.group(1)), int(s.group(2)), int(s.group(3)))
+        content = date(int(c.group(1)), int(c.group(2)), int(c.group(3)))
+        if (stamp - content).days > STAMP_DRIFT_DAYS:
+            stamped_stale.append(f"{f} (stamped {stamp}, content {content})")
+
     actual = {
         "orphan_pct": orphan_pct,
         "stale_pct": stale_pct,
         "max_file_lines": max_lines,
         "dupe_clusters": len(dupes),
         "root_loose": len(root_loose),
+        "headerless_pct": headerless_pct,
+        "stamped_stale": len(stamped_stale),
+        "shipped_living": len(shipped_living),
     }
 
     regressions = {k: v for k, v in actual.items() if v > BUDGET[k]}
@@ -175,6 +238,23 @@ def main() -> int:
     if root_loose:
         print(f"\n**Loose in repo root ({len(root_loose)}):** "
               + ", ".join(f"`{f}`" for f in sorted(root_loose)[:12]))
+    if stamped_stale:
+        print(f"\n**Stamped but stale ({len(stamped_stale)})** — claims a freshness "
+              f"date newer than its own content. The numeric TRUTH gear passes these "
+              f"because the numbers match; the narrative is dead:\n")
+        for f in stamped_stale[:8]:
+            print(f"- `{f}`")
+    if shipped_living:
+        print(f"\n**Shipped but still live ({len(shipped_living)})** — marked "
+              f"IMPLEMENTED yet not in an archive dir:\n")
+        for f in shipped_living[:8]:
+            print(f"- `{f}`")
+    if headerless:
+        print(f"\n**Headerless ({len(headerless)})** — no `<!-- doc: ... -->` line, so "
+              f"nothing can tell whether their work shipped. This is the metric that "
+              f"blocks every other lifecycle automation; biggest first:\n")
+        for f in sorted(headerless, key=lambda f: -lines[f])[:8]:
+            print(f"- `{f}` ({lines[f]} lines)")
     print("\n</details>\n")
 
     if regressions:
