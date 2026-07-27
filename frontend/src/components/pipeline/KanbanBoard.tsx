@@ -18,6 +18,7 @@ import {
   Users,
   Trophy,
   XCircle,
+  Ghost,
   ChevronRight,
   Clock,
   AlertTriangle,
@@ -114,14 +115,33 @@ const STAGES = [
     headerBg: "bg-rose-500/[0.06]",
     badgeBg: "bg-rose-500/15 text-rose-400",
   },
+  {
+    // Distinct from Rejected: rejected = they replied no, ghosted = silence.
+    // This column is the seed of the first-party ghost-job dataset.
+    key: "ghosted",
+    label: "No reply",
+    icon: Ghost,
+    color: "text-zinc-400",
+    bgColor: "bg-zinc-500/10",
+    borderColor: "border-zinc-500/20",
+    ringColor: "ring-zinc-500/20",
+    headerBg: "bg-zinc-500/[0.06]",
+    badgeBg: "bg-zinc-500/15 text-zinc-400",
+  },
 ] as const;
 
 const STAGE_ORDER: string[] = STAGES.map((s) => s.key);
 
 function nextStage(current: string): string | null {
   const idx = STAGE_ORDER.indexOf(current);
-  // No advance from offer or rejected
-  if (idx === -1 || current === "offer" || current === "rejected") return null;
+  // Terminal stages — nothing advances out of an outcome.
+  if (
+    idx === -1 ||
+    current === "offer" ||
+    current === "rejected" ||
+    current === "ghosted"
+  )
+    return null;
   return STAGE_ORDER[idx + 1] ?? null;
 }
 

@@ -26,7 +26,14 @@ from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["pipeline"])
 
-_VALID_STAGES = {"applied", "outreach", "interview", "offer", "rejected"}
+# "ghosted" is deliberately distinct from "rejected": rejected means the employer
+# REPLIED no; ghosted means SILENCE. That distinction is the whole point — it is
+# the only first-party signal that a posting took applications and never
+# responded, which is what an actual ghost job looks like from the outside.
+# (Contrast services/ghost_detection.py, which infers staleness from a listing
+# DISAPPEARING from its source — usually a sign the role was filled, i.e. the
+# opposite of a ghost job. User-confirmed silence is the stronger signal.)
+_VALID_STAGES = {"applied", "outreach", "interview", "offer", "rejected", "ghosted"}
 
 
 def _to_pipeline_application(row: dict[str, Any]) -> PipelineApplication:
