@@ -114,3 +114,62 @@ jobs:
             gh issue close "$num" \
               --comment "Restarted — nothing is stopped as of run ${{ github.run_id }}. (auto-close)"
           fi
+
+  # ── DEAD-MAN'S SWITCH (issue #144) ──────────────────────────────────────────
+  # One level up from the job above: that asks "did the PRODUCT stop?", this asks
+  # "did the WATCHERS stop?". A workflow that stops running looks identical to
+  # one that passes — no red X, no email — and GitHub silently auto-disables
+  # schedules after ~60 days of repo inactivity. So the entire monitoring layer
+  # can switch itself off with every dashboard still green.
+  # Independent of the absence job on purpose: it needs no DB secret, so it keeps
+  # working even if PROD_DATABASE_URL is missing or rotated.
+  watchdog:
+    name: Are the watchers still running?
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Check every scheduled workflow reported inside its window
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python scripts/watchdog_check.py > watchdog.md 2>&1
+          code=$?
+          set -e
+          cat watchdog.md
+          cat watchdog.md >> "$GITHUB_STEP_SUMMARY"
+          echo "stopped=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" -le 1 ] || exit "$code"
+
+      - name: Open, update or close the tracking issue
+        if: always() && steps.watch.outputs.stopped != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="WATCHDOG: a scheduled workflow has stopped running"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ steps.watch.outputs.stopped }}" = "1" ]; then
+            {
+              cat watchdog.md
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > wbody.md
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file wbody.md --label harness
+            else
+              gh issue comment "$num" --body-file wbody.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" \
+              --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
+          fi
