@@ -214,6 +214,12 @@ class TestEdgeCases:
         result = extract_deadline("Deadline 30 September 2026", today_iso=TODAY)
         assert result == ("2026-09-30", "description")
 
+    def test_leap_day_today_does_not_raise(self):
+        # today.year + 2 (2030) is not a leap year, so a naive date(y+2, 2, 29)
+        # ceiling would raise ValueError. Must not crash.
+        result = extract_deadline("Apply by 30 June 2026", today_iso="2028-02-29")
+        assert result is None
+
     def test_real_clock_used_when_no_today_iso(self):
         # When today_iso is omitted, extract_deadline uses date.today().
         # We can't predict the result, but it must not crash and must return
