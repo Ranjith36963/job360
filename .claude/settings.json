@@ -53,6 +53,11 @@
             "type": "command",
             "command": "bash .claude/hooks/commit-gate.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/branch-owner-guard.sh",
+            "timeout": 15
           }
         ]
       }
