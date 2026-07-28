@@ -114,10 +114,29 @@ MIN_STORE_SCORE = int(os.getenv("MIN_STORE_SCORE", "1"))
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
 
-# Step-1 B7 — gate the LLM enrichment pipeline by score. Only jobs whose
-# match_score >= ENRICHMENT_THRESHOLD get sent to the LLM. Default 60 cuts
-# noise-floor traffic and keeps free-tier provider quotas usable.
-ENRICHMENT_THRESHOLD = int(os.getenv("ENRICHMENT_THRESHOLD", "60"))
+# Step-1 B7 — gate the LLM enrichment pipeline.
+#
+# WAS a hard threshold of 60. Measured in prod 2026-07-28: the maximum
+# match_score across the entire 3,342-row feed was 58 and `job_enrichment` held
+# 0 rows. The gate sat ABOVE the highest score the scorer can produce, so this
+# stage had never run once — and produced no error, no log and no empty state
+# while doing so. A filter tuned past your maximum is indistinguishable from a
+# feature that was never built.
+#
+# Cause: the distribution moved. `merge_cv_and_preferences` used to copy the
+# whole CV into preferences, inflating every score; removing that dropped scores
+# to normal, and this constant was never re-tuned.
+#
+# Now a BUDGET: enrich the best N per run, above a low sanity floor. A budget
+# makes no claim about the distribution, so it cannot go stale — and it doubles
+# as a hard cost ceiling, which a threshold never was. Same pattern as
+# MATCHER_MAX_JOBS (engine 4), which is precisely why the LLM judge was running
+# in prod while enrichment was dark.
+ENRICHMENT_MAX_JOBS = int(os.getenv("ENRICHMENT_MAX_JOBS", "20"))
+ENRICHMENT_MIN_SCORE = int(os.getenv("ENRICHMENT_MIN_SCORE", "10"))
+# Back-compat: some call sites / .env files still reference the old name. Kept as
+# an alias of the floor so nothing breaks, but it is no longer the gate.
+ENRICHMENT_THRESHOLD = int(os.getenv("ENRICHMENT_THRESHOLD", str(ENRICHMENT_MIN_SCORE)))
 
 # Step-1 B12 — per-user concurrent search cap. POST /search refuses with
 # HTTP 429 once a user already has this many runs in `pending`/`running`

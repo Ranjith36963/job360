@@ -14,7 +14,8 @@ from src.core.settings import (
     CAREERJET_AFFID,
     DB_PATH,
     DFE_APPRENTICESHIPS_API_KEY,
-    ENRICHMENT_THRESHOLD,
+    ENRICHMENT_MAX_JOBS,
+    ENRICHMENT_MIN_SCORE,
     EXPORTS_DIR,
     FINDWORK_API_KEY,
     JOOBLE_API_KEY,
@@ -851,18 +852,52 @@ async def run_search(
             from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
 
             if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
-                high_scored = [
+                # BUDGET, not a threshold. Measured in prod 2026-07-28: the highest
+                # match_score in the entire 3,342-row feed was 58, against a
+                # threshold of 60 — so this stage had NEVER run, and job_enrichment
+                # held 0 rows. It could not have run: the gate sat above the
+                # maximum the scorer can currently produce.
+                #
+                # A threshold is a claim about the score distribution. That
+                # distribution moved when the CV-copy merge was removed from
+                # merge_cv_and_preferences (scores fell to normal), and the gate
+                # was never re-tuned. Worse, the failure is SILENT: zero rows
+                # selected logs nothing, raises nothing, and looks exactly like a
+                # feature that was never built.
+                #
+                # "Best N per run" makes no claim about the distribution at all. It
+                # works whether the top score is 58 or 95, self-adjusts as scoring
+                # changes, and doubles as a hard cost ceiling — the same pattern
+                # MATCHER_MAX_JOBS already uses for the LLM judge (engine 4), which
+                # is why THAT engine was running (80 verdicts in prod) while this
+                # one was dark.
+                eligible = [
                     j
                     for j in unique_jobs
                     if getattr(j, "id", None) is not None
                     and j.match_score is not None
-                    and j.match_score >= ENRICHMENT_THRESHOLD
+                    and j.match_score >= ENRICHMENT_MIN_SCORE
                 ]
+                eligible.sort(key=lambda j: j.match_score or 0, reverse=True)
+                high_scored = eligible[:ENRICHMENT_MAX_JOBS]
                 if high_scored:
                     logger.info(
-                        "Enriching %s jobs with match_score >= %s",
+                        "Enriching top %s of %s eligible jobs (budget=%s, floor=%s, best score=%s)",
                         len(high_scored),
-                        ENRICHMENT_THRESHOLD,
+                        len(eligible),
+                        ENRICHMENT_MAX_JOBS,
+                        ENRICHMENT_MIN_SCORE,
+                        high_scored[0].match_score,
+                    )
+                elif unique_jobs:
+                    # Never fail silently again: if the budget selected nothing,
+                    # say why. This log is the alarm the old threshold lacked.
+                    best = max((j.match_score or 0) for j in unique_jobs)
+                    logger.warning(
+                        "Enrichment selected 0 jobs — %s scored, best was %s, floor is %s",
+                        len(unique_jobs),
+                        best,
+                        ENRICHMENT_MIN_SCORE,
                     )
                     # Concurrency 3 (not 10): free-tier LLMs cap at ~30 requests/min
                     # (Cerebras) and small token/min budgets (Groq). A burst of 10

@@ -648,3 +648,55 @@ async def test_enrich_batch_persists_results_to_db(db_with_schema):
         loaded = await load_enrichment(conn, job.id)
         assert loaded is not None
         assert loaded.title_canonical == valid.title_canonical
+
+
+# ---------------------------------------------------------------------------
+# Enrichment BUDGET (replaces the old absolute ENRICHMENT_THRESHOLD)
+#
+# Regression guard for a silent, total failure measured in prod 2026-07-28:
+# the gate was `match_score >= 60`, the highest score in the entire 3,342-row
+# feed was 58, and `job_enrichment` held 0 rows. The stage had never run once
+# and said nothing while not running.
+#
+# A threshold is a claim about the score distribution; the distribution moved
+# and the claim went stale. A budget makes no such claim. These tests pin that
+# property: selection must work at ANY scale of scores.
+# ---------------------------------------------------------------------------
+
+
+def _pick(scores, budget, floor):
+    """Mirror of the selection in src/main.py's enrichment stage."""
+    jobs = [type("J", (), {"id": i, "match_score": s})() for i, s in enumerate(scores)]
+    eligible = [j for j in jobs if j.id is not None and j.match_score is not None and j.match_score >= floor]
+    eligible.sort(key=lambda j: j.match_score or 0, reverse=True)
+    return [j.match_score for j in eligible[:budget]]
+
+
+def test_budget_selects_best_jobs_when_all_scores_are_below_the_old_threshold():
+    """THE bug. Real prod distribution: nothing above 58, old gate was 60."""
+    prod_like = [10] * 2795 + [25] * 254 + [35] * 197 + [45] * 47 + [55] * 14
+    picked = _pick(prod_like, budget=20, floor=10)
+    assert len(picked) == 20, "budget must fill even though no score reaches 60"
+    # Best-first: only 14 jobs score 55, so the budget takes all of those and
+    # then drops to the next band. It must never take the FIRST 20 it walks past.
+    assert picked == [55] * 14 + [45] * 6
+    assert picked == sorted(picked, reverse=True), "selection must be best-first"
+    # The old behaviour, for contrast: an absolute floor of 60 selects nothing.
+    assert _pick(prod_like, budget=20, floor=60) == []
+
+
+def test_budget_is_a_hard_cost_ceiling():
+    """Even if every job scores perfectly, we never exceed the budget."""
+    assert len(_pick([100] * 500, budget=20, floor=10)) == 20
+
+
+def test_budget_survives_a_distribution_shift_in_either_direction():
+    """The property a threshold lacks: correct at any scale, no re-tuning."""
+    for top in (12, 58, 95):
+        picked = _pick([top - 2, top - 1, top], budget=2, floor=10)
+        assert picked == [top, top - 1], f"failed at distribution topping out at {top}"
+
+
+def test_floor_still_drops_true_noise():
+    """A budget is not 'enrich everything' — the sanity floor still applies."""
+    assert _pick([1, 2, 3], budget=20, floor=10) == []

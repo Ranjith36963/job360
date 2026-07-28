@@ -44,8 +44,23 @@ import type { JobFilters } from "@/lib/types";
  * So a 30 default hides 87% of the feed from every NEW user — the product
  * looks empty on day one. 20 keeps a real filter (drops the weakest ~38%)
  * while leaving a populated feed. Change this one constant to re-tune.
+ *
+ * RE-MEASURED IN PROD 2026-07-28 — 20 is still far too high:
+ *   user 88e7d907: 3,236 feed rows -> 406 visible at >=20   (87.5% hidden)
+ *   whole feed:    3,342 rows      -> 512 visible at >=20
+ *   score p50 = 10, p90 = 26, max = 58
+ * A floor of 20 sits near the 90th percentile, so it hides nine jobs in ten.
+ *
+ * DEFAULT IS NOW 0 — rank, never hide.
+ *
+ * Any non-zero default is a claim about the score distribution, and that
+ * distribution moves every time scoring changes (it did when the CV-copy merge
+ * was removed from merge_cv_and_preferences). Sorting by score already puts the
+ * best first, and users stop scrolling when quality drops — so the filter buys
+ * nothing that the sort does not already give, while risking an empty product.
+ * The slider still works for anyone who wants a floor; it just is not imposed.
  */
-export const DEFAULT_MIN_SCORE = 20;
+export const DEFAULT_MIN_SCORE = 0;
 
 const DEFAULT_FILTERS: JobFilters = {
   min_score: DEFAULT_MIN_SCORE,
