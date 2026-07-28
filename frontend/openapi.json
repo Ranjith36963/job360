@@ -3469,7 +3469,7 @@
     },
     "/api/jobs/export": {
       "get": {
-        "description": "Download all recent jobs as CSV (catalog is shared; auth gates access).",
+        "description": "Download the caller's own recent matches as CSV.",
         "operationId": "export_jobs_api_jobs_export_get",
         "parameters": [
           {

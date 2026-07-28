@@ -122,7 +122,23 @@ def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobR
         company=row.get("company", ""),
         location=row.get("location", ""),
         salary=salary,
-        match_score=row.get("match_score", 0),
+        # The caller's OWN score, from THEIR user_feed row — never
+        # `jobs.match_score`.
+        #
+        # `_JOBS_ENRICHMENT_JOIN_COLS` starts with `j.*`, so the shared
+        # catalog's `match_score` lands in this dict under that exact key,
+        # while the per-user value arrives separately as `feed_score`. Reading
+        # `match_score` here meant every logged-in caller was served the shared
+        # column — which is user-derived (computed from whoever's profile ran
+        # the last search) and last-writer-wins across ALL users. Measured in
+        # production 2026-07-28: 100% of 3688 catalog rows carried a score, and
+        # for 97% of one account's feed that shared value was EXACTLY that one
+        # person's personal score.
+        #
+        # No `feed_score` means the row did not come from anyone's feed — the
+        # anonymous catalog branch. 0 is then the honest answer ("not scored
+        # for you"), never a stranger's number.
+        match_score=int(row["feed_score"]) if row.get("feed_score") is not None else 0,
         source=row.get("source", ""),
         date_found=row.get("date_found", ""),
         apply_url=row.get("apply_url", ""),
@@ -390,8 +406,19 @@ async def export_jobs(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ) -> StreamingResponse:
-    """Download all recent jobs as CSV (catalog is shared; auth gates access)."""
-    rows = await db.get_recent_jobs(days=7, min_score=0)
+    """Download the caller's own recent matches as CSV."""
+    # Was `get_recent_jobs(...)` — the whole SHARED catalog. The route already
+    # required a login, but it then handed that user every job in the system,
+    # including ones never matched to them, carrying `jobs.match_score`: a
+    # last-writer-wins column holding whoever searched most recently. So one
+    # user's export contained another user's scores, and jobs that were never in
+    # their feed. Reading the per-user feed makes the export mean what its name
+    # promises — and matches the dashboard, which reads the same source.
+    #
+    # Kept as a comment, not a docstring: FastAPI publishes docstrings into the
+    # OpenAPI description, and an internal post-mortem does not belong in the
+    # public API contract (it also churns the generated frontend types).
+    rows = await db.get_user_feed_jobs(user.id, days=7, min_score=0)
     output = io.StringIO()
     headers = [
         "job_title",
@@ -420,7 +447,11 @@ async def export_jobs(
                 "company": row.get("company", ""),
                 "location": row.get("location", ""),
                 "salary": salary or "",
-                "match_score": row.get("match_score", 0),
+                # The caller's own feed score — same rule as the JSON
+                # serializer above: never the shared `jobs.match_score`.
+                "match_score": (
+                    int(row["feed_score"]) if row.get("feed_score") is not None else 0
+                ),
                 "apply_url": row.get("apply_url", ""),
                 "source": row.get("source", ""),
                 "date_found": row.get("date_found", ""),
