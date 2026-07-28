@@ -145,6 +145,12 @@ export default function DashboardPage() {
     [jobsData?.jobs]
   );
   const total = jobsData?.total ?? 0;
+  // How many rows the min_score filter removed. A hidden job with nothing on
+  // screen saying it is hidden reads as "the product found nothing" — which is
+  // how 2,830 of one user's 3,236 jobs disappeared silently (measured
+  // 2026-07-28). Never hide without saying so.
+  const totalUnfiltered = jobsData?.total_unfiltered ?? 0;
+  const hiddenByFilters = Math.max(0, totalUnfiltered - total);
 
   // ---------------------------------------------------------------------------
   // TanStack Query — unfiltered list for accurate bucket counts
@@ -422,6 +428,22 @@ export default function DashboardPage() {
                 <>
                   <span className="font-mono text-foreground">{total}</span> jobs
                   matched your profile
+                  {hiddenByFilters > 0 && (
+                    <>
+                      {" · "}
+                      <span className="font-mono text-foreground">{hiddenByFilters}</span>{" "}
+                      hidden by filters{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFilters((f) => ({ ...f, min_score: 0 }))
+                        }
+                        className="underline hover:no-underline"
+                      >
+                        show all
+                      </button>
+                    </>
+                  )}
                 </>
               ) : isLoading ? (
                 "Loading jobs..."

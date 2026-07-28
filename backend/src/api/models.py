@@ -138,6 +138,12 @@ class JobResponse(BaseModel):
 class JobListResponse(BaseModel):
     jobs: list[JobResponse]
     total: int
+    # Rows before min_score was applied. `total - total_unfiltered` is what the
+    # filter removed, which the UI shows as "N hidden by filters". Without it a
+    # filter tuned above the score distribution looks identical to an empty feed —
+    # exactly how 2,830 of one user's 3,236 jobs vanished with nothing on screen
+    # to say so. Defaults to 0 for back-compat with older clients.
+    total_unfiltered: int = 0
     filters_applied: dict[Any, Any]
 
 

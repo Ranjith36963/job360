@@ -290,8 +290,13 @@ async def test_enrichment_runs_after_insert_so_jobs_have_db_ids(tmp_db_path, mon
     )
 
     # Turn enrichment ON and enrich everything that clears the score filter.
+    # The absolute ENRICHMENT_THRESHOLD was replaced by a budget (max jobs) plus
+    # a low sanity floor — the old constant sat above the maximum score the
+    # scorer could produce, so the stage never ran. Floor 0 + a generous budget
+    # keeps this test's intent: "enrich everything, then check the DB ids".
     monkeypatch.setattr(main_mod, "ENRICHMENT_ENABLED", True)
-    monkeypatch.setattr(main_mod, "ENRICHMENT_THRESHOLD", 0)
+    monkeypatch.setattr(main_mod, "ENRICHMENT_MIN_SCORE", 0)
+    monkeypatch.setattr(main_mod, "ENRICHMENT_MAX_JOBS", 1000)
 
     # Capture the jobs handed to enrich_batch (no live LLM — rule #4).
     captured: dict = {}
