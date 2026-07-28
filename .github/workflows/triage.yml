@@ -191,6 +191,7 @@ jobs:
       # `agent:fix`, because nothing in this file can.
       - name: Post the diagnosis and apply ONE routing label
         if: steps.token.outputs.have == 'true'
+        id: route
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -221,6 +222,7 @@ jobs:
           } > comment.md
           gh issue comment "$num" --body-file comment.md
           gh issue edit "$num" --add-label "$label"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "triaged #$num as $label" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Say so if triage is not configured
@@ -230,3 +232,44 @@ jobs:
         run: |
           gh issue comment "${{ steps.issue.outputs.num }}" \
             --body "Triage loop is installed but CLAUDE_CODE_OAUTH_TOKEN is not set, so this issue was not diagnosed."
+
+      # ── THE LAST MILE (issue #145) ────────────────────────────────────────
+      # Everything above speaks only on GitHub. This is where the chain finally
+      # reaches a human who is not looking at GitHub.
+      #
+      # `always()` is the whole point: the alert must fire when triage FAILED
+      # just as much as when it succeeded. A harness that only emails you about
+      # problems it understood is useless for the problems that matter most —
+      # and tonight's four breaks were all cases where a stage failed outright.
+      - name: Compose the alert
+        if: always()
+        id: compose
+        run: |
+          set -uo pipefail
+          num="${{ steps.issue.outputs.num }}"
+          d="EOF_${{ github.run_id }}"    # run-scoped delimiter: model output cannot close it
+          {
+            echo "body<<$d"
+            if [ -s triage.md ]; then
+              echo "Triage diagnosed issue #$num and routed it as: ${{ steps.route.outputs.label }}"
+              echo
+              cat triage.md
+            else
+              echo "Issue #$num was raised, but TRIAGE DID NOT PRODUCE A DIAGNOSIS."
+              echo "Something in the triage loop itself failed — go and look."
+            fi
+            echo
+            echo "-- "
+            echo "Issue: ${{ github.server_url }}/${{ github.repository }}/issues/$num"
+            echo "Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "$d"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Email the owner
+        if: always()
+        uses: ./.github/actions/alert
+        with:
+          subject: "[job360 harness] #${{ steps.issue.outputs.num }} ${{ steps.route.outputs.label || 'TRIAGE FAILED' }}"
+          body: ${{ steps.compose.outputs.body }}
+          resend_api_key: ${{ secrets.RESEND_API_KEY }}
+          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}

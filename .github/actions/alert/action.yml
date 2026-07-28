@@ -1,0 +1,110 @@
+name: "Alert the owner"
+description: >-
+  Send a harness alert to the owner by email via Resend. The last mile of the
+  escalation chain: without it the loops diagnose perfectly and tell nobody.
+
+# WHY THIS EXISTS (issue #145)
+#
+# The chain could detect, diagnose, route and even fix — and then it spoke only
+# on GitHub. A real outage at 03:00 would open an issue, label it correctly, and
+# wait until someone happened to look. Silence is the exact failure mode the
+# whole harness exists to prevent, so the harness having no voice was the last
+# hole in it.
+#
+# TWO RULES, both learned the hard way tonight:
+#
+#  1. NEVER fail the caller. An alert is a courtesy on top of the real work; if
+#     Resend is down, the detector must still finish and the issue must still be
+#     raised. Every failure path here ends in a ::warning::, never a non-zero
+#     exit. (The same choice is what made the 403 handoff bug survivable rather
+#     than silent — see absence.yml.)
+#  2. NEVER be quiet about being quiet. If the key is missing or the send fails,
+#     say so loudly in the job summary and the log. An alerting system that
+#     fails silently is worse than none, because it manufactures false
+#     confidence — you stop checking, believing you'd be told.
+
+inputs:
+  subject:
+    description: "Email subject line"
+    required: true
+  body:
+    description: "Plain-text email body"
+    required: true
+  resend_api_key:
+    description: "Resend API key. Pass secrets.RESEND_API_KEY. Blank = skip with a warning."
+    required: false
+    default: ""
+  to_email:
+    description: "Owner address. Pass secrets.OWNER_ALERT_EMAIL. Blank = skip with a warning."
+    required: false
+    default: ""
+  from_email:
+    description: "Sender. Must be on a Resend-verified domain (job360.uk is verified)."
+    required: false
+    default: "alerts@job360.uk"
+
+runs:
+  using: composite
+  steps:
+    - name: Send the alert
+      shell: bash
+      env:
+        RESEND_API_KEY: ${{ inputs.resend_api_key }}
+        TO_EMAIL: ${{ inputs.to_email }}
+        FROM_EMAIL: ${{ inputs.from_email }}
+        SUBJECT: ${{ inputs.subject }}
+        BODY: ${{ inputs.body }}
+      run: |
+        # No `set -e`: see rule 1 above. A failure to alert must never fail the
+        # thing that had something worth alerting about.
+        set +e
+
+        if [ -z "$RESEND_API_KEY" ] || [ -z "$TO_EMAIL" ]; then
+          echo "::warning::ALERT NOT SENT — RESEND_API_KEY and/or OWNER_ALERT_EMAIL is not set. The harness has no voice; you will only see this on GitHub."
+          {
+            echo "### ⚠️ Alert not sent"
+            echo
+            echo "\`RESEND_API_KEY\` and/or \`OWNER_ALERT_EMAIL\` are missing from repo secrets,"
+            echo "so this alert reached GitHub only. Add both under"
+            echo "**Settings → Secrets and variables → Actions** to receive it by email."
+            echo
+            echo "**Subject that would have been sent:** $SUBJECT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        # jq builds the JSON so a quote, newline or backtick anywhere in the
+        # body cannot break out of the payload. The body carries model output
+        # and scraped log text, so hand-rolled JSON here would be a real
+        # injection path, not a theoretical one.
+        payload=$(jq -n \
+          --arg from "$FROM_EMAIL" \
+          --arg to "$TO_EMAIL" \
+          --arg subject "$SUBJECT" \
+          --arg text "$BODY" \
+          '{from: $from, to: [$to], subject: $subject, text: $text}')
+
+        code=$(curl -sS -o /tmp/alert-resp.json -w '%{http_code}' \
+          -X POST https://api.resend.com/emails \
+          -H "Authorization: Bearer $RESEND_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "$payload")
+
+        if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+          echo "alert sent (HTTP $code): $SUBJECT" >> "$GITHUB_STEP_SUMMARY"
+          echo "alert sent (HTTP $code)"
+        else
+          # Print the response so a bad key or an unverified sender domain is
+          # diagnosable from the run alone. Resend never echoes the API key back.
+          echo "::warning::ALERT SEND FAILED (HTTP $code) — you will only see this on GitHub. Response: $(head -c 300 /tmp/alert-resp.json)"
+          {
+            echo "### ⚠️ Alert send FAILED (HTTP $code)"
+            echo
+            echo "\`\`\`"
+            head -c 300 /tmp/alert-resp.json
+            echo
+            echo "\`\`\`"
+            echo "Common causes: bad \`RESEND_API_KEY\`, or \`$FROM_EMAIL\` is not on a Resend-verified domain."
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit 0

@@ -111,6 +111,7 @@ jobs:
           echo "canary ok — the detector still fails when it should" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Open, update or close the tracking issue
+        id: raise
         if: always() && steps.check.outputs.stopped != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,8 +151,17 @@ jobs:
               # itself: a raised-but-undiagnosed issue still reaches a human,
               # which is the whole point.
               n="${new##*/}"
-              gh workflow run triage.yml -f issue="$n" \
-                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
+              echo "raised=$n" >> "$GITHUB_OUTPUT"
+              if gh workflow run triage.yml -f issue="$n"; then
+                echo "woken=yes" >> "$GITHUB_OUTPUT"
+              else
+                # Triage will not run, so it cannot send the alert either.
+                # Record that so the fallback step emails the owner directly:
+                # a broken handoff must never mean a silent alarm, which is
+                # the one outcome this entire chain exists to prevent.
+                echo "woken=no" >> "$GITHUB_OUTPUT"
+                echo "::warning::issue #$n was raised but triage could not be woken - diagnose it by hand"
+              fi
             else
               gh issue comment "$num" --body-file body.md
             fi
@@ -168,6 +178,26 @@ jobs:
   # can switch itself off with every dashboard still green.
   # Independent of the absence job on purpose: it needs no DB secret, so it keeps
   # working even if PROD_DATABASE_URL is missing or rotated.
+
+      # FALLBACK last mile: normally triage sends the email, because its alert
+      # carries the diagnosis. But if the handoff failed, triage never runs and
+      # never alerts — so the alarm would be silent. That is precisely the 403
+      # bug found on 2026-07-27, which stayed invisible because the failing call
+      # was the last thing the job did. Email directly in that case.
+      - name: Email the owner directly (only if triage could not be woken)
+        if: always() && steps.raise.outputs.woken == 'no'
+        uses: ./.github/actions/alert
+        with:
+          subject: "[job360 harness] #${{ steps.raise.outputs.raised }} raised - TRIAGE COULD NOT BE WOKEN"
+          body: |
+            The absence detector raised issue #${{ steps.raise.outputs.raised }}, but the handoff to
+            the triage loop FAILED, so nothing has diagnosed it. Go and look.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.raised }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          resend_api_key: ${{ secrets.RESEND_API_KEY }}
+          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
+
   watchdog:
     name: Are the watchers still running?
     runs-on: ubuntu-latest
@@ -194,6 +224,7 @@ jobs:
           [ "$code" -le 1 ] || exit "$code"
 
       - name: Open, update or close the tracking issue
+        id: wraise
         if: always() && steps.watch.outputs.stopped != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -212,8 +243,17 @@ jobs:
             if [ -z "$num" ]; then
               new=$(gh issue create --title "$title" --body-file wbody.md --label harness)
               n="${new##*/}"   # same GITHUB_TOKEN recursion block as above
-              gh workflow run triage.yml -f issue="$n" \
-                || echo "::warning::issue #$n was raised but triage could not be woken — diagnose it by hand"
+              echo "raised=$n" >> "$GITHUB_OUTPUT"
+              if gh workflow run triage.yml -f issue="$n"; then
+                echo "woken=yes" >> "$GITHUB_OUTPUT"
+              else
+                # Triage will not run, so it cannot send the alert either.
+                # Record that so the fallback step emails the owner directly:
+                # a broken handoff must never mean a silent alarm, which is
+                # the one outcome this entire chain exists to prevent.
+                echo "woken=no" >> "$GITHUB_OUTPUT"
+                echo "::warning::issue #$n was raised but triage could not be woken - diagnose it by hand"
+              fi
             else
               gh issue comment "$num" --body-file wbody.md
             fi
@@ -221,3 +261,22 @@ jobs:
             gh issue close "$num" \
               --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
           fi
+
+      # FALLBACK last mile: normally triage sends the email, because its alert
+      # carries the diagnosis. But if the handoff failed, triage never runs and
+      # never alerts — so the alarm would be silent. That is precisely the 403
+      # bug found on 2026-07-27, which stayed invisible because the failing call
+      # was the last thing the job did. Email directly in that case.
+      - name: Email the owner directly (only if triage could not be woken)
+        if: always() && steps.wraise.outputs.woken == 'no'
+        uses: ./.github/actions/alert
+        with:
+          subject: "[job360 harness] #${{ steps.wraise.outputs.raised }} raised - TRIAGE COULD NOT BE WOKEN"
+          body: |
+            The watchdog raised issue #${{ steps.wraise.outputs.raised }}, but the handoff to
+            the triage loop FAILED, so nothing has diagnosed it. Go and look.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.wraise.outputs.raised }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          resend_api_key: ${{ secrets.RESEND_API_KEY }}
+          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
