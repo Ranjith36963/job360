@@ -880,6 +880,17 @@ async def run_search(
                 ]
                 eligible.sort(key=lambda j: j.match_score or 0, reverse=True)
                 high_scored = eligible[:ENRICHMENT_MAX_JOBS]
+                if not high_scored and unique_jobs:
+                    # Never fail silently again: if the budget selected nothing,
+                    # say why. This log is the alarm the old threshold lacked —
+                    # a stage that selects 0 rows otherwise looks identical to a
+                    # stage that was never built.
+                    logger.warning(
+                        "Enrichment selected 0 jobs — %s scored, best was %s, floor is %s",
+                        len(unique_jobs),
+                        max((j.match_score or 0) for j in unique_jobs),
+                        ENRICHMENT_MIN_SCORE,
+                    )
                 if high_scored:
                     logger.info(
                         "Enriching top %s of %s eligible jobs (budget=%s, floor=%s, best score=%s)",
@@ -888,16 +899,6 @@ async def run_search(
                         ENRICHMENT_MAX_JOBS,
                         ENRICHMENT_MIN_SCORE,
                         high_scored[0].match_score,
-                    )
-                elif unique_jobs:
-                    # Never fail silently again: if the budget selected nothing,
-                    # say why. This log is the alarm the old threshold lacked.
-                    best = max((j.match_score or 0) for j in unique_jobs)
-                    logger.warning(
-                        "Enrichment selected 0 jobs — %s scored, best was %s, floor is %s",
-                        len(unique_jobs),
-                        best,
-                        ENRICHMENT_MIN_SCORE,
                     )
                     # Concurrency 3 (not 10): free-tier LLMs cap at ~30 requests/min
                     # (Cerebras) and small token/min budgets (Groq). A burst of 10
