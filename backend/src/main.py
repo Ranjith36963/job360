@@ -542,6 +542,7 @@ async def run_search(
     no_notify: bool = False,
     user_id: str | None = None,
     enqueue: Callable[..., Any] | None = None,
+    search_config: SearchConfig | None = None,
 ) -> dict[str, Any]:
     # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
     # path historically wrote user_feed but NEVER triggered a notification, so no
@@ -578,8 +579,16 @@ async def run_search(
     # profile; otherwise fall back to the single-tenant CLI path
     # (DEFAULT_TENANT_ID). See docs/plans/batch-3.5.2-plan.md Deliverable E.
     # Without this, the web "New Search" ran profile-less (E2E_TEST_REPORT #1).
-    profile = load_profile(user_id or DEFAULT_TENANT_ID)
-    if not profile or not profile.is_complete:
+    #
+    # A caller may instead hand us a ready-made `search_config` — the shared
+    # catalog refresh does: it fetches for EVERYONE (union of all users'
+    # configs), so no single profile is "the" profile, and the worker container
+    # has no legacy user_profile.json to fall back to. Found live 2026-07-30:
+    # the 04:00 cron loaded DEFAULT_TENANT_ID, got nothing, and aborted with
+    # sources_queried=0 — the second of two independent reasons the catalog
+    # cron had never once fetched a job.
+    profile = None if search_config is not None else load_profile(user_id or DEFAULT_TENANT_ID)
+    if search_config is None and (not profile or not profile.is_complete):
         logger.error("=" * 60)
         logger.error("No user profile found. Job360 requires a CV or preferences.")
         logger.error("")
@@ -598,8 +607,15 @@ async def run_search(
             "error": "no_profile",
         }
 
-    search_config = generate_search_config(profile)
-    logger.info("  Using dynamic keywords from user profile")
+    if search_config is None:
+        search_config = generate_search_config(profile)
+        logger.info("  Using dynamic keywords from user profile")
+    else:
+        logger.info(
+            "  Using caller-provided search config (%s titles, %s keywords)",
+            len(search_config.job_titles),
+            len(search_config.relevance_keywords),
+        )
     logger.info("=" * 60)
 
     # Init database

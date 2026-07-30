@@ -318,6 +318,19 @@ def load_profile(user_id: str) -> Optional[UserProfile]:
     )
 
 
+def list_profile_user_ids() -> list[str]:
+    """Return every user_id that has a stored profile.
+
+    Exists for the shared-catalog refresh: the catalog serves ALL users, so
+    the fetch keywords must be the union of all users' configs — no single
+    profile is "the" profile there, and the worker container has no legacy
+    JSON fallback.
+    """
+    with pgsync.connect(str(DB_PATH)) as conn:
+        cur = conn.execute("SELECT user_id FROM user_profiles ORDER BY user_id")
+        return [r[0] for r in cur.fetchall()]
+
+
 def profile_exists(user_id: str) -> bool:
     """Return True if ``user_id`` has a profile row.
 
