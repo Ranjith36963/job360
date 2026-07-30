@@ -1649,6 +1649,11 @@ export interface components {
             jobs: components["schemas"]["JobResponse"][];
             /** Total */
             total: number;
+            /**
+             * Total Unfiltered
+             * @default 0
+             */
+            total_unfiltered: number;
         };
         /** JobResponse */
         JobResponse: {

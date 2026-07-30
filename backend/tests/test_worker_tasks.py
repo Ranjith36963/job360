@@ -550,7 +550,20 @@ def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
     import asyncio
     from unittest.mock import patch
 
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
     from src.workers import tasks as tasks_mod
+
+    # The union-config redesign (issue #170 layer two) skips the fetch entirely
+    # when no complete profiles exist — seed one so run_search is reached and
+    # this test keeps exercising its actual contract (user_id=None).
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+            preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["python"]),
+        ),
+        user_id="cost-safety-user",
+    )
 
     captured: dict = {}
 
@@ -570,3 +583,68 @@ def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
     )
     assert captured.get("no_notify") is True
     assert result["new_jobs"] == 7
+
+
+def test_refresh_catalog_fetches_with_the_union_of_all_user_configs():
+    """Issue #170, second root cause: passing user_id=None made run_search fall
+    back to DEFAULT_TENANT_ID, which has no profile row in prod — so the cron
+    aborted with sources_queried=0 every night (once the read-only-disk crash
+    in front of it was fixed). The shared catalog serves EVERYONE, so the fetch
+    must use the UNION of every user's search config, while user_id stays None
+    to keep the paid per-user stages structurally unreachable.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+    from src.workers import tasks as tasks_mod
+
+    # Two users with clearly different interests — and one personal exclusion.
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Data Engineer"]),
+            preferences=UserPreferences(
+                target_job_titles=["Data Engineer"],
+                additional_skills=["python"],
+                excluded_skills=["sales"],
+            ),
+        ),
+        user_id="union-user-a",
+    )
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="y", skills=["selling"], job_titles=["Sales Manager"]),
+            preferences=UserPreferences(
+                target_job_titles=["Sales Manager"], additional_skills=["selling"]
+            ),
+        ),
+        user_id="union-user-b",
+    )
+
+    captured: dict = {}
+
+    async def _fake_run_search(**kwargs):
+        captured.update(kwargs)
+        return {"total_found": 10, "new_jobs": 2, "sources_queried": 5}
+
+    async def _go():
+        with patch("src.main.run_search", _fake_run_search):
+            return await tasks_mod.refresh_catalog({})
+
+    result = asyncio.run(_go())
+
+    assert result["new_jobs"] == 2
+    cfg = captured.get("search_config")
+    assert cfg is not None, "refresh_catalog must hand run_search a union config"
+    # Both users' worlds are represented — the catalog over-collects on purpose.
+    assert "Data Engineer" in cfg.job_titles
+    assert "Sales Manager" in cfg.job_titles
+    # Cost safety unchanged.
+    assert captured.get("user_id") is None
+    # One user's personal exclusion must NOT hide jobs from the other: user A
+    # excluded "sales" while user B wants exactly that. Exclusions are applied
+    # per-user at scoring time, never at shared-catalog fetch time.
+    assert not cfg.negative_title_keywords, (
+        f"personal exclusions leaked into the shared fetch: {cfg.negative_title_keywords}"
+    )

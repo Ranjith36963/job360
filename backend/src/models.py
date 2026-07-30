@@ -3,6 +3,9 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+# Max chars per normalized-key component — see normalized_key() for the why.
+_KEY_COMPONENT_MAX = 300
+
 _COMPANY_SUFFIXES = re.compile(
     r"\s+(ltd|limited|inc|plc|corporation|corp|group|llc|gmbh|ag|sa|co|company|holdings|solutions|technologies|services|systems|pty)\.?\s*$",
     re.IGNORECASE,
@@ -110,4 +113,15 @@ class Job:
         # (stripping punctuation risks over-merging distinct roles).
         company = re.sub(r"\s+", " ", company)
         title = re.sub(r"\s+", " ", self.title.strip().lower())
-        return (company, title)
+        # Cap each component. Found live 2026-07-30: one scraped job carried a
+        # title so long that (normalized_company, normalized_title) blew
+        # Postgres's btree index-row limit — "index row size 3128 exceeds
+        # maximum 2704" on jobs' UNIQUE(normalized_company, normalized_title) —
+        # and that ONE poison row aborted the whole catalog insert. No real
+        # company or title approaches 300 chars; anything longer is scraped
+        # garbage whose first 300 chars identify it just as well for dedup.
+        # 300+300 chars stays under the ~2704-byte limit even fully multibyte.
+        # Rule #1 holds because BOTH consumers of the key — the in-memory
+        # deduplicator and the DB UNIQUE constraint — flow through this one
+        # function, so they keep agreeing after truncation.
+        return (company[:_KEY_COMPONENT_MAX], title[:_KEY_COMPONENT_MAX])

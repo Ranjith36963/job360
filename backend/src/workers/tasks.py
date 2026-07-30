@@ -982,8 +982,62 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     import logging  # noqa: PLC0415
 
     from src.main import run_search  # noqa: PLC0415 — lazy (rule #11): heavy import
+    from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
+    from src.services.profile.models import SearchConfig  # noqa: PLC0415
+    from src.services.profile.storage import list_profile_user_ids, load_profile  # noqa: PLC0415
 
-    stats = await run_search(user_id=None, no_notify=True)
+    # The shared catalog serves EVERYONE, so fetch with the UNION of every
+    # user's search config. Passing user_id=None alone was not enough — found
+    # live 2026-07-30: run_search then fell back to DEFAULT_TENANT_ID, which
+    # has no profile row in prod, and aborted with sources_queried=0. Combined
+    # with the read-only-disk crash it masked, this cron had never fetched a
+    # single job. Cost safety is unchanged: user_id stays None, so the
+    # per-user stages (user_feed write, the paid LLM judge) remain
+    # structurally unreachable.
+    union = SearchConfig()
+    profiles_used = 0
+    for uid in list_profile_user_ids():
+        profile = load_profile(uid)
+        if not profile or not profile.is_complete:
+            continue
+        cfg = generate_search_config(profile)
+        profiles_used += 1
+        for attr in (
+            "job_titles",
+            "primary_skills",
+            "secondary_skills",
+            "tertiary_skills",
+            "relevance_keywords",
+            "locations",
+            "visa_keywords",
+            "search_queries",
+        ):
+            merged = getattr(union, attr)
+            for item in getattr(cfg, attr):
+                if item not in merged:
+                    merged.append(item)
+        union.core_domain_words |= cfg.core_domain_words
+        union.supporting_role_words |= cfg.supporting_role_words
+        # Deliberately NOT unioned: negative_title_keywords. One user's "not
+        # for me" (e.g. an engineer excluding "sales") must not hide jobs from
+        # a user who wants exactly those — exclusions are personal, and the
+        # shared catalog must over-collect, not under-collect.
+
+    if profiles_used == 0:
+        # Say it loudly rather than abort quietly inside run_search — an empty
+        # union means an empty fetch, which is this cron failing its one job.
+        logging.getLogger(__name__).warning(
+            "catalog refresh skipped: no complete user profiles found — nothing to fetch for"
+        )
+        return {"sources_queried": 0, "total_found": 0, "new_jobs": 0, "profiles_used": 0}
+
+    logging.getLogger(__name__).info(
+        "catalog refresh: union of %s profile(s) — %s titles, %s keywords",
+        profiles_used,
+        len(union.job_titles),
+        len(union.relevance_keywords),
+    )
+    stats = await run_search(user_id=None, no_notify=True, search_config=union)
     logging.getLogger(__name__).info(
         "catalog refresh: sources=%s found=%s new=%s",
         stats.get("sources_queried"),

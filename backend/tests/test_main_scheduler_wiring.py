@@ -290,8 +290,13 @@ async def test_enrichment_runs_after_insert_so_jobs_have_db_ids(tmp_db_path, mon
     )
 
     # Turn enrichment ON and enrich everything that clears the score filter.
+    # The absolute ENRICHMENT_THRESHOLD was replaced by a budget (max jobs) plus
+    # a low sanity floor — the old constant sat above the maximum score the
+    # scorer could produce, so the stage never ran. Floor 0 + a generous budget
+    # keeps this test's intent: "enrich everything, then check the DB ids".
     monkeypatch.setattr(main_mod, "ENRICHMENT_ENABLED", True)
-    monkeypatch.setattr(main_mod, "ENRICHMENT_THRESHOLD", 0)
+    monkeypatch.setattr(main_mod, "ENRICHMENT_MIN_SCORE", 0)
+    monkeypatch.setattr(main_mod, "ENRICHMENT_MAX_JOBS", 1000)
 
     # Capture the jobs handed to enrich_batch (no live LLM — rule #4).
     captured: dict = {}
@@ -499,3 +504,67 @@ async def test_breaker_open_source_is_skipped(
     # still covers every registered source, with the breaker state explaining why.
     assert stats["per_source"].get("flaky", 0) == 0
     assert stats["per_source"].get("healthy") == 1
+
+
+@pytest.mark.asyncio
+async def test_run_search_survives_readonly_exports_dir(tmp_db_path, monkeypatch):
+    """Issue #170 regression, second write site: a read-only EXPORTS_DIR /
+    REPORTS_DIR must not kill the run.
+
+    In the worker container the package dir is read-only, so after fixing the
+    logging mkdir the run would have fetched EVERYTHING and then died at the
+    CSV export — throwing the whole fetch away and, worse, skipping the
+    run_log write that the absence detector watches. This drives the REAL
+    run_search (not a mirror of it) with dirs that refuse mkdir and asserts
+    the run completes, stores jobs, and writes run_log.
+    """
+    from migrations import runner
+    from src import main as main_mod
+    from src.repositories.database import JobDatabase
+    from src.services.profile.models import CVData, SearchConfig, UserPreferences, UserProfile
+
+    _setup = JobDatabase(tmp_db_path)
+    await _setup.init_db()
+    await runner.up(tmp_db_path)
+    await _setup.close()
+
+    stub = UserProfile(
+        cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+        preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["python"]),
+    )
+    monkeypatch.setattr(main_mod, "load_profile", lambda uid: stub)
+    monkeypatch.setattr(
+        main_mod, "generate_search_config",
+        lambda p: SearchConfig(job_titles=["Engineer"], relevance_keywords=["engineer"]),
+    )
+    monkeypatch.setattr(
+        main_mod, "_build_sources",
+        lambda *a, **kw: [_FakeSource("s", "ats", result=[_make_job("Engineer", "AcmeCo")])],
+    )
+
+    class _ReadOnlyDir:
+        """EXPORTS_DIR/REPORTS_DIR on a read-only filesystem."""
+
+        def mkdir(self, *a, **kw):
+            raise PermissionError(13, "Permission denied", "/site-packages/data/exports")
+
+        def __truediv__(self, other):  # pragma: no cover — reaching this IS the bug
+            raise AssertionError("export path built despite failed mkdir")
+
+    monkeypatch.setattr(main_mod, "EXPORTS_DIR", _ReadOnlyDir())
+    monkeypatch.setattr(main_mod, "REPORTS_DIR", _ReadOnlyDir())
+
+    # Must not raise — the old code let PermissionError escape here.
+    stats = await main_mod.run_search(db_path=tmp_db_path, no_notify=True, user_id="u1")
+
+    assert stats["new_jobs"] >= 1, "the fetched job must still be stored"
+
+    # run_log is what the absence detector reads — it MUST exist even though
+    # every file side-output was refused.
+    db = JobDatabase(tmp_db_path)
+    await db.init_db()
+    try:
+        runs = await db.get_run_logs(limit=5)
+    finally:
+        await db.close()
+    assert len(runs) >= 1, "run_log row must be written despite read-only export dirs"

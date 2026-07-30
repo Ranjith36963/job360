@@ -482,6 +482,11 @@
           "total": {
             "title": "Total",
             "type": "integer"
+          },
+          "total_unfiltered": {
+            "default": 0,
+            "title": "Total Unfiltered",
+            "type": "integer"
           }
         },
         "required": [

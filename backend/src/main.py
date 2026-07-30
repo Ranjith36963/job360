@@ -14,7 +14,8 @@ from src.core.settings import (
     CAREERJET_AFFID,
     DB_PATH,
     DFE_APPRENTICESHIPS_API_KEY,
-    ENRICHMENT_THRESHOLD,
+    ENRICHMENT_MAX_JOBS,
+    ENRICHMENT_MIN_SCORE,
     EXPORTS_DIR,
     FINDWORK_API_KEY,
     JOOBLE_API_KEY,
@@ -541,6 +542,7 @@ async def run_search(
     no_notify: bool = False,
     user_id: str | None = None,
     enqueue: Callable[..., Any] | None = None,
+    search_config: SearchConfig | None = None,
 ) -> dict[str, Any]:
     # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
     # path historically wrote user_feed but NEVER triggered a notification, so no
@@ -577,8 +579,16 @@ async def run_search(
     # profile; otherwise fall back to the single-tenant CLI path
     # (DEFAULT_TENANT_ID). See docs/plans/batch-3.5.2-plan.md Deliverable E.
     # Without this, the web "New Search" ran profile-less (E2E_TEST_REPORT #1).
-    profile = load_profile(user_id or DEFAULT_TENANT_ID)
-    if not profile or not profile.is_complete:
+    #
+    # A caller may instead hand us a ready-made `search_config` — the shared
+    # catalog refresh does: it fetches for EVERYONE (union of all users'
+    # configs), so no single profile is "the" profile, and the worker container
+    # has no legacy user_profile.json to fall back to. Found live 2026-07-30:
+    # the 04:00 cron loaded DEFAULT_TENANT_ID, got nothing, and aborted with
+    # sources_queried=0 — the second of two independent reasons the catalog
+    # cron had never once fetched a job.
+    profile = None if search_config is not None else load_profile(user_id or DEFAULT_TENANT_ID)
+    if search_config is None and (not profile or not profile.is_complete):
         logger.error("=" * 60)
         logger.error("No user profile found. Job360 requires a CV or preferences.")
         logger.error("")
@@ -597,8 +607,15 @@ async def run_search(
             "error": "no_profile",
         }
 
-    search_config = generate_search_config(profile)
-    logger.info("  Using dynamic keywords from user profile")
+    if search_config is None:
+        search_config = generate_search_config(profile)
+        logger.info("  Using dynamic keywords from user profile")
+    else:
+        logger.info(
+            "  Using caller-provided search config (%s titles, %s keywords)",
+            len(search_config.job_titles),
+            len(search_config.relevance_keywords),
+        )
     logger.info("=" * 60)
 
     # Init database
@@ -851,18 +868,53 @@ async def run_search(
             from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
 
             if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
-                high_scored = [
+                # BUDGET, not a threshold. Measured in prod 2026-07-28: the highest
+                # match_score in the entire 3,342-row feed was 58, against a
+                # threshold of 60 — so this stage had NEVER run, and job_enrichment
+                # held 0 rows. It could not have run: the gate sat above the
+                # maximum the scorer can currently produce.
+                #
+                # A threshold is a claim about the score distribution. That
+                # distribution moved when the CV-copy merge was removed from
+                # merge_cv_and_preferences (scores fell to normal), and the gate
+                # was never re-tuned. Worse, the failure is SILENT: zero rows
+                # selected logs nothing, raises nothing, and looks exactly like a
+                # feature that was never built.
+                #
+                # "Best N per run" makes no claim about the distribution at all. It
+                # works whether the top score is 58 or 95, self-adjusts as scoring
+                # changes, and doubles as a hard cost ceiling — the same pattern
+                # MATCHER_MAX_JOBS already uses for the LLM judge (engine 4), which
+                # is why THAT engine was running (80 verdicts in prod) while this
+                # one was dark.
+                eligible = [
                     j
                     for j in unique_jobs
                     if getattr(j, "id", None) is not None
                     and j.match_score is not None
-                    and j.match_score >= ENRICHMENT_THRESHOLD
+                    and j.match_score >= ENRICHMENT_MIN_SCORE
                 ]
+                eligible.sort(key=lambda j: j.match_score or 0, reverse=True)
+                high_scored = eligible[:ENRICHMENT_MAX_JOBS]
+                if not high_scored and unique_jobs:
+                    # Never fail silently again: if the budget selected nothing,
+                    # say why. This log is the alarm the old threshold lacked —
+                    # a stage that selects 0 rows otherwise looks identical to a
+                    # stage that was never built.
+                    logger.warning(
+                        "Enrichment selected 0 jobs — %s scored, best was %s, floor is %s",
+                        len(unique_jobs),
+                        max((j.match_score or 0) for j in unique_jobs),
+                        ENRICHMENT_MIN_SCORE,
+                    )
                 if high_scored:
                     logger.info(
-                        "Enriching %s jobs with match_score >= %s",
+                        "Enriching top %s of %s eligible jobs (budget=%s, floor=%s, best score=%s)",
                         len(high_scored),
-                        ENRICHMENT_THRESHOLD,
+                        len(eligible),
+                        ENRICHMENT_MAX_JOBS,
+                        ENRICHMENT_MIN_SCORE,
+                        high_scored[0].match_score,
                     )
                     # Concurrency 3 (not 10): free-tier LLMs cap at ~30 requests/min
                     # (Cerebras) and small token/min budgets (Groq). A burst of 10
@@ -1026,21 +1078,33 @@ async def run_search(
                 "per_source": per_source,
             }
 
-            # Generate outputs
+            # Generate outputs — file side-outputs only, so non-fatal by design.
+            # The run's REAL products (jobs, user_feed, run_log) live in
+            # Postgres above/below this block. In a container whose package dir
+            # is read-only (the worker installs into site-packages), these
+            # writes raise OSError; letting that kill the run would throw away
+            # the entire fetch AND skip the run_log write — which is exactly
+            # what starved the catalog for three nights before issue #170.
             if new_jobs:
-                # CSV
-                EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
-                await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
-                logger.info("CSV exported: %s", csv_path)
+                try:
+                    # CSV
+                    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
+                    await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
+                    logger.info("CSV exported: %s", csv_path)
 
-                # Markdown report
-                REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-                md_report = generate_markdown_report(new_jobs, stats)
-                md_path = REPORTS_DIR / f"report_{ts}.md"
-                await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
-                logger.info("Report saved: %s", md_path)
+                    # Markdown report
+                    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                    md_report = generate_markdown_report(new_jobs, stats)
+                    md_path = REPORTS_DIR / f"report_{ts}.md"
+                    await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
+                    logger.info("Report saved: %s", md_path)
+                except OSError as exc:
+                    logger.warning(
+                        "CSV/report export skipped (%s) — run continues; DB is the source of truth",
+                        exc,
+                    )
 
 
                 # Print time-bucketed summary to console

@@ -263,3 +263,44 @@ def test_normalized_key_does_not_strip_seniority():
     j1 = Job(title="Senior AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
     j2 = Job(title="AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
     assert j1.normalized_key() != j2.normalized_key(), "Seniority should NOT be stripped by normalized_key"
+
+
+def test_normalized_key_caps_component_length():
+    """Live failure 2026-07-30: one scraped job's title blew Postgres's btree
+    index-row limit ("index row size 3128 exceeds maximum 2704" on the jobs
+    UNIQUE(normalized_company, normalized_title)) and that single poison row
+    aborted the ENTIRE catalog insert — the whole 257s fetch thrown away.
+
+    Rule #1 safety: dedup layer 1 and the DB constraint both consume this one
+    function, so capping here keeps them agreeing.
+    """
+    monster = Job(
+        title="Senior Engineer " * 300,  # ~4,800 chars of scraped garbage
+        company="Acme " * 300,
+        apply_url="https://x.test/1",
+        source="test",
+        date_found="2026-07-30",
+    )
+    company, title = monster.normalized_key()
+    assert len(company) <= 300
+    assert len(title) <= 300
+    # Two monsters that share their first 300 chars must still collide — that
+    # is the dedup working, not a loss: page-of-text titles differing only
+    # after char 300 are the same scraped listing.
+    monster2 = Job(
+        title="Senior Engineer " * 300 + "different tail",
+        company="Acme " * 300,
+        apply_url="https://x.test/2",
+        source="test",
+        date_found="2026-07-30",
+    )
+    assert monster.normalized_key() == monster2.normalized_key()
+    # And sane keys are untouched.
+    normal = Job(
+        title="Software Engineer",
+        company="Acme Ltd",
+        apply_url="https://x.test/3",
+        source="test",
+        date_found="2026-07-30",
+    )
+    assert normal.normalized_key() == ("acme", "software engineer")

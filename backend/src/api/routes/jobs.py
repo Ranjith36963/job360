@@ -491,10 +491,20 @@ async def list_jobs(
     # callers (sitemap / unfurl bots) get the shared catalog. No fallback: an
     # empty feed shows the empty dashboard, never another user's jobs.
     # Step-1 B6: single LEFT JOIN avoids per-job enrichment lookups (N+1).
+    # Fetch UNFILTERED, then apply min_score in Python, so we can report how many
+    # rows the filter removed. Without that number the UI cannot say "N hidden",
+    # and a filter that hides everything is indistinguishable from an empty feed —
+    # measured 2026-07-28: 3,236 rows -> 406 visible at the old default of 20,
+    # with nothing on screen explaining the missing 2,830.
+    # No extra cost: this route already loads every row and paginates in Python.
     if user is not None:
-        all_rows = await db.get_user_feed_jobs(user.id, days=days, min_score=min_score or 0)
+        all_rows = await db.get_user_feed_jobs(user.id, days=days, min_score=0)
     else:
-        all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=min_score or 0)
+        all_rows = await db.get_recent_jobs_with_enrichment(days=days, min_score=0)
+
+    total_unfiltered = len(all_rows)
+    if min_score:
+        all_rows = [r for r in all_rows if (r["match_score"] or 0) >= min_score]
 
     if mode == "hybrid":
         # Rank semantically against the caller's OWN profile (not the top job).
@@ -574,7 +584,12 @@ async def list_jobs(
     if visa_only:
         filters_applied["visa_only"] = visa_only
 
-    return JobListResponse(jobs=jobs, total=total, filters_applied=filters_applied)
+    return JobListResponse(
+        jobs=jobs,
+        total=total,
+        total_unfiltered=total_unfiltered,
+        filters_applied=filters_applied,
+    )
 
 
 @router.get("/jobs/{job_id}/duplicates")

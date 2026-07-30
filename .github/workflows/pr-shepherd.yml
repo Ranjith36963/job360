@@ -1,0 +1,127 @@
+name: PR shepherd (conflicts + red CI on human PRs)
+
+# The dependabot loop covers dependabot's queue; this covers EVERYONE ELSE'S.
+# Found live 2026-07-30: PR #171 sat with 2 failing checks and nothing in the
+# harness watching — a red human PR just rots until its author happens to look.
+# Conflicts are worse: a branch that was green on Monday silently becomes
+# unmergeable as main moves, and nobody is told.
+#
+# WHAT IT DOES (all dumb code, no model):
+#   RED CHECKS   -> dispatch the triage loop on the PR (a PR number IS an
+#                   issue number to the API), so the failure arrives diagnosed
+#                   with file:line evidence — same as every other failure here.
+#                   Comment once so the author knows triage was called.
+#   CONFLICTING  -> try GitHub's own "Update branch" (merges main INTO the
+#                   branch — a plain merge commit, NO history rewrite, so it is
+#                   safe alongside the one-session-per-branch rule; nothing is
+#                   force-pushed). If even that fails, the conflict needs a
+#                   human: comment once naming it.
+#   GREEN+IDLE   -> a summary line only. Merging a human's PR is an
+#                   AUTHORIZATION, and this harness reserves authorization for
+#                   humans (same reason triage may not apply agent:fix).
+#
+# WHAT IT NEVER DOES: merge, close, rebase, or force-push anyone's branch.
+# It repairs metadata (branch freshness) and routes problems; it does not
+# take over the work.
+#
+# HONESTY RULE: every open PR gets one summary line — acted on or left alone,
+# with the reason. Silent skipping is how queues rot.
+
+on:
+  schedule:
+    - cron: "45 9 * * *" # daily, after the 09:30 dependabot sweep
+  workflow_dispatch: {} # drill entrance — every loop must be fireable on demand
+
+permissions:
+  contents: write # update-branch creates a merge commit on the PR branch
+  pull-requests: write
+  issues: write # PR comments ride the issues API
+  actions: write # lets a red PR wake the triage loop
+
+concurrency:
+  group: pr-shepherd
+  cancel-in-progress: false
+
+jobs:
+  shepherd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Sweep human PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          prs=$(gh pr list --state open --json number,title,author,mergeable,isDraft \
+                  --jq '[.[]|select(.author.login!="dependabot[bot]" and .author.login!="app/dependabot")]')
+          count=$(echo "$prs" | jq length)
+          echo "### PR shepherd — $count open human PR(s)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$count" = "0" ] && exit 0
+
+          echo "$prs" | jq -c '.[]' | while read -r pr; do
+            num=$(echo "$pr"       | jq -r .number)
+            title=$(echo "$pr"     | jq -r .title)
+            mergeable=$(echo "$pr" | jq -r .mergeable)
+            draft=$(echo "$pr"     | jq -r .isDraft)
+
+            # Drafts are work-in-progress by declaration — leave them alone.
+            if [ "$draft" = "true" ]; then
+              echo "- #$num DRAFT (left alone) — $title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            red=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE")]|length')
+            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.status!="COMPLETED")]|length')
+
+            # ---- conflicts first: a conflicted PR's CI state is stale anyway ----
+            if [ "$mergeable" = "CONFLICTING" ]; then
+              # GitHub's own "Update branch": merges base INTO the branch.
+              # Plain merge commit, no history rewrite — safe next to parallel
+              # sessions. expected_head_sha guards against racing a push.
+              head_sha=$(gh pr view "$num" --json headRefOid --jq .headRefOid)
+              if gh api -X PUT "repos/$GH_REPO/pulls/$num/update-branch" \
+                   -f expected_head_sha="$head_sha" >/dev/null 2>&1; then
+                echo "- #$num UPDATED (was conflicting; merged main in, CI re-running) — $title" >> "$GITHUB_STEP_SUMMARY"
+              else
+                marker="<!-- pr-shepherd-conflict -->"
+                if ! gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+                  body=$(printf '%s\n**PR shepherd:** this branch now CONFLICTS with `main` and even "Update branch" cannot resolve it automatically. It needs a hand-merge — until then every check result here is stale.' "$marker")
+                  gh pr comment "$num" --body "$body"
+                fi
+                echo "- #$num CONFLICT (auto-update failed, commented for author) — $title" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # ---- red CI: OWNER PRs get FIXED, not just diagnosed ----
+            # (Owner's standing instruction 2026-07-30: conflicts and red CI
+            # are repaired autonomously; only the merge stays human.)
+            if [ "$red" -gt 0 ]; then
+              author=$(echo "$pr" | jq -r .author.login)
+              marker="<!-- pr-shepherd-red -->"
+              if ! gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+                if [ "$author" = "Ranjith36963" ] && gh workflow run pr-repair.yml -f pr="$num"; then
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing - the PR-repair loop has been dispatched to FIX this branch. It will push additive commits and CI will re-run; merging stays with you.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> pr-repair dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+                elif gh workflow run triage.yml -f issue="$num"; then
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing, so the triage loop has been dispatched to diagnose this PR.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing and no loop could be dispatched - diagnose by hand.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> DISPATCH FAILED — $title" >> "$GITHUB_STEP_SUMMARY"
+                fi
+                gh pr comment "$num" --body "$body"
+              else
+                echo "- #$num RED ($red failing, already routed — not re-nagging) — $title" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            if [ "$pending" -gt 0 ]; then
+              echo "- #$num WAIT ($pending pending) — $title" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- #$num GREEN (awaiting the author's merge — not the shepherd's call) — $title" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
