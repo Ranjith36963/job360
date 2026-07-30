@@ -233,7 +233,8 @@ def setup_audit_logger() -> logging.Logger:
     # during an incident. propagate=False means it never reaches the main
     # handlers' scrubber, so it needs its own.
     handler.addFilter(CRLFScrubFilter())
-    handler._job360_audit = True  # type: ignore[attr-defined] — idempotence marker, see above
+    # Idempotence marker (see guard above); setattr keeps mypy clean on the union type.
+    setattr(handler, "_job360_audit", True)  # noqa: B010 — deliberate dynamic marker
     audit.addHandler(handler)
     # docs/fable/05 C8 — tee the same records into the audit_log DB table so
     # audit history survives file rotation and is queryable with SQL. Lazy
