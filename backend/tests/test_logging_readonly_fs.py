@@ -65,8 +65,10 @@ def test_setup_logging_console_keeps_injection_scrubber(monkeypatch):
 
     log = logger_mod.setup_logging("INFO")
 
+    # Class-NAME check, not isinstance: a module reload elsewhere in the suite
+    # gives CRLFScrubFilter a new identity and would fail isinstance spuriously.
     assert any(
-        isinstance(f, logger_mod.CRLFScrubFilter) for f in log.handlers[0].filters
+        type(f).__name__ == "CRLFScrubFilter" for f in log.handlers[0].filters
     ), "console fallback lost the CRLF injection scrubber"
 
 
@@ -75,12 +77,25 @@ def test_audit_logger_survives_readonly_fs(monkeypatch):
 
     audit = logger_mod.setup_audit_logger()  # must not raise
 
-    assert audit.handlers, "audit logger must still get a handler"
-    handler = audit.handlers[0]
+    # Assert on the handler THIS call created, not on handlers[0]: the shared
+    # `job360.audit` logger also carries the DB-tee QueueHandler (added by
+    # install_db_audit_trail at the end of setup), and in the full CI suite
+    # other tests touch this global logger too. Grabbing [0] made this test
+    # pass alone and fail in the full run.
+    import logging.handlers as lh
+
+    own = [h for h in audit.handlers if not isinstance(h, lh.QueueHandler)]
+    assert len(own) == 1, f"expected exactly one non-tee handler, got {audit.handlers}"
+    handler = own[0]
+    # RotatingFileHandler subclasses StreamHandler, so pin the fallback exactly:
+    # a rotating handler here would mean mkdir silently succeeded on the stub.
+    assert not isinstance(handler, lh.RotatingFileHandler)
     assert isinstance(handler, logging.StreamHandler)
     # The audit stream is the most injection-sensitive one — the scrubber must
-    # survive the fallback here too.
-    assert any(isinstance(f, logger_mod.CRLFScrubFilter) for f in handler.filters)
+    # survive the fallback. Checked by class NAME, not identity: another test
+    # reloading src.utils.logger gives the same class a new identity and would
+    # fail an isinstance() check spuriously.
+    assert any(type(f).__name__ == "CRLFScrubFilter" for f in handler.filters)
 
 
 def test_writable_fs_still_gets_file_handlers(tmp_path, monkeypatch):
