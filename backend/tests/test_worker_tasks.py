@@ -550,7 +550,20 @@ def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
     import asyncio
     from unittest.mock import patch
 
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
     from src.workers import tasks as tasks_mod
+
+    # The union-config redesign (issue #170 layer two) skips the fetch entirely
+    # when no complete profiles exist — seed one so run_search is reached and
+    # this test keeps exercising its actual contract (user_id=None).
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+            preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["python"]),
+        ),
+        user_id="cost-safety-user",
+    )
 
     captured: dict = {}
 
