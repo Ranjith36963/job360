@@ -1062,21 +1062,33 @@ async def run_search(
                 "per_source": per_source,
             }
 
-            # Generate outputs
+            # Generate outputs — file side-outputs only, so non-fatal by design.
+            # The run's REAL products (jobs, user_feed, run_log) live in
+            # Postgres above/below this block. In a container whose package dir
+            # is read-only (the worker installs into site-packages), these
+            # writes raise OSError; letting that kill the run would throw away
+            # the entire fetch AND skip the run_log write — which is exactly
+            # what starved the catalog for three nights before issue #170.
             if new_jobs:
-                # CSV
-                EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
-                await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
-                logger.info("CSV exported: %s", csv_path)
+                try:
+                    # CSV
+                    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    csv_path = str(EXPORTS_DIR / f"jobs_{ts}.csv")
+                    await asyncio.to_thread(export_to_csv, new_jobs, csv_path)
+                    logger.info("CSV exported: %s", csv_path)
 
-                # Markdown report
-                REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-                md_report = generate_markdown_report(new_jobs, stats)
-                md_path = REPORTS_DIR / f"report_{ts}.md"
-                await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
-                logger.info("Report saved: %s", md_path)
+                    # Markdown report
+                    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                    md_report = generate_markdown_report(new_jobs, stats)
+                    md_path = REPORTS_DIR / f"report_{ts}.md"
+                    await asyncio.to_thread(md_path.write_text, md_report, encoding="utf-8")
+                    logger.info("Report saved: %s", md_path)
+                except OSError as exc:
+                    logger.warning(
+                        "CSV/report export skipped (%s) — run continues; DB is the source of truth",
+                        exc,
+                    )
 
 
                 # Print time-bucketed summary to console

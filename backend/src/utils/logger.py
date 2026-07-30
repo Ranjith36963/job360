@@ -133,7 +133,6 @@ class JSONFormatter(logging.Formatter):
 
 
 def setup_logging(log_level: str | None = None) -> logging.Logger:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("job360")
     if logger.handlers:
         if log_level:
@@ -148,21 +147,44 @@ def setup_logging(log_level: str | None = None) -> logging.Logger:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(fmt)
     logger.addHandler(console)
-    file_handler = RotatingFileHandler(LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3)
-    file_handler.setFormatter(fmt)
-    logger.addHandler(file_handler)
-    # Second handler — JSON lines for machine consumption.
-    json_handler = RotatingFileHandler(
-        LOGS_DIR / "job360.jsonl", maxBytes=5_000_000, backupCount=3
-    )
-    json_handler.setFormatter(JSONFormatter())
-    logger.addHandler(json_handler)
+    # File handlers are a CONVENIENCE, not the product — stdout is the channel
+    # Railway (and any container host) actually captures. On 2026-07-30 the
+    # worker's 04:00 refresh_catalog cron died HERE, before fetching a single
+    # job: its image installs the package into site-packages, so LOGS_DIR
+    # resolved to /usr/local/lib/python3.12/site-packages/data/logs and
+    # mkdir() raised PermissionError. Three silent nights, empty catalog,
+    # absence detector's issue #170. A log file must never take down the
+    # pipeline it exists to describe.
+    file_handlers: list[logging.Handler] = []
+    try:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            LOGS_DIR / "job360.log", maxBytes=5_000_000, backupCount=3
+        )
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+        # Second handler — JSON lines for machine consumption.
+        json_handler = RotatingFileHandler(
+            LOGS_DIR / "job360.jsonl", maxBytes=5_000_000, backupCount=3
+        )
+        json_handler.setFormatter(JSONFormatter())
+        logger.addHandler(json_handler)
+        file_handlers = [file_handler, json_handler]
+    except OSError as exc:
+        # Never quiet about being quiet: say where file logs would have gone.
+        console.handle(
+            logging.LogRecord(
+                "job360", logging.WARNING, __file__, 0,
+                "file logging disabled (%s: %s) — continuing console-only",
+                (LOGS_DIR, exc), None,
+            )
+        )
     # Log-injection guard. MUST be attached to the HANDLERS, not to the logger:
     # a logger-level filter only sees records logged directly on that logger,
     # while every finding lives on CHILD loggers (job360.api.auth, …) whose
     # records merely propagate to these handlers. Handler filters see them all.
     _scrubber = CRLFScrubFilter()
-    for _h in (console, file_handler, json_handler):
+    for _h in (console, *file_handlers):
         _h.addFilter(_scrubber)
     return logger
 
@@ -182,21 +204,37 @@ def setup_audit_logger() -> logging.Logger:
     so audit records never appear in the main job360 handlers.  Idempotent
     — safe to call multiple times (e.g. from tests and from lifespan).
     """
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     audit = logging.getLogger("job360.audit")
-    if audit.handlers:
+    # Idempotence must key on OUR handler, not on "any handler present".
+    # `job360.audit` is a process-global name: pytest's caplog attaches its
+    # LogCaptureHandlers to it, and any library can too. The old guard
+    # (`if audit.handlers`) saw a foreign handler and returned early — WITHOUT
+    # installing the audit file/stdout handler, its CRLF scrubber, or the DB
+    # tee. In that state audit records went wherever the foreign handler
+    # pointed and the durable audit_log table got nothing.
+    if any(getattr(h, "_job360_audit", False) for h in audit.handlers):
         return audit
     audit.setLevel(logging.INFO)
     audit.propagate = False
-    handler = RotatingFileHandler(
-        LOGS_DIR / "audit.log", maxBytes=5_000_000, backupCount=5
-    )
+    # Same read-only-container rule as setup_logging above: the audit FILE is a
+    # convenience copy. On OSError we fall back to stdout — the audit trail
+    # keeps flowing (host log capture + the DB tee below), just not to a file.
+    handler: logging.Handler
+    try:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            LOGS_DIR / "audit.log", maxBytes=5_000_000, backupCount=5
+        )
+    except OSError:
+        handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JSONFormatter())
     # The audit trail is the MOST injection-sensitive stream — it records login
     # attempts with attacker-supplied emails, and it is what an operator reads
     # during an incident. propagate=False means it never reaches the main
     # handlers' scrubber, so it needs its own.
     handler.addFilter(CRLFScrubFilter())
+    # Idempotence marker (see guard above); setattr keeps mypy clean on the union type.
+    setattr(handler, "_job360_audit", True)  # noqa: B010 — deliberate dynamic marker
     audit.addHandler(handler)
     # docs/fable/05 C8 — tee the same records into the audit_log DB table so
     # audit history survives file rotation and is queryable with SQL. Lazy
