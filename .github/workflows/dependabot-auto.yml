@@ -1,0 +1,140 @@
+name: Dependabot loop (merge the safe, route the rest)
+
+# Dependabot PRs arrive from GitHub on their own schedule and then just SIT
+# there — green, boring, and unmerged — until a human notices. That makes the
+# human the bottleneck for the one queue that needs no judgment at all: a
+# patch/minor bump with the full CI suite green is as verified as anything in
+# this repo ever gets.
+#
+# This is the only loop with NO model anywhere in it. Every decision below is
+# a string compare or a check count — which is exactly why it is allowed to
+# merge on its own while the LLM loops (triage/repair) may only recommend.
+#
+# POLICY (mirrors .github/dependabot.yml's grouping):
+#   AUTO-MERGE  patch/minor version bumps, and the "minor-and-patch" groups —
+#               but ONLY with every check green and a minimum check count
+#               (a vacuous 0-check green must never merge; see below).
+#   HUMAN       majors, "-major" groups, and requirement/range widenings —
+#               these can break code and deserve eyes.
+#   TRIAGE      red checks -> dispatch the triage loop on the PR (a PR is an
+#               issue to the API), so it arrives diagnosed like every other
+#               failure in this harness.
+#   REBASE      merge conflicts -> ask dependabot itself to rebase
+#               ("@dependabot rebase" is an official command).
+#
+# HONESTY RULE: every PR this loop touches OR skips gets one line in the job
+# summary saying what happened and why. A queue manager that silently skips
+# is how work rots invisibly.
+#
+# Known, accepted quirk: a merge performed with GITHUB_TOKEN does not trigger
+# main's push-event workflows (the same recursion rule the escalation chain
+# hit). Acceptable here: the FULL suite already ran green on the PR itself,
+# and prod deploys via Railway's GitHub integration, which is not an Actions
+# workflow and fires regardless.
+
+on:
+  schedule:
+    - cron: "30 9 * * *" # daily, after the 08:00 absence check
+  workflow_dispatch: {} # drill entrance — every loop must be fireable on demand
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write # PR comments ride the issues API
+  actions: write # lets a red PR wake the triage loop
+
+concurrency:
+  group: dependabot-auto
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Sweep dependabot PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          prs=$(gh pr list --state open --json number,title,author,mergeable \
+                  --jq '[.[]|select(.author.login=="dependabot[bot]" or .author.login=="app/dependabot")]')
+          count=$(echo "$prs" | jq length)
+          echo "### Dependabot sweep — $count open PR(s)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$count" = "0" ] && exit 0
+
+          echo "$prs" | jq -c '.[]' | while read -r pr; do
+            num=$(echo "$pr"    | jq -r .number)
+            title=$(echo "$pr"  | jq -r .title)
+            mergeable=$(echo "$pr" | jq -r .mergeable)
+
+            # ---- classify from the title (dependabot's format is stable) ----
+            decision="human"; reason="unclassified"
+            case "$title" in
+              *"minor-and-patch group"*|*"npm-minor-and-patch"*)
+                decision="auto"; reason="minor/patch group" ;;
+              *"-major"*|*"major group"*)
+                decision="human"; reason="major group" ;;
+              *"update "*" requirement "*)
+                decision="human"; reason="range widening" ;;
+              *"bump "*" from "*" to "*)
+                from=$(echo "$title" | grep -oE 'from [0-9]+' | grep -oE '[0-9]+' | head -1)
+                to=$(echo "$title"   | grep -oE 'to [0-9]+'   | grep -oE '[0-9]+' | head -1)
+                if [ -n "$from" ] && [ "$from" = "$to" ]; then
+                  decision="auto"; reason="same-major bump ($from.x -> $to.x)"
+                else
+                  decision="human"; reason="major bump ($from -> $to)"
+                fi ;;
+            esac
+
+            # ---- conflicts: dependabot fixes its own rebases ----
+            if [ "$mergeable" = "CONFLICTING" ]; then
+              gh pr comment "$num" --body "@dependabot rebase"
+              echo "- #$num REBASE requested (conflicting) — $title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            # ---- checks: all done, none red, and ENOUGH of them ----
+            green=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="SUCCESS")]|length')
+            red=$(gh pr view "$num"   --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE")]|length')
+            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.status!="COMPLETED")]|length')
+
+            if [ "$red" -gt 0 ]; then
+              # Arrive diagnosed, like every failure in this harness. A PR
+              # number IS an issue number to the API, so triage can take it.
+              gh workflow run triage.yml -f issue="$num" \
+                || echo "::warning::could not wake triage for #$num"
+              echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            if [ "$pending" -gt 0 ]; then
+              echo "- #$num WAIT ($pending pending) — $title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            # A merge gated on "no failures" alone would merge a PR whose
+            # checks never ran at all. 10 is well under the ~14 this repo
+            # produces but far above zero — it exists to catch "CI simply
+            # didn't fire", the vacuous-green trap.
+            if [ "$green" -lt 10 ]; then
+              echo "- #$num SUSPICIOUS (only $green checks — CI may not have run) — $title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            if [ "$decision" = "auto" ]; then
+              if gh pr merge "$num" --squash; then
+                echo "- #$num MERGED ($reason, $green checks green) — $title" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "- #$num MERGE FAILED (left for human) — $title" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            else
+              # Tell the human ONCE, not daily.
+              marker="<!-- dependabot-loop-routed -->"
+              if ! gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+                body=$(printf '%s\n**Dependabot loop:** all %s checks are green, but this is a **%s** - auto-merge covers patch/minor only, so this one is yours. Merge it, or close it AND add an ignore rule to `.github/dependabot.yml` (closing alone does not silence it - it will come back).' "$marker" "$green" "$reason")
+                gh pr comment "$num" --body "$body"
+              fi
+              echo "- #$num HUMAN ($reason, $green green) — $title" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
