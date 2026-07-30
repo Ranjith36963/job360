@@ -77,15 +77,16 @@ def test_audit_logger_survives_readonly_fs(monkeypatch):
 
     audit = logger_mod.setup_audit_logger()  # must not raise
 
-    # Assert on the handler THIS call created, not on handlers[0]: the shared
-    # `job360.audit` logger also carries the DB-tee QueueHandler (added by
-    # install_db_audit_trail at the end of setup), and in the full CI suite
-    # other tests touch this global logger too. Grabbing [0] made this test
-    # pass alone and fail in the full run.
+    # Assert on the handler THIS call created — identified by its idempotence
+    # marker. The shared `job360.audit` logger also carries the DB-tee
+    # QueueHandler, and in CI pytest's caplog attaches LogCaptureHandlers to it
+    # between our fixture's clear and the call. That very noise exposed the
+    # real bug this run fixed: the old `if audit.handlers` guard saw a foreign
+    # handler and skipped installing the audit handler entirely.
     import logging.handlers as lh
 
-    own = [h for h in audit.handlers if not isinstance(h, lh.QueueHandler)]
-    assert len(own) == 1, f"expected exactly one non-tee handler, got {audit.handlers}"
+    own = [h for h in audit.handlers if getattr(h, "_job360_audit", False)]
+    assert len(own) == 1, f"expected exactly one job360 audit handler, got {audit.handlers}"
     handler = own[0]
     # RotatingFileHandler subclasses StreamHandler, so pin the fallback exactly:
     # a rotating handler here would mean mkdir silently succeeded on the stub.
@@ -96,6 +97,27 @@ def test_audit_logger_survives_readonly_fs(monkeypatch):
     # reloading src.utils.logger gives the same class a new identity and would
     # fail an isinstance() check spuriously.
     assert any(type(f).__name__ == "CRLFScrubFilter" for f in handler.filters)
+
+
+def test_audit_setup_not_blocked_by_foreign_handlers(tmp_path, monkeypatch):
+    """The bug CI's caplog noise exposed: `job360.audit` is a process-global
+    logger anyone can attach handlers to (pytest's caplog does exactly that).
+    The old idempotence guard — `if audit.handlers: return` — saw a FOREIGN
+    handler and skipped installing the audit handler, its scrubber and the DB
+    tee entirely. Idempotence must key on OUR marker, not on 'any handler'."""
+    monkeypatch.setattr(logger_mod, "LOGS_DIR", tmp_path / "logs")
+
+    foreign = logging.NullHandler()
+    logging.getLogger("job360.audit").addHandler(foreign)
+
+    audit = logger_mod.setup_audit_logger()
+
+    own = [h for h in audit.handlers if getattr(h, "_job360_audit", False)]
+    assert len(own) == 1, "a foreign handler must not block the audit handler install"
+    # And calling again must NOT double-install (real idempotence).
+    logger_mod.setup_audit_logger()
+    own2 = [h for h in audit.handlers if getattr(h, "_job360_audit", False)]
+    assert len(own2) == 1, "second call must not add a duplicate audit handler"
 
 
 def test_writable_fs_still_gets_file_handlers(tmp_path, monkeypatch):

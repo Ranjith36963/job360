@@ -205,7 +205,14 @@ def setup_audit_logger() -> logging.Logger:
     — safe to call multiple times (e.g. from tests and from lifespan).
     """
     audit = logging.getLogger("job360.audit")
-    if audit.handlers:
+    # Idempotence must key on OUR handler, not on "any handler present".
+    # `job360.audit` is a process-global name: pytest's caplog attaches its
+    # LogCaptureHandlers to it, and any library can too. The old guard
+    # (`if audit.handlers`) saw a foreign handler and returned early — WITHOUT
+    # installing the audit file/stdout handler, its CRLF scrubber, or the DB
+    # tee. In that state audit records went wherever the foreign handler
+    # pointed and the durable audit_log table got nothing.
+    if any(getattr(h, "_job360_audit", False) for h in audit.handlers):
         return audit
     audit.setLevel(logging.INFO)
     audit.propagate = False
@@ -226,6 +233,7 @@ def setup_audit_logger() -> logging.Logger:
     # during an incident. propagate=False means it never reaches the main
     # handlers' scrubber, so it needs its own.
     handler.addFilter(CRLFScrubFilter())
+    handler._job360_audit = True  # type: ignore[attr-defined] — idempotence marker, see above
     audit.addHandler(handler)
     # docs/fable/05 C8 — tee the same records into the audit_log DB table so
     # audit history survives file rotation and is queryable with SQL. Lazy
