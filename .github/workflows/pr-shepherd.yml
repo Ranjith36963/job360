@@ -95,19 +95,26 @@ jobs:
               continue
             fi
 
-            # ---- red CI: send it through the same diagnosis path as everything ----
+            # ---- red CI: OWNER PRs get FIXED, not just diagnosed ----
+            # (Owner's standing instruction 2026-07-30: conflicts and red CI
+            # are repaired autonomously; only the merge stays human.)
             if [ "$red" -gt 0 ]; then
+              author=$(echo "$pr" | jq -r .author.login)
               marker="<!-- pr-shepherd-red -->"
               if ! gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
-                if gh workflow run triage.yml -f issue="$num"; then
-                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing, so the triage loop has been dispatched to diagnose this PR. Its verdict will appear here as a comment + label.' "$marker" "$red")
+                if [ "$author" = "Ranjith36963" ] && gh workflow run pr-repair.yml -f pr="$num"; then
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing - the PR-repair loop has been dispatched to FIX this branch. It will push additive commits and CI will re-run; merging stays with you.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> pr-repair dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+                elif gh workflow run triage.yml -f issue="$num"; then
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing, so the triage loop has been dispatched to diagnose this PR.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
                 else
-                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing and triage could NOT be dispatched — diagnose by hand.' "$marker" "$red")
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing and no loop could be dispatched - diagnose by hand.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> DISPATCH FAILED — $title" >> "$GITHUB_STEP_SUMMARY"
                 fi
                 gh pr comment "$num" --body "$body"
-                echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "- #$num RED ($red failing, already triaged — not re-nagging) — $title" >> "$GITHUB_STEP_SUMMARY"
+                echo "- #$num RED ($red failing, already routed — not re-nagging) — $title" >> "$GITHUB_STEP_SUMMARY"
               fi
               continue
             fi
