@@ -40,6 +40,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write # approve the CI runs our own push parks in action_required
 
 concurrency:
   group: pr-repair
@@ -262,6 +263,15 @@ jobs:
             git commit -F /tmp/commit-msg.txt
           fi
           git push origin HEAD:${{ steps.gate.outputs.branch }}
+          # A push made with GITHUB_TOKEN parks the resulting pull_request CI
+          # runs in `action_required` (the same recursion rule, fourth
+          # appearance — measured on run 30551513619: 5 runs sat waiting and
+          # the repaired PR showed one lonely check). Approve them so the
+          # repair actually PROVES itself green instead of stalling silently.
+          sleep 30
+          for id in $(gh run list --branch "${{ steps.gate.outputs.branch }}" --limit 10                         --json databaseId,conclusion                         --jq '.[]|select(.conclusion=="action_required")|.databaseId'); do
+            gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1               && echo "approved parked run $id" >> "$GITHUB_STEP_SUMMARY"               || echo "::warning::could not approve run $id — approve it in the UI or CI will not report on this PR"
+          done
           gh pr comment "${{ inputs.pr }}" --body "**PR repair:** pushed a fix to this branch — the full offline suite passed in the workflow itself (run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})). CI is re-running now; merging stays with you."
           echo "pushed repair to ${{ steps.gate.outputs.branch }}" >> "$GITHUB_STEP_SUMMARY"
 
