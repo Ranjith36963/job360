@@ -729,7 +729,11 @@ async def _personalize_dims(row: dict[str, Any], db: JobDatabase, user: CurrentU
     out["visa_flag"] = int(scorer.check_visa_flag(job))
     out["experience_level"] = detect_experience_level(job.title)
     # Overall: the stored feed score the user saw; recompute only as fallback.
-    out["match_score"] = feed_score if feed_score is not None else breakdown.match_score
+    # Written under "feed_score" (not "match_score") because that's the key
+    # _row_to_job_response actually reads for the personalized score — writing
+    # "match_score" here would land on a key the serializer ignores, and the
+    # response would silently fall back to 0.
+    out["feed_score"] = feed_score if feed_score is not None else breakdown.match_score
     return out
 
 
