@@ -184,7 +184,7 @@ jobs:
           # No Bash: this repo is PUBLIC and this job holds a token. The agent
           # reads files and writes exactly one file; the workflow runs every
           # command. Same cage as repair.yml and doc-sync.yml.
-          claude_args: --allowedTools Edit,Write,Read,Glob,Grep
+          claude_args: --allowedTools Edit,Write,Read,Glob,Grep --max-turns 40
 
       # ── ROUTE stage (dumb code): the model's verdict is a WORD, not an action.
       # Bash maps that word onto a whitelisted label. The agent can never apply
