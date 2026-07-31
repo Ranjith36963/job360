@@ -220,7 +220,7 @@ jobs:
           # `Bash(cd:*)`/`Bash(npm:*)` were no better — `cd . && <anything>` and
           # `npm run <anything>`/postinstall are both arbitrary execution.
           # The agent now edits only; the workflow runs every command.
-          claude_args: --allowedTools Edit,Write,Read,Glob,Grep
+          claude_args: --allowedTools Edit,Write,Read,Glob,Grep --max-turns 40
 
       - name: Upload Claude transcript (always — for diagnosis)
         if: always() && steps.token.outputs.have == 'true'

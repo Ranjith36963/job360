@@ -185,7 +185,7 @@ jobs:
           # `python -c "...os.environ..."` exfiltrates both. The checker now runs
           # in a deterministic step above and the agent reads its output as a
           # file, so nothing dangerous is reachable from the model.
-          claude_args: --allowedTools Edit,Write,Read,Glob,Grep
+          claude_args: --allowedTools Edit,Write,Read,Glob,Grep --max-turns 40
 
       - name: Upload Claude transcript (always — for diagnosis)
         if: always() && steps.token.outputs.have == 'true'
