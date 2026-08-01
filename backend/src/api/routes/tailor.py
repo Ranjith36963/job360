@@ -21,7 +21,7 @@ from src.api.dependencies import get_request_db
 from src.core.settings import TAILOR_FREE_PER_MONTH
 from src.repositories.database import JobDatabase
 from src.services.profile.llm_provider import llm_extract
-from src.services.profile.storage import load_profile
+from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.tailoring import DOC_KINDS, generate_document
 from src.services.tailoring.docx import render_docx
 from src.services.tailoring.generator import EmptyCVError
@@ -139,6 +139,24 @@ async def generate(
 
     fit_reason = await db.get_fit_reason(user.id, job_id)
 
+    # PROVENANCE — which profile snapshot produced these documents.
+    #
+    # `tailored_documents.profile_version` has existed since migration 0023
+    # ("which user_profile_versions snapshot fed the draft") and
+    # `upsert_tailored_doc` has always accepted it, but this — the only caller —
+    # never passed it. Production therefore held tailored documents with no
+    # provenance at all.
+    #
+    # It matters because this is the most expensive and most personal artifact
+    # the product makes: a paid LLM call, sent to a real employer. Without the
+    # stamp there is no way to answer "which version of my profile wrote this?",
+    # and no way to find the documents generated from a profile later discovered
+    # to be wrong — the CV-blend bug produced exactly such profiles.
+    #
+    # Resolved ONCE, outside the loop, so the CV and the cover letter can never
+    # be attributed to different versions of the same profile.
+    profile_version = current_profile_version_id(user.id)
+
     for kind in DOC_KINDS:
         # Layer 2 (per-user): the user's own past KEPT docs → 'write like me'.
         examples = await db.get_user_kept_docs(user.id, kind, limit=3)
@@ -171,6 +189,7 @@ async def generate(
         await db.upsert_tailored_doc(
             user.id, job_id, kind, doc.document,
             model=doc.model, flagged_terms=doc.flagged_terms,
+            profile_version=profile_version,
         )
 
     await db.record_tailored_usage(user.id, job_id)

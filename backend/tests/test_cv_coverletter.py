@@ -420,3 +420,76 @@ async def test_upsert_insert_failure_does_not_lose_existing_doc(fixture_user_id,
     row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
     assert row is not None, "original doc was lost — DELETE was not rolled back"
     assert row["ai_draft"] == "precious original draft"
+
+
+# ── Provenance: a tailored doc must name the profile snapshot that wrote it ────
+
+
+@pytest.mark.asyncio
+async def test_generated_docs_are_stamped_with_the_profile_version(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """A tailored CV must record WHICH profile version produced it.
+
+    `tailored_documents.profile_version` has existed since migration 0023
+    ("which user_profile_versions snapshot fed the draft") and
+    `upsert_tailored_doc` has always accepted it — but the one caller never
+    passed it, so production held 4 tailored documents with 0 versions between
+    them.
+
+    That is the most expensive, most personal artifact this product makes: a
+    paid LLM call, sent to a real employer. Without the stamp there is no way to
+    answer "which version of my profile wrote this?" — and no way to find the
+    documents generated from a profile that was later found to be wrong (the
+    CV-blend bug produced exactly such profiles).
+    """
+    import src.services.profile.storage as storage
+
+    captured: list = []
+    _patch_route(monkeypatch, captured)
+    # Pin the version the route should stamp, so the assertion is exact rather
+    # than "some integer".
+    monkeypatch.setattr(
+        "src.api.routes.tailor.current_profile_version_id", lambda _uid: 4242
+    )
+    assert hasattr(storage, "current_profile_version_id")
+
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+
+    async with authenticated_async_context() as client:
+        resp = await client.post(f"/api/tailor/{job_id}/generate")
+    assert resp.status_code == 200, resp.text
+
+    # BOTH documents — the cover letter is generated from the same profile.
+    for kind in ("cv", "cover_letter"):
+        row = await db.get_tailored_doc(fixture_user_id, job_id, kind)
+        assert row is not None, f"{kind} was not stored"
+        assert row["profile_version"] == 4242, (
+            f"{kind} must record the profile snapshot that produced it, "
+            f"got {row.get('profile_version')!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_profile_version_does_not_block_generation(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """No version available (fresh account, or the versions table is empty) must
+    still produce documents — provenance is a record, never a gate."""
+    captured: list = []
+    _patch_route(monkeypatch, captured)
+    monkeypatch.setattr(
+        "src.api.routes.tailor.current_profile_version_id", lambda _uid: None
+    )
+
+    db = await api_deps.get_db()
+    job_id = await _insert_job(db)
+
+    async with authenticated_async_context() as client:
+        resp = await client.post(f"/api/tailor/{job_id}/generate")
+
+    assert resp.status_code == 200, resp.text
+    row = await db.get_tailored_doc(fixture_user_id, job_id, "cv")
+    assert row["ai_draft"], "the document must still be generated and stored"
+    assert row["profile_version"] is None
