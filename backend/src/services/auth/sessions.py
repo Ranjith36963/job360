@@ -93,14 +93,39 @@ async def resolve_session(
     return cast(Optional[str], row["user_id"])
 
 
-async def revoke_session(db_path: str, cookie: str, *, secret: str) -> None:
+async def revoke_session(db_path: str, cookie: str, *, secret: str) -> Optional[str]:
+    """Delete one session and return the user it belonged to (None if unknown).
+
+    Reads the owner BEFORE deleting so the audit trail can say *who* signed out.
+    It previously ran the DELETE alone, which meant the one fact worth recording
+    was thrown away: measured in production 2026-07-28, `audit_log` held 19 of 59
+    rows with no user_id, and while 10 were `magic_link_request` (legitimately
+    unattributed — no account exists yet at request time), 4 `logout` and 4
+    `session_revoked` had lost a user that was perfectly knowable. "Who logged
+    out?" was unanswerable from the table you reach for during an incident.
+
+    SELECT-then-DELETE rather than `DELETE ... RETURNING`: every statement here
+    goes through the psycopg shim's translate(), and SELECT + DELETE are already
+    exercised everywhere in this codebase, so this cannot depend on how the shim
+    handles a RETURNING clause.
+
+    Returns None for a forged, expired or already-revoked cookie — logout is
+    called with whatever the browser presents, so that path must degrade quietly.
+    """
     sid = _unsign(cookie, secret)
     if sid is None:
-        return
+        return None
     async with open_db(db_path) as db:
+        cur = await db.execute("SELECT user_id FROM sessions WHERE id = ?", (sid,))
+        row = await cur.fetchone()
+        user_id = cast(Optional[str], row["user_id"]) if row else None
         await db.execute("DELETE FROM sessions WHERE id = ?", (sid,))
         await db.commit()
-    get_audit_logger().info("session_revoked", extra={"event": "session_revoked", "session_id": sid[:8]})
+    get_audit_logger().info(
+        "session_revoked",
+        extra={"event": "session_revoked", "session_id": sid[:8], "user_id": user_id},
+    )
+    return user_id
 
 
 async def revoke_all_for_user(db_path: str, user_id: str) -> int:

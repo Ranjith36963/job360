@@ -282,9 +282,27 @@ async def logout(
     request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Response:
+    # Capture WHO is logging out. This route deliberately takes the raw cookie
+    # rather than `require_user` (an expired or forged cookie must still clear
+    # the browser's, not 401), so the user is not otherwise in scope — and the
+    # audit line was being written without one. `revoke_session` now returns the
+    # owner it just signed out, which is the only place that identity exists.
+    user_id = None
     if job360_session:
-        await auth_sessions.revoke_session(str(DB_PATH), job360_session, secret=_secret())
-    get_audit_logger().info("auth", extra={"event": "logout", "status": "ok", **_client_meta(request)})
+        user_id = await auth_sessions.revoke_session(
+            str(DB_PATH), job360_session, secret=_secret()
+        )
+    get_audit_logger().info(
+        "auth",
+        extra={
+            "event": "logout",
+            "status": "ok",
+            # None when the cookie was already invalid — genuinely unknown, and
+            # honestly recorded as such rather than silently omitted.
+            "user_id": user_id,
+            **_client_meta(request),
+        },
+    )
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
