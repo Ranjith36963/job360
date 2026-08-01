@@ -698,3 +698,141 @@ class TestTwoPassOrchestrator:
         out = await two_pass.run_two_pass_extraction(prof)
         assert "Existing LI Skill" in out.cv_data.linkedin_skills
         assert "Existing GH Skill" in out.cv_data.github_skills_inferred
+
+
+# ── CV REPLACEMENT — a new upload must not inherit the previous CV ──────────
+
+
+class TestCvReplacementResetsCvOwnedFields:
+    """Uploading a DIFFERENT CV must replace the CV-derived profile, not blend it.
+
+    Found in production 2026-07-27. The upload route sets only
+    ``profile.cv_data.raw_text`` and leaves every other field in place; the
+    enhance merge then fills empty scalars ONLY (`two_pass.py`
+    "never overwrite a value the user already has") and UNIONS the lists. So a
+    second CV produced one profile holding:
+
+        * the FIRST person's name / headline / location / summary
+        * BOTH people's skills, roles, companies, education
+
+    Measured: a real profile went from 104 skills to 152 after a different
+    person's CV was uploaded, while `name` still read the original owner.
+
+    That matters beyond tidiness — tailored CVs and cover letters are generated
+    from this profile, so the wrong name goes out to an employer.
+    """
+
+    def _cv_from_first_upload(self) -> CVData:
+        cv = CVData(
+            raw_text="OLD CV TEXT",
+            name="Alice Anderson",
+            headline="Staff Data Engineer",
+            location="Manchester, UK",
+            summary="Ten years of data platform work.",
+            experience_text="Built pipelines at OldCorp.",
+            skills=["Airflow", "Spark", "Python"],
+            job_titles=["Data Engineer"],
+            companies=["OldCorp"],
+            education=["BSc Computer Science"],
+            certifications=["AWS Solutions Architect"],
+            achievements=["Cut pipeline cost 40%"],
+            industries=["Energy"],
+            cv_languages=["English"],
+            cv_skills_esco={"Airflow": "http://esco/airflow"},
+            career_domain="data",
+            # NOT CV-owned — these come from other inputs and must SURVIVE.
+            linkedin_skills=["Public Speaking"],
+            linkedin_industry="Utilities",
+            linkedin_raw_text="LINKEDIN TEXT",
+            github_languages={"Python": 900},
+            github_llm_skills=["LangChain"],
+            github_repos_brief=[{"name": "etl-tools"}],
+            about_me_inferred_skills=["Mentoring"],
+        )
+        return cv
+
+    def test_reset_clears_every_cv_derived_field(self):
+        from src.services.profile.two_pass import reset_cv_owned_fields
+
+        cv = self._cv_from_first_upload()
+        reset_cv_owned_fields(cv)
+
+        # Identity must not survive — this is the bug that put the wrong name
+        # on someone else's tailored CV.
+        assert cv.name == ""
+        assert cv.headline == ""
+        assert cv.location == ""
+        assert cv.summary == ""
+        assert cv.experience_text == ""
+
+        # Nor may the previous CV's substance survive to be UNIONED with the new
+        # one. This is the assertion a "name updated" check would have missed.
+        assert cv.skills == []
+        assert cv.job_titles == []
+        assert cv.companies == []
+        assert cv.education == []
+        assert cv.certifications == []
+        assert cv.achievements == []
+        assert cv.industries == []
+        assert cv.cv_languages == []
+        assert cv.cv_skills_esco == {}
+        assert cv.career_domain is None
+
+    def test_reset_preserves_everything_the_cv_does_not_own(self):
+        """LinkedIn / GitHub / about-me are separate inputs the user did not re-upload.
+
+        Wiping them would silently delete work — the opposite failure.
+        """
+        from src.services.profile.two_pass import reset_cv_owned_fields
+
+        cv = self._cv_from_first_upload()
+        reset_cv_owned_fields(cv)
+
+        assert cv.linkedin_skills == ["Public Speaking"]
+        assert cv.linkedin_industry == "Utilities"
+        assert cv.linkedin_raw_text == "LINKEDIN TEXT"
+        assert cv.github_languages == {"Python": 900}
+        assert cv.github_llm_skills == ["LangChain"]
+        assert cv.github_repos_brief == [{"name": "etl-tools"}]
+        assert cv.about_me_inferred_skills == ["Mentoring"]
+
+    def test_reset_mutates_in_place_so_the_profile_keeps_its_object(self):
+        """The route holds `profile.cv_data`; a rebind would be silently lost."""
+        from src.services.profile.two_pass import reset_cv_owned_fields
+
+        cv = self._cv_from_first_upload()
+        skills_obj = cv.skills
+        reset_cv_owned_fields(cv)
+        assert cv.skills is skills_obj, "must clear the list, not rebind it"
+
+    def test_after_reset_the_merge_can_write_the_new_cvs_identity(self):
+        """End-to-end of the actual defect: reset + merge must yield ONLY person B.
+
+        Without the reset, `_merge_cv_llm_into` refuses to overwrite `name`
+        (fill-if-empty) and unions the skills — producing the two-person blend.
+        """
+        from src.services.profile.two_pass import (
+            _merge_cv_llm_into,
+            reset_cv_owned_fields,
+        )
+
+        cv = self._cv_from_first_upload()
+        cv.raw_text = "NEW CV TEXT"
+        reset_cv_owned_fields(cv)
+
+        newly_extracted = CVData(
+            name="Bob Brown",
+            headline="Frontend Engineer",
+            summary="Six years of React.",
+            skills=["React", "TypeScript"],
+            job_titles=["Frontend Engineer"],
+        )
+        _merge_cv_llm_into(cv, newly_extracted)
+
+        assert cv.name == "Bob Brown", "the new CV must own the identity"
+        assert cv.headline == "Frontend Engineer"
+        assert sorted(cv.skills) == ["React", "TypeScript"]
+        assert "Airflow" not in cv.skills, "person A's skills must be GONE, not unioned"
+        assert cv.job_titles == ["Frontend Engineer"]
+        # Other inputs still intact after the full round-trip.
+        assert cv.github_llm_skills == ["LangChain"]

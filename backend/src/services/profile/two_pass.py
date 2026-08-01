@@ -138,6 +138,61 @@ def dedup_fuzzy(items: list[str], threshold: int = 85) -> list[str]:
     return kept
 
 
+def reset_cv_owned_fields(cv: CVData) -> None:
+    """Clear everything the CV owns, so a NEW upload cannot inherit the old one.
+
+    Call this the moment a DIFFERENT CV replaces the current one — before the
+    new ``raw_text`` is parsed.
+
+    WHY THIS EXISTS. The upload route only replaces ``cv_data.raw_text``; every
+    other field stays. ``_merge_cv_llm_into`` (below) then fills empty scalars
+    ONLY and UNIONS the lists — both correct when RE-RUNNING extraction over the
+    same CV, both wrong when the CV has been swapped. Together they produced, in
+    production, a single profile holding the FIRST person's name/headline/
+    location/summary and BOTH people's skills, roles, companies and education. A
+    real profile went 104 skills -> 152 after a different person's CV was
+    uploaded, while ``name`` still read the original owner. Tailored CVs and
+    cover letters are generated from this profile, so the wrong name reaches an
+    employer.
+
+    Mutates IN PLACE: the route holds ``profile.cv_data``, so rebinding a new
+    object here would be silently discarded.
+
+    The field list below must stay in lockstep with ``_merge_cv_llm_into`` —
+    they are two halves of one contract: "what the CV owns". Deliberately NOT
+    cleared: ``raw_text`` (the caller is about to overwrite it), and everything
+    sourced from a DIFFERENT input the user did not re-upload — ``linkedin_*``,
+    ``github_*`` and ``about_me_inferred_skills``. Wiping those would silently
+    delete work, which is the opposite failure.
+    """
+    # Scoring-semantic — these reach SearchConfig and change what matches.
+    cv.skills.clear()
+    cv.job_titles.clear()
+    cv.companies.clear()
+    cv.education.clear()
+    cv.certifications.clear()
+    cv.industries.clear()
+    cv.cv_languages.clear()
+    cv.cv_skills_esco.clear()
+    cv.summary = ""
+    cv.experience_text = ""
+
+    # Identity / display — the fields that put the wrong name on a tailored CV.
+    cv.name = ""
+    cv.headline = ""
+    cv.location = ""
+    cv.achievements.clear()
+
+    # Classified FROM the CV, so it belongs to the CV. ``None`` (not "") is the
+    # documented "not classified" sentinel on CVData.
+    cv.career_domain = None
+
+    # Regenerated wholesale from the merged skill set on every two-pass run, but
+    # cleared so a failed re-extract cannot leave suggestions computed from a
+    # different person's skills.
+    cv.suggested_skills.clear()
+
+
 def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     """Merge the CV-OWNED fields of an LLM result into the live ``cv``.
 

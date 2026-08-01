@@ -420,3 +420,96 @@ def test_profile_route_logger_is_under_job360_namespace():
     import src.api.routes.profile as profile_route
 
     assert profile_route.logger.name == "job360.api.profile"
+
+
+# ---------------------------------------------------------------------------
+# CV REPLACEMENT — the route must reset CV-owned fields, and must NOT reset
+# them when the upload is rejected.
+# ---------------------------------------------------------------------------
+
+
+class TestCapturedCvReplacesRatherThanBlends:
+    """`_capture_cv_raw` is the single choke point for every CV upload route.
+
+    Unit tests cover `reset_cv_owned_fields` itself; these prove the ROUTE
+    actually calls it, and — just as important — that a REJECTED upload leaves
+    the existing profile untouched. Without the second half, a user who
+    accidentally picks a .txt file would have their whole profile wiped.
+    """
+
+    def _seeded_profile(self):
+        from src.services.profile.models import CVData, UserProfile
+
+        return UserProfile(
+            cv_data=CVData(
+                raw_text="ORIGINAL CV TEXT",
+                name="Alice Anderson",
+                skills=["Airflow", "Spark"],
+                job_titles=["Data Engineer"],
+                github_llm_skills=["LangChain"],
+            )
+        )
+
+    def test_successful_upload_drops_the_previous_cvs_data(self):
+        from unittest.mock import patch
+
+        from src.api.routes.profile import _capture_cv_raw
+
+        profile = self._seeded_profile()
+        with patch("src.api.routes.profile.extract_text", return_value="BRAND NEW CV TEXT"):
+            _capture_cv_raw(b"%PDF-1.4 fake", "new_cv.pdf", profile)
+
+        assert profile.cv_data.raw_text == "BRAND NEW CV TEXT"
+        # The previous CV's extracted data must be GONE, not waiting to be
+        # unioned with the new extraction.
+        assert profile.cv_data.name == ""
+        assert profile.cv_data.skills == []
+        assert profile.cv_data.job_titles == []
+        # A different input the user did NOT re-upload must survive.
+        assert profile.cv_data.github_llm_skills == ["LangChain"]
+
+    def test_oversized_upload_leaves_the_profile_completely_intact(self):
+        from fastapi import HTTPException
+
+        from src.api.routes.profile import _capture_cv_raw
+
+        profile = self._seeded_profile()
+        with pytest.raises(HTTPException) as exc:
+            _capture_cv_raw(b"x" * (10 * 1024 * 1024 + 1), "huge.pdf", profile)
+
+        assert exc.value.status_code == 413
+        assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
+        assert profile.cv_data.name == "Alice Anderson"
+        assert profile.cv_data.skills == ["Airflow", "Spark"]
+
+    def test_wrong_filetype_leaves_the_profile_completely_intact(self):
+        from fastapi import HTTPException
+
+        from src.api.routes.profile import _capture_cv_raw
+
+        profile = self._seeded_profile()
+        with pytest.raises(HTTPException) as exc:
+            _capture_cv_raw(b"hello", "notes.txt", profile)
+
+        assert exc.value.status_code == 415
+        assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
+        assert profile.cv_data.name == "Alice Anderson"
+        assert profile.cv_data.skills == ["Airflow", "Spark"]
+
+    def test_unreadable_file_leaves_the_profile_intact(self):
+        """A readable-looking PDF that yields no text must not wipe the profile."""
+        from unittest.mock import patch
+
+        from fastapi import HTTPException
+
+        from src.api.routes.profile import _capture_cv_raw
+
+        profile = self._seeded_profile()
+        with patch("src.api.routes.profile.extract_text", return_value="   "):
+            with pytest.raises(HTTPException) as exc:
+                _capture_cv_raw(b"%PDF-1.4 fake", "empty.pdf", profile)
+
+        assert exc.value.status_code == 503
+        assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
+        assert profile.cv_data.name == "Alice Anderson"
+        assert profile.cv_data.skills == ["Airflow", "Spark"]
