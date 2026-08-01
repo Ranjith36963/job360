@@ -1,21 +1,33 @@
 # Job360 — Deploy Runbook (Railway)
 
-> **Status: ✅ LIVE (2026-07-02).** Railway Hobby active. Project `job360`, 5 services all Online.
-> - **Frontend (the site):** https://frontend-production-c608f.up.railway.app
+## 🔴 `main` IS PRODUCTION — deploys are AUTOMATIC
+
+**Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. Every merge ships to real users.** There is no manual deploy step and no staging gate. Merging is a release — never merge "to tidy up".
+
+Live at **job360.uk**. Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
+
+### How to check what is actually deployed
+
+```bash
+railway deployment list --service backend --json   # read meta.commitHash, meta.branch
+```
+
+Verified 2026-07-27: `meta.commitHash` equalled `origin/main` HEAD exactly, and four deploys fired within 70 seconds as PRs merged.
+
+> **`/api/health` cannot answer this.** It returns a hardcoded `{"status":"ok","version":"1.0.0"}` with no commit SHA. Timestamp correlation is the only alternative signal and it fails silently on a rollback or a failed build — so use the deploy API, not the clock.
+
+### If you ever need to deploy WITHOUT the GitHub link
+
+The manual `railway up` recipe further down still works, but it is the fallback path, not the normal one. Do not use it while the GitHub link is active — a manual upload and an auto-deploy can race and leave services on different commits.
+
+---
+
+> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`, 5 services all Online.
+> - **Custom domain:** https://job360.uk
+> - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
 > - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
 > - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
->
-> To redeploy after code changes: `cd backend && railway up --service backend --detach` (and `--service worker`), `cd frontend && railway up --service frontend --detach`. Env vars already set per-service in Railway.
-
-## 🔴 What YOU must do (one time, ~2 min)
-The Railway **free trial has expired**. To deploy, activate a plan + payment:
-1. Go to **https://railway.com/account/plans** (logged in as `rahulranjith369@gmail.com`).
-2. Pick **Hobby** (~$5/mo; includes usage credit that covers Postgres + Redis + the app at small scale).
-3. Add a payment method.
-4. Tell me "Railway plan active" — I run the deploy below and give you the live URL.
-
-*(Alternative if you'd rather not pay Railway: say the word and I'll target a free host — Render/Fly for the API, Vercel for the frontend. That needs an account on that host, though.)*
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
@@ -24,7 +36,13 @@ The Railway **free trial has expired**. To deploy, activate a plan + payment:
 - **DB backup script** (`backend/scripts/backup_db.py`).
 - All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `POSTHOG_KEY`).
 
-## Deploy commands (I run these once the plan is active)
+## First-time provisioning (HISTORICAL — already done 2026-07-02)
+
+> These commands **created** the project, databases and services. They are kept as a
+> record of how prod was built, and as the recipe if it ever has to be rebuilt from
+> scratch. **They are NOT how you deploy a code change** — merging to `main` does
+> that automatically (see the banner at the top).
+
 ```bash
 # From repo root, logged in as rahulranjith369@gmail.com
 railway init --name job360 --workspace "ranjith36963's Projects" --json

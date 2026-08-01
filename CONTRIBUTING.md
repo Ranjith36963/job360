@@ -54,6 +54,27 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
 7. Open the PR against `main`. Fill the template. Link the issue.
 8. Request review. Do not self-merge unless explicitly authorised.
 
+## ⚠️ Merging to `main` deploys to production
+
+Railway is GitHub-linked to this repo on `main`. **A merge is a release** — it goes
+straight to real users at **job360.uk**, with no manual step and no staging
+environment. There is nowhere to catch a bad merge after the fact.
+
+So: **never merge to tidy up the PR list.** Land a branch because the change is
+ready to be live, or leave it open.
+
+Check what is actually deployed:
+
+```bash
+railway deployment list --service backend --json   # meta.commitHash, meta.branch
+```
+
+`/api/health` cannot tell you — it returns a hardcoded `"version": "1.0.0"` with no
+commit SHA.
+
+If a merge does break production, the fastest recovery is Railway → Deployments →
+redeploy the previous SUCCESS build, then fix forward on a branch.
+
 ## Test-before-merge gate
 
 **Invariant baseline: ~1,409 collected (2 live deselected), 0 failing.**
