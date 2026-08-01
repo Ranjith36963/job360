@@ -762,3 +762,76 @@ async def test_get_request_db_yields_own_connection_not_the_singleton():
             pass
     assert conns[0] is not conns[1], "each request must get a fresh connection"
     assert conns[0] is not singleton._conn, "request conn must not be the singleton"
+
+
+# ---------------------------------------------------------------------------
+# Cross-user isolation: the SHARED catalog must not serve one person's score
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_anonymous_jobs_never_expose_a_personal_match_score():
+    """`jobs.match_score` is user-derived data living on a SHARED row.
+
+    It is computed from whoever's profile ran the last search, then stored on
+    the catalog row every user shares. Measured in production 2026-07-28: all
+    3688 catalog rows carried a score, and for 97% of one account's feed the
+    catalog value was EXACTLY that person's personal score — so the public
+    endpoint was serving one real user's job-fit numbers to anyone on the
+    internet.
+
+    Logged-in isolation is already correct (jobs.py routes authenticated
+    callers to their own user_feed). This pins the ANONYMOUS branch: a caller
+    with no session must receive no personal score at all. Zero is the honest
+    value — 'we have not scored this for you' — not another person's 40.
+    """
+    db = await api_deps.get_db()
+    # A catalog row carrying somebody's personal score, exactly as prod has.
+    job_id = await _insert_job_row(db, title="Staff AI Engineer", match_score=57)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/jobs?hours=168")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    served = [j for j in body["jobs"] if j["id"] == job_id]
+    assert served, "the anonymous catalog view should still list the job"
+    assert served[0]["match_score"] == 0, (
+        "an anonymous caller must not receive a personal match score — "
+        f"got {served[0]['match_score']}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_authenticated_user_still_sees_their_own_score(
+    authenticated_async_context, fixture_user_id
+):
+    """The counterpart: nulling the anonymous score must NOT blank the real one.
+
+    A logged-in caller reads from their own `user_feed`, so their personal score
+    must survive untouched — otherwise the fix above would silently break every
+    dashboard.
+    """
+    from src.services.feed import FeedService
+
+    db = await api_deps.get_db()
+    # Catalog says 57 (somebody else's score); THIS user's feed says 71.
+    job_id = await _insert_job_row(db, title="Senior ML Engineer", match_score=57)
+    # A NEW profile_version is required to move the score — feed.py deliberately
+    # freezes it under the same version so a re-fetch cannot cause drift.
+    await FeedService(db._conn).upsert_feed_row(
+        user_id=fixture_user_id, job_id=job_id, score=71, bucket="7d",
+        profile_version=2,
+    )
+
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/jobs?hours=168&min_score=0")
+
+    assert resp.status_code == 200
+    mine = [j for j in resp.json()["jobs"] if j["id"] == job_id]
+    assert mine, "the authenticated user should see the job in their feed"
+    assert mine[0]["match_score"] == 71, (
+        "a logged-in user must still get THEIR OWN score, not 0 and not the "
+        f"catalog's 57 — got {mine[0]['match_score']}"
+    )

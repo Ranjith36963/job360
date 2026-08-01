@@ -446,7 +446,7 @@ export interface paths {
         };
         /**
          * Export Jobs
-         * @description Download all recent jobs as CSV (catalog is shared; auth gates access).
+         * @description Download the caller's own recent matches as CSV.
          */
         get: operations["export_jobs_api_jobs_export_get"];
         put?: never;
