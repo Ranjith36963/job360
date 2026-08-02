@@ -48,6 +48,11 @@ on:
         description: "Issue number to repair"
         required: true
         type: string
+      attempt:
+        description: "Attempt number (the goal-based loop re-dispatches itself; humans leave this blank)"
+        required: false
+        default: "1"
+        type: string
 
 # contents: write -> push a branch (never main). pull-requests: write -> open a
 # PR. issues: write -> report back on the issue it was asked to fix.
@@ -181,6 +186,33 @@ jobs:
       # functions in 3.3M lines; Claude Opus found 0/39 on the same task. Not a
       # prompting problem, a physics one. So dumb code answers it and hands the
       # answer over as a file, exactly like the failing-test output.
+      # ── ATTEMPT MEMORY ─────────────────────────────────────────────────────
+      # We already wrote the black box and never opened it. A retry used to
+      # start completely fresh, blind to why the last attempt was rejected —
+      # so it could re-make the identical mistake and burn another full run.
+      # Anthropic's own multi-agent post names this: "we can't just restart
+      # from the beginning... we built systems that can resume from where the
+      # agent was when the errors occurred."
+      - name: Fetch prior attempt rejections (so a retry is not blind)
+        if: steps.token.outputs.have == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          attempt="${{ inputs.attempt || '1' }}"
+          [ "$attempt" = "1" ] && { echo "first attempt - no prior context"; exit 0; }
+          gh issue view "${{ steps.issue.outputs.num }}" --json comments \
+            --jq '.comments[].body | select(contains("REJECTED by the blind checker"))' \
+            > agent-prior-attempts.md 2>/dev/null || true
+          if [ -s agent-prior-attempts.md ]; then
+            echo "--- prior rejections: $(wc -l < agent-prior-attempts.md) lines ---"
+          else
+            rm -f agent-prior-attempts.md
+            echo "no prior rejection found on the issue"
+          fi
+
       - name: Scan for existing implementations (dumb code, no model)
         if: steps.token.outputs.have == 'true'
         continue-on-error: true # a scan failure must never block a repair
@@ -260,7 +292,10 @@ jobs:
             The workflow runs the tests for you, on both sides of your edit.
 
             THE LOOP:
-              0. Read `agent-plan.md` FIRST — a planning pass already
+              0a. If `agent-prior-attempts.md` exists, read it FIRST. A previous
+                 attempt was REJECTED by an independent checker and its reasons
+                 are in there. Do not repeat that mistake.
+              0. Read `agent-plan.md` — a planning pass already
                  analysed this and critiqued itself. Follow its REVISED PLAN if
                  present, else its PLAN, unless you find it plainly wrong.
               1. Read `agent-issue.md` (the report you are fixing) AND
@@ -319,7 +354,7 @@ jobs:
           # fix no matter what the agent did. Proven by the first real run,
           # 30306004722, which died here on `agent-test-output.txt` alone.
           # Deleting them by exact name keeps the cage strict for everything else.
-          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md
+          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md agent-prior-attempts.md
           changed=$(git status --porcelain | sed 's/^...//' | sed 's/.* -> //')
           if [ -z "$changed" ]; then
             echo "changed=" >> "$GITHUB_OUTPUT"
@@ -527,6 +562,45 @@ jobs:
           gh pr comment "$prnum" --body-file checker-comment.md
           gh pr edit "$prnum" --add-label "$label" 2>/dev/null || true
           echo "checker: $v" >> "$GITHUB_STEP_SUMMARY"
+
+          # ── THE GOAL-BASED EDGE ────────────────────────────────────────────
+          # Anthropic's fourth loop pattern, and the only one we lacked: an
+          # evaluator checks the stop condition and SENDS THE WORK BACK until
+          # the goal is met. Until now a `reject` verdict ended with a human
+          # being told to "re-apply the agent:fix label" — a person acting as a
+          # wire between two machines that had already agreed something was
+          # wrong.
+          #
+          # Two hard stops, because an uncapped self-retrying loop is exactly
+          # how the original ralph-loop burned a repo:
+          #   * MAX_ATTEMPTS 3 — after that it stops and asks for a human
+          #   * approve/uncertain never retries — only an explicit reject does
+          # Google ADK calls the same shape Generator-and-Critic with
+          # max_iterations + early escalate.
+          attempt="${{ inputs.attempt || '1' }}"
+          MAX_ATTEMPTS=3
+          if [ "$v" = "reject" ] && [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            next=$((attempt + 1))
+            # The rejection travels WITH the retry. Previously a second attempt
+            # started blind and could re-make the same mistake; the critique is
+            # the single most useful context the next attempt can have.
+            {
+              echo "## A previous attempt was REJECTED by the blind checker"
+              echo "Attempt $attempt of $MAX_ATTEMPTS. Do not repeat this mistake."
+              echo
+              cat checker-verdict.md
+            } > /tmp/rejection.md
+            gh issue comment "${{ steps.issue.outputs.num }}" --body-file /tmp/rejection.md
+            if gh workflow run repair.yml -f issue="${{ steps.issue.outputs.num }}" -f attempt="$next"; then
+              gh pr comment "$prnum" --body "**Goal-based loop:** the checker rejected this, so attempt $next of $MAX_ATTEMPTS has been dispatched automatically. No human action needed yet."
+              echo "rejected -> dispatched attempt $next" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::checker rejected but the retry could not be dispatched - needs a human"
+            fi
+          elif [ "$v" = "reject" ]; then
+            gh issue comment "${{ steps.issue.outputs.num }}" --body "**Goal-based loop stopped:** $MAX_ATTEMPTS attempts have now been rejected by the blind checker. The loop will not try again on its own — this one needs you. That cap is deliberate: a loop that retries forever is how an agent burns a repo."
+            echo "rejected at max attempts - handed to human" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Report back when it could not fix it
         if: always() && steps.token.outputs.have == 'true' && (steps.cage.outputs.changed == '' || failure())
