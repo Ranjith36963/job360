@@ -453,6 +453,82 @@ def _det_merge_wrapped_lines(skill_lines: list[str]) -> list[str]:
     return logical
 
 
+# Words that only ever appear in prose, never inside a real skill name. This is
+# a GRAMMAR list, not a skill list — it says nothing about any domain, so it
+# does not violate CLAUDE.md rule #28 (no hardcoded skill/keyword vocabularies).
+# It exists because a CV that states skills in sentences gets its sentences
+# split on commas into fake "skills" like "analytics and APIs" or
+# "Production Python for data engineering". Measured on the real 7-CV corpus:
+# this was the single biggest source of over-extraction.
+_DET_PROSE_MARKERS = (" for ", " with ", " to ", " of the ", " in the ", " using ",
+                      " across ", " through ", " including ", " such as ")
+
+
+def _det_is_prose(token: str) -> bool:
+    """True when a token reads as a sentence fragment rather than a skill name.
+
+    Three structural signals, none of them domain-specific:
+      * it ends in a full stop  -> it was a sentence
+      * it contains a prepositional phrase ("X for Y", "X using Y")
+      * it starts with a lowercase verb-ish word AND is multi-word
+        ("integrating various sensors" vs "asyncio")
+    """
+    t = token.strip()
+    if not t:
+        return True
+    if t.endswith("."):
+        return True
+    # A full stop INSIDE a token means two sentences were glued together and
+    # then comma-split, producing hybrids like "grounded LLM answers. Containers"
+    # — found in the real corpus. Not a skill; the sentence boundary was missed.
+    # Guard against real dotted names (Node.js, .NET, asp.net) by requiring the
+    # stop to be followed by a space and a capital, i.e. actual sentence shape.
+    # Require a real WORD before the stop (3+ letters), so abbreviations like
+    # "U.S. GAAP" and "M.Sc. Statistics" survive - those are genuine skills in
+    # finance and academia, and an over-eager guard silently deletes them.
+    if re.search(r"[A-Za-z]{3}\.\s+[A-Z]", t):
+        return True
+    low = f" {t.lower()} "
+    if any(m in low for m in _DET_PROSE_MARKERS):
+        return True
+    # "integrating various sensors and actuators" — a gerund opening a
+    # multi-word phrase is describing an activity, not naming a skill.
+    words = t.split()
+    if len(words) >= 3 and words[0].islower() and words[0].endswith("ing"):
+        return True
+    return False
+
+
+def _det_collapse_acronyms(skills: list[str]) -> list[str]:
+    """Drop an expansion when its own acronym is already present (or vice versa).
+
+    "RAG" + "Retrieval Augmented Generation" is ONE capability listed twice —
+    the parenthesis expander produces both. Keeping both inflates the skill
+    count without adding capability, which is exactly what makes a profile look
+    broad and match everything weakly.
+
+    Structural: we build the initials of each multi-word token and look for an
+    existing short token that matches. No vocabulary involved, so this works
+    for any profession.
+    """
+    if len(skills) < 2:
+        return skills
+    short = {s.lower(): s for s in skills if len(s.split()) == 1}
+    out: list[str] = []
+    dropped: set[str] = set()
+    for s in skills:
+        words = s.split()
+        if len(words) >= 2:
+            initials = "".join(w[0] for w in words if w and w[0].isalpha()).lower()
+            if len(initials) >= 2 and initials in short:
+                # Keep the acronym (shorter, and what job ads actually use);
+                # drop the long form.
+                dropped.add(s.lower())
+                continue
+        out.append(s)
+    return [s for s in out if s.lower() not in dropped]
+
+
 def deterministic_cv_fields(raw_text: str) -> dict[str, Any]:
     """Pass 1 for the CV — pull base fields from text with NO LLM.
 
@@ -485,9 +561,21 @@ def deterministic_cv_fields(raw_text: str) -> dict[str, Any]:
             # precision when stem-matched headings pull in prose bodies.
             if not tok or len(tok) > 45 or len(tok.split()) > 5:
                 continue
+            if _det_is_prose(tok):
+                continue
             if tok.lower() not in seen:
                 skills.append(tok)
                 seen.add(tok.lower())
+
+    # Collapse acronym/expansion pairs. A skills line reading
+    # "RAG (Retrieval Augmented Generation)" expands to BOTH terms, so the same
+    # capability is counted twice — and a CV listing many such pairs inflates
+    # the count without adding a single new capability. Measured on the real
+    # corpus (User_info/, 7 CVs): this was a meaningful share of the two
+    # over-extracted profiles. Structural, not a vocabulary: we compare a
+    # token's initials to another token, so it works for any domain and needs
+    # no keyword list (CLAUDE.md rule #28).
+    skills = _det_collapse_acronyms(skills)
 
     # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
     # The deterministic pass reads STRUCTURE only (the Skills section + its

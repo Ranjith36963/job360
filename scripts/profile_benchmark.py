@@ -39,12 +39,24 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# What "good" looks like. A CV that yields 2 skills was not understood; one that
-# yields 120 was not understood either — it just swept up every noun. Both ends
-# are failures, and only the low end is usually tested for.
+# What "good" looks like.
+#
+# CORRECTION, recorded honestly: the first version of this file called anything
+# over 60 skills "over-extracted". That number was invented, not measured. When
+# I actually READ the output, one 73-skill profile was entirely legitimate
+# (Python, Pandas, OCR, Tesseract, AI Ethics, Linux...) — a dense AI CV really
+# does have that many. A raw count cannot tell a rich profile from a noisy one.
+#
+# So the ceiling is gone and the signal is NOISE RATIO instead: what fraction of
+# extracted "skills" are single lowercase common words? Real skill names are
+# proper nouns, acronyms, or capitalised terms ("PySpark", "RAG", "Deep
+# Learning"). A list full of bare words like "validity", "uniqueness",
+# "timeliness", "metrics" is a sentence that was comma-split — which is exactly
+# what the genuinely noisy profile in the corpus contained.
 MIN_SKILLS = 5
-MAX_HEALTHY_SKILLS = 60
 MIN_CHARS = 400
+# Above this share of bare-lowercase tokens, the list is prose, not skills.
+MAX_NOISE_RATIO = 0.35
 
 
 def mask(name: str) -> str:
@@ -56,16 +68,24 @@ def mask(name: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="repo root holding User_info/")
+    # The corpus and the code under test are NOT always in the same checkout:
+    # User_info/ lives once in the main working copy, while the extractor being
+    # benchmarked may be in a worktree. Conflating them silently benchmarks the
+    # WRONG code and reports "no change" after a real fix — which is exactly
+    # what happened the first time this ran.
+    ap.add_argument("--code", default=None,
+                    help="checkout whose backend/ is under test (default: --root)")
     args = ap.parse_args()
 
     root = Path(args.root).resolve()
+    code_root = Path(args.code).resolve() if args.code else root
     ui = root / "User_info"
     if not ui.is_dir():
         print(f"# Profile benchmark\n\n`User_info/` not found under `{root}`.")
         print("Nothing to benchmark — this is an honest empty result, not a pass.")
         return 0
 
-    sys.path.insert(0, str(root / "backend"))
+    sys.path.insert(0, str(code_root / "backend"))
     try:
         from src.services.profile.cv_parser import deterministic_cv_fields, extract_text
     except ImportError as exc:
@@ -112,14 +132,22 @@ def main() -> int:
         skills = len(det.get("skills") or [])
         summary = len(det.get("summary") or "")
 
+        # Noise = single bare lowercase words. "asyncio" and "pandas" are real
+        # and lowercase, so one such token proves nothing; a HIGH SHARE of them
+        # is the signal that a sentence got comma-split into fake skills.
+        items = det.get("skills") or []
+        noise = [x for x in items if len(x.split()) == 1 and x.islower() and len(x) > 2]
+        ratio = (len(noise) / len(items)) if items else 0.0
+
         if chars < MIN_CHARS:
             verdict, why = "**BROKEN**", f"only {chars} chars read from the PDF"
         elif skills < MIN_SKILLS:
             verdict, why = "**no floor**", f"{chars} chars in, {skills} skills out"
-        elif skills > MAX_HEALTHY_SKILLS:
-            verdict, why = "over-extracted", f"{skills} skills — too many to discriminate"
+        elif ratio > MAX_NOISE_RATIO:
+            verdict, why = "noisy", (f"{skills} skills but {int(ratio*100)}% are bare "
+                                     "lowercase words — a sentence was comma-split")
         else:
-            verdict, why = "ok", f"{skills} skills, {summary}-char summary"
+            verdict, why = "ok", f"{skills} skills, {int(ratio*100)}% noise, {summary}-char summary"
         rows.append((who, chars, skills, verdict, why, key))
 
     print("| person | CV chars | skills | LinkedIn | GitHub | verdict | note |")
@@ -131,13 +159,13 @@ def main() -> int:
     print()
 
     ok = [r for r in rows if r[3] == "ok"]
-    over = [r for r in rows if r[3] == "over-extracted"]
+    over = [r for r in rows if r[3] == "noisy"]
     broken = [r for r in rows if "no floor" in r[3] or "FAILED" in r[3]]
     counts = [r[2] for r in rows if r[2]]
 
     print("## What this says\n")
     print(f"- Usable extraction: **{len(ok)}/{len(rows)}**")
-    print(f"- Over-extracted (>{MAX_HEALTHY_SKILLS} skills): **{len(over)}/{len(rows)}**")
+    print(f"- Noisy (prose split into fake skills): **{len(over)}/{len(rows)}**")
     print(f"- No deterministic floor (fully LLM-dependent): **{len(broken)}/{len(rows)}**")
     if counts:
         print(f"- Skills per CV: min {min(counts)}, median "

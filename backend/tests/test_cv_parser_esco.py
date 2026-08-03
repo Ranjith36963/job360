@@ -110,3 +110,47 @@ def test_full_cv_parse_pipeline_populates_esco_map(fake_esco):
     assert "Python" in cvdata.skills
     assert "Bespoke Tooling" in cvdata.skills
     assert cvdata.cv_skills_esco == {"Python": "esco://skill/python"}
+
+
+# ---------------------------------------------------------------------------
+# Structural noise guards (added 2026-08-03, driven by the real 7-CV corpus in
+# User_info/). These are GRAMMAR rules, not skill vocabularies — rule #28 holds.
+# ---------------------------------------------------------------------------
+
+def test_prose_fragments_are_not_skills():
+    """A CV that states skills in sentences gets comma-split into fake skills.
+    Real examples pulled from the corpus."""
+    from src.services.profile.cv_parser import _det_is_prose
+    for prose in (
+        "Production Python for data engineering",
+        "integrating various sensors and actuators.",
+        "grounded LLM answers. Containers",       # two sentences glued together
+    ):
+        assert _det_is_prose(prose), f"should be dropped as prose: {prose!r}"
+
+
+def test_real_skill_names_survive_the_prose_guard():
+    """The guard must not eat legitimate skills — including dotted names and
+    abbreviations, which an over-eager sentence check silently deletes."""
+    from src.services.profile.cv_parser import _det_is_prose
+    for skill in (
+        "Node.js", ".NET", "asp.net core", "PySpark", "Deep Learning",
+        "Generative AI", "U.S. GAAP", "M.Sc. Statistics",
+    ):
+        assert not _det_is_prose(skill), f"real skill wrongly dropped: {skill!r}"
+
+
+def test_acronym_and_expansion_collapse_to_one_skill():
+    """'RAG (Retrieval Augmented Generation)' expands to BOTH terms, counting
+    one capability twice and inflating the profile."""
+    from src.services.profile.cv_parser import _det_collapse_acronyms
+    out = _det_collapse_acronyms(["RAG", "Retrieval Augmented Generation", "Python"])
+    assert "RAG" in out and "Python" in out
+    assert "Retrieval Augmented Generation" not in out
+
+
+def test_collapse_leaves_unrelated_multiword_skills_alone():
+    """Only a genuine acronym/expansion pair collapses — not every phrase."""
+    from src.services.profile.cv_parser import _det_collapse_acronyms
+    out = _det_collapse_acronyms(["Deep Learning", "Computer Vision", "Python"])
+    assert len(out) == 3
