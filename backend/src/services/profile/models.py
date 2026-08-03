@@ -22,6 +22,12 @@ class CVData:
     headline: str = ""
     location: str = ""
     achievements: list[str] = field(default_factory=list)
+    # The universal extraction gate's verdict on THIS profile (coverage,
+    # precision, completeness, input health, overall, problems). Written by
+    # run_two_pass_extraction after both passes merge. Advisory: it never
+    # blocks a save, it tells the product when a profile is too thin to match
+    # anything so it can escalate instead of failing silently.
+    extraction_score: dict[str, Any] = field(default_factory=dict)
     # LinkedIn-sourced data
     linkedin_positions: list[dict[str, Any]] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
