@@ -25,6 +25,10 @@ from src.services.profile.cv_parser import (
     deterministic_cv_fields,
     llm_cv_fields_from_text,
 )
+from src.services.profile.extraction_quality import (
+    needs_escalation,
+    score_extraction,
+)
 from src.services.profile.github_enricher import (
     deterministic_github_fields,
     llm_infer_github_skills,
@@ -343,5 +347,40 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         profile.preferences = merge_cv_and_preferences(
             cv.skills, cv.job_titles, prefs
         )
+
+    # ── THE UNIVERSAL GATE ────────────────────────────────────────────────
+    # Grade what we just produced against the document it came from. This is
+    # deliberately the LAST thing the extractor does, after BOTH passes and the
+    # merge, because it judges the finished profile — not any one parser.
+    #
+    # Why it exists: extraction was being fixed one CV at a time, and every fix
+    # was a patch for a layout we happened to have seen. Layouts are unbounded;
+    # that road has no end. A parser cannot be made perfect for every document,
+    # so the product's job is to NOTICE when it did badly rather than silently
+    # hand someone a profile that will never match a job.
+    #
+    # Never raises and never blocks a save: a scoring failure must not cost a
+    # user their upload. The score is advisory — it is carried on the profile so
+    # the API can show it, and logged loudly so a low score is visible in prod.
+    try:
+        score = score_extraction(
+            cv.raw_text or "",
+            list(cv.skills or []),
+            job_titles=list(cv.job_titles or []),
+            summary=cv.summary or "",
+            certifications=list(cv.certifications or []),
+        )
+        cv.extraction_score = score.as_dict()
+        if needs_escalation(score):
+            logger.warning(
+                "extraction scored %s (%.2f) for this profile - coverage %.0f%%, "
+                "precision %.0f%%. Problems: %s",
+                score.verdict, score.overall, score.coverage * 100,
+                score.precision * 100, "; ".join(score.problems[:3]),
+            )
+        else:
+            logger.info("extraction scored %s (%.2f)", score.verdict, score.overall)
+    except Exception as exc:  # noqa: BLE001 - scoring must never cost an upload
+        logger.warning("extraction scoring failed (non-fatal): %s", exc)
 
     return profile
