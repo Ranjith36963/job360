@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -262,7 +263,7 @@ async def get_profile(user: CurrentUser = Depends(require_user)) -> ProfileRespo
 # (run_two_pass_extraction -> save one version -> schedule re-score) lives in
 # exactly one spot and can never drift between routes.
 
-def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) -> None:
+async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) -> None:
     """Validate the upload and store the RAW CV text on the profile.
 
     Skill extraction is NOT done here — that happens once, later, in
@@ -280,7 +281,18 @@ def _capture_cv_raw(content: bytes, filename: str | None, profile: UserProfile) 
         raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
-        raw_text = extract_text(tmp_path)
+        # OFF THE EVENT LOOP. pdfplumber is synchronous and CPU-bound, so calling
+        # it directly here froze the whole server for the duration of the parse.
+        # MEASURED in a browser run: while one CV uploaded, /api/health went from
+        # 27 ms to 1.4 s, then 1.6 s, then a 5 s timeout, then an outright
+        # connection failure. The user's own profile poll was reset by the
+        # server, and the page showed "Something went wrong - API error 500"
+        # while their upload was in fact succeeding. One person uploading a CV
+        # degraded the API for everyone on that worker.
+        #
+        # Same fix, same reason as the search freeze (PR #123): the work is
+        # unchanged, it simply runs in a worker thread so the loop keeps serving.
+        raw_text = await asyncio.to_thread(extract_text, tmp_path)
         if not raw_text or not raw_text.strip():
             raise HTTPException(
                 status_code=503,
@@ -390,7 +402,7 @@ async def upload_cv(
     profile = load_profile(user.id) or UserProfile()
     # Bounded read: cap memory even for a malicious oversized upload.
     content = await cv.read(10 * 1024 * 1024 + 1)
-    _capture_cv_raw(content, cv.filename, profile)
+    await _capture_cv_raw(content, cv.filename, profile)
     await _extract_save_trigger(profile, user.id)
     return _build_profile_response(profile)
 
@@ -421,7 +433,7 @@ async def upsert_profile(
     profile = load_profile(user.id) or UserProfile()
     if cv is not None:
         content = await cv.read(10 * 1024 * 1024 + 1)
-        _capture_cv_raw(content, cv.filename, profile)
+        await _capture_cv_raw(content, cv.filename, profile)
     if preferences is not None:
         _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
@@ -450,7 +462,10 @@ async def upload_linkedin(
     try:
         # Capture RAW LinkedIn text only; the single extractor below turns it
         # into skills/positions (deterministic + LLM).
-        text = extract_linkedin_text(tmp_path)
+        # Off the event loop for the same reason as the CV path above:
+        # pdfplumber is synchronous, and blocking here froze the API for
+        # every other request while one person enriched their profile.
+        text = await asyncio.to_thread(extract_linkedin_text, tmp_path)
         merged = bool(text) and _looks_like_linkedin(text)
         if merged:
             profile = load_profile(user.id) or UserProfile()
