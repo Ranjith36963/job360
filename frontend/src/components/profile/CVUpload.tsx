@@ -275,6 +275,54 @@ export function CVUpload({
           )}
         </div>
 
+        {/* ── HOW MUCH OF THIS CV DID WE ACTUALLY UNDERSTAND? ───────────────
+            Measured on 7 real CVs, the parser captured 18-48% of what people
+            had written. Nothing on screen said so, so nobody could know their
+            profile was thin — they just quietly got worse matches forever.
+
+            Deliberately lives HERE and not in CVViewer: CVViewer is rendered
+            nowhere (a Playwright run proved it), and a warning in a dead
+            component is the same as no warning at all.
+
+            Silent on a good extraction. A banner that appears every time is a
+            banner nobody reads. */}
+        {(() => {
+          const q = (cvDetail as { extraction_score?: {
+            verdict?: string; coverage?: number; problems?: string[];
+          } } | null | undefined)?.extraction_score;
+          if (!q?.verdict || q.verdict === "good") return null;
+          const pct = Math.round((q.coverage ?? 0) * 100);
+          const broken = q.verdict === "broken";
+          return (
+            <div
+              role="status"
+              data-testid="extraction-quality-warning"
+              className={`mt-3 rounded-md border p-3 text-xs ${
+                broken
+                  ? "border-destructive/40 bg-destructive/5"
+                  : "border-amber-500/40 bg-amber-500/5"
+              }`}
+            >
+              <p className="font-semibold mb-1">
+                {broken
+                  ? "We could not read much of this CV"
+                  : `We understood about ${pct}% of this CV`}
+              </p>
+              <p className="text-muted-foreground mb-2">
+                Anything we missed will not be matched against jobs. Add what is
+                missing in your preferences on the right.
+              </p>
+              {q.problems?.length ? (
+                <ul className="list-disc pl-4 space-y-0.5 text-muted-foreground">
+                  {q.problems.slice(0, 3).map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })()}
+
         {/* V-04 upload validation error */}
         {uploadError && (
           <p className="mb-3 text-sm text-red-400" role="alert">{uploadError}</p>

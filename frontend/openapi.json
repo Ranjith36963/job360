@@ -201,6 +201,12 @@
             "title": "Experience Text",
             "type": "string"
           },
+          "extraction_score": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Extraction Score",
+            "type": "object"
+          },
           "headline": {
             "default": "",
             "title": "Headline",

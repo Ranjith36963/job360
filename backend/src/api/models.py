@@ -192,6 +192,11 @@ class CVDetail(BaseModel):
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []
+    # The universal extraction gate's verdict, so the USER can see how well we
+    # understood their CV. A score computed and logged but never shown is a dead
+    # artifact — the person whose profile it is has no way to know we only
+    # understood a fraction of their document, and no way to correct it.
+    extraction_score: dict[str, Any] = {}
 
 
 class ProfileResponse(BaseModel):
