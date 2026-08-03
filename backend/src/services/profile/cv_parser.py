@@ -129,11 +129,44 @@ def extract_text_from_pdf(file_path: str) -> str:
         logger.error("pdfplumber not installed. Run: pip install pdfplumber")
         return ""
 
+    from src.services.profile.layout import find_column_gutter  # noqa: PLC0415
+
     text_parts = []
     try:
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
-                page_text = page.extract_text()
+                # Read each COLUMN in turn on a two-column page. Reading such a
+                # page straight through walks it line by line across the full
+                # width, so a sidebar and the main column interleave and fuse —
+                # on a real LinkedIn export a line came out as "Pandas
+                # (Software) Mathematics Tutor", a skill welded to a job title,
+                # and the profile got zero work history. LinkedIn's "Save to
+                # PDF" is ALWAYS two-column, so this is every such upload.
+                #
+                # find_column_gutter returns None for a normal one-column CV,
+                # which is the overwhelming majority, and then this is the exact
+                # extract_text() call it has always been. Cropping is wrapped
+                # because a malformed page can raise inside pdfplumber, and a
+                # layout optimisation must never cost someone their upload.
+                page_text = None
+                try:
+                    gutter = find_column_gutter(page.extract_words(), page.width)
+                    if gutter:
+                        halves = [
+                            page.crop((0, 0, gutter, page.height)).extract_text(),
+                            page.crop((gutter, 0, page.width, page.height)).extract_text(),
+                        ]
+                        page_text = "\n".join(h for h in halves if h)
+                        logger.info(
+                            "two-column page detected in %s - read the columns "
+                            "separately (gutter at x=%.0f of %.0f)",
+                            file_path, gutter, page.width,
+                        )
+                except Exception as e:  # noqa: BLE001 - fall back to flat text
+                    logger.warning("column split failed for %s (%s); reading flat", file_path, e)
+                    page_text = None
+                if not page_text:
+                    page_text = page.extract_text()
                 if page_text:
                     text_parts.append(page_text)
     except Exception as e:
