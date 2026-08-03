@@ -303,12 +303,15 @@ INVARIANTS: list[Invariant] = [
         table="jobs",
         age_col="first_seen_at",
         where="",
-        scalar_sql="SELECT GREATEST(0, (SELECT count(*) FROM jobs) - 5000)",
+        scalar_sql="SELECT GREATEST(0, (SELECT count(*) FROM jobs) - 50000)",
         why="the catalog is bigger than the re-score query's LIMIT, so the oldest "
             "rows are never re-scored when a profile changes. Silent, and it "
             "grows every single day.",
         incident="2026-08-03: 6,457 jobs vs a hard limit of 5,000 in "
-                 "database.py:get_catalog_jobs_for_rescore.",
+                 "database.py:get_catalog_jobs_for_rescore, so 1,457 jobs were "
+                 "never re-scored. The limit was raised to 50,000; this "
+                 "invariant now guards THAT ceiling, so the same silent "
+                 "truncation cannot return as the catalog grows.",
     ),
     Invariant(
         id="applied_job_still_openable",
