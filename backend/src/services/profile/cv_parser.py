@@ -557,6 +557,29 @@ def _det_is_prose(token: str) -> bool:
     return False
 
 
+def _acronym_words(skill: str) -> list[str]:
+    """Split a skill into the words an acronym would be built from.
+
+    Hyphens and slashes join words INSIDE a term, so a plain ``.split()`` sees
+    "Retrieval-Augmented Generation" as two words and builds "rg" — missing the
+    "RAG" sitting right next to it in the same list. Observed in a real profile,
+    which showed both "RAG" and "Retrieval-Augmented Generation" as separate
+    skills. Structural only (punctuation), no vocabulary — rule #28 safe.
+    """
+    return [w for w in re.split(r"[\s\-/]+", skill or "") if w]
+
+
+def _strip_possessive(skill: str) -> str:
+    """Turn "LLM'S" into "LLM".
+
+    LinkedIn prose yields possessives and stylised plurals of acronyms, and they
+    reach the profile verbatim — a real extraction showed "LLM'S" as a skill. It
+    matches no job posting and reads as junk to the person whose profile it is.
+    Punctuation-only, so it is profession-agnostic.
+    """
+    return re.sub(r"['’]s$", "", (skill or "").strip(), flags=re.I)
+
+
 def _det_collapse_acronyms(skills: list[str]) -> list[str]:
     """Drop an expansion when its own acronym is already present (or vice versa).
 
@@ -571,11 +594,11 @@ def _det_collapse_acronyms(skills: list[str]) -> list[str]:
     """
     if len(skills) < 2:
         return skills
-    short = {s.lower(): s for s in skills if len(s.split()) == 1}
+    short = {s.lower(): s for s in skills if len(_acronym_words(s)) == 1}
     out: list[str] = []
     dropped: set[str] = set()
     for s in skills:
-        words = s.split()
+        words = _acronym_words(s)
         if len(words) >= 2:
             initials = "".join(w[0] for w in words if w and w[0].isalpha()).lower()
             if len(initials) >= 2 and initials in short:

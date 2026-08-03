@@ -312,6 +312,24 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     cv.certifications = dedup_fuzzy(dedup_by_containment(cv.certifications))
     cv.education = dedup_by_containment(cv.education)
 
+    # Clean the LinkedIn skill list the same way the CV list is cleaned.
+    #
+    # It never was, and a real profile showed the cost: "RAG" AND
+    # "Retrieval-Augmented Generation", "LoRA" AND "Low-Rank Adaptation", plus a
+    # stray "LLM'S". One capability counted two or three times inflates the skill
+    # count without adding capability — which makes a profile look broad and
+    # match everything weakly, the opposite of what the user wants. Both helpers
+    # are punctuation-structural, no vocabulary, so this stays rule-#28 safe and
+    # works for any profession.
+    if cv.linkedin_skills:
+        from src.services.profile.cv_parser import (  # noqa: PLC0415
+            _det_collapse_acronyms,
+            _strip_possessive,
+        )
+
+        cleaned = [_strip_possessive(s) for s in cv.linkedin_skills]
+        cv.linkedin_skills = _det_collapse_acronyms([s for s in cleaned if s])
+
     # LLM curation — the reasoning layer. The deterministic + fuzzy passes can't
     # safely merge entries that mean the same thing but are worded very
     # differently ("Master of Science…" vs "Master's degree…"; "AI/ML Engineer
