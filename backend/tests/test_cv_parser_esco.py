@@ -154,3 +154,51 @@ def test_collapse_leaves_unrelated_multiword_skills_alone():
     from src.services.profile.cv_parser import _det_collapse_acronyms
     out = _det_collapse_acronyms(["Deep Learning", "Computer Vision", "Python"])
     assert len(out) == 3
+
+
+def test_body_text_is_not_mistaken_for_a_skills_heading():
+    """The stem test alone matched any LINE containing a stem, so ordinary body
+    text hijacked the section — and because the collector started at the FIRST
+    match, the real skills block was never reached. That is how an embedded
+    engineer with a full 'Technical Skills' section extracted ZERO skills."""
+    from src.services.profile.cv_parser import _is_skill_heading
+    # Real body lines from the corpus that used to match:
+    assert not _is_skill_heading(
+        "jssate, (visvesvaraya technological university) bangalore, india")
+    assert not _is_skill_heading(
+        "skilledinleveraging python, sql, c/c++, and aws to deliver solutions")
+    # Real headings must still match:
+    for real in ("technical skills", "core competencies", "tools & technologies",
+                 "key skills"):
+        assert _is_skill_heading(real), f"real heading rejected: {real!r}"
+
+
+def test_all_skills_sections_are_collected_not_just_the_first():
+    """A CV may split skills across two blocks, and one early false-positive
+    heading used to swallow the entire result."""
+    from src.services.profile.cv_parser import _DET_SKILL_HEADINGS, _det_collect_section
+    lines = [
+        "Technical Skills",
+        "Python, Java",
+        "Experience",
+        "worked somewhere",
+        "Tools & Technologies",
+        "Docker, Git",
+    ]
+    body = _det_collect_section(lines, _DET_SKILL_HEADINGS, stem_skills=True)
+    joined = " ".join(body)
+    assert "Python, Java" in joined
+    assert "Docker, Git" in joined, "the second skills block was dropped"
+    assert "worked somewhere" not in joined, "experience body leaked in"
+
+
+def test_missing_word_boundaries_is_detected():
+    """One real CV exported with no space glyphs at all (0.9% spaces vs 11-13%
+    for every other). pdfplumber's word-level path returns the same, so this is
+    the FILE, not our code — but shipping mangled skills silently is worse than
+    saying so."""
+    from src.services.profile.cv_parser import text_is_missing_spaces
+    assert text_is_missing_spaces("Skilledinleveraging" * 40)
+    assert not text_is_missing_spaces("This is a normal sentence with spaces. " * 20)
+    # Too short to judge — must not false-positive on a stub.
+    assert not text_is_missing_spaces("short")
