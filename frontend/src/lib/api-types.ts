@@ -1522,6 +1522,13 @@ export interface components {
              */
             experience_text: string;
             /**
+             * Extraction Score
+             * @default {}
+             */
+            extraction_score: {
+                [key: string]: unknown;
+            };
+            /**
              * Headline
              * @default
              */

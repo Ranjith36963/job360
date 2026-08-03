@@ -114,6 +114,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     )
     cv = profile.cv_data
     cv_detail = CVDetail(
+        extraction_score=getattr(cv, "extraction_score", {}) or {},
         raw_text=cv.raw_text,
         skills=cv.skills,
         job_titles=cv.job_titles,
