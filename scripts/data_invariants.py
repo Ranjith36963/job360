@@ -230,6 +230,152 @@ INVARIANTS: list[Invariant] = [
                  "what the purge leaves dangling.",
         sample_cols="id, user_id",
     ),
+    # ── ROUND 2 ──────────────────────────────────────────────────────────
+    # These exist because a Fable model was run as an INDEPENDENT detector over
+    # one real user's whole lifecycle, and the diff against this library was
+    # measured. It found 12 faults; this library had caught 2 of them. Every
+    # invariant below closes one of the misses, using the SQL that model wrote.
+    #
+    # That diff is the method, not a one-off: an expensive model finds what a
+    # cheap check cannot imagine, and each thing it finds becomes a cheap check
+    # forever. Run it again when the product changes shape.
+    Invariant(
+        id="index_row_size_canary",
+        table="jobs",
+        age_col="first_seen_at",
+        where="length(normalized_company) + length(normalized_title) > 2000",
+        why="a row approaching Postgres's 2,704-byte btree index limit. When one "
+            "crosses it the INSERT raises ProgramLimitExceeded, and because the "
+            "insert loop has no per-job guard, THE WHOLE SEARCH ABORTS — one "
+            "poison row silently freezes a user's feed.",
+        incident="2026-07-27: both of the active user's searches crashed on a "
+                 "HackerNews comment stored as title+company. His feed then "
+                 "received zero new rows for SEVEN DAYS while the catalog grew "
+                 "by ~2,800 jobs. Measured 2026-08-03: the largest pair is 2,491 "
+                 "bytes against a 2,704 ceiling — this is armed, not theoretical.",
+        group_by="source",
+    ),
+    Invariant(
+        id="title_is_not_a_paragraph",
+        table="jobs",
+        age_col="first_seen_at",
+        where="length(title) > 200 OR (title = company AND length(title) > 80)",
+        why="a whole forum comment stored as a job title. It renders as an "
+            "unreadable card, produces a meaningless dedup key, and is the raw "
+            "material for the index-size crash above.",
+        incident="2026-08-03: 14 titles over 300 chars, longest 1,551. Several "
+                 "reach the dashboard; one is visible on the real user's feed.",
+        group_by="source",
+    ),
+    Invariant(
+        id="paid_verdicts_are_visible",
+        table="user_feed",
+        age_col="created_at",
+        where="llm_fit_score >= 70 AND EXISTS (SELECT 1 FROM jobs j "
+              "WHERE j.id = user_feed.job_id AND (j.staleness_state IS DISTINCT FROM 'active' "
+              "OR substring(j.first_seen from 1 for 10) < "
+              "to_char(now() - interval '7 days', 'YYYY-MM-DD')))",
+        why="we PAID an LLM to judge these as strong matches, and the dashboard's "
+            "staleness and 7-day window then hide them. The user never sees the "
+            "best thing we found for them, and the money is spent either way.",
+        incident="2026-08-03: 35 of 54 judged rows (65%) were invisible, "
+                 "including a job scored 85 'Strong fit' that was posted five "
+                 "days earlier and is still open.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="feed_scored_by_current_profile",
+        table="user_feed",
+        age_col="created_at",
+        where="profile_version IS NOT NULL AND profile_version <> "
+              "(SELECT max(v.id) FROM user_profile_versions v WHERE v.user_id = user_feed.user_id)",
+        why="scores computed against a profile the user has since replaced. They "
+            "sit on a different scale from everything around them, so they sort "
+            "wrongly against current rows and mislead every threshold that reads "
+            "them.",
+        incident="2026-08-03: 43 rows still carried profile_version=2 from 7-02, "
+                 "because get_catalog_jobs_for_rescore caps at 5,000 rows and the "
+                 "catalog had grown to 6,457. The gap widens every day.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="rescore_covers_whole_catalog",
+        table="jobs",
+        age_col="first_seen_at",
+        where="",
+        scalar_sql="SELECT GREATEST(0, (SELECT count(*) FROM jobs) - 5000)",
+        why="the catalog is bigger than the re-score query's LIMIT, so the oldest "
+            "rows are never re-scored when a profile changes. Silent, and it "
+            "grows every single day.",
+        incident="2026-08-03: 6,457 jobs vs a hard limit of 5,000 in "
+                 "database.py:get_catalog_jobs_for_rescore.",
+    ),
+    Invariant(
+        id="applied_job_still_openable",
+        table="applications",
+        age_col="created_at",
+        where="EXISTS (SELECT 1 FROM jobs j WHERE j.id = applications.job_id "
+              "AND j.staleness_state IS DISTINCT FROM 'active')",
+        why="the user's own application points at a job whose detail page now "
+            "404s, because the detail route serves active jobs only. Clicking "
+            "your own application and getting 'not found' reads as data loss — "
+            "on the highest-intent object in the product.",
+        incident="2026-08-03: the active user's application on job 56 "
+                 "('AI / ML Intern') could no longer be opened.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="search_always_has_a_terminal_event",
+        table="audit_log",
+        age_col="occurred_at",
+        where="",
+        scalar_sql="SELECT count(*) FROM audit_log a WHERE a.event = 'search_started' "
+                   "AND a.occurred_at::timestamptz < now() - interval '30 minutes' "
+                   "AND a.occurred_at::timestamptz > now() - interval '7 days' "
+                   "AND NOT EXISTS (SELECT 1 FROM audit_log b WHERE b.user_id = a.user_id "
+                   "AND b.event IN ('search_completed','search_failed') "
+                   "AND b.occurred_at::timestamptz > a.occurred_at::timestamptz)",
+        why="a search that started and never finished, failed, or recorded "
+            "anything. The user watches a spinner forever and support has no "
+            "record to look at. A crash at least writes search_failed; this "
+            "writes nothing at all.",
+        incident="2026-08-03 12:25: a search started and produced no terminal "
+                 "event three hours later, and no run_log row. The same shape "
+                 "appeared on 7-27.",
+    ),
+    Invariant(
+        id="notifications_have_ever_delivered",
+        table="user_feed",
+        age_col="created_at",
+        where="",
+        scalar_sql="SELECT CASE WHEN (SELECT count(*) FROM users) > 3 "
+                   "AND (SELECT count(*) FROM notification_rules) = 0 THEN 1 ELSE 0 END",
+        why="this is a job-ALERT product that has never alerted anyone. Not one "
+            "notification rule exists, so no digest, no instant send and no "
+            "channel can ever fire. New matching jobs reach the user only if "
+            "they happen to open the site and press Search themselves.",
+        incident="2026-08-03: notification_rules, user_channels, "
+                 "notification_ledger and user_notification_digests are ALL "
+                 "empty, and notified_at is NULL on every one of 6,054 feed rows. "
+                 "The core promise of the product is silently absent.",
+    ),
+    Invariant(
+        id="catalog_has_descriptions",
+        table="jobs",
+        age_col="first_seen_at",
+        where="",
+        scalar_sql="SELECT count(*) FROM jobs WHERE (description IS NULL OR description = '') "
+                   "AND substring(first_seen_at from 1 for 10) >= "
+                   "to_char(now() - interval '2 days', 'YYYY-MM-DD')",
+        why="a job with no description cannot be skill-matched, so the 40-point "
+            "skill component scores near zero and the job can never compete. "
+            "Fetching it at all was wasted work.",
+        incident="2026-08-03: 69% of the catalog had an empty description — "
+                 "devitjobs, greenhouse, workday, smartrecruiters and linkedin "
+                 "were 100% empty. The user's score distribution collapsed into "
+                 "the 10-19 band as a direct result, starving every threshold "
+                 "above it.",
+    ),
     Invariant(
         id="catalog_dedup_holds",
         table="jobs",
