@@ -123,8 +123,83 @@ await corner("terms page", async () => { await gotoOK("/terms"); });
 await corner("contact page", async () => { await gotoOK("/contact"); });
 
 // ── AUTHED corners (need a verified synthetic session) ──
+// ── RENDER-TRUTH corners ────────────────────────────────────────────────────
+// The half of production that SQL cannot see.
+//
+// 2026-08-03: the dashboard rendered "Posted NaNw ago" for days. Nothing threw,
+// Sentry logged zero events, and all six scheduled detectors stayed green —
+// because every one of them queries the database, and the fault only exists
+// once a browser has rendered it. The database was merely odd; the SCREEN was
+// wrong. Only a real page load can tell the difference.
+//
+// PATTERN PRECISION IS THE WHOLE GAME. A poison scan that wakes the owner at
+// 3am over a false positive dies of distrust within a month. So these patterns
+// are chosen to be impossible in natural prose rather than merely suspicious:
+// a data-engineering ad may well say "NaN handling" or "undefined behaviour",
+// and neither matches. "NaNw ago" and "[object Object]" are only ever bugs.
+const POISON = [
+  /\bNaN\s*[smhdwy]?\s+ago\b/i,   // "NaNw ago"  <- the 2026-08-03 bug, exactly
+  /Invalid Date/i,                 // Date parse failure rendered raw
+  /\[object Object\]/,             // a toString() that should have been a field
+  /[£$€]\s*NaN/i,                  // salary arithmetic on a non-number
+  /\bNaN\s*[%kK](?![a-z])/i,               // a score or salary that became NaN
+  /\bundefined\s+ago\b/i,          // the null-ish twin of the same bug
+];
+
+async function scanPoison(where) {
+  const text = await page.evaluate(() => document.body.innerText || "");
+  const hits = POISON.filter((re) => re.test(text))
+    .map((re) => (text.match(re) || [""])[0].trim());
+  if (hits.length) {
+    throw new Error(
+      `${where} rendered impossible text: ${JSON.stringify(hits.slice(0, 3))}. ` +
+      `This throws no error and reaches no error tracker — it is only visible on screen.`
+    );
+  }
+}
+
 const AUTHED = [
   ["dashboard loads", async () => { await gotoOK("/dashboard"); await page.waitForTimeout(2500); }],
+
+  ["dashboard renders no impossible text", async () => {
+    await gotoOK("/dashboard");
+    await page.waitForTimeout(2500);
+    await scanPoison("dashboard");
+  }],
+
+  ["dashboard counts agree with each other", async () => {
+    // TWO USER-VISIBLE NUMBERS ON ONE SCREEN MUST NOT CONTRADICT.
+    //
+    // 2026-08-03: the header said "4078 jobs matched your profile" while the
+    // All tab said 100. Both the DB and the API were CORRECT — `total` is
+    // computed before the page slice (jobs.py) — but the time-bucket tabs are
+    // derived client-side from a second query that inherits the API's default
+    // limit=100. So the screen contradicted itself while every backend check
+    // passed. No SQL invariant can ever catch this shape; only reading the
+    // rendered page can.
+    await gotoOK("/dashboard");
+    await page.waitForTimeout(2500);
+    const text = await page.evaluate(() => document.body.innerText || "");
+
+    const header = text.match(/([\d,]+)\s+jobs?\s+matched/i);
+    const allTab = text.match(/\bAll\s+([\d,]+)/i);
+    if (!header || !allTab) return; // empty feed / layout change — not this check's business
+
+    const num = (s) => parseInt(s.replace(/,/g, ""), 10);
+    const total = num(header[1]);
+    const shown = num(allTab[1]);
+
+    // A cap is fine — SAYING one number and SHOWING another without telling the
+    // user is not. Either they agree, or the page admits it is truncating.
+    const admitsTruncation = /showing|first\s+\d|of\s+[\d,]+|see all|show all/i.test(text);
+    if (total !== shown && !admitsTruncation) {
+      throw new Error(
+        `header claims ${total} matches but the All tab shows ${shown}, and nothing on ` +
+        `the page tells the user it is truncated. One of these numbers is lying to them.`
+      );
+    }
+  }],
+
   [ALLOW_WRITES ? "profile + CV upload → extraction" : "profile page renders (read-only)", async () => {
     await gotoOK("/profile");
     if (!ALLOW_WRITES) {

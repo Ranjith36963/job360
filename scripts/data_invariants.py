@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Production data invariants — is the data VALID, not merely PRESENT?
+
+WHY THIS FILE EXISTS.
+
+On 2026-08-03 the live dashboard showed a job card reading **"Posted NaNw ago"**.
+It had been doing so for days. On that same day, every scheduled detector we own
+ran and reported success:
+
+    uptime          success     synthetic-live  success
+    absence         success     product-health  success
+    user-journey    success
+
+Six green loops, one visibly broken product. That is not bad luck, it is a
+category error: every one of those detectors measures **quantity** — are there
+enough rows, is anything still moving, did something stop. Not one of them asks
+whether a value is *what its column claims to be*.
+
+The root cause was exactly that kind of value. `jobs.posted_at` is an
+unconstrained TEXT column, and `arbeitnow.py` stored the upstream `created_at`
+verbatim — a Unix epoch integer:
+
+    posted_at       = '1785750903'
+    date_confidence = 'high'          <- and we CERTIFIED it
+
+The frontend then did `new Date('1785750903')` -> NaN. Every guard in `timeAgo()`
+compares against NaN, every comparison is false, so control fell through to the
+final `return` and shipped the string "NaNw ago" to a real person. Nothing threw.
+Sentry recorded zero events. It is not that we missed an alarm — for this class
+of fault, **no alarm existed**.
+
+WHAT THIS DOES. A library of cheap, dumb, deterministic SQL invariants over the
+production database. Each one is a claim the product depends on being true. They
+are boring on purpose: no statistics, no thresholds to tune, no model to trust.
+A violation is a fact, not an opinion.
+
+WHAT IT DELIBERATELY CANNOT DO. Some faults are invisible from the database.
+Found the same day: the dashboard header showed "4078 jobs matched" while the
+time-bucket tabs read 100, because the tabs are computed client-side over a
+query that hits the API's default `limit=100`. The DB is right. The API is right.
+Only the rendered screen lies. No SQL can ever see that — which is why the
+detector has a second leg in `frontend/tests/synthetic/live-smoke.mjs`. Two
+bugs, two legs; neither leg alone would have caught both.
+
+CONTRACT (matches scripts/product_assertions.py so the workflows stay identical):
+    exit 0  every invariant holds
+    exit 1  at least one NEW violation -> file an issue
+    exit 2  the checker itself broke -> a red run means "I am blind", not "clean"
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import dataclass
+from typing import Any
+
+# ── Knobs. Env-overridable so a drill can force a red without editing code. ──
+# NEW_WINDOW is the heart of the anti-staleness design (see Invariant.why below):
+# only violations on rows first seen inside this window raise the alarm.
+NEW_WINDOW_HOURS = int(os.getenv("DI_NEW_WINDOW_HOURS", "48"))
+# A drill/canary knob: set to 1 to make the always-true invariant fail, proving
+# this script can still go red. A checker that cannot fail is not a checker.
+FORCE_RED = os.getenv("DI_FORCE_RED", "") == "1"
+SAMPLE_ROWS = int(os.getenv("DI_SAMPLE_ROWS", "3"))
+
+
+@dataclass
+class Invariant:
+    """One claim the product depends on being true of production data.
+
+    ``where`` is a SQL predicate selecting VIOLATING rows. It is deliberately
+    written as a predicate rather than a full query so the runner can split
+    every invariant into new-vs-legacy counts without each entry repeating that
+    logic.
+    """
+
+    id: str
+    table: str
+    age_col: str          # ISO-8601 text column used to tell new rows from old
+    where: str            # SQL predicate: TRUE for a violating row
+    why: str              # what BREAKS for a user when this is false
+    incident: str = ""    # provenance: the real event that motivated it
+    sample_cols: str = "id, source"
+    group_by: str = ""    # optional column to break the count down by
+    # Some invariants cannot be expressed as a row predicate (e.g. a global
+    # count comparison). Those supply a full query returning a single integer.
+    scalar_sql: str = ""
+    scalar_ok: str = "== 0"
+
+
+# ---------------------------------------------------------------------------
+# THE LIBRARY.
+#
+# Every entry carries `why` (what a USER loses) and `incident` (why we believe
+# it). That provenance is load-bearing: a threshold with no story behind it is
+# un-deletable, because nobody later can tell whether it still means anything.
+# An invariant that fires twice and is ruled "not a real problem" should be
+# FIXED OR DELETED the same day — a muted invariant is worse than none.
+# ---------------------------------------------------------------------------
+INVARIANTS: list[Invariant] = [
+    Invariant(
+        id="posted_at_parses",
+        table="jobs",
+        age_col="first_seen_at",
+        where=r"posted_at IS NOT NULL AND posted_at <> '' "
+              r"AND posted_at !~ '^\d{4}-\d{2}-\d{2}'",
+        why="a job's posted date is not a date. The UI calls new Date() on it, "
+            "gets NaN, and every comparison against NaN is false — so the card "
+            "renders 'Posted NaNw ago'. Recency scoring silently returns 0 for "
+            "these jobs too, so they rank wrong as well as read wrong.",
+        incident="2026-08-03: 526 rows held epoch strings ('1785750903') or UK "
+                 "dates ('27/07/2026'). arbeitnow 385, reed 98, nofluffjobs 24, "
+                 "himalayas 19. Zero Sentry events.",
+        group_by="source",
+    ),
+    Invariant(
+        id="posted_at_in_range",
+        table="jobs",
+        age_col="first_seen_at",
+        # Lexical comparison on ISO prefixes — correct for YYYY-MM-DD, and it
+        # cannot raise a cast error on the garbage the previous invariant finds.
+        where=r"posted_at ~ '^\d{4}-\d{2}-\d{2}' AND ("
+              r"substring(posted_at from 1 for 10) < '2015-01-01' OR "
+              r"substring(posted_at from 1 for 10) > to_char(now() + interval '2 days', 'YYYY-MM-DD'))",
+        why="a date that parses but is absurd — a job posted in 1970 or next "
+            "year. Millisecond-vs-second epoch confusion produces exactly this, "
+            "and it passes the parse check while making recency meaningless.",
+        incident="Companion to posted_at_parses: fixing the format without "
+                 "checking the value would trade a visible bug for a silent one.",
+        group_by="source",
+    ),
+    Invariant(
+        id="confidence_honesty",
+        table="jobs",
+        age_col="first_seen_at",
+        where=r"date_confidence = 'high' AND (posted_at IS NULL OR posted_at = '' "
+              r"OR posted_at !~ '^\d{4}-\d{2}-\d{2}')",
+        why="we labelled a date we cannot parse as HIGH confidence. Anything "
+            "downstream that trusts that flag is being lied to by our own code.",
+        incident="2026-08-03: job 34718 carried posted_at='1785750903' with "
+                 "date_confidence='high'.",
+        group_by="source",
+    ),
+    Invariant(
+        id="apply_url_is_reachable_shape",
+        table="jobs",
+        age_col="first_seen_at",
+        where=r"apply_url IS NOT NULL AND apply_url <> '' AND apply_url !~ '^https?://'",
+        why="the apply link is the entire point of the product. A malformed one "
+            "fails only when a user clicks it, which we never see.",
+        incident="2026-08-03, found by this invariant on its FIRST run: 2,805 "
+                 "jobs — 43% of the entire catalog, every one from devitjobs — "
+                 "carried a bare slug instead of a URL ('FBI-TMT-Metadata-Lead'). "
+                 "The Apply button, the single action the whole product exists "
+                 "to produce, was dead on nearly half the catalog and no alarm, "
+                 "test or human had ever noticed.",
+        group_by="source",
+    ),
+    Invariant(
+        id="salary_range_sane",
+        table="jobs",
+        age_col="first_seen_at",
+        where="salary_min IS NOT NULL AND salary_max IS NOT NULL "
+              "AND salary_min > salary_max",
+        why="a salary range that runs backwards renders as nonsense and breaks "
+            "the salary dimension of scoring.",
+        incident="fx.py converts 18 currencies and salary.py normalises cadence; "
+                 "either can invert a range without raising.",
+        group_by="source",
+    ),
+    Invariant(
+        id="salary_magnitude_sane",
+        table="jobs",
+        age_col="first_seen_at",
+        where="(salary_min IS NOT NULL AND (salary_min < 0 OR salary_min > 2000000)) "
+              "OR (salary_max IS NOT NULL AND (salary_max < 0 OR salary_max > 2000000))",
+        why="an hourly rate stored as an annual salary (or a currency left "
+            "unconverted) produces £3 or £8,000,000 jobs. Both read as broken "
+            "and both poison salary scoring.",
+        incident="Cadence normalisation is a known-hard path; this is its smoke "
+                 "alarm.",
+        group_by="source",
+    ),
+    Invariant(
+        id="match_score_in_bounds",
+        table="jobs",
+        age_col="first_seen_at",
+        where="match_score IS NOT NULL AND (match_score < 0 OR match_score > 100)",
+        why="scores outside 0-100 break every threshold in the system at once — "
+            "feed visibility, the enrichment gate, the judge funnel.",
+        incident="CLAUDE.md rule #27: multi-dim weights sum to 130 before a clamp "
+                 "to [0,100]. This invariant detects that clamp being removed.",
+    ),
+    Invariant(
+        id="feed_score_in_bounds",
+        table="user_feed",
+        age_col="created_at",
+        where="(score IS NOT NULL AND (score < 0 OR score > 100)) "
+              "OR (llm_fit_score IS NOT NULL AND (llm_fit_score < 0 OR llm_fit_score > 100))",
+        why="the same clamp failure, on the per-user side. user_feed.score has a "
+            "CHECK constraint; llm_fit_score does not — so the judge is the "
+            "unguarded half.",
+        incident="Migration 0017 added llm_fit_score without a bound.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="llm_verdict_fields_move_together",
+        table="user_feed",
+        age_col="created_at",
+        where="(llm_fit_score IS NOT NULL)::int + (llm_verdict IS NOT NULL)::int "
+              "+ (llm_matched_at IS NOT NULL)::int NOT IN (0, 3)",
+        why="a half-written judge verdict. Either all three LLM columns are set "
+            "or none are; anything else means the judge died mid-write and the "
+            "row now shows a score with no reasoning, or reasoning with no score.",
+        incident="Migration 0017 writes three columns with no transaction "
+                 "guarantee tying them together.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="feed_has_no_orphans",
+        table="user_feed",
+        age_col="created_at",
+        where="NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = user_feed.job_id)",
+        why="a feed row pointing at a job that no longer exists renders as a "
+            "broken or blank card. purge_old_jobs() deletes from the shared "
+            "catalog on a 30-day window; feed rows are per-user and outlive it.",
+        incident="CLAUDE.md rule #3 guards the purge threshold; nothing guards "
+                 "what the purge leaves dangling.",
+        sample_cols="id, user_id",
+    ),
+    Invariant(
+        id="catalog_dedup_holds",
+        table="jobs",
+        age_col="first_seen_at",
+        where="",  # scalar form below
+        scalar_sql="SELECT count(*) - count(DISTINCT (normalized_company, normalized_title)) "
+                   "FROM jobs",
+        why="duplicate (company, title) pairs in the shared catalog. The UNIQUE "
+            "constraint should make this impossible, so a non-zero value means "
+            "the constraint or the SQL translation layer is not doing its job.",
+        incident="pg.translate() rewrites legacy SQLite-flavoured SQL to Postgres "
+                 "at RUNTIME and is production-critical. This is a one-line audit "
+                 "of it.",
+    ),
+]
+
+
+def _iso_cutoff_expr(age_col: str) -> str:
+    """SQL fragment: TRUE when this row is NEW (inside the alarm window).
+
+    The age columns are ISO-8601 TEXT, not timestamps, so this compares date
+    prefixes lexically — correct for ISO, and it cannot raise a cast error on a
+    malformed value (which, given this script exists to find malformed values,
+    matters more than usual).
+    """
+    return (
+        f"({age_col} IS NOT NULL AND substring({age_col} from 1 for 10) >= "
+        f"to_char(now() - interval '{NEW_WINDOW_HOURS} hours', 'YYYY-MM-DD'))"
+    )
+
+
+def _run_invariant(cur: Any, inv: Invariant) -> dict[str, Any]:
+    """Evaluate one invariant. Returns a result dict; never raises for SQL
+    reasons the caller can't act on — a broken invariant is reported as such
+    rather than taking the whole run down with it."""
+    out: dict[str, Any] = {"id": inv.id, "new": 0, "legacy": 0, "breakdown": [],
+                           "sample": [], "error": ""}
+    try:
+        if inv.scalar_sql:
+            cur.execute(inv.scalar_sql)
+            n = int(cur.fetchone()[0] or 0)
+            # A scalar invariant has no age dimension: any violation is "new",
+            # because we cannot tell when it started.
+            out["new"] = n
+            return out
+
+        newp = _iso_cutoff_expr(inv.age_col)
+        cur.execute(
+            f"SELECT count(*) FILTER (WHERE {newp}), "  # noqa: S608 - literals only
+            f"       count(*) FILTER (WHERE NOT {newp}) "
+            f"FROM {inv.table} WHERE {inv.where}"
+        )
+        new_n, old_n = cur.fetchone()
+        out["new"], out["legacy"] = int(new_n or 0), int(old_n or 0)
+
+        if out["new"] or out["legacy"]:
+            if inv.group_by:
+                cur.execute(
+                    f"SELECT {inv.group_by}, count(*) FROM {inv.table} "  # noqa: S608
+                    f"WHERE {inv.where} GROUP BY 1 ORDER BY 2 DESC LIMIT 8"
+                )
+                out["breakdown"] = [(str(a), int(b)) for a, b in cur.fetchall()]
+            cur.execute(
+                f"SELECT {inv.sample_cols} FROM {inv.table} "  # noqa: S608
+                f"WHERE {inv.where} LIMIT {SAMPLE_ROWS}"
+            )
+            out["sample"] = [tuple(str(x) for x in r) for r in cur.fetchall()]
+    except Exception as exc:  # noqa: BLE001 - one bad invariant must not blind the rest
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
+
+
+def main() -> int:
+    dsn = os.getenv("PROD_DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
+    if not dsn:
+        # Loud, not silent. A detector that skips because a secret is missing is
+        # the dead-watcher failure this whole harness exists to prevent.
+        print("::error::no PROD_DATABASE_URL - data invariants cannot run")
+        return 2
+    try:
+        import psycopg
+    except ImportError:
+        print("::error::psycopg not installed - data invariants cannot run")
+        return 2
+
+    results: list[dict[str, Any]] = []
+    try:
+        with psycopg.connect(dsn, connect_timeout=25) as conn, conn.cursor() as cur:
+            for inv in INVARIANTS:
+                results.append(_run_invariant(cur, inv))
+            if FORCE_RED:
+                # The canary. Proves this script can still go red, every run.
+                # "Green" must be a measurement, never a default.
+                results.append({"id": "CANARY", "new": 1, "legacy": 0,
+                                "breakdown": [], "sample": [], "error": ""})
+    except Exception as exc:  # noqa: BLE001
+        print(f"::error::could not reach production DB: {type(exc).__name__}: {exc}")
+        return 2
+
+    broken = [r for r in results if r["error"]]
+    firing = [r for r in results if r["new"] > 0 and not r["error"]]
+    legacy_only = [r for r in results if r["new"] == 0 and r["legacy"] > 0 and not r["error"]]
+    by_id = {i.id: i for i in INVARIANTS}
+
+    print("# Production data invariants\n")
+    print(f"Window for NEW violations: last {NEW_WINDOW_HOURS}h\n")
+    print("| invariant | new | legacy | verdict |")
+    print("|---|---|---|---|")
+    for r in results:
+        verdict = ("**CHECKER BROKE**" if r["error"]
+                   else "**FIRING**" if r["new"] else "legacy only" if r["legacy"] else "ok")
+        print(f"| `{r['id']}` | {r['new']} | {r['legacy']} | {verdict} |")
+    print()
+
+    for r in firing:
+        inv = by_id.get(r["id"])
+        print(f"## FIRING: `{r['id']}` — {r['new']} new violations\n")
+        if inv:
+            print(f"**What breaks for a user:** {inv.why}\n")
+            if inv.incident:
+                print(f"**Why we check this:** {inv.incident}\n")
+        if r["breakdown"]:
+            print("**By source:** " + ", ".join(f"{k} {v}" for k, v in r["breakdown"]) + "\n")
+        if r["sample"]:
+            print("**Sample rows:** " + "; ".join(" / ".join(s) for s in r["sample"]) + "\n")
+        if r["legacy"]:
+            print(f"_({r['legacy']} older rows also violate — fix the source first, "
+                  "then backfill.)_\n")
+
+    if legacy_only:
+        print("## Legacy only (informational — not alarming)\n")
+        print("These violate but no NEW row has since the window opened, so the "
+              "source is probably already fixed and the remaining rows need a "
+              "backfill, not a code change.\n")
+        for r in legacy_only:
+            print(f"- `{r['id']}`: {r['legacy']} old rows")
+        print()
+
+    if broken:
+        print("## The checker itself is broken\n")
+        for r in broken:
+            print(f"- `{r['id']}`: {r['error']}")
+        print("\nA green run means nothing while this is true.\n")
+        return 2
+
+    if firing:
+        print("None of these threw an exception. None reached Sentry. That is the "
+              "point: a value that is merely WRONG looks exactly like a value that "
+              "is right, until a person sees it on their screen.")
+        # Machine-readable tail so the workflow can open one issue per invariant
+        # rather than one blanket issue nobody can scope a fix to.
+        print("\n<!--FIRING_JSON:" + json.dumps([r["id"] for r in firing]) + "-->")
+        return 1
+
+    print("Every production data invariant holds.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
