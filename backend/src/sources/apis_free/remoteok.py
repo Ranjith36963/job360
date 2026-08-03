@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from src.core.settings import USER_AGENT
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.remoteok")
-
 
 class RemoteOKSource(BaseJobSource):
     name = "remoteok"
@@ -24,8 +24,8 @@ class RemoteOKSource(BaseJobSource):
                 continue
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_date = item.get("date")
-            posted_at = raw_date if raw_date else None
-            confidence = "high" if raw_date else "low"
+            posted_at, confidence = normalize_posted_at(raw_date)
+
             jobs.append(Job(
                 title=item.get("position", ""),
                 company=item.get("company", ""),

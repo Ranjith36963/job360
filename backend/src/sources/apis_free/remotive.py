@@ -4,9 +4,9 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.remotive")
-
 
 class RemotiveSource(BaseJobSource):
     name = "remotive"
@@ -25,8 +25,8 @@ class RemotiveSource(BaseJobSource):
             desc = item.get("description", "")
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_pub = item.get("publication_date")
-            posted_at = raw_pub if raw_pub else None
-            confidence = "high" if raw_pub else "low"
+            posted_at, confidence = normalize_posted_at(raw_pub)
+
             salary = item.get("salary", "")
             salary_min = None
             salary_max = None

@@ -763,7 +763,12 @@ async def get_job(
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008 — shared catalog; generateMetadata reads unauthenticated
 ) -> JobResponse:
     # Step-1 B6: single LEFT JOIN — JobResponse surfaces enrichment fields.
-    row = await db.get_job_by_id_with_enrichment(job_id)
+    # Passing the user lets them open a job THEY applied to or acted on even
+    # after it goes stale. Hiding a ghost from browsing is right; hiding a
+    # person's own application from them reads as data loss (found 2026-08-03).
+    row = await db.get_job_by_id_with_enrichment(
+        job_id, user_id=user.id if user is not None else None
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
     job_action = await db.get_action_for_job(job_id, user.id) if user is not None else None
