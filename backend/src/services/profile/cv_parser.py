@@ -102,6 +102,25 @@ CV TEXT:
 # ── File reading (infrastructure — not LLM) ─────────────────────
 
 
+# A PDF whose text layer carries no space glyphs extracts as one long run:
+# "SkilledinleveragingPython,SQL,C/C++". Found on the real corpus 2026-08-03 -
+# one CV came out at 0.9% spaces where every other sat at 11-13%. pdfplumber's
+# WORD-level extraction returns the same result, so this is the FILE, not our
+# code: some exporters position glyphs without emitting space characters.
+#
+# We cannot fix the file, but silently shipping mangled skills is the worst
+# option. Detect it, so the user can be told to re-export rather than left with
+# a profile full of "Agilemethodologies".
+_MIN_SPACE_RATIO = 0.05
+
+
+def text_is_missing_spaces(raw_text: str) -> bool:
+    """True when a PDF's text layer lost its word boundaries."""
+    if not raw_text or len(raw_text) < 200:
+        return False
+    return (raw_text.count(" ") / len(raw_text)) < _MIN_SPACE_RATIO
+
+
 def extract_text_from_pdf(file_path: str) -> str:
     """Extract text from a PDF file using pdfplumber."""
     try:
@@ -120,7 +139,14 @@ def extract_text_from_pdf(file_path: str) -> str:
     except Exception as e:
         logger.error("Failed to read PDF %s: %s", file_path, e)
         return ""
-    return "\n".join(text_parts)
+    text = "\n".join(text_parts)
+    if text_is_missing_spaces(text):
+        logger.warning(
+            "PDF text layer has no word boundaries (%.1f%% spaces) for %s - "
+            "extracted skills will be mangled; this file needs re-exporting",
+            text.count(" ") / max(len(text), 1) * 100, file_path,
+        )
+    return text
 
 
 def extract_sections_from_pdf(file_path: str) -> dict[str, str] | None:
@@ -271,8 +297,32 @@ _DET_SKILL_HEADING_STEMS = (
 
 
 def _is_skill_heading(key: str) -> bool:
-    """A short heading line whose label contains a skills/tools section stem."""
-    return bool(key) and any(stem in key for stem in _DET_SKILL_HEADING_STEMS)
+    """A short heading line whose label contains a skills/tools section stem.
+
+    SHAPE CHECK ADDED 2026-08-03. The stem test alone matched any line
+    CONTAINING a stem, which on the real 7-CV corpus fired on ordinary body
+    text and hijacked the section:
+
+        "JSSATE, (Visvesvaraya Technological University) Bangalore, India"
+        "Skilledinleveraging Python, SQL, C/C++ and AWS to deliver..."
+
+    Because the collector starts at the FIRST match, one such false positive
+    means the real skills block is never reached. That is how an embedded
+    engineer with a full "Technical Skills" section extracted ZERO skills.
+
+    A real heading is short and label-shaped: a handful of words, no sentence
+    punctuation. Structural, not a vocabulary - rule #28 holds.
+    """
+    if not key:
+        return False
+    if not any(stem in key for stem in _DET_SKILL_HEADING_STEMS):
+        return False
+    # A heading is a LABEL, not a sentence. Real ones: "Technical Skills",
+    # "CORE COMPETENCIES", "TOOLS & TECHNOLOGIES".
+    if len(key) > 45 or len(key.split()) > 6:
+        return False
+    # Commas and full stops belong to prose, not to a section label.
+    return not any(ch in key for ch in ",.;")
 
 
 # Last-word markers of a section heading. A short heading whose FINAL word is one
@@ -388,17 +438,25 @@ def _det_collect_section(
     heading``) — so non-standard headings like "Core Technical Skills" or
     "TOOLS & TECHNOLOGIES" are captured, not just the exact ``heading_set``.
     """
+    # Collect EVERY matching section, not just the first. A CV may legitimately
+    # split its skills across two blocks ("Technical Skills" and "Tools"), and a
+    # single early false positive used to swallow the whole result. Taking all
+    # of them makes one bad match survivable instead of fatal.
     out: list[str] = []
     capturing = False
     for line in lines:
         key = _det_heading_key(line)
+        is_start = key in heading_set or (stem_skills and _is_skill_heading(key))
         if not capturing:
-            if key in heading_set or (stem_skills and _is_skill_heading(key)):
+            if is_start:
                 capturing = True
             continue
-        # capturing — stop at the next recognised section heading
+        # A new skills heading continues collecting; any other section ends it.
+        if is_start:
+            continue
         if _is_section_heading(key):
-            break
+            capturing = False
+            continue
         if line.strip():
             out.append(line.strip())
     return out
