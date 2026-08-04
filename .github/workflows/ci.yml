@@ -153,6 +153,7 @@ jobs:
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)

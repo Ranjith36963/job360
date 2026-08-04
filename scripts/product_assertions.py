@@ -158,6 +158,44 @@ def main() -> int:
                               f"feature look alive in a row count.")
 
             # ---------------------------------------------------------------
+            # 2b. A SEARCH THAT STARTED AND NEVER ENDED.
+            #
+            # This is also the FIRST CONSUMER `audit_log` has ever had. The
+            # table was added by migration 0025 as a "durable, queryable audit
+            # trail"; `audit_trail.py:91` inserts into it and NOTHING has ever
+            # selected from it — only the retention purge touches it. By this
+            # repo's own law (an artifact with no notifier dies) it was already
+            # dead on arrival.
+            #
+            # What it catches: on 2026-08-03 a real user's search wrote
+            # `search_started` at 12:25 and then no `search_completed`, no
+            # `search_failed`, and no run_log row — three hours later. The user
+            # watched a spinner forever and support had nothing to read. A crash
+            # at least writes search_failed; this wrote nothing at all.
+            try:
+                cur.execute("""
+                    SELECT count(*) FROM audit_log a
+                    WHERE a.event = 'search_started'
+                      AND a.occurred_at::timestamptz < now() - interval '30 minutes'
+                      AND a.occurred_at::timestamptz > now() - interval '7 days'
+                      AND NOT EXISTS (
+                            SELECT 1 FROM audit_log b
+                             WHERE b.user_id = a.user_id
+                               AND b.event IN ('search_completed', 'search_failed')
+                               AND b.occurred_at::timestamptz > a.occurred_at::timestamptz)
+                """)
+                orphaned = cur.fetchone()[0]
+                check("searches with no terminal event", str(orphaned), orphaned == 0,
+                      f"{orphaned} search(es) in the last 7 days started and never "
+                      f"recorded completed OR failed. The user sees an endless spinner "
+                      f"and there is no record for anyone to diagnose.")
+            except Exception:
+                # audit_log may not exist on an older DB — that is not a product
+                # fault, so degrade quietly rather than failing the whole run.
+                conn.rollback()
+                rows.append(("searches with no terminal event", "audit_log missing", "-"))
+
+            # ---------------------------------------------------------------
             # 3. A SCORING DIMENSION THAT IS ALWAYS ZERO.
             # The Executive bug: the UI offered a value the scorer never knew,
             # so that dimension was dead for those users. A dimension that is

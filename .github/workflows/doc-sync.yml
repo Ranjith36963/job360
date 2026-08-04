@@ -38,6 +38,7 @@ concurrency:
 jobs:
   drift-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       drift: ${{ steps.check.outputs.drift }}
     steps:
@@ -126,6 +127,7 @@ jobs:
       github.event_name != 'pull_request' &&
       needs.drift-check.outputs.drift == '1'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write

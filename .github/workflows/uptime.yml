@@ -16,6 +16,7 @@ permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Ping backend /api/readyz
         run: |
@@ -52,6 +53,7 @@ jobs:
     # were dead on arrival and only a deliberate drill revealed it.
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)
