@@ -43,8 +43,8 @@ If you have time for nothing else: **read this section, the Hard Rules index bel
   **Two traps that cost real time:** `railway logs` *streams*, so piping it to `tail` returns nothing and looks exactly like "no access" — always `| head -N` with a `timeout`. And **never print secret values** (`railway variables` once dumped a live API key into a transcript); filter to key NAMES only.
 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface to the user on divergence — never silent rebase.
-- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (~1,716 collected, 2 live tests deselected — always defer to the runtime collected count, this number drifts). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s. **The suite runs against a real Postgres** via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py` (schema-per-test isolation), not SQLite — see the DB note below.
-- **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). An autonomous maintenance loop (worker/integrator/scout/health agents, missions in `docs/maintenance/MISSIONS.md`) is running. Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly` (**2,151 collected, 2 deselected** — measured 2026-08-03; always defer to the runtime collected count, this number drifts and three docs disagreed by 400-800 tests before this was measured). `test_main.py` is included: it was rehabbed offline in the M8 batch (JobSpy stubbed via autouse fixture) and runs in ~8 s. **The suite runs against a real Postgres** via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py` (schema-per-test isolation), not SQLite — see the DB note below.
+- **State of play:** Step 3 (control-surface batch) merged at origin/main `7194d0e`. Post-Step-3, the funnel→judge matcher batch (a925f42..d801f78, migration 0017) landed on branch `fix/per-user-search-and-scoring-gate`, adding the LLM judge engine (engine #4). The old agent-based maintenance loop (worker/integrator/scout/health, missions in `docs/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**; its SKILL.md files carry dated DORMANT banners and MISSIONS.md has not moved since 2026-06-17. **Do not wait on it.** The live automation is the GitHub Actions harness (`.github/workflows/`: repair, triage, doc-sync, absence, product-health, user-journey, external-health, uptime, synthetic-live, live-e2e, db-backup, pr-shepherd, dependabot-auto, checker-scorecard). Step 4 (ops hardening) is still pending. See `STATUS.md` for current phase + carry-overs; see `docs/IMPLEMENTATION_LOG.md` for the batch-by-batch history.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3** — `src/repositories/pg.py` is the aiosqlite-shaped driver; the old SQLite path is gone) and `frontend/` (Next.js 16, React 19). Runtime data lives in `backend/data/`. **Live on Railway** since 2026-07-02 at **job360.uk**, auto-deployed from `main` (see the banner above). Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but only 46 unique source classes (`indeed` and `glassdoor` both alias `JobSpySource`). Heavy deps must be lazy-imported (rules #11 + #16). Next.js 16 broke `params` to async (rule #22). Adding/removing a source touches **five** files, not four (rule #13).
 
@@ -226,14 +226,14 @@ job360/
 │   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── models.py          # Job dataclass with normalized_key() for dedup
-│   │   ├── api/               # FastAPI app + 11 route modules (46 endpoints, all per-user routes gated)
+│   │   ├── api/               # FastAPI app + 13 route modules (71 endpoints, all per-user routes gated)
 │   │   ├── core/              # settings, keywords, companies, skill_synonyms, fx, tenancy
 │   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
 │   │   ├── repositories/      # database, csv_export
 │   │   ├── sources/           # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY entries
 │   │   ├── workers/           # ARQ tasks + WorkerSettings (cron: nightly_ghost_sweep @02:00, notification_tick @every 5m)
 │   │   └── utils/             # logger, rate_limiter, time_buckets
-│   └── tests/                 # ~1,716 collected, Postgres-backed (defer to runtime collected count)
+│   └── tests/                 # 2,151 collected, Postgres-backed (defer to runtime collected count)
 └── frontend/                  # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
     └── src/
         ├── app/               # App Router: dashboard, jobs/[id], pipeline, profile, channels (top-level), settings/{layout,notifications,account}, notifications (ledger)
@@ -289,7 +289,9 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (default `60`) | Min match_score for a job to be LLM-enriched |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:139) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:136) |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:135) — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
@@ -307,7 +309,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 ## Important Patterns
 
 - **Adding a new job source:** Class extends `BaseJobSource`, implements `async fetch_jobs() -> list[Job]`, sets `category` (rule #15). Use `self.relevance_keywords` / `self.job_titles` (not direct imports). If custom `__init__`, accept `search_config=None` and pass through to `super().__init__(session, search_config=search_config)`. Update **five surfaces** per rule #8/#13. Add mocked `aioresponses` tests.
-- **Adding a notification channel:** Implement `NotificationChannel` ABC, register in `get_all_channels()` in `src/services/notifications/base.py`. For multi-channel routing via Apprise, work in `src/services/channels/dispatcher.py` instead — and ensure rules #23 + #24 are respected.
+- **Adding a notification channel:** work in `src/services/channels/dispatcher.py` (the Apprise dispatcher) — that is the ONLY delivery path. ⚠️ Older docs told you to implement a `NotificationChannel` ABC and register it in `get_all_channels()` in `src/services/notifications/base.py`: **that module and both symbols no longer exist** (verified 2026-08-03 — `src/services/notifications/` now holds only `report_generator.py`). An agent following the old instruction would be writing against a deleted API. Ensure rules #23 + #24 are respected.
 - **Keyed source pattern:** Accept `api_key`, return `[]` early with info-log if empty, pass `search_config` through.
 - **ATS source pattern:** Accept `companies` list and `search_config=None`; iterate slugs from `companies.py`.
 - **RSS/XML source pattern:** `_get_text()` → parse with stdlib `xml.etree.ElementTree`. Consider `_get_json_conditional` if upstream honours ETag (rule #14).
@@ -315,7 +317,7 @@ Dropped in Batch 3: `yc_companies`, `nomis`, `findajob`. Dropped 2026-06 (M6 rot
 
 ## Testing
 
-**~1,716 collected** (2 live tests deselected — defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). **Runs against a real Postgres**, not SQLite: `tests/conftest.py` sets `sys.modules["aiosqlite"] = pg` / `sys.modules["sqlite3"] = pgsync`, so the ~40 legacy test files that still write SQLite-flavored SQL are transparently routed through `pg.translate()` + a fresh per-test schema (`schema_for_path()`). A local Postgres must be up (`docker-compose.dev.yml`, host port 5433) or the suite errors at collection. Shared fixtures in `tests/conftest.py`. External HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
+**2,151 collected** (2 deselected — measured 2026-08-03; defer to the runtime collected count), 0 failing (bash-only `setup.sh` / `cron_run.sh` tests skip on Windows). **Runs against a real Postgres**, not SQLite: `tests/conftest.py` sets `sys.modules["aiosqlite"] = pg` / `sys.modules["sqlite3"] = pgsync`, so the ~40 legacy test files that still write SQLite-flavored SQL are transparently routed through `pg.translate()` + a fresh per-test schema (`schema_for_path()`). A local Postgres must be up (`docker-compose.dev.yml`, host port 5433) or the suite errors at collection. Shared fixtures in `tests/conftest.py`. External HTTP mocked with `aioresponses`. `pytest-asyncio` for async tests.
 
 `make test` runs the full suite including `test_main.py` (rehabbed offline in M8 — JobSpy stubbed, runs in ~8 s).
 
@@ -374,7 +376,7 @@ The DB backend moved from SQLite to **Postgres (psycopg3)**. `src/repositories/p
 
 ### Tailored documents — AI CV & cover-letter generator (2026-07-04)
 
-A full-stack, **shipped and live** feature. Per-job, the user generates a tailored CV + cover letter via a paid LLM call. Backend: `services/tailoring/` (`generator.py`, `docx.py`, `pdf.py`, `patterns.py`, `prompts.py`, `provenance.py`, `integrity.py`) + route `api/routes/tailor.py`; migrations 0023 (`tailored_documents`) + 0024 (`tailored_flagged_terms`). Frontend: `components/tailor/{TailorPanel,TailorButton,TailorSection}.tsx`, wired into `JobDetailClient.tsx`, `JobCard.tsx`, `KanbanBoard.tsx`. Guardrail: `TAILOR_FREE_PER_MONTH` (settings.py:146, default 10) caps free usage — one generation = one CV + cover letter for one job; premium bypass is designed but no plan column exists yet. Design doc: `docs/peruser_cv_coverletter.md`.
+A full-stack, **shipped and live** feature. Per-job, the user generates a tailored CV + cover letter via a paid LLM call. Backend: `services/tailoring/` (`generator.py`, `docx.py`, `pdf.py`, `patterns.py`, `prompts.py`, `provenance.py`, `integrity.py`) + route `api/routes/tailor.py`; migrations 0023 (`tailored_documents`) + 0024 (adds the `flagged_terms` JSON **column** to `tailored_documents` — there is NO `tailored_flagged_terms` table; an agent that queries one will crash). Frontend: `components/tailor/{TailorPanel,TailorButton,TailorSection}.tsx`, wired into `JobDetailClient.tsx`, `JobCard.tsx`, `KanbanBoard.tsx`. Guardrail: `TAILOR_FREE_PER_MONTH` (settings.py:146, default 10) caps free usage — one generation = one CV + cover letter for one job; premium bypass is designed but no plan column exists yet. Design doc: `docs/peruser_cv_coverletter.md`.
 
 ## Related documentation
 
