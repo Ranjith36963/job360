@@ -41,6 +41,27 @@ MIN_FEED_ROWS = int(os.getenv("PA_MIN_FEED_ROWS", "50"))
 MAX_EMPTY_FEED_PCT = float(os.getenv("PA_MAX_EMPTY_FEED_PCT", "50"))
 MIN_VISIBLE_PCT = float(os.getenv("PA_MIN_VISIBLE_PCT", "25"))
 DISPLAY_FLOOR = int(os.getenv("PA_DISPLAY_FLOOR", "0"))
+# A feature that produced rows and then produced none for this long has stopped.
+# Generous on purpose: this must catch "dead", not "quiet week".
+STALE_FEATURE_DAYS = int(os.getenv("PA_STALE_FEATURE_DAYS", "14"))
+
+
+def _age_days(iso: str) -> int | None:
+    """Age in whole days of an ISO-8601 timestamp, or None if unparseable.
+
+    The timestamp columns here are TEXT, so they can hold anything; a parse
+    failure must degrade to "cannot tell" rather than crash the whole detector
+    or, worse, silently read as fresh.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        dt = datetime.fromisoformat(iso.strip().replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - dt).days)
 
 
 def main() -> int:
@@ -76,7 +97,18 @@ def main() -> int:
             check("feed rows", str(feed_rows), feed_rows >= MIN_FEED_ROWS,
                   f"only {feed_rows} feed rows (floor {MIN_FEED_ROWS}) - is anything being fed?")
 
-            enrich_gate = int(os.getenv("ENRICHMENT_MIN_SCORE", "10"))
+            # Mirror settings.py's REAL resolution order, not a guess at it.
+            # settings.py:139 is `ENRICHMENT_THRESHOLD = getenv("ENRICHMENT_THRESHOLD",
+            # str(ENRICHMENT_MIN_SCORE))` — so THRESHOLD is the effective gate and
+            # MIN_SCORE is only its fallback. This read only MIN_SCORE, so if prod
+            # ever set THRESHOLD (the documented knob) the detector was comparing
+            # the score ceiling against a number the engine does not use — a
+            # stale-threshold detector with a stale threshold.
+            enrich_gate = int(
+                os.getenv("ENRICHMENT_THRESHOLD")
+                or os.getenv("ENRICHMENT_MIN_SCORE")
+                or "10"
+            )
             check(f"max score ({max_score}) vs enrichment floor ({enrich_gate})",
                   f"{max_score} vs {enrich_gate}",
                   max_score >= enrich_gate,
@@ -96,11 +128,34 @@ def main() -> int:
                     conn.rollback()
                     rows.append((f"{label} rows", "table missing", "-"))
                     continue
-                # 0 rows is only a PROBLEM if the engine is meant to be on. We
-                # cannot read prod env from here, so report it and let the human
-                # judge - but say plainly what 0 means.
+                # 0 rows is only a PROBLEM if the engine is meant to be on, and
+                # we cannot read prod env from here — so "never produced
+                # anything" stays a report, not an alarm.
+                #
+                # BUT "it produced rows and then STOPPED" needs no env knowledge
+                # at all, and it is the more dangerous case: a feature that
+                # worked, silently died, and left its old rows behind looks
+                # identical to a healthy one in a row count. This family used to
+                # be display-only in BOTH directions, so the docstring's claim
+                # that each assertion "would have caught its originating bug"
+                # was false here. Now the stopped case can go red.
                 rows.append((f"{label} rows", str(n),
                              "ok" if n > 0 else "zero - never produced anything"))
+                if n > 0:
+                    try:
+                        cur.execute(f"SELECT max(created_at) FROM {table}")  # noqa: S608 - fixed literals
+                        newest = cur.fetchone()[0]
+                    except Exception:
+                        conn.rollback()
+                        newest = None
+                    if newest:
+                        age_days = _age_days(str(newest))
+                        stale = age_days is not None and age_days > STALE_FEATURE_DAYS
+                        check(f"{label} freshness", f"newest {age_days}d old" if age_days is not None else "unparseable",
+                              not stale,
+                              f"{label} has {n} rows but NOTHING new for {age_days} days - "
+                              f"it worked once and has silently stopped. Old rows make a dead "
+                              f"feature look alive in a row count.")
 
             # ---------------------------------------------------------------
             # 3. A SCORING DIMENSION THAT IS ALWAYS ZERO.
@@ -118,6 +173,20 @@ def main() -> int:
                 judged, total = cur.fetchone()
                 rows.append(("rows with an LLM verdict", f"{judged}/{total}",
                              "ok" if judged > 0 else "zero - the judge never ran"))
+                # Same asymmetry as above: "never ran" may just mean the flag is
+                # off, but "ran and then stopped" is a fault no matter what the
+                # flags say — and it was previously unalarmable.
+                if judged > 0:
+                    cur.execute("SELECT max(llm_matched_at) FROM user_feed WHERE llm_matched_at IS NOT NULL")
+                    newest_j = cur.fetchone()[0]
+                    if newest_j:
+                        age_days = _age_days(str(newest_j))
+                        stale = age_days is not None and age_days > STALE_FEATURE_DAYS
+                        check("LLM judge freshness",
+                              f"newest verdict {age_days}d old" if age_days is not None else "unparseable",
+                              not stale,
+                              f"the judge produced {judged} verdicts but none for {age_days} days - "
+                              f"it has silently stopped judging.")
             except Exception:
                 conn.rollback()
 

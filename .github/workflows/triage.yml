@@ -14,14 +14,23 @@ name: Triage loop (diagnose every new issue)
 #            step, the log tail, the recent pass/fail history) — never vibes
 #   -> OUTPUT: a diagnosis comment plus ONE routing label.
 #
-# WHAT IT DELIBERATELY DOES NOT DO: apply `agent:fix`.
+# WHO MAY APPLY `agent:fix` — the cage, stated precisely.
 # That label is the ONLY authorisation control on a write-capable agent
 # (repair.yml). This repo is PUBLIC — anyone can open an issue — and our own
 # detectors paste log output into issue bodies, which can contain scraped,
-# attacker-influenced text. If a machine could apply that label, a
-# machine-authored issue could start a write-capable agent with no human in the
-# path. So triage RECOMMENDS and the human confirms with one click. Everything
-# else is automated; that single step is the cage.
+# attacker-influenced text. So the DEFAULT is: triage RECOMMENDS, the human
+# confirms with one click.
+#
+# ONE narrow exception, and it rests on a single property: the issue was opened
+# by our own bot AND its title carries a prefix whose body is nothing but our
+# own SQL counts and fixed strings — no model-generated text, no third-party
+# text (see the whitelist below). Those, and only those, are auto-authorised
+# and the repair loop is started explicitly.
+#
+# `Loop 2 RED:` was REMOVED from that whitelist on 2026-08-03: its body is a
+# tail of the live pipeline log, which contains text from whatever employers
+# post on the job boards we scrape. It looked like a trusted detector and was
+# in fact a third-party text channel.
 
 on:
   issues:
@@ -41,6 +50,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write # to START repair.yml on auto-authorisation (see below)
 
 concurrency:
   group: triage-${{ github.event.issue.number || inputs.issue }}
@@ -231,9 +241,19 @@ jobs:
           issue_author=$(gh issue view "$num" --json author --jq .author.login)
           issue_title=$(gh issue view "$num" --json title --jq .title)
           auto="no"
-          if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -q "github-actions"; then
+          # -F -x: exact whole-line match. A substring match would accept any
+          # login merely CONTAINING "github-actions".
+          if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -qFx "github-actions[bot]"; then
             case "$issue_title" in
-              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"Loop 2 RED: "*) auto="yes" ;;
+              # "Loop 2 RED: " was REMOVED 2026-08-03. Auto-authorisation
+              # rests on one property: the issue body contains no
+              # model-generated and no attacker-supplied text. That prefix
+              # broke it — its body is `tail -40` of the LIVE pipeline log,
+              # i.e. text influenced by whatever any employer posts on a job
+              # board we scrape. Auto-authorising it would let third-party
+              # text start a WRITE-capable agent. The others are our own SQL
+              # counts and fixed strings, which is why they qualify.
+              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*) auto="yes" ;;
             esac
           fi
 
@@ -258,7 +278,25 @@ jobs:
           gh issue edit "$num" --add-label "$label"
           if [ "$auto" = "yes" ]; then
             gh issue edit "$num" --add-label "agent:fix"
-            echo "AUTO-AUTHORISED #$num (trusted detector + auto-fixable)" >> "$GITHUB_STEP_SUMMARY"
+            # AND ACTUALLY START IT. repair.yml triggers on `issues: [labeled]`,
+            # and a label applied with GITHUB_TOKEN raises NO workflow run —
+            # GitHub blocks that recursion. This repo documents the trap in four
+            # places and works around it with an explicit dispatch everywhere
+            # else; the auto-authorisation path — the newest and the only one
+            # that starts a WRITE-capable agent — was missing it. So every
+            # auto-authorised issue got the label, got a comment saying "the
+            # repair loop is starting", and then nothing happened. The flagship
+            # automation was a sentence in a comment. Verified by reading the
+            # block: there was no dispatch here at all.
+            if gh workflow run repair.yml -f issue="$num"; then
+              echo "AUTO-AUTHORISED #$num and STARTED repair" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # Do not lie in the issue if the dispatch failed — say so where a
+              # human will see it, and leave the label on so a manual re-run works.
+              gh issue comment "$num" --body \
+                "Auto-authorised, but the repair loop could not be started automatically (\`workflow_dispatch\` failed). The \`agent:fix\` label is applied — re-run \`repair.yml\` by hand for this issue."
+              echo "::warning::auto-authorised #$num but repair dispatch FAILED"
+            fi
           fi
           echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "triaged #$num as $label" >> "$GITHUB_STEP_SUMMARY"

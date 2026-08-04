@@ -40,12 +40,58 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "ci-offline.yml": (36, "daily 06:00"),
     "doc-sync.yml": (36, "daily 06:30"),
     "absence.yml": (36, "daily 08:00"),
+    # THE PRODUCT + QUEUE LOOPS. Added 2026-08-03 after an audit found them
+    # UNWATCHED: every loop written after this file was created had been
+    # silently omitted, because the roster is hand-maintained and nothing
+    # checked it against the directory. That included the two loops that
+    # actually look at production data (product-health, user-journey), both
+    # loops that manage the PR queue, and the judge-of-the-judge.
+    "product-health.yml": (36, "daily 08:30"),
+    "user-journey.yml": (36, "daily 09:00"),
+    "dependabot-auto.yml": (36, "daily 09:30"),
+    "pr-shepherd.yml": (36, "daily 09:45"),
+    "checker-scorecard.yml": (9 * 24, "weekly Mon 10:00"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
     # ci.yml and repair.yml are event-triggered only — silence is normal, so
     # they are deliberately NOT watched here. Watching them would produce a
     # permanent false alarm, and a permanent alarm is how a loop dies.
 }
+
+# Event-triggered or PR-only workflows: silence is CORRECT for these, so they
+# are excluded from the roster-drift check below rather than watched.
+NOT_SCHEDULED: set[str] = {"ci.yml", "repair.yml", "pr-repair.yml", "triage.yml"}
+
+
+def roster_drift(workflow_dir: str = ".github/workflows") -> list[str]:
+    """Every scheduled workflow on disk must appear in EXPECTED.
+
+    THE ROSTER IS THE WEAK POINT. EXPECTED is hand-written, so the failure mode
+    is not a wrong number — it is a loop that was never added at all, which is
+    invisible precisely because an unwatched watcher produces no signal. Six
+    workflows had drifted out of it before this check existed.
+
+    Returns human-readable drift lines; empty list means the roster is complete.
+    """
+    import pathlib
+    import re
+
+    drift: list[str] = []
+    d = pathlib.Path(workflow_dir)
+    if not d.is_dir():
+        return [f"cannot read {workflow_dir} — roster drift is UNVERIFIED"]
+    on_disk = set()
+    for f in sorted(d.glob("*.yml")):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        # A workflow is "scheduled" if it declares a cron. Deliberately a dumb
+        # regex, not a YAML parse: this must keep working on a malformed file.
+        if re.search(r"^\s*-\s*cron:", text, re.M):
+            on_disk.add(f.name)
+    for wf in sorted(on_disk - set(EXPECTED) - NOT_SCHEDULED):
+        drift.append(f"`{wf}` runs on a schedule but is NOT watched — add it to EXPECTED")
+    for wf in sorted(set(EXPECTED) - on_disk):
+        drift.append(f"`{wf}` is watched but no longer exists on disk — remove it from EXPECTED")
+    return drift
 
 
 # Sentinel: the workflow file is not on the default branch yet (e.g. it only
@@ -102,6 +148,19 @@ def main() -> int:
     print("|---|---|---|")
     for wf, age, verdict in rows:
         print(f"| `{wf}` | {age} | {verdict} |")
+
+    # The roster itself is a watcher, and nothing was watching IT.
+    drift = roster_drift()
+    if drift:
+        print("\n## The watchdog's own roster has drifted\n")
+        for d in drift:
+            print(f"- {d}")
+        print(
+            "\nA scheduled loop missing from EXPECTED is completely unwatched: "
+            "it can stop for months and every dashboard stays green. This is the "
+            "same blind spot the watchdog exists to close, one level up again."
+        )
+        stopped.extend(drift)
 
     if stopped:
         print("\n## Watchers have stopped\n")

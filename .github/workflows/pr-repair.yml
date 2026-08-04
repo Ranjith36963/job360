@@ -103,6 +103,24 @@ jobs:
           esac
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
+      # SILENCE IS THE FAILURE MODE THIS HARNESS EXISTS TO KILL.
+      # Every step below is gated on the token being present, so a missing or
+      # rotated CLAUDE_CODE_OAUTH_TOKEN made this whole loop a no-op that ended
+      # GREEN and said nothing — a dispatched repair that looks like a success
+      # and fixed nothing. repair.yml has always announced this; pr-repair never
+      # did. Added 2026-08-03.
+      - name: Say so loudly if the fixer is not configured
+        if: steps.token.outputs.have != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "${{ inputs.pr }}" --body \
+            "PR-repair was dispatched but \`CLAUDE_CODE_OAUTH_TOKEN\` is not set, so nothing ran. (Silence would be worse than this comment.)" \
+            || echo "::warning::could not comment on the PR"
+          echo "::error::CLAUDE_CODE_OAUTH_TOKEN missing — pr-repair is a no-op, failing loudly instead of passing silently"
+          exit 1
+
       - uses: actions/checkout@v7
         if: steps.token.outputs.have == 'true'
         with:

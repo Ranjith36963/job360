@@ -57,18 +57,36 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+# Set when `gh` ITSELF failed, as opposed to legitimately returning nothing.
+#
+# THE DISTINCTION IS THE WHOLE POINT. An expired token and a genuinely quiet
+# month both produced `[]`, and the scorecard then printed "an honest empty
+# result, not a pass", exited 0, and committed that reassuring sentence to
+# docs/maintenance/CHECKER-SCORECARD.md. A blind measurement tool reporting
+# "nothing to measure" is the dead-watcher shape one level up: the judge of the
+# judges was itself unjudged.
+GH_BROKE: list[str] = []
+
+
 def gh_json(args: list[str]) -> list[dict]:
-    """Run a gh command and parse JSON. Never raises: no data is a finding."""
+    """Run a gh command and parse JSON.
+
+    Never raises — but it REMEMBERS that it failed, so main() can exit 2
+    ("I am blind") instead of 0 ("all clear").
+    """
     try:
         out = subprocess.run(
             ["gh", *args], capture_output=True, text=True, timeout=120, check=False
         )
         if out.returncode != 0:
-            print(f"(gh failed: {out.stderr.strip()[:200]})", file=sys.stderr)
+            msg = out.stderr.strip()[:200]
+            print(f"(gh failed: {msg})", file=sys.stderr)
+            GH_BROKE.append(f"`gh {' '.join(args[:2])}` failed: {msg}")
             return []
         return json.loads(out.stdout or "[]")
     except Exception as exc:  # noqa: BLE001 — a measurement tool must not crash a run
         print(f"(gh error: {exc})", file=sys.stderr)
+        GH_BROKE.append(f"`gh {' '.join(args[:2])}` errored: {type(exc).__name__}: {exc}")
         return []
 
 
@@ -146,6 +164,20 @@ def main() -> int:
         return 0
 
     print(f"# Blind-checker scorecard — last {args.days} days\n")
+
+    # BLIND is not the same as EMPTY. Check this BEFORE the empty-result branch,
+    # or a broken `gh` reads as a quiet month forever.
+    if GH_BROKE:
+        print("## The scorecard could not measure anything\n")
+        for e in GH_BROKE:
+            print(f"- {e}")
+        print(
+            "\nThis is not an empty result, it is a BLIND one — exiting 2 so the run "
+            "fails loudly instead of writing a reassuring sentence that cannot be "
+            "told apart from a genuinely quiet month.\n"
+        )
+        return 2
+
     if not loop_prs:
         print("**No loop-opened PRs in the window.** Nothing to measure yet — "
               "this is an honest empty result, not a pass.\n")
