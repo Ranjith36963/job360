@@ -47,6 +47,40 @@ async def client_log(
         return None
 
     level = body.level if body.level in _LEVELS else "error"
+
+    # GIVE BROWSER ERRORS A DURABLE, QUERYABLE HOME.
+    #
+    # Until 2026-08-03 this endpoint was the ONLY working browser-error channel
+    # in production, and it dead-ended: records went to rotating files under
+    # data/logs/ on Railway's EPHEMERAL filesystem, wiped by every deploy, read
+    # by no loop and reachable by no human after the fact. Sentry deliberately
+    # ignores this logger (observability.py) because client ERRORs once flooded
+    # the backend error stream — including the synthetic monitor's own failure
+    # posts — so forwarding there would re-create a solved problem.
+    #
+    # audit_log is the right home: durable, SQL-queryable, already retention-
+    # managed, and product_assertions now reads it. Only ERRORs are recorded —
+    # info/warn stay in the file stream — so the flood that motivated the Sentry
+    # exclusion cannot happen here either, and the per-IP 60/min cap above
+    # bounds it regardless.
+    if level == "error":
+        try:
+            from src.utils.logger import get_audit_logger
+
+            get_audit_logger().error(
+                "client_error",
+                extra={
+                    "event": "client_error",
+                    "status": "error",
+                    "user_id": user.id if user else None,
+                    "client_ip": ip,
+                    "client_message": (body.message or "")[:500],
+                    "client_url": (body.url or "")[:300],
+                },
+            )
+        except Exception:  # noqa: BLE001 — logging must never break the client
+            pass
+
     log_fn = getattr(_client_log, level, _client_log.error)
     log_fn(
         "client_event",

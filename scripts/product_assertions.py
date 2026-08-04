@@ -48,6 +48,9 @@ STALE_FEATURE_DAYS = int(os.getenv("PA_STALE_FEATURE_DAYS", "14"))
 # this share of the feed can, the feature is on-but-silent — the worst state,
 # because it looks configured and produces nothing.
 NOTIFY_MIN_REACHABLE_PCT = float(os.getenv("PA_NOTIFY_MIN_REACHABLE_PCT", "1.0"))
+# Browser errors are expected to be rare; a spike means a shipped frontend
+# regression that throws nothing server-side (the "NaNw ago" class).
+CLIENT_ERROR_MAX_24H = int(os.getenv("PA_CLIENT_ERROR_MAX_24H", "20"))
 
 
 def _age_days(iso: str) -> int | None:
@@ -238,6 +241,31 @@ def main() -> int:
                     f"whole system is {feed_max}. Turning notifications on would deliver "
                     f"almost nothing, silently and forever.",
                 )
+            except Exception:
+                conn.rollback()
+
+            # ---------------------------------------------------------------
+            # 2d. BROWSER ERRORS NOBODY WOULD OTHERWISE SEE.
+            #
+            # The /api/client-log bridge is the only working browser-error
+            # channel in production, and its records used to land in rotating
+            # files on an ephemeral container -- wiped by every deploy, read by
+            # nothing. Sentry deliberately ignores that logger (client ERRORs
+            # once flooded the backend stream), so there was no consumer at all.
+            # Client errors now also land in audit_log, and this is the eye on
+            # them. "NaNw ago" was exactly this class: broken on screen, silent
+            # on the server.
+            try:
+                cur.execute("""
+                    SELECT count(*) FROM audit_log
+                     WHERE event = 'client_error'
+                       AND occurred_at::timestamptz > now() - interval '24 hours'
+                """)
+                cerr = cur.fetchone()[0]
+                check("browser errors (24h)", str(cerr), cerr <= CLIENT_ERROR_MAX_24H,
+                      f"{cerr} browser-side errors in 24h (limit {CLIENT_ERROR_MAX_24H}). "
+                      f"These never reach Sentry by design, so this is the only place "
+                      f"they surface.")
             except Exception:
                 conn.rollback()
 
