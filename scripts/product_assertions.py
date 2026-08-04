@@ -44,6 +44,10 @@ DISPLAY_FLOOR = int(os.getenv("PA_DISPLAY_FLOOR", "0"))
 # A feature that produced rows and then produced none for this long has stopped.
 # Generous on purpose: this must catch "dead", not "quiet week".
 STALE_FEATURE_DAYS = int(os.getenv("PA_STALE_FEATURE_DAYS", "14"))
+# A notification threshold is a CLAIM that some jobs will clear it. If under
+# this share of the feed can, the feature is on-but-silent — the worst state,
+# because it looks configured and produces nothing.
+NOTIFY_MIN_REACHABLE_PCT = float(os.getenv("PA_NOTIFY_MIN_REACHABLE_PCT", "1.0"))
 
 
 def _age_days(iso: str) -> int | None:
@@ -194,6 +198,48 @@ def main() -> int:
                 # fault, so degrade quietly rather than failing the whole run.
                 conn.rollback()
                 rows.append(("searches with no terminal event", "audit_log missing", "-"))
+
+            # ---------------------------------------------------------------
+            # 2c. A NOTIFICATION THRESHOLD ABOVE THE SCORE CEILING.
+            #
+            # The same gate-above-ceiling bug as check 1, on the delivery side —
+            # and this one is why the product has never notified anybody.
+            #
+            # Measured 2026-08-03: the default score_threshold is 60
+            # (dispatcher.py:255 and routes/notification_rules.py), while the
+            # highest score any user has is 69 and only 6 of 9,429 feed rows —
+            # 0.06% — reach 60 at all. So even a user who turns notifications ON
+            # gets essentially nothing, forever, with no error anywhere. A
+            # feature that is enabled and silent is indistinguishable from one
+            # that is broken.
+            #
+            # This checks the REAL configured thresholds against the REAL score
+            # distribution, so it keeps working as either moves.
+            try:
+                cur.execute("SELECT count(*), coalesce(max(score), 0) FROM user_feed")
+                feed_n, feed_max = cur.fetchone()
+                cur.execute("""
+                    SELECT coalesce(min(score_threshold), 60), coalesce(max(score_threshold), 60)
+                    FROM notification_rules WHERE enabled = 1
+                """)
+                lo_t, hi_t = cur.fetchone()
+                # No enabled rules yet -> judge the DEFAULT, which is what every
+                # future user will inherit the moment they switch it on.
+                effective = lo_t if lo_t is not None else 60
+                cur.execute("SELECT count(*) FROM user_feed WHERE score >= %s", (effective,))
+                reachable = cur.fetchone()[0]
+                pct = (reachable * 100.0 / feed_n) if feed_n else 0.0
+                check(
+                    f"notifiable at threshold {effective} (max score {feed_max})",
+                    f"{reachable}/{feed_n} ({pct:.2f}%)",
+                    reachable > 0 and pct >= NOTIFY_MIN_REACHABLE_PCT,
+                    f"the notification threshold is {effective} but only {reachable} of "
+                    f"{feed_n} feed rows ({pct:.2f}%) ever reach it — the best score in the "
+                    f"whole system is {feed_max}. Turning notifications on would deliver "
+                    f"almost nothing, silently and forever.",
+                )
+            except Exception:
+                conn.rollback()
 
             # ---------------------------------------------------------------
             # 3. A SCORING DIMENSION THAT IS ALWAYS ZERO.

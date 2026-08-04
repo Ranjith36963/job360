@@ -134,7 +134,22 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
       case "$f" in
         backend/tests/test_*.py) [ -f "$f" ] && TARGETS="$TARGETS ${f#backend/}" ;;
         backend/tests/*) ;; # conftest/fixtures: no direct target; fall through
-        *) [ -f "backend/tests/test_${base}.py" ] && TARGETS="$TARGETS tests/test_${base}.py" ;;
+        *)
+          # Exact name first, then a SUFFIX match. The exact-only rule silently
+          # missed well-tested files whose test carries a prefix — e.g.
+          # src/services/channels/dispatcher.py maps to tests/test_dispatcher.py,
+          # which does not exist, while tests/test_channels_dispatcher.py does.
+          # A miss is not harmless: it drops through to the conservative FULL
+          # suite (~34 min on Windows), so touching a well-covered file was
+          # SLOWER than touching an untested one. Measured 2026-08-03.
+          if [ -f "backend/tests/test_${base}.py" ]; then
+            TARGETS="$TARGETS tests/test_${base}.py"
+          else
+            for cand in backend/tests/test_*_${base}.py; do
+              [ -f "$cand" ] && TARGETS="$TARGETS ${cand#backend/}"
+            done
+          fi
+          ;;
       esac
     done
     # `|| true` is load-bearing: grep exits 1 on no match, and under `set -o

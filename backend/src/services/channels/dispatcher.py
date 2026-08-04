@@ -27,6 +27,7 @@ Quiet-hours use ``zoneinfo.ZoneInfo`` (stdlib 3.9+) — no pytz required.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any, Optional, cast
@@ -35,6 +36,11 @@ from src.repositories import pg
 from src.services.channels.crypto import decrypt
 from src.services.channels.ssrf_guard import assert_public_http_url
 from src.utils.logger import get_logger
+
+# Default notification score gate. See the rationale at its use below:
+# 60 was above the practical score ceiling, so notifications could never
+# fire; 30 matches MATCHER_THRESHOLD, the existing "worth an LLM call" bar.
+DEFAULT_SCORE_THRESHOLD = int(os.getenv("NOTIFY_SCORE_THRESHOLD", "30"))
 
 logger = get_logger("channels.dispatcher")  # job360.channels.dispatcher → data/logs/
 
@@ -252,7 +258,20 @@ async def dispatch(
     rule = await _load_notification_rule(db, user_id)
     # Compute once for all channels
     rule_enabled = rule is None or bool(rule.get("enabled", 1))
-    threshold = int(rule.get("score_threshold", 60)) if rule else 0
+    # 60 was UNREACHABLE. Measured against production 2026-08-03: the highest
+    # score any user has is 69, and only 6 of 9,429 feed rows (0.06%) reach 60
+    # at all. A user who switched notifications on would receive essentially
+    # nothing, forever, with no error anywhere — the same gate-above-ceiling bug
+    # that left job_enrichment at zero rows for weeks, on the delivery side.
+    #
+    # 30 is not a guess: it is MATCHER_THRESHOLD, the bar this system already
+    # uses for "worth spending an LLM call on". A job good enough to judge is
+    # good enough to tell someone about. At 30, 307 rows qualify instead of 6.
+    #
+    # Env-overridable so the number can move with the score distribution rather
+    # than rotting again, and product_assertions now alarms if whatever it is
+    # set to stops being reachable.
+    threshold = int(rule.get("score_threshold", DEFAULT_SCORE_THRESHOLD)) if rule else 0
     notify_mode = rule.get("notify_mode", "instant") if rule else "instant"
     in_quiet = False
     if rule:
