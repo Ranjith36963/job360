@@ -1,0 +1,145 @@
+name: Journey probe (walk a real user, grade every step)
+
+# THE LOOP THAT ANSWERS THE OWNER'S ACTUAL QUESTION.
+#
+# Six scheduled loops already run, and every one of them measures a FRAGMENT:
+# uptime checks a status code, synthetic-live checks that pages load,
+# user-journey counts DB rows, product-health checks aggregates, data-invariants
+# checks value shapes, absence checks freshness.
+#
+# None of them answers: "this person signed up and used the product — what
+# happened at each step, how long did it take, and was the result right?"
+#
+# That is the difference between "the dashboard is green" and "I know why this
+# user's feed is empty". Every expensive bug this month lived in the seam
+# BETWEEN two green checks:
+#   * a CV parsed fine and the LinkedIn merge added nothing
+#   * a search returned HTTP 200 and wrote zero feed rows
+#   * a card rendered "Posted NaNw ago" while the API and DB were both correct
+#
+# This walks the whole journey per person, times every stage, and grades each
+# against a recorded benchmark — so "we fixed it" becomes a number that either
+# holds or does not, instead of a feeling.
+#
+# NOT pointed at production by default. It CREATES accounts and RUNS searches,
+# so it belongs against a staging/ephemeral target. Set JOURNEY_API to opt in.
+
+on:
+  schedule:
+    - cron: "40 5 * * *" # 05:40 UTC daily, before the other detectors
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Run one person by name prefix (blank = everyone)"
+        required: false
+        type: string
+      drill:
+        description: "FIRE DRILL — force a red to prove the escalation path works"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write # to hand the alarm to triage
+
+concurrency:
+  group: journey-probe
+  cancel-in-progress: false
+
+jobs:
+  walk:
+    name: Walk every user end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U job360" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Check a target is configured
+        id: target
+        run: echo "have=${{ vars.JOURNEY_API != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Say so loudly if it cannot run
+        if: steps.target.outputs.have != 'true'
+        run: |
+          echo "::error::JOURNEY_API is not set, so the journey probe has nothing to walk."
+          echo "A silent skip here is the dead-watcher failure this harness exists to kill."
+          echo "Set the JOURNEY_API repo variable to a staging backend URL."
+          echo "Deliberately NOT defaulted to production: this loop creates accounts"
+          echo "and runs real searches."
+          exit 1
+
+      - name: Install deps
+        run: python -m pip install httpx "psycopg[binary]>=3.2"
+
+      - name: Walk the journeys
+        id: walk
+        env:
+          JOURNEY_API: ${{ vars.JOURNEY_API }}
+          JOURNEY_VERIFY_DSN: postgresql://job360:job360dev@localhost:5433/job360
+          JOURNEY_CORPUS: ${{ vars.JOURNEY_CORPUS || 'User_info' }}
+        run: |
+          set +e
+          # A drill forces a red by demanding an impossible benchmark, so the
+          # whole chain — issue, triage, notification — is exercised on purpose
+          # rather than only during a real incident.
+          if [ "${{ inputs.drill }}" = "true" ]; then
+            echo '{"cv upload + extraction": {"min_skills": 999999}}' > drill-bench.json
+            BENCH="--benchmark drill-bench.json"
+          else
+            BENCH=""
+          fi
+          ONLY=""
+          [ -n "${{ inputs.only }}" ] && ONLY="--only ${{ inputs.only }}"
+          python scripts/journey_probe.py $ONLY $BENCH > journey.md 2>&1
+          code=$?
+          set -e
+          cat journey.md
+          cat journey.md >> "$GITHUB_STEP_SUMMARY"
+          echo "bad=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" -le 1 ] || exit "$code" # exit 2 = probe broke, fail LOUD
+
+      - name: Raise it, and hand it to triage
+        if: always() && steps.walk.outputs.bad != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.drill }}" = "true" ]; then
+            title="DRILL: journey probe test - not a real problem"
+          else
+            title="JOURNEY: a stage of the user journey is failing"
+          fi
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ steps.walk.outputs.bad }}" = "1" ]; then
+            { cat journey.md
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > body.md
+            if [ -z "$num" ]; then
+              new=$(gh issue create --title "$title" --body-file body.md --label harness)
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n raised but triage could not be woken"
+            else
+              gh issue comment "$num" --body-file body.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" --comment "Every journey stage passed its benchmark as of run ${{ github.run_id }}. (auto-close)"
+          fi

@@ -46,6 +46,7 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # checked it against the directory. That included the two loops that
     # actually look at production data (product-health, user-journey), both
     # loops that manage the PR queue, and the judge-of-the-judge.
+    "journey.yml": (36, "daily 05:40"),
     "external-health.yml": (36, "daily 07:10"),
     "product-health.yml": (36, "daily 08:30"),
     "user-journey.yml": (36, "daily 09:00"),
