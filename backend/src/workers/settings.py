@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from src.workers.tasks import (
     enrich_job_task,
+    enrichment_sweep,
     mark_ledger_failed_task,
     mark_ledger_sent_task,
     nightly_ghost_sweep,
@@ -153,6 +154,8 @@ class WorkerSettings:
         nightly_ghost_sweep,
         # The production loop: refill the shared catalog on a timer
         refresh_catalog,
+        # Self-heal enrichment coverage of the candidate pool
+        enrichment_sweep,
     ]
 
     # Lifecycle hooks — open/close the DB connection tasks read from ``ctx['db']``
@@ -218,6 +221,12 @@ class WorkerSettings:
             # structurally unreachable (see refresh_catalog's docstring).
             _cron(refresh_catalog, hour=4, minute=0),
             _cron(notification_tick, minute=set(range(0, 60, 5))),
+            # Self-heal enrichment coverage: every 30 min, enrich the
+            # ENRICHMENT_SWEEP_PER_TICK (default 100) highest-value candidate
+            # jobs still missing enrichment. Prod gap at ship time: 738/6,589
+            # candidates enriched — this cron closes it in ~1-2 days and keeps
+            # it closed as new jobs arrive. No-op when E2 flags are off.
+            _cron(enrichment_sweep, minute={10, 40}),
         ]
         del _cron
     except Exception:  # noqa: BLE001 — arq absent in a minimal env
