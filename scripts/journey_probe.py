@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 # How long a real user is willing to sit at the search spinner.
-SEARCH_WAIT_S = float(os.getenv("JOURNEY_SEARCH_WAIT_S", "180"))
+SEARCH_WAIT_S = float(os.getenv("JOURNEY_SEARCH_WAIT_S", "420"))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
