@@ -126,6 +126,79 @@ def dead_links() -> list[tuple[str, str]]:
     return broken
 
 
+def hard_rule_count() -> int:
+    """How many numbered Hard Rules CLAUDE.md actually defines.
+
+    backend/CLAUDE.md said "the 26 hard rules" while the root defined 28 — a
+    pointer doc quietly disagreeing with the thing it points at. Cheap to check,
+    and exactly the class of number that rots every time a rule is added.
+    """
+    text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
+    return len(re.findall(r"^\d+\. \*\*", text, re.M))
+
+
+def route_module_count() -> int:
+    """Route modules under backend/src/api/routes/, excluding __init__."""
+    d = ROOT / "backend" / "src" / "api" / "routes"
+    if not d.is_dir():
+        return -1
+    return len([p for p in d.glob("*.py") if p.name != "__init__.py"])
+
+
+def endpoint_count() -> int:
+    """`@router.<verb>` decorators across the route modules."""
+    d = ROOT / "backend" / "src" / "api" / "routes"
+    if not d.is_dir():
+        return -1
+    n = 0
+    for p in d.glob("*.py"):
+        n += len(re.findall(r"@router\.(?:get|post|put|patch|delete)\b",
+                            p.read_text(encoding="utf-8", errors="replace")))
+    return n
+
+
+def dead_path_claims() -> list[tuple[str, str]]:
+    """Paths a LIVING doc names that DO NOT EXIST on disk.
+
+    THE MOST DANGEROUS DRIFT OF ALL, and the one nothing checked. STATUS.md
+    pointed at `backend/src/profile/` and `backend/src/filters/` — both moved to
+    `src/services/` in the clean-architecture restructure, and both gone for
+    months. An agent told to "fix the CV parser per STATUS.md" would create
+    files at paths that no longer exist, in a directory nothing imports.
+
+    Deliberately narrow: only `backend/src/...` and `frontend/src/...` prefixes,
+    only inside backticks, so prose and historical references never false-match.
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    pat = re.compile(r"`((?:backend|frontend)/src/[A-Za-z0-9_./-]+)`")
+    # README.md is a HOW-TO. It is full of "create `backend/src/sources/
+    # yoursource.py`" examples - instructions, not claims that a file exists.
+    # Flagging those is a permanent false alarm, and a permanent alarm is how a
+    # loop dies. In CLAUDE.md / STATUS.md / ARCHITECTURE.md a path IS a factual
+    # claim, and a wrong one sends an agent to edit a file that is not there.
+    # (A word-based "is this an instruction?" filter was tried first and is
+    # strictly worse: it silences real claims that merely contain "add".)
+    factual_docs = [d for d in LIVING_DOCS if not d.endswith("README.md")]
+    for rel in factual_docs:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                claimed = m.group(1).rstrip("/")
+                # A trailing-slash claim is a directory; otherwise allow either.
+                target = ROOT / claimed
+                if target.exists():
+                    continue
+                key = (rel, claimed)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append((f"{rel}:{i}", claimed))
+    return out
+
+
 def main() -> int:
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
@@ -140,6 +213,14 @@ def main() -> int:
         ("registry", registry, r"(\d+) SOURCE_REGISTRY entries"),
         ("unique-classes", unique_classes, r"(\d+) unique source classes"),
         ("migration-head", mig_head, r"0000 → (\d{4})"),
+        # Added 2026-08-03. The checker tracked THREE facts, so every other
+        # number in the docs rotted silently — an audit found the rule count,
+        # the route/endpoint counts and three mutually-contradictory test counts
+        # all wrong at once. A drift checker that only guards what it already
+        # guarded is how a doc estate dies while its tripwire stays green.
+        ("hard-rules", hard_rule_count(), r"the (\d+) hard rules"),
+        ("route-modules", route_module_count(), r"(\d+) route modules"),
+        ("endpoints", endpoint_count(), r"\((\d+) endpoints"),
     ]
 
     drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
@@ -192,6 +273,12 @@ def main() -> int:
         if matches_per_fact.get(fact, 0) == 0:
             drift.append(("(all docs)", "-", fact, "claim not found in any doc",
                           "reworded/removed — update checker patterns or restore the claim"))
+    # Paths a doc names that do not exist. Checked ONCE, after every doc has
+    # been read, because it is a property of the estate rather than of a line.
+    for where, claimed in dead_path_claims():
+        f, ln = where.rsplit(":", 1)
+        drift.append((f, ln, "dead-path", claimed, "this path does not exist"))
+
 
     print("# Doc-sync drift report (Loop 3)\n")
     print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "

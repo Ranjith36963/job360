@@ -157,8 +157,10 @@ jobs:
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write
+      actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
       - name: Open, update or close the tracking issue
         env:
@@ -177,7 +179,20 @@ jobs:
               echo "- Commit: \`${{ github.sha }}\`"
             } > notify-body.md
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file notify-body.md
+              # LABEL + HAND OFF. Until 2026-08-03 this line was the end of the road:
+              # the issue was created with GITHUB_TOKEN, which raises NO `issues:
+              # opened` event (GitHub blocks that recursion), carried no `harness`
+              # label, and dispatched nothing — so no loop ever diagnosed it and no
+              # email was sent. The alarm rang into an empty room. Proven live:
+              # issue #190 (security RED) opened and auto-closed with zero
+              # diagnosis; #185 sat unread for days. Seven loops shared this bug.
+              new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
+              n="${new##*/}"
+              if gh workflow run triage.yml -f issue="$n"; then
+                echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
+              fi
             else
               gh issue comment "$num" --body-file notify-body.md
             fi

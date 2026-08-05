@@ -95,6 +95,7 @@ jobs:
       # CANARY: prove the assertions can still go red. A detector nobody has
       # seen fail is not known to work - "all green" might just mean blind.
       - name: Canary - prove the assertions can still fail
+        id: canary
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           PA_MIN_FEED_ROWS: "999999999"
@@ -114,6 +115,7 @@ jobs:
         if: always() && steps.check.outputs.wrong != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -157,7 +159,13 @@ jobs:
               gh issue comment "$num" --body-file body.md
               echo "commented on existing #$num" >> "$GITHUB_STEP_SUMMARY"
             fi
-          elif [ -n "$num" ]; then
+          # CANARY-GATED: never close an outage issue when the canary FAILED.
+          # A failed canary means the detector could not go red on demand —
+          # it is BLIND, and 'all clear' from a blind detector is not evidence
+          # of health. Under the old `if: always()` gate a detector that had
+          # just proved it cannot see would close its own alarm as 'Restarted',
+          # destroying the only record of the outage.
+          elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "Product assertions all hold again as of run ${{ github.run_id }}. (auto-close)"
           fi

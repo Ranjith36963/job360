@@ -16,6 +16,7 @@ permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Ping backend /api/readyz
         run: |
@@ -44,10 +45,18 @@ jobs:
   notify:
     name: Report failure as an issue
     needs: [ping]
-    if: always() && github.event_name == 'schedule'
+    # Also fires on a manual dispatch, so the ALARM PATH itself can be
+    # drilled. Previously this was schedule-only: the one way to force a
+    # red on demand skipped the very step you would be drilling, so the
+    # notify layer could not be exercised until a real incident — the
+    # worst possible moment to discover it broken. Two loops in this repo
+    # were dead on arrival and only a deliberate drill revealed it.
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write
+      actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
       - name: Open, update or close the tracking issue
         env:
@@ -68,7 +77,20 @@ jobs:
             # Fires every 10 min: comment-per-failure would be spam. Open ONE
             # issue per outage and stay silent until it recovers.
             if [ -z "$num" ]; then
-              gh issue create --title "$title" --body-file notify-body.md
+              # LABEL + HAND OFF. Until 2026-08-03 this line was the end of the road:
+              # the issue was created with GITHUB_TOKEN, which raises NO `issues:
+              # opened` event (GitHub blocks that recursion), carried no `harness`
+              # label, and dispatched nothing — so no loop ever diagnosed it and no
+              # email was sent. The alarm rang into an empty room. Proven live:
+              # issue #190 (security RED) opened and auto-closed with zero
+              # diagnosis; #185 sat unread for days. Seven loops shared this bug.
+              new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
+              n="${new##*/}"
+              if gh workflow run triage.yml -f issue="$n"; then
+                echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
+              fi
             else
               echo "outage issue #$num already open — staying quiet" >> "$GITHUB_STEP_SUMMARY"
             fi

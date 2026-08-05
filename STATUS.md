@@ -1,7 +1,16 @@
 # Job360 Project Status
 <!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
 
-## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next; autonomous maintenance loop running
+## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next
+
+> **⚠️ THIS FILE HAS ROTTED — read `CLAUDE.md` first.** Verified 2026-08-03: it pointed at
+> `backend/src/services/profile/` and `backend/src/services/`, neither of which has existed since the
+> clean-architecture restructure (they are `src/services/profile/` and
+> `src/services/skill_matcher.py`); it named a merged head ~334 commits behind; it listed a
+> sentinel file that does not exist; and it claimed an autonomous maintenance loop was
+> running when that loop was disabled on 2026-06-21. An agent following it would edit paths
+> that are not there. Treat every path and commit below as UNVERIFIED unless you have just
+> checked it.
 
 > **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
 > profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
@@ -44,12 +53,12 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Profile dataclasses | `backend/src/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
-| CV parser (PDF/DOCX) | `backend/src/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
-| Preferences validator | `backend/src/profile/preferences.py` | Done -- form validation, CV+prefs merge |
-| Profile storage | `backend/src/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
-| Keyword generator | `backend/src/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
-| JobScorer class | `backend/src/filters/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
+| Profile dataclasses | `backend/src/services/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
+| CV parser (PDF/DOCX) | `backend/src/services/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
+| Preferences validator | `backend/src/services/profile/preferences.py` | Done -- form validation, CV+prefs merge |
+| Profile storage | `backend/src/services/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
+| Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
+| JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
 | 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
@@ -77,12 +86,12 @@
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| LinkedIn ZIP parser | `backend/src/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
-| LinkedIn CVData enrichment | `backend/src/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
-| GitHub API enricher | `backend/src/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
-| GitHub CVData enrichment | `backend/src/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
-| CVData model fields | `backend/src/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
-| UserPreferences field | `backend/src/profile/models.py` | Done -- github_username field |
+| LinkedIn ZIP parser | `backend/src/services/profile/linkedin_parser.py` | Done -- parses positions.csv, skills.csv, education.csv from ZIP |
+| LinkedIn CVData enrichment | `backend/src/services/profile/linkedin_parser.py:enrich_cv_from_linkedin()` | Done -- merges LinkedIn data into CVData |
+| GitHub API enricher | `backend/src/services/profile/github_enricher.py` | Done -- fetches repos, languages, topics; infers skills |
+| GitHub CVData enrichment | `backend/src/services/profile/github_enricher.py:enrich_cv_from_github()` | Done -- merges GitHub data into CVData |
+| CVData model fields | `backend/src/services/profile/models.py` | Done -- linkedin_positions, linkedin_skills, linkedin_industry, github_languages, github_topics, github_skills_inferred |
+| UserPreferences field | `backend/src/services/profile/models.py` | Done -- github_username field |
 | CLI --linkedin option | `backend/src/cli.py:setup-profile` | Done -- accepts LinkedIn ZIP path |
 | CLI --github option | `backend/src/cli.py:setup-profile` | Done -- accepts GitHub username |
 | GITHUB_TOKEN env var | `backend/src/core/settings.py`, `.env.example` | Done -- optional, for higher API rate limits |
@@ -110,8 +119,8 @@
 |-----------|---------|--------|
 | DB error logging | `backend/src/cli_view.py` | Done -- `except Exception` blocks now log errors before returning empty |
 | Magic number elimination | `backend/src/main.py`, `backend/tests/test_main.py` | Done -- `SOURCE_INSTANCE_COUNT` constant replaces hard-coded 47 |
-| Schema migration | `backend/src/storage/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
-| Source health tracking | `backend/src/main.py`, `backend/src/storage/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
+| Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
+| Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
 | Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
@@ -155,11 +164,11 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Step 2 (API→UI seam) closed at `5cf60ea` with all 5 cohorts (foundations + components + page surfaces + SEO + TanStack Query + run-surface + E2E smokes) + reviewer R-1..R-4 fixes + sentinel.
 - **Step 3 (new endpoints + Settings UI) closed at origin/main `7194d0e` PR #9 merge** — 8 new backend endpoints, migrations 0012/0013/0014, dispatcher rule consultation with timezone-aware quiet hours, ARQ digest + ghost-sweep periodic tasks, 5 new frontend pages, KanbanBoard polish, Cohort D toasts/a11y/loading skeletons, reviewer R-1..R-7 closed, sentinel `337fbda`.
 - **Matcher batch (funnel→judge) merged post-Step-3** on `fix/per-user-search-and-scoring-gate` — `services/llm_matcher.py`, migration 0017 (`user_feed` llm_* columns), `_run_matcher_stage` in pipeline, API llm_* fields, dashboard AI-verdict badge + COALESCE sort, MATCHER_ENABLED/THRESHOLD/MAX_JOBS flags (all default off). Measured: 18/18 in 89.8 s, judge spread 20–92, 10/10 fit accuracy.
-- **Autonomous maintenance loop** running — worker/integrator/scout/health agents processing missions from `docs/maintenance/MISSIONS.md`.
+- ~~**Autonomous maintenance loop** running~~ — **DORMANT since 2026-06-21.** The live automation is the GitHub Actions harness in `.github/workflows/`, not these agents. MISSIONS.md has not moved since 2026-06-17.
 
 **Step 4 — ops hardening (next):** GitHub Actions CI matrix, Dockerfile + docker-compose, deploy platform config, secret manager integration, security headers middleware, `/livez` + `/readyz` split, worker timeouts, pip-audit + npm audit + gitleaks + bandit in CI, FastAPI request timeout middleware, LLM call timeouts, per-query DB deadlines, DB backup script + restore drill, `/admin/runs` UI consuming `GET /api/runs/recent` (Step-3 backend already shipped this).
 
-**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, Amazon SES wiring (unblocks magic-link email change), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
+**Step 5 / Batch 4 — launch readiness:** scope-down to top 10-15 sources, freemium metering, ICO £40 registration, privacy notice + LIA, ASA-compliant marketing copy, ~~Amazon SES wiring~~ (**DONE differently**: magic-link email ships via **Resend**'s HTTP API — `services/auth/email_sender.py`, live on the verified `job360.uk` domain since 2026-07-10. SES was never used), full password-reset (forgot-password) flow, friend dogfood, prod-Redis smoke.
 
 **Step 3 carry-overs — ALL SHIPPED (closed):**
 - V-01..V-03 form-validation library (RHF + zod) — DONE; forms now use RHF + zod validation.

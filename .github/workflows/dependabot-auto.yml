@@ -104,9 +104,26 @@ jobs:
             if [ "$red" -gt 0 ]; then
               # Arrive diagnosed, like every failure in this harness. A PR
               # number IS an issue number to the API, so triage can take it.
-              gh workflow run triage.yml -f issue="$num" \
-                || echo "::warning::could not wake triage for #$num"
-              echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+              #
+              # ROUTE ONCE, NOT EVERY DAY. This ran unconditionally, so a
+              # permanently-red dependabot PR — e.g. a deliberately-frozen major
+              # that will never go green — cost one LLM triage run AND one email
+              # to the owner EVERY DAY, forever. Two such PRs have been open
+              # since 2026-07-27. pr-shepherd already solved this with a marker
+              # comment; this loop simply never got it. Re-diagnosing an
+              # unchanged failure daily is how a signal becomes noise and a
+              # notification channel becomes something the owner mutes.
+              marker="<!-- dependabot-auto-red -->"
+              if gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+                echo "- #$num RED ($red failing, already routed — not re-nagging) — $title" >> "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
+              if gh workflow run triage.yml -f issue="$num"; then
+                gh pr comment "$num" --body "$(printf '%s\n**Dependabot auto:** %s check(s) are failing, so the triage loop has been dispatched to diagnose this update. This PR will not be auto-merged while it is red, and it will not be re-diagnosed until something changes.' "$marker" "$red")"
+                echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::warning::could not wake triage for #$num"
+              fi
               continue
             fi
             if [ "$pending" -gt 0 ]; then

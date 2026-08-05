@@ -46,7 +46,7 @@ job360/
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 11 route modules
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags

@@ -276,7 +276,7 @@ Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.
 
 ## Notification Channels
 
-The notification system uses an abstract base class (`NotificationChannel` in `backend/src/services/notifications/base.py`) with auto-discovery. For multi-channel per-user delivery (email/Slack/Discord/Telegram/webhook), the Apprise dispatcher at `backend/src/services/channels/dispatcher.py` handles per-user rules (score threshold, timezone-aware quiet hours, digest mode).
+Notification delivery goes through the Apprise dispatcher (the `NotificationChannel` ABC that used to live at `backend/src/services/notifications/base.py` was REMOVED — do not write against it). For multi-channel per-user delivery (email/Slack/Discord/Telegram/webhook), the Apprise dispatcher at `backend/src/services/channels/dispatcher.py` handles per-user rules (score threshold, timezone-aware quiet hours, digest mode).
 
 ```
 NotificationChannel (ABC)
@@ -351,7 +351,7 @@ job360/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 11 route modules (46+ endpoints)
+│       ├── api/                 # FastAPI app + 13 route modules (46+ endpoints)
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)

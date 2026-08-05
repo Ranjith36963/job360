@@ -95,6 +95,7 @@ jobs:
       # threshold and fails the job if it does NOT go red. It proves, every
       # single day, that a green result above was a real observation.
       - name: Canary — prove the detector can still go red
+        id: canary
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           ABSENCE_MIN_JOBS: "999999999"
@@ -115,6 +116,7 @@ jobs:
         if: always() && steps.check.outputs.stopped != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -165,7 +167,13 @@ jobs:
             else
               gh issue comment "$num" --body-file body.md
             fi
-          elif [ -n "$num" ]; then
+          # CANARY-GATED: never close an outage issue when the canary FAILED.
+          # A failed canary means the detector could not go red on demand —
+          # it is BLIND, and 'all clear' from a blind detector is not evidence
+          # of health. Under the old `if: always()` gate a detector that had
+          # just proved it cannot see would close its own alarm as 'Restarted',
+          # destroying the only record of the outage.
+          elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "Restarted — nothing is stopped as of run ${{ github.run_id }}. (auto-close)"
           fi
@@ -213,6 +221,7 @@ jobs:
         id: watch
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
         run: |
           set +e
           python scripts/watchdog_check.py > watchdog.md 2>&1
@@ -228,6 +237,7 @@ jobs:
         if: always() && steps.watch.outputs.stopped != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -257,7 +267,13 @@ jobs:
             else
               gh issue comment "$num" --body-file wbody.md
             fi
-          elif [ -n "$num" ]; then
+          # CANARY-GATED: never close an outage issue when the canary FAILED.
+          # A failed canary means the detector could not go red on demand —
+          # it is BLIND, and 'all clear' from a blind detector is not evidence
+          # of health. Under the old `if: always()` gate a detector that had
+          # just proved it cannot see would close its own alarm as 'Restarted',
+          # destroying the only record of the outage.
+          elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
           fi

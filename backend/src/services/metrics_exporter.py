@@ -1,4 +1,23 @@
-"""Metrics exporters — dump pipeline + notification snapshots to JSON files."""
+"""Metrics exporters — dump pipeline + notification snapshots to JSON files.
+
+⚠️ NOTHING READS THESE FILES. Audited 2026-08-03: `pipeline.json` and
+`notifications.json` are written here (called from `src/main.py`) and grepping
+the whole repo — scripts, workflows, backend, frontend — finds no reader. On
+Railway they land on the container's ephemeral filesystem and are wiped by every
+deploy, so even a human cannot go and look at yesterday's.
+
+This repo has a law, learned by losing four artifacts to it: **an artifact with
+no notifier dies.** This is one. It is left in place rather than deleted because
+it is genuinely useful for LOCAL debugging (`data/metrics/`) and it has tests —
+but do not mistake it for monitoring. If you want these numbers watched, the
+consumer belongs in `scripts/product_assertions.py` or
+`scripts/data_invariants.py`, which run against production on a schedule and
+raise an issue that the triage → repair chain picks up.
+
+The live equivalents that ARE consumed: `run_log` (read by
+`scripts/absence_check.py` every morning) and the per-user funnel in
+`scripts/user_journey_audit.py`.
+"""
 from __future__ import annotations
 
 import json

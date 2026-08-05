@@ -38,6 +38,7 @@ concurrency:
 jobs:
   drift-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       drift: ${{ steps.check.outputs.drift }}
     steps:
@@ -126,6 +127,7 @@ jobs:
       github.event_name != 'pull_request' &&
       needs.drift-check.outputs.drift == '1'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -207,6 +209,29 @@ jobs:
           # Docs-only cage: any non-markdown change kills the ship. Dumb code, not LLM promises.
           nonmd=$(echo "$changed" | grep -vc '\.md$' || true)
           [ "$nonmd" -eq 0 ] || { echo "::error::fixer touched $nonmd non-markdown file(s) — refusing to ship: $(echo "$changed" | grep -v '\.md$' | tr '\n' ' ')"; exit 1; }
+          # ── CONSTITUTION CAGE ──────────────────────────────────────────────
+          # "Markdown only" is NOT a sufficient cage, because the files that
+          # CAGE EVERY OTHER LOOP ARE MARKDOWN.
+          #
+          # CLAUDE.md holds the 28 Hard Rules, and repair.yml + pr-repair.yml
+          # feed exactly that text to their blind checker as INVARIANTS. Every
+          # `.claude/**` file is agent instruction. So under the old rule this
+          # loop's model could edit the constraints that every other loop's
+          # model is judged against — and then SQUASH-MERGE IT TO main, which
+          # is production, with no human in the path. That was the only route
+          # by which model-authored text reached prod unreviewed, and it
+          # inverts repair.yml's own stated principle: an agent must not
+          # rewrite the rules that constrain it.
+          #
+          # These files may still be EDITED by the fixer (drift in them is real
+          # and worth fixing) — they simply cannot be SELF-MERGED. Marking the
+          # PR destructive routes it down the existing human-review path below,
+          # which already exists for deletions. Same door, same guarantee.
+          constitution=$(echo "$changed" | grep -E '^(CLAUDE\.md|[^/]+/CLAUDE\.md|\.claude/)' || true)
+          if [ -n "$constitution" ]; then
+            echo "::warning::fixer edited constitution file(s) — PR will be left OPEN for human review: $(echo "$constitution" | tr '\n' ' ')"
+            destructive_constitution="$constitution"
+          fi
           branch="docs/sync-auto-${{ github.run_id }}"
           git config user.name "loop3-doc-sync[bot]"
           git config user.email "loop3@users.noreply.github.com"
@@ -225,11 +250,16 @@ jobs:
           # unreviewed. Deletes/renames still get a PR — they just don't
           # auto-merge. Structural (dumb git plumbing), not an LLM promise.
           destructive=$(git diff --cached --diff-filter=DR --name-only)
+          # Constitution edits take the SAME human-review door as deletions:
+          # both are changes a model must not merge into production by itself.
+          if [ -n "${destructive_constitution:-}" ]; then
+            destructive=$(printf '%s\n%s' "$destructive" "$destructive_constitution" | sed '/^$/d')
+          fi
           git commit -m "docs: auto-sync (Loop 3) — drift fixed by CI fixer run ${{ github.run_id }}"
           git push -u origin "$branch"
           python scripts/doc_sync_check.py > after.md 2>&1 || true
           if [ -n "$destructive" ]; then
-            { echo "> **HUMAN REVIEW REQUIRED — this PR DELETES or RENAMES docs, so it was NOT auto-merged.**"
+            { echo "> **HUMAN REVIEW REQUIRED — this PR deletes/renames docs or edits an agent-instruction file, so it was NOT auto-merged.**"
               echo ">"
               echo "> Files removed/renamed:"
               echo '> ```'
@@ -245,7 +275,7 @@ jobs:
             --title "docs: auto-sync (Loop 3)" \
             --body-file pr-body.md
           if [ -n "$destructive" ]; then
-            echo "::warning::fixer deleted/renamed doc(s) — PR left OPEN for human review: $(echo "$destructive" | tr '\n' ' ')"
+            echo "::warning::fixer deleted/renamed doc(s) or edited an agent-instruction file — PR left OPEN for human review: $(echo "$destructive" | tr '\n' ' ')"
             echo "docs PR opened but NOT merged (deletes/renames need a human): $(echo "$destructive" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
           else
             # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
