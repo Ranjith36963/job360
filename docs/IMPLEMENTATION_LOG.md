@@ -1575,3 +1575,53 @@ now recognises both backends' wording. Full suite: **1673 passed** on a fresh DB
 a clean throwaway Postgres database — matching CI's fresh-Postgres service
 (`ci-offline.yml`, `d0cefe6`) — so the local suite isn't polluted by the shared
 dev DB's data + partial migration state.
+
+---
+
+## 2026-08-05 — The funnel batch: retrieve→enrich→rank→judge goes live (PRs #224, #226, #227, #228, #229)
+
+**Goal (owner):** `GOOD MATCH = understand USER × understand JOB — make both 100%`.
+Six squash-merges in one day, every change measured against live prod data.
+
+**Root causes found first (prod measurements):** the 40-pt title lever was dead
+(CV-derived config titles never appear verbatim in postings → no job scored
+above 8/40 on title → scores capped ~69 → the feed secretly sorted by
+LOCATION); one user's feed held 85% of the whole catalog (6,207/7,309 — the
+"shelf" was the warehouse); 65% of the catalog had no description text
+(devitjobs 3,041 + greenhouse 996 + workday 537 + smartrecruiters 150 all
+shipped 0% descriptions); enrichment covered 24 jobs (0.3%), embeddings
+284 (3.9%); Spearman(keyword score, LLM-judge fit) = −0.04.
+
+**#224 (squash `e2e61e2`)** — four bricks: (1) evidence-based
+`core_domain_words` + domain+role title band → Spearman −0.04 → **+0.29**,
+score range 10–69 → 10–81; (2) `user_feed` becomes a bounded candidate set
+(`FEED_CANDIDATE_CAP`, default 800; reversible eviction; LLM-verdict rows
+never evicted; `0` = legacy off) — proven 6,186 → exactly 800 active on the
+real catalog; (3) job text: greenhouse `?content=true` + `html.unescape`,
+devitjobs structured descriptions from the API's own fields, workday +
+smartrecruiters per-posting detail fetches (all verified live); (4)
+`scripts/embed_catalog.py` idempotent sweep (local run: 6,046/6,046, 0 failed).
+
+**#226 (`962078f`)** — the user-feedback loop: `not_interested` excluded from
+selection + force-evicted past every guard; `liked`/`applied` protected from
+eviction. **#227 (`4e14ef7`)** — `EMBED_BACKFILL_PER_RUN` (default 300/run)
+converges embedding coverage through ordinary searches; learned-preference v1
+(+8 liked company, +4 liked title vocabulary — membership-only).
+**#228 (`e7a5647`)** — `enrichment_sweep` ARQ cron (every 30 min ×
+`ENRICHMENT_SWEEP_PER_TICK`=100 highest-value candidates): enrichment
+self-heals; measured converging 11% → 27% within ~2 h of shipping.
+**#229 (`b38a866`)** — learned-preference v2: title tokens recurring across
+≥2 rejected jobs sink −6 in selection (recurrence required; liked-vocabulary
+immune; never blacklists).
+
+**Invariants to respect going forward:** the candidate cap is membership-only
+(stored scores stay raw scorer output); eviction is always reversible
+(`status='stale'`, never DELETE) and never touches LLM-judged or
+liked/applied rows — except an explicit `not_interested`, which outranks every
+guard; preference weighting affects selection order only; all new stages gate
+on their engine flags (rule #18 pattern) with `0`-value off-switches
+(`FEED_CANDIDATE_CAP`, `EMBED_BACKFILL_PER_RUN`, `ENRICHMENT_SWEEP_PER_TICK`).
+
+**Open at batch close:** prod `SEMANTIC_ENABLED`/`ENGINE3_ENABLED` still false
+(owner env flip — embedding machinery inert until then); linkedin scraper text
+(107 jobs, auth-walled) deferred; enrichment converging autonomously.
