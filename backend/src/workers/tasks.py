@@ -557,6 +557,77 @@ async def nightly_ghost_sweep(ctx: dict[str, Any]) -> dict[str, int]:
     return {"evaluated": evaluated, "transitioned": transitioned}
 
 
+@_logged_task
+async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
+    """ARQ periodic task: self-heal enrichment coverage of the candidate pool.
+
+    WHY THIS EXISTS (goal: understand JOB → 100%, 2026-08-05). Enrichment is
+    per-JOB and shared (rule #17), but it only ever ran inside pipeline runs
+    with small per-run budgets — measured in prod: 24/7,309 jobs enriched
+    (0.3%), so the salary/visa/seniority/workplace preference dimensions
+    effectively never fired for anyone. Filling coverage depended on manual
+    sweeps from a laptop — exactly the kind of hands-on ops a production
+    system must not need. This cron makes coverage converge BY ITSELF.
+
+    Each tick: pick the ``ENRICHMENT_SWEEP_PER_TICK`` (default 100, 0
+    disables) highest-value ACTIVE candidate jobs still missing enrichment —
+    value = the best COALESCE(llm_fit_score, score) any user's feed gives the
+    job — and enrich them via the standard ``enrich_batch`` path (idempotent,
+    ``skip_existing``, semaphore 3). Cost: the free-tier extraction chain the
+    pipeline already uses; bounded per tick; zero per-user LLM spend.
+
+    Gated exactly like every other E2 call site: ``ENGINE2_ENABLED`` OR the
+    legacy ``ENRICHMENT_ENABLED`` flag — both off ⇒ pure no-op (rule #18).
+    """
+    import os as _os  # noqa: PLC0415
+
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+    from src.services.job_enrichment import enrich_batch  # noqa: PLC0415
+
+    if not (ENGINE2_ENABLED or ENRICHMENT_ENABLED):
+        return {"enriched": 0, "reason": "e2_off"}
+    budget = int(_os.getenv("ENRICHMENT_SWEEP_PER_TICK", "100"))
+    if budget <= 0:
+        return {"enriched": 0, "reason": "disabled"}
+
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
+
+    cur = await db.execute(
+        """
+        SELECT j.id, j.title, j.company, j.location, j.description,
+               j.apply_url, j.source, j.date_found
+        FROM jobs j
+        JOIN user_feed f ON f.job_id = j.id AND f.status = 'active'
+        LEFT JOIN job_enrichment e ON e.job_id = j.id
+        WHERE e.job_id IS NULL
+        GROUP BY j.id, j.title, j.company, j.location, j.description,
+                 j.apply_url, j.source, j.date_found
+        ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
+        LIMIT ?
+        """,
+        (budget,),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return {"enriched": 0, "reason": "coverage_complete"}
+
+    jobs: list[Job] = []
+    for r in rows:
+        job = Job(
+            title=r["title"] or "", company=r["company"] or "",
+            apply_url=r["apply_url"] or "", source=r["source"] or "",
+            date_found=r["date_found"] or "", location=r["location"] or "",
+            description=r["description"] or "",
+        )
+        job.id = r["id"]
+        jobs.append(job)
+
+    results = await enrich_batch(jobs, semaphore_limit=3, conn=db, skip_existing=True)
+    enriched = len([x for x in (results or []) if x])
+    return {"enriched": enriched, "remaining_batch": len(rows) - enriched}
+
+
 # ---------- Pillar 2 Batch 2.5 — job enrichment task -------------------
 #
 # Queued post-ingest (after ``score_and_ingest``) via the ARQ fan-out hook in
