@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -26,7 +27,12 @@ class GreenhouseSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         for slug in self._companies:
-            url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+            # Job-understanding fix (2026-08-05): WITHOUT `?content=true` the
+            # board list endpoint returns NO `content` field at all — verified
+            # live (deepmind board: absent vs 5,359 chars). Every greenhouse
+            # job in prod (996 rows, 100% of the slice) had an empty
+            # description because this param was missing. Same request count.
+            url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
             data = await self._get_json(url)
             if not data or "jobs" not in data:
                 continue
@@ -34,7 +40,10 @@ class GreenhouseSource(BaseJobSource):
             for item in cast(dict[str, Any], data)["jobs"]:
                 title = item.get("title", "")
                 content = item.get("content", "")
-                plain = _HTML_TAG_RE.sub(" ", content)
+                # The API returns HTML-ENTITY-ESCAPED markup (`&lt;p&gt;`), so
+                # unescape first — the tag-strip regex can't see escaped tags,
+                # and skipping this stores literal `&lt;h4&gt;` noise as text.
+                plain = _HTML_TAG_RE.sub(" ", html.unescape(content or ""))
                 loc = item.get("location", {})
                 location = loc.get("name", "") if isinstance(loc, dict) else str(loc)
                 if not _is_uk_or_remote(location):

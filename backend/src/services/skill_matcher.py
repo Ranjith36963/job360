@@ -484,13 +484,23 @@ class JobScorer:
                 return TITLE_WEIGHT
             if target.lower() in title_lower or title_lower in target.lower():
                 return TITLE_WEIGHT // 2
-        # Partial keyword overlap using dynamic domain words
         title_words = set(re.findall(r"\w+", title_lower))
         core_overlap = title_words & self._config.core_domain_words
         if not core_overlap:
             return 0
         support_overlap = title_words & self._config.supporting_role_words
-        return min(len(core_overlap) * 5 + len(support_overlap) * 3, TITLE_WEIGHT // 2)
+        # Dead-title-lever fix (funnel redesign 2026-08-05): a job title showing
+        # BOTH a core domain word AND a role word ("AI Engineer", "Machine
+        # Learning Engineer", "Data Scientist") is a strong role match — the
+        # thing exact/substring matching was supposed to catch but never did,
+        # because CV-derived config titles don't appear verbatim in postings.
+        # 30/40 base + 3 per extra domain word, capped at the full weight.
+        if support_overlap:
+            return min(
+                TITLE_WEIGHT * 3 // 4 + (len(core_overlap) - 1) * 3, TITLE_WEIGHT
+            )
+        # Domain word(s) with no role word: partial overlap band, capped at 20.
+        return min(len(core_overlap) * 5, TITLE_WEIGHT // 2)
 
     def _skill_score(self, text: str) -> int:
         points = 0

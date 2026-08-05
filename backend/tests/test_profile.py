@@ -708,3 +708,86 @@ def test_has_linkedin_true_from_positions_even_without_skills():
     )
     resp = _build_profile_response(profile)
     assert resp.summary.has_linkedin is True
+
+
+# ═══ Dead-title-lever fix (P0-3, funnel redesign 2026-08-05) ══════════════════
+# core_domain_words used to be built ONLY from title tokens, so a user with two
+# hyper-specific CV titles got a 4-word vocabulary polluted by junk tokens
+# ('department', 'solutions' from "AI Solutions Engineer – R&D Department").
+# Measured on real prod data: the 40-pt title lever never scored above 8 for
+# ANY job, capping all scores at ~69 and making location the de-facto sort key.
+# The fix is evidence-based: a title token joins core only with corroboration
+# (>=2 titles, the skill pool, or an acronym); high-frequency skill tokens join
+# core so "Machine Learning Engineer" matches a deep-learning profile.
+
+
+class TestCoreDomainWordEvidence:
+    def _profile(self, titles, skills=None):
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+        return UserProfile(
+            cv_data=CVData(job_titles=titles, skills=skills or []),
+            preferences=UserPreferences(),
+        )
+
+    def test_junk_single_title_tokens_are_dropped(self):
+        """'department'/'solutions' appear in ONE title and no skill — they are
+        noise from a CV job-title string, not the user's domain."""
+        profile = self._profile(
+            titles=["AI Solutions Engineer - R&D Department", "AI/ML Engineer Intern"],
+            skills=["Deep Learning", "Generative AI"],
+        )
+        cfg = generate_search_config(profile)
+        assert "department" not in cfg.core_domain_words
+        assert "solutions" not in cfg.core_domain_words
+
+    def test_cross_title_and_acronym_tokens_survive(self):
+        """'ai' appears in both titles (corroborated); 'ml' is a short acronym
+        token — both are real domain signal and must stay."""
+        profile = self._profile(
+            titles=["AI Solutions Engineer - R&D Department", "AI/ML Engineer Intern"],
+            skills=["Deep Learning"],
+        )
+        cfg = generate_search_config(profile)
+        assert "ai" in cfg.core_domain_words
+        assert "ml" in cfg.core_domain_words
+
+    def test_frequent_skill_tokens_join_core(self):
+        """Tokens appearing across >=2 skills describe the user's domain even
+        when absent from titles — this is what lets 'Machine Learning Engineer'
+        postings match a profile whose titles never contain 'learning'."""
+        profile = self._profile(
+            titles=["AI Engineer"],
+            skills=["Deep Learning", "Supervised Learning", "Machine Learning Ops"],
+        )
+        cfg = generate_search_config(profile)
+        assert "learning" in cfg.core_domain_words
+
+    def test_single_title_no_skills_falls_back_to_all_tokens(self):
+        """A thin profile (one title, no skills) must not end up with an EMPTY
+        core vocabulary — fall back to the old all-title-tokens behaviour."""
+        profile = self._profile(titles=["Underwriting Portfolio Manager"])
+        cfg = generate_search_config(profile)
+        assert "underwriting" in cfg.core_domain_words
+        assert "portfolio" in cfg.core_domain_words
+
+    def test_role_words_still_go_to_supporting(self):
+        profile = self._profile(titles=["AI Engineer", "ML Engineer"])
+        cfg = generate_search_config(profile)
+        assert "engineer" in cfg.supporting_role_words
+        assert "engineer" not in cfg.core_domain_words
+
+    def test_near_duplicate_titles_count_as_one_evidence(self):
+        """The same title with a hyphen vs em-dash (or arriving from both CV and
+        LinkedIn) must not fake cross-title corroboration for its junk tokens."""
+        profile = self._profile(
+            titles=[
+                "AI Solutions Engineer - R&D Department",
+                "AI Solutions Engineer – R&D Department",  # em-dash variant
+                "AI/ML Engineer Intern",
+            ],
+            skills=["Deep Learning"],
+        )
+        cfg = generate_search_config(profile)
+        assert "department" not in cfg.core_domain_words
+        assert "solutions" not in cfg.core_domain_words
+        assert "ai" in cfg.core_domain_words

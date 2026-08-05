@@ -182,6 +182,48 @@ class FeedService:
         await self._db.commit()
         return cur.rowcount or 0
 
+    async def apply_candidate_selection(
+        self, user_id: str, selected_ids: set[int]
+    ) -> int:
+        """Enforce the User-Level candidate bound (funnel Stage-1).
+
+        ``user_feed`` is a bounded per-user candidate set, not a catalog
+        mirror. After the caller has upserted the selected rows, this method
+        synchronises MEMBERSHIP:
+
+          * active rows OUTSIDE ``selected_ids`` are marked ``stale``
+            (evicted — reversible, never a delete), EXCEPT rows carrying an
+            LLM verdict: a paid judgment is never thrown away over a keyword
+            re-rank, and there are at most ~MATCHER_MAX_JOBS of them.
+          * stale rows INSIDE ``selected_ids`` are reactivated (a job that
+            re-qualifies under a new profile comes back). Job-level ghost
+            staleness still hides such rows at read time — the dashboard
+            query filters ``jobs.staleness_state`` independently.
+
+        Returns the number of evicted rows. A defensively empty selection is
+        a no-op: mass-evicting a whole feed because scoring produced nothing
+        would turn a transient fault into a wiped shelf.
+        """
+        if not selected_ids:
+            return 0
+        now = datetime.now(timezone.utc).isoformat()
+        ids = list(selected_ids)
+        placeholders = ",".join("?" for _ in ids)
+        await self._db.execute(
+            f"UPDATE user_feed SET status = 'active', updated_at = ? "
+            f"WHERE user_id = ? AND status = 'stale' AND job_id IN ({placeholders})",
+            [now, user_id, *ids],
+        )
+        cur = await self._db.execute(
+            f"UPDATE user_feed SET status = 'stale', updated_at = ? "
+            f"WHERE user_id = ? AND status = 'active' "
+            f"AND llm_fit_score IS NULL "
+            f"AND job_id NOT IN ({placeholders})",
+            [now, user_id, *ids],
+        )
+        await self._db.commit()
+        return cur.rowcount or 0
+
     async def upsert_feed_row(
         self,
         *,
