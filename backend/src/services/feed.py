@@ -183,7 +183,11 @@ class FeedService:
         return cur.rowcount or 0
 
     async def apply_candidate_selection(
-        self, user_id: str, selected_ids: set[int]
+        self,
+        user_id: str,
+        selected_ids: set[int],
+        *,
+        force_evict_ids: Optional[set[int]] = None,
     ) -> int:
         """Enforce the User-Level candidate bound (funnel Stage-1).
 
@@ -221,8 +225,21 @@ class FeedService:
             f"AND job_id NOT IN ({placeholders})",
             [now, user_id, *ids],
         )
+        evicted = cur.rowcount or 0
+        # The user-feedback loop: an explicit not_interested outranks EVERY
+        # guard — including the LLM-verdict protection. The user said no; the
+        # machine's opinion doesn't resurrect the job.
+        if force_evict_ids:
+            f_ids = list(force_evict_ids)
+            f_ph = ",".join("?" for _ in f_ids)
+            cur2 = await self._db.execute(
+                f"UPDATE user_feed SET status = 'stale', updated_at = ? "
+                f"WHERE user_id = ? AND status = 'active' AND job_id IN ({f_ph})",
+                [now, user_id, *f_ids],
+            )
+            evicted += cur2.rowcount or 0
         await self._db.commit()
-        return cur.rowcount or 0
+        return evicted
 
     async def upsert_feed_row(
         self,
