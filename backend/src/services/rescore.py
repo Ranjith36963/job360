@@ -212,6 +212,54 @@ async def backfill_feed_from_catalog(
         except Exception as exc:  # noqa: BLE001
             logger.warning("catalog backfill: selection sync failed: %s", exc)
 
+    # Phase 4 — CANDIDATE enrichment (funnel Stage-2, 2026-08-05). E2 used to
+    # enrich only the top-20 of jobs a run itself fetched, so prod coverage sat
+    # at 24/7,309 jobs (0.3%) and the salary/visa/seniority/workplace
+    # preference dimensions effectively never fired. Enrichment is per-JOB and
+    # shared (rule #17: no user_id), so enriching this user's candidates
+    # benefits every user and is cached forever. Budget: the best-scoring
+    # ENRICHMENT_MAX_JOBS selected candidates still missing enrichment, per
+    # backfill — coverage of the candidate set grows with every search.
+    # Gated exactly like run_search's stage (ENGINE2_ENABLED OR legacy flag).
+    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+    from src.services.job_enrichment import ENRICHMENT_ENABLED  # noqa: PLC0415
+
+    if (ENGINE2_ENABLED or ENRICHMENT_ENABLED) and selected:
+        try:
+            from src.core.settings import ENRICHMENT_MAX_JOBS  # noqa: PLC0415
+            from src.models import Job as _EJob  # noqa: PLC0415
+            from src.services.job_enrichment import (  # noqa: PLC0415
+                enrich_batch,
+                has_enrichment,
+            )
+
+            ranked = sorted(selected, key=lambda t: t[0], reverse=True)
+            to_enrich: list[Any] = []
+            for ms, jid, row in ranked:
+                if len(to_enrich) >= ENRICHMENT_MAX_JOBS:
+                    break
+                if await has_enrichment(db._db, jid):
+                    continue
+                ejob = _EJob(
+                    title=row.get("title", "") or "",
+                    company=row.get("company", "") or "",
+                    apply_url=row.get("apply_url", "") or "",
+                    source=row.get("source", "") or "",
+                    date_found=row.get("date_found", "") or "",
+                    location=row.get("location", "") or "",
+                    description=row.get("description", "") or "",
+                )
+                ejob.id = jid
+                to_enrich.append(ejob)
+            if to_enrich:
+                await enrich_batch(to_enrich, semaphore_limit=3, conn=db._db)
+                logger.info(
+                    "catalog backfill: enriched %s candidate jobs for user %s",
+                    len(to_enrich), user_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("catalog backfill: candidate enrichment failed: %s", exc)
+
     logger.info(
         "catalog backfill: user %s matched %s of %s catalog jobs "
         "(floor %s, cap %s, evicted %s)",

@@ -379,3 +379,85 @@ async def test_rescore_user_feed_caps_and_evicts(full_db, monkeypatch):
     by_id = dict((jid, status) for jid, status, _ in rows)
     assert len(active) == 2
     assert by_id[junk_id] == "stale", "rescore did not evict the out-of-selection row"
+
+
+# ── candidate enrichment (funnel Stage-2) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_backfill_enriches_selected_candidates_when_e2_on(full_db, monkeypatch):
+    """With E2 on, backfill must enrich the best-scoring SELECTED candidates
+    that lack enrichment — coverage of the candidate set grows per search.
+    (Prod before this: 24/7,309 jobs enriched, so salary/visa/seniority
+    preference dims effectively never fired.)"""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+    import src.services.rescore as rescore_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 2, raising=False)
+    monkeypatch.setattr(settings_mod, "ENGINE2_ENABLED", True, raising=False)
+    monkeypatch.setattr(settings_mod, "ENRICHMENT_MAX_JOBS", 1, raising=False)
+
+    enriched: list[int] = []
+
+    async def fake_enrich_batch(jobs, semaphore_limit=3, conn=None, **kw):
+        enriched.extend(j.id for j in jobs)
+        return []
+
+    import src.services.job_enrichment as je_mod
+    monkeypatch.setattr(je_mod, "enrich_batch", fake_enrich_batch)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        await _seed_catalog(db, n_relevant=3, n_junk=1)
+        await rescore_mod.backfill_feed_from_catalog(user_id, db)
+    finally:
+        await db.close()
+
+    # Budget 1 → exactly the single best-scoring candidate gets enriched.
+    assert len(enriched) == 1, f"expected 1 enrichment call, got {enriched}"
+
+
+@pytest.mark.asyncio
+async def test_backfill_never_enriches_when_e2_off(full_db, monkeypatch):
+    """Rule #18 analog: with E2 off, backfill must make ZERO enrichment calls —
+    behaviour identical to pre-Stage-2."""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+    import src.services.rescore as rescore_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 2, raising=False)
+    monkeypatch.setattr(settings_mod, "ENGINE2_ENABLED", False, raising=False)
+
+    called = {"n": 0}
+
+    async def fake_enrich_batch(jobs, **kw):
+        called["n"] += 1
+        return []
+
+    import src.services.job_enrichment as je_mod
+    monkeypatch.setattr(je_mod, "enrich_batch", fake_enrich_batch)
+    monkeypatch.setattr(je_mod, "ENRICHMENT_ENABLED", False)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        await _seed_catalog(db, n_relevant=2, n_junk=0)
+        await rescore_mod.backfill_feed_from_catalog(user_id, db)
+    finally:
+        await db.close()
+
+    assert called["n"] == 0, "E2 off must mean zero enrichment calls"
