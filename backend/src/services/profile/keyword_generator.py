@@ -106,16 +106,61 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
             locations.append(arrangement)
 
     # --- Core domain words & supporting role words ---
-    core_words: set[str] = set()
+    # Dead-title-lever fix (funnel redesign 2026-08-05). Titles pulled from a CV
+    # are hyper-specific ("AI Solutions Engineer - R&D Department"): real
+    # postings never equal or contain them, so title scoring falls back to this
+    # vocabulary — which used to be raw title tokens, i.e. tiny AND polluted by
+    # junk like 'department'. Measured on prod: no job scored above 8/40 on
+    # title, capping every match_score at ~69 and quietly making LOCATION the
+    # feed's sort key. All corroboration below is evidence from the profile
+    # itself (titles, skills) — no hardcoded vocabulary (rule #28 spirit).
+    #
+    # A title token joins core only with corroboration:
+    #   - it appears in >=2 different titles (cross-title evidence), or
+    #   - it appears inside the user's skill tokens (skill evidence), or
+    #   - it is a short acronym token (<=3 chars: 'ai', 'ml', 'nlp' — domain
+    #     acronyms; 1-char junk like the 'r'/'d' of "R&D" is already dropped).
+    # Skill tokens seen across >=2 skills join core too, so "Machine Learning
+    # Engineer" postings match a profile whose titles never say 'learning'.
     support_words: set[str] = set()
+    title_token_titles: dict[str, int] = {}  # token -> number of DISTINCT titles
+    seen_token_sets: set[frozenset[str]] = set()
     for title in titles:
+        seen_in_title: set[str] = set()
         for word in re.findall(r'\w+', title.lower()):
             if word in _STOPWORDS or len(word) <= 1:
                 continue
             if word in _ROLE_WORDS:
                 support_words.add(word)
             else:
-                core_words.add(word)
+                seen_in_title.add(word)
+        # Near-duplicate titles ("… - R&D Department" vs "… – R&D Department",
+        # or the same title arriving from both CV and LinkedIn) must count as
+        # ONE piece of evidence, or their junk tokens fake cross-title
+        # corroboration. Identity = the token set, not the raw string.
+        fs = frozenset(seen_in_title)
+        if not fs or fs in seen_token_sets:
+            continue
+        seen_token_sets.add(fs)
+        for word in seen_in_title:
+            title_token_titles[word] = title_token_titles.get(word, 0) + 1
+
+    skill_token_freq: dict[str, int] = {}  # token -> number of skills it appears in
+    for skill in primary + secondary:
+        for word in set(re.findall(r'\w+', skill.lower())):
+            if word in _STOPWORDS or word in _ROLE_WORDS or len(word) <= 1:
+                continue
+            skill_token_freq[word] = skill_token_freq.get(word, 0) + 1
+
+    core_words: set[str] = {
+        tok for tok, n_titles in title_token_titles.items()
+        if n_titles >= 2 or tok in skill_token_freq or len(tok) <= 3
+    }
+    core_words |= {tok for tok, freq in skill_token_freq.items() if freq >= 2}
+    if not core_words:
+        # Thin-profile safety net (one title, no skills): an empty vocabulary
+        # would kill title scoring entirely — keep the old all-tokens behaviour.
+        core_words = set(title_token_titles)
 
     # --- Search queries (top 8 titles x top 2 locations) ---
     top_titles = titles[:8]

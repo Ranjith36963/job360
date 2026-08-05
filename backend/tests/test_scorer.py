@@ -6,6 +6,7 @@ from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import (
     RECENCY_WEIGHT,
+    TITLE_WEIGHT,
     JobScorer,
     ScoreBreakdown,
     _foreign_location_penalty,
@@ -1097,3 +1098,52 @@ class TestScoreBreakdown:
         breakdown = scorer.score(job)
         assert isinstance(breakdown, ScoreBreakdown)
         assert breakdown.match_score == 10  # floor
+
+
+# ═══ Dead-title-lever fix (P0-3, funnel redesign 2026-08-05) ══════════════════
+# Real postings almost never equal or contain a user's CV-derived title string
+# ("AI Solutions Engineer - R&D Department"), so exact/substring matching never
+# fired and the partial fallback capped at 20 — measured on prod: no job ever
+# scored above 8/40 on title. The fix: a job title showing BOTH a core domain
+# word AND a role word ("AI Engineer", "Machine Learning Engineer") is a strong
+# role match worth 30/40, +3 per extra core word, capped at TITLE_WEIGHT.
+
+
+class TestDomainRoleTitleBand:
+    def _scorer(self, core, support):
+        cfg = SearchConfig(
+            job_titles=["AI Solutions Engineer - R&D Department"],
+            primary_skills=["python"],
+            secondary_skills=[],
+            tertiary_skills=[],
+            locations=["London"],
+            core_domain_words=set(core),
+            supporting_role_words=set(support),
+        )
+        return JobScorer(cfg)
+
+    def test_domain_plus_role_scores_strong(self):
+        s = self._scorer({"ai", "ml", "learning"}, {"engineer"})
+        assert s._title_score("AI Engineer (UK)") >= 30
+
+    def test_ml_engineer_matches_via_skill_derived_core(self):
+        s = self._scorer({"ai", "ml", "learning"}, {"engineer"})
+        assert s._title_score("Machine Learning Engineer") >= 30
+
+    def test_role_without_domain_scores_zero(self):
+        """'Safety Engineer' has the role word but no domain word — a generic
+        role title must NOT ride the strong band."""
+        s = self._scorer({"ai", "ml"}, {"engineer"})
+        assert s._title_score("Safety Engineer") == 0
+
+    def test_domain_without_role_stays_in_partial_band(self):
+        s = self._scorer({"ai"}, {"engineer"})
+        assert 0 < s._title_score("Generative AI Newsletter") <= TITLE_WEIGHT // 2
+
+    def test_strong_band_capped_at_title_weight(self):
+        s = self._scorer({"ai", "ml", "learning", "data", "language"}, {"engineer"})
+        assert s._title_score("AI ML Learning Data Language Engineer") <= TITLE_WEIGHT
+
+    def test_exact_match_still_wins_everything(self):
+        s = self._scorer({"ai"}, {"engineer"})
+        assert s._title_score("AI Solutions Engineer - R&D Department") == TITLE_WEIGHT
