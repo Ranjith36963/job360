@@ -78,6 +78,14 @@ RECENT_REPO_MULTIPLIER = 3
 # we probe to stay within GitHub's 60 unauthenticated / 5000 authenticated
 # requests-per-hour budget. Authenticated runs comfortably cover this.
 MAX_REPOS_FOR_DEPS = 10
+# "Read 100% of GitHub" — README prose is the richest signal, but each README
+# is one more request AND more prompt tokens, so cap how many we read and how
+# long each excerpt is. Authenticated (5000/hr) reads far more than
+# unauthenticated (60/hr, where the whole probe must fit ≈54 < 60).
+README_EXCERPT_CHARS = 1200          # per-repo README, truncated for the prompt
+PROFILE_README_CHARS = 2500          # the self-authored {u}/{u} portfolio README
+README_REPOS_AUTHED = 15
+README_REPOS_UNAUTHED = 4
 
 
 # NOTE (CLAUDE.md rule #28): the hardcoded LANGUAGE_TO_SKILL and TOPIC_TO_SKILL
@@ -102,6 +110,12 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> Any:
         async with session.get(url, headers=_headers(), timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 403:
                 logger.warning("GitHub API rate limited")
+                return None
+            if resp.status == 404:
+                # Expected for optional resources (a repo with no README, a
+                # user with no {u}/{u} profile repo). Not an error — debug only,
+                # so a missing README doesn't spam warnings for every repo.
+                logger.debug("GitHub API 404 for %s", url)
                 return None
             if resp.status != 200:
                 logger.warning("GitHub API %s for %s", resp.status, url)
@@ -212,6 +226,107 @@ async def _fetch_repo_frameworks(
     return skills
 
 
+async def _fetch_user(session: aiohttp.ClientSession, username: str) -> dict[str, Any]:
+    """GET ``/users/{u}`` — the developer's own identity block.
+
+    Returns bio, name, company, blog, location, hireable, twitter — the words
+    a developer uses to describe THEMSELVES, which we never read before. One
+    cheap request. Returns ``{}`` on any failure (never raises)."""
+    data = await _get_json(session, f"{GITHUB_API}/users/{username}")
+    return data if isinstance(data, dict) else {}
+
+
+def _compose_bio(user: dict[str, Any]) -> str:
+    """Fold the /users/{u} identity fields into one short self-description
+    string for the LLM pass. Only non-empty fields are included, so a sparse
+    profile yields a short line and a rich one yields more."""
+    parts: list[str] = []
+    for label, key in (
+        ("Name", "name"), ("Bio", "bio"), ("Company", "company"),
+        ("Location", "location"), ("Website", "blog"),
+    ):
+        val = user.get(key)
+        if isinstance(val, str) and val.strip():
+            parts.append(f"{label}: {val.strip()}")
+    if user.get("hireable") is True:
+        parts.append("Open to work: yes")
+    tw = user.get("twitter_username")
+    if isinstance(tw, str) and tw.strip():
+        parts.append(f"Twitter/X: @{tw.strip()}")
+    return " | ".join(parts)
+
+
+def _decode_readme(payload: Any, limit: int) -> str:
+    """Decode a GitHub ``/readme`` payload (base64 JSON) to a truncated string.
+
+    Returns ``""`` on a missing/oversized/malformed payload. Truncation keeps
+    the LLM prompt bounded — the first ``limit`` chars of a README carry the
+    'what this is / what it's built with' summary; the tail is usually install
+    steps and licence boilerplate."""
+    if not isinstance(payload, dict):
+        return ""
+    encoded = payload.get("content")
+    if payload.get("encoding") != "base64" or not isinstance(encoded, str) or not encoded:
+        return ""
+    try:
+        text = base64.b64decode(encoded).decode("utf-8", errors="replace")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("README base64 decode failed: %s", e)
+        return ""
+    return text.strip()[:limit]
+
+
+async def _fetch_readme(
+    session: aiohttp.ClientSession, username: str, repo_name: str, limit: int
+) -> str:
+    """GET ``/repos/{u}/{repo}/readme`` — the richest prose GitHub holds.
+
+    A repo ``description`` is often one line or null; the README is where the
+    real project story lives. Base64 JSON → decoded → truncated. Returns ``""``
+    on 404 (no README — common) or any failure. Routes through ``_get_json`` so
+    tests that patch it stay offline (rule #4)."""
+    payload = await _get_json(session, f"{GITHUB_API}/repos/{username}/{repo_name}/readme")
+    return _decode_readme(payload, limit)
+
+
+async def _fetch_pinned(session: aiohttp.ClientSession, username: str) -> list[str]:
+    """Return the names of the user's PINNED repos — their own curated
+    highlights — via the GraphQL API. REST cannot expose pins; GraphQL needs a
+    token, so this is a no-op (returns ``[]``) when unauthenticated. Never
+    raises. Used only to REORDER which repos we read first within the request
+    budget, so the user's showcased work is covered before the long tail."""
+    if not GITHUB_TOKEN:
+        return []
+    # Concatenation, not f-string/%: the GraphQL body is full of literal { }
+    # braces. `username` is already validated by _GITHUB_USERNAME_RE upstream
+    # (alphanumeric + hyphen), so there is no injection surface here.
+    query = (
+        '{ user(login: "' + username + '") { pinnedItems(first: 6, types: REPOSITORY) '
+        '{ nodes { ... on Repository { name } } } } }'
+    )
+    try:
+        async with session.post(
+            f"{GITHUB_API}/graphql",
+            json={"query": query},
+            headers=_headers(),
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            if resp.status != 200:
+                logger.debug("GitHub GraphQL pinned fetch %s", resp.status)
+                return []
+            data = await resp.json()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("GitHub GraphQL pinned fetch failed: %s", e)
+        return []
+    if not isinstance(data, dict):
+        return []
+    try:
+        nodes = data["data"]["user"]["pinnedItems"]["nodes"]
+    except (KeyError, TypeError):
+        return []
+    return [n["name"] for n in nodes if isinstance(n, dict) and n.get("name")]
+
+
 async def fetch_github_profile(
     username: str, session: aiohttp.ClientSession | None = None
 ) -> dict[str, Any]:
@@ -231,6 +346,8 @@ async def fetch_github_profile(
         "skills_inferred": [],
         "frameworks_inferred": [],
         "repos_brief": [],
+        "bio": "",
+        "profile_readme": "",
     }
     # Accept a full profile URL or @handle, not just a bare username.
     username = normalize_github_username(username)
@@ -276,6 +393,21 @@ async def fetch_github_profile(
         authed = bool(GITHUB_TOKEN)
         lang_n = 20 if authed else 12
         dep_n = MAX_REPOS_FOR_DEPS if authed else 5
+        readme_n = README_REPOS_AUTHED if authed else README_REPOS_UNAUTHED
+
+        # The user's PINNED repos are their own curated highlights. Pull them to
+        # the front so the capped language / dep-file / README probes cover the
+        # work the developer chose to showcase before the long tail. No-op when
+        # unauthenticated (GraphQL needs a token); stable — pinned first in pin
+        # order, then the rest in their existing pushed-desc order.
+        pinned = await _fetch_pinned(session, username)
+        if pinned:
+            pin_rank = {name: i for i, name in enumerate(pinned)}
+            repositories.sort(key=lambda r: pin_rank.get(r["name"], len(pin_rank) + 1))
+
+        # The developer's own identity block (bio / name / company / location /
+        # blog / hireable). One cheap request; prose fed to the LLM pass.
+        user_obj = await _fetch_user(session, username)
 
         # Fetch per-repo language breakdown with temporal weight.
         # We keep a per-repo map so the recency multiplier can be applied
@@ -322,19 +454,51 @@ async def fetch_github_profile(
 
         skills_inferred = _infer_skills(weighted_languages, all_topics)
 
-        # Two-pass — compact repo briefs (name/description/topics) for the
-        # LLM pass. Only repos with prose worth reading (a description or
-        # topics) are kept, capped so the prompt stays small.
-        repos_brief = [
-            {
+        # ── READMEs — the richest per-repo prose. A repo `description` is often
+        # one line or null; the README is where "what this is / what it's built
+        # with" actually lives. Fetched for the top `readme_n` repos (pinned
+        # first after the reorder), truncated, and fed ONLY to the LLM pass
+        # (rule #28 safe). Routes through _fetch_readme → _get_json so tests stay
+        # offline. A failed/absent README just yields no excerpt for that repo.
+        readme_targets = repositories[:readme_n]
+        readme_results = await asyncio.gather(
+            *[_fetch_readme(session, username, r["name"], README_EXCERPT_CHARS)
+              for r in readme_targets],
+            return_exceptions=True,
+        )
+        readme_by_name: dict[str, str] = {}
+        for r, res in zip(readme_targets, readme_results):
+            if isinstance(res, str) and res:
+                readme_by_name[r["name"]] = res
+
+        # Two-pass — compact repo briefs for the LLM pass. Keep a repo if it has
+        # ANY prose worth reading: a description, topics, a language, OR a README
+        # we just fetched. Each brief carries its README excerpt so the offline
+        # re-run reads the same prose without re-fetching.
+        repos_brief: list[dict[str, Any]] = []
+        for r in repositories:
+            excerpt = readme_by_name.get(r["name"], "")
+            if not (r.get("description") or r.get("topics") or r.get("language") or excerpt):
+                continue
+            brief: dict[str, Any] = {
                 "name": r["name"],
                 "language": r.get("language", "") or "",
                 "description": r.get("description", ""),
                 "topics": list(r.get("topics", []) or []),
             }
-            for r in repositories
-            if r.get("description") or r.get("topics") or r.get("language")
-        ][:MAX_REPOS]
+            if excerpt:
+                brief["readme_excerpt"] = excerpt
+            repos_brief.append(brief)
+            if len(repos_brief) >= MAX_REPOS:
+                break
+
+        # ── Profile README — the {u}/{u} special repo GitHub renders at the top
+        # of a profile: the developer's self-authored portfolio. Often absent.
+        profile_readme = await _fetch_readme(session, username, username, PROFILE_README_CHARS)
+
+        # ── Identity block — bio / name / company / location the developer wrote
+        # about themselves, folded into one short self-description line.
+        bio = _compose_bio(user_obj)
 
         return {
             "repositories": repositories,
@@ -343,6 +507,8 @@ async def fetch_github_profile(
             "skills_inferred": skills_inferred,
             "frameworks_inferred": frameworks_inferred,
             "repos_brief": repos_brief,
+            "bio": bio,
+            "profile_readme": profile_readme,
         }
     finally:
         if own_session:
@@ -418,38 +584,54 @@ _GITHUB_LLM_SYSTEM = (
     "return JSON only and never invent skills the text does not support."
 )
 
-_GITHUB_LLM_PROMPT = """Below is a list of a developer's public GitHub repositories — each with
-a name, description, and topic tags.
+_GITHUB_LLM_PROMPT = """Below is a developer's public GitHub presence: an optional self-description
+(their profile bio and portfolio README), followed by their repositories —
+each with a name, language, description, topic tags, and (when available) an
+excerpt of the repo's README.
 
 Infer the concrete technical SKILLS this developer demonstrates: frameworks,
 libraries, tools, platforms, and technical domains. Focus on things a
 hard-coded language/topic table would MISS — e.g. "LangChain", "RAG",
-"Computer Vision", "Fraud Detection", "Cloudflare Workers".
+"Computer Vision", "Fraud Detection", "Cloudflare Workers". The README excerpts
+and self-description are the richest source — read them carefully.
 
 Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
 
 Rules:
-- GROUNDED ONLY: every skill must be supported by words actually in the name,
-  description, or topics. Do NOT guess a tech stack from a repo's purpose — e.g.
-  for "cold outreach platform" do not assume "Gmail API"/"GPT-4o" unless named.
+- GROUNDED ONLY: every skill must be supported by words actually present in the
+  self-description, a name, description, topics, or a README excerpt. Do NOT
+  guess a tech stack from a repo's purpose — e.g. for "cold outreach platform"
+  do not assume "Gmail API"/"GPT-4o" unless named.
 - Individual items, not categories ("PyTorch", not "ML frameworks").
 - Skip bare programming languages (Python/Java/etc.) — those are covered elsewhere.
 
-REPOSITORIES:
+{self_desc}REPOSITORIES:
 ---
 {repos}
 ---"""
 
 
-async def llm_infer_github_skills(repos_brief: list[dict[str, Any]]) -> list[str]:
+async def llm_infer_github_skills(
+    repos_brief: list[dict[str, Any]],
+    *,
+    bio: str = "",
+    profile_readme: str = "",
+) -> list[str]:
     """Pass 2 for GitHub — ask the LLM to read repo prose and name skills the
     hard-coded ``LANGUAGE_TO_SKILL`` / ``TOPIC_TO_SKILL`` tables can't know.
 
-    Returns ``[]`` (never raises) when there are no repos worth reading or the
+    Reads, in order of richness: the profile bio + portfolio README (the
+    developer's self-description), each repo's README excerpt, then the
+    name/description/topics. All are prose the LLM canonicalises — no hardcoded
+    map (rule #28).
+
+    Returns ``[]`` (never raises) when there is nothing worth reading or the
     provider chain fails — graceful no-op, mirroring the deterministic path.
     The empty-input branch never calls the LLM (cost guard).
     """
-    if not repos_brief:
+    bio = (bio or "").strip()
+    profile_readme = (profile_readme or "").strip()
+    if not (repos_brief or bio or profile_readme):
         return []
 
     lines: list[str] = []
@@ -458,14 +640,32 @@ async def llm_infer_github_skills(repos_brief: list[dict[str, Any]]) -> list[str
         lang = (r.get("language") or "").strip()
         desc = (r.get("description") or "").strip()
         topics = ", ".join(t for t in (r.get("topics") or []) if t)
-        if not (name or desc or topics or lang):
+        readme = (r.get("readme_excerpt") or "").strip()
+        if not (name or desc or topics or lang or readme):
             continue
         lang_tag = f" [language: {lang}]" if lang else ""
-        lines.append(f"- {name}:{lang_tag} {desc} [topics: {topics}]")
-    if not lines:
+        entry = f"- {name}:{lang_tag} {desc} [topics: {topics}]"
+        if readme:
+            entry += f"\n  README: {readme}"
+        lines.append(entry)
+
+    # A self-description block (bio + portfolio README) may exist even with no
+    # repo prose — a valid reason to call the LLM on its own.
+    self_desc = ""
+    if bio or profile_readme:
+        sd_parts = []
+        if bio:
+            sd_parts.append(bio)
+        if profile_readme:
+            sd_parts.append(f"Profile README:\n{profile_readme}")
+        self_desc = "DEVELOPER SELF-DESCRIPTION:\n---\n" + "\n\n".join(sd_parts) + "\n---\n\n"
+
+    if not lines and not self_desc:
         return []
 
-    prompt = _GITHUB_LLM_PROMPT.format(repos="\n".join(lines))
+    prompt = _GITHUB_LLM_PROMPT.format(
+        self_desc=self_desc, repos="\n".join(lines) or "(none)"
+    )
     try:
         from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
         result = await llm_extract(prompt, system=_GITHUB_LLM_SYSTEM)
@@ -518,5 +718,11 @@ def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
     # a non-empty value arrives, so a partial re-enrich never wipes them.
     if github_data.get("repos_brief"):
         cv.github_repos_brief = github_data["repos_brief"]
+    # "Read 100% of GitHub" — the self-authored prose signals. Only overwrite on
+    # a non-empty fetch so a rate-limited partial re-enrich never wipes them.
+    if github_data.get("bio"):
+        cv.github_bio = github_data["bio"]
+    if github_data.get("profile_readme"):
+        cv.github_profile_readme = github_data["profile_readme"]
 
     return cv

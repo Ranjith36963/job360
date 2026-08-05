@@ -622,7 +622,7 @@ class TestTwoPassOrchestrator:
                     "languages": [], "projects": [], "volunteer": [], "courses": [],
                     "skills": ["LangGraph", "Systems Design"]}
 
-        async def fake_gh(brief):
+        async def fake_gh(brief, *a, **kw):  # accepts bio=/profile_readme= kwargs
             return ["LangChain"]
 
         async def fake_about(text):

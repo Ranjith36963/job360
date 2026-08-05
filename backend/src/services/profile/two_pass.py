@@ -332,7 +332,14 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     _inputs = {
         "cv": cv.raw_text,
         "linkedin": cv.linkedin_raw_text,
-        "github": cv.github_repos_brief,
+        # GitHub input is the repo briefs (which now carry README excerpts) PLUS
+        # the self-authored bio + profile README. Any of the three changing must
+        # re-trigger the pass, so all three fold into the one cache key.
+        "github": {
+            "repos": cv.github_repos_brief,
+            "bio": cv.github_bio,
+            "readme": cv.github_profile_readme,
+        },
         "about_me": prefs.about_me,
     }
     _cached = {k: _already_read(cv, k, v) for k, v in _inputs.items()}
@@ -342,13 +349,19 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
             ", ".join(sorted(k for k, v in _cached.items() if v)),
         )
 
+    # The GitHub pass now has input when EITHER the repo briefs OR the
+    # self-authored bio / profile README are present.
+    _has_github = bool(cv.github_repos_brief or cv.github_bio or cv.github_profile_readme)
+
     _llm_cv_res, _llm_li_res, _llm_gh_res, _llm_pr_res = await asyncio.gather(
         _safe(llm_cv_fields_from_text(cv.raw_text), "CV")
         if cv.raw_text and not _cached["cv"] else _none(),
         _safe(llm_linkedin_fields(cv.linkedin_raw_text), "LinkedIn")
         if cv.linkedin_raw_text and not _cached["linkedin"] else _none(),
-        _safe(llm_infer_github_skills(cv.github_repos_brief), "GitHub")
-        if cv.github_repos_brief and not _cached["github"] else _none(),
+        _safe(llm_infer_github_skills(
+            cv.github_repos_brief, bio=cv.github_bio,
+            profile_readme=cv.github_profile_readme), "GitHub")
+        if _has_github and not _cached["github"] else _none(),
         _safe(llm_infer_from_about_me(prefs.about_me), "about_me")
         if prefs.about_me and not _cached["about_me"] else _none(),
     )
@@ -366,7 +379,9 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     _retryable = [
         ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
         ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
-        ("github", cv.github_repos_brief, lambda: llm_infer_github_skills(cv.github_repos_brief)),
+        ("github", _has_github, lambda: llm_infer_github_skills(
+            cv.github_repos_brief, bio=cv.github_bio,
+            profile_readme=cv.github_profile_readme)),
         ("about_me", prefs.about_me, lambda: llm_infer_from_about_me(prefs.about_me)),
     ]
     _results = {"cv": _llm_cv_res, "linkedin": _llm_li_res,

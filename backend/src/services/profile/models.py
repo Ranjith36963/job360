@@ -79,6 +79,17 @@ class CVData:
     # tables can't recognise (e.g. "LangChain", "RAG"). Separate field so
     # skill-tiering can weight this signal independently.
     github_llm_skills: list[str] = field(default_factory=list)
+    # "Read 100% of GitHub" (2026-08-05) — the two richest SELF-AUTHORED prose
+    # signals on a profile. Stored so the GitHub LLM pass can re-read them
+    # offline on a later profile change (mirrors github_repos_brief). Both are
+    # prose fed only to the LLM pass (rule #28 safe — never a hardcoded map),
+    # and persist automatically via the asdict() blob, no migration.
+    #   github_bio: the /users/{u} identity block (bio + name/company/blog/
+    #               location/hireable) — the developer describing themselves.
+    #   github_profile_readme: the {u}/{u} special-repo README — the portfolio
+    #               page GitHub renders at the top of a profile.
+    github_bio: str = ""
+    github_profile_readme: str = ""
     # Batch 1.1 — archetype classification (CareerDomain enum value).
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).

@@ -216,8 +216,18 @@ def test_is_recent_accepts_now_injection():
 
 
 def _make_async_session():
-    """Return an AsyncMock that emulates ``aiohttp.ClientSession`` — ``close()`` is awaitable."""
-    return AsyncMock()
+    """Return an AsyncMock that emulates ``aiohttp.ClientSession`` — ``close()``
+    is awaitable, and ``.post`` (the GraphQL pinned-repos fetch) is a benign
+    async context manager returning a non-200 so ``_fetch_pinned`` no-ops
+    without leaving a dangling coroutine."""
+    sess = AsyncMock()
+    _resp = AsyncMock()
+    _resp.status = 404
+    _cm = MagicMock()
+    _cm.__aenter__ = AsyncMock(return_value=_resp)
+    _cm.__aexit__ = AsyncMock(return_value=None)
+    sess.post = MagicMock(return_value=_cm)
+    return sess
 
 
 # ── github_enricher — username normalisation (URL / @handle / bare) ─
