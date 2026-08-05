@@ -111,6 +111,15 @@ MIN_MATCH_SCORE = 30
 # profile (or a job that simply aged past the recency bands) lost jobs forever
 # with no way to get them back. Store broadly, filter at read time.
 MIN_STORE_SCORE = int(os.getenv("MIN_STORE_SCORE", "1"))
+# FEED_CANDIDATE_CAP — the User-Level candidate bound (funnel Stage-1,
+# 2026-08-05). user_feed is a bounded per-user CANDIDATE SET, not a mirror of
+# the shared catalog: only the user's top-N jobs by score enter/stay in it
+# (measured before the cap: one user's feed held 85% of the whole catalog).
+# Rows that fall out of the selection are marked stale — reversible, and rows
+# carrying an LLM verdict are never evicted. `0` disables the cap entirely
+# (legacy flood behaviour). Industry anchor: Twitter materializes ~800-1000
+# candidates per user.
+FEED_CANDIDATE_CAP = int(os.getenv("FEED_CANDIDATE_CAP", "800"))
 MAX_RESULTS_PER_SOURCE = 100
 MAX_DAYS_OLD = 7
 

@@ -146,10 +146,16 @@ async def backfill_feed_from_catalog(
     rows = await db.get_catalog_jobs_for_rescore()
 
     # recency bucket — imported lazily to dodge the main.py import cycle
+    # User-Level candidate bound (funnel Stage-1). Read at call time so tests
+    # (and a runtime env change) can adjust it without re-importing.
+    import src.core.settings as _settings  # noqa: PLC0415
     from src.main import _recency_bucket  # noqa: PLC0415
 
-    feed = FeedService(db._db)
-    written = 0
+    cap = int(getattr(_settings, "FEED_CANDIDATE_CAP", 0) or 0)
+
+    # Phase 1 — score the whole catalog (unchanged cost: this loop always
+    # scored every row; it just also WROTE every row that beat the floor).
+    scored: list[tuple[int, Any, dict[str, Any]]] = []
     for row in rows:
         jid = row.get("id")
         if jid is None:
@@ -159,8 +165,26 @@ async def backfill_feed_from_catalog(
         try:
             breakdown = score_catalog_row(scorer, row)
             ms = int(breakdown.match_score or 0)
-            if ms < MIN_STORE_SCORE:
-                continue
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("catalog backfill: skipping job %s: %s", jid, exc)
+            continue
+        if ms < MIN_STORE_SCORE:
+            continue
+        scored.append((ms, jid, row))
+
+    # Phase 2 — candidate selection: keep only the user's top-`cap` jobs.
+    # cap=0 disables (legacy flood). Ties broken by score order; stable sort
+    # keeps catalog order within equal scores.
+    if cap > 0 and len(scored) > cap:
+        scored.sort(key=lambda t: t[0], reverse=True)
+        selected = scored[:cap]
+    else:
+        selected = scored
+
+    feed = FeedService(db._db)
+    written = 0
+    for ms, jid, row in selected:
+        try:
             await with_write_retry(
                 lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(  # type: ignore[misc]
                     user_id=user_id,
@@ -175,12 +199,28 @@ async def backfill_feed_from_catalog(
             logger.warning("catalog backfill: skipping job %s: %s", jid, exc)
             continue
 
+    # Phase 3 — membership sync: evict active rows outside the selection,
+    # reactivate re-selected stale rows. Only when the cap is on.
+    evicted = 0
+    if cap > 0 and selected:
+        try:
+            evicted = await with_write_retry(
+                lambda: feed.apply_candidate_selection(
+                    user_id, {jid for _, jid, _ in selected}
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("catalog backfill: selection sync failed: %s", exc)
+
     logger.info(
-        "catalog backfill: user %s matched %s of %s catalog jobs (floor %s)",
+        "catalog backfill: user %s matched %s of %s catalog jobs "
+        "(floor %s, cap %s, evicted %s)",
         user_id,
         written,
         len(rows),
         MIN_STORE_SCORE,
+        cap or "off",
+        evicted,
     )
     return written
 
@@ -319,38 +359,58 @@ async def rescore_user_feed(
                 _Job = None  # type: ignore[assignment,misc]  # unused branch
                 shortlist_jobs = None
 
+            # User-Level candidate bound (funnel Stage-1) — same selection the
+            # backfill applies, so a profile change re-selects the shelf.
+            import src.core.settings as _settings  # noqa: PLC0415
+
+            cap = int(getattr(_settings, "FEED_CANDIDATE_CAP", 0) or 0)
+
+            # Phase 1 — score every catalog row (FIX 3 per-row guard kept:
+            # one bad row must not abort the whole re-score).
+            scored_rows: list[tuple[int, Any, dict[str, Any]]] = []
             for row in rows:
                 jid = row.get("id")
                 if jid is None:
                     continue
-                # FIX 3 — per-row error guard: one bad row must not abort the
-                # whole re-score (mirrors run_search's per-job guard in main.py).
                 try:
                     breakdown = score_catalog_row(scorer, row)
-                    ms = breakdown.match_score
+                    ms = int(breakdown.match_score or 0)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("rescore: skipping job %s: %s", jid, exc)
+                    continue
+                # Legacy write condition: a positive score, or an existing feed
+                # row that must be re-stamped under the new profile version.
+                if ms > 0 or jid in existing_feed_ids:
+                    scored_rows.append((ms, jid, row))
 
-                    if ms > 0 or jid in existing_feed_ids:
-                        # Finding #11: retry on 'database is locked' so a
-                        # transient lock under concurrent writes doesn't drop
-                        # this scored row (the except below used to swallow it).
-                        await with_write_retry(
-                            # Bind loop vars as defaults so the closure captures
-                            # THIS iteration's values (B023); the callback is
-                            # awaited inline here, but the explicit binding keeps
-                            # it correct if it ever becomes deferred.
-                            # ignore[misc]: a default-arg lambda is not a bare
-                            # zero-arg Callable, so mypy can't infer its type.
-                            lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(  # type: ignore[misc]
-                                user_id=user_id,
-                                job_id=jid,
-                                score=int(ms),
-                                bucket=_recency_bucket(row.get("date_found")),
-                                profile_version=version,
-                            )
+            # Phase 2 — selection: top-`cap` by score. cap=0 = legacy (all).
+            if cap > 0 and len(scored_rows) > cap:
+                scored_rows.sort(key=lambda t: t[0], reverse=True)
+                selected_rows = scored_rows[:cap]
+            else:
+                selected_rows = scored_rows
+
+            for ms, jid, row in selected_rows:
+                try:
+                    # Finding #11: retry on 'database is locked' so a transient
+                    # lock under concurrent writes doesn't drop this scored row.
+                    await with_write_retry(
+                        # Bind loop vars as defaults so the closure captures
+                        # THIS iteration's values (B023). ignore[misc]: a
+                        # default-arg lambda is not a bare zero-arg Callable.
+                        lambda jid=jid, ms=ms, row=row: feed.upsert_feed_row(  # type: ignore[misc]
+                            user_id=user_id,
+                            job_id=jid,
+                            score=int(ms),
+                            bucket=_recency_bucket(row.get("date_found")),
+                            profile_version=version,
                         )
-                        rescored += 1
+                    )
+                    rescored += 1
 
-                    # Collect shortlist for LLM judge (FIX 1: only when matcher_on)
+                    # Collect shortlist for LLM judge (FIX 1: only when
+                    # matcher_on) — built from SELECTED rows only, so the judge
+                    # never spends on a job outside the candidate set.
                     if matcher_on and ms >= MATCHER_THRESHOLD:
                         job = _Job(
                             title=row.get("title", "") or "",
@@ -371,6 +431,23 @@ async def rescore_user_feed(
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("rescore: skipping job %s: %s", jid, exc)
                     continue
+
+            # Phase 3 — membership sync (evict out-of-selection, reactivate
+            # re-selected). Only when the cap is on.
+            if cap > 0 and selected_rows:
+                try:
+                    evicted = await with_write_retry(
+                        lambda: feed.apply_candidate_selection(
+                            user_id, {jid for _, jid, _ in selected_rows}
+                        )
+                    )
+                    if evicted:
+                        logger.info(
+                            "rescore: user %s evicted %s out-of-selection rows",
+                            user_id, evicted,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("rescore: selection sync failed: %s", exc)
 
             # 6. LLM re-judge (FIX 1: entire block gated on matcher_on)
             if matcher_on and shortlist_jobs:
