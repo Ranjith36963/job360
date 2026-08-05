@@ -62,8 +62,10 @@ class HNJobsSource(BaseJobSource):
         now_iso = datetime.now(timezone.utc).isoformat()
         ts = item.get("time", 0)
         posted_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
-        confidence = "high" if ts else "low"
-
+        # Confidence follows the RESULT, not the input. A present-but-
+        # unparseable value used to be stamped "high" purely because the
+        # field existed — certifying as trustworthy a date we could not read.
+        confidence = "high" if posted_at else "low"
         return Job(
             title=title,
             company=company,

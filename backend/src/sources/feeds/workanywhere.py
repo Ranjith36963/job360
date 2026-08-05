@@ -63,8 +63,10 @@ class WorkAnywhereSource(BaseJobSource):
 
             now_iso = datetime.now(timezone.utc).isoformat()
             posted_at = self._parse_rss_date(pub_date) if pub_date else None
-            confidence = "high" if pub_date else "low"
-
+            # Confidence follows the RESULT, not the input. A present-but-
+            # unparseable value used to be stamped "high" purely because the
+            # field existed — certifying as trustworthy a date we could not read.
+            confidence = "high" if posted_at else "low"
             jobs.append(Job(
                 title=title,
                 company=company,

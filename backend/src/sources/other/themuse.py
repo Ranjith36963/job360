@@ -5,13 +5,13 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.themuse")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 MAX_PAGES = 5
-
 
 class TheMuseSource(BaseJobSource):
     name = "themuse"
@@ -56,8 +56,7 @@ class TheMuseSource(BaseJobSource):
                 apply_url = refs.get("landing_page", "") if isinstance(refs, dict) else ""
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_pub = item.get("publication_date")
-                posted_at = raw_pub if raw_pub else None
-                confidence = "high" if raw_pub else "low"
+                posted_at, confidence = normalize_posted_at(raw_pub)
 
                 # Experience level from levels array
                 levels = item.get("levels", [])
