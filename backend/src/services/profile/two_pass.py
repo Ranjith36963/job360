@@ -17,6 +17,8 @@ imported at module top so tests can monkeypatch them by name.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 from typing import Any
@@ -56,6 +58,30 @@ async def _none() -> None:
     this keeps the call site readable instead of building the list conditionally.
     """
     return None
+
+
+def _input_hash(raw: Any) -> str:
+    """Stable fingerprint of one extraction input.
+
+    Accepts whatever the four inputs actually are — CV/LinkedIn text are strings,
+    ``github_repos_brief`` may be a list of dicts — so a non-string is serialised
+    with sorted keys to keep the digest stable across runs (Python dict order is
+    insertion-ordered, and a re-fetch could reorder it without the content
+    changing, which would look like a change and re-bill the user).
+    """
+    if not isinstance(raw, str):
+        raw = json.dumps(raw, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _already_read(cv: CVData, key: str, raw: Any) -> bool:
+    """True when a paid LLM pass has already absorbed this exact input.
+
+    The result of that pass is merged into ``cv``, so skipping the call loses
+    nothing — the data is already in the fields. Returns False for empty input
+    so the "no input" path stays the caller's existing ``if raw`` check.
+    """
+    return bool(raw) and cv.llm_input_hashes.get(key) == _input_hash(raw)
 
 
 def _merge_str_list(dst: list[str], src: list[str]) -> None:
@@ -196,6 +222,15 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     # different person's skills.
     cv.suggested_skills.clear()
 
+    # MUST be cleared with the fields it guards. The hash means "the LLM's
+    # reading of this input is already merged into the fields above" — and we
+    # just erased those fields. Leaving it would make re-uploading the SAME CV
+    # (a real thing users do after a bad parse) skip the LLM pass and keep the
+    # wiped, deterministic-only profile forever. Only the CV key: LinkedIn,
+    # GitHub and about_me data deliberately survives a CV swap, so their
+    # hashes must survive too.
+    cv.llm_input_hashes.pop("cv", None)
+
 
 def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     """Merge the CV-OWNED fields of an LLM result into the live ``cv``.
@@ -265,12 +300,44 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
             logger.warning("two_pass: %s LLM pass skipped: %s", label, e)
             return None
 
+    # ── Skip any pass whose input we have already paid to read ─────────
+    # Changing ONE preference re-runs this whole function, so without this an
+    # untouched CV is sent to a paid model again on every edit. The hash says
+    # the previous result is already merged into `cv`, so the call adds cost
+    # and latency and returns what we already have.
+    _inputs = {
+        "cv": cv.raw_text,
+        "linkedin": cv.linkedin_raw_text,
+        "github": cv.github_repos_brief,
+        "about_me": prefs.about_me,
+    }
+    _cached = {k: _already_read(cv, k, v) for k, v in _inputs.items()}
+    if any(_cached.values()):
+        logger.info(
+            "two_pass: reusing unchanged input(s) %s - skipping those LLM calls",
+            ", ".join(sorted(k for k, v in _cached.items() if v)),
+        )
+
     _llm_cv_res, _llm_li_res, _llm_gh_res, _llm_pr_res = await asyncio.gather(
-        _safe(llm_cv_fields_from_text(cv.raw_text), "CV") if cv.raw_text else _none(),
-        _safe(llm_linkedin_fields(cv.linkedin_raw_text), "LinkedIn") if cv.linkedin_raw_text else _none(),
-        _safe(llm_infer_github_skills(cv.github_repos_brief), "GitHub") if cv.github_repos_brief else _none(),
-        _safe(llm_infer_from_about_me(prefs.about_me), "about_me") if prefs.about_me else _none(),
+        _safe(llm_cv_fields_from_text(cv.raw_text), "CV")
+        if cv.raw_text and not _cached["cv"] else _none(),
+        _safe(llm_linkedin_fields(cv.linkedin_raw_text), "LinkedIn")
+        if cv.linkedin_raw_text and not _cached["linkedin"] else _none(),
+        _safe(llm_infer_github_skills(cv.github_repos_brief), "GitHub")
+        if cv.github_repos_brief and not _cached["github"] else _none(),
+        _safe(llm_infer_from_about_me(prefs.about_me), "about_me")
+        if prefs.about_me and not _cached["about_me"] else _none(),
     )
+
+    # Record ONLY what actually succeeded. `_safe` returns None on failure, so a
+    # provider outage leaves the hash unset and the next run retries — the
+    # alternative would silently freeze a half-extracted profile forever.
+    for _key, _res in (
+        ("cv", _llm_cv_res), ("linkedin", _llm_li_res),
+        ("github", _llm_gh_res), ("about_me", _llm_pr_res),
+    ):
+        if _res is not None:
+            cv.llm_input_hashes[_key] = _input_hash(_inputs[_key])
 
     # ── ① CV ── raw = cv.raw_text ──────────────────────────────────────
     if cv.raw_text:
