@@ -1,7 +1,14 @@
 # Job360 Project Status
 <!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
 
-## Current State: Post-Step-3 matcher batch merged; Step 4 (ops hardening) is next
+## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
+
+> **Freshest history:** `docs/IMPLEMENTATION_LOG.md` § "2026-08-05 — The funnel batch"
+> (PRs #224/#226/#227/#228/#229): bounded per-user candidate set (top-800), revived
+> title ranking (Spearman −0.04→+0.29 vs LLM oracle), job text for ~65% of the
+> catalog, user-feedback loop + learned preferences v1/v2, self-healing enrichment
+> cron, embedding convergence. Open: prod `SEMANTIC_ENABLED` env flip (owner),
+> linkedin scraper text.
 
 > **⚠️ THIS FILE HAS ROTTED — read `CLAUDE.md` first.** Verified 2026-08-03: it pointed at
 > `backend/src/services/profile/` and `backend/src/services/`, neither of which has existed since the
