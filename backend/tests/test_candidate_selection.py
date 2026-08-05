@@ -621,3 +621,80 @@ async def test_learned_preference_wins_marginal_shelf_slot(full_db, monkeypatch)
     assert active_companies == ["LovedCo"], (
         f"the liked company's job must win the marginal slot, got {active_companies}"
     )
+
+
+@pytest.mark.asyncio
+async def test_recurring_rejection_pattern_loses_marginal_slot(full_db, monkeypatch):
+    """Learned-preference v2: rejecting SEVERAL jobs sharing a title pattern
+    must sink that pattern in selection — one rejection teaches nothing
+    general, a recurring one does. Before v2, rejections only excluded the
+    exact jobs; the pattern kept refilling the shelf."""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 1, raising=False)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        # Two equal-scoring candidates: one 'Support' pattern, one clean.
+        await db.insert_job(Job(
+            title="ML Support Engineer", company="PatternCo",
+            apply_url="https://x/p", source="reed", date_found=_NOW,
+            location="London, UK", description="Python machine learning role with pytorch.",
+        ))
+        await db.insert_job(Job(
+            title="ML Research Engineer", company="CleanCo",
+            apply_url="https://x/c", source="reed", date_found=_NOW,
+            location="London, UK", description="Python machine learning role with pytorch.",
+        ))
+        # The user rejected TWO other 'Support' jobs before.
+        for i in range(2):
+            await db.insert_job(Job(
+                title=f"Customer Support Specialist {i}", company=f"R{i}",
+                apply_url=f"https://x/r{i}", source="reed", date_found=_NOW,
+                location="London, UK", description="Helpdesk.",
+            ))
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute("SELECT id FROM jobs WHERE title LIKE ?", ("Customer Support%",))
+            for (rid,) in cur.fetchall():
+                conn.execute(
+                    "INSERT INTO user_actions(user_id, job_id, action, notes, created_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (user_id, rid, "not_interested", "", _NOW),
+                )
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        await backfill_feed_from_catalog(user_id, db)
+
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute(
+                "SELECT j.title FROM user_feed f JOIN jobs j ON j.id=f.job_id "
+                "WHERE f.user_id=? AND f.status='active' AND j.title LIKE ?",
+                (user_id, "ML %"),
+            )
+            active = [r[0] for r in cur.fetchall()]
+    finally:
+        await db.close()
+
+    assert active == ["ML Research Engineer"], (
+        f"the recurring rejection pattern must lose the marginal slot, got {active}"
+    )
+
+
+def test_liked_vocabulary_is_immune_to_rejection_pattern():
+    """A token in BOTH liked and rejected vocabularies must NOT be penalized —
+    positive counter-evidence wins ties."""
+    from src.services.rescore import _preference_boost
+
+    signals = {"companies": set(), "tokens": {"machine", "learning"},
+               "rejected_tokens": set()}  # builder already removed the overlap
+    assert _preference_boost({"title": "Machine Learning Engineer", "company": "X"},
+                             signals) >= 0

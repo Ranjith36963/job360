@@ -95,36 +95,56 @@ async def _build_user_scorer(db: Any, profile: Any) -> Any:
 
 
 async def _load_preference_signals(db: Any, user_id: str) -> dict[str, set[str]]:
-    """Learned-preference v1 (2026-08-05): what the user's OWN actions teach us.
+    """Learned-preference weighting (v1 2026-08-05, v2 same day): what the
+    user's OWN actions teach us — BOTH directions.
 
-    Companies and title tokens of liked/applied jobs. Used as a SELECTION
-    boost — jobs resembling what the user chose get priority for the shelf's
-    last slots. Deliberately deterministic and explainable (no model): the
-    boost affects candidate MEMBERSHIP only, never the stored score, so the
+    Positive: companies and title tokens of liked/applied jobs.
+    Negative (v2): title tokens that RECUR across rejected jobs. One
+    rejection teaches nothing general (the exact job is already excluded);
+    a token appearing in >=2 rejected titles is a PATTERN the user keeps
+    saying no to. Tokens also present in the liked vocabulary are immune —
+    an ambivalent signal must never sink jobs the user demonstrably wants.
+
+    Used as SELECTION weighting only — deterministic, explainable (no
+    model), affects candidate MEMBERSHIP, never the stored score, so the
     dashboard ranking stays the raw scorer output.
     """
     import re as _re  # noqa: PLC0415
 
     cur = await db._db.execute(
-        "SELECT j.company, j.title FROM user_actions a JOIN jobs j ON j.id = a.job_id "
-        "WHERE a.user_id = ? AND a.action IN (?, ?)",
-        (user_id, "liked", "applied"),
+        "SELECT j.company, j.title, a.action FROM user_actions a "
+        "JOIN jobs j ON j.id = a.job_id WHERE a.user_id = ? AND a.action IN (?, ?, ?)",
+        (user_id, "liked", "applied", "not_interested"),
     )
     companies: set[str] = set()
     tokens: set[str] = set()
+    rejected_counts: dict[str, int] = {}
     for row in await cur.fetchall():
-        comp, title = (row[0] or ""), (row[1] or "")
+        comp, title, action = (row[0] or ""), (row[1] or ""), (row[2] or "")
+        title_words = {w for w in _re.findall(r"\w+", title.lower()) if len(w) > 2}
+        if action == "not_interested":
+            for w in title_words:
+                rejected_counts[w] = rejected_counts.get(w, 0) + 1
+            continue
         if comp.strip():
             companies.add(comp.strip().lower())
-        for w in _re.findall(r"\w+", title.lower()):
-            if len(w) > 2:
-                tokens.add(w)
-    return {"companies": companies, "tokens": tokens}
+        tokens |= title_words
+    # v2 — a rejection PATTERN needs recurrence (>=2 rejected titles) and no
+    # positive counter-evidence (liked vocabulary wins ties).
+    rejected_tokens = {
+        w for w, n in rejected_counts.items() if n >= 2 and w not in tokens
+    }
+    return {"companies": companies, "tokens": tokens, "rejected_tokens": rejected_tokens}
 
 
 def _preference_boost(row: dict[str, Any], signals: dict[str, set[str]]) -> int:
-    """Selection-priority boost from learned preferences. +8 same company as a
-    liked/applied job; +4 when >=2 title tokens overlap the liked vocabulary."""
+    """Selection-priority weighting from learned preferences.
+
+    +8 same company as a liked/applied job; +4 when >=2 title tokens overlap
+    the liked vocabulary; −6 when >=1 title token matches a recurring
+    rejection pattern (v2). The penalty is deliberately smaller than the
+    keyword scale so it re-orders the shelf's margin — it does not blacklist
+    (explicit rejection of the exact job already does that)."""
     import re as _re  # noqa: PLC0415
 
     boost = 0
@@ -133,6 +153,8 @@ def _preference_boost(row: dict[str, Any], signals: dict[str, set[str]]) -> int:
     title_tokens = set(_re.findall(r"\w+", (row.get("title") or "").lower()))
     if len(title_tokens & signals["tokens"]) >= 2:
         boost += 4
+    if title_tokens & signals.get("rejected_tokens", set()):
+        boost -= 6
     return boost
 
 
@@ -251,7 +273,7 @@ async def backfill_feed_from_catalog(
     # The boost affects MEMBERSHIP only — stored scores stay raw.
     if cap > 0 and len(scored) > cap:
         signals = await _load_preference_signals(db, user_id)
-        if signals["companies"] or signals["tokens"]:
+        if signals["companies"] or signals["tokens"] or signals["rejected_tokens"]:
             scored.sort(
                 key=lambda t: t[0] + _preference_boost(t[2], signals), reverse=True
             )
@@ -526,7 +548,7 @@ async def rescore_user_feed(
             # about shelf membership). cap=0 = legacy (all).
             if cap > 0 and len(scored_rows) > cap:
                 signals = await _load_preference_signals(db, user_id)
-                if signals["companies"] or signals["tokens"]:
+                if signals["companies"] or signals["tokens"] or signals["rejected_tokens"]:
                     scored_rows.sort(
                         key=lambda t: t[0] + _preference_boost(t[2], signals),
                         reverse=True,
