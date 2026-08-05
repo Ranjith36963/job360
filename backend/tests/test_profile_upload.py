@@ -457,7 +457,7 @@ class TestCapturedCvReplacesRatherThanBlends:
 
         profile = self._seeded_profile()
         with patch("src.api.routes.profile.extract_text", return_value="BRAND NEW CV TEXT"):
-            _capture_cv_raw(b"%PDF-1.4 fake", "new_cv.pdf", profile)
+            asyncio.run(_capture_cv_raw(b"%PDF-1.4 fake", "new_cv.pdf", profile))
 
         assert profile.cv_data.raw_text == "BRAND NEW CV TEXT"
         # The previous CV's extracted data must be GONE, not waiting to be
@@ -475,7 +475,7 @@ class TestCapturedCvReplacesRatherThanBlends:
 
         profile = self._seeded_profile()
         with pytest.raises(HTTPException) as exc:
-            _capture_cv_raw(b"x" * (10 * 1024 * 1024 + 1), "huge.pdf", profile)
+            asyncio.run(_capture_cv_raw(b"x" * (10 * 1024 * 1024 + 1), "huge.pdf", profile))
 
         assert exc.value.status_code == 413
         assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
@@ -489,7 +489,7 @@ class TestCapturedCvReplacesRatherThanBlends:
 
         profile = self._seeded_profile()
         with pytest.raises(HTTPException) as exc:
-            _capture_cv_raw(b"hello", "notes.txt", profile)
+            asyncio.run(_capture_cv_raw(b"hello", "notes.txt", profile))
 
         assert exc.value.status_code == 415
         assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
@@ -507,7 +507,7 @@ class TestCapturedCvReplacesRatherThanBlends:
         profile = self._seeded_profile()
         with patch("src.api.routes.profile.extract_text", return_value="   "):
             with pytest.raises(HTTPException) as exc:
-                _capture_cv_raw(b"%PDF-1.4 fake", "empty.pdf", profile)
+                asyncio.run(_capture_cv_raw(b"%PDF-1.4 fake", "empty.pdf", profile))
 
         assert exc.value.status_code == 503
         assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
