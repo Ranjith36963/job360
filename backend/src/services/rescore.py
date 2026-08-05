@@ -235,7 +235,7 @@ async def backfill_feed_from_catalog(
 
             ranked = sorted(selected, key=lambda t: t[0], reverse=True)
             to_enrich: list[Any] = []
-            for ms, jid, row in ranked:
+            for _ms, jid, row in ranked:
                 if len(to_enrich) >= ENRICHMENT_MAX_JOBS:
                     break
                 if await has_enrichment(db._db, jid):
