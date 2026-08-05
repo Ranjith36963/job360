@@ -94,6 +94,31 @@ async def _build_user_scorer(db: Any, profile: Any) -> Any:
     )
 
 
+async def _load_action_sets(db: Any, user_id: str) -> tuple[set[Any], set[Any]]:
+    """The user-feedback loop's read side (2026-08-05).
+
+    Returns ``(protected, rejected)`` job-id sets from ``user_actions``:
+      * ``protected`` — liked/applied jobs: user investment that must survive
+        any re-selection (same principle as the LLM-verdict guard).
+      * ``rejected`` — not_interested jobs: an explicit user NO that selection
+        must honour; before this, the reject button recorded a row the
+        candidate layer completely ignored — a dead lever.
+    """
+    cur = await db._db.execute(
+        "SELECT job_id, action FROM user_actions WHERE user_id = ?",
+        (user_id,),
+    )
+    protected: set[Any] = set()
+    rejected: set[Any] = set()
+    for row in await cur.fetchall():
+        jid, action = row[0], row[1]
+        if action == "not_interested":
+            rejected.add(jid)
+        elif action in ("liked", "applied"):
+            protected.add(jid)
+    return protected, rejected
+
+
 async def backfill_feed_from_catalog(
     user_id: str,
     db: Any,
@@ -172,6 +197,11 @@ async def backfill_feed_from_catalog(
             continue
         scored.append((ms, jid, row))
 
+    # The user-feedback loop: explicit actions steer the shelf.
+    protected_ids, rejected_ids = await _load_action_sets(db, user_id)
+    if rejected_ids:
+        scored = [t for t in scored if t[1] not in rejected_ids]
+
     # Phase 2 — candidate selection: keep only the user's top-`cap` jobs.
     # cap=0 disables (legacy flood). Ties broken by score order; stable sort
     # keeps catalog order within equal scores.
@@ -204,9 +234,13 @@ async def backfill_feed_from_catalog(
     evicted = 0
     if cap > 0 and selected:
         try:
+            # Liked/applied rows join the kept set (never staled, reactivated
+            # if stale); not_interested rows are force-evicted past every guard.
             evicted = await with_write_retry(
                 lambda: feed.apply_candidate_selection(
-                    user_id, {jid for _, jid, _ in selected}
+                    user_id,
+                    {jid for _, jid, _ in selected} | protected_ids,
+                    force_evict_ids=rejected_ids,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -431,6 +465,12 @@ async def rescore_user_feed(
                 if ms > 0 or jid in existing_feed_ids:
                     scored_rows.append((ms, jid, row))
 
+            # The user-feedback loop: rejected jobs never re-enter selection
+            # (and never reach the paid judge); liked/applied are protected.
+            protected_ids, rejected_ids = await _load_action_sets(db, user_id)
+            if rejected_ids:
+                scored_rows = [t for t in scored_rows if t[1] not in rejected_ids]
+
             # Phase 2 — selection: top-`cap` by score. cap=0 = legacy (all).
             if cap > 0 and len(scored_rows) > cap:
                 scored_rows.sort(key=lambda t: t[0], reverse=True)
@@ -486,7 +526,9 @@ async def rescore_user_feed(
                 try:
                     evicted = await with_write_retry(
                         lambda: feed.apply_candidate_selection(
-                            user_id, {jid for _, jid, _ in selected_rows}
+                            user_id,
+                            {jid for _, jid, _ in selected_rows} | protected_ids,
+                            force_evict_ids=rejected_ids,
                         )
                     )
                     if evicted:
