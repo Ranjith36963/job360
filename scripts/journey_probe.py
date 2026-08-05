@@ -329,6 +329,31 @@ def main() -> int:
         j.run("linkedin enrich", enrich_li,
               skip="" if li else "no LinkedIn PDF for this person")
 
+        # ── 3b. GitHub ────────────────────────────────────────────────────────
+        # Read the handle from the corpus. GitHub skills surface under
+        # skills_by_source['github'] (NOT a cv_detail field — checking the wrong
+        # place is why an earlier walk wrongly reported GitHub as producing 0).
+        gh_file = corpus / "github_urls" / f"{person}_github.txt"
+        gh_url = gh_file.read_text(encoding="utf-8").strip() if gh_file.exists() else ""
+
+        def enrich_gh(s: Step) -> None:
+            before = len((client.get("/api/profile").json().get("skills_by_source") or {}).get("github") or [])
+            r = client.post("/api/profile/github", data={"username": gh_url})
+            s.evidence["http"] = r.status_code
+            if r.status_code >= 400:
+                s.reason = f"GitHub enrich returned HTTP {r.status_code}."
+                return
+            time.sleep(75)  # GitHub fetch + LLM pass run in the background
+            sbs = client.get("/api/profile").json().get("skills_by_source") or {}
+            gained = len(sbs.get("github") or [])
+            s.evidence.update(github_skills=gained, was=before)
+            s.ok = gained > 0
+            if not s.ok:
+                s.reason = ("GitHub was accepted but contributed no skills — the fetch or "
+                            "the repo-skill inference produced nothing for this handle.")
+        j.run("github enrich", enrich_gh,
+              skip="" if gh_url else "no GitHub URL for this person")
+
         # ── 4. search ────────────────────────────────────────────────────────
         def search(s: Step) -> None:
             r = client.post("/api/search", json={}, timeout=600.0)
