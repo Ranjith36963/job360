@@ -837,9 +837,35 @@ async def run_search(
 
             # Insert new jobs (INSERT OR IGNORE returns rowcount=1 for actual inserts)
             new_jobs: list[Job] = []
+            # ONE POISON ROW MUST NOT KILL THE WHOLE SEARCH.
+            #
+            # 2026-07-27: both of a real user's searches aborted here. A
+            # HackerNews "Who's hiring" comment had been stored as title AND
+            # company, so (normalized_company, normalized_title) exceeded
+            # Postgres's 2,704-byte btree index limit and insert_job raised
+            # ProgramLimitExceeded. With no guard, that single row took down the
+            # entire run: his feed then received ZERO new rows for seven days
+            # while the catalog grew by ~2,800 jobs. He pressed Search twice,
+            # got a failure twice, and had no idea why.
+            #
+            # The rescore and backfill paths were given per-row guards after an
+            # earlier incident; this loop never was. Skipping one unstorable job
+            # costs that job; aborting costs every job AND the user's feed.
+            skipped = 0
             for job in unique_jobs:
-                if await db.insert_job(job):
-                    new_jobs.append(job)
+                try:
+                    if await db.insert_job(job):
+                        new_jobs.append(job)
+                except Exception as exc:  # noqa: BLE001 — never sink the whole run
+                    skipped += 1
+                    logger.error(
+                        "insert failed for %r @ %r (%s: %s) — skipping this job "
+                        "and continuing the run",
+                        (job.title or "")[:80], (job.company or "")[:60],
+                        type(exc).__name__, str(exc)[:200],
+                    )
+            if skipped:
+                logger.warning("%d job(s) could not be stored this run", skipped)
             await db.commit()
 
             new_jobs.sort(key=lambda j: (j.match_score, salary_in_range(j)), reverse=True)

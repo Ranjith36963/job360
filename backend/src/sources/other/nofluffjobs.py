@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.nofluffjobs")
 
@@ -13,7 +14,6 @@ _API_URLS = [
     "https://nofluffjobs.com/api/posting",
     "https://nofluffjobs.com/api/search/posting",
 ]
-
 
 class NoFluffJobsSource(BaseJobSource):
     name = "nofluffjobs"
@@ -74,8 +74,7 @@ class NoFluffJobsSource(BaseJobSource):
             # (listing refresh) and must not populate posted_at.
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_posted = item.get("posted")
-            posted_at = raw_posted if raw_posted else None
-            confidence = "high" if raw_posted else "low"
+            posted_at, confidence = normalize_posted_at(raw_posted)
 
             # Salary
             salary_obj = item.get("salary", {})

@@ -245,15 +245,15 @@ jobs:
           # login merely CONTAINING "github-actions".
           if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -qFx "github-actions[bot]"; then
             case "$issue_title" in
-              # "Loop 2 RED: " was REMOVED 2026-08-03. Auto-authorisation
-              # rests on one property: the issue body contains no
-              # model-generated and no attacker-supplied text. That prefix
-              # broke it — its body is `tail -40` of the LIVE pipeline log,
-              # i.e. text influenced by whatever any employer posts on a job
-              # board we scrape. Auto-authorising it would let third-party
-              # text start a WRITE-capable agent. The others are our own SQL
-              # counts and fixed strings, which is why they qualify.
-              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*) auto="yes" ;;
+              # Auto-authorisation rests on ONE property: the issue body contains
+              # no model-generated and no attacker-supplied text.
+              #   PRODUCT/ABSENCE/WATCHDOG/INVARIANT — bodies are our own SQL
+              #     counts and fixed strings. They qualify.
+              #   "Loop 2 RED:" was REMOVED 2026-08-03 — its body is `tail -40`
+              #     of the LIVE pipeline log, i.e. text influenced by whatever an
+              #     employer posts on a job board we scrape. Auto-authorising it
+              #     would let third-party text start a WRITE-capable agent.
+              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"INVARIANT: "*) auto="yes" ;;
             esac
           fi
 

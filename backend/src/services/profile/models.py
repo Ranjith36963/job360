@@ -28,6 +28,21 @@ class CVData:
     # blocks a save, it tells the product when a profile is too thin to match
     # anything so it can escalate instead of failing silently.
     extraction_score: dict[str, Any] = field(default_factory=dict)
+    # Which inputs the paid LLM passes have ALREADY read, as {input: sha256}.
+    # Keys: "cv", "linkedin", "github", "about_me".
+    #
+    # WHY. Every profile change re-runs the whole extraction, and each run makes
+    # a paid LLM call per input. Change one preference and we re-read an
+    # unchanged CV, again, at full price. The only guard was a blunt
+    # PROFILE_EXTRACT_MAX_PER_HOUR rate limit, which caps the bleeding rather
+    # than stopping it — and punishes the user with a 429 for our waste.
+    #
+    # We store the input's hash, NOT the LLM's output, because the output is
+    # already here: every pass merges into this same CVData. So an unchanged
+    # hash means "that call's result is already in these fields" and the call
+    # can simply be skipped. A hash is only recorded after a pass SUCCEEDS —
+    # otherwise one provider outage would permanently skip that input.
+    llm_input_hashes: dict[str, str] = field(default_factory=dict)
     # LinkedIn-sourced data
     linkedin_positions: list[dict[str, Any]] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)

@@ -713,12 +713,25 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def get_catalog_jobs_for_rescore(self, limit: int = 5000) -> list[dict[str, Any]]:
+    async def get_catalog_jobs_for_rescore(self, limit: int = 50000) -> list[dict[str, Any]]:
         """Return the most-recently-found jobs from the shared catalog for rescoring.
 
         Read-only. Returns a list of plain dicts with the columns that
         ``score_catalog_row`` (``src/services/rescore.py``) needs to reconstruct
         a ``Job`` for scoring. Respects ``limit`` so callers can cap memory use.
+
+        THE LIMIT MUST EXCEED THE CATALOG, or a "full re-score" silently is not
+        one. It was 5,000 while the catalog had grown to 6,457, so the oldest
+        1,457 jobs were never re-scored when a profile changed: 43 of one real
+        user's feed rows still carried scores computed on 2026-07-02 against a
+        profile he had since replaced. Those sit on a different scale from
+        everything around them, so they sort wrongly and mislead every threshold
+        that reads them — and the gap widened every single day.
+
+        purge_old_jobs() caps the catalog at 30 days of live postings, so 50,000
+        is far above any real size while still bounding memory if that ever
+        changes. The data-invariants detector alarms if the catalog approaches
+        it (`rescore_covers_whole_catalog`), so this cannot silently rot again.
         """
         cursor = await self._db.execute(
             "SELECT id, title, company, apply_url, source, date_found, location, "
@@ -1256,30 +1269,60 @@ class JobDatabase:
             out.append(d)
         return out
 
-    async def get_job_by_id_with_enrichment(self, job_id: int) -> dict[str, Any] | None:
+    async def get_job_by_id_with_enrichment(
+        self, job_id: int, user_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Same as :meth:`get_job_by_id` plus a LEFT JOIN to job_enrichment.
 
         C-1 fix: mirrors the staleness filter from
         :meth:`get_recent_jobs_with_enrichment` so a single-job lookup
         cannot surface a ghost-detected expired posting that the list
         path correctly hides.
+
+        BUT A JOB THE USER ALREADY ACTED ON IS THEIRS TO OPEN. When ``user_id``
+        is given, a job they applied to or acted on is returned even if it has
+        since gone stale.
+
+        Found 2026-08-03: a real user's own application (job 56, stage
+        "applied") could no longer be opened — clicking your own application and
+        getting "not found" reads as data loss, on the highest-intent object in
+        the product. Hiding a ghost from BROWSING is right; hiding a person's
+        own history from them is not, and staleness is a guess about the
+        employer, not a fact about the user's record.
         """
         # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 is a false positive here.
+        own = ""
+        params: tuple[Any, ...] = (job_id,)
+        if user_id:
+            own = (
+                " OR EXISTS (SELECT 1 FROM applications a "
+                "WHERE a.job_id = j.id AND a.user_id = ?)"
+                " OR EXISTS (SELECT 1 FROM user_actions ua "
+                "WHERE ua.job_id = j.id AND ua.user_id = ?)"
+            )
+            params = (job_id, user_id, user_id)
         sql = (
             f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS} "  # noqa: S608
             "FROM jobs j "
             "LEFT JOIN job_enrichment je ON je.job_id = j.id "
             "WHERE j.id = ? "
-            "AND (j.staleness_state IS NULL OR j.staleness_state = 'active')"
+            f"AND (j.staleness_state IS NULL OR j.staleness_state = 'active'{own})"
         )
         try:
-            cursor = await self._db.execute(sql, (job_id,))
+            cursor = await self._db.execute(sql, params)
         except pg.OperationalError:
             # Fallback for fresh DBs without migration 0008 — still apply
             # the staleness filter so the read path stays consistent.
+            fb_own = (
+                " OR EXISTS (SELECT 1 FROM applications a "
+                "WHERE a.job_id = jobs.id AND a.user_id = ?)"
+                " OR EXISTS (SELECT 1 FROM user_actions ua "
+                "WHERE ua.job_id = jobs.id AND ua.user_id = ?)"
+            ) if user_id else ""
             cursor = await self._db.execute(
-                "SELECT * FROM jobs WHERE id = ? " "AND (staleness_state IS NULL OR staleness_state = 'active')",
-                (job_id,),
+                "SELECT * FROM jobs WHERE id = ? "
+                f"AND (staleness_state IS NULL OR staleness_state = 'active'{fb_own})",
+                (job_id, user_id, user_id) if user_id else (job_id,),
             )
             row = await cursor.fetchone()
             if not row:

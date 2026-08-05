@@ -22,6 +22,15 @@ WHAT IT MEASURES (all layout-agnostic, all rule-#28 safe — no skill vocabulary
   COVERAGE   Of the document's own signal terms — capitalised words, acronyms,
              dotted/slashed tech tokens — how many reached the profile? Low
              coverage means we read the file and understood little of it.
+
+             **Coverage is a RELATIVE signal, never a target.** Measured on 7 real
+             CVs, roughly half of what it counts as "missed" is not a skill at all:
+             the person's own name, Leeds, United Kingdom, former employers, the
+             word "Awards". A profile that captured 100% of signal terms would be
+             full of cities and company names and would match jobs WORSE, not
+             better. So: compare coverage against the same CV over time, or across
+             the deterministic/LLM passes. Never drive it toward 1.0, and never let
+             a loop optimise it — that is a metric begging to be gamed into junk.
   PRECISION  Of what we extracted, how much is junk? Bare lowercase words,
              glued-together tokens, near-duplicates. High junk means we are
              padding the profile with noise that flattens every match.
@@ -175,9 +184,13 @@ def score_extraction(
         missed = sorted(signals - hit, key=len, reverse=True)
         s.missed_examples = missed[:10]
         if s.coverage < 0.25:
+            # Deliberately NOT "most of what they wrote was not understood". About
+            # half of what this counts as missed is a place, an employer or the
+            # person's own name — saying otherwise tells someone their good CV was
+            # unreadable, which is both false and discouraging.
             s.problems.append(
-                f"only {s.coverage*100:.0f}% of the document's own specific terms "
-                "reached the profile — most of what this person wrote was not understood"
+                f"only {s.coverage*100:.0f}% of the specific terms in this document "
+                "reached the profile — likely whole sections were not read"
             )
     else:
         s.coverage = 0.0

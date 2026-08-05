@@ -4,9 +4,9 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.arbeitnow")
-
 
 class ArbeitnowSource(BaseJobSource):
     name = "arbeitnow"
@@ -20,8 +20,8 @@ class ArbeitnowSource(BaseJobSource):
         for item in cast(dict[str, Any], data)["data"]:
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_created = item.get("created_at")
-            posted_at = raw_created if raw_created else None
-            confidence = "high" if raw_created else "low"
+            posted_at, confidence = normalize_posted_at(raw_created)
+
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("company_name", ""),

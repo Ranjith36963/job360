@@ -9,9 +9,9 @@ from src.core.settings import RATE_LIMITS, SOURCE_FETCH_TIMEOUT
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.reed")
-
 
 class ReedSource(BaseJobSource):
     name = "reed"
@@ -68,8 +68,8 @@ class ReedSource(BaseJobSource):
                 for item in cast(dict[str, Any], data)["results"]:
                     now_iso = datetime.now(timezone.utc).isoformat()
                     raw_date = item.get("date") or item.get("datePosted")
-                    posted_at = raw_date if raw_date else None
-                    confidence = "high" if raw_date else "low"
+                    posted_at, confidence = normalize_posted_at(raw_date)
+
                     jobs.append(Job(
                         title=item.get("jobTitle", ""),
                         company=item.get("employerName", ""),

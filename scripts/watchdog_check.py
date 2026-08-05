@@ -50,6 +50,7 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "external-health.yml": (36, "daily 07:10"),
     "product-health.yml": (36, "daily 08:30"),
     "user-journey.yml": (36, "daily 09:00"),
+    "data-invariants.yml": (14, "every 6h"),
     "dependabot-auto.yml": (36, "daily 09:30"),
     "pr-shepherd.yml": (36, "daily 09:45"),
     "checker-scorecard.yml": (9 * 24, "weekly Mon 10:00"),

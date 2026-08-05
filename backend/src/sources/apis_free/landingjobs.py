@@ -3,13 +3,13 @@ from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.landingjobs")
 
 # Country codes that count as UK/relevant
 _UK_CODES = {"GB", "UK"}
 _MAX_JOBS = 200
-
 
 class LandingJobsSource(BaseJobSource):
     name = "landingjobs"
@@ -61,8 +61,7 @@ class LandingJobsSource(BaseJobSource):
                 apply_url = item.get("url", "")
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_pub = item.get("published_at")
-                posted_at = raw_pub if raw_pub else None
-                confidence = "high" if raw_pub else "low"
+                posted_at, confidence = normalize_posted_at(raw_pub)
 
                 jobs.append(Job(
                     title=title,
