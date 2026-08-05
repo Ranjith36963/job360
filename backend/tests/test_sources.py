@@ -474,6 +474,47 @@ def test_greenhouse_parses_response():
     _run(_test())
 
 
+def test_greenhouse_requests_content_and_unescapes_it():
+    """Job-understanding fix (2026-08-05): the board list endpoint returns NO
+    `content` field unless `?content=true` is sent — 996 prod jobs (100% of the
+    greenhouse slice) had empty descriptions because of it. And the content that
+    DOES come back is HTML-entity-escaped (`&lt;p&gt;`), so tag-stripping must
+    unescape first or the text keeps literal `&lt;h4&gt;` noise. Verified against
+    the live API 2026-08-05 (deepmind board: absent without the param, 5,359
+    chars with it, escaped)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            captured: list[str] = []
+            with aioresponses() as m:
+                def _cb(url, **kwargs):
+                    captured.append(str(url))
+                    from aioresponses import CallbackResult
+                    return CallbackResult(payload={"jobs": [{
+                        "id": 7, "title": "Research Engineer",
+                        "location": {"name": "London, UK"},
+                        "absolute_url": "https://boards.greenhouse.io/x/jobs/7",
+                        # Entity-escaped HTML, exactly as the live API returns it.
+                        "content": "&lt;h4&gt;Snapshot&lt;/h4&gt;&lt;p&gt;Deep learning research role using PyTorch.&lt;/p&gt;",
+                    }]})
+                m.get(re.compile(r"https://boards-api\.greenhouse\.io/.*"), callback=_cb)
+                source = GreenhouseSource(session, companies=["deepmind"])
+                jobs = await source.fetch_jobs()
+
+            assert captured and "content=true" in captured[0], (
+                "the list request must ask for content, or every description is empty"
+            )
+            assert len(jobs) == 1
+            desc = jobs[0].description
+            assert "Deep learning research role" in desc
+            assert "&lt;" not in desc and "<" not in desc, (
+                "escaped HTML must be unescaped then stripped, not stored as noise"
+            )
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_lever_parses_response():
     async def _test():
         session = aiohttp.ClientSession()
@@ -869,6 +910,14 @@ DEVITJOBS_PAYLOAD = [
         "expLevel": "Senior",
         "jobUrl": "https://devitjobs.uk/jobs/revolut-ml-engineer",
         "publishedAt": "2024-01-15",
+        # Structured fields the live jobsLight API provides (verified
+        # 2026-08-05) — folded into the composed description.
+        "technologies": ["Python", "PyTorch", "AWS"],
+        "filterTags": ["machine-learning", "mlops"],
+        "techCategory": "Data Science",
+        "jobType": "Full-time",
+        "remoteType": "Hybrid",
+        "companySize": "1000+",
     },
     {
         "name": "Marketing Manager",
@@ -941,6 +990,18 @@ def test_devitjobs_parses_response():
                 assert jobs[0].salary_min == 65000
                 assert jobs[0].salary_max == 95000
                 assert jobs[0].visa_flag is True
+                # Job-understanding fix (2026-08-05): jobsLight has no prose
+                # description, but it DOES publish the tech stack + structured
+                # attributes — 3,041 prod jobs (42% of the catalog) had EMPTY
+                # descriptions while the API was handing us `technologies` all
+                # along. The composed description makes them skill-matchable.
+                desc = jobs[0].description
+                assert "Python" in desc and "PyTorch" in desc, (
+                    "the technologies field must reach the description"
+                )
+                assert "machine learning" in desc or "machine-learning" in desc
+                assert "Hybrid" in desc
+                assert "Visa sponsorship" in desc
         finally:
             await session.close()
     _run(_test())

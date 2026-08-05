@@ -54,10 +54,42 @@ class DevITJobsSource(BaseJobSource):
             visa_flag = bool(item.get("hasVisaSponsorship", False))
             exp_level = item.get("expLevel", "")
 
+            # Job-understanding fix (2026-08-05): jobsLight has NO prose
+            # description — 3,041 prod jobs (42% of the whole catalog, our
+            # largest source) sat with EMPTY description text, unmatchable by
+            # the skill scorer and unreadable by enrichment/embeddings. But
+            # the API publishes the tech stack + structured attributes on
+            # every row (verified live: `technologies`, `filterTags`,
+            # `techCategory`, `jobType`, `remoteType`, `companySize`).
+            # Compose them into an honest structured description — API facts
+            # verbatim, nothing fabricated.
+            desc_bits: list[str] = []
+            techs = [str(t) for t in (item.get("technologies") or []) if t]
+            if techs:
+                desc_bits.append("Technologies: " + ", ".join(techs))
+            tags = [str(t).replace("-", " ") for t in (item.get("filterTags") or []) if t]
+            if tags:
+                desc_bits.append("Tags: " + ", ".join(tags))
+            for label, key in (
+                ("Tech category", "techCategory"),
+                ("Category", "metaCategory"),
+                ("Job type", "jobType"),
+                ("Workplace", "remoteType"),
+                ("Experience level", "expLevel"),
+                ("Company size", "companySize"),
+            ):
+                val = item.get(key)
+                if val:
+                    desc_bits.append(f"{label}: {val}")
+            if visa_flag:
+                desc_bits.append("Visa sponsorship available")
+            description = ". ".join(desc_bits)
+
             jobs.append(Job(
                 title=title,
                 company=company,
                 location=location,
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
