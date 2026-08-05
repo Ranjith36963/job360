@@ -137,7 +137,7 @@ class Journey:
 DEFAULT_BENCHMARK: dict[str, dict[str, Any]] = {
     # stage -> {min_<evidence key>: value, max_ms: value}
     "cv upload + extraction": {"min_skills": 15, "min_titles": 1, "max_ms": 120_000},
-    "linkedin enrich": {"min_gained": 1, "max_ms": 90_000},
+    "linkedin enrich": {"max_ms": 90_000},  # no min: a rich CV makes LinkedIn redundant
     "search": {"min_sources_returning": 8, "max_ms": 300_000},
     "feed written": {"min_feed_rows": 20, "max_ms": 30_000},
     "dashboard read": {"min_visible": 1, "max_ms": 15_000},
@@ -310,13 +310,22 @@ def main() -> int:
                 return
             after = (client.get("/api/profile").json() or {}).get("cv_detail") or {}
             a_sk, a_ro = len(after.get("skills") or []), len(after.get("job_titles") or [])
+            positions = len(after.get("linkedin_positions") or [])
+            li_only = len(after.get("linkedin_skills") or [])
             gained = (a_sk - b_sk) + (a_ro - b_ro)
             s.evidence.update(gained=gained, skills=a_sk, roles=a_ro,
-                              li_only_skills=len(after.get("linkedin_skills") or []))
-            s.ok = gained > 0
+                              li_only_skills=li_only, li_positions=positions)
+            # The file did SOMETHING if it produced positions, LinkedIn-only
+            # skills, or grew the merged profile. "gained=0 merged" alone is NOT
+            # a failure: a rich CV legitimately makes LinkedIn redundant on
+            # skills — measured on a 130-skill CV whose LinkedIn's 3 skills were
+            # all already present. Failing that would punish a good CV.
+            did_something = gained > 0 or li_only > 0 or positions > 0
+            s.ok = did_something
             if not s.ok:
-                s.reason = ("LinkedIn was accepted but the profile gained NOTHING — no new "
-                            "skill and no new role. The user uploaded a file for nothing.")
+                s.reason = ("LinkedIn was accepted but produced NO positions, NO "
+                            "LinkedIn-only skills, and grew the profile by nothing — "
+                            "the parse extracted zero usable data from the file.")
         j.run("linkedin enrich", enrich_li,
               skip="" if li else "no LinkedIn PDF for this person")
 
