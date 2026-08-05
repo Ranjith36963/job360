@@ -131,7 +131,10 @@ def test_a_failed_pass_is_retried_not_cached():
     assert "cv" not in p.cv_data.llm_input_hashes, "a failure was cached"
 
     _run(p, c)
-    assert c.cv == 2, "a failed CV pass was never retried"
+    # 3 = run-1 initial (fail) + run-1 sequential in-run retry (fail) + run-2
+    # (succeeds). The in-run retry adds the middle call; the point stands: a
+    # failure is not cached, it is retried, and the eventual success lands.
+    assert c.cv == 3, "a failed CV pass was never retried across runs"
     assert "Epic" in p.cv_data.skills, "the retry's result never landed"
 
 
@@ -220,9 +223,12 @@ def test_a_soft_empty_pass_is_not_frozen_by_the_cache():
          patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
          patch.object(llm_curate, "llm_merge_duplicates", _pass):
         asyncio.run(tp.run_two_pass_extraction(p))
-        assert "linkedin" not in p.cv_data.llm_input_hashes, \
-            "an empty LinkedIn pass was cached — it will now be frozen forever"
-        asyncio.run(tp.run_two_pass_extraction(p))
 
-    assert calls["n"] == 2, "the empty pass was not retried — it was frozen"
+    # The concurrent pass returned {} first; the SEQUENTIAL in-run retry then
+    # recovered the real data. So the profile has its positions after ONE
+    # upload, and the now-non-empty result is correctly cached. This is strictly
+    # better than the old "don't cache, hope a later upload retries" behaviour.
+    assert calls["n"] == 2, "the empty pass was not retried in-run"
     assert p.cv_data.linkedin_positions, "the retry's positions never landed"
+    assert "linkedin" in p.cv_data.llm_input_hashes, \
+        "a recovered, non-empty pass should be cached"

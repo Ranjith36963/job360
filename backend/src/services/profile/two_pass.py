@@ -353,6 +353,34 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         if prefs.about_me and not _cached["about_me"] else _none(),
     )
 
+    # RETRY A SOFT-EMPTY PASS ONCE, SEQUENTIALLY.
+    #
+    # The four passes above run concurrently in one gather. On free-tier keys
+    # that means up to four simultaneous LLM calls, and the providers
+    # rate-limit: one call gets a valid but EMPTY answer while the same input
+    # extracts fine when it runs alone (measured on Rohith — 0 positions via the
+    # concurrent API path, 7 in isolation). So any pass that RAN but produced no
+    # usable data is retried here one at a time, with no concurrent contention.
+    # Bounded: at most one extra call per empty input, and only when the input
+    # was non-empty and not cached.
+    _retryable = [
+        ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
+        ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
+        ("github", cv.github_repos_brief, lambda: llm_infer_github_skills(cv.github_repos_brief)),
+        ("about_me", prefs.about_me, lambda: llm_infer_from_about_me(prefs.about_me)),
+    ]
+    _results = {"cv": _llm_cv_res, "linkedin": _llm_li_res,
+                "github": _llm_gh_res, "about_me": _llm_pr_res}
+    for _k, _raw, _call in _retryable:
+        if _raw and not _cached[_k] and not _pass_produced_data(_k, _results[_k]):
+            retried = await _safe(_call(), f"{_k} (retry)")
+            if _pass_produced_data(_k, retried):
+                logger.info("two_pass: %s pass was empty under load — sequential "
+                            "retry recovered it", _k)
+                _results[_k] = retried
+    _llm_cv_res, _llm_li_res = _results["cv"], _results["linkedin"]
+    _llm_gh_res, _llm_pr_res = _results["github"], _results["about_me"]
+
     # Record ONLY a pass that PRODUCED USABLE DATA, not merely one that did not
     # raise.
     #
