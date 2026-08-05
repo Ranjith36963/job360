@@ -461,3 +461,99 @@ async def test_backfill_never_enriches_when_e2_off(full_db, monkeypatch):
         await db.close()
 
     assert called["n"] == 0, "E2 off must mean zero enrichment calls"
+
+
+# ── the user-feedback loop (USER-understanding: actions steer the shelf) ─────
+
+
+@pytest.mark.asyncio
+async def test_not_interested_jobs_are_excluded_from_selection(full_db, monkeypatch):
+    """A job the user explicitly rejected must never be selected again — even
+    when it out-scores everything. Before this, 'not_interested' was recorded
+    but the candidate layer ignored it: the reject button was a dead lever."""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 2, raising=False)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        await _seed_catalog(db, n_relevant=3, n_junk=0)
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute("SELECT id FROM jobs WHERE title LIKE 'ML Engineer%' ORDER BY id LIMIT 1")
+            rejected_id = cur.fetchone()[0]
+            conn.execute(
+                "INSERT INTO user_actions(user_id, job_id, action, notes, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (user_id, rejected_id, "not_interested", "", _NOW),
+            )
+            # It also has a lingering active feed row from before the reject.
+            conn.execute(
+                "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
+                "VALUES (?,?,?,?,'active',?,?)",
+                (user_id, rejected_id, 60, "older", _NOW, _NOW),
+            )
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        await backfill_feed_from_catalog(user_id, db)
+    finally:
+        await db.close()
+
+    rows = dict((jid, status) for jid, status, _ in _feed_rows(full_db, user_id))
+    assert rows.get(rejected_id) == "stale", (
+        "a not_interested job must be evicted, not re-offered"
+    )
+
+
+@pytest.mark.asyncio
+async def test_liked_and_applied_jobs_survive_eviction(full_db, monkeypatch):
+    """Jobs the user invested in (liked/applied) must never be evicted by a
+    re-selection, even when their score falls outside the top-N — mirroring
+    the LLM-verdict protection: user signal outranks keyword re-ranks."""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 1, raising=False)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        await _seed_catalog(db, n_relevant=2, n_junk=1)
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute("SELECT id FROM jobs WHERE title LIKE 'Florist%'")
+            liked_junk_id = cur.fetchone()[0]
+            conn.execute(
+                "INSERT INTO user_actions(user_id, job_id, action, notes, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (user_id, liked_junk_id, "liked", "", _NOW),
+            )
+            conn.execute(
+                "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
+                "VALUES (?,?,?,?,'active',?,?)",
+                (user_id, liked_junk_id, 12, "older", _NOW, _NOW),
+            )
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        await backfill_feed_from_catalog(user_id, db)
+    finally:
+        await db.close()
+
+    rows = dict((jid, status) for jid, status, _ in _feed_rows(full_db, user_id))
+    assert rows[liked_junk_id] == "active", (
+        "a liked/applied job was evicted — user investment must survive re-selection"
+    )
