@@ -212,6 +212,12 @@ PROFILE_EXTRACT_MAX_PER_HOUR = int(os.getenv("PROFILE_EXTRACT_MAX_PER_HOUR", "12
 # When false (default), embeddings + ChromaDB + ESCO normalisation all skip.
 # When true, callers that check this flag activate the semantic retrieval path.
 SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+# Convergence backfill (2026-08-05): each pipeline run ALSO embeds up to this
+# many EXISTING catalog jobs that never got a vector, so embedding coverage
+# converges to 100% through ordinary searches — no manual sweep on the prod
+# box needed. ~50ms/job on CPU => 300 ≈ 15s inside a background search task.
+# 0 disables. Only active when SEMANTIC_ENABLED is on (rule #18).
+EMBED_BACKFILL_PER_RUN = int(os.getenv("EMBED_BACKFILL_PER_RUN", "300"))
 
 
 def _env_flag(name: str, default: bool) -> bool:
