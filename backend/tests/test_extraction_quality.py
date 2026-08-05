@@ -103,6 +103,45 @@ def test_missing_certifications_are_reported_when_the_cv_mentions_them():
     assert any("certification" in p.lower() for p in s.problems)
 
 
+def test_coverage_is_not_punished_for_places_employers_and_names():
+    """A CV thick with proper nouns must not be graded as a failed extraction.
+
+    MEASURED, on 7 real CVs: about half of what coverage counts as "missed" is
+    not a skill at all — the person's own name, Leeds, United Kingdom, General
+    Motors, the word "Awards". Coverage therefore has a practical ceiling well
+    below 1.0, and this test exists to stop anyone (a future session, or a loop
+    told to "improve extraction") from chasing it by stuffing employers and
+    cities into the skills list. That would raise the number and RUIN matching.
+
+    Here every genuine skill was captured. The verdict must not be "broken".
+    """
+    noun_heavy_cv = """
+    Priya Raman
+    London, United Kingdom
+    EXPERIENCE
+    Structural Engineer, Arup Group, Manchester
+    Previously at Balfour Beatty and Laing O'Rourke, Birmingham.
+    Chartered with the Institution of Civil Engineers.
+    Delivered designs in Revit and Tekla to Eurocode 2 and BS 5950.
+    EDUCATION
+    University of Leeds, Yorkshire
+    """
+    s = score_extraction(
+        noun_heavy_cv,
+        ["Revit", "Tekla", "Eurocode 2", "BS 5950", "Structural Design"],
+        job_titles=["Structural Engineer"],
+        summary="Chartered structural engineer.",
+        certifications=["Institution of Civil Engineers"],
+    )
+    # Every real skill in the document was extracted, so this must not read as a
+    # failure — even though coverage is dragged down by ~10 place/employer names.
+    assert s.verdict != "broken", (
+        f"a complete extraction was graded broken by proper-noun drag: {s.as_dict()}"
+    )
+    assert s.precision == 1.0, "no junk was extracted, precision must be perfect"
+    assert s.completeness == 1.0, "all four matcher-critical fields were filled"
+
+
 def test_empty_extraction_is_broken_not_merely_weak():
     s = score_extraction(NURSE_CV, [])
     assert s.verdict == "broken"
