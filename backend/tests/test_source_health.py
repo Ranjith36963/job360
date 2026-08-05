@@ -263,3 +263,30 @@ def test_source_health_results_ordered_by_priority(client, temp_db):
     # Alpha within tier: greenhouse < reed
     ok_names = [s["source"] for s in body["sources"] if s["health"] == "ok"]
     assert ok_names == ["greenhouse", "reed"]
+
+
+def test_per_source_duration_is_stored_in_seconds_not_milliseconds():
+    """A source's fetch duration must be recorded in SECONDS, consistent with
+    total_duration and the un-suffixed field name.
+
+    Found by the deep journey walk 2026-08-05: it was stored in milliseconds, so
+    the source-health endpoint reported workday=212391s (59 hours) for a search
+    that finishes in ~5 minutes. 212391 ms is 212 s — the real figure. Verified
+    corrupt in production too. This pins the unit so a source that ran for a
+    plausible time never round-trips as a nonsense duration again.
+    """
+    import re
+    from pathlib import Path
+
+    main_src = (Path(__file__).resolve().parents[1] / "src" / "main.py").read_text(encoding="utf-8")
+    # Grab the whole finally-block that computes and stores the duration, so the
+    # nanosecond→second division (on the line above the store) is in scope.
+    block = re.search(r"finally:(.*?)per_source_duration\[src\.name\] = [^\n]+", main_src, re.S)
+    assert block, "the per_source_duration write moved — re-point this test"
+    body = block.group(0)
+    # It must divide nanoseconds by 1e9 (seconds), NOT by 1e6 (milliseconds).
+    assert "1_000_000_000" in body or "1e9" in body, (
+        "per_source_duration is not converted to seconds — a millisecond value "
+        "read as seconds reports hours-long fake latency"
+    )
+    assert "// 1_000_000)" not in body, "still storing milliseconds"

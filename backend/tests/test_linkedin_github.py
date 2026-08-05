@@ -620,6 +620,7 @@ class TestFetchGitHubProfile:
 
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
 
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 2
@@ -645,6 +646,7 @@ class TestFetchGitHubProfile:
 
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
 
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 1
@@ -659,6 +661,7 @@ class TestFetchGitHubProfile:
 
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
 
         result = await fetch_github_profile("nonexistent", session=session)
         assert result["repositories"] == []
@@ -673,6 +676,7 @@ class TestFetchGitHubProfile:
 
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
 
         result = await fetch_github_profile("testuser", session=session)
         assert result["repositories"] == []
@@ -815,6 +819,7 @@ class TestGitHubErrors:
             raise asyncio.TimeoutError("Timed out")
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
         result = await fetch_github_profile("testuser", session=session)
         assert result["repositories"] == []
         assert result["skills_inferred"] == []
@@ -841,6 +846,7 @@ class TestGitHubErrors:
 
         session = AsyncMock()
         session.get = MagicMock(side_effect=lambda url, **kw: _async_context(mock_get(url, **kw)))
+        session.post = MagicMock(side_effect=lambda *a, **kw: _async_context(_pinned_404()))
         result = await fetch_github_profile("testuser", session=session)
         assert len(result["repositories"]) == 2
         assert "Python" in result["skills_inferred"]
@@ -914,3 +920,11 @@ class _async_context:
 
     async def __aexit__(self, *args):
         pass
+
+
+async def _pinned_404():
+    """A 404 response for the GraphQL pinned-repos POST, so ``_fetch_pinned``
+    no-ops cleanly on the mock session (no dangling coroutine warning)."""
+    resp = AsyncMock()
+    resp.status = 404
+    return resp

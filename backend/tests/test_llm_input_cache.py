@@ -55,7 +55,11 @@ def _run(profile: UserProfile, counter: _Counter, *, cv_fails: bool = False) -> 
 
     async def fake_li(text, *a, **kw):
         counter.linkedin += 1
-        return {}
+        # A REAL successful LinkedIn pass returns usable data. Returning {} here
+        # modelled "the call succeeded but produced nothing", which the
+        # soft-failure-cache fix now (correctly) refuses to cache — so the stub
+        # must produce data or the cache legitimately keeps retrying it.
+        return {"skills": ["Triage"], "positions": [{"title": "Nurse", "company": "NHS"}]}
 
     async def fake_gh(brief, *a, **kw):
         counter.github += 1
@@ -127,7 +131,10 @@ def test_a_failed_pass_is_retried_not_cached():
     assert "cv" not in p.cv_data.llm_input_hashes, "a failure was cached"
 
     _run(p, c)
-    assert c.cv == 2, "a failed CV pass was never retried"
+    # 3 = run-1 initial (fail) + run-1 sequential in-run retry (fail) + run-2
+    # (succeeds). The in-run retry adds the middle call; the point stands: a
+    # failure is not cached, it is retried, and the eventual success lands.
+    assert c.cv == 3, "a failed CV pass was never retried across runs"
     assert "Epic" in p.cv_data.skills, "the retry's result never landed"
 
 
@@ -177,3 +184,51 @@ def test_reordered_github_data_is_not_mistaken_for_a_change():
     x = tp._input_hash([{"name": "a", "lang": "Py"}])
     y = tp._input_hash([{"lang": "Py", "name": "a"}])
     assert x == y, "dict key order must not read as a content change"
+
+
+def test_a_soft_empty_pass_is_not_frozen_by_the_cache():
+    """THE ROHITH BUG, found by the journey simulation 2026-08-05.
+
+    A rate-limited free-tier provider can return a valid but EMPTY result
+    (`{"positions": [], "skills": []}`) without raising. The cache used to
+    record that as a success and skip re-extraction forever — so a profile
+    that momentarily failed extraction was frozen with zero LinkedIn data,
+    while the LLM extracted 7 positions fine when retried in isolation.
+
+    An empty result from a non-empty input must NOT be cached: it is exactly
+    the case you most want to retry.
+    """
+    calls = {"n": 0}
+
+    async def li_empty_then_full(text, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {}  # soft failure: valid response, no data
+        return {"skills": ["Triage"], "positions": [{"title": "Nurse", "company": "NHS"}]}
+
+    async def _noop(*a, **kw):
+        return CVData()
+
+    async def _noop_list(*a, **kw):
+        return []
+
+    async def _pass(items, *a, **kw):
+        return items
+
+    p = _profile(linkedin_raw_text="Top Skills\nTriage\n")
+    with patch.object(tp, "llm_cv_fields_from_text", _noop), \
+         patch.object(tp, "llm_linkedin_fields", li_empty_then_full), \
+         patch.object(tp, "llm_infer_github_skills", _noop_list), \
+         patch.object(tp, "llm_infer_from_about_me", _noop_list), \
+         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
+         patch.object(llm_curate, "llm_merge_duplicates", _pass):
+        asyncio.run(tp.run_two_pass_extraction(p))
+
+    # The concurrent pass returned {} first; the SEQUENTIAL in-run retry then
+    # recovered the real data. So the profile has its positions after ONE
+    # upload, and the now-non-empty result is correctly cached. This is strictly
+    # better than the old "don't cache, hope a later upload retries" behaviour.
+    assert calls["n"] == 2, "the empty pass was not retried in-run"
+    assert p.cv_data.linkedin_positions, "the retry's positions never landed"
+    assert "linkedin" in p.cv_data.llm_input_hashes, \
+        "a recovered, non-empty pass should be cached"

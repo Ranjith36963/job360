@@ -74,6 +74,30 @@ def _input_hash(raw: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _pass_produced_data(key: str, res: Any) -> bool:
+    """Did an LLM pass return anything worth caching?
+
+    A pass that returned an empty result from a NON-empty input is almost always
+    a soft failure (a rate-limited provider answering with `{}` instead of
+    raising), and caching it freezes that emptiness forever. So only a pass that
+    yielded usable data records its hash; an empty one re-runs next time.
+
+    Shapes differ per input: the CV pass returns a ``CVData``; the others return
+    dicts or lists. This reads the fields that actually matter for each.
+    """
+    if res is None:
+        return False
+    if key == "cv":
+        # llm_cv_fields_from_text returns a CVData; skills OR titles is enough.
+        return bool(getattr(res, "skills", None) or getattr(res, "job_titles", None))
+    if key == "linkedin":
+        # A dict of {skills, positions, education, certifications}.
+        d = res if isinstance(res, dict) else {}
+        return bool(d.get("skills") or d.get("positions") or d.get("education"))
+    # github / about_me return a list[str] of inferred skills.
+    return bool(res)
+
+
 def _already_read(cv: CVData, key: str, raw: Any) -> bool:
     """True when a paid LLM pass has already absorbed this exact input.
 
@@ -308,7 +332,14 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     _inputs = {
         "cv": cv.raw_text,
         "linkedin": cv.linkedin_raw_text,
-        "github": cv.github_repos_brief,
+        # GitHub input is the repo briefs (which now carry README excerpts) PLUS
+        # the self-authored bio + profile README. Any of the three changing must
+        # re-trigger the pass, so all three fold into the one cache key.
+        "github": {
+            "repos": cv.github_repos_brief,
+            "bio": cv.github_bio,
+            "readme": cv.github_profile_readme,
+        },
         "about_me": prefs.about_me,
     }
     _cached = {k: _already_read(cv, k, v) for k, v in _inputs.items()}
@@ -318,25 +349,75 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
             ", ".join(sorted(k for k, v in _cached.items() if v)),
         )
 
+    # The GitHub pass now has input when EITHER the repo briefs OR the
+    # self-authored bio / profile README are present.
+    _has_github = bool(cv.github_repos_brief or cv.github_bio or cv.github_profile_readme)
+
     _llm_cv_res, _llm_li_res, _llm_gh_res, _llm_pr_res = await asyncio.gather(
         _safe(llm_cv_fields_from_text(cv.raw_text), "CV")
         if cv.raw_text and not _cached["cv"] else _none(),
         _safe(llm_linkedin_fields(cv.linkedin_raw_text), "LinkedIn")
         if cv.linkedin_raw_text and not _cached["linkedin"] else _none(),
-        _safe(llm_infer_github_skills(cv.github_repos_brief), "GitHub")
-        if cv.github_repos_brief and not _cached["github"] else _none(),
+        _safe(llm_infer_github_skills(
+            cv.github_repos_brief, bio=cv.github_bio,
+            profile_readme=cv.github_profile_readme), "GitHub")
+        if _has_github and not _cached["github"] else _none(),
         _safe(llm_infer_from_about_me(prefs.about_me), "about_me")
         if prefs.about_me and not _cached["about_me"] else _none(),
     )
 
-    # Record ONLY what actually succeeded. `_safe` returns None on failure, so a
-    # provider outage leaves the hash unset and the next run retries — the
-    # alternative would silently freeze a half-extracted profile forever.
+    # RETRY A SOFT-EMPTY PASS ONCE, SEQUENTIALLY.
+    #
+    # The four passes above run concurrently in one gather. On free-tier keys
+    # that means up to four simultaneous LLM calls, and the providers
+    # rate-limit: one call gets a valid but EMPTY answer while the same input
+    # extracts fine when it runs alone (measured on Rohith — 0 positions via the
+    # concurrent API path, 7 in isolation). So any pass that RAN but produced no
+    # usable data is retried here one at a time, with no concurrent contention.
+    # Bounded: at most one extra call per empty input, and only when the input
+    # was non-empty and not cached.
+    _retryable = [
+        ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
+        ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
+        ("github", _has_github, lambda: llm_infer_github_skills(
+            cv.github_repos_brief, bio=cv.github_bio,
+            profile_readme=cv.github_profile_readme)),
+        ("about_me", prefs.about_me, lambda: llm_infer_from_about_me(prefs.about_me)),
+    ]
+    _results = {"cv": _llm_cv_res, "linkedin": _llm_li_res,
+                "github": _llm_gh_res, "about_me": _llm_pr_res}
+    for _k, _raw, _call in _retryable:
+        if _raw and not _cached[_k] and not _pass_produced_data(_k, _results[_k]):
+            retried = await _safe(_call(), f"{_k} (retry)")
+            if _pass_produced_data(_k, retried):
+                logger.info("two_pass: %s pass was empty under load — sequential "
+                            "retry recovered it", _k)
+                _results[_k] = retried
+    _llm_cv_res, _llm_li_res = _results["cv"], _results["linkedin"]
+    _llm_gh_res, _llm_pr_res = _results["github"], _results["about_me"]
+
+    # Record ONLY a pass that PRODUCED USABLE DATA, not merely one that did not
+    # raise.
+    #
+    # THE BUG THIS FIXES (found by the journey simulation 2026-08-05). `_safe`
+    # returns None only on an EXCEPTION. But a rate-limited free-tier provider
+    # often returns a valid, EMPTY result — `{"positions": [], "skills": []}` —
+    # without raising. The old check (`_res is not None`) recorded that empty
+    # result's hash as "done", so the cache then skipped re-extraction FOREVER,
+    # freezing a profile with zero positions and zero LinkedIn skills. Measured
+    # on Rohith: the LLM extracts 7 positions in isolation, but his stored
+    # profile had 0, and every re-upload logged "reusing unchanged linkedin —
+    # skipping" and kept the empty result. A soft failure is exactly the case
+    # you MOST want to retry, and it was the one case being cached.
+    #
+    # So the hash is recorded only when the pass yielded something worth keeping.
+    # An input that genuinely contains nothing will re-run cheaply next time —
+    # far better than freezing a broken extraction.
     for _key, _res in (
         ("cv", _llm_cv_res), ("linkedin", _llm_li_res),
         ("github", _llm_gh_res), ("about_me", _llm_pr_res),
     ):
-        if _res is not None:
+        if _res is not None and _pass_produced_data(_key, _res):
             cv.llm_input_hashes[_key] = _input_hash(_inputs[_key])
 
     # ── ① CV ── raw = cv.raw_text ──────────────────────────────────────

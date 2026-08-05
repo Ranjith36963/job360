@@ -702,7 +702,7 @@ async def run_search(
             # `source_timer` populates `t.duration_ms` after the call returns;
             # we record the wall-clock duration AND any raised exception into
             # two dicts that we persist to run_log at end-of-run.
-            per_source_duration: dict[str, int] = {}
+            per_source_duration: dict[str, float] = {}
             per_source_errors: dict[str, int] = {}
 
             def _instrument(src: BaseJobSource) -> None:
@@ -717,8 +717,19 @@ async def run_search(
                         per_source_errors[src.name] = per_source_errors.get(src.name, 0) + 1
                         raise
                     finally:
-                        elapsed_ms = max(0, (time.perf_counter_ns() - started_ns) // 1_000_000)
-                        per_source_duration[src.name] = int(elapsed_ms)
+                        # Store SECONDS, not milliseconds.
+                        #
+                        # This column was written in ms while `total_duration`
+                        # (below) and the field's own un-suffixed name are
+                        # SECONDS, so every consumer read ms as seconds. Found by
+                        # the deep journey walk 2026-08-05: the source-health
+                        # endpoint reported `workday=212391s` — 59 HOURS — for a
+                        # search that finishes in ~5 minutes. 212391 ms is 212 s,
+                        # which is the real number. Verified corrupt in prod too,
+                        # so any monitoring keyed on per-source latency was acting
+                        # on garbage. Now consistent with total_duration.
+                        elapsed_s = max(0.0, (time.perf_counter_ns() - started_ns) / 1_000_000_000)
+                        per_source_duration[src.name] = round(elapsed_s, 2)
 
                 src.fetch_jobs = _timed_fetch  # type: ignore[method-assign]
 

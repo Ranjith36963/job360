@@ -137,7 +137,7 @@ class Journey:
 DEFAULT_BENCHMARK: dict[str, dict[str, Any]] = {
     # stage -> {min_<evidence key>: value, max_ms: value}
     "cv upload + extraction": {"min_skills": 15, "min_titles": 1, "max_ms": 120_000},
-    "linkedin enrich": {"min_gained": 1, "max_ms": 90_000},
+    "linkedin enrich": {"max_ms": 90_000},  # no min: a rich CV makes LinkedIn redundant
     "search": {"min_sources_returning": 8, "max_ms": 300_000},
     "feed written": {"min_feed_rows": 20, "max_ms": 30_000},
     "dashboard read": {"min_visible": 1, "max_ms": 15_000},
@@ -310,15 +310,49 @@ def main() -> int:
                 return
             after = (client.get("/api/profile").json() or {}).get("cv_detail") or {}
             a_sk, a_ro = len(after.get("skills") or []), len(after.get("job_titles") or [])
+            positions = len(after.get("linkedin_positions") or [])
+            li_only = len(after.get("linkedin_skills") or [])
             gained = (a_sk - b_sk) + (a_ro - b_ro)
             s.evidence.update(gained=gained, skills=a_sk, roles=a_ro,
-                              li_only_skills=len(after.get("linkedin_skills") or []))
-            s.ok = gained > 0
+                              li_only_skills=li_only, li_positions=positions)
+            # The file did SOMETHING if it produced positions, LinkedIn-only
+            # skills, or grew the merged profile. "gained=0 merged" alone is NOT
+            # a failure: a rich CV legitimately makes LinkedIn redundant on
+            # skills — measured on a 130-skill CV whose LinkedIn's 3 skills were
+            # all already present. Failing that would punish a good CV.
+            did_something = gained > 0 or li_only > 0 or positions > 0
+            s.ok = did_something
             if not s.ok:
-                s.reason = ("LinkedIn was accepted but the profile gained NOTHING — no new "
-                            "skill and no new role. The user uploaded a file for nothing.")
+                s.reason = ("LinkedIn was accepted but produced NO positions, NO "
+                            "LinkedIn-only skills, and grew the profile by nothing — "
+                            "the parse extracted zero usable data from the file.")
         j.run("linkedin enrich", enrich_li,
               skip="" if li else "no LinkedIn PDF for this person")
+
+        # ── 3b. GitHub ────────────────────────────────────────────────────────
+        # Read the handle from the corpus. GitHub skills surface under
+        # skills_by_source['github'] (NOT a cv_detail field — checking the wrong
+        # place is why an earlier walk wrongly reported GitHub as producing 0).
+        gh_file = corpus / "github_urls" / f"{person}_github.txt"
+        gh_url = gh_file.read_text(encoding="utf-8").strip() if gh_file.exists() else ""
+
+        def enrich_gh(s: Step) -> None:
+            before = len((client.get("/api/profile").json().get("skills_by_source") or {}).get("github") or [])
+            r = client.post("/api/profile/github", data={"username": gh_url})
+            s.evidence["http"] = r.status_code
+            if r.status_code >= 400:
+                s.reason = f"GitHub enrich returned HTTP {r.status_code}."
+                return
+            time.sleep(75)  # GitHub fetch + LLM pass run in the background
+            sbs = client.get("/api/profile").json().get("skills_by_source") or {}
+            gained = len(sbs.get("github") or [])
+            s.evidence.update(github_skills=gained, was=before)
+            s.ok = gained > 0
+            if not s.ok:
+                s.reason = ("GitHub was accepted but contributed no skills — the fetch or "
+                            "the repo-skill inference produced nothing for this handle.")
+        j.run("github enrich", enrich_gh,
+              skip="" if gh_url else "no GitHub URL for this person")
 
         # ── 4. search ────────────────────────────────────────────────────────
         def search(s: Step) -> None:
