@@ -88,7 +88,7 @@ dev = [
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags
     # previously-clean code and reds CI on unrelated PRs).
-    "ruff>=0.15,<0.16",
+    "ruff>=0.15,<0.17",
 ]
 indeed = [
     "python-jobspy",
