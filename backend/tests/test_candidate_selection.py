@@ -557,3 +557,67 @@ async def test_liked_and_applied_jobs_survive_eviction(full_db, monkeypatch):
     assert rows[liked_junk_id] == "active", (
         "a liked/applied job was evicted — user investment must survive re-selection"
     )
+
+
+@pytest.mark.asyncio
+async def test_learned_preference_wins_marginal_shelf_slot(full_db, monkeypatch):
+    """Learned-preference v1: when two jobs tie on score for the last shelf
+    slot, the one from a company the user LIKED before must win it. The boost
+    affects membership only — stored scores stay the raw scorer output."""
+    from pathlib import Path
+
+    import src.core.settings as settings_mod
+    import src.services.profile.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "DB_PATH", Path(full_db), raising=True)
+    monkeypatch.setattr(settings_mod, "FEED_CANDIDATE_CAP", 1, raising=False)
+
+    user_id = _seed_user(full_db)
+    _seed_profile(full_db, user_id)
+
+    db = JobDatabase(full_db)
+    await db.init_db()
+    try:
+        # Two identical-scoring relevant jobs from different companies...
+        await db.insert_job(Job(
+            title="ML Engineer A", company="LovedCo",
+            apply_url="https://x/a", source="reed", date_found=_NOW,
+            location="London, UK", description="Python machine learning role with pytorch.",
+        ))
+        await db.insert_job(Job(
+            title="ML Engineer B", company="StrangerCo",
+            apply_url="https://x/b", source="reed", date_found=_NOW,
+            location="London, UK", description="Python machine learning role with pytorch.",
+        ))
+        # ...and an EARLIER liked job from LovedCo (different posting).
+        await db.insert_job(Job(
+            title="Data Platform Engineer", company="LovedCo",
+            apply_url="https://x/old", source="reed", date_found=_NOW,
+            location="London, UK", description="Old role.",
+        ))
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute("SELECT id FROM jobs WHERE title = 'Data Platform Engineer'")
+            liked_id = cur.fetchone()[0]
+            conn.execute(
+                "INSERT INTO user_actions(user_id, job_id, action, notes, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (user_id, liked_id, "liked", "", _NOW),
+            )
+
+        from src.services.rescore import backfill_feed_from_catalog
+
+        await backfill_feed_from_catalog(user_id, db)
+
+        with pgsync.connect(full_db) as conn:
+            cur = conn.execute(
+                "SELECT j.company FROM user_feed f JOIN jobs j ON j.id=f.job_id "
+                "WHERE f.user_id=? AND f.status='active' AND j.title LIKE ?",
+                (user_id, "ML Engineer%"),
+            )
+            active_companies = [r[0] for r in cur.fetchall()]
+    finally:
+        await db.close()
+
+    assert active_companies == ["LovedCo"], (
+        f"the liked company's job must win the marginal slot, got {active_companies}"
+    )

@@ -474,6 +474,67 @@ def _encode_and_upsert(
     )
 
 
+async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
+    """Embed up to ``budget`` EXISTING catalog jobs that have no vector yet.
+
+    Convergence backfill (2026-08-05): jobs inserted before semantic was on
+    would otherwise stay vectorless until purged. Same encode path as new-job
+    embedding (enrichment-aware, worker-thread hop). Per-job failures are
+    logged and skipped — one bad row never stops the sweep. Returns embedded
+    count. Callers gate on SEMANTIC_ENABLED.
+    """
+    from src.services.embeddings import MODEL_NAME, encode_job  # noqa: PLC0415 — lazy (rule #16)
+    from src.services.job_enrichment import load_enrichment  # noqa: PLC0415
+    from src.services.vector_index import VectorIndex  # noqa: PLC0415
+
+    try:
+        vix = VectorIndex()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("embed backfill: VectorIndex init failed: %s", e)
+        return 0
+
+    cur = await conn.execute(
+        """
+        SELECT j.id, j.title, j.company, j.location, j.description,
+               j.apply_url, j.source, j.date_found
+        FROM jobs j LEFT JOIN job_embeddings e ON e.job_id = j.id
+        WHERE e.job_id IS NULL
+        ORDER BY j.id
+        LIMIT ?
+        """,
+        (budget,),
+    )
+    rows = await cur.fetchall()
+    embedded = 0
+    for r in rows:
+        try:
+            job = Job(
+                title=r[1] or "", company=r[2] or "", apply_url=r[5] or "",
+                source=r[6] or "", date_found=r[7] or "",
+                location=r[3] or "", description=r[4] or "",
+            )
+            job.id = r[0]
+            try:
+                enrichment = await load_enrichment(conn, r[0])
+            except Exception:  # noqa: BLE001
+                enrichment = None
+            await asyncio.to_thread(
+                _encode_and_upsert, vix, encode_job, job, enrichment, r[0]
+            )
+            await conn.execute(
+                "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, ?) "
+                "ON CONFLICT(job_id) DO UPDATE SET model_version = EXCLUDED.model_version",
+                (r[0], MODEL_NAME),
+            )
+            embedded += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning("embed backfill: job %s failed: %s", r[0], e)
+    await db.commit()
+    if embedded:
+        logger.info("embed backfill: %s existing jobs embedded this run", embedded)
+    return embedded
+
+
 def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
     """Score every job, extract deadlines, dedup, and score-filter — the whole
     SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
@@ -1106,6 +1167,18 @@ async def run_search(
                         except Exception as e:
                             logger.warning("vector upsert failed for job %r: %s", j.title, e)
                     await db.commit()
+
+            # Convergence backfill (2026-08-05, goal: JOB understanding → 100%).
+            # New jobs embed above; EXISTING catalog jobs that predate semantic
+            # (prod: 284/7,309 embedded) would otherwise stay vectorless until
+            # the 30-day purge cycled them out. Each run therefore also embeds
+            # a budget of missing-embedding jobs — same pattern as candidate
+            # enrichment: coverage converges through ordinary searches, no
+            # manual sweep on the prod box. Gated on SEMANTIC_ENABLED (rule #18).
+            if SEMANTIC_ENABLED:
+                from src.core.settings import EMBED_BACKFILL_PER_RUN  # noqa: PLC0415
+                if EMBED_BACKFILL_PER_RUN > 0:
+                    await _embed_backfill_budget(db, conn, EMBED_BACKFILL_PER_RUN)
 
             # Stats
             stats = {

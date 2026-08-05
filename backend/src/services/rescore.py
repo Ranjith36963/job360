@@ -94,6 +94,48 @@ async def _build_user_scorer(db: Any, profile: Any) -> Any:
     )
 
 
+async def _load_preference_signals(db: Any, user_id: str) -> dict[str, set[str]]:
+    """Learned-preference v1 (2026-08-05): what the user's OWN actions teach us.
+
+    Companies and title tokens of liked/applied jobs. Used as a SELECTION
+    boost — jobs resembling what the user chose get priority for the shelf's
+    last slots. Deliberately deterministic and explainable (no model): the
+    boost affects candidate MEMBERSHIP only, never the stored score, so the
+    dashboard ranking stays the raw scorer output.
+    """
+    import re as _re  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT j.company, j.title FROM user_actions a JOIN jobs j ON j.id = a.job_id "
+        "WHERE a.user_id = ? AND a.action IN (?, ?)",
+        (user_id, "liked", "applied"),
+    )
+    companies: set[str] = set()
+    tokens: set[str] = set()
+    for row in await cur.fetchall():
+        comp, title = (row[0] or ""), (row[1] or "")
+        if comp.strip():
+            companies.add(comp.strip().lower())
+        for w in _re.findall(r"\w+", title.lower()):
+            if len(w) > 2:
+                tokens.add(w)
+    return {"companies": companies, "tokens": tokens}
+
+
+def _preference_boost(row: dict[str, Any], signals: dict[str, set[str]]) -> int:
+    """Selection-priority boost from learned preferences. +8 same company as a
+    liked/applied job; +4 when >=2 title tokens overlap the liked vocabulary."""
+    import re as _re  # noqa: PLC0415
+
+    boost = 0
+    if (row.get("company") or "").strip().lower() in signals["companies"]:
+        boost += 8
+    title_tokens = set(_re.findall(r"\w+", (row.get("title") or "").lower()))
+    if len(title_tokens & signals["tokens"]) >= 2:
+        boost += 4
+    return boost
+
+
 async def _load_action_sets(db: Any, user_id: str) -> tuple[set[Any], set[Any]]:
     """The user-feedback loop's read side (2026-08-05).
 
@@ -203,10 +245,18 @@ async def backfill_feed_from_catalog(
         scored = [t for t in scored if t[1] not in rejected_ids]
 
     # Phase 2 — candidate selection: keep only the user's top-`cap` jobs.
-    # cap=0 disables (legacy flood). Ties broken by score order; stable sort
-    # keeps catalog order within equal scores.
+    # cap=0 disables (legacy flood). Selection priority = score + learned-
+    # preference boost (v1: liked/applied companies + title vocabulary), so
+    # jobs resembling what the user chose win the shelf's marginal slots.
+    # The boost affects MEMBERSHIP only — stored scores stay raw.
     if cap > 0 and len(scored) > cap:
-        scored.sort(key=lambda t: t[0], reverse=True)
+        signals = await _load_preference_signals(db, user_id)
+        if signals["companies"] or signals["tokens"]:
+            scored.sort(
+                key=lambda t: t[0] + _preference_boost(t[2], signals), reverse=True
+            )
+        else:
+            scored.sort(key=lambda t: t[0], reverse=True)
         selected = scored[:cap]
     else:
         selected = scored
@@ -471,9 +521,18 @@ async def rescore_user_feed(
             if rejected_ids:
                 scored_rows = [t for t in scored_rows if t[1] not in rejected_ids]
 
-            # Phase 2 — selection: top-`cap` by score. cap=0 = legacy (all).
+            # Phase 2 — selection: top-`cap` by score + learned-preference
+            # boost (same rule as backfill, so the two paths never disagree
+            # about shelf membership). cap=0 = legacy (all).
             if cap > 0 and len(scored_rows) > cap:
-                scored_rows.sort(key=lambda t: t[0], reverse=True)
+                signals = await _load_preference_signals(db, user_id)
+                if signals["companies"] or signals["tokens"]:
+                    scored_rows.sort(
+                        key=lambda t: t[0] + _preference_boost(t[2], signals),
+                        reverse=True,
+                    )
+                else:
+                    scored_rows.sort(key=lambda t: t[0], reverse=True)
                 selected_rows = scored_rows[:cap]
             else:
                 selected_rows = scored_rows
