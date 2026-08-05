@@ -14,6 +14,8 @@ logger = logging.getLogger("job360.sources.workday")
 
 # Parse "Posted 3 Days Ago", "Posted Today", "Posted Yesterday", "Posted 30+ Days Ago"
 _POSTED_RE = re.compile(r"Posted\s+(\d+)\s+Days?\s+Ago", re.IGNORECASE)
+# Strip HTML tags from the CXS detail endpoint's jobDescription.
+_DESC_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _parse_posted_on(text: str) -> str:
@@ -96,11 +98,21 @@ class WorkdaySource(BaseJobSource):
                     else:
                         parsed_posted_at = None
                         confidence = "low"
+                    # Job-understanding fix (2026-08-05): the search response
+                    # has no description (537 prod jobs, 100% empty). The CXS
+                    # detail endpoint at {base}/wday/cxs/{tenant}/{site}{path}
+                    # returns jobPostingInfo.jobDescription (verified live:
+                    # 12,746 chars for an astrazeneca posting). Only UK/remote
+                    # survivors reach this point, so the request count matches
+                    # what we keep. Failure degrades to "", never drops the job.
+                    description = await self._fetch_job_description(
+                        base_url, tenant, site, ext_path
+                    )
                     jobs.append(Job(
                         title=title,
                         company=company_name,
                         location=location,
-                        description="",
+                        description=description,
                         apply_url=apply_url,
                         source=self.name,
                         date_found=now_iso,
@@ -111,3 +123,21 @@ class WorkdaySource(BaseJobSource):
 
         logger.info("Workday: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
+
+    async def _fetch_job_description(
+        self, base_url: str, tenant: str, site: str, ext_path: str
+    ) -> str:
+        """Fetch one posting's ``jobPostingInfo.jobDescription`` (HTML → text).
+
+        Returns ``""`` on any failure — a missing description is a data gap the
+        scorer treats neutrally, not a reason to drop the job.
+        """
+        if not ext_path:
+            return ""
+        detail = await self._get_json(f"{base_url}/wday/cxs/{tenant}/{site}{ext_path}")
+        if not isinstance(detail, dict):
+            return ""
+        desc = (detail.get("jobPostingInfo") or {}).get("jobDescription") or ""
+        if not desc:
+            return ""
+        return _DESC_TAG_RE.sub(" ", str(desc))[:5000].strip()

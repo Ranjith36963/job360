@@ -49,7 +49,7 @@ class SmartRecruitersSource(BaseJobSource):
                 raw_released = item.get("releasedDate")
                 posted_at, confidence = normalize_posted_at(raw_released)
 
-                jobs.append(Job(
+                job = Job(
                     title=title,
                     company=company_name,
                     location=location,
@@ -60,7 +60,43 @@ class SmartRecruitersSource(BaseJobSource):
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=raw_released,
-                ))
+                )
+                # Job-understanding fix (2026-08-05): the list endpoint has no
+                # posting text (150 prod jobs, 100% empty descriptions). The
+                # public detail endpoint carries the full jobAd sections
+                # (verified live: 6,445 chars for a wise posting). Only
+                # UK/remote-relevant jobs are detail-fetched, so the extra
+                # request count matches what we actually keep. A failed detail
+                # fetch degrades to the empty description, never drops the job.
+                if _is_uk_or_remote(location):
+                    job.description = await self._fetch_posting_text(
+                        slug, str(item.get("id", ""))
+                    )
+                jobs.append(job)
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("SmartRecruiters: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
+
+    async def _fetch_posting_text(self, slug: str, posting_id: str) -> str:
+        """Fetch one posting's full text from the public detail endpoint.
+
+        Concatenates the ``jobAd.sections`` texts (companyDescription,
+        jobDescription, qualifications, additionalInformation), tag-stripped.
+        Returns ``""`` on any failure — absence of text is a data gap, not an
+        error (the scorer's unknown-handling treats it neutrally).
+        """
+        if not posting_id:
+            return ""
+        detail = await self._get_json(
+            f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{posting_id}"
+        )
+        if not isinstance(detail, dict):
+            return ""
+        sections = (detail.get("jobAd") or {}).get("sections") or {}
+        parts: list[str] = []
+        for key in ("jobDescription", "qualifications", "additionalInformation", "companyDescription"):
+            sec = sections.get(key)
+            text = (sec or {}).get("text") if isinstance(sec, dict) else None
+            if text:
+                parts.append(_HTML_TAG_RE.sub(" ", str(text)))
+        return " ".join(parts)[:5000].strip()

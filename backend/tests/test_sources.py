@@ -751,6 +751,83 @@ def test_smartrecruiters_parses_response():
     _run(_test())
 
 
+def test_smartrecruiters_fetches_posting_detail_text():
+    """Job-understanding fix (2026-08-05): the list endpoint has no posting
+    text (150 prod jobs, 100% empty descriptions); the public detail endpoint
+    carries the full jobAd sections (verified live: 6,445 chars). The detail
+    text must land in Job.description, tag-stripped."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://api\.smartrecruiters\.com/v1/companies/wise/postings\?.*"),
+                    payload={"content": [{
+                        "id": "sr-101", "name": "AI Research Scientist",
+                        "location": {"city": "London", "country": "GB"},
+                        "ref": "https://jobs.smartrecruiters.com/wise/sr-101",
+                        "releasedDate": "2024-01-15",
+                    }]},
+                )
+                m.get(
+                    "https://api.smartrecruiters.com/v1/companies/wise/postings/sr-101",
+                    payload={"jobAd": {"sections": {
+                        "jobDescription": {"text": "<p>Deep learning research with PyTorch.</p>"},
+                        "qualifications": {"text": "<ul><li>PhD in ML</li></ul>"},
+                    }}},
+                )
+                source = SmartRecruitersSource(session, companies=["wise"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                desc = jobs[0].description
+                assert "Deep learning research" in desc
+                assert "PhD in ML" in desc
+                assert "<" not in desc, "detail HTML must be tag-stripped"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workday_fetches_job_description_from_detail():
+    """Same fix for Workday (537 prod jobs, 100% empty): the CXS detail
+    endpoint's jobPostingInfo.jobDescription (verified live: 12,746 chars)
+    must land in Job.description, tag-stripped."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(
+                    re.compile(r"https://acme\.wd1\.myworkdayjobs\.com/wday/cxs/acme/ext/jobs"),
+                    payload={"jobPostings": [{
+                        "title": "ML Engineer",
+                        "locationsText": "London, United Kingdom",
+                        "externalPath": "/job/London/ML-Engineer_R123",
+                        "postedOn": "Posted Today",
+                    }]},
+                    repeat=True,
+                )
+                m.get(
+                    "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/ext/job/London/ML-Engineer_R123",
+                    payload={"jobPostingInfo": {
+                        "jobDescription": "<h2>About</h2><p>Build ML pipelines with Python and Spark.</p>",
+                    }},
+                    repeat=True,
+                )
+                source = WorkdaySource(
+                    session,
+                    companies=[{"tenant": "acme", "wd": "wd1", "site": "ext", "name": "Acme"}],
+                    search_config=_sc_ai_defaults(),
+                )
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                desc = jobs[0].description
+                assert "Build ML pipelines" in desc
+                assert "<" not in desc, "detail HTML must be tag-stripped"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_pinpoint_parses_response():
     async def _test():
         session = aiohttp.ClientSession()
