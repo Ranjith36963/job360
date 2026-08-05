@@ -4,9 +4,9 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.jobicy")
-
 
 class JobicySource(BaseJobSource):
     name = "jobicy"
@@ -31,8 +31,8 @@ class JobicySource(BaseJobSource):
             description = item.get("jobExcerpt", "")
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_pub = item.get("pubDate")
-            posted_at = raw_pub if raw_pub else None
-            confidence = "high" if raw_pub else "low"
+            posted_at, confidence = normalize_posted_at(raw_pub)
+
             jobs.append(Job(
                 title=title,
                 company=item.get("companyName", ""),

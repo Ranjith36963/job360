@@ -233,7 +233,12 @@ jobs:
           auto="no"
           if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -q "github-actions"; then
             case "$issue_title" in
-              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"Loop 2 RED: "*) auto="yes" ;;
+              # INVARIANT: added 2026-08-03. Same trust basis as PRODUCT: — the
+              # body is our own SQL counts and a fixed rationale string, with no
+              # model-generated and no attacker-supplied text anywhere in it.
+              # That property is the whole argument for auto-authorising, so it
+              # must be re-checked before any future prefix joins this list.
+              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"INVARIANT: "*|"Loop 2 RED: "*) auto="yes" ;;
             esac
           fi
 

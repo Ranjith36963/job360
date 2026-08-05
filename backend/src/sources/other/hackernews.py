@@ -5,12 +5,12 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.hackernews")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
-
 
 def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     """Parse a HN 'Who is Hiring' comment into job fields.
@@ -30,6 +30,22 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     parts = [p.strip() for p in first_line.split("|")]
 
     company = parts[0] if parts else ""
+
+    # A HN "Who's hiring" post is EXPECTED to start "Company | Location | Role".
+    # When a comment is plain prose instead, there is no "|", so parts[0] is the
+    # ENTIRE paragraph — and it became both the company and the job title.
+    #
+    # Measured 2026-08-03: 14 such titles over 300 chars, longest 1,551. They
+    # render as unreadable cards, produce meaningless dedup keys, and one of them
+    # blew Postgres's 2,704-byte index limit and aborted a real user's search
+    # twice, freezing his feed for seven days.
+    #
+    # No company name is 120 characters. If we cannot find one, this comment is
+    # not a parseable job posting and we say so, rather than inventing a job out
+    # of a paragraph. Dropping a non-posting costs nothing; storing it cost a
+    # week of one user's feed.
+    if len(company) > 120:
+        return None
     location = parts[1] if len(parts) > 1 else ""
 
     # Extract URL from anywhere in the text
@@ -49,7 +65,6 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
         "description": description,
         "title": title,
     }
-
 
 class HackerNewsSource(BaseJobSource):
     name = "hackernews"
@@ -100,8 +115,7 @@ class HackerNewsSource(BaseJobSource):
 
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_created = child.get("created_at")
-            posted_at = raw_created if raw_created else None
-            confidence = "high" if raw_created else "low"
+            posted_at, confidence = normalize_posted_at(raw_created)
 
             jobs.append(Job(
                 title=parsed["title"],

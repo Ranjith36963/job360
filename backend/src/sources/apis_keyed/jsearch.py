@@ -8,6 +8,7 @@ import aiohttp
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.jsearch")
 
@@ -74,8 +75,8 @@ class JSearchSource(BaseJobSource):
 
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_posted = item.get("job_posted_at_datetime_utc")
-                posted_at = raw_posted if raw_posted else None
-                confidence = "high" if raw_posted else "low"
+                posted_at, confidence = normalize_posted_at(raw_posted)
+
                 jobs.append(Job(
                     title=title,
                     company=item.get("employer_name", ""),

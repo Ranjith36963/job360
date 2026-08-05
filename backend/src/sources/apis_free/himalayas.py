@@ -4,9 +4,9 @@ from typing import Any, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.himalayas")
-
 
 class HimalayasSource(BaseJobSource):
     name = "himalayas"
@@ -25,8 +25,8 @@ class HimalayasSource(BaseJobSource):
             location = ", ".join(loc_restrictions) if isinstance(loc_restrictions, list) else str(loc_restrictions)
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_pub = item.get("pubDate") or item.get("createdAt")
-            posted_at = raw_pub if raw_pub else None
-            confidence = "high" if raw_pub else "low"
+            posted_at, confidence = normalize_posted_at(raw_pub)
+
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("companyName", ""),

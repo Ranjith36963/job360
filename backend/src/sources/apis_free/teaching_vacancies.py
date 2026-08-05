@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.teaching_vacancies")
-
 
 class TeachingVacanciesSource(BaseJobSource):
     name = "teaching_vacancies"
@@ -57,8 +57,7 @@ class TeachingVacanciesSource(BaseJobSource):
                 continue
 
             raw_posted = item.get("datePosted") or item.get("date_posted")
-            posted_at = raw_posted if raw_posted else None
-            confidence = "high" if raw_posted else "low"
+            posted_at, confidence = normalize_posted_at(raw_posted)
 
             apply_url = item.get("url") or item.get("applyUrl") or ""
             description = (item.get("description") or "")[:5000]

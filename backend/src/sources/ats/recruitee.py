@@ -8,9 +8,9 @@ from src.core.companies import COMPANY_NAME_OVERRIDES, RECRUITEE_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.recruitee")
-
 
 class RecruiteeSource(BaseJobSource):
     name = "recruitee"
@@ -37,8 +37,8 @@ class RecruiteeSource(BaseJobSource):
                 apply_url = item.get("careers_url", "") or item.get("url", "")
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_published = item.get("published_at")
-                posted_at = raw_published if raw_published else None
-                confidence = "high" if raw_published else "low"
+                posted_at, confidence = normalize_posted_at(raw_published)
+
                 salary_min = item.get("min_salary")
                 salary_max = item.get("max_salary")
                 jobs.append(Job(

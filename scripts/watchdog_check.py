@@ -40,6 +40,15 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "ci-offline.yml": (36, "daily 06:00"),
     "doc-sync.yml": (36, "daily 06:30"),
     "absence.yml": (36, "daily 08:00"),
+    # THE PRODUCT-QUALITY DETECTORS. Added 2026-08-03 after an audit found them
+    # UNWATCHED: product-health and user-journey are two of the three loops that
+    # look at production data, and either could have stopped running weeks ago
+    # without anything noticing. A watchdog that watches the infrastructure loops
+    # but not the loops that actually check the product is watching the wrong
+    # things — the loops most worth having are the ones nobody would miss.
+    "product-health.yml": (36, "daily 08:30"),
+    "user-journey.yml": (36, "daily 09:00"),
+    "data-invariants.yml": (14, "every 6h"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
     # ci.yml and repair.yml are event-triggered only — silence is normal, so

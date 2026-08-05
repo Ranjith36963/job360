@@ -7,9 +7,9 @@ import aiohttp
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.adzuna")
-
 
 class AdzunaSource(BaseJobSource):
     name = "adzuna"
@@ -50,8 +50,8 @@ class AdzunaSource(BaseJobSource):
                 location = item.get("location", {})
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_created = item.get("created")
-                posted_at = raw_created if raw_created else None
-                confidence = "high" if raw_created else "low"
+                posted_at, confidence = normalize_posted_at(raw_created)
+
                 jobs.append(Job(
                     title=item.get("title", ""),
                     company=company.get("display_name", "") if isinstance(company, dict) else str(company),

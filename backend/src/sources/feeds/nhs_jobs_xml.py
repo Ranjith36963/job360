@@ -17,9 +17,9 @@ from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignor
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.nhs_jobs_xml")
-
 
 class NHSJobsXMLSource(BaseJobSource):
     name = "nhs_jobs_xml"
@@ -66,8 +66,7 @@ class NHSJobsXMLSource(BaseJobSource):
                 continue
 
             apply_url = advert_url or f"https://www.jobs.nhs.uk/candidate/jobadvert/{vacancy_id}"
-            posted_at = created if created else None
-            confidence = "high" if created else "low"
+            posted_at, confidence = normalize_posted_at(created)
 
             results.append(Job(
                 title=title,

@@ -8,9 +8,9 @@ from src.core.companies import ASHBY_COMPANIES, COMPANY_NAME_OVERRIDES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.ashby")
-
 
 class AshbySource(BaseJobSource):
     name = "ashby"
@@ -38,8 +38,8 @@ class AshbySource(BaseJobSource):
                 # mutation timestamp and must not populate posted_at.
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_published = item.get("publishedAt")
-                posted_at = raw_published if raw_published else None
-                confidence = "high" if raw_published else "low"
+                posted_at, confidence = normalize_posted_at(raw_published)
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,

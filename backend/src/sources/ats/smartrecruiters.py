@@ -9,11 +9,11 @@ from src.core.companies import COMPANY_NAME_OVERRIDES, SMARTRECRUITERS_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.smartrecruiters")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-
 
 class SmartRecruitersSource(BaseJobSource):
     name = "smartrecruiters"
@@ -47,8 +47,8 @@ class SmartRecruitersSource(BaseJobSource):
                 )
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_released = item.get("releasedDate")
-                posted_at = raw_released if raw_released else None
-                confidence = "high" if raw_released else "low"
+                posted_at, confidence = normalize_posted_at(raw_released)
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,

@@ -14,9 +14,9 @@ from src.core.companies import COMPANY_NAME_OVERRIDES, RIPPLING_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.rippling")
-
 
 class RipplingSource(BaseJobSource):
     name = "rippling"
@@ -57,8 +57,7 @@ class RipplingSource(BaseJobSource):
                     continue
 
                 raw_created = item.get("createdAt") or item.get("created_at")
-                posted_at = raw_created if raw_created else None
-                confidence = "high" if raw_created else "low"
+                posted_at, confidence = normalize_posted_at(raw_created)
 
                 now_iso = datetime.now(timezone.utc).isoformat()
                 results.append(Job(

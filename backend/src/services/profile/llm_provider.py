@@ -177,6 +177,52 @@ async def _attempt(  # type: ignore[return]
             raise
 
 
+# Providers proven dead THIS PROCESS: an expired key, a missing package, a model
+# that does not exist. Not rate limits — those recover on their own and are
+# handled by the backoff in ``_attempt``.
+#
+# WHY THIS EXISTS. The chain already DETECTED these ("looks PERMANENTLY
+# misconfigured") and then called them again on the very next request, forever.
+# Measured in a real upload: one profile extraction makes 8 LLM calls, and with
+# an expired GROQ_API_KEY in the chain every one of them paid a doomed network
+# round-trip first. That upload took 584 SECONDS — 9.7 minutes of a user staring
+# at a spinner, entirely spent on a provider we already knew was dead.
+#
+# In-memory and process-lifetime on purpose: fixing a key means changing an env
+# var, which means a restart, which clears this. No TTL to tune, no state to
+# persist, and a deploy is the natural "try again" signal.
+_DEAD_PROVIDERS: set[str] = set()
+
+
+def reset_dead_providers() -> None:
+    """Forget which providers are dead. For tests and for a manual re-probe."""
+    _DEAD_PROVIDERS.clear()
+
+
+def _note_provider_failure(name: str, exc: BaseException) -> None:
+    """Log one provider's failure and, if it is permanent, stop using it.
+
+    A CONFIGURATION failure is not a bad minute — it fails on EVERY call until a
+    human changes something. Logging it at WARNING beside genuine 429s is exactly
+    how the ``openai`` outage stayed invisible: the package was never installed,
+    the ImportError was caught, and "openai failed, trying next provider"
+    scrolled past while every parse silently used a free tier.
+    """
+    if _is_permanent_provider_failure(exc):
+        first_time = name not in _DEAD_PROVIDERS
+        _DEAD_PROVIDERS.add(name)
+        if first_time:
+            logger.error(
+                "LLM provider '%s' looks PERMANENTLY misconfigured (%s: %s). "
+                "SKIPPING it for the rest of this process so it stops costing a "
+                "round-trip on every call — check the package is installed, the "
+                "API key is valid, and the model name exists, then restart.",
+                name, type(exc).__name__, exc,
+            )
+    else:
+        logger.warning("%s failed, trying next provider: %s", name, exc)
+
+
 async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     """CV parsing — OpenAI (paid, primary) → Gemini → Groq → Cerebras fallback.
 
@@ -202,35 +248,16 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     ):
         if not key:
             continue
+        # Already proven dead this process — skip without paying a round-trip.
+        if name in _DEAD_PROVIDERS:
+            errors.append(f"{name}: skipped (permanently misconfigured)")
+            continue
         try:
             return await _attempt(call, prompt, system, name)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
             rate_limited = rate_limited or _is_rate_limit(e)
-            # A CONFIGURATION failure is not a bad minute — it fails on EVERY
-            # call until a human changes something. Logging it at WARNING beside
-            # genuine 429s is exactly how the `openai` outage stayed invisible:
-            # the package was never installed, the ImportError was caught here,
-            # and "openai failed, trying next provider" scrolled past while every
-            # parse silently used a free tier. The documented PRIMARY provider
-            # never ran once, and nothing said so above the noise.
-            #
-            # Escalating to ERROR does not change control flow — the chain still
-            # falls through, which is the right resilience behaviour — it makes a
-            # permanently-dead provider visible (Sentry, log scans) instead of
-            # indistinguishable from a transient blip.
-            if _is_permanent_provider_failure(e):
-                logger.error(
-                    "LLM provider '%s' looks PERMANENTLY misconfigured (%s: %s). "
-                    "Falling back to the next provider, but this will fail on EVERY "
-                    "call until fixed — check the package is installed, the API key "
-                    "is valid, and the model name exists.",
-                    name,
-                    type(e).__name__,
-                    e,
-                )
-            else:
-                logger.warning("%s failed, trying next provider: %s", name, e)
+            _note_provider_failure(name, e)
 
     if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
@@ -267,35 +294,16 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
     ):
         if not key:
             continue
+        # Already proven dead this process — skip without paying a round-trip.
+        if name in _DEAD_PROVIDERS:
+            errors.append(f"{name}: skipped (permanently misconfigured)")
+            continue
         try:
             return await _attempt(call, prompt, system, name)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
             rate_limited = rate_limited or _is_rate_limit(e)
-            # A CONFIGURATION failure is not a bad minute — it fails on EVERY
-            # call until a human changes something. Logging it at WARNING beside
-            # genuine 429s is exactly how the `openai` outage stayed invisible:
-            # the package was never installed, the ImportError was caught here,
-            # and "openai failed, trying next provider" scrolled past while every
-            # parse silently used a free tier. The documented PRIMARY provider
-            # never ran once, and nothing said so above the noise.
-            #
-            # Escalating to ERROR does not change control flow — the chain still
-            # falls through, which is the right resilience behaviour — it makes a
-            # permanently-dead provider visible (Sentry, log scans) instead of
-            # indistinguishable from a transient blip.
-            if _is_permanent_provider_failure(e):
-                logger.error(
-                    "LLM provider '%s' looks PERMANENTLY misconfigured (%s: %s). "
-                    "Falling back to the next provider, but this will fail on EVERY "
-                    "call until fixed — check the package is installed, the API key "
-                    "is valid, and the model name exists.",
-                    name,
-                    type(e).__name__,
-                    e,
-                )
-            else:
-                logger.warning("%s failed, trying next provider: %s", name, e)
+            _note_provider_failure(name, e)
 
     if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
         raise RuntimeError(
