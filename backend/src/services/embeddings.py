@@ -112,6 +112,123 @@ def _pool_chunk_vectors(vectors: Iterable[list[float]]) -> list[float]:
     return out
 
 
+def profile_to_embedding_text(profile: Any) -> str:
+    """Build the CANDIDATE-side semantic text from the WHOLE profile.
+
+    WHY THIS EXISTS (2026-08-06). The hybrid search's query vector was built
+    from ``job_titles + cv.skills[:40] + summary`` only. But ``cv.skills``
+    receives CV-derived skills exclusively (two_pass.py merges only
+    ``llm_cv.skills`` / the deterministic CV pass into it) — LinkedIn and
+    GitHub skills live in their OWN fields (``linkedin_skills``,
+    ``github_llm_skills``, ``about_me_inferred_skills``), which
+    ``skill_tiering`` reads separately. So the semantic side of the engine
+    silently searched on a CV-only, 40-skill-truncated view of the user,
+    discarding exactly the LinkedIn/GitHub signal the profile pipeline works
+    hardest to extract. The old docstring even claimed the opposite
+    ("LinkedIn/GitHub data is already merged into cv_data") — true for the
+    blob, false for ``cv.skills``.
+
+    Included here: target + held job titles, EVERY skill source, the CV
+    summary and raw experience text, LinkedIn positions (title + company +
+    description), LinkedIn/GitHub projects, GitHub repo names + descriptions
+    + README excerpts (what the user actually BUILDS), education,
+    certifications, and the stated preferences.
+
+    NOTHING IS CAPPED OR TRUNCATED — deliberate. There is exactly ONE profile
+    per user, and ``encode_job`` chunks long text into 300-word windows and
+    MAX-pools the chunk vectors, so length costs a few milliseconds, never
+    signal. Truncation here is the same failure this function exists to fix:
+    a cap at 40 skills silently dropped everything a rich profile knew. If a
+    field describes the candidate, it belongs in the vector.
+    """
+    cv = getattr(profile, "cv_data", None)
+    prefs = getattr(profile, "preferences", None)
+    if cv is None and prefs is None:
+        return ""
+
+    parts: list[str] = []
+
+    def _add_all(values: Any) -> None:
+        for v in values or []:
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+
+    if prefs is not None:
+        _add_all(getattr(prefs, "target_job_titles", []))
+        _add_all(getattr(prefs, "additional_skills", []))
+    if cv is not None:
+        _add_all(getattr(cv, "job_titles", []))
+        _add_all(getattr(cv, "companies", []))
+        # EVERY skill source — the CV-derived list is only one of five.
+        for field in (
+            "skills",
+            "linkedin_skills",
+            "github_llm_skills",
+            "github_skills_inferred",
+            "github_frameworks",
+            "about_me_inferred_skills",
+            "cv_skills_esco",
+        ):
+            _add_all(getattr(cv, field, []))
+        for text_field in ("summary", "experience_text", "linkedin_summary"):
+            v = getattr(cv, text_field, "") or ""
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+        _add_all(getattr(cv, "education", []))
+        _add_all(getattr(cv, "certifications", []))
+        _add_all(getattr(cv, "achievements", []))
+        # Roles actually held — title + company + what they did there.
+        for pos in getattr(cv, "linkedin_positions", []) or []:
+            if isinstance(pos, dict):
+                bits = [str(pos.get(k) or "").strip()
+                        for k in ("title", "company", "description")]
+                blob = " ".join(b for b in bits if b)
+                if blob:
+                    parts.append(blob)
+        for proj in getattr(cv, "linkedin_projects", []) or []:
+            if isinstance(proj, dict):
+                blob = f"{proj.get('title') or ''} {proj.get('description') or ''}".strip()
+                if blob:
+                    parts.append(blob)
+        # What the user BUILDS — repo prose carries domain signal a skill list
+        # cannot ("human-in-the-loop agent", "fraud detection").
+        for repo in getattr(cv, "github_repos_brief", []) or []:
+            if isinstance(repo, dict):
+                name = (repo.get("name") or "").replace("-", " ").strip()
+                topics = " ".join(str(t) for t in (repo.get("topics") or []))
+                blob = " ".join(b for b in (
+                    name, repo.get("description") or "", topics,
+                    repo.get("readme_excerpt") or "",
+                ) if b).strip()
+                if blob:
+                    parts.append(blob)
+        for gh_text in ("github_bio", "github_profile_readme"):
+            v = getattr(cv, gh_text, "") or ""
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+    if prefs is not None:
+        _add_all(getattr(prefs, "industries", []))
+        _add_all(getattr(prefs, "preferred_locations", []))
+        for attr in ("preferred_workplace", "experience_level", "work_arrangement"):
+            v = getattr(prefs, attr, None)
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+        about = getattr(prefs, "about_me", "") or ""
+        if about:
+            parts.append(about)
+
+    # De-dup while preserving order — repeated skills add no semantic signal
+    # but do eat the chunker's budget.
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        key = p.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return " ".join(out).strip()
+
+
 def encode_job(
     job: Any,
     enrichment: Any,

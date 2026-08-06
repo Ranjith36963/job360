@@ -241,3 +241,85 @@ def test_vector_index_respects_metadata_filter():
     idx.upsert(2, [0.2] * EMBEDDING_DIM, {"domain": "healthcare"})
     results = idx.query([0.0] * EMBEDDING_DIM, k=5, filter_metadata={"domain": "tech"})
     assert [rid for rid, _ in results] == [1]
+
+
+# ── candidate-side embedding text (2026-08-06) ──────────────────────────────
+
+
+def test_profile_embedding_text_includes_every_skill_source():
+    """THE PARTIAL-PROFILE BUG. The hybrid query vector was built from
+    `job_titles + cv.skills[:40] + summary`, but `cv.skills` only ever receives
+    CV-derived skills — LinkedIn and GitHub skills live in their own fields.
+    The semantic engine therefore searched on a CV-only view and ignored
+    exactly the LinkedIn/GitHub signal the profile pipeline extracts."""
+    from src.services.embeddings import profile_to_embedding_text
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    profile = UserProfile(
+        cv_data=CVData(
+            job_titles=["AI Engineer"],
+            skills=["Python"],
+            linkedin_skills=["Stakeholder Management"],
+            github_llm_skills=["LangGraph"],
+            about_me_inferred_skills=["Mentoring"],
+            github_repos_brief=[{"name": "fraud-detect", "description": "Fraud detection with XGBoost"}],
+            linkedin_positions=[{"title": "ML Engineer", "company": "Acme"}],
+        ),
+        preferences=UserPreferences(target_job_titles=["ML Engineer"]),
+    )
+    txt = profile_to_embedding_text(profile)
+    assert "Python" in txt
+    assert "Stakeholder Management" in txt, "LinkedIn skills missing from the query"
+    assert "LangGraph" in txt, "GitHub skills missing from the query"
+    assert "Mentoring" in txt, "about-me skills missing from the query"
+    assert "Fraud detection" in txt, "GitHub project prose missing from the query"
+    assert "ML Engineer" in txt
+
+
+def test_profile_embedding_text_is_not_truncated_at_40_skills():
+    """A rich profile (measured: 79 CV skills) lost everything past 40."""
+    from src.services.embeddings import profile_to_embedding_text
+    from src.services.profile.models import CVData, UserProfile
+
+    skills = [f"Skill{i}" for i in range(55)]
+    txt = profile_to_embedding_text(UserProfile(cv_data=CVData(skills=skills)))
+    assert "Skill54" in txt, "skills beyond the old 40-item cap were dropped"
+
+
+def test_profile_embedding_text_dedups_and_survives_empty_profile():
+    from src.services.embeddings import profile_to_embedding_text
+    from src.services.profile.models import CVData, UserProfile
+
+    profile = UserProfile(cv_data=CVData(job_titles=["AI Engineer"], skills=["Python", "python"]))
+    txt = profile_to_embedding_text(profile)
+    assert txt.lower().count("python") == 1, "duplicate skills waste the chunk budget"
+    assert profile_to_embedding_text(UserProfile(cv_data=CVData())) == ""
+
+
+def test_profile_embedding_text_caps_nothing():
+    """NO CAPS on the user side (owner directive 2026-08-06: "we need
+    everything and more from user"). There is one profile per user and
+    encode_job chunks+max-pools long text, so length costs milliseconds, never
+    signal. A 200-skill profile must keep its 200th skill; a long README
+    excerpt and a long about_me must survive whole."""
+    from src.services.embeddings import profile_to_embedding_text
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    long_about = "I want to build agentic AI systems. " * 60  # ~2k chars
+    long_readme = "Kubernetes operator written in Go. " * 80
+    profile = UserProfile(
+        cv_data=CVData(
+            skills=[f"Skill{i}" for i in range(200)],
+            experience_text="Led the platform team. " * 100,
+            github_repos_brief=[{"name": "op", "readme_excerpt": long_readme}],
+            certifications=["AWS Solutions Architect"],
+            education=["MSc Artificial Intelligence"],
+        ),
+        preferences=UserPreferences(about_me=long_about),
+    )
+    txt = profile_to_embedding_text(profile)
+    assert "Skill199" in txt, "the 200th skill was dropped"
+    assert txt.count("agentic AI systems") >= 1
+    assert "Kubernetes operator" in txt, "README excerpt was dropped"
+    assert "AWS Solutions Architect" in txt and "MSc Artificial Intelligence" in txt
+    assert len(txt) > 5000, "the full profile should produce a long document"
