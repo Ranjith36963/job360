@@ -328,3 +328,39 @@ def test_notification_rules_unique_user(db):
 
     with pytest.raises(pg.IntegrityError):
         asyncio.run(_insert_duplicate())
+
+
+@pytest.mark.asyncio
+async def test_refetch_backfills_empty_description():
+    """Pillar-2 sim finding (2026-08-06): INSERT OR IGNORE kept old EMPTY
+    descriptions forever, so the 0%-desc source fixes only helped brand-new
+    postings. A re-fetch carrying text must fill an empty stored description —
+    and never overwrite existing text (empty -> non-empty only)."""
+    from src.models import Job as _Job
+
+    db = JobDatabase(":memory:")
+    await db.init_db()
+    try:
+        j1 = _Job(title="ML Engineer", company="Acme", apply_url="https://x/1",
+                  source="greenhouse", date_found="2026-08-06T00:00:00+00:00",
+                  location="London, UK", description="")
+        assert await db.insert_job(j1) is True
+
+        j2 = _Job(title="ML Engineer", company="Acme", apply_url="https://x/1",
+                  source="greenhouse", date_found="2026-08-06T01:00:00+00:00",
+                  location="London, UK", description="Full posting text now available.")
+        assert await db.insert_job(j2) is False  # duplicate, not a new insert
+
+        cur = await db._db.execute("SELECT description FROM jobs")
+        desc = (await cur.fetchone())[0]
+        assert desc == "Full posting text now available.", "backfill did not land"
+
+        # Value-presence guard (rule #21): a later EMPTY re-fetch must not wipe it.
+        j3 = _Job(title="ML Engineer", company="Acme", apply_url="https://x/1",
+                  source="greenhouse", date_found="2026-08-06T02:00:00+00:00",
+                  location="London, UK", description="")
+        await db.insert_job(j3)
+        cur = await db._db.execute("SELECT description FROM jobs")
+        assert (await cur.fetchone())[0] == "Full posting text now available."
+    finally:
+        await db.close()

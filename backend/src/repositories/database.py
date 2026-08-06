@@ -411,7 +411,23 @@ class JobDatabase:
                 job.deadline_source,
             ),
         )
-        return cursor.rowcount > 0
+        inserted = cursor.rowcount > 0
+        # Description backfill on re-fetch (2026-08-06, found by the Pillar-2
+        # simulation). INSERT OR IGNORE means a re-fetched job that NOW carries
+        # a description (the four 0%-desc source fixes) silently kept its old
+        # empty one — the fixes only ever benefited brand-new postings, and
+        # existing rows had to age through the 30-day purge to become readable
+        # (measured: catalog text coverage stuck at 35% the morning after the
+        # fixes shipped). Empty -> non-empty is the only allowed transition, so
+        # an upstream description REMOVAL can never wipe stored text.
+        if not inserted and job.description:
+            await self._db.execute(
+                """UPDATE jobs SET description = ?
+                   WHERE normalized_company = ? AND normalized_title = ?
+                     AND (description IS NULL OR description = '')""",
+                (job.description, company, title),
+            )
+        return inserted
 
     async def update_job_scores(self, job: Job) -> None:
         """Persist a re-scored job's match_score + dim columns to the catalog.
