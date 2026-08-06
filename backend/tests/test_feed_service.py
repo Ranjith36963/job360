@@ -316,3 +316,46 @@ async def test_upsert_score_overwritten_when_version_changes(feed_db):
     # score overwritten because version changed (5 -> 6)
     assert row["score"] == 40
     assert row["profile_version"] == 6
+
+
+@pytest.mark.asyncio
+async def test_scorer_version_bump_unfreezes_the_score(feed_db):
+    """THE FIX FOR SHIPPED-CODE-THAT-NEVER-LANDS (2026-08-06).
+
+    The freeze used to key on profile_version ALONE, which made a
+    SCORING-CODE improvement inert: 6,165 prod rows carried the CURRENT
+    profile version with pre-fix scores, so PR #224's revived title lever
+    (Spearman -0.04 -> +0.29) reached none of them — shipped code did not
+    equal live behaviour, and nothing surfaced the gap. A scorer_version bump
+    must re-score even when the profile is unchanged.
+    """
+    async with pg.connect(feed_db) as db:
+        db.row_factory = pg.Row
+        svc = FeedService(db)
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=31, score=27, bucket="24h",
+            profile_version=14, scorer_version=1,
+        )
+        # Same profile AND same scorer -> still frozen (unchanged contract).
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=31, score=99, bucket="24h",
+            profile_version=14, scorer_version=1,
+        )
+        cur = await db.execute(
+            "SELECT score FROM user_feed WHERE user_id = ? AND job_id = ?",
+            ("alice", 31),
+        )
+        assert (await cur.fetchone())["score"] == 27, "same scorer must still freeze"
+
+        # Same profile, NEW scorer -> the score MUST be re-written.
+        await svc.upsert_feed_row(
+            user_id="alice", job_id=31, score=81, bucket="24h",
+            profile_version=14, scorer_version=2,
+        )
+        cur = await db.execute(
+            "SELECT score, scorer_version FROM user_feed WHERE user_id = ? AND job_id = ?",
+            ("alice", 31),
+        )
+        row2 = await cur.fetchone()
+    assert row2["score"] == 81, "a scorer_version bump must re-score the row"
+    assert row2["scorer_version"] == 2

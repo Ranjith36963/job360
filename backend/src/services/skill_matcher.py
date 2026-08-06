@@ -22,6 +22,16 @@ from src.core.skill_synonyms import aliases_for
 from src.models import Job
 from src.services.scoring_dimensions import ScoreBreakdown
 
+# SCORER_VERSION — bump this whenever a change alters the score a given
+# (job, profile) pair produces. user_feed.score is frozen per
+# (profile_version, scorer_version), so this constant is what makes a scoring
+# fix REACH existing rows: bump it and every row re-scores on the next
+# backfill. Found necessary 2026-08-06 — PR #224's title fix was inert on
+# 6,165 prod rows because their profile_version was unchanged.
+#   1 = pre-2026-08-06 (legacy title matching)
+#   2 = revived title lever: evidence-based core domain words + domain+role band
+SCORER_VERSION = 2
+
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
 SKILL_WEIGHT = 40

@@ -1,0 +1,13 @@
+-- Stamps WHICH SCORER produced the row's score, alongside profile_version.
+--
+-- WHY (2026-08-06, found by the Pillar-2 ground-truth audit): user_feed.score
+-- is frozen unless the incoming profile_version differs (feed.py freeze). That
+-- makes a SCORING-CODE improvement inert — 6,165 prod rows carried the current
+-- profile version (14) with pre-fix scores, so the revived title lever (PR #224,
+-- Spearman -0.04 -> +0.29) could not reach a single existing row. Shipped code
+-- did not equal live behaviour, and nothing surfaced the gap.
+--
+-- With this column the freeze key becomes (profile_version, scorer_version):
+-- bumping SCORER_VERSION in code re-scores every row on the next backfill, no
+-- profile edit required. NULL = scored before this migration (always re-score).
+ALTER TABLE user_feed ADD COLUMN scorer_version INTEGER;

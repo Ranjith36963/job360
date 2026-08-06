@@ -249,6 +249,7 @@ class FeedService:
         score: int,
         bucket: str,
         profile_version: Optional[int] = None,
+        scorer_version: Optional[int] = None,
     ) -> int:
         """Insert a feed row or update (score, bucket, profile_version) if (user, job) already tracked.
 
@@ -257,30 +258,42 @@ class FeedService:
         row's score — None for legacy/unscored rows.
 
         FIX 6 — Version-conditional score freeze:
-        On an EXISTING row, the score is FROZEN when the incoming
-        ``profile_version`` equals the stored one (SQLite ``IS`` is NULL-safe:
-        equal-or-both-NULL -> freeze).  The score is overwritten only when the
-        version differs (re-score under a new profile).  This means an ordinary
-        re-fetch of the same job under the same profile keeps its score stable
-        (no time-based drift), while a re-score under a new profile updates it.
-        ``bucket`` and ``profile_version`` are always overwritten.
+        On an EXISTING row, the score is FROZEN when BOTH the incoming
+        ``profile_version`` AND ``scorer_version`` equal the stored ones
+        (``IS NOT DISTINCT FROM`` is NULL-safe: equal-or-both-NULL -> freeze).
+        The score is overwritten when either differs. So an ordinary re-fetch
+        under the same profile AND the same scorer keeps its score stable (no
+        time-based drift), while a new profile OR a new scorer re-scores it.
+
+        The ``scorer_version`` half was added 2026-08-06 after the Pillar-2
+        ground-truth audit: profile-only freezing made SCORING-CODE fixes inert
+        — 6,165 prod rows carried the current profile version with pre-fix
+        scores, so PR #224's title fix (Spearman -0.04 -> +0.29) reached none of
+        them. Shipped code did not equal live behaviour. Bumping
+        ``skill_matcher.SCORER_VERSION`` now re-scores every row on the next
+        backfill, with no profile edit required.
+        ``bucket`` and both version stamps are always overwritten.
         """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             """
-            INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at, profile_version)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+            INSERT INTO user_feed(user_id, job_id, score, bucket, status,
+                                  created_at, updated_at, profile_version, scorer_version)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
             ON CONFLICT(user_id, job_id)
             DO UPDATE SET
                 score = CASE
-                    WHEN user_feed.profile_version IS NOT DISTINCT FROM excluded.profile_version THEN user_feed.score
+                    WHEN user_feed.profile_version IS NOT DISTINCT FROM excluded.profile_version
+                     AND user_feed.scorer_version IS NOT DISTINCT FROM excluded.scorer_version
+                        THEN user_feed.score
                     ELSE excluded.score
                 END,
                 bucket = excluded.bucket,
                 updated_at = excluded.updated_at,
-                profile_version = excluded.profile_version
+                profile_version = excluded.profile_version,
+                scorer_version = excluded.scorer_version
             """,
-            (user_id, job_id, score, bucket, now, now, profile_version),
+            (user_id, job_id, score, bucket, now, now, profile_version, scorer_version),
         )
         await self._db.commit()
         cur = await self._db.execute(
