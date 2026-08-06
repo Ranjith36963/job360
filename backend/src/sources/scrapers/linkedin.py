@@ -1,4 +1,6 @@
 import asyncio
+import html as _html
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -27,6 +29,16 @@ _LINK_RE = re.compile(r'href="(https://[^"]*linkedin\.com/jobs/view/[^"]*)"', re
 # changed and the regexes above are silently matching nothing.
 _STRUCTURE_ANCHOR = "base-search-card__title"
 _MIN_STRUCTURAL_HTML_LEN = 500
+
+# Job-understanding fix (2026-08-06): the job-view pages serve the FULL
+# description to guests via JSON-LD SEO markup (verified live: 8,930 chars on
+# a real posting with a plain browser UA — the assumed auth-wall does not
+# apply to the SEO payload). One extra fetch per kept job, capped.
+_LDJSON_RE = re.compile(
+    r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL
+)
+_TAG_RE = re.compile(r"<[^>]+>")
+_MAX_DETAIL_FETCHES = 30
 
 
 class LinkedInSource(BaseJobSource):
@@ -91,5 +103,35 @@ class LinkedInSource(BaseJobSource):
             if len(jobs) >= 50:
                 break
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        # Detail pass — only for jobs we KEEP, capped, graceful per-job degrade.
+        for job in jobs[:_MAX_DETAIL_FETCHES]:
+            try:
+                job.description = await self._fetch_description(job.apply_url)
+            except Exception as e:  # noqa: BLE001 — a detail miss never drops the job
+                logger.debug("LinkedIn: detail fetch failed for %s: %s", job.apply_url, e)
+            await asyncio.sleep(1)
         logger.info("LinkedIn: found %s relevant jobs", len(jobs))
         return jobs
+
+    async def _fetch_description(self, view_url: str) -> str:
+        """Pull the posting's full description from the job-view page's JSON-LD.
+
+        The SEO markup is guest-accessible (verified live 2026-08-06). The
+        `description` field arrives as entity-escaped HTML — unescape, strip
+        tags, cap 5,000 chars. Returns "" on any miss: absence of text is a
+        data gap the scorer treats neutrally, never an error.
+        """
+        page = await self._get_text(view_url)
+        if not page:
+            return ""
+        m = _LDJSON_RE.search(page)
+        if not m:
+            return ""
+        try:
+            data = json.loads(m.group(1))
+        except (ValueError, TypeError):
+            return ""
+        desc = data.get("description") or ""
+        if not isinstance(desc, str) or not desc:
+            return ""
+        return _TAG_RE.sub(" ", _html.unescape(desc))[:5000].strip()
