@@ -609,11 +609,41 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
         (budget,),
     )
     rows = [dict(r) for r in await cur.fetchall()]
-    if not rows:
+
+    # REPAIR phase (2026-08-06, found by the Pillar-2 simulation): enrichment
+    # that ran against an EMPTY description extracted mostly 'unknown' (prod:
+    # visa 94% / seniority 62% / workplace 61% unknown), and skip_existing
+    # froze those hollow rows forever — even after the description-backfill
+    # fixes delivered the text. Spend whatever budget the missing-coverage
+    # phase left on re-enriching unknown-heavy rows whose job NOW has real
+    # text. save_enrichment upserts, so the repair overwrites in place.
+    repair_budget = budget - len(rows)
+    repair_rows: list[dict[str, Any]] = []
+    if repair_budget > 0:
+        cur = await db.execute(
+            """
+            SELECT j.id, j.title, j.company, j.location, j.description,
+                   j.apply_url, j.source, j.date_found
+            FROM jobs j
+            JOIN job_enrichment e ON e.job_id = j.id
+            JOIN user_feed f ON f.job_id = j.id AND f.status = 'active'
+            WHERE e.visa_sponsorship = 'unknown'
+              AND e.seniority = 'unknown'
+              AND e.workplace_type = 'unknown'
+              AND length(coalesce(j.description, '')) > 200
+            GROUP BY j.id, j.title, j.company, j.location, j.description,
+                     j.apply_url, j.source, j.date_found
+            ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
+            LIMIT ?
+            """,
+            (repair_budget,),
+        )
+        repair_rows = [dict(r) for r in await cur.fetchall()]
+
+    if not rows and not repair_rows:
         return {"enriched": 0, "reason": "coverage_complete"}
 
-    jobs: list[Job] = []
-    for r in rows:
+    def _mk_job(r: dict[str, Any]) -> Job:
         job = Job(
             title=r["title"] or "", company=r["company"] or "",
             apply_url=r["apply_url"] or "", source=r["source"] or "",
@@ -621,11 +651,21 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
             description=r["description"] or "",
         )
         job.id = r["id"]
-        jobs.append(job)
+        return job
 
-    results = await enrich_batch(jobs, semaphore_limit=3, conn=db, skip_existing=True)
-    enriched = len([x for x in (results or []) if x])
-    return {"enriched": enriched, "remaining_batch": len(rows) - enriched}
+    enriched = repaired = 0
+    if rows:
+        results = await enrich_batch(
+            [_mk_job(r) for r in rows], semaphore_limit=3, conn=db, skip_existing=True
+        )
+        enriched = len([x for x in (results or []) if x])
+    if repair_rows:
+        results = await enrich_batch(
+            [_mk_job(r) for r in repair_rows], semaphore_limit=3, conn=db,
+            skip_existing=False,  # deliberate: overwrite the hollow rows
+        )
+        repaired = len([x for x in (results or []) if x])
+    return {"enriched": enriched, "repaired": repaired}
 
 
 # ---------- Pillar 2 Batch 2.5 — job enrichment task -------------------

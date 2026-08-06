@@ -122,3 +122,51 @@ async def test_sweep_reports_complete_when_nothing_missing(tmp_path, monkeypatch
         assert result["reason"] == "coverage_complete"
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_sweep_repairs_hollow_enrichment_when_text_arrives(tmp_path, monkeypatch):
+    """REPAIR phase (Pillar-2 sim finding): enrichment that ran on an empty
+    description extracted all-unknowns and skip_existing froze it forever.
+    Once the job HAS text, leftover budget must re-enrich it in place."""
+    import src.core.settings as settings_mod
+    import src.workers.tasks as tasks_mod
+
+    monkeypatch.setattr(settings_mod, "ENGINE2_ENABLED", True, raising=False)
+    monkeypatch.setenv("ENRICHMENT_SWEEP_PER_TICK", "5")
+
+    db = await _full_db(str(tmp_path / "t3.db"))
+    try:
+        await db.insert_job(Job(
+            title="ML Engineer", company="Co", apply_url="https://x/1",
+            source="reed", date_found=_NOW, location="London, UK",
+            description="A real, substantial description " * 20,
+        ))
+        conn = db._db
+        user_id = _seed_user(str(tmp_path / "t3.db"))
+        cur = await conn.execute("SELECT id FROM jobs LIMIT 1")
+        jid = (await cur.fetchone())[0]
+        await conn.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,'active',?,?)", (user_id, jid, 50, "older", _NOW, _NOW))
+        # A hollow enrichment row — the empty-text artifact.
+        await conn.execute(
+            "INSERT INTO job_enrichment(job_id, title_canonical, category, visa_sponsorship, "
+            "seniority, workplace_type, enriched_at) VALUES (?,?,?,?,?,?,?)",
+            (jid, "ML Engineer", "software_engineering", "unknown", "unknown", "unknown", _NOW))
+        await db.commit()
+
+        calls = []
+
+        async def fake_enrich_batch(jobs, semaphore_limit=3, conn=None, skip_existing=True, **kw):
+            calls.append((sorted(j.id for j in jobs), skip_existing))
+            return [object()] * len(jobs)
+
+        with patch("src.services.job_enrichment.enrich_batch", new=fake_enrich_batch):
+            result = await tasks_mod.enrichment_sweep({"db": conn})
+
+        assert result.get("repaired") == 1, result
+        # The repair call must run with skip_existing=False so it overwrites.
+        assert any(ids == [jid] and skip is False for ids, skip in calls), calls
+    finally:
+        await db.close()
