@@ -38,6 +38,24 @@ MATCHER_ENABLED = os.getenv("MATCHER_ENABLED", "false").lower() in {"1", "true",
 # it can never see a job the funnel discarded. 30 == the MIN_MATCH_SCORE floor.
 MATCHER_THRESHOLD = int(os.getenv("MATCHER_THRESHOLD", "30"))
 MATCHER_MAX_JOBS = int(os.getenv("MATCHER_MAX_JOBS", "30"))
+# The Verified Window (2026-08-06, ground-truth audit). The judge used to see
+# only jobs fetched in the CURRENT run — never the backfilled catalog rows that
+# actually fill the dashboard — so 28 of the measured top-100 were unjudged
+# junk. The judge now targets the DISPLAYED window: the top MATCHER_WINDOW
+# feed rows by rank, judging any that lack a verdict. Verdicts cache forever,
+# so the first pass pays ~window calls and steady state only pays for new
+# entrants. 0 disables the window pass (legacy fetched-only behaviour).
+MATCHER_WINDOW = int(os.getenv("MATCHER_WINDOW", "120"))
+# The gem-rescue lane: jobs whose TITLE alone is a strong match (per-user
+# title points >= TITLE_RESCUE_MIN) but whose total sank on thin/no
+# description. Iteration-1 audit: 17 buried gems, all title-strong thin-text
+# ("Senior Data Engineer", desc=0c, kw=26). They get judged regardless of
+# total score, capped per run; judged-strong ones reactivate.
+MATCHER_RESCUE_MAX = int(os.getenv("MATCHER_RESCUE_MAX", "30"))
+TITLE_RESCUE_MIN = int(os.getenv("TITLE_RESCUE_MIN", "30"))
+# A rescued/evicted row whose verdict is at least this strong returns to the
+# active shelf (COALESCE ranking then surfaces it).
+RESCUE_REACTIVATE_MIN = int(os.getenv("RESCUE_REACTIVATE_MIN", "65"))
 
 
 class MatchVerdict(BaseModel):

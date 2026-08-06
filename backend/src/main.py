@@ -355,6 +355,7 @@ async def _run_matcher_stage(db: JobDatabase, *, user_id: str, jobs: list[Job]) 
             MATCHER_ENABLED,
             MATCHER_MAX_JOBS,
             MATCHER_THRESHOLD,
+            MATCHER_WINDOW,
             match_batch,
             profile_to_matcher_text,
         )
@@ -368,17 +369,57 @@ async def _run_matcher_stage(db: JobDatabase, *, user_id: str, jobs: list[Job]) 
         if profile is None:
             logger.info("matcher: no profile for user %s — skipping", user_id)
             return
-        shortlist = sorted(
-            (
-                j
-                for j in jobs
-                if getattr(j, "id", None) is not None
-                and j.match_score is not None
-                and j.match_score >= MATCHER_THRESHOLD
-            ),
-            key=lambda j: j.match_score,
-            reverse=True,
-        )[:MATCHER_MAX_JOBS]
+
+        # THE VERIFIED WINDOW (2026-08-06, ground-truth audit finding). The old
+        # shortlist came only from `jobs` — the postings THIS run fetched — so
+        # the backfilled catalog rows that actually fill the dashboard were
+        # never judged: 28 of the measured top-100 were unjudged junk sitting
+        # above judged rows. The judge now targets what the user WILL SEE — the
+        # top MATCHER_WINDOW feed rows by display rank — judging any without a
+        # verdict. Verdicts cache per (user, job), so only new window entrants
+        # cost anything after the first pass. MATCHER_WINDOW=0 falls back to
+        # the legacy fetched-only shortlist.
+        assert db._conn is not None  # set by init_db() before this stage runs
+        shortlist: list[Job] = []
+        if MATCHER_WINDOW > 0:
+            cur = await db._conn.execute(
+                """
+                SELECT j.id, j.title, j.company, j.location, j.description,
+                       j.apply_url, j.source, j.date_found, j.salary_min,
+                       j.salary_max, f.score
+                FROM (
+                    SELECT job_id, score, llm_fit_score FROM user_feed
+                    WHERE user_id = ? AND status = 'active' AND score >= ?
+                    ORDER BY COALESCE(llm_fit_score, score) DESC
+                    LIMIT ?
+                ) f
+                JOIN jobs j ON j.id = f.job_id
+                WHERE f.llm_fit_score IS NULL
+                """,
+                (user_id, MATCHER_THRESHOLD, MATCHER_WINDOW),
+            )
+            for r in await cur.fetchall():
+                wj = Job(
+                    title=r[1] or "", company=r[2] or "", apply_url=r[5] or "",
+                    source=r[6] or "", date_found=r[7] or "",
+                    location=r[3] or "", description=r[4] or "",
+                    salary_min=r[8], salary_max=r[9],
+                )
+                wj.id = r[0]
+                wj.match_score = int(r[10] or 0)
+                shortlist.append(wj)
+        else:
+            shortlist = sorted(
+                (
+                    j
+                    for j in jobs
+                    if getattr(j, "id", None) is not None
+                    and j.match_score is not None
+                    and j.match_score >= MATCHER_THRESHOLD
+                ),
+                key=lambda j: j.match_score,
+                reverse=True,
+            )[:MATCHER_MAX_JOBS]
         if not shortlist:
             return
         t0 = time.perf_counter()

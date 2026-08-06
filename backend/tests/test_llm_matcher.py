@@ -113,7 +113,9 @@ async def mem_db():
             apply_url TEXT NOT NULL,
             source TEXT NOT NULL,
             date_found TEXT NOT NULL,
-            match_score INTEGER DEFAULT 0
+            match_score INTEGER DEFAULT 0,
+            salary_min REAL,
+            salary_max REAL
         );
         CREATE TABLE IF NOT EXISTS user_feed (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -270,7 +272,9 @@ async def stage_db():
             apply_url TEXT NOT NULL,
             source TEXT NOT NULL,
             date_found TEXT NOT NULL,
-            match_score INTEGER DEFAULT 0
+            match_score INTEGER DEFAULT 0,
+            salary_min REAL,
+            salary_max REAL
         );
         CREATE TABLE IF NOT EXISTS user_feed (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -691,3 +695,36 @@ async def test_match_batch_never_uses_the_shared_connection_concurrently(mem_db)
         )
         row = await cur.fetchone()
         assert row["llm_fit_score"] == 77
+
+
+@pytest.mark.asyncio
+async def test_matcher_window_judges_backfilled_rows_not_just_fetched(stage_db, monkeypatch):
+    """THE VERIFIED WINDOW (2026-08-06 audit finding). The judge used to see
+    only jobs passed in from the current fetch — backfilled catalog rows that
+    fill the dashboard were never judged (28 of the measured top-100 were
+    unjudged junk). The window pass must judge feed rows even when the
+    `jobs` argument does not contain them."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    async def fake(prompt, schema, system):
+        return MatchVerdict(fit_score=66, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    # A BACKFILLED row: exists in the feed, NOT passed via `jobs`.
+    backfilled = await _seed_job(conn, "Backfilled Data Engineer", "CatalogCo", 55, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[])
+
+    cur = await conn.execute(
+        "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+        (_UID, backfilled.id),
+    )
+    row = await cur.fetchone()
+    assert row is not None and row["llm_fit_score"] == 66, (
+        "a backfilled feed row inside the display window was not judged"
+    )

@@ -246,7 +246,13 @@ async def backfill_feed_from_catalog(
 
     # Phase 1 — score the whole catalog (unchanged cost: this loop always
     # scored every row; it just also WROTE every row that beat the floor).
+    # `title_strong` feeds the gem-rescue lane (Phase 5): iteration-1 audit
+    # found 17 buried gems, ALL title-perfect jobs sunk by thin/no description
+    # text ("Senior Data Engineer", desc=0c, kw=26).
     scored: list[tuple[int, Any, dict[str, Any]]] = []
+    title_strong: list[tuple[int, Any, dict[str, Any]]] = []
+    from src.services.llm_matcher import TITLE_RESCUE_MIN  # noqa: PLC0415
+
     for row in rows:
         jid = row.get("id")
         if jid is None:
@@ -259,6 +265,8 @@ async def backfill_feed_from_catalog(
         except Exception as exc:  # noqa: BLE001
             logger.warning("catalog backfill: skipping job %s: %s", jid, exc)
             continue
+        if int(getattr(breakdown, "title_score", 0) or 0) >= TITLE_RESCUE_MIN:
+            title_strong.append((ms, jid, row))
         if ms < MIN_STORE_SCORE:
             continue
         scored.append((ms, jid, row))
@@ -368,6 +376,76 @@ async def backfill_feed_from_catalog(
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("catalog backfill: candidate enrichment failed: %s", exc)
+
+    # Phase 5 — the GEM-RESCUE lane (2026-08-06, iteration-1 audit). Title-
+    # perfect jobs with thin/no descriptions lose the 40 skill points and sink
+    # below the shelf (or get evicted): 17/100 buried-sample gems, all this
+    # class. Any title-strong row without a verdict gets judged regardless of
+    # its total (capped per run); a judged-strong row is reactivated so the
+    # COALESCE ranking surfaces it, and the verdict guard makes it
+    # eviction-proof from then on. Gated like every E4 call site.
+    from src.core.settings import ENGINE4_ENABLED  # noqa: PLC0415
+    from src.services.llm_matcher import (  # noqa: PLC0415
+        MATCHER_ENABLED,
+        MATCHER_RESCUE_MAX,
+        RESCUE_REACTIVATE_MIN,
+    )
+
+    if (ENGINE4_ENABLED or MATCHER_ENABLED) and title_strong and MATCHER_RESCUE_MAX > 0:
+        try:
+            from src.models import Job as _RJob  # noqa: PLC0415
+            from src.services.llm_matcher import (  # noqa: PLC0415
+                has_verdict,
+                match_batch,
+                profile_to_matcher_text,
+            )
+
+            rescue: list[Any] = []
+            for ms, jid, row in sorted(title_strong, key=lambda t: t[0], reverse=True):
+                if len(rescue) >= MATCHER_RESCUE_MAX:
+                    break
+                if await has_verdict(db._db, user_id, jid):
+                    continue
+                rjob = _RJob(
+                    title=row.get("title", "") or "",
+                    company=row.get("company", "") or "",
+                    apply_url=row.get("apply_url", "") or "",
+                    source=row.get("source", "") or "",
+                    date_found=row.get("date_found", "") or "",
+                    location=row.get("location", "") or "",
+                    description=row.get("description", "") or "",
+                    salary_min=row.get("salary_min"),
+                    salary_max=row.get("salary_max"),
+                )
+                rjob.id = jid
+                rjob.match_score = ms
+                rescue.append(rjob)
+            if rescue:
+                await match_batch(
+                    rescue,
+                    user_id=user_id,
+                    profile_text=profile_to_matcher_text(profile),
+                    conn=db._db,
+                    semaphore_limit=3,
+                )
+                # Reactivate rescued rows whose verdict clears the bar — an
+                # evicted gem returns to the shelf, ranked by its fit score.
+                from datetime import datetime, timezone  # noqa: PLC0415
+
+                now = datetime.now(timezone.utc).isoformat()
+                cur = await db._db.execute(
+                    "UPDATE user_feed SET status = 'active', updated_at = ? "
+                    "WHERE user_id = ? AND status = 'stale' AND llm_fit_score >= ?",
+                    (now, user_id, RESCUE_REACTIVATE_MIN),
+                )
+                await db._db.commit()
+                logger.info(
+                    "catalog backfill: gem-rescue judged %s title-strong jobs "
+                    "for user %s (reactivated %s)",
+                    len(rescue), user_id, cur.rowcount or 0,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("catalog backfill: gem-rescue failed: %s", exc)
 
     logger.info(
         "catalog backfill: user %s matched %s of %s catalog jobs "
