@@ -876,18 +876,35 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
     job_titles: list[str] = []
     companies: list[str] = []
     experience_lines: list[str] = []
+    # STRUCTURED experience (2026-08-06). The prompt above has always asked for
+    # {company, title, dates, location, bullets}, but this adapter kept only the
+    # flattened title/company lists and discarded dates + location + the
+    # title<->company pairing. Nothing downstream could then say which role was
+    # held where, for how long, or how recently — the reason the engine has no
+    # skill-recency signal. The flat lists stay (the scorer's SearchConfig and
+    # every existing consumer read them); this preserves the full record too.
+    cv_positions: list[dict[str, Any]] = []
     exp_raw = result.get("experience", [])
     if isinstance(exp_raw, list):
         for exp in exp_raw:
             if isinstance(exp, dict):
                 company = _coerce_str(exp.get("company"))
                 title = _coerce_str(exp.get("title"))
+                bullets = _coerce_str_list(exp.get("bullets"))
                 if title:
                     job_titles.append(title)
                 if company:
                     companies.append(company)
-                for bullet in _coerce_str_list(exp.get("bullets")):
+                for bullet in bullets:
                     experience_lines.append(bullet)
+                if title or company:
+                    cv_positions.append({
+                        "company": company,
+                        "title": title,
+                        "dates": _coerce_str(exp.get("dates")),
+                        "location": _coerce_str(exp.get("location")),
+                        "bullets": bullets,
+                    })
             elif isinstance(exp, str):
                 job_titles.append(exp)
 
@@ -907,6 +924,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
         certifications=certifications,
         summary=summary,
         experience_text="\n".join(experience_lines),
+        cv_positions=cv_positions,
         # Display-only (accessed via CVData.highlights property for CV viewer)
         name=name,
         headline=headline,

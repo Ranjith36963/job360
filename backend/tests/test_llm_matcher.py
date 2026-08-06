@@ -728,3 +728,65 @@ async def test_matcher_window_judges_backfilled_rows_not_just_fetched(stage_db, 
     assert row is not None and row["llm_fit_score"] == 66, (
         "a backfilled feed row inside the display window was not judged"
     )
+
+
+def test_matcher_text_includes_every_source_not_just_cv_skills():
+    """THE JUDGE'S BLIND SPOT (2026-08-06). profile_to_matcher_text sent
+    `job_titles + cv.skills[:30] + summary` and claimed LinkedIn/GitHub were
+    "already merged into cv_data" — false for cv.skills. So the highest-signal
+    stage in the funnel, and the oracle the accuracy audit measures against,
+    scored every job against a CV-only, 30-skill-truncated candidate."""
+    class _CV2:
+        job_titles = ["AI Engineer"]
+        companies = ["Acme"]
+        skills = [f"CvSkill{i}" for i in range(45)]
+        linkedin_skills = ["Stakeholder Management"]
+        github_llm_skills = ["LangGraph"]
+        github_frameworks = ["FastAPI"]
+        about_me_inferred_skills = ["Mentoring"]
+        summary = "Senior AI engineer."
+        cv_positions = [{"title": "ML Engineer", "company": "Acme",
+                         "dates": "2023-2025", "location": "London", "bullets": []}]
+        linkedin_positions = [{"title": "Data Scientist", "company": "Beta",
+                               "start": "2021", "end": "2023"}]
+        github_repos_brief = [{"name": "fraud", "description": "Fraud detection"}]
+        education = ["MSc AI"]
+        certifications = ["AWS SA"]
+
+    class _Prefs2:
+        target_job_titles = ["ML Engineer"]
+        experience_level = "senior"
+        work_arrangement = "remote"
+        preferred_workplace = "hybrid"
+        salary_min = 60000
+        salary_max = 90000
+        needs_visa = True
+        preferred_locations = ["London"]
+        about_me = "I want to build agentic systems."
+
+    class _P2:
+        cv_data = _CV2()
+        preferences = _Prefs2()
+
+    txt = profile_to_matcher_text(_P2())
+    # every skill source, labelled by origin
+    assert "Stakeholder Management" in txt, "LinkedIn skills hidden from the judge"
+    assert "LangGraph" in txt, "GitHub skills hidden from the judge"
+    assert "FastAPI" in txt and "Mentoring" in txt
+    assert "CvSkill44" in txt, "skills beyond the old 30-item cap were dropped"
+    # dated experience — the rubric asks about seniority fit and had no data
+    assert "ML Engineer at Acme (2023-2025)" in txt
+    assert "Data Scientist at Beta" in txt
+    # what they built, credentials, and the full preference set
+    assert "Fraud detection" in txt
+    assert "MSc AI" in txt and "AWS SA" in txt
+    assert "needs_visa_sponsorship=true" in txt
+    assert "salary_min=60000" in txt
+    assert "agentic systems" in txt
+
+
+def test_matcher_text_survives_a_bare_profile():
+    class _Empty:
+        cv_data = None
+        preferences = None
+    assert profile_to_matcher_text(_Empty()) == ""

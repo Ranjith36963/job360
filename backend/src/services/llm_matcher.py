@@ -89,27 +89,118 @@ _MATCH_RUBRIC = (
 
 
 def profile_to_matcher_text(profile: Any) -> str:
-    """The permanent 'left side': titles + skills + summary from cv_data
-    (LinkedIn/GitHub are already merged into cv_data by the upload routes)
-    plus explicit preferences."""
+    """The permanent 'left side' of every judgment — the WHOLE candidate.
+
+    WHAT THIS USED TO BE (fixed 2026-08-06): ``job_titles + cv.skills[:30] +
+    summary[:600]`` and three preference bits, with a docstring claiming
+    "LinkedIn/GitHub are already merged into cv_data by the upload routes".
+    True of the blob, FALSE of ``cv.skills`` — that list only ever receives
+    CV-derived skills, while LinkedIn/GitHub/about-me skills live in their own
+    fields. So the JUDGE — the highest-signal stage in the funnel, and the
+    oracle the accuracy audit measures against — scored every job against a
+    CV-only profile truncated to 30 skills. It never saw the user's LinkedIn
+    skills, their GitHub skills, the roles they actually held, what they
+    built, their education or certifications.
+
+    Now: every skill source (labelled by origin so the judge can weigh
+    "proven on GitHub" against "listed on a CV"), roles held WITH dates
+    (cv_positions + linkedin_positions), projects, education, certifications,
+    and the full preference set. Written as labelled sections, not a bag of
+    words, because a judge reads structure.
+
+    Uncapped on the candidate side by design: there is one profile per user,
+    and prompt input tokens are the cheapest thing in this pipeline —
+    truncating the candidate to save them is how the 30-skill bug happened.
+    """
     cv = getattr(profile, "cv_data", None)
     prefs = getattr(profile, "preferences", None)
-    titles = ", ".join(getattr(cv, "job_titles", []) or []) if cv else ""
-    skills = ", ".join((getattr(cv, "skills", []) or [])[:30]) if cv else ""
-    summary = (getattr(cv, "summary", "") or "")[:600] if cv else ""
-    pref_bits = []
-    if prefs:
-        for attr in ("experience_level", "work_arrangement"):
+    lines: list[str] = []
+
+    def _join(values: Any) -> str:
+        return ", ".join(
+            v.strip() for v in (values or []) if isinstance(v, str) and v.strip()
+        )
+
+    if prefs is not None:
+        targets = _join(getattr(prefs, "target_job_titles", []))
+        if targets:
+            lines.append(f"Target roles: {targets}")
+    if cv is not None:
+        held = _join(getattr(cv, "job_titles", []))
+        if held:
+            lines.append(f"Titles held: {held}")
+        summary = (getattr(cv, "summary", "") or "").strip()
+        if summary:
+            lines.append(f"Summary: {summary}")
+
+        # Skills BY SOURCE — the judge can then weigh evidence strength
+        # ("proven in GitHub repos" outranks "listed on a CV").
+        for label, field in (
+            ("Skills (CV)", "skills"),
+            ("Skills (LinkedIn)", "linkedin_skills"),
+            ("Skills (GitHub, from real repos)", "github_llm_skills"),
+            ("Frameworks (GitHub dependencies)", "github_frameworks"),
+            ("Skills (stated by the user)", "about_me_inferred_skills"),
+        ):
+            joined = _join(getattr(cv, field, []))
+            if joined:
+                lines.append(f"{label}: {joined}")
+
+        # Roles actually held, WITH dates — recency and tenure are dimensions
+        # the rubric asks about (seniority fit) and previously had no data.
+        role_lines: list[str] = []
+        for pos in list(getattr(cv, "cv_positions", []) or []) + list(
+            getattr(cv, "linkedin_positions", []) or []
+        ):
+            if not isinstance(pos, dict):
+                continue
+            title = (pos.get("title") or "").strip()
+            company = (pos.get("company") or "").strip()
+            dates = (pos.get("dates") or f"{pos.get('start') or ''} - {pos.get('end') or ''}").strip(" -")
+            if title or company:
+                role_lines.append(f"  - {title} at {company} ({dates or 'dates unknown'})")
+        if role_lines:
+            lines.append("Experience:\n" + "\n".join(role_lines))
+
+        projects: list[str] = []
+        for repo in getattr(cv, "github_repos_brief", []) or []:
+            if isinstance(repo, dict) and (repo.get("name") or repo.get("description")):
+                projects.append(
+                    f"  - {repo.get('name') or ''}: {(repo.get('description') or '')[:200]}"
+                )
+        if projects:
+            lines.append("Built (GitHub):\n" + "\n".join(projects))
+
+        for label, field in (
+            ("Education", "education"),
+            ("Certifications", "certifications"),
+        ):
+            joined = _join(getattr(cv, field, []))
+            if joined:
+                lines.append(f"{label}: {joined}")
+
+    if prefs is not None:
+        pref_bits: list[str] = []
+        for attr in ("experience_level", "work_arrangement", "preferred_workplace"):
             v = getattr(prefs, attr, None)
             if v:
                 pref_bits.append(f"{attr}={v}")
-        smin = getattr(prefs, "salary_min", None)
-        if smin:
-            pref_bits.append(f"salary_min={smin}")
-    return (
-        f"Target titles: {titles}\nSkills: {skills}\nSummary: {summary}\n"
-        f"Preferences: {', '.join(pref_bits)}"
-    )
+        for attr in ("salary_min", "salary_max"):
+            v = getattr(prefs, attr, None)
+            if v:
+                pref_bits.append(f"{attr}={v}")
+        if getattr(prefs, "needs_visa", False):
+            pref_bits.append("needs_visa_sponsorship=true")
+        locs = _join(getattr(prefs, "preferred_locations", []))
+        if locs:
+            pref_bits.append(f"locations={locs}")
+        if pref_bits:
+            lines.append(f"Preferences: {', '.join(pref_bits)}")
+        about = (getattr(prefs, "about_me", "") or "").strip()
+        if about:
+            lines.append(f"In their own words: {about}")
+
+    return "\n".join(lines)
 
 
 def _build_match_prompt(profile_txt: str, job: Job, facts: dict[str, Any] | None) -> str:
