@@ -16,6 +16,12 @@ logger = logging.getLogger("job360.sources.workday")
 _POSTED_RE = re.compile(r"Posted\s+(\d+)\s+Days?\s+Ago", re.IGNORECASE)
 # Strip HTML tags from the CXS detail endpoint's jobDescription.
 _DESC_TAG_RE = re.compile(r"<[^>]+>")
+# Detail-fetch budget per RUN (2026-08-06) — same timeout regression as
+# smartrecruiters: uncapped detail fetches blew the 240s ATS ceiling in the
+# nightly union refresh and zeroed the source (537 jobs before). Past-cap jobs
+# keep empty descriptions; the description-backfill-on-refetch (PR #232) fills
+# them across later runs.
+_MAX_DETAIL_FETCHES = 40
 
 
 def _parse_posted_on(text: str) -> str:
@@ -45,6 +51,7 @@ class WorkdaySource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_keys = set()
+        detail_budget = _MAX_DETAIL_FETCHES
         for entry in self._companies:
             tenant = entry["tenant"]
             wd = entry["wd"]
@@ -105,9 +112,12 @@ class WorkdaySource(BaseJobSource):
                     # 12,746 chars for an astrazeneca posting). Only UK/remote
                     # survivors reach this point, so the request count matches
                     # what we keep. Failure degrades to "", never drops the job.
-                    description = await self._fetch_job_description(
-                        base_url, tenant, site, ext_path
-                    )
+                    description = ""
+                    if detail_budget > 0:
+                        detail_budget -= 1
+                        description = await self._fetch_job_description(
+                            base_url, tenant, site, ext_path
+                        )
                     jobs.append(Job(
                         title=title,
                         company=company_name,
