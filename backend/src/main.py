@@ -51,7 +51,12 @@ from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.scheduler import TieredScheduler
-from src.services.skill_matcher import JobScorer, detect_experience_level, salary_in_range
+from src.services.skill_matcher import (
+    SCORER_VERSION,
+    JobScorer,
+    detect_experience_level,
+    salary_in_range,
+)
 from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
@@ -1074,6 +1079,7 @@ async def run_search(
                             score=_score,
                             bucket=_recency_bucket(job.date_found),
                             profile_version=feed_profile_version,
+                            scorer_version=SCORER_VERSION,
                         )
                         feed_written += 1
                         _written_for_notify.append((job.id, _score))

@@ -231,6 +231,8 @@ async def backfill_feed_from_catalog(
     if version is None:
         version = current_profile_version_id(user_id)
 
+    from src.services.skill_matcher import SCORER_VERSION as _SCORER_VERSION  # noqa: PLC0415
+
     scorer = await _build_user_scorer(db, profile)
     rows = await db.get_catalog_jobs_for_rescore()
 
@@ -294,6 +296,7 @@ async def backfill_feed_from_catalog(
                     score=ms,
                     bucket=_recency_bucket(row.get("date_found")),
                     profile_version=version,
+                    scorer_version=_SCORER_VERSION,
                 )
             )
             written += 1
@@ -431,6 +434,9 @@ async def rescore_user_feed(
                 _build_enrichment_lookup,
             )
             from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
+            from src.services.skill_matcher import (  # noqa: PLC0415
+                SCORER_VERSION as _SCORER_VERSION,
+            )
             from src.services.skill_matcher import JobScorer  # noqa: PLC0415
 
             search_config = generate_search_config(profile)
@@ -573,6 +579,7 @@ async def rescore_user_feed(
                             score=int(ms),
                             bucket=_recency_bucket(row.get("date_found")),
                             profile_version=version,
+                            scorer_version=_SCORER_VERSION,
                         )
                     )
                     rescored += 1
