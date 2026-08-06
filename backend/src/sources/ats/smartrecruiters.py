@@ -14,6 +14,13 @@ from src.utils.dates import normalize_posted_at
 logger = logging.getLogger("job360.sources.smartrecruiters")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+# Detail-fetch budget per RUN (2026-08-06). The 2026-08-05 detail pass had NO
+# cap: the nightly union refresh detail-fetched every UK posting across every
+# company, blew the 240s ATS fetch timeout, and the whole source was recorded
+# as errored with ZERO jobs stored (it produced 150 before). Jobs past the cap
+# keep an empty description — the description-backfill-on-refetch (PR #232)
+# fills them across later runs.
+_MAX_DETAIL_FETCHES = 60
 
 class SmartRecruitersSource(BaseJobSource):
     name = "smartrecruiters"
@@ -25,6 +32,7 @@ class SmartRecruitersSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        detail_budget = _MAX_DETAIL_FETCHES
         for slug in self._companies:
             url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
             data = await self._get_json(url, params={"limit": "100"})
@@ -68,7 +76,8 @@ class SmartRecruitersSource(BaseJobSource):
                 # UK/remote-relevant jobs are detail-fetched, so the extra
                 # request count matches what we actually keep. A failed detail
                 # fetch degrades to the empty description, never drops the job.
-                if _is_uk_or_remote(location):
+                if _is_uk_or_remote(location) and detail_budget > 0:
+                    detail_budget -= 1
                     job.description = await self._fetch_posting_text(
                         slug, str(item.get("id", ""))
                     )

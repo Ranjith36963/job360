@@ -2786,3 +2786,71 @@ def test_eightykhours_declares_niche_domain():
     can exclude it for unrelated profiles."""
     assert EightyKHoursSource.DOMAINS != {"general"}
     assert EightyKHoursSource.DOMAINS == {"tech"}
+
+
+def test_smartrecruiters_detail_fetches_are_budgeted(monkeypatch):
+    """Timeout-regression guard (2026-08-06): the nightly union refresh blew
+    the 240s ATS ceiling because detail fetches were uncapped — the source
+    errored and stored ZERO jobs. The per-run budget must bound them."""
+    async def _test():
+        import src.sources.ats.smartrecruiters as sr_mod
+        monkeypatch.setattr(sr_mod, "_MAX_DETAIL_FETCHES", 2)
+        session = aiohttp.ClientSession()
+        try:
+            postings = [{"id": f"sr-{i}", "name": f"AI Engineer {i}",
+                         "location": {"city": "London", "country": "GB"},
+                         "ref": f"https://jobs.smartrecruiters.com/wise/sr-{i}",
+                         "releasedDate": "2024-01-15"} for i in range(5)]
+            detail_calls = []
+            with aioresponses() as m:
+                m.get(re.compile(r".*postings\?.*"), payload={"content": postings})
+                def _detail_cb(url, **kw):
+                    from aioresponses import CallbackResult
+                    detail_calls.append(str(url))
+                    return CallbackResult(payload={"jobAd": {"sections": {
+                        "jobDescription": {"text": "<p>role text</p>"}}}})
+                m.get(re.compile(r".*postings/sr-\d+$"), callback=_detail_cb, repeat=True)
+                source = SmartRecruitersSource(session, companies=["wise"])
+                jobs = await source.fetch_jobs()
+            assert len(jobs) == 5, "past-budget jobs must still be KEPT"
+            assert len(detail_calls) == 2, f"budget must cap details, got {len(detail_calls)}"
+            with_desc = [j for j in jobs if j.description]
+            assert len(with_desc) == 2
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workday_detail_fetches_are_budgeted(monkeypatch):
+    """Same guard for workday (537 jobs zeroed by the uncapped detail pass)."""
+    async def _test():
+        import src.sources.ats.workday as wd_mod
+        monkeypatch.setattr(wd_mod, "_MAX_DETAIL_FETCHES", 1)
+        session = aiohttp.ClientSession()
+        try:
+            postings = [{"title": f"ML Engineer {i}",
+                         "locationsText": "London, United Kingdom",
+                         "externalPath": f"/job/London/ML-{i}",
+                         "postedOn": "Posted Today"} for i in range(3)]
+            detail_calls = []
+            with aioresponses() as m:
+                m.post(re.compile(r".*wday/cxs/acme/ext/jobs"),
+                       payload={"jobPostings": postings}, repeat=True)
+                def _detail_cb(url, **kw):
+                    from aioresponses import CallbackResult
+                    detail_calls.append(str(url))
+                    return CallbackResult(payload={"jobPostingInfo": {
+                        "jobDescription": "<p>text</p>"}})
+                m.get(re.compile(r".*wday/cxs/acme/ext/job/London/ML-\d+"),
+                      callback=_detail_cb, repeat=True)
+                source = WorkdaySource(
+                    session,
+                    companies=[{"tenant": "acme", "wd": "wd1", "site": "ext", "name": "Acme"}],
+                    search_config=_sc_ai_defaults(),
+                )
+                jobs = await source.fetch_jobs()
+            assert len(jobs) == 3, "past-budget jobs must still be KEPT"
+            assert len(detail_calls) == 1, f"budget must cap details, got {len(detail_calls)}"
+        finally:
+            await session.close()
+    _run(_test())
