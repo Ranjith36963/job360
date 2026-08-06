@@ -122,6 +122,16 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
         print(f"progress {min(i + 30, len(work))}/{len(work)}", flush=True)
 
     ok = [r for r in results if "fit" in r]
+    errs = [r for r in results if "error" in r]
+    if errs:
+        # Drill finding (2026-08-06, run 31107748440): 160/160 judge calls
+        # failed INSTANTLY and the script said only "no judgments" — the
+        # per-call errors were swallowed, so the alarm issue couldn't name
+        # the cause. Surface a sample of distinct error strings.
+        distinct = list({r["error"] for r in errs})[:5]
+        print(f"judge errors: {len(errs)}/{len(results)} — sample causes:")
+        for e in distinct:
+            print(f"  ERROR: {e}")
     top_ok = [r for r in ok if r["bucket"] == "top"]
     buried_ok = [r for r in ok if r["bucket"] == "buried"]
     if not top_ok:
