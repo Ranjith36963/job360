@@ -201,20 +201,37 @@ def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobR
 
 
 def _profile_query_text(profile: Any) -> str:
-    """Build a semantic-query string from the user's profile — job titles +
-    skills + summary. LinkedIn/GitHub data is already merged into ``cv_data`` by
-    the upload routes, so this naturally includes it. Returns "" when there's
-    nothing usable (caller then falls back to the top job's title)."""
-    cv = getattr(profile, "cv_data", None)
-    if cv is None:
+    """Build the semantic-query string for the user's profile.
+
+    Delegates to ``embeddings.profile_to_embedding_text`` — ONE definition of
+    "what the candidate side means", shared by the hybrid read path and any
+    future persisted candidate embedding.
+
+    This used to build the string here from ``job_titles + cv.skills[:40] +
+    summary``, and its docstring claimed LinkedIn/GitHub were "already merged
+    into cv_data". That is true of the blob but NOT of ``cv.skills``, which
+    only ever receives CV-derived skills — so the semantic engine searched on
+    a CV-only, truncated view and ignored the LinkedIn/GitHub skills the
+    profile pipeline works hardest to extract. Returns "" when there is
+    nothing usable (caller then falls back to the top job's title).
+
+    Kept as a thin wrapper (not deleted) because the BM25 leg and the
+    fallback path both call it, and it is exercised directly by tests.
+    """
+    if profile is None:
         return ""
-    parts: list[str] = []
-    parts.extend(getattr(cv, "job_titles", []) or [])
-    parts.extend((getattr(cv, "skills", []) or [])[:40])
-    summary = getattr(cv, "summary", "") or ""
-    if summary:
-        parts.append(summary)
-    return " ".join(p for p in parts if p).strip()
+    try:
+        from src.services.embeddings import (  # noqa: PLC0415 — lazy (rule #16)
+            profile_to_embedding_text,
+        )
+    except Exception:  # noqa: BLE001 — semantic extra absent: degrade, never 500
+        cv = getattr(profile, "cv_data", None)
+        if cv is None:
+            return ""
+        parts = list(getattr(cv, "job_titles", []) or [])
+        parts.extend((getattr(cv, "skills", []) or [])[:40])
+        return " ".join(p for p in parts if p).strip()
+    return profile_to_embedding_text(profile)
 
 
 def _hybrid_reorder_rows(
