@@ -666,6 +666,74 @@ def test_linkedin_parses_html():
     _run(_test())
 
 
+def test_linkedin_fetches_description_from_jsonld():
+    """Job-understanding fix (2026-08-06): the job-view page's JSON-LD carries
+    the FULL description for guests (verified live: 8,930 chars) — the assumed
+    auth-wall does not apply to the SEO payload. The entity-escaped HTML must
+    land in Job.description unescaped and tag-stripped."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            search_html = """
+            <h3 class="base-search-card__title">AI Engineer</h3>
+            <h4 class="base-search-card__subtitle">DeepTech Ltd</h4>
+            <span class="job-search-card__location">London, UK</span>
+            <a href="https://uk.linkedin.com/jobs/view/1234567890">View</a>
+            """
+            view_html = (
+                '<html><script type="application/ld+json">'
+                '{"@type":"JobPosting","description":"&lt;p&gt;Build RAG systems '
+                'with LangChain and PyTorch.&lt;/p&gt;"}'
+                "</script></html>"
+            )
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
+                      body=search_html, content_type="text/html", repeat=True)
+                m.get("https://uk.linkedin.com/jobs/view/1234567890",
+                      body=view_html, content_type="text/html", repeat=True)
+                sc = _make_search_config(["AI engineer UK"])
+                source = LinkedInSource(session, search_config=sc)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                desc = jobs[0].description
+                assert "Build RAG systems" in desc
+                assert "LangChain" in desc
+                assert "<" not in desc and "&lt;" not in desc, (
+                    "JSON-LD description must be unescaped then tag-stripped"
+                )
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_missing_jsonld_degrades_to_empty():
+    """A view page without JSON-LD (layout change, rate-limit shell) must leave
+    description empty — never drop the job, never crash."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            search_html = """
+            <h3 class="base-search-card__title">AI Engineer</h3>
+            <h4 class="base-search-card__subtitle">DeepTech Ltd</h4>
+            <span class="job-search-card__location">London, UK</span>
+            <a href="https://uk.linkedin.com/jobs/view/555">View</a>
+            """
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
+                      body=search_html, content_type="text/html", repeat=True)
+                m.get("https://uk.linkedin.com/jobs/view/555",
+                      body="<html>no markup here</html>", content_type="text/html",
+                      repeat=True)
+                sc = _make_search_config(["AI engineer UK"])
+                source = LinkedInSource(session, search_config=sc)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].description == ""
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_linkedin_skips_without_queries():
     async def _test():
         session = aiohttp.ClientSession()
