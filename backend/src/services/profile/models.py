@@ -90,6 +90,17 @@ class CVData:
     #               page GitHub renders at the top of a profile.
     github_bio: str = ""
     github_profile_readme: str = ""
+    # CV experience, STRUCTURED (2026-08-06). The CV LLM prompt has always
+    # asked for {company, title, dates, location, bullets} per role, but the
+    # adapter flattened it into unpaired ``job_titles`` + ``companies`` lists
+    # and threw ``dates``/``location`` away entirely — so nothing downstream
+    # could tell WHICH title was held at WHICH company, for HOW LONG, or how
+    # RECENTLY. That is why no skill-recency signal exists anywhere in the
+    # engine. Each entry: {company, title, dates, location, bullets: [str]}.
+    # Mirrors ``linkedin_positions`` (the only previously-structured source);
+    # JSON blob, no migration (storage._filter_fields drops unknown keys, so
+    # old rows load with an empty list).
+    cv_positions: list[dict[str, Any]] = field(default_factory=list)
     # Batch 1.1 — archetype classification (CareerDomain enum value).
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).
