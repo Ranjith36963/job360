@@ -54,6 +54,10 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "dependabot-auto.yml": (36, "daily 09:30"),
     "pr-shepherd.yml": (36, "daily 09:45"),
     "checker-scorecard.yml": (9 * 24, "weekly Mon 10:00"),
+    # The ranking ground-truth eval (2026-08-06): judges the shown top-100 +
+    # buried samples against a real profile weekly; opens a harness issue on
+    # regression. Born from the audit that found the top-100 at 39% strong.
+    "accuracy-audit.yml": (9 * 24, "weekly Mon 06:20"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
     # ci.yml and repair.yml are event-triggered only — silence is normal, so

@@ -134,6 +134,15 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
       case "$f" in
         backend/tests/test_*.py) [ -f "$f" ] && TARGETS="$TARGETS ${f#backend/}" ;;
         backend/tests/*) ;; # conftest/fixtures: no direct target; fall through
+        backend/scripts/*)
+          # Operational helper scripts (embed_catalog, eval_ranking, ...):
+          # standalone entry points, never imported by src/, exercised by their
+          # scheduled workflows rather than unit tests. They get ruff via
+          # LINT_FILES below; mapping them to the conservative FULL suite made
+          # a script-only change cost ~34min on Windows (measured 2026-08-06)
+          # while verifying nothing about the script itself.
+          SCRIPT_ONLY_SEEN=1
+          ;;
         *)
           # Exact name first, then a SUFFIX match. The exact-only rule silently
           # missed well-tested files whose test carries a prefix — e.g.
@@ -172,6 +181,13 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
         # from deps entirely — PR #33 drained 329 findings it had been hiding).
         echo "[gate] ruff on changed files..."
         (cd backend && python -m ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
+      fi
+    elif [ "${SCRIPT_ONLY_SEEN:-0}" = "1" ]; then
+      # Every backend change was a helper script — lint them, skip the suite.
+      echo "[gate] backend changes are helper scripts only — ruff + compile, no suite"
+      if [ -n "${LINT_FILES// /}" ]; then
+        (cd backend && python -m ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
+        (cd backend && python -m py_compile $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
       fi
     else
       echo "[gate] no changed file maps to a test — running FULL backend suite (conservative fallback)"

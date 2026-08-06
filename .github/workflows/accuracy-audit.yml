@@ -1,0 +1,84 @@
+# The standing accuracy instrument (eval-loop PR-C, 2026-08-06).
+#
+# WHY: ranking accuracy was only ever measured when someone remembered to.
+# The one manual audit found the shown top-100 at 39% strong precision with
+# 28% outright junk; two measured fix iterations took it to 78% with a 100%
+# first page. This workflow makes that measurement WEEKLY and gives it a
+# NOTIFIER (the Law: an artifact with no notifier dies) — on regression it
+# opens/updates a `harness`-labelled issue and wakes the triage loop.
+#
+# Judges ~160 jobs against the biggest real profile via the shared free LLM
+# chain — read-only on the DB, no feed writes.
+name: accuracy-audit
+
+on:
+  schedule:
+    - cron: "20 6 * * 1" # weekly, Monday 06:20 UTC (clear of the 04:00 refresh)
+  workflow_dispatch: {} # the drill entrance — every loop must be fireable on purpose
+
+permissions:
+  contents: read
+  issues: write
+  actions: write # hand a regression to the triage loop
+
+concurrency:
+  group: accuracy-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend (runtime deps only)
+        working-directory: backend
+        run: pip install -q -e .
+      - name: Run the ranking audit
+        id: audit
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SESSION_SECRET: audit-only-not-used-0000000000000000
+          CHANNEL_ENCRYPTION_KEY: sk9vWl9wZmMtc2VjcmV0LWtleS0zMzMzMzMzMzM=
+        run: |
+          set -o pipefail
+          python scripts/eval_ranking.py 2>&1 | tee audit.out
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+      - name: Notify on regression (or auto-close when healthy)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Accuracy audit REGRESSED (weekly ranking eval)"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ steps.audit.outcome }}" = "failure" ] || \
+             grep -q "REGRESSED" backend/audit.out; then
+            { echo "The weekly ground-truth ranking audit fell below its alarm floors."
+              echo
+              echo '```'
+              grep -A 12 "ACCURACY SCOREBOARD" backend/audit.out || tail -20 backend/audit.out
+              echo '```'
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "- Instrument: backend/scripts/eval_ranking.py (floors: EVAL_MIN_STRONG_100, EVAL_MAX_GEMS)"
+            } > body.md
+            if [ -z "$num" ]; then
+              new=$(gh issue create --title "$title" --body-file body.md --label harness)
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n raised but triage could not be woken"
+            else
+              gh issue comment "$num" --body-file body.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" --comment "Accuracy back within benchmark as of run ${{ github.run_id }}. (auto-close)"
+          fi
