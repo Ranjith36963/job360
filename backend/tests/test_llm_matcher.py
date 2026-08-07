@@ -790,3 +790,66 @@ def test_matcher_text_survives_a_bare_profile():
         cv_data = None
         preferences = None
     assert profile_to_matcher_text(_Empty()) == ""
+
+
+@pytest.mark.asyncio
+async def test_deep_bench_judges_below_the_window(stage_db, monkeypatch):
+    """THE DEEP BENCH (2026-08-07). The window judges what the user sees and
+    the rescue lane catches thin-text gems; neither reaches a genuinely good
+    job sitting mid-pack for ordinary reasons — the iteration-2 audit still
+    found 6 (fit 70-85) at ranks 100-800. A slice below the window must be
+    judged each run."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_WINDOW", 1)
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_DEEP_BENCH", 2)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    async def fake(prompt, schema, system):
+        return MatchVerdict(fit_score=71, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    top = await _seed_job(conn, "Window Job", "W", 90, _UID)
+    bench1 = await _seed_job(conn, "Bench Job A", "B1", 60, _UID)
+    bench2 = await _seed_job(conn, "Bench Job B", "B2", 55, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[])
+
+    for job, label in ((top, "window"), (bench1, "deep bench 1"), (bench2, "deep bench 2")):
+        cur = await conn.execute(
+            "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+            (_UID, job.id),
+        )
+        row = await cur.fetchone()
+        assert row is not None and row["llm_fit_score"] == 71, f"{label} was not judged"
+
+
+@pytest.mark.asyncio
+async def test_deep_bench_zero_disables_it(stage_db, monkeypatch):
+    """0 must mean the window-only behaviour, byte-identical (rule #18 shape)."""
+    from src import main as main_mod
+
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_ENABLED", True)
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_WINDOW", 1)
+    monkeypatch.setattr("src.services.llm_matcher.MATCHER_DEEP_BENCH", 0)
+    monkeypatch.setattr("src.services.profile.storage.load_profile", lambda uid: _Profile())
+
+    async def fake(prompt, schema, system):
+        return MatchVerdict(fit_score=71, verdict="good", reason="r")
+
+    monkeypatch.setattr("src.services.llm_matcher.llm_extract_validated", fake)
+
+    conn = stage_db._conn
+    await _seed_job(conn, "Window Job", "W", 90, _UID)
+    bench = await _seed_job(conn, "Bench Job", "B", 60, _UID)
+
+    await main_mod._run_matcher_stage(stage_db, user_id=_UID, jobs=[])
+
+    cur = await conn.execute(
+        "SELECT llm_fit_score FROM user_feed WHERE user_id=? AND job_id=?",
+        (_UID, bench.id),
+    )
+    assert (await cur.fetchone())["llm_fit_score"] is None, "deep bench ran while disabled"

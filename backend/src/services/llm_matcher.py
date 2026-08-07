@@ -56,6 +56,15 @@ TITLE_RESCUE_MIN = int(os.getenv("TITLE_RESCUE_MIN", "30"))
 # A rescued/evicted row whose verdict is at least this strong returns to the
 # active shelf (COALESCE ranking then surfaces it).
 RESCUE_REACTIVATE_MIN = int(os.getenv("RESCUE_REACTIVATE_MIN", "65"))
+# THE DEEP BENCH (2026-08-07). The window judges what the user already sees;
+# the rescue lane catches title-strong thin-text jobs. Neither reaches a job
+# that is genuinely good but scores mid-pack for ordinary reasons — the
+# iteration-2 audit still found 6 such jobs (fit 70-85) sitting at ranks
+# 100-800, e.g. "Data Engineer" kw=46 fit=85. Each run judges a slice BELOW
+# the window, walking further down on every search (cursor = the deepest rank
+# already judged), so the whole shelf is eventually verified without ever
+# paying for it twice. 0 disables.
+MATCHER_DEEP_BENCH = int(os.getenv("MATCHER_DEEP_BENCH", "40"))
 
 
 class MatchVerdict(BaseModel):
