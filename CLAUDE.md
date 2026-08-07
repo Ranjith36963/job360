@@ -80,6 +80,8 @@ Rules are reference material — keep them in one place. Long-form context for e
 
 ### Scoring + enrichment
 
+29. **STRICT — "Filled shelves work harder; empty shelves stay silent" (owner rule, 2026-08-07).** Like Indeed/LinkedIn: match on what the user filled; an empty preference (salary range, locations, workplace, experience level, about_me) means **"don't care" — never a penalty, never a per-job zero, never a guess**. In code: dim scorers return a CONSTANT for an empty user side (constants can't change ranking order); prefilter stages pass everything when their preference is empty; the judge prompt omits unset prefs entirely; the frontend never blocks on or silently defaults an unfilled preference. Full rule + audit table: `docs/product_design_rules.md`. The test: empty ONE user field and re-rank — if any job moves *relative to another*, the rule is broken.
+
 9. **Scoring changes require running `test_scorer.py` AND `test_profile.py`.** 53 + 55 tests cover edge cases.
 18. **Pillar 2 flags default off.** When `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` are false, behaviour must **exactly** match pre-Pillar-2 — no implicit semantic queries, no LLM calls. Test with both flags OFF.
 19. **`JobScorer` legacy default = 4-component formula.** New 7-dim scoring activates only when `JobScorer(config, user_preferences=..., enrichment_lookup=...)` gets all three kwargs. Don't flip defaults silently.
