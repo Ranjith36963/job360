@@ -40,9 +40,15 @@ class _FakeSource:
 
 
 def _make_job(title: str = "Test", company: str = "Co") -> Job:
+    # `location` is NOT decoration. The UK gate (rule #30) runs in the insert
+    # loop these tests exercise, and a job from an unrecognised source with no
+    # location at all is exactly what it is built to refuse — strict-by-default
+    # so a new source opts INTO trust. Without a UK location these fixtures are
+    # dropped before storage and every assertion downstream sees an empty feed.
     return Job(
         title=title,
         company=company,
+        location="London, UK",
         apply_url="https://x.test/1",
         source="fake",
         date_found=datetime.now(timezone.utc).isoformat(),
