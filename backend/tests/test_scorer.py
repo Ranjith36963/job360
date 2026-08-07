@@ -1147,3 +1147,69 @@ class TestDomainRoleTitleBand:
     def test_exact_match_still_wins_everything(self):
         s = self._scorer({"ai"}, {"engineer"})
         assert s._title_score("AI Solutions Engineer - R&D Department") == TITLE_WEIGHT
+
+
+# ═══ Skill-score length normalisation (tie-band fix, 2026-08-07) ══════════════
+# Skill points are +3/+2/+1 per match. A LONGER ad contains more words and so
+# accidentally contains more of the user's skills — 5,000-char corporate waffle
+# saturated the same 40/40 as a tight, genuinely-matching role. Measured: 141
+# of one user's jobs collapsed into the 24-29 band where junk and real matches
+# were indistinguishable. Nothing is truncated; only the SCORE is made fair
+# between a short ad and a long one (BM25's length normalisation).
+
+
+class TestSkillLengthNormalisation:
+    def _scorer(self):
+        cfg = SearchConfig(
+            job_titles=["ML Engineer"],
+            primary_skills=["python", "pytorch", "kubernetes", "airflow"],
+            secondary_skills=[],
+            tertiary_skills=[],
+            locations=["London"],
+            core_domain_words={"ml"},
+            supporting_role_words={"engineer"},
+        )
+        return JobScorer(cfg)
+
+    def test_a_typical_length_ad_is_unchanged(self):
+        s = self._scorer()
+        # 4 skills in ~400 words (the measured prod baseline) -> full points.
+        text = "python pytorch kubernetes airflow " + ("filler " * 396)
+        assert s._skill_score(text) == 12
+
+    def test_a_long_waffle_ad_is_discounted(self):
+        """The measured offender: the same 4 skills sprinkled through a
+        1,600-word corporate ad must NOT score like a tight 400-word match."""
+        s = self._scorer()
+        tight = "python pytorch kubernetes airflow " + ("filler " * 396)
+        waffle = "python pytorch kubernetes airflow " + ("filler " * 1596)
+        assert s._skill_score(waffle) < s._skill_score(tight)
+        assert s._skill_score(waffle) <= 5  # 12 / 2.5
+
+    def test_a_short_ad_is_never_boosted(self):
+        """One-sided by design: thin descriptions are a DATA problem here
+        (empty-description sources), so inflating them would reward missing
+        information."""
+        s = self._scorer()
+        short = "python pytorch kubernetes airflow"
+        assert s._skill_score(short) == 12, "short text must not be inflated"
+
+    def test_normalisation_can_be_disabled(self):
+        """B=0 restores byte-identical legacy behaviour (rule #18 shape)."""
+        import src.services.skill_matcher as sm
+
+        s = self._scorer()
+        waffle = "python pytorch kubernetes airflow " + ("filler " * 1596)
+        old_b = sm.SKILL_LENGTH_NORM_B
+        try:
+            sm.SKILL_LENGTH_NORM_B = 0.0
+            assert s._skill_score(waffle) == 12
+        finally:
+            sm.SKILL_LENGTH_NORM_B = old_b
+
+    def test_scorer_version_was_bumped_for_this_change(self):
+        """A scoring change that does not bump SCORER_VERSION never reaches a
+        single existing row — the exact failure PR #233 fixed."""
+        from src.services.skill_matcher import SCORER_VERSION
+
+        assert SCORER_VERSION >= 3

@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -30,7 +31,8 @@ from src.services.scoring_dimensions import ScoreBreakdown
 # 6,165 prod rows because their profile_version was unchanged.
 #   1 = pre-2026-08-06 (legacy title matching)
 #   2 = revived title lever: evidence-based core domain words + domain+role band
-SCORER_VERSION = 2
+#   3 = skill-score length normalisation (long ads no longer out-score tight ones)
+SCORER_VERSION = 3
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -43,6 +45,42 @@ PRIMARY_POINTS = 3
 SECONDARY_POINTS = 2
 TERTIARY_POINTS = 1
 SKILL_CAP = SKILL_WEIGHT
+
+# LENGTH NORMALISATION for the skill score (2026-08-07, tie-band fix).
+# Skill points are +3/+2/+1 per matched skill, capped at 40. A LONGER job ad
+# simply contains more words, so it accidentally contains more of the user's
+# skills — a 5,000-char corporate description ("we value collaboration,
+# Python a plus, data-driven culture") saturates the same 40/40 as a tight,
+# genuinely-matching role. Measured consequence: 141 of one user's jobs piled
+# into a single score band (24-29), where junk and real matches were
+# indistinguishable, and the top-100 filled from that noise.
+#
+# The standard IR answer (BM25's length normalisation): divide by
+#   max(1, (1 - b) + b * words / baseline)
+# so a job at/below the baseline length is UNCHANGED and longer ads are
+# discounted in proportion. Deliberately one-sided — never boosts short text,
+# because thin descriptions are a known DATA problem here (empty-description
+# sources), and inflating them would reward missing information.
+# Baseline measured on prod 2026-08-07: avg 390 words, median 353, p90 751.
+SKILL_LENGTH_BASELINE_WORDS = int(os.getenv("SKILL_LENGTH_BASELINE_WORDS", "400"))
+SKILL_LENGTH_NORM_B = float(os.getenv("SKILL_LENGTH_NORM_B", "0.5"))
+
+
+def _length_normalise_skill_points(points: int, text: str) -> int:
+    """Discount skill points earned in an unusually long job ad.
+
+    ``SKILL_LENGTH_NORM_B = 0`` disables (byte-identical to the old
+    behaviour). Never returns more than ``points`` — short ads are not
+    inflated (see the module note above)."""
+    if points <= 0 or SKILL_LENGTH_NORM_B <= 0 or SKILL_LENGTH_BASELINE_WORDS <= 0:
+        return points
+    words = len(text.split())
+    norm = (1.0 - SKILL_LENGTH_NORM_B) + SKILL_LENGTH_NORM_B * (
+        words / SKILL_LENGTH_BASELINE_WORDS
+    )
+    if norm <= 1.0:
+        return points
+    return int(points / norm)
 
 # Location aliases — map variants to canonical form
 LOCATION_ALIASES = {
@@ -513,6 +551,16 @@ class JobScorer:
         return min(len(core_overlap) * 5, TITLE_WEIGHT // 2)
 
     def _skill_score(self, text: str) -> int:
+        """Skill points, normalised for how much text earned them.
+
+        Nothing is truncated — the whole ad is still read. But a longer ad
+        contains more words and therefore accidentally contains more of the
+        user's skills, so raw counts reward LENGTH over FIT (measured: 141
+        jobs collapsed into one score band). Points are divided by the ad's
+        length relative to a typical ad, exactly as BM25 does; ads at or below
+        typical length are untouched. See the module note on
+        ``_length_normalise_skill_points``.
+        """
         points = 0
         for skill in self._config.primary_skills:
             if _text_contains_skill(text, skill):
@@ -523,7 +571,7 @@ class JobScorer:
         for skill in self._config.tertiary_skills:
             if _text_contains_skill(text, skill):
                 points += TERTIARY_POINTS
-        return min(points, SKILL_CAP)
+        return min(_length_normalise_skill_points(points, text), SKILL_CAP)
 
     def _negative_penalty(self, job_title: str) -> int:
         for kw in self._config.negative_title_keywords:
