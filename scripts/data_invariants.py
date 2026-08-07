@@ -407,7 +407,15 @@ INVARIANTS: list[Invariant] = [
               r"sydney|shanghai|warsaw|madrid|barcelona|munich|münchen|berlin|"
               r"aachen|darmstadt|brussels|lima|são paulo|sao paulo|ottawa|"
               r"palo alto|belo horizonte)\M' "
-              r"AND location !~* '\m(uk|united kingdom|london|england|scotland|wales)\M'",
+              r"AND location !~* '\m(uk|united kingdom|london|england|scotland|wales)\M' "
+              # RETIRED ROWS ARE NOT A VIOLATION. The one-time sweep marks
+              # pre-gate foreign jobs `confirmed_expired` rather than deleting
+              # them (a delete cascades to user_feed and is unrecoverable).
+              # Without this clause the invariant counts the very rows the
+              # sweep just fixed and fires forever — and a permanently-firing
+              # invariant gets muted, which this file's own doctrine calls
+              # worse than having none.
+              r"AND (staleness_state IS NULL OR staleness_state = 'active')",
         why="a job in Warsaw or Indianapolis is in a UK-only product's catalog. "
             "The user searches for UK work and gets a role they cannot take — a "
             "product fault, not a ranking miss. Every such row also consumes "

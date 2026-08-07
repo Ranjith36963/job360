@@ -76,24 +76,56 @@ well. Measured 2026-08-07: 156 clearly foreign jobs were live in prod
 (Shanghai, São Paulo, Lima, Ottawa, München) despite the penalty existing.
 
 **How the gate decides** (`src/services/uk_gate.py`, one chokepoint in
-`main.py` — never per-source):
+`main.py` — never per-source). Order is load-bearing:
 
-1. A named foreign country/city → **blocked**, whoever listed it.
+1. A named foreign **country or admin division** → **blocked**, whoever listed it.
 2. Remote fenced to another region ("Remote — US only") → **blocked**.
-3. A UK token, or genuine remote → **allowed**.
-4. Otherwise **who said it decides**: a UK-native source (Reed, NHS,
-   jobs.ac.uk, teaching_vacancies, devitjobs.**uk**) is UK by construction, so
-   an unrecognised town is a UK town; a global source (Greenhouse, Workday,
-   RemoteOK) needs evidence — a £ sign, UK right-to-work language, or a UK
-   city named in the ad.
+3. An explicit UK country name or a **full UK postcode** → allowed.
+4. A hit in the **UK gazetteer** (~52k places) → allowed.
+5. Genuine remote → allowed.
+6. Otherwise **who said it decides**: a UK-native source keeps it; a global
+   source needs evidence (£, right-to-work language, a UK city in the body).
 
-Unknown sources default to **strict**: a new source opts *into* trust.
+### THE RULE THIS ENCODES: never hand-enumerate an UNBOUNDED set
 
-**The trap this design exists to avoid.** `UK_TERMS` holds 26 cities; Cardiff,
-Newcastle and Brighton are absent. A dry run of the naive rule ("no UK token →
-reject") blocked **2,436 jobs (48%)** including Telford, Fareham and
-Northampton. Never ship a location rule without dry-running it over the live
-catalog first and eyeballing what it drops.
+The first version listed ~120 **foreign cities** by hand. The owner rejected
+it: *"How many will you hard-code like that? What if there is a city out of
+this list? Then you missed that."* He is right — foreign cities are unbounded,
+so a hand-written **sample** of them rots silently and misses forever.
+
+So the polarity is inverted. **UK places are FINITE** (~52k populated places,
+published; settlements do not churn), compiled from GeoNames by
+`scripts/build_uk_gazetteer.py` into `data/uk_gazetteer/`. Every future miss is
+a data refresh, never a code edit.
+
+**The distinction that matters:** countries (~250) and first-level admin
+divisions (~4.5k — US states, Canadian provinces) stay enumerated *on purpose*,
+because those are **CLOSED** sets. A COMPLETE closed set is not the same
+mistake as a SAMPLE of an open one. Both are built from data, so neither drifts.
+
+**Why the foreign check survives inversion:** positive-only matching has a
+fatal hole — `"Cambridge (USA)"` contains "cambridge", a real UK town, so a
+pure gazetteer lookup would **admit** it. The country override runs first.
+
+**Ambiguity is COMPUTED, not typed.** Boston, Cambridge and Perth name real
+places here and abroad. `ambiguous.txt` is derived at build time by comparing
+UK populations against world cities — London survives (London, Ontario is ~4%
+the size); Boston does not. Hand-listing collisions would repeat the original
+sin.
+
+**Traps found by dry-running over the live catalog** (do this before shipping
+any location rule):
+- The naive "no UK token → reject" blocked **48%**, including Telford and
+  Northampton — `UK_TERMS` only held 26 cities.
+- **devitjobs** was misclassified as global; its endpoint is devitjobs.**uk**.
+  That alone was 1,409 wrongly blocked jobs.
+- `"Sydney, Australia"` was **allowed**: the UK has a hamlet called Sydney, so
+  a bare gazetteer hit triggered the dual-site escape. Dual-site now demands an
+  *unambiguous* UK signal.
+- `"Indianapolis, IN, USA"` was not blocked — the country data holds "United
+  States", not "USA"/"US". ISO2 + ISO3 codes are now included.
+
+Measured after: 799 blocked of 4,544 (18%), **2 potential false drops**.
 
 **Ambiguity favours the user:** a dual-site posting ("London / New York") is
 kept — the user can take the UK half.
