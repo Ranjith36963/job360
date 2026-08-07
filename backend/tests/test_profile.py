@@ -660,6 +660,84 @@ class TestLLMCVParser:
         # None and 42 dropped from list cleanly
 
 
+class TestCvPromptRequestsCareerDomain:
+    """BUG 1a (Pillar-1 audit 2026-08-07). `_CV_PROMPT`'s JSON schema never
+    asked for `career_domain`, even though `CVSchema.career_domain` and the
+    `CareerDomain` enum have existed since Batch 1.1 — so the LLM had no
+    reason to ever return one. Asserts PROMPT CONTENT (matches the style of
+    test_cv_prompt_steering.py), not LLM behaviour."""
+
+    def test_prompt_asks_for_career_domain(self):
+        from src.services.profile import cv_parser
+
+        p = cv_parser._CV_PROMPT.lower()
+        assert '"career_domain"' in p
+
+    def test_prompt_lists_the_real_enum_members_not_invented_values(self):
+        """The allowed values in the prompt must be the ACTUAL `CareerDomain`
+        members — a mismatched or partial list would have the model return
+        buckets `CVSchema` then rejects, wasting a retry."""
+        from src.services.profile import cv_parser
+        from src.services.profile.schemas import CareerDomain
+
+        p = cv_parser._CV_PROMPT
+        for member in CareerDomain:
+            assert member.value in p, f"{member.value!r} missing from the CV prompt"
+
+    def test_prompt_tells_the_model_to_return_null_when_unclear(self):
+        """Steering against guessing — a wrong classification corrupts
+        downstream archetype-aware scoring more than an absent one."""
+        from src.services.profile import cv_parser
+
+        p = cv_parser._CV_PROMPT.lower()
+        assert "null" in p
+        assert "guess" in p
+
+
+class TestCvSchemaEscoNormalisation:
+    """BUG 2 (Pillar-1 audit 2026-08-07). `_maybe_normalise_skills_via_esco`
+    was only ever called from `cv_parser._llm_result_to_cvdata` — the untyped
+    DEFENSIVE FALLBACK, reached only when strict `CVSchema` validation
+    exhausts its retries. `cv_schema_to_cvdata` (the path every successful
+    extraction actually returns through) built `CVData(...)` with no
+    `cv_skills_esco=` argument at all, so prod (`SEMANTIC_ENABLED=true`)
+    shipped `cv_skills_esco={}` on every profile regardless of the flag.
+    """
+
+    def _schema(self):
+        from src.services.profile.schemas import CVSchema
+
+        return CVSchema(skills=["Python", "Docker"])
+
+    def test_populates_cv_skills_esco_when_esco_data_is_available(self):
+        from unittest.mock import patch
+
+        from src.services.profile.schemas import cv_schema_to_cvdata
+
+        fake_map = {"Python": "http://esco/python"}
+        with patch(
+            "src.services.profile.schemas._maybe_normalise_skills_via_esco",
+            return_value=(["Python", "Docker"], fake_map),
+        ) as mock_norm:
+            cv = cv_schema_to_cvdata(self._schema(), "raw")
+
+        mock_norm.assert_called_once_with(["Python", "Docker"])
+        assert cv.cv_skills_esco == fake_map
+
+    def test_returns_empty_dict_without_raising_when_esco_unavailable(self):
+        """Flag-off / no-index-on-disk is the DEFAULT runtime state
+        (`SEMANTIC_ENABLED` defaults false, root rule #18) — this must
+        degrade to `{}` silently, never raise. No mocking: the test
+        environment genuinely has the flag off and no ESCO index on disk
+        (conftest.py + no backend/data/esco/), so the real normaliser runs
+        its own no-op path."""
+        from src.services.profile.schemas import cv_schema_to_cvdata
+
+        cv = cv_schema_to_cvdata(self._schema(), "raw")
+        assert cv.cv_skills_esco == {}
+        assert cv.skills == ["Python", "Docker"]
+
+
 class TestCVParserFailures:
     """Tests for C2 — parse_cv_async must raise, not silently return empty."""
 

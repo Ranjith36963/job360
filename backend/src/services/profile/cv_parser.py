@@ -62,7 +62,8 @@ Return a JSON object with exactly these fields:
   ],
   "experience_level": "One of: intern, junior, mid, senior, lead, principal, director — infer from experience duration and roles",
   "industries": ["Industries/domains they have experience in"],
-  "languages": ["Human languages they speak, if mentioned"]
+  "languages": ["Human languages they speak, if mentioned"],
+  "career_domain": "The ONE coarse career bucket that best fits this person's OVERALL career. Must be EXACTLY one of: software_engineering, data_and_ai, product_and_design, marketing_and_growth, sales_and_bizdev, finance_and_accounting, operations_and_supply, human_resources, legal_and_compliance, healthcare_and_lifesciences, education_and_research, engineering_physical, customer_support, media_and_content, skilled_trades, other. Return null (not a guess) when the CV genuinely does not fit any bucket clearly."
 }}
 
 RULES:
@@ -92,6 +93,10 @@ RULES:
    strategy, a structural load calculation are skills demonstrated in prose). Do NOT limit
    skills to the items already written in the skills section — the strongest signal often
    hides in what the person actually DID.
+10. For "career_domain", classify only when the evidence clearly points to ONE bucket from
+    the fixed list above. A wrong guess corrupts downstream archetype-aware scoring, so a
+    CV that spans multiple domains equally, or doesn't fit any bucket confidently, gets
+    null — never invent a value outside the listed set.
 
 CV TEXT:
 ---
@@ -833,6 +838,32 @@ def _maybe_normalise_skills_via_esco(
     return canonical, esco_map
 
 
+def _coerce_career_domain(value: Any) -> str | None:
+    """Validate a raw LLM ``career_domain`` string against the same closed
+    enum the typed path enforces (``schemas.CareerDomain``), so this untyped
+    fallback adapter can't write a bucket the strict path would have
+    rejected. Unknown/blank/invalid values become ``None`` (never guess) —
+    mirrors ``CVSchema._domain_nullable``.
+
+    Local import, not module-level: ``schemas.py`` imports THIS module at
+    module level (for ``_maybe_normalise_skills_via_esco``), so a top-level
+    `import schemas` here would cycle. cv_parser stays import-free of
+    schemas at module scope; only this function pays the cost, once, on the
+    rare defensive-fallback path.
+    """
+    from src.services.profile.schemas import CareerDomain  # noqa: PLC0415 — see docstring
+
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    if v in ("", "unknown", "n/a", "none"):
+        return None
+    try:
+        return CareerDomain(v).value
+    except ValueError:
+        return None
+
+
 def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
     """Convert LLM JSON response to CVData dataclass.
 
@@ -850,6 +881,15 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
     headline = _coerce_str(result.get("headline"))
     location = _coerce_str(result.get("location"))
     achievements = _coerce_str_list(result.get("achievements"))
+    # ADAPTER-PARITY FIX (2026-08-07). `cv_schema_to_cvdata` (the live path)
+    # has plumbed `industries` / `cv_languages` through since "review fix #1"
+    # and now plumbs `career_domain` too — this fallback adapter (only
+    # reached when strict CVSchema validation exhausts its retries) silently
+    # dropped all three. Same bug shape as `cv_positions` before it: one
+    # adapter got the fix, the other didn't. See test_adapter_parity.py.
+    industries = _coerce_str_list(result.get("industries"))
+    cv_languages = _coerce_str_list(result.get("languages"))
+    career_domain = _coerce_career_domain(result.get("career_domain"))
 
     # Education: flatten nested dicts to list of strings for display
     education_lines: list[str] = []
@@ -931,4 +971,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
         location=location,
         achievements=achievements,
         cv_skills_esco=cv_skills_esco,
+        industries=industries,
+        cv_languages=cv_languages,
+        career_domain=career_domain,
     )

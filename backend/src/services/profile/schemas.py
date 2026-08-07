@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.services.profile.cv_parser import _maybe_normalise_skills_via_esco
 from src.services.profile.models import CVData
 
 
@@ -196,6 +197,19 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     job_titles = [e.title for e in schema.experience if e.title]
     companies = [e.company for e in schema.experience if e.company]
 
+    # ADAPTER-PARITY FIX (2026-08-07) — Step-1.5 S1.5-D ESCO normalisation.
+    # `_llm_result_to_cvdata` (the untyped fallback, reached only when strict
+    # CVSchema validation exhausts its retries) has called
+    # `_maybe_normalise_skills_via_esco` since it was built. THIS adapter —
+    # the one every successful extraction actually returns through — never
+    # did, so `CVData(...)` below had no `cv_skills_esco=` argument at all.
+    # Prod runs `SEMANTIC_ENABLED=true` and every profile shipped with
+    # `cv_skills_esco={}` regardless. Same shape as the `cv_positions` bug:
+    # one adapter fixed, the other silently isn't. Graceful no-op (skills
+    # unchanged, empty map) when the flag is off or the ESCO index isn't on
+    # disk — see the helper's own docstring for the guard chain.
+    skills, cv_skills_esco = _maybe_normalise_skills_via_esco(list(schema.skills))
+
     experience_lines: list[str] = []
     for e in schema.experience:
         experience_lines.extend(e.bullets)
@@ -248,7 +262,7 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
 
     return CVData(
         raw_text=raw_text,
-        skills=list(schema.skills),
+        skills=skills,
         job_titles=job_titles,
         companies=companies,
         education=education_lines,
@@ -267,4 +281,5 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         # values for CVs that list them.
         industries=list(schema.industries),
         cv_languages=list(schema.languages),
+        cv_skills_esco=cv_skills_esco,
     )

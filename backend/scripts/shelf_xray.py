@@ -22,12 +22,67 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from src.services.coverage import DIMENSIONS, job_has_value  # noqa: E402 — needs sys.path fixup above
+
+# job/enrichment columns fetched for the job-side coverage pass. Kept as an
+# explicit tuple (rather than SELECT *) so the SQL column order and the dict
+# keys `job_has_value` expects can never drift apart silently.
+_JOB_COLS = ("title", "location", "description", "salary_min", "salary_max")
+_ENRICH_COLS = (
+    "workplace_type",
+    "seniority",
+    "visa_sponsorship",
+    "category",
+    "salary",
+    "required_skills",
+)
 
 
 def _filled(v: object) -> bool:
     return v not in (None, "", [], {}, "unknown", "Unknown")
+
+
+def _job_side_coverage(cur, n_jobs: int) -> dict[str, int]:
+    """Percent of the active catalog carrying a real value per dimension.
+
+    THE FIX: this used to be N inline SQL predicates, one of which
+    (`e.salary NOT IN ('{}', '')`) tested the salary column's *shape*, not
+    its *value* — `{"min": null, "max": null}` matched neither literal and
+    passed, reporting 83% coverage against a real figure near 5%. Counting
+    is now done in Python, one row at a time, through `job_has_value` — the
+    same value-presence rule the canary test (`tests/test_coverage_canary.py`)
+    pins down — so no predicate here can silently drift from the definition
+    the test enforces.
+    """
+    select_cols = ", ".join(f"j.{c}" for c in _JOB_COLS) + ", " + ", ".join(
+        f"e.{c}" for c in _ENRICH_COLS
+    )
+    cur.execute(
+        f"SELECT {select_cols} FROM jobs j "
+        "LEFT JOIN job_enrichment e ON e.job_id = j.id "
+        "WHERE j.staleness_state IS NULL OR j.staleness_state = 'active'"
+    )
+    n_job_cols = len(_JOB_COLS)
+    counts = dict.fromkeys(DIMENSIONS, 0)
+    for row in cur.fetchall():
+        job_row = dict(zip(_JOB_COLS, row[:n_job_cols]))
+        enrich_vals = row[n_job_cols:]
+        # A LEFT JOIN miss comes back as an all-None tuple — treat that as
+        # "no enrichment row" (None) rather than a dict of Nones, matching
+        # what a caller without a JOIN (e.g. two separate queries) would pass.
+        enrichment_row: Optional[dict] = (
+            dict(zip(_ENRICH_COLS, enrich_vals))
+            if any(v is not None for v in enrich_vals)
+            else None
+        )
+        for dim in DIMENSIONS:
+            if job_has_value(dim, job_row, enrichment_row):
+                counts[dim] += 1
+    return {dim: round(100 * counts[dim] / max(1, n_jobs)) for dim in DIMENSIONS}
 
 
 def main() -> int:
@@ -61,22 +116,21 @@ def main() -> int:
     cur.execute("SELECT count(*) FROM jobs WHERE staleness_state IS NULL OR staleness_state='active'")
     n_jobs = cur.fetchone()[0]
 
-    def cov(sql: str) -> int:
-        cur.execute(sql)
-        n = cur.fetchone()[0]
-        return round(100 * n / max(1, n_jobs))
-
+    # Every job-side percentage is now decided by job_has_value (coverage.py)
+    # — no inline SQL predicate may reappear here. See _job_side_coverage's
+    # docstring for the incident that made that a hard rule.
+    _cov = _job_side_coverage(cur, n_jobs)
     job_shelves = {
-        "skills":    cov("SELECT count(*) FROM jobs WHERE length(coalesce(description,''))>200 AND (staleness_state IS NULL OR staleness_state='active')"),
-        "titles":    cov("SELECT count(*) FROM jobs WHERE coalesce(title,'')<>'' AND (staleness_state IS NULL OR staleness_state='active')"),
+        "skills":    _cov["skills"],
+        "titles":    _cov["titles"],
         "dated_experience": None,  # job side needs no dates
         "education": None,
-        "salary":    cov("SELECT count(*) FROM jobs j WHERE (j.salary_min IS NOT NULL OR EXISTS (SELECT 1 FROM job_enrichment e WHERE e.job_id=j.id AND e.salary NOT IN ('{}',''))) AND (j.staleness_state IS NULL OR j.staleness_state='active')"),
-        "location":  cov("SELECT count(*) FROM jobs WHERE coalesce(location,'')<>'' AND (staleness_state IS NULL OR staleness_state='active')"),
-        "workplace": cov("SELECT count(*) FROM jobs j WHERE EXISTS (SELECT 1 FROM job_enrichment e WHERE e.job_id=j.id AND coalesce(e.workplace_type,'unknown')<>'unknown') AND (j.staleness_state IS NULL OR j.staleness_state='active')"),
-        "seniority": cov("SELECT count(*) FROM jobs j WHERE EXISTS (SELECT 1 FROM job_enrichment e WHERE e.job_id=j.id AND coalesce(e.seniority,'unknown')<>'unknown') AND (j.staleness_state IS NULL OR j.staleness_state='active')"),
-        "visa":      cov("SELECT count(*) FROM jobs j WHERE EXISTS (SELECT 1 FROM job_enrichment e WHERE e.job_id=j.id AND coalesce(e.visa_sponsorship,'unknown')<>'unknown') AND (j.staleness_state IS NULL OR j.staleness_state='active')"),
-        "domain":    cov("SELECT count(*) FROM jobs j WHERE EXISTS (SELECT 1 FROM job_enrichment e WHERE e.job_id=j.id AND coalesce(e.category,'')<>'') AND (j.staleness_state IS NULL OR j.staleness_state='active')"),
+        "salary":    _cov["salary"],
+        "location":  _cov["location"],
+        "workplace": _cov["workplace"],
+        "seniority": _cov["seniority"],
+        "visa":      _cov["visa"],
+        "domain":    _cov["domain"],
         "about_me":  None,
     }
 

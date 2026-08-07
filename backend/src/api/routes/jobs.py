@@ -16,6 +16,7 @@ from src.api.auth_deps import CurrentUser, optional_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobListResponse, JobResponse
 from src.repositories.database import JobDatabase
+from src.services.job_signals import signal_backed_lookup
 from src.services.visa_signal import VisaStatus, detect_visa_status
 
 if TYPE_CHECKING:  # annotation-only; the real import stays lazy (rule #16)
@@ -763,7 +764,9 @@ async def _personalize_dims(row: dict[str, Any], db: JobDatabase, user: CurrentU
     scorer = JobScorer(
         search_config,
         user_preferences=profile.preferences,
-        enrichment_lookup=lambda j: enrichment_lookup_dict.get(getattr(j, "id", None)),
+        enrichment_lookup=signal_backed_lookup(
+            lambda j: enrichment_lookup_dict.get(getattr(j, "id", None))
+        ),
     )
 
     # Reconstruct the Job for scoring — _row_to_scoring_job sets job.id so the

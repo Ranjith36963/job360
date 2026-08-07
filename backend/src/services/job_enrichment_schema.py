@@ -5,9 +5,18 @@ The `JobEnrichment` model is the target schema for `llm_extract_validated()`
 explicitly typed or an enum, and every list/string field is length-bounded so
 a malformed LLM response can't bloat the DB.
 
-The 18 fields below are the contract the downstream pipeline (dedup, scorer,
+The 16 fields below are the contract the downstream pipeline (dedup, scorer,
 embeddings in Batch 2.6) consumes. Keep this module import-light — no
 aiohttp, no Pydantic-v1 compat shims.
+
+Retired 2026-08 (measured on 3,119 live enriched rows): ``employer_type``
+(100% 'unknown', never once produced) and ``locations`` (0% populated, and
+redundant with ``jobs.location`` which `uk_gate.py` already validates at
+ingestion). Both cost prompt/schema surface for zero signal, so the fields
+were dropped from this schema rather than left as permanently-defaulted dead
+weight. The `job_enrichment.employer_type` / `.locations` DB columns are
+UNTOUCHED (still `NOT NULL DEFAULT`) — see the comment at the INSERT column
+list in `job_enrichment.py` before re-adding either field.
 """
 from __future__ import annotations
 
@@ -83,19 +92,6 @@ class ExperienceLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-class EmployerType(str, Enum):
-    STARTUP = "startup"
-    SCALEUP = "scaleup"
-    ENTERPRISE = "enterprise"
-    AGENCY = "agency"
-    NONPROFIT = "nonprofit"
-    GOVERNMENT = "government"
-    ACADEMIC = "academic"
-    HEALTHCARE = "healthcare"
-    OTHER = "other"
-    UNKNOWN = "unknown"
-
-
 class SalaryFrequency(str, Enum):
     HOURLY = "hourly"
     DAILY = "daily"
@@ -124,7 +120,7 @@ class SalaryBand(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Top-level enrichment schema — 18 fields
+# Top-level enrichment schema — 16 fields
 # ---------------------------------------------------------------------------
 
 
@@ -148,46 +144,40 @@ class JobEnrichment(BaseModel):
     # 4. Workplace type
     workplace_type: WorkplaceType = Field(default=WorkplaceType.UNKNOWN)
 
-    # 5. Locations (list of free-form place strings)
-    locations: list[str] = Field(default_factory=list, max_length=10)
-
-    # 6. Salary (nested)
+    # 5. Salary (nested)
     salary: SalaryBand = Field(default_factory=SalaryBand)
 
-    # 7. Required skills (short list — not the kitchen sink)
+    # 6. Required skills (short list — not the kitchen sink)
     required_skills: list[str] = Field(default_factory=list, max_length=30)
 
-    # 8. Preferred skills
+    # 7. Preferred skills
     preferred_skills: list[str] = Field(default_factory=list, max_length=30)
 
-    # 9. Minimum years of experience
+    # 8. Minimum years of experience
     experience_min_years: Optional[int] = Field(default=None, ge=0, le=40)
 
-    # 10. Experience level enum
+    # 9. Experience level enum
     experience_level: ExperienceLevel = Field(default=ExperienceLevel.UNKNOWN)
 
-    # 11. Requirements summary (≤250 chars — for Batch 2.6 embedding input)
+    # 10. Requirements summary (≤250 chars — for Batch 2.6 embedding input)
     requirements_summary: str = Field(default="", max_length=250)
 
-    # 12. Language (ISO 639-1)
+    # 11. Language (ISO 639-1)
     language: str = Field(default="en", min_length=2, max_length=2)
 
-    # 13. Employer type
-    employer_type: EmployerType = Field(default=EmployerType.UNKNOWN)
-
-    # 14. Visa sponsorship
+    # 12. Visa sponsorship
     visa_sponsorship: VisaSponsorship = Field(default=VisaSponsorship.UNKNOWN)
 
-    # 15. Seniority
+    # 13. Seniority
     seniority: SeniorityLevel = Field(default=SeniorityLevel.UNKNOWN)
 
-    # 16. Remote region (nullable — only relevant when workplace_type=REMOTE)
+    # 14. Remote region (nullable — only relevant when workplace_type=REMOTE)
     remote_region: Optional[str] = Field(default=None, max_length=60)
 
-    # 17. Apply instructions (nullable)
+    # 15. Apply instructions (nullable)
     apply_instructions: Optional[str] = Field(default=None, max_length=500)
 
-    # 18. Red flags list (e.g. "requires unpaid work", "MLM signal")
+    # 16. Red flags list (e.g. "requires unpaid work", "MLM signal")
     red_flags: list[str] = Field(default_factory=list, max_length=10)
 
     @field_validator("language")
@@ -195,7 +185,7 @@ class JobEnrichment(BaseModel):
     def _lower_language(cls, v: str) -> str:
         return v.lower()
 
-    @field_validator("locations", "required_skills", "preferred_skills", "red_flags")
+    @field_validator("required_skills", "preferred_skills", "red_flags")
     @classmethod
     def _strip_and_dedup(cls, v: list[str]) -> list[str]:
         """Strip empties and exact-dupes while preserving order."""
