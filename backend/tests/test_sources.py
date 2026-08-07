@@ -1428,7 +1428,17 @@ def test_themuse_skips_non_uk():
 
 # ---- Hacker News ----
 
-HN_SEARCH_PAYLOAD = {"hits": [{"objectID": "99999"}]}
+# Mirrors the real /search_by_date response: newest-first, and the SAME author
+# posts a sibling "Who wants to be hired?" thread on the same day (job seekers
+# advertising themselves — the inverse of this source). The old fixture carried
+# only an objectID and no title, so it could not have caught either the
+# relevance-vs-date bug or the sibling-thread trap.
+HN_SEARCH_PAYLOAD = {
+    "hits": [
+        {"objectID": "99998", "title": "Ask HN: Who wants to be hired? (August 2026)"},
+        {"objectID": "99999", "title": "Ask HN: Who is hiring? (August 2026)"},
+    ]
+}
 
 HN_ITEM_PAYLOAD = {
     "children": [
@@ -2861,3 +2871,33 @@ def test_workday_detail_fetches_are_budgeted(monkeypatch):
         finally:
             await session.close()
     _run(_test())
+
+
+class TestHackerNewsUsesTheCurrentThread:
+    """`/search` ranks by RELEVANCE, not date, so the old query returned the
+    same COVID-era thread forever — "Ask HN: Who is hiring right now?" from
+    2020-03-23. Measured 2026-08-08: all 118 stored HackerNews jobs carried
+    posted_at=2020-03-23, stamped date_confidence='high'. The catalog was
+    serving six-year-old dead postings as current, and recency scored them 0.
+
+    Found by scripts/distribution_sanity.py on its first run (one distinct
+    posted_at across 118 rows) — this test is the pin.
+    """
+
+    def test_queries_the_date_sorted_endpoint(self) -> None:
+        from pathlib import Path
+
+        import src.sources.other.hackernews as hn
+
+        src = Path(hn.__file__).read_text(encoding="utf-8")
+        assert "search_by_date" in src, "must sort by date, not relevance"
+
+    def test_skips_the_who_wants_to_be_hired_sibling(self) -> None:
+        """The same author posts "Who wants to be hired?" on the same day —
+        job SEEKERS advertising themselves, the inverse of this source."""
+        from pathlib import Path
+
+        import src.sources.other.hackernews as hn
+
+        src = Path(hn.__file__).read_text(encoding="utf-8")
+        assert "wants to be hired" in src, "the sibling thread must be excluded"
