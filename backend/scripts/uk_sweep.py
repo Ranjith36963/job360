@@ -31,7 +31,16 @@ ap.add_argument("--confident-only", action="store_true",
                      "rows; leave the judgement-call bucket alone")
 args = ap.parse_args()
 
-conn = psycopg.connect(os.environ["DATABASE_URL"])
+# Accept either name. Inside `railway run -s Postgres`, DATABASE_URL points at
+# postgres.railway.internal, which resolves only INSIDE Railway; from a laptop
+# the usable DSN is DATABASE_PUBLIC_URL. Reading both means the command is a
+# plain `railway run -s Postgres python scripts/uk_sweep.py` on any shell,
+# with no bash -c wrapper to export one from the other (PowerShell has neither
+# `&&` nor `VAR=x cmd`).
+_dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
+if not _dsn:
+    raise SystemExit("set DATABASE_PUBLIC_URL or DATABASE_URL")
+conn = psycopg.connect(_dsn)
 cur = conn.cursor()
 cur.execute(
     "SELECT id, title, location, source, coalesce(description,'') FROM jobs "
