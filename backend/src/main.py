@@ -1063,7 +1063,6 @@ async def run_search(
                     sum(gate_blocked.values()),
                     ", ".join(f"{k}={v}" for k, v in sorted(gate_blocked.items())),
                 )
-                stats["uk_gate_blocked"] = sum(gate_blocked.values())
             if skipped:
                 logger.warning("%d job(s) could not be stored this run", skipped)
             await db.commit()
