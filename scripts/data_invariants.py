@@ -393,6 +393,34 @@ INVARIANTS: list[Invariant] = [
                  "at RUNTIME and is production-critical. This is a one-line audit "
                  "of it.",
     ),
+    Invariant(
+        id="catalog_is_uk_only",
+        table="jobs",
+        age_col="first_seen_at",
+        # Explicit foreign countries and unambiguous foreign cities only. This
+        # deliberately does NOT re-implement the gate's judgement — it is the
+        # tripwire for the obvious case the gate must never miss, so it stays
+        # readable and cannot itself become a source of false alarms.
+        where=r"location ~* '\m(united states|usa|canada|australia|india|germany|"
+              r"france|spain|italy|netherlands|poland|brazil|singapore|japan|china|"
+              r"indianapolis|houston|san francisco|new york|toronto|mississauga|"
+              r"sydney|shanghai|warsaw|madrid|barcelona|munich|münchen|berlin|"
+              r"aachen|darmstadt|brussels|lima|são paulo|sao paulo|ottawa|"
+              r"palo alto|belo horizonte)\M' "
+              r"AND location !~* '\m(uk|united kingdom|london|england|scotland|wales)\M'",
+        why="a job in Warsaw or Indianapolis is in a UK-only product's catalog. "
+            "The user searches for UK work and gets a role they cannot take — a "
+            "product fault, not a ranking miss. Every such row also consumes "
+            "enrichment budget, embedding budget and a candidate-shelf slot that "
+            "a real UK job needed.",
+        incident="2026-08-07: 156 clearly foreign jobs were live (greenhouse 77, "
+                 "workday 24, devitjobs 11). Each of the 46 sources applied its "
+                 "own _is_uk_or_remote check or none at all, so the leak was "
+                 "structural. Fixed by the single-chokepoint UK gate "
+                 "(src/services/uk_gate.py); this invariant is the watcher that "
+                 "makes a regression page instead of hide.",
+        group_by="source",
+    ),
 ]
 
 

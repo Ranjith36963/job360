@@ -57,6 +57,7 @@ from src.services.skill_matcher import (
     detect_experience_level,
     salary_in_range,
 )
+from src.services.uk_gate import check_uk
 from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
@@ -1024,7 +1025,25 @@ async def run_search(
             # earlier incident; this loop never was. Skipping one unstorable job
             # costs that job; aborting costs every job AND the user's feed.
             skipped = 0
+            # THE UK GATE — one door, checked once, for every source.
+            #
+            # Job360 is a UK-market product: a job in Warsaw or Indianapolis
+            # reaching a user's feed is a product fault, not a ranking
+            # preference. The only prior defence was the scorer's -15
+            # foreign-location penalty, which admits the job and then argues
+            # about its rank; measured 2026-08-07, 156 clearly foreign jobs
+            # were live in prod. Each of the 46 sources applied its own
+            # `_is_uk_or_remote` check (or none), so the leak was structural.
+            # This is the single chokepoint every job passes through.
+            gate_blocked: dict[str, int] = {}
             for job in unique_jobs:
+                verdict = check_uk(
+                    job.location, job.source,
+                    description=job.description or "", title=job.title or "",
+                )
+                if not verdict.allowed:
+                    gate_blocked[verdict.reason] = gate_blocked.get(verdict.reason, 0) + 1
+                    continue
                 try:
                     if await db.insert_job(job):
                         new_jobs.append(job)
@@ -1036,6 +1055,15 @@ async def run_search(
                         (job.title or "")[:80], (job.company or "")[:60],
                         type(exc).__name__, str(exc)[:200],
                     )
+            if gate_blocked:
+                # Log the reasons, never a bare total: tightening or loosening
+                # the gate must be an evidence-based change, not a guess.
+                logger.info(
+                    "UK gate blocked %d job(s) before storage: %s",
+                    sum(gate_blocked.values()),
+                    ", ".join(f"{k}={v}" for k, v in sorted(gate_blocked.items())),
+                )
+                stats["uk_gate_blocked"] = sum(gate_blocked.values())
             if skipped:
                 logger.warning("%d job(s) could not be stored this run", skipped)
             await db.commit()
