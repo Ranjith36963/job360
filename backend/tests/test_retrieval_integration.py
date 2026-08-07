@@ -118,7 +118,7 @@ def test_mode_hybrid_populated_index_fuses(monkeypatch):
     piece — if it correctly reorders, the route correctly reorders.
     """
     from src.core import settings
-    from src.services import vector_index as vix_mod
+    from src.services import pg_vector_index as vix_mod
 
     monkeypatch.setattr(settings, "SEMANTIC_ENABLED", True, raising=True)
 
@@ -138,7 +138,7 @@ def test_mode_hybrid_populated_index_fuses(monkeypatch):
         def upsert(self, *a, **kw):
             pass
 
-    monkeypatch.setattr(vix_mod, "VectorIndex", _FakeIndex)
+    monkeypatch.setattr(vix_mod, "PgVectorIndex", _FakeIndex)
 
     # Patch encode_job to return a fixed vector so we never touch a real
     # sentence-transformers model.
@@ -189,7 +189,7 @@ def test_hybrid_query_uses_profile_when_provided(monkeypatch):
             return [(2, 0.1), (1, 0.2)]
 
     monkeypatch.setattr("src.services.embeddings.encode_job", fake_encode_job)
-    monkeypatch.setattr("src.services.vector_index.VectorIndex", lambda *a, **k: _FakeVix())
+    monkeypatch.setattr("src.services.pg_vector_index.PgVectorIndex", lambda *a, **k: _FakeVix())
 
     rows = [
         {"id": 1, "title": "Top Keyword Job", "description": "kw"},

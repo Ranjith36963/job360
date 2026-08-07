@@ -35,7 +35,7 @@ services:
   # Host port 5433 (5432 is reserved/blocked on this Windows box).
   # DATABASE_URL=postgresql://job360:job360dev@localhost:5433/job360
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: job360-dev-postgres
     restart: unless-stopped
     environment:

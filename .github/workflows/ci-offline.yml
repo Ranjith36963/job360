@@ -41,7 +41,7 @@ jobs:
     # :5433 and fail with "connection refused".
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: job360
           POSTGRES_PASSWORD: job360dev
@@ -121,7 +121,7 @@ jobs:
     # Postgres-backed backend needs a DB + Redis (see offline-suite note above).
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: job360
           POSTGRES_PASSWORD: job360dev

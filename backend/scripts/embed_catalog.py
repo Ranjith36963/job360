@@ -35,7 +35,7 @@ async def main(limit: int | None) -> int:
     from src.repositories import pg
     from src.services.embeddings import MODEL_NAME, encode_job
     from src.services.job_enrichment import load_enrichment
-    from src.services.vector_index import VectorIndex
+    from src.services.pg_vector_index import PgVectorIndex, vector_column_available
 
     db = await pg.connect(str(DB_PATH))
     try:
@@ -45,7 +45,10 @@ async def main(limit: int | None) -> int:
                    j.apply_url, j.source, j.date_found
             FROM jobs j
             LEFT JOIN job_embeddings e ON e.job_id = j.id
-            WHERE e.job_id IS NULL
+            WHERE """ + (
+                "e.job_id IS NULL OR e.embedding IS NULL"
+                if vector_column_available(str(DB_PATH)) else "e.job_id IS NULL"
+            ) + """
             ORDER BY j.id
             """
         )
@@ -57,7 +60,7 @@ async def main(limit: int | None) -> int:
         if not total:
             return 0
 
-        vix = VectorIndex()
+        vix = PgVectorIndex()
         done = failed = 0
         for r in rows:
             jid = r["id"]
