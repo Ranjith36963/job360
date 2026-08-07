@@ -191,6 +191,11 @@ class JobDatabase:
             # Migration 0020 — application deadline columns.
             ("deadline", "TEXT"),
             ("deadline_source", "TEXT"),
+            # Migration 0029 — description-backfill retry counter. Real state
+            # (not a padded description) so a thin job stops being re-fetched
+            # after MAX_BACKFILL_ATTEMPTS without faking coverage.py's
+            # skill-text signal (see 0029's up.sql for the full incident).
+            ("description_backfill_attempts", "INTEGER DEFAULT 0"),
         ]
         run_log_migrations = [
             # Step-0 pre-flight — migration 0010 observability columns.

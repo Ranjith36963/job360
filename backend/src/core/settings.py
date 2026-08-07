@@ -219,6 +219,19 @@ SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "false").lower() in {"1", "true
 # 0 disables. Only active when SEMANTIC_ENABLED is on (rule #18).
 EMBED_BACKFILL_PER_RUN = int(os.getenv("EMBED_BACKFILL_PER_RUN", "300"))
 
+# Description-backfill phase of the enrichment_sweep cron (2026-08-07) —
+# workers/tasks.py::_backfill_thin_descriptions. Sources fetch job-detail
+# pages under strict PER-RUN budgets (_MAX_DETAIL_FETCHES in workday.py /
+# smartrecruiters.py) so a single run never blows the 240s ATS timeout; a job
+# stored past that budget keeps description="" forever unless something goes
+# back for it. Measured in prod: 1,311 active jobs (30% of the catalog) carry
+# under 200 chars of description, and coverage of every enriched field
+# (workplace/seniority/visa) tracks description length almost perfectly.
+# Same knobs as ENRICHMENT_SWEEP_PER_TICK: default 50/tick keeps HTTP fetch
+# volume polite across the 30-min cron cadence; `0` disables the phase
+# entirely (no SELECT, no fetch, no-op).
+DESCRIPTION_BACKFILL_PER_TICK = int(os.getenv("DESCRIPTION_BACKFILL_PER_TICK", "50"))
+
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""

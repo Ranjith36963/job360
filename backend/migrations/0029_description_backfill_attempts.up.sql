@@ -1,0 +1,29 @@
+-- 0029_description_backfill_attempts: a real per-job retry counter for the
+-- description-backfill sweep (workers/tasks.py::_backfill_thin_descriptions).
+--
+-- WHY (2026-08-07). The first version of this sweep tried to avoid a schema
+-- migration by padding a fetched-but-still-thin job's `description` with
+-- trailing spaces past coverage.py's `_SKILL_TEXT_MIN_CHARS` floor (200
+-- chars), purely so the SELECT that finds thin jobs would stop reselecting
+-- it. That was rejected in review: coverage.py:142 counts ANY description
+-- longer than 200 chars as real skill-text coverage, with no whitespace
+-- check — so padding a job that had ten real words manufactured a FALSE
+-- coverage signal, the exact class of bug a same-day batch had just spent
+-- effort eliminating (a shelf X-ray predicate once counted an empty JSON
+-- shell as "salary present": reported 83% coverage when the real figure was
+-- ~5%). Worse, the padded whitespace was also fed to the LLM judge and the
+-- keyword scorer as if it were content, and rendered to real users on the
+-- job card.
+--
+-- The honest fix needs real state: a counter that survives worker restarts
+-- and lives OUTSIDE the `description` column, so `description` is never
+-- written except with genuinely fetched text — never padded, never
+-- sentinel-stamped. A job that has been fetched `description_backfill_attempts`
+-- times (capped at 3 — see MAX_BACKFILL_ATTEMPTS in
+-- services/description_backfill.py) without ever clearing the 200-char floor
+-- simply stops being selected; the SELECT predicate does the "stop retrying
+-- forever" job, not the data itself.
+--
+-- Additive and non-destructive: defaults to 0, so every existing row starts
+-- with a full attempt budget. Shared catalog — no user_id (CLAUDE.md rule #10).
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS description_backfill_attempts INTEGER DEFAULT 0;

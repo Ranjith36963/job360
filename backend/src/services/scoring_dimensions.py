@@ -16,7 +16,7 @@ Each scorer gracefully returns a neutral midpoint when its signal is missing
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.core.settings import (
     SALARY_WEIGHT,
@@ -31,6 +31,9 @@ from src.services.job_enrichment_schema import (
     WorkplaceType,
 )
 from src.services.salary import normalize_salary
+
+if TYPE_CHECKING:
+    from src.services.profile.models import UserPreferences
 
 # ---------------------------------------------------------------------------
 # ScoreBreakdown — Step-1 B3 per-dimension score container
@@ -100,6 +103,31 @@ _USER_EXPERIENCE_RANK = {
     "vp": 6,
     "executive": 6,
 }
+
+
+def resolve_experience_level(prefs: Optional[UserPreferences]) -> str:
+    """The one seam every scoring call site must use to read the user's level.
+
+    Typed always wins. ``UserPreferences.experience_level_inferred`` (a FACT
+    read off the CV's dated job titles by
+    ``services.profile.seniority.infer_experience_level`` — see that
+    module's docstring for why this is allowed under product design rule
+    #29 when guessing a PREFERENCE would not be) is consulted ONLY when the
+    user has not typed a value. Neither present → "", which makes
+    ``seniority_score`` fall back to its documented neutral half-weight,
+    byte-identical to before this field existed.
+
+    A single helper here (instead of each call site reading
+    ``prefs.experience_level`` directly) is what keeps that fallback
+    consistent — a call site that forgets it silently leaves the seniority
+    dimension dead even once the CV inference starts producing values.
+    """
+    if prefs is None:
+        return ""
+    typed = (getattr(prefs, "experience_level", "") or "").strip()
+    if typed:
+        return typed
+    return (getattr(prefs, "experience_level_inferred", "") or "").strip()
 
 
 def seniority_score(enrichment: Optional[JobEnrichment], user_experience: str) -> int:

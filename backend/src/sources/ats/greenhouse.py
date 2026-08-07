@@ -68,3 +68,22 @@ class GreenhouseSource(BaseJobSource):
                 ))
         logger.info("Greenhouse: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
+
+    async def _fetch_job_content(self, slug: str, job_id: str) -> str:
+        """Fetch ONE posting's content via the per-job detail endpoint.
+
+        fetch_jobs() only ever calls the whole-board listing (?content=true
+        gets every posting's text in one shot), so this is a NEW, narrower
+        entry point — added for the description-backfill sweep
+        (services/description_backfill.py), which needs to refresh a single
+        already-stored job without re-listing its whole company. Same parse
+        as fetch_jobs(): unescape entities, strip tags, cap 5000 chars.
+        Returns "" on any failure — a miss is a data gap, not an error.
+        """
+        detail = await self._get_json(
+            f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{job_id}?content=true"
+        )
+        if not isinstance(detail, dict):
+            return ""
+        content = detail.get("content", "")
+        return _HTML_TAG_RE.sub(" ", html.unescape(content or ""))[:5000].strip()

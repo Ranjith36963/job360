@@ -621,6 +621,7 @@ class JobScorer:
             if enrichment is not None:
                 # Lazy import to avoid import cycles during first test collection.
                 from src.services.scoring_dimensions import (
+                    resolve_experience_level,
                     salary_score,
                     seniority_score,
                     visa_score,
@@ -629,7 +630,9 @@ class JobScorer:
 
                 prefs = self._user_preferences
                 salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
-                seniority_pts = seniority_score(enrichment, prefs.experience_level)
+                # Typed value wins; CV-inferred value fills a genuine blank only
+                # — see resolve_experience_level's docstring (product rule #29).
+                seniority_pts = seniority_score(enrichment, resolve_experience_level(prefs))
                 visa_pts = visa_score(enrichment, prefs.needs_visa)
                 workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
 

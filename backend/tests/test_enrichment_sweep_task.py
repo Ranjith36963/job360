@@ -90,11 +90,26 @@ async def test_sweep_enriches_highest_value_candidates_within_budget(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_sweep_noop_when_e2_off(tmp_path, monkeypatch):
+    """E2 off must mean zero LLM calls — but NOT zero everything.
+
+    2026-08-07 manager review: the BACKFILL phase (description-backfill)
+    was moved OUTSIDE the E2 gate on purpose. It makes no LLM call of its
+    own, and description text feeds Engine 1's keyword scorer and the
+    Engine 4 LLM judge, not just E2 enrichment — gating it behind E2 would
+    mean a keyword-only deployment (E2 off) never gets its thin-job text
+    fixed. So this test now needs a REAL db connection (backfill touches it
+    unconditionally) and asserts on `reason`/`called["n"]` rather than exact
+    dict equality, since backfill_stats keys are always merged into the
+    return value. Backfill itself is disabled here via
+    DESCRIPTION_BACKFILL_PER_TICK=0 so this test stays focused on the E2
+    gate — see test_description_backfill.py for backfill's own coverage.
+    """
     import src.core.settings as settings_mod
     import src.workers.tasks as tasks_mod
 
     monkeypatch.setattr(settings_mod, "ENGINE2_ENABLED", False, raising=False)
     monkeypatch.setattr(tasks_mod, "ENRICHMENT_ENABLED", False)
+    monkeypatch.setattr(settings_mod, "DESCRIPTION_BACKFILL_PER_TICK", 0, raising=False)
 
     called = {"n": 0}
 
@@ -102,11 +117,16 @@ async def test_sweep_noop_when_e2_off(tmp_path, monkeypatch):
         called["n"] += 1
         return []
 
-    with patch("src.services.job_enrichment.enrich_batch", new=fake_enrich_batch):
-        result = await tasks_mod.enrichment_sweep({"db": None})
+    db = await _full_db(str(tmp_path / "e2_off.db"))
+    try:
+        with patch("src.services.job_enrichment.enrich_batch", new=fake_enrich_batch):
+            result = await tasks_mod.enrichment_sweep({"db": db._db})
 
-    assert result == {"enriched": 0, "reason": "e2_off"}
-    assert called["n"] == 0, "E2 off must mean zero LLM calls (rule #18)"
+        assert result["reason"] == "e2_off"
+        assert result["enriched"] == 0
+        assert called["n"] == 0, "E2 off must mean zero LLM calls (rule #18)"
+    finally:
+        await db.close()
 
 
 @pytest.mark.asyncio
