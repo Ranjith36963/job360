@@ -913,6 +913,11 @@
             ],
             "title": "Visa Sponsorship"
           },
+          "visa_status": {
+            "default": "unknown",
+            "title": "Visa Status",
+            "type": "string"
+          },
           "workplace_score": {
             "default": 0,
             "title": "Workplace Score",
@@ -3377,6 +3382,7 @@
             }
           },
           {
+            "description": "SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour.",
             "in": "query",
             "name": "visa_only",
             "required": false,
@@ -3389,7 +3395,26 @@
                   "type": "null"
                 }
               ],
+              "description": "SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour.",
               "title": "Visa Only"
+            }
+          },
+          {
+            "description": "Opt-in hard filter: show ONLY confirmed sponsors.",
+            "in": "query",
+            "name": "visa_strict",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opt-in hard filter: show ONLY confirmed sponsors.",
+              "title": "Visa Strict"
             }
           },
           {

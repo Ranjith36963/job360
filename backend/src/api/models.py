@@ -55,6 +55,13 @@ class JobResponse(BaseModel):
     date_found: str
     apply_url: str
     visa_flag: bool
+    # THREE-state visa fact: "sponsors" | "no_sponsorship" | "unknown".
+    # `visa_flag` above is a bool and therefore cannot distinguish "this ad
+    # says it will NOT sponsor" from "this ad never mentions visas" — opposite
+    # facts for a candidate who needs sponsorship (a dead end vs a question
+    # worth asking). Product rule #31: visa is a SPOTLIGHT, not a wall — the
+    # UI badges all three states and never hides the 58% that are unknown.
+    visa_status: str = "unknown"
     job_type: str = ""
     experience_level: str = ""
     # ── Score-dim breakdown ─────────────────────────────────────────────

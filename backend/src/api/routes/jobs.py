@@ -16,6 +16,7 @@ from src.api.auth_deps import CurrentUser, optional_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobListResponse, JobResponse
 from src.repositories.database import JobDatabase
+from src.services.visa_signal import VisaStatus, detect_visa_status
 
 if TYPE_CHECKING:  # annotation-only; the real import stays lazy (rule #16)
     from src.models import Job
@@ -143,6 +144,14 @@ def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobR
         date_found=row.get("date_found", ""),
         apply_url=row.get("apply_url", ""),
         visa_flag=bool(row.get("visa_flag", 0)),
+        # Product rule #31 — visa is a THREE-state fact, and `visa_flag` above
+        # is a bool that cannot say "the ad never mentioned it". Computed at
+        # read time from stored text (plus the LLM verdict when one exists),
+        # so it needs no migration and can never go stale against the ad.
+        visa_status=detect_visa_status(
+            row.get("description", ""), row.get("title", ""),
+            enrichment_value=row.get("visa_sponsorship"),
+        ).value,
         experience_level=row.get("experience_level", ""),
         # Step-1.5 S1.1-F — surface the per-dim breakdown columns added by
         # migration 0011. The j.* projection in _JOBS_ENRICHMENT_JOIN_COLS
@@ -492,7 +501,19 @@ async def list_jobs(
     source: Optional[str] = Query(None),
     bucket: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
-    visa_only: Optional[bool] = Query(None),
+    visa_only: Optional[bool] = Query(
+        None,
+        description=(
+            'SPOTLIGHT, not a wall (product rule #31). True keeps every job '
+            'and lifts confirmed sponsors to the top; it does NOT hide the '
+            '58%% of the catalog whose visa position is simply unstated. '
+            'Use visa_strict=true for the old hard-filter behaviour.'
+        ),
+    ),
+    visa_strict: Optional[bool] = Query(
+        None,
+        description='Opt-in hard filter: show ONLY confirmed sponsors.',
+    ),
     mode: Optional[str] = Query(None, description="'keyword' | 'hybrid' (Batch 2.7)"),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -562,9 +583,38 @@ async def list_jobs(
     if source:
         all_rows = [r for r in all_rows if r.get("source", "") == source]
 
-    # Filter by visa_only
-    if visa_only:
-        all_rows = [r for r in all_rows if bool(r.get("visa_flag", 0))]
+    # VISA — spotlight, not a wall (product rule #31, owner 2026-08-07).
+    #
+    # This used to be a hard filter on `visa_flag`. Measured 2026-08-07, that
+    # hid ~58% of the catalog: visa status is genuinely UNSTATED in most ads,
+    # and a bool cannot tell "the employer said no" from "the employer never
+    # mentioned it". Filtering on it discarded every sponsor we merely failed
+    # to detect. Now: keep everything, lift confirmed sponsors, and let the
+    # per-card `visa_status` badge carry the fact.
+    #
+    # `visa_strict` remains for the user who explicitly wants only confirmed
+    # sponsors — a deliberate choice, never the default.
+    if visa_strict:
+        all_rows = [
+            r for r in all_rows
+            if detect_visa_status(
+                r.get("description", ""), r.get("title", ""),
+                enrichment_value=r.get("visa_sponsorship"),
+            ) is VisaStatus.SPONSORS
+        ]
+    elif visa_only:
+        def _visa_rank(r: dict) -> int:
+            st = detect_visa_status(
+                r.get("description", ""), r.get("title", ""),
+                enrichment_value=r.get("visa_sponsorship"),
+            )
+            # 0 sorts first. Confirmed refusals sink BELOW unknowns — an ad
+            # that says "we cannot sponsor" is a dead end, while silence is
+            # still a question worth asking.
+            return {VisaStatus.SPONSORS: 0, VisaStatus.UNKNOWN: 1,
+                    VisaStatus.NO_SPONSORSHIP: 2}[st]
+
+        all_rows = sorted(all_rows, key=_visa_rank)
 
     # Filter by bucket
     if bucket:
@@ -599,7 +649,9 @@ async def list_jobs(
     if action:
         filters_applied["action"] = action
     if visa_only:
-        filters_applied["visa_only"] = visa_only
+        filters_applied["visa_focus"] = visa_only
+    if visa_strict:
+        filters_applied["visa_strict"] = visa_strict
 
     return JobListResponse(
         jobs=jobs,

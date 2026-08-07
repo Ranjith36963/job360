@@ -59,6 +59,14 @@ Rules are reference material — keep them in one place. Long-form context for e
 10. **Never INSERT into `jobs` with `user_id` or `tenant_id`** — `jobs` is the shared catalog by design (blueprint §3). Per-user state lives in `user_feed`, `user_actions`, `applications`.
 17. **`job_enrichment` and `job_embeddings` must NOT gain `user_id`** — same rationale as #10. Per-user scoring against the enrichment happens at read time in `JobScorer(..., user_preferences=..., enrichment_lookup=...)`.
 
+### Catalog scope + filters (product design rules)
+
+30. **STRICT — UK-only is a DOOR, not a penalty (owner rule, 2026-08-07).** A job the user cannot take because it is in another country is a **catalog defect**, refused at ingestion — it never reaches storage, a feed, an enrichment budget, an embedding, or a shelf slot. ONE chokepoint (`src/services/uk_gate.check_uk`, called in `main.py`'s insert loop), never per-source. The gate asks *who said it*: UK-native sources (reed/NHS/jobs.ac.uk/teaching_vacancies/**devitjobs.uk**/linkedin) keep an unrecognised town; global sources (greenhouse/workday/remoteok) need evidence (£, right-to-work language, a UK city in the body). **Unknown sources default to STRICT** — a new source opts INTO trust. Never ship a location rule without dry-running it over the live catalog: the naive "no UK token → reject" blocked 48% including Telford and Northampton.
+
+31. **STRICT — Visa is a SPOTLIGHT, not a wall (owner rule, 2026-08-07).** Visa ON must never shrink the catalog: every job still shows, sponsors are guaranteed in + ranked up + badged. Visa status is **three states** (`services/visa_signal.detect_visa_status` → sponsors / no_sponsorship / unknown) because `jobs.visa_flag` is a bool that conflates "says no" with "never mentioned" — opposite facts for a candidate. 58% of the catalog is genuinely unknown; a hard filter would hide it on the strength of a sentence nobody wrote. Refusal is tested BEFORE offer ("cannot offer visa sponsorship" contains "visa sponsorship").
+
+Both live in full in `docs/product_design_rules.md` (rules 2 and 3).
+
 ### Sources
 
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking all 46 source files that inherit from it.
