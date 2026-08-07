@@ -50,9 +50,21 @@ async def test_backfill_embeds_only_missing_up_to_budget(tmp_path):
         # Pretend job #1 is already embedded.
         cur = await conn.execute("SELECT id FROM jobs ORDER BY id")
         ids = [r[0] for r in await cur.fetchall()]
-        await conn.execute(
-            "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, 'm')", (ids[0],)
-        )
+        # "Already embedded" now means "has a VECTOR", not "has an audit row" —
+        # that distinction IS the fix (a Chroma-era audit row with no vector
+        # must be re-embedded, never skipped). Seed whichever the DB supports.
+        from src.services.pg_vector_index import vector_column_available
+        if vector_column_available(str(tmp_path / "t.db")):
+            await conn.execute(
+                "INSERT INTO job_embeddings(job_id, model_version, embedding) "
+                "VALUES (?, 'm', ?::vector)",
+                (ids[0], "[" + ",".join(["0.1"] * 384) + "]"),
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO job_embeddings(job_id, model_version) VALUES (?, 'm')",
+                (ids[0],),
+            )
         await db.commit()
 
         upserted: list[int] = []
@@ -67,7 +79,7 @@ async def test_backfill_embeds_only_missing_up_to_budget(tmp_path):
         async def fake_load_enrichment(conn, jid):
             return None
 
-        with patch("src.services.vector_index.VectorIndex", return_value=_FakeVix()), \
+        with patch("src.services.pg_vector_index.PgVectorIndex", return_value=_FakeVix()), \
              patch("src.services.embeddings.encode_job", new=fake_encode), \
              patch("src.services.job_enrichment.load_enrichment", new=fake_load_enrichment):
             n = await main_mod._embed_backfill_budget(db, conn, budget=2)
@@ -104,7 +116,7 @@ async def test_backfill_survives_a_poison_row(tmp_path):
         async def fake_load_enrichment(conn, jid):
             return None
 
-        with patch("src.services.vector_index.VectorIndex", return_value=_FakeVix()), \
+        with patch("src.services.pg_vector_index.PgVectorIndex", return_value=_FakeVix()), \
              patch("src.services.embeddings.encode_job", new=flaky_encode), \
              patch("src.services.job_enrichment.load_enrichment", new=fake_load_enrichment):
             n = await main_mod._embed_backfill_budget(db, conn, budget=10)

@@ -568,23 +568,40 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
     """
     from src.services.embeddings import MODEL_NAME, encode_job  # noqa: PLC0415 — lazy (rule #16)
     from src.services.job_enrichment import load_enrichment  # noqa: PLC0415
-    from src.services.vector_index import VectorIndex  # noqa: PLC0415
+    from src.services.pg_vector_index import (  # noqa: PLC0415
+        PgVectorIndex,
+        vector_column_available,
+    )
 
     try:
-        vix = VectorIndex()
+        vix = PgVectorIndex()
     except Exception as e:  # noqa: BLE001
         logger.warning("embed backfill: VectorIndex init failed: %s", e)
         return 0
 
-    cur = await conn.execute(
+    sql = """
+        SELECT j.id, j.title, j.company, j.location, j.description,
+               j.apply_url, j.source, j.date_found
+        FROM jobs j LEFT JOIN job_embeddings e ON e.job_id = j.id
+        WHERE e.job_id IS NULL OR e.embedding IS NULL
+        ORDER BY j.id
+        LIMIT ?
         """
+    # Migration 0027 only adds `embedding` where pgvector exists, and naming a
+    # missing column is a hard error inside run_search — so ask first. With the
+    # column present, a legacy audit row WITHOUT a vector (the Chroma-era rows)
+    # must count as "needs embedding": that desync is what this change removes.
+    if not vector_column_available(str(getattr(db, "_path", "")) or None):
+        sql = """
         SELECT j.id, j.title, j.company, j.location, j.description,
                j.apply_url, j.source, j.date_found
         FROM jobs j LEFT JOIN job_embeddings e ON e.job_id = j.id
         WHERE e.job_id IS NULL
         ORDER BY j.id
         LIMIT ?
-        """,
+        """
+    cur = await conn.execute(
+        sql,
         (budget,),
     )
     rows = await cur.fetchall()
@@ -1206,10 +1223,10 @@ async def run_search(
             if SEMANTIC_ENABLED and new_jobs:
                 from src.services.embeddings import MODEL_NAME, encode_job  # noqa: PLC0415 — lazy by design (rule #16)
                 from src.services.job_enrichment import load_enrichment  # noqa: PLC0415
-                from src.services.vector_index import VectorIndex  # noqa: PLC0415
+                from src.services.pg_vector_index import PgVectorIndex  # noqa: PLC0415
 
                 try:
-                    vix = VectorIndex()
+                    vix = PgVectorIndex()
                 except Exception as e:
                     logger.warning("VectorIndex init failed; skipping vector upsert: %s", e)
                     vix = None

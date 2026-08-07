@@ -335,14 +335,14 @@ def _maybe_apply_hybrid_reorder(rows: list[dict[str, Any]], *, profile: Any = No
         return rows
 
     try:
+        from src.services.pg_vector_index import PgVectorIndex  # noqa: PLC0415
         from src.services.retrieval import is_hybrid_available  # noqa: PLC0415 — lazy (rule #16)
-        from src.services.vector_index import VectorIndex  # noqa: PLC0415
     except Exception as e:
         logger.warning("hybrid mode requested but retrieval stack unavailable: %s", e)
         return rows
 
     try:
-        vix = VectorIndex()
+        vix = PgVectorIndex()
         count = vix.count()
     except Exception as e:
         logger.warning("hybrid mode requested but VectorIndex unavailable: %s", e)
