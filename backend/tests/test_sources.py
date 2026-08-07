@@ -1051,7 +1051,11 @@ DEVITJOBS_PAYLOAD = [
         "actualCity": "London",
         "annualSalaryFrom": 65000,
         "annualSalaryTo": 95000,
-        "hasVisaSponsorship": True,
+        # STRINGS, not booleans — this is what the live API actually
+        # sends, and the mismatch is why a `bool("No") is True` bug
+        # survived here for months: the fixture encoded a shape the
+        # upstream never produced, so the test could not catch it.
+        "hasVisaSponsorship": "Yes",
         "expLevel": "Senior",
         "jobUrl": "https://devitjobs.uk/jobs/revolut-ml-engineer",
         "publishedAt": "2024-01-15",
@@ -1061,7 +1065,10 @@ DEVITJOBS_PAYLOAD = [
         "filterTags": ["machine-learning", "mlops"],
         "techCategory": "Data Science",
         "jobType": "Full-time",
-        "remoteType": "Hybrid",
+        # `workplace` is the field the live API populates (2,377/2,377);
+        # `remoteType` is null on 2,324 of them. Verified 2026-08-07.
+        "workplace": "Hybrid",
+        "remoteType": None,
         "companySize": "1000+",
     },
     {
@@ -1070,7 +1077,7 @@ DEVITJOBS_PAYLOAD = [
         "actualCity": "London",
         "annualSalaryFrom": 40000,
         "annualSalaryTo": 55000,
-        "hasVisaSponsorship": False,
+        "hasVisaSponsorship": "No",
         "expLevel": "Mid",
         "jobUrl": "https://devitjobs.uk/jobs/someco-marketing",
     },
