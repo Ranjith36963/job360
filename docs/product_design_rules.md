@@ -47,8 +47,92 @@ comply. One contradiction found and reported:
 **Deliberate exception (documented, not a violation):** the legacy scorer's
 foreign-location penalty (−15) applies even with no location preference. That
 is UK-market product scope — every source is UK/remote by design — not an
-inference from an empty user field.
+inference from an empty user field. **Superseded in practice by Rule 2**: the
+UK gate now refuses foreign jobs at ingestion, so the penalty should rarely
+have anything left to fire on. It stays as a belt-and-braces backstop for rows
+that predate the gate; if it is ever found penalising a job the gate admitted,
+that is a gate bug to fix, not a penalty to tune.
 
 **The test for new code:** take any scoring/filter change, empty ONE user
 field, and re-rank. If any job's position changes *relative to another job*
 because of the emptiness alone, the rule is broken.
+
+---
+
+## Rule 2 — UK-only is a DOOR, not a penalty
+
+*Set by the owner, 2026-08-07: "If I search for a job in UK and I get another
+country, that is a product fault. How can we solve it rather than penalty?"*
+
+**The rule.** Job360 is a UK-market product. A job the user cannot take
+because it is in another country is a **catalog defect**, not a low-ranking
+job. It is refused at ingestion; it never reaches storage, a feed, an
+enrichment budget, an embedding, or a candidate-shelf slot.
+
+**Why not the penalty.** The legacy scorer applies −15 for a foreign location.
+That admits the job and then argues about its rank — so it still consumes
+every downstream budget and can still surface when the other dimensions score
+well. Measured 2026-08-07: 156 clearly foreign jobs were live in prod
+(Shanghai, São Paulo, Lima, Ottawa, München) despite the penalty existing.
+
+**How the gate decides** (`src/services/uk_gate.py`, one chokepoint in
+`main.py` — never per-source):
+
+1. A named foreign country/city → **blocked**, whoever listed it.
+2. Remote fenced to another region ("Remote — US only") → **blocked**.
+3. A UK token, or genuine remote → **allowed**.
+4. Otherwise **who said it decides**: a UK-native source (Reed, NHS,
+   jobs.ac.uk, teaching_vacancies, devitjobs.**uk**) is UK by construction, so
+   an unrecognised town is a UK town; a global source (Greenhouse, Workday,
+   RemoteOK) needs evidence — a £ sign, UK right-to-work language, or a UK
+   city named in the ad.
+
+Unknown sources default to **strict**: a new source opts *into* trust.
+
+**The trap this design exists to avoid.** `UK_TERMS` holds 26 cities; Cardiff,
+Newcastle and Brighton are absent. A dry run of the naive rule ("no UK token →
+reject") blocked **2,436 jobs (48%)** including Telford, Fareham and
+Northampton. Never ship a location rule without dry-running it over the live
+catalog first and eyeballing what it drops.
+
+**Ambiguity favours the user:** a dual-site posting ("London / New York") is
+kept — the user can take the UK half.
+
+---
+
+## Rule 3 — Visa is a SPOTLIGHT, not a wall
+
+*Set by the owner, 2026-08-07: "If you turn on visa, we emphasize on visa. If
+you turn off, we show visa jobs and non-visa jobs. Either way we show both."*
+
+**The rule.** The product serves candidates who need sponsorship and those who
+do not. Turning visa ON must never shrink the catalog:
+
+| Toggle | Behaviour |
+|---|---|
+| **OFF** | every job shows; visa affects nothing |
+| **ON** | every job *still* shows — but sponsors are **guaranteed into the feed**, **ranked up**, and every card carries a badge |
+
+**Why never a hard filter.** Visa status is a three-state fact —
+**sponsors / no sponsorship / unknown** — and *unknown dominates*. Measured
+2026-08-07: with text detection plus LLM enrichment, 42% of the catalog is
+decidable; 58% is silent. A hard filter would hide that 58% on the strength of
+a sentence the employer simply never wrote — including sponsors we merely
+failed to detect. The badge gives the user the fact without the deletion.
+
+**Three states, never a boolean.** `jobs.visa_flag` is a bool, so "this ad says
+it will not sponsor" and "this ad never mentions visas" are the same value.
+Those are opposite facts for a candidate: a dead end versus a question worth
+asking. Use `services/visa_signal.detect_visa_status()`.
+
+**Precedence is load-bearing:** "we cannot offer visa sponsorship" *contains*
+"visa sponsorship", so refusal must be tested before offer. And a signal that
+fires on the wrong sentence is worse than no signal — `tier 2` was removed
+from the pattern after it matched "Tier 1 and Tier 2 support representatives".
+
+**Detection is deterministic first, LLM second.** The phrases are formulaic UK
+recruitment boilerplate. Reading stored text took visa coverage from **3% to
+42% (14×) at zero LLM cost**; enrichment's verdict still wins where it exists.
+
+**This is Rule 1 applied to a filter:** what the user turns on *sharpens the
+ranking*; it never silently deletes the catalog.

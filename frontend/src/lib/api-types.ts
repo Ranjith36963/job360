@@ -1821,6 +1821,11 @@ export interface components {
             /** Visa Sponsorship */
             visa_sponsorship?: boolean | null;
             /**
+             * Visa Status
+             * @default unknown
+             */
+            visa_status: string;
+            /**
              * Workplace Score
              * @default 0
              */
@@ -3034,7 +3039,10 @@ export interface operations {
                 source?: string | null;
                 bucket?: string | null;
                 action?: string | null;
+                /** @description SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour. */
                 visa_only?: boolean | null;
+                /** @description Opt-in hard filter: show ONLY confirmed sponsors. */
+                visa_strict?: boolean | null;
                 /** @description 'keyword' | 'hybrid' (Batch 2.7) */
                 mode?: string | null;
                 limit?: number;
