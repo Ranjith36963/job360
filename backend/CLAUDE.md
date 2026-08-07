@@ -1,5 +1,5 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-07 by /sync -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
 > (the 28 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
