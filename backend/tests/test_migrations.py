@@ -606,3 +606,38 @@ async def test_up_rolls_back_partial_migration_on_failure(tmp_db_path, tmp_path)
             "SELECT name FROM sqlite_master WHERE type='table' AND name='good_tbl'"
         )
         assert await cur2.fetchone() is None, "partial CREATE TABLE was not rolled back"
+
+
+@pytest.mark.asyncio
+async def test_user_profiles_has_no_dead_input_columns(tmp_path):
+    """Migration 0006 created `linkedin_data` + `github_data` for a
+    one-column-per-input design that was superseded before it shipped: the
+    two-pass extractor merges every input into ONE `cv_data` JSON document,
+    and `save_profile` writes only (user_id, cv_data, preferences,
+    updated_at). Prod confirmed 0 of 3 rows populated.
+
+    Dead schema is not harmless — an architecture review read the empty
+    columns as "LinkedIn and GitHub are unused" and recommended normalising
+    both into new tables, exactly backwards. This pins the removal so nobody
+    re-adds a second write path for data that already has one.
+    """
+    from migrations import runner
+    from src.repositories import pg
+    from src.repositories.database import JobDatabase
+
+    path = str(tmp_path / "cols.db")
+    db = JobDatabase(path)
+    await db.init_db()
+    await db.close()
+    await runner.up(path)
+
+    async with pg.connect(path) as conn:
+        cur = await conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'user_profiles'"
+        )
+        cols = {r[0] for r in await cur.fetchall()}
+
+    assert "cv_data" in cols and "preferences" in cols, "the live columns must survive"
+    assert "linkedin_data" not in cols, "dead column re-appeared"
+    assert "github_data" not in cols, "dead column re-appeared"
