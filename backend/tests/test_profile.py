@@ -791,3 +791,60 @@ class TestCoreDomainWordEvidence:
         assert "department" not in cfg.core_domain_words
         assert "solutions" not in cfg.core_domain_words
         assert "ai" in cfg.core_domain_words
+
+
+class TestCvSchemaCarriesDatedExperience:
+    """PILLAR-1 AUDIT FINDING (2026-08-07, profile: Pavan).
+
+    PR #241 added `cv_positions` to `cv_parser._llm_result_to_cvdata` — but
+    `llm_cv_fields_from_text` returns through `schemas.cv_schema_to_cvdata`,
+    so the fix reached no real extraction. Measured on a live CV: the LLM
+    returned "Freelance AI Trainer & Subject Matter Expert, 2023 - 2024" and
+    cv_positions still came out 0. Two adapters for one contract was the bug.
+    """
+
+    def _schema(self):
+        from src.services.profile.schemas import CVSchema, ExperienceEntry
+
+        return CVSchema(
+            skills=["python"],
+            experience=[
+                ExperienceEntry(
+                    company="Acme", title="ML Engineer", dates="2023 - 2024",
+                    location="London", bullets=["Built pipelines"],
+                ),
+                ExperienceEntry(
+                    company="", title="Freelance AI Trainer", dates="2022 - 2023",
+                    location="Remote", bullets=[],
+                ),
+            ],
+        )
+
+    def test_dated_positions_survive_the_schema_adapter(self):
+        from src.services.profile.schemas import cv_schema_to_cvdata
+
+        cv = cv_schema_to_cvdata(self._schema(), "raw cv text")
+        assert len(cv.cv_positions) == 2, "experience entries were dropped"
+        first = cv.cv_positions[0]
+        assert first["title"] == "ML Engineer"
+        assert first["company"] == "Acme"
+        assert first["dates"] == "2023 - 2024", "dates discarded again"
+        assert first["location"] == "London"
+        assert first["bullets"] == ["Built pipelines"]
+
+    def test_title_and_company_stay_paired(self):
+        """The flat lists cannot express WHICH title was held WHERE — a
+        company-less entry silently shifts every later pairing."""
+        from src.services.profile.schemas import cv_schema_to_cvdata
+
+        cv = cv_schema_to_cvdata(self._schema(), "raw")
+        assert cv.cv_positions[1]["title"] == "Freelance AI Trainer"
+        assert cv.cv_positions[1]["company"] == ""
+        # the legacy flat lists are exactly the trap: 2 titles, 1 company
+        assert len(cv.job_titles) == 2 and len(cv.companies) == 1
+
+    def test_entries_without_title_or_company_are_skipped(self):
+        from src.services.profile.schemas import CVSchema, ExperienceEntry, cv_schema_to_cvdata
+
+        schema = CVSchema(experience=[ExperienceEntry(bullets=["orphan bullet"])])
+        assert cv_schema_to_cvdata(schema, "raw").cv_positions == []
