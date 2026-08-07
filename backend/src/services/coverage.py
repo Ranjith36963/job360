@@ -225,6 +225,36 @@ def job_has_value(
             enrichment_value=(enrichment_row or {}).get("visa_sponsorship"),
         )
         return status != VisaStatus.UNKNOWN
+    if dimension in ("workplace", "seniority"):
+        # Same principle as the visa branch above, and the reason it is worth
+        # repeating: SCORING sees these dimensions through
+        # `job_signals.signal_backed_lookup`, which fills an 'unknown'
+        # enrichment value from the job's TITLE and LOCATION. Those fields
+        # exist for the 1,311 catalog rows that carry almost no description.
+        #
+        # If this function read only the enrichment column it would report
+        # coverage the product does NOT have a problem with — understating
+        # seniority by 33 points (27% stored vs 60% effective) and workplace by
+        # 7. An instrument must count with the same eyes its consumer reads.
+        field = _ENUM_ENRICHMENT_FIELD[dimension]
+        raw = (enrichment_row or {}).get(field)
+        if _has_enum_value(raw):
+            return True
+        from src.services.job_signals import (  # noqa: PLC0415 — avoids a cycle
+            detect_seniority,
+            detect_workplace,
+        )
+
+        title = job_row.get("title") or ""
+        desc = job_row.get("description") or ""
+        if dimension == "workplace":
+            got = detect_workplace(
+                desc, title, location=job_row.get("location") or ""
+            )
+        else:
+            got = detect_seniority(title, desc)
+        val = getattr(getattr(got, "value", got), "value", getattr(got, "value", got))
+        return str(val).strip().lower() not in ("", "unknown")
     if dimension in _ENUM_ENRICHMENT_FIELD:
         field = _ENUM_ENRICHMENT_FIELD[dimension]
         raw = (enrichment_row or {}).get(field)

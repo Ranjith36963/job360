@@ -1,0 +1,73 @@
+# seniority_terms.txt — one `<value><TAB><phrase>` pair per line.
+# value is a SeniorityLevel enum value (job_enrichment_schema.py): intern |
+# junior | mid | senior | staff | principal | director. Lines starting with
+# # and blank lines are ignored. A new phrase is a line here, never a code
+# change (see job_signals.py).
+#
+# NOTE: bare "staff" is deliberately ABSENT from the staff tier. "Staff
+# Nurse" (NHS Band 5, an entry grade) and "Staff Accountant" / "Staff
+# Writer" use "staff" as an ordinary grade name in their fields, not the
+# tech-industry "staff engineer" senior-IC tier. Only compounds below.
+staff	staff engineer
+staff	staff software engineer
+staff	staff data scientist
+staff	staff developer
+staff	senior staff engineer
+#
+principal	principal engineer
+principal	principal software engineer
+principal	principal consultant
+principal	distinguished engineer
+principal	distinguished
+#
+# NOTE: bare "executive" is deliberately ABSENT from the director tier.
+# "Account Executive" / "Sales Executive" / "Customer Service Executive" are
+# common UK ENTRY-level titles despite the word "executive" — only the
+# compounds below ("chief executive", "executive director") are unambiguous.
+# "head of" is guarded in code (_SENIORITY_NOISE) against "head of year" /
+# "head of house" / "head of sixth form" — school pastoral titles, not the
+# department-leadership sense this tier means.
+director	director
+director	head of
+director	vp
+director	vice president
+director	chief
+director	c-suite
+director	cto
+director	ceo
+director	coo
+director	cfo
+director	chief executive
+director	chief technology officer
+director	chief operating officer
+director	chief financial officer
+director	managing director
+director	executive director
+director	head teacher
+director	headteacher
+#
+senior	senior
+senior	sr.
+senior	sr
+senior	lead
+#
+mid	mid level
+mid	mid-level
+mid	intermediate
+mid	mid-weight
+#
+junior	junior
+junior	graduate
+junior	entry level
+junior	entry-level
+junior	trainee
+junior	apprentice
+junior	early career
+junior	new grad
+junior	newly qualified
+#
+intern	intern
+intern	internship
+intern	placement student
+intern	industrial placement
+intern	summer intern
