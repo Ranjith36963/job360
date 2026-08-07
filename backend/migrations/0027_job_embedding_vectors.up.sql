@@ -29,6 +29,11 @@
 -- now runs the pgvector image; anywhere else this migration is a clean no-op
 -- and PgVectorIndex degrades to "no semantic results" instead of erroring.
 --
+-- SCHEMA-QUALIFIED ON PURPOSE. The test suite isolates each test in its own
+-- Postgres schema, so an unqualified `vector` type (and the `<=>` operator)
+-- resolves only when the extension's schema is on search_path — CI failed
+-- with `type "vector" does not exist` until this was pinned to public.
+--
 -- At ~8k jobs an exact cosine scan is milliseconds, so no ANN index is
 -- created here; add ivfflat/hnsw when the catalog justifies it.
 --
@@ -37,13 +42,13 @@
 DO $do$
 BEGIN
     BEGIN
-        CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'pgvector unavailable — job_embeddings.embedding skipped';
     END;
 
     IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
-        ALTER TABLE job_embeddings ADD COLUMN IF NOT EXISTS embedding vector(384);
+        ALTER TABLE job_embeddings ADD COLUMN IF NOT EXISTS embedding public.vector(384);
         -- `embedding IS NULL` is exactly the "needs embedding" predicate the
         -- backfill uses, so rows carried over from the Chroma era (audit row,
         -- no vector) are picked up automatically.

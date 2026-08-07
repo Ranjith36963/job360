@@ -115,7 +115,7 @@ class PgVectorIndex:
             with pgsync.connect(self._db_path) as conn:
                 conn.execute(
                     "INSERT INTO job_embeddings(job_id, model_version, embedding) "
-                    "VALUES (?, ?, ?::vector) "
+                    "VALUES (?, ?, ?::public.vector) "
                     "ON CONFLICT(job_id) DO UPDATE SET "
                     "  model_version = EXCLUDED.model_version, "
                     "  embedding = EXCLUDED.embedding, "
@@ -144,9 +144,9 @@ class PgVectorIndex:
         try:
             with pgsync.connect(self._db_path) as conn:
                 cur = conn.execute(
-                    "SELECT job_id, (embedding <=> ?::vector) AS distance "
+                    "SELECT job_id, public.cosine_distance(embedding, ?::public.vector) AS distance "
                     "FROM job_embeddings WHERE embedding IS NOT NULL "
-                    "ORDER BY embedding <=> ?::vector LIMIT ?",
+                    "ORDER BY public.cosine_distance(embedding, ?::public.vector) LIMIT ?",
                     (_to_literal(vector), _to_literal(vector), int(k)),
                 )
                 return [(int(r[0]), float(r[1])) for r in cur.fetchall()]
