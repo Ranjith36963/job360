@@ -563,6 +563,172 @@ async def nightly_ghost_sweep(ctx: dict[str, Any]) -> dict[str, int]:
     return {"evaluated": evaluated, "transitioned": transitioned}
 
 
+async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[str, int]:
+    """BACKFILL phase (2026-08-07) — runs FIRST inside ``enrichment_sweep``,
+    before missing-coverage and repair, so a job whose real text just landed
+    is eligible for enrichment in THIS SAME tick rather than the next one.
+
+    WHY THIS EXISTS. Sources fetch job-detail pages under strict PER-RUN
+    budgets (``_MAX_DETAIL_FETCHES`` in workday.py / smartrecruiters.py) so a
+    single run never blows the 240s ATS timeout. A job stored past that
+    budget keeps an empty/short description forever — nothing re-fetches it
+    unless it happens to reappear in a later run's listing. Coverage of every
+    enriched field (workplace/seniority/visa) tracks description length
+    almost perfectly: measured in prod, 1,311 active jobs (30% of the
+    catalog) carry under 200 chars of description.
+
+    Selects the ``budget`` highest-value ACTIVE jobs (same
+    COALESCE(llm_fit_score, score) value ordering as the other phases) whose
+    ``description`` is under ``MIN_DESCRIPTION_CHARS`` AND whose source is on
+    the ``ALLOWED_BACKFILL_SOURCES`` capability list (LinkedIn and
+    structurally-textless sources are OUT — pushed into the SQL itself,
+    not filtered in Python after the fact, so a 50/tick budget is never
+    burned on rows that were never going to be fetched) AND whose
+    ``description_backfill_attempts`` is under ``MAX_BACKFILL_ATTEMPTS``.
+
+    TERMINAL STATE — real counter (migration 0029), not a padded description.
+    An earlier version of this padded a still-thin ``description`` with
+    trailing spaces past the 200-char floor purely to stop it being
+    reselected. That was REJECTED in review: coverage.py's skill-text
+    predicate counts ANY description over 200 chars as real coverage with no
+    whitespace check, so padding manufactured a FALSE "we understand this
+    job" signal — fed to the LLM judge, the keyword scorer, and rendered to
+    users, on top of it. ``description`` is now written ONLY with genuinely
+    fetched (whitespace-stripped) text; ``description_backfill_attempts`` is
+    the thing that stops a hopeless row from being retried forever, and it
+    increments on EVERY attempt regardless of outcome — success, partial
+    improvement, no improvement, or an exception. A row that clears
+    ``MIN_DESCRIPTION_CHARS`` drops out of selection naturally (the length
+    predicate already excludes it); a row that never does stops being
+    selected once it hits ``MAX_BACKFILL_ATTEMPTS``, full stop.
+
+    Per-row try/except (rule: one poison row must never abort the sweep) —
+    the file already documents an incident where a single bad row aborted an
+    entire run.
+
+    Returns ``{"attempted", "filled", "still_thin", "skipped_by_capability",
+    "errors"}`` — merged into ``enrichment_sweep``'s return dict.
+    ``skipped_by_capability`` stays 0 in normal operation now that the SQL
+    itself excludes disallowed sources; kept as a defensive counter (belt-
+    and-braces) in case a row's source ever slips past the IN-clause.
+    """
+    stats = {"attempted": 0, "filled": 0, "still_thin": 0, "skipped_by_capability": 0, "errors": 0}
+    if budget <= 0:
+        return stats
+
+    from src.services.description_backfill import (  # noqa: PLC0415
+        ALLOWED_BACKFILL_SOURCES,
+        MAX_BACKFILL_ATTEMPTS,
+        MIN_DESCRIPTION_CHARS,
+        fetch_description,
+    )
+
+    allowed_sources = sorted(ALLOWED_BACKFILL_SOURCES)
+    if not allowed_sources:
+        return stats
+    source_placeholders = ",".join("?" for _ in allowed_sources)
+
+    cur = await db.execute(
+        f"""
+        SELECT j.id, j.title, j.company, j.location, j.description,
+               j.apply_url, j.source
+        FROM jobs j
+        JOIN user_feed f ON f.job_id = j.id AND f.status = 'active'
+        WHERE length(coalesce(j.description, '')) < ?
+          AND coalesce(j.description_backfill_attempts, 0) < ?
+          AND j.source IN ({source_placeholders})
+        GROUP BY j.id, j.title, j.company, j.location, j.description,
+                 j.apply_url, j.source
+        ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
+        LIMIT ?
+        """,  # noqa: S608 — source_placeholders is "?"*len(allowed_sources), no user input
+        (MIN_DESCRIPTION_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+
+    # Defensive belt-and-braces (see docstring) — should never fire given the
+    # SQL IN-clause above, but a row landing here with a disallowed source
+    # must still never be fetched.
+    allowed_rows = []
+    for row in rows:
+        if row.get("source") in ALLOWED_BACKFILL_SOURCES:
+            allowed_rows.append(row)
+        else:
+            stats["skipped_by_capability"] += 1
+    if not allowed_rows:
+        return stats
+
+    import aiohttp  # noqa: PLC0415 — only needed when there is real fetching to do
+
+    devitjobs_cache: dict[str, dict[str, str]] = {}
+    async with aiohttp.ClientSession() as session:
+        for row in allowed_rows:
+            stats["attempted"] += 1
+            fetch_raised = False
+            new_text: Optional[str] = None
+            try:
+                new_text = await fetch_description(row, session, devitjobs_cache=devitjobs_cache)
+            except Exception:  # noqa: BLE001 — one poison row must never abort the sweep
+                fetch_raised = True
+                stats["errors"] += 1
+                _log.warning(
+                    "description_backfill_fetch_failed",
+                    extra={"event": "description_backfill_fetch_failed", "job_id": row.get("id")},
+                    exc_info=True,
+                )
+
+            try:
+                existing = row.get("description") or ""
+                # .strip() on BOTH sides — a fetch that returns whitespace-only
+                # text (or HTML that tag-strips down to nothing) must NOT be
+                # mistaken for real content, and must not be compared unfairly
+                # against padded legacy rows either. Pins the exact bug this
+                # phase was rejected for once already (see module docstring).
+                stripped_new = (new_text or "").strip()
+                stripped_existing = existing.strip()
+
+                if stripped_new and len(stripped_new) >= MIN_DESCRIPTION_CHARS:
+                    await db.execute(
+                        "UPDATE jobs SET description = ?, "
+                        "description_backfill_attempts = coalesce(description_backfill_attempts, 0) + 1 "
+                        "WHERE id = ?",
+                        (stripped_new, row["id"]),
+                    )
+                    stats["filled"] += 1
+                elif stripped_new and len(stripped_new) > len(stripped_existing):
+                    # Genuine improvement, still short — real text, written
+                    # verbatim; the attempt still counts against the cap.
+                    await db.execute(
+                        "UPDATE jobs SET description = ?, "
+                        "description_backfill_attempts = coalesce(description_backfill_attempts, 0) + 1 "
+                        "WHERE id = ?",
+                        (stripped_new, row["id"]),
+                    )
+                    stats["still_thin"] += 1
+                else:
+                    # No improvement (including a fetch that raised) — bump
+                    # the REAL attempt counter only. description is NEVER
+                    # modified except with real fetched text.
+                    await db.execute(
+                        "UPDATE jobs SET "
+                        "description_backfill_attempts = coalesce(description_backfill_attempts, 0) + 1 "
+                        "WHERE id = ?",
+                        (row["id"],),
+                    )
+                    if not fetch_raised:
+                        stats["still_thin"] += 1
+                await db.commit()
+            except Exception:  # noqa: BLE001 — one poison row must never abort the sweep
+                _log.warning(
+                    "description_backfill_write_failed",
+                    extra={"event": "description_backfill_write_failed", "job_id": row.get("id")},
+                    exc_info=True,
+                )
+                stats["errors"] += 1
+
+    return stats
+
+
 @_logged_task
 async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     """ARQ periodic task: self-heal enrichment coverage of the candidate pool.
@@ -575,6 +741,11 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     sweeps from a laptop — exactly the kind of hands-on ops a production
     system must not need. This cron makes coverage converge BY ITSELF.
 
+    A BACKFILL phase (``_backfill_thin_descriptions``, 2026-08-07) now runs
+    FIRST: it goes back for real description text on jobs a source's per-run
+    detail-fetch budget skipped over, so the enrichment phases below actually
+    have something to extract from. See that function's docstring.
+
     Each tick: pick the ``ENRICHMENT_SWEEP_PER_TICK`` (default 100, 0
     disables) highest-value ACTIVE candidate jobs still missing enrichment —
     value = the best COALESCE(llm_fit_score, score) any user's feed gives the
@@ -583,21 +754,33 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     pipeline already uses; bounded per tick; zero per-user LLM spend.
 
     Gated exactly like every other E2 call site: ``ENGINE2_ENABLED`` OR the
-    legacy ``ENRICHMENT_ENABLED`` flag — both off ⇒ pure no-op (rule #18).
+    legacy ``ENRICHMENT_ENABLED`` flag — both off ⇒ the MISSING-COVERAGE and
+    REPAIR phases below are a pure no-op (rule #18).
+
+    The BACKFILL phase is DELIBERATELY OUTSIDE that gate (2026-08-07 manager
+    review). E2 only controls the LLM enrichment call — but description text
+    is also what Engine 1's keyword scorer matches against and what the
+    Engine 4 LLM judge reads, so a keyword-only deployment (E2 off) would
+    otherwise never get its text fixed. Backfill is governed ONLY by its own
+    ``DESCRIPTION_BACKFILL_PER_TICK`` budget (0 disables it), and it makes no
+    LLM call of its own regardless.
     """
     import os as _os  # noqa: PLC0415
 
-    from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+    from src.core.settings import DESCRIPTION_BACKFILL_PER_TICK, ENGINE2_ENABLED  # noqa: PLC0415
     from src.services.job_enrichment import enrich_batch  # noqa: PLC0415
-
-    if not (ENGINE2_ENABLED or ENRICHMENT_ENABLED):
-        return {"enriched": 0, "reason": "e2_off"}
-    budget = int(_os.getenv("ENRICHMENT_SWEEP_PER_TICK", "100"))
-    if budget <= 0:
-        return {"enriched": 0, "reason": "disabled"}
 
     db: pg.Connection = ctx["db"]
     db.row_factory = pg.Row
+
+    backfill_stats = await _backfill_thin_descriptions(db, DESCRIPTION_BACKFILL_PER_TICK)
+
+    if not (ENGINE2_ENABLED or ENRICHMENT_ENABLED):
+        return {"enriched": 0, "reason": "e2_off", **backfill_stats}
+
+    budget = int(_os.getenv("ENRICHMENT_SWEEP_PER_TICK", "100"))
+    if budget <= 0:
+        return {"enriched": 0, "reason": "disabled", **backfill_stats}
 
     cur = await db.execute(
         """
@@ -647,7 +830,7 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
         repair_rows = [dict(r) for r in await cur.fetchall()]
 
     if not rows and not repair_rows:
-        return {"enriched": 0, "reason": "coverage_complete"}
+        return {"enriched": 0, "reason": "coverage_complete", **backfill_stats}
 
     def _mk_job(r: dict[str, Any]) -> Job:
         job = Job(
@@ -671,7 +854,7 @@ async def enrichment_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
             skip_existing=False,  # deliberate: overwrite the hollow rows
         )
         repaired = len([x for x in (results or []) if x])
-    return {"enriched": enriched, "repaired": repaired}
+    return {"enriched": enriched, "repaired": repaired, **backfill_stats}
 
 
 # ---------- Pillar 2 Batch 2.5 — job enrichment task -------------------

@@ -47,6 +47,7 @@ from src.services.profile.preferences import (
     llm_infer_from_about_me,
     merge_cv_and_preferences,
 )
+from src.services.profile.seniority import infer_experience_level
 
 logger = logging.getLogger("job360.profile.two_pass")
 
@@ -543,6 +544,21 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         profile.preferences = merge_cv_and_preferences(
             cv.skills, cv.job_titles, prefs
         )
+
+    # ── Seniority inference (2026-08-07) — a FACT read off dated CV/LinkedIn
+    # positions, never a guessed preference; see seniority.py's module
+    # docstring for why that distinction is what makes this legal under
+    # product design rule #29. Runs LAST, after both merges above, so it
+    # reads the fully-populated cv_positions/linkedin_positions and writes
+    # onto whichever preferences object is now live (the merged one above,
+    # or the original if that merge did not run). Never raises — a failed
+    # inference just leaves the field empty and the dimension stays neutral.
+    try:
+        profile.preferences.experience_level_inferred = infer_experience_level(
+            cv.cv_positions, cv.linkedin_positions
+        )
+    except Exception as exc:  # noqa: BLE001 - inference must never cost a save
+        logger.warning("seniority inference failed (non-fatal): %s", exc)
 
     # ── THE UNIVERSAL GATE ────────────────────────────────────────────────
     # Grade what we just produced against the document it came from. This is

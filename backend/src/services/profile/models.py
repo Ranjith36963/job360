@@ -337,6 +337,18 @@ class UserPreferences:
     salary_max: Optional[float] = None
     work_arrangement: str = ""  # "remote", "hybrid", "onsite", or ""
     experience_level: str = ""
+    # A FACT read off the CV/LinkedIn dated job titles, NOT a preference the
+    # user typed — see `services/profile/seniority.py`'s module docstring for
+    # why that distinction lets this exist under product rule #29 (an empty
+    # PREFERENCE means "don't care"; this is extraction, like skills). Kept
+    # on a separate field so it can never be mistaken for something the user
+    # stated. Populated by `services.profile.seniority.infer_experience_level`
+    # during two-pass extraction; read ONLY as a fallback when
+    # `experience_level` above is empty — see
+    # `scoring_dimensions.resolve_experience_level`, the single seam every
+    # scoring call site must go through instead of reading either field
+    # directly.
+    experience_level_inferred: str = ""
     negative_keywords: list[str] = field(default_factory=list)
     about_me: str = ""
     github_username: str = ""
