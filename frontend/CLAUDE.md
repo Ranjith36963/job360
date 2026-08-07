@@ -20,6 +20,16 @@ shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 
 forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
 **recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.
 
+## Owner rule #29 — empty preferences stay SILENT (never default, never require)
+
+Preference inputs (salary range, locations, remote/hybrid/office, experience
+level, about_me) are OPTIONAL and must read as optional. Never block a search
+on an unfilled preference, and never write a default value the user didn't
+choose — a silently-written default is indistinguishable from a real choice
+and turns "don't care" into a fake constraint. The backend treats empty as
+"dimension off"; the UI must not manufacture emptiness away. Details:
+`../docs/product_design_rules.md` (root CLAUDE.md rule #29).
+
 ## ⚠️ Next.js 16 — this is NOT the Next.js your training data knows (root rule #22)
 
 Training data for Next.js 14–15 is **wrong** here. Before any App Router pattern, read
