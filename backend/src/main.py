@@ -398,16 +398,53 @@ async def _run_matcher_stage(db: JobDatabase, *, user_id: str, jobs: list[Job]) 
                 """,
                 (user_id, MATCHER_THRESHOLD, MATCHER_WINDOW),
             )
-            for r in await cur.fetchall():
-                wj = Job(
+            def _row_to_job(r: Any) -> Job:
+                j = Job(
                     title=r[1] or "", company=r[2] or "", apply_url=r[5] or "",
                     source=r[6] or "", date_found=r[7] or "",
                     location=r[3] or "", description=r[4] or "",
                     salary_min=r[8], salary_max=r[9],
                 )
-                wj.id = r[0]
-                wj.match_score = int(r[10] or 0)
-                shortlist.append(wj)
+                j.id = r[0]
+                j.match_score = int(r[10] or 0)
+                return j
+
+            for r in await cur.fetchall():
+                shortlist.append(_row_to_job(r))
+
+            # THE DEEP BENCH — judge a slice BELOW the window each run. The
+            # iteration-2 audit still found 6 good jobs (fit 70-85) stranded
+            # at ranks 100-800: not thin-text (the rescue lane's case) and not
+            # visible (the window's case), just ordinary mid-pack keyword
+            # scores. Walking a fixed-size slice deeper on every search
+            # verifies the whole shelf over time, and the `llm_fit_score IS
+            # NULL` filter means a judged job is never paid for twice.
+            from src.services.llm_matcher import MATCHER_DEEP_BENCH  # noqa: PLC0415
+
+            if MATCHER_DEEP_BENCH > 0:
+                cur = await db._conn.execute(
+                    """
+                    SELECT j.id, j.title, j.company, j.location, j.description,
+                           j.apply_url, j.source, j.date_found, j.salary_min,
+                           j.salary_max, f.score
+                    FROM (
+                        SELECT job_id, score, llm_fit_score FROM user_feed
+                        WHERE user_id = ? AND status = 'active'
+                          AND score >= ? AND llm_fit_score IS NULL
+                        ORDER BY score DESC
+                        OFFSET ? LIMIT ?
+                    ) f
+                    JOIN jobs j ON j.id = f.job_id
+                    """,
+                    (user_id, MATCHER_THRESHOLD, MATCHER_WINDOW, MATCHER_DEEP_BENCH),
+                )
+                deep = [_row_to_job(r) for r in await cur.fetchall()]
+                if deep:
+                    logger.info(
+                        "matcher: deep bench adds %s jobs below the window for user %s",
+                        len(deep), user_id,
+                    )
+                    shortlist.extend(deep)
         else:
             shortlist = sorted(
                 (
