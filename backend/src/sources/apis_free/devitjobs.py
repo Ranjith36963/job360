@@ -51,7 +51,19 @@ class DevITJobsSource(BaseJobSource):
                 except (ValueError, TypeError):
                     salary_max = None
 
-            visa_flag = bool(item.get("hasVisaSponsorship", False))
+            # `hasVisaSponsorship` arrives as the STRING "Yes"/"No", never a
+            # boolean — and `bool("No")` is True in Python. That one-word bug
+            # marked EVERY devitjobs row as sponsoring and then wrote
+            # "Visa sponsorship available" into the description we compose
+            # below. Measured in prod 2026-08-07: 1,977 active rows claimed
+            # sponsorship while the API says exactly 2 of 2,377 actually
+            # offer it. Users who need sponsorship were being shown - and
+            # ranked UP on - jobs that explicitly refuse it, and the visa text
+            # detector then read our own fabricated sentence back as evidence.
+            # Parse the value; never trust a non-empty string to mean "true".
+            visa_flag = str(item.get("hasVisaSponsorship") or "").strip().lower() in (
+                "yes", "true", "1",
+            )
             exp_level = item.get("expLevel", "")
 
             # Job-understanding fix (2026-08-05): jobsLight has NO prose
@@ -74,7 +86,12 @@ class DevITJobsSource(BaseJobSource):
                 ("Tech category", "techCategory"),
                 ("Category", "metaCategory"),
                 ("Job type", "jobType"),
-                ("Workplace", "remoteType"),
+                # `workplace` (office/hybrid/remote), NOT `remoteType`:
+                # measured live, remoteType is null on 2,324 of 2,377 rows
+                # while workplace is populated on all of them. Reading the
+                # empty one threw away a structured workplace signal for the
+                # single largest source in the catalog.
+                ("Workplace", "workplace"),
                 ("Experience level", "expLevel"),
                 ("Company size", "companySize"),
             ):
