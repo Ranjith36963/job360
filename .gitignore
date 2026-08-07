@@ -22,6 +22,12 @@ Thumbs.db
 # Project specific
 *.log
 data/
+# ...EXCEPT the compiled UK gazetteer. It is checked in on purpose: the UK gate
+# runs on every ingest and its tests must pass OFFLINE (hard rule #4), so the
+# data cannot be a runtime download the way ESCO is. 745 KB, rebuilt only by
+# `python backend/scripts/build_uk_gazetteer.py` — UK settlements do not churn.
+!backend/data/uk_gazetteer/
+!backend/data/uk_gazetteer/**
 .secrets/
 
 # Playwright MCP cache + ad-hoc test screenshots
