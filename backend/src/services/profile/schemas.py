@@ -200,6 +200,33 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     for e in schema.experience:
         experience_lines.extend(e.bullets)
 
+    # STRUCTURED experience — the dated, paired record (2026-08-07).
+    #
+    # ``ExperienceEntry`` has always carried ``dates`` and ``location``, and
+    # the CV prompt has always asked for them, but this function flattened
+    # experience into two UNPAIRED lists and dropped both. Nothing downstream
+    # could say which title was held at which company, for how long, or how
+    # recently — the reason the engine has no skill-recency signal and the
+    # judge could not answer the seniority question its own rubric asks.
+    #
+    # PR #241 added ``cv_positions`` to the OTHER adapter
+    # (``cv_parser._llm_result_to_cvdata``) — but ``llm_cv_fields_from_text``
+    # returns through THIS one, so the fix reached no real extraction. Caught
+    # by the Pillar-1 audit on a live CV: the LLM returned
+    # "Freelance AI Trainer, 2023-2024" and cv_positions still came out 0.
+    # Two adapters for one contract is the bug; both now populate the field.
+    cv_positions: list[dict[str, Any]] = [
+        {
+            "company": e.company or "",
+            "title": e.title or "",
+            "dates": e.dates or "",
+            "location": e.location or "",
+            "bullets": list(e.bullets),
+        }
+        for e in schema.experience
+        if (e.title or e.company)
+    ]
+
     # ONE entry per degree — "degree — institution | dates" combined on a single
     # line so the "Education: N" stat counts qualifications, not lines. The
     # per-degree DETAILS (coursework, thesis, project bullets) are NOT flattened
@@ -228,6 +255,7 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         certifications=list(schema.certifications),
         summary=schema.summary or "",
         experience_text="\n".join(experience_lines),
+        cv_positions=cv_positions,
         name=schema.name or "",
         headline=schema.headline or "",
         location=schema.location or "",

@@ -836,3 +836,76 @@ class TestCvReplacementResetsCvOwnedFields:
         assert cv.job_titles == ["Frontend Engineer"]
         # Other inputs still intact after the full round-trip.
         assert cv.github_llm_skills == ["LangChain"]
+
+
+@pytest.mark.asyncio
+async def test_cv_positions_survive_the_two_pass_merge(monkeypatch):
+    """PILLAR-1 AUDIT FINDING (2026-08-07). Every other CV-owned field was
+    merged by `_merge_cv_llm_into`; `cv_positions` was not — so a live
+    extraction produced 3 dated positions and the merge threw them away one
+    layer above the adapter that had just been fixed to emit them."""
+    from src.services.profile import llm_curate, two_pass
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    positions = [
+        {"company": "Acme", "title": "ML Engineer", "dates": "2023 - 2024",
+         "location": "London", "bullets": ["Built pipelines"]},
+    ]
+
+    async def fake_cv(text, *a, **kw):
+        return CVData(skills=["Python"], job_titles=["ML Engineer"],
+                      cv_positions=positions)
+
+    async def _noop_list(*a, **kw):
+        return []
+
+    async def _pass(items, *a, **kw):
+        return items
+
+    profile = UserProfile(
+        cv_data=CVData(raw_text="Experience\nML Engineer at Acme 2023-2024\n"),
+        preferences=UserPreferences(),
+    )
+    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
+         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
+         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
+         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
+         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
+         patch.object(llm_curate, "llm_merge_duplicates", _pass):
+        out = await two_pass.run_two_pass_extraction(profile)
+
+    got = out.cv_data.cv_positions
+    assert len(got) == 1, "dated positions were dropped by the merge"
+    assert got[0]["dates"] == "2023 - 2024"
+
+
+@pytest.mark.asyncio
+async def test_cv_positions_replace_not_duplicate_on_reextraction(monkeypatch):
+    """One CV = one ordered career record. A union would duplicate every role
+    on each re-extraction (profiles re-extract on ANY input change)."""
+    from src.services.profile import llm_curate, two_pass
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    positions = [{"company": "Acme", "title": "ML Engineer", "dates": "2023",
+                  "location": "", "bullets": []}]
+
+    async def fake_cv(text, *a, **kw):
+        return CVData(skills=["Python"], cv_positions=positions)
+
+    async def _noop_list(*a, **kw):
+        return []
+
+    async def _pass(items, *a, **kw):
+        return items
+
+    cv = CVData(raw_text="cv text", cv_positions=list(positions))
+    profile = UserProfile(cv_data=cv, preferences=UserPreferences())
+    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
+         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
+         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
+         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
+         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
+         patch.object(llm_curate, "llm_merge_duplicates", _pass):
+        out = await two_pass.run_two_pass_extraction(profile)
+
+    assert len(out.cv_data.cv_positions) == 1, "re-extraction duplicated the role"

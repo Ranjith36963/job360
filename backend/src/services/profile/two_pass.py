@@ -282,6 +282,18 @@ def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
         cv.summary = llm_cv.summary
     if not cv.experience_text and llm_cv.experience_text:
         cv.experience_text = llm_cv.experience_text
+    # Structured, dated experience (Pillar-1 audit 2026-08-07). Every OTHER
+    # CV-owned field was merged here; cv_positions was not, so a re-extraction
+    # produced dated positions and then threw them away one layer above the
+    # adapter that had just been fixed to emit them. Measured on a live CV:
+    # "CV LLM pass: positions=3" followed by "merged: cv_positions 0".
+    #
+    # Replace rather than union: this is ONE ordered record of the same career
+    # read from the same CV, so a union would duplicate every role on each
+    # re-extraction. A non-empty result wins; an empty one never clobbers what
+    # is already there (same guard as the GitHub/LinkedIn raw fields).
+    if llm_cv.cv_positions:
+        cv.cv_positions = list(llm_cv.cv_positions)
 
 
 async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
