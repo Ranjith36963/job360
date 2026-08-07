@@ -20,7 +20,6 @@ from src.services.job_enrichment import (
     save_enrichment,
 )
 from src.services.job_enrichment_schema import (
-    EmployerType,
     EmploymentType,
     ExperienceLevel,
     JobCategory,
@@ -56,7 +55,6 @@ def _make_valid_enrichment(**overrides) -> JobEnrichment:
         category=JobCategory.MACHINE_LEARNING,
         employment_type=EmploymentType.FULL_TIME,
         workplace_type=WorkplaceType.HYBRID,
-        locations=["London, UK"],
         salary=SalaryBand(min=60000, max=90000, currency="GBP", frequency=SalaryFrequency.ANNUAL),
         required_skills=["Python", "PyTorch"],
         preferred_skills=["MLOps"],
@@ -64,7 +62,6 @@ def _make_valid_enrichment(**overrides) -> JobEnrichment:
         experience_level=ExperienceLevel.MID,
         requirements_summary="Build and ship ML systems end-to-end.",
         language="en",
-        employer_type=EmployerType.SCALEUP,
         visa_sponsorship=VisaSponsorship.YES,
         seniority=SeniorityLevel.MID,
         remote_region=None,
@@ -156,13 +153,18 @@ def test_schema_uppercases_currency():
     assert e.salary.currency == "GBP"
 
 
-def test_schema_dedups_locations():
+def test_schema_dedups_required_skills():
+    """Retargeted 2026-08 — this pinned `_strip_and_dedup` via the now-removed
+    `locations` field (100% dead: 0/3,119 live rows ever populated it, and it
+    duplicated `jobs.location`). The dedup validator itself still applies to
+    `required_skills`/`preferred_skills`/`red_flags`, so prove it there
+    instead of dropping the coverage."""
     e = JobEnrichment(
         title_canonical="Dev",
         category=JobCategory.SOFTWARE_ENGINEERING,
-        locations=["London", "london", "  London  ", "Remote"],
+        required_skills=["Python", "python", "  Python  ", "SQL"],
     )
-    assert e.locations == ["London", "Remote"]
+    assert e.required_skills == ["Python", "SQL"]
 
 
 def test_schema_lowercases_language():
@@ -184,6 +186,45 @@ def test_schema_caps_required_skills_list():
             category=JobCategory.SOFTWARE_ENGINEERING,
             required_skills=too_many,
         )
+
+
+def test_enrichment_never_asks_for_employer_type_or_locations():
+    """Regression guard, 2026-08.
+
+    Measured on all 3,119 live-production `job_enrichment` rows:
+      * `employer_type` was 'unknown' on 100% of rows — never once produced.
+      * `locations` was empty on 100% of rows (0% populated) — and would be
+        redundant even if fixed, since `jobs.location` already holds
+        geography and is validated at ingestion by `uk_gate.py`.
+
+    Both fields were still paid for on every enrichment call (they widened
+    the validated-output schema) despite never returning anything usable.
+    This test pins two things so neither field can quietly come back:
+      1. `JobEnrichment` no longer declares either field (schema surface).
+      2. The rendered prompt text never mentions them (token surface) — this
+         was already true before the fix (they were never in the prompt,
+         only defaulted in the schema), and this test keeps it true.
+    """
+    assert "employer_type" not in JobEnrichment.model_fields
+    assert "locations" not in JobEnrichment.model_fields
+
+    from src.models import Job
+    from src.services.job_enrichment import _SYSTEM_PROMPT, _build_prompt
+
+    job = Job(
+        title="ML Engineer",
+        company="Acme AI",
+        apply_url="https://example.com/job/1",
+        source="greenhouse",
+        date_found="2026-04-21T10:00:00+00:00",
+        location="London, UK",
+        description="Python PyTorch role.",
+    )
+    prompt = _build_prompt(job)
+    assert "employer_type" not in prompt
+    assert "locations" not in prompt
+    assert "employer_type" not in _SYSTEM_PROMPT
+    assert "locations" not in _SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------

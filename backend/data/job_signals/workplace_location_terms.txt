@@ -1,0 +1,43 @@
+# workplace_location_terms.txt — vocabulary for the STRUCTURED location
+# field ONLY, distinct from workplace_terms.txt (free-text description /
+# title prose). See job_signals.py's "WHY LOCATION GETS ITS OWN RULES" for
+# why a bare "remote" token is trusted here but banned in prose — a
+# location field never names a job DOMAIN the way "Remote Sensing Analyst"
+# does, so there is no sentence for a bare token to be part of.
+#
+# value<TAB>phrase. Matched against a location-field SEGMENT WHOLE
+# (fullmatch, not substring search) — the field is split on
+# commas/parens/slashes/" or "/" - " first (see _location_segments), so a
+# segment is either exactly one of these phrases or it's an office name.
+#
+# remote  = the segment states remote work.
+# onsite  = the segment states onsite/office-based work.
+# ignore  = a country/nation qualifier — not an office, not a remote signal;
+#           must not count as an "office" when deciding hybrid vs pure remote.
+remote	remote
+remote	fully remote
+remote	100% remote
+remote	remote first
+remote	remote-first
+remote	wfh
+remote	work from home
+remote	work from anywhere
+remote	home based
+remote	home-based
+#
+onsite	onsite
+onsite	on-site
+onsite	on site
+onsite	office based
+onsite	office-based
+#
+ignore	uk
+ignore	u k
+ignore	gb
+ignore	united kingdom
+ignore	great britain
+ignore	england
+ignore	scotland
+ignore	wales
+ignore	northern ireland
+ignore	anywhere

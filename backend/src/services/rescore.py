@@ -76,6 +76,7 @@ async def _build_user_scorer(db: Any, profile: Any) -> Any:
         ENRICHMENT_ENABLED,
         _build_enrichment_lookup,
     )
+    from src.services.job_signals import signal_backed_lookup  # noqa: PLC0415
     from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
     from src.services.skill_matcher import JobScorer  # noqa: PLC0415
 
@@ -88,8 +89,8 @@ async def _build_user_scorer(db: Any, profile: Any) -> Any:
     return JobScorer(
         search_config,
         user_preferences=profile.preferences,
-        enrichment_lookup=lambda j: enrichment_lookup_dict.get(
-            cast(int, getattr(j, "id", None))
+        enrichment_lookup=signal_backed_lookup(
+            lambda j: enrichment_lookup_dict.get(cast(int, getattr(j, "id", None)))
         ),
     )
 
@@ -511,6 +512,7 @@ async def rescore_user_feed(
                 ENRICHMENT_ENABLED,
                 _build_enrichment_lookup,
             )
+            from src.services.job_signals import signal_backed_lookup  # noqa: PLC0415
             from src.services.profile.keyword_generator import generate_search_config  # noqa: PLC0415
             from src.services.skill_matcher import (  # noqa: PLC0415
                 SCORER_VERSION as _SCORER_VERSION,
@@ -532,8 +534,10 @@ async def rescore_user_feed(
                 # cast: the lookup is keyed by job id; `getattr` widens to
                 # Any|None and a missing id simply misses the dict (unchanged
                 # runtime behaviour — `cast` is a no-op).
-                enrichment_lookup=lambda j: enrichment_lookup_dict.get(
-                    cast(int, getattr(j, "id", None))
+                enrichment_lookup=signal_backed_lookup(
+                    lambda j: enrichment_lookup_dict.get(
+                        cast(int, getattr(j, "id", None))
+                    )
                 ),
             )
 

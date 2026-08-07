@@ -1,0 +1,69 @@
+# workplace_terms.txt — one `<value><TAB><phrase>` pair per line.
+# value is a WorkplaceType enum value (job_enrichment_schema.py): remote |
+# hybrid | onsite. Lines starting with # and blank lines are ignored.
+# A new phrase is a line here, never a code change (see job_signals.py).
+#
+# NOTE: bare "remote" is deliberately ABSENT from the remote tier. Real job
+# titles use "remote" as a DOMAIN word, not a work-arrangement word —
+# "Remote Sensing Analyst", "Remote Desktop Support Engineer", "Remote
+# Access Engineer". Every remote phrase below is multi-word and unambiguous.
+# Same rule visa_signal.py states: a signal that fires on the wrong sentence
+# is worse than no signal.
+remote	fully remote
+remote	100% remote
+remote	remote-first
+remote	remote first
+remote	full remote
+remote	totally remote
+remote	remote only
+remote	remote working
+remote	remote role
+remote	remote position
+remote	remote job
+remote	remote employee
+remote	work from home
+remote	work from anywhere
+remote	home based
+remote	home-based
+remote	fully home-based
+remote	distributed team
+#
+# "hybrid" alone is safe as a bare word — unlike "remote" it has no common
+# non-work-arrangement sense in job-ad text.
+hybrid	hybrid
+hybrid	hybrid working
+hybrid	hybrid role
+hybrid	hybrid position
+hybrid	hybrid model
+hybrid	part remote
+hybrid	part-remote
+hybrid	mix of home and office
+hybrid	mix of office and home
+hybrid	split between home and office
+hybrid	blend of office and remote
+#
+# Bare onsite phrases are guarded in code (_ONSITE_AMENITY) against amenity
+# mentions like "on-site parking" / "on-site gym" — those are perks, not a
+# workplace-arrangement statement.
+onsite	onsite
+onsite	on-site
+onsite	on site
+onsite	in office
+onsite	in-office
+onsite	office based
+onsite	office-based
+onsite	fully in office
+onsite	no remote working
+onsite	not a remote role
+onsite	office only
+onsite	office-only
+onsite	must be based in the office
+onsite	based in our office
+#
+# 5 days is a full standard UK work week — no remote days at all, so it is
+# plain onsite, not a hybrid cadence. Kept OUT of _HYBRID_CADENCE on purpose
+# (see job_signals.py module docstring) and enumerated here instead.
+onsite	5 days in the office
+onsite	five days in the office
+onsite	5 days a week in the office
+onsite	five days a week in the office

@@ -28,6 +28,12 @@ data/
 # `python backend/scripts/build_uk_gazetteer.py` — UK settlements do not churn.
 !backend/data/uk_gazetteer/
 !backend/data/uk_gazetteer/**
+# ...and the job-signal vocabularies, for the same reason: the detectors run on
+# every scored job and their tests must pass OFFLINE (hard rule #4). CI proved
+# this the hard way — without the files committed, the detectors correctly
+# degraded to UNKNOWN and 4 tests failed in CI while passing locally.
+!backend/data/job_signals/
+!backend/data/job_signals/**
 .secrets/
 
 # Playwright MCP cache + ad-hoc test screenshots

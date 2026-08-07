@@ -54,6 +54,14 @@ def _build_prompt(job: Job) -> str:
     weak free-tier models cannot infer the field names from a schema *name*
     alone (they emit ``job_title`` instead of the required ``title_canonical``,
     failing validation every time). Listing the contract inline fixes that.
+
+    Deliberately excludes ``employer_type`` and ``locations`` — never asked
+    for here (both silently rode on their Pydantic defaults) and, per the
+    2026-08 measurement across 3,119 live enriched rows, the model never
+    produced a usable value for either (`employer_type` 100% 'unknown',
+    `locations` 0% populated). Do not add them back to this key list without
+    new evidence the model can actually decide them; ``jobs.location``
+    already covers geography (validated at ingestion by `uk_gate.py`).
     """
     desc = (job.description or "")[:4000]
     return (
@@ -236,22 +244,35 @@ async def save_enrichment(
 
     JSON-serialises every list/nested-model field. Uses `INSERT OR REPLACE`
     so re-enrichment is a clean upsert without requiring a DELETE first.
+
+    ``employer_type`` and ``locations`` are RETIRED-BUT-PRESENT columns (see
+    the module comment below) — deliberately absent from this column list.
+    The table's `NOT NULL DEFAULT 'unknown'` / `DEFAULT '[]'` (migration
+    0008) fills them on INSERT, and the `ON CONFLICT` clause never touches
+    them again, so old rows keep whatever they already had. Measured on
+    3,119 live enriched rows: `employer_type` was 100% 'unknown' and
+    `locations` was 0% populated — the LLM has never once produced a usable
+    value for either, so writing a constant from Python would just be a
+    second place encoding the same dead default the DB already owns. DO NOT
+    add these columns back to the INSERT/SELECT statements in this file
+    without new evidence the LLM can actually decide them (see
+    `job_enrichment_schema.py`'s module docstring and `_build_prompt`'s
+    docstring above).
     """
     await conn.execute(
         """
         INSERT INTO job_enrichment (
             job_id, title_canonical, category, employment_type, workplace_type,
-            locations, salary, required_skills, preferred_skills,
+            salary, required_skills, preferred_skills,
             experience_min_years, experience_level, requirements_summary,
-            language, employer_type, visa_sponsorship, seniority,
+            language, visa_sponsorship, seniority,
             remote_region, apply_instructions, red_flags, enriched_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(job_id) DO UPDATE SET
             title_canonical = EXCLUDED.title_canonical,
             category = EXCLUDED.category,
             employment_type = EXCLUDED.employment_type,
             workplace_type = EXCLUDED.workplace_type,
-            locations = EXCLUDED.locations,
             salary = EXCLUDED.salary,
             required_skills = EXCLUDED.required_skills,
             preferred_skills = EXCLUDED.preferred_skills,
@@ -259,7 +280,6 @@ async def save_enrichment(
             experience_level = EXCLUDED.experience_level,
             requirements_summary = EXCLUDED.requirements_summary,
             language = EXCLUDED.language,
-            employer_type = EXCLUDED.employer_type,
             visa_sponsorship = EXCLUDED.visa_sponsorship,
             seniority = EXCLUDED.seniority,
             remote_region = EXCLUDED.remote_region,
@@ -273,7 +293,6 @@ async def save_enrichment(
             enrichment.category.value,
             enrichment.employment_type.value,
             enrichment.workplace_type.value,
-            json.dumps(enrichment.locations),
             enrichment.salary.model_dump_json(),
             json.dumps(enrichment.required_skills),
             json.dumps(enrichment.preferred_skills),
@@ -281,7 +300,6 @@ async def save_enrichment(
             enrichment.experience_level.value,
             enrichment.requirements_summary,
             enrichment.language,
-            enrichment.employer_type.value,
             enrichment.visa_sponsorship.value,
             enrichment.seniority.value,
             enrichment.remote_region,
@@ -308,13 +326,15 @@ async def _build_enrichment_lookup(
     treat ``{}`` as "no enrichment available, fall back to legacy 4-component
     scoring" per CLAUDE.md rule #19.
     """
+    # employer_type / locations deliberately excluded — see the module
+    # comment on save_enrichment's column list above.
     try:
         cur = await conn.execute(
             """
             SELECT job_id, title_canonical, category, employment_type, workplace_type,
-                   locations, salary, required_skills, preferred_skills,
+                   salary, required_skills, preferred_skills,
                    experience_min_years, experience_level, requirements_summary,
-                   language, employer_type, visa_sponsorship, seniority,
+                   language, visa_sponsorship, seniority,
                    remote_region, apply_instructions, red_flags
             FROM job_enrichment
             """
@@ -332,7 +352,6 @@ async def _build_enrichment_lookup(
                 category,
                 employment_type,
                 workplace_type,
-                locations_json,
                 salary_json,
                 required_json,
                 preferred_json,
@@ -340,7 +359,6 @@ async def _build_enrichment_lookup(
                 experience_level,
                 requirements_summary,
                 language,
-                employer_type,
                 visa_sponsorship,
                 seniority,
                 remote_region,
@@ -352,7 +370,6 @@ async def _build_enrichment_lookup(
                 category=category,
                 employment_type=employment_type,
                 workplace_type=workplace_type,
-                locations=json.loads(locations_json) if locations_json else [],
                 salary=json.loads(salary_json) if salary_json else {},
                 required_skills=json.loads(required_json) if required_json else [],
                 preferred_skills=json.loads(preferred_json) if preferred_json else [],
@@ -360,7 +377,6 @@ async def _build_enrichment_lookup(
                 experience_level=experience_level,
                 requirements_summary=requirements_summary or "",
                 language=language,
-                employer_type=employer_type,
                 visa_sponsorship=visa_sponsorship,
                 seniority=seniority,
                 remote_region=remote_region,
@@ -381,13 +397,16 @@ async def load_enrichment(
 
     Used by the dedup tiebreaker in `services/deduplicator.py` and by the
     Batch 2.6 embedding builder.
+
+    employer_type / locations deliberately excluded — see the module comment
+    on save_enrichment's column list above.
     """
     cur = await conn.execute(
         """
         SELECT title_canonical, category, employment_type, workplace_type,
-               locations, salary, required_skills, preferred_skills,
+               salary, required_skills, preferred_skills,
                experience_min_years, experience_level, requirements_summary,
-               language, employer_type, visa_sponsorship, seniority,
+               language, visa_sponsorship, seniority,
                remote_region, apply_instructions, red_flags
         FROM job_enrichment
         WHERE job_id = ?
@@ -402,7 +421,6 @@ async def load_enrichment(
         category,
         employment_type,
         workplace_type,
-        locations_json,
         salary_json,
         required_json,
         preferred_json,
@@ -410,7 +428,6 @@ async def load_enrichment(
         experience_level,
         requirements_summary,
         language,
-        employer_type,
         visa_sponsorship,
         seniority,
         remote_region,
@@ -422,7 +439,6 @@ async def load_enrichment(
         category=category,
         employment_type=employment_type,
         workplace_type=workplace_type,
-        locations=json.loads(locations_json) if locations_json else [],
         salary=json.loads(salary_json) if salary_json else {},
         required_skills=json.loads(required_json) if required_json else [],
         preferred_skills=json.loads(preferred_json) if preferred_json else [],
@@ -430,7 +446,6 @@ async def load_enrichment(
         experience_level=experience_level,
         requirements_summary=requirements_summary or "",
         language=language,
-        employer_type=employer_type,
         visa_sponsorship=visa_sponsorship,
         seniority=seniority,
         remote_region=remote_region,

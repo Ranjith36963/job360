@@ -909,3 +909,77 @@ async def test_cv_positions_replace_not_duplicate_on_reextraction(monkeypatch):
         out = await two_pass.run_two_pass_extraction(profile)
 
     assert len(out.cv_data.cv_positions) == 1, "re-extraction duplicated the role"
+
+
+# ── career_domain / cv_skills_esco merge — Pillar-1 audit 2026-08-07 ───────
+# Same bug shape as `cv_positions` above, twice more in one day:
+#   * career_domain: the CV prompt never asked for it, and even once it does
+#     (cv_parser._CV_PROMPT), `_merge_cv_llm_into` had no line copying it.
+#   * cv_skills_esco: `cv_schema_to_cvdata` never populated it (fixed in
+#     schemas.py), and even once it does, this merge had no line for it
+#     either — `reset_cv_owned_fields` has always CLEARED this field on a CV
+#     swap, treating it as CV-owned, but nothing ever wrote it back.
+
+
+def test_merge_cv_llm_into_fills_career_domain_when_empty():
+    from src.services.profile.two_pass import _merge_cv_llm_into
+
+    cv = CVData(skills=["Python"])
+    llm_cv = CVData(career_domain="software_engineering")
+    _merge_cv_llm_into(cv, llm_cv)
+    assert cv.career_domain == "software_engineering"
+
+
+def test_merge_cv_llm_into_never_overwrites_existing_career_domain():
+    """Fill-if-empty, like every other scalar in this function — a
+    re-classification on a later re-run must not clobber what the user's
+    profile already carries."""
+    from src.services.profile.two_pass import _merge_cv_llm_into
+
+    cv = CVData(career_domain="healthcare_and_lifesciences")
+    llm_cv = CVData(career_domain="data_and_ai")
+    _merge_cv_llm_into(cv, llm_cv)
+    assert cv.career_domain == "healthcare_and_lifesciences"
+
+
+def test_merge_cv_llm_into_unions_cv_skills_esco():
+    from src.services.profile.two_pass import _merge_cv_llm_into
+
+    cv = CVData(cv_skills_esco={"Python": "http://esco/python"})
+    llm_cv = CVData(cv_skills_esco={"Docker": "http://esco/docker"})
+    _merge_cv_llm_into(cv, llm_cv)
+    assert cv.cv_skills_esco == {
+        "Python": "http://esco/python",
+        "Docker": "http://esco/docker",
+    }
+
+
+@pytest.mark.asyncio
+async def test_career_domain_survives_the_two_pass_merge():
+    """End-to-end: a value the CV LLM pass classifies must reach the merged
+    profile, not just the isolated adapter output."""
+    from src.services.profile import llm_curate, two_pass
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    async def fake_cv(text, *a, **kw):
+        return CVData(skills=["Python"], career_domain="data_and_ai")
+
+    async def _noop_list(*a, **kw):
+        return []
+
+    async def _pass(items, *a, **kw):
+        return items
+
+    profile = UserProfile(
+        cv_data=CVData(raw_text="Data scientist CV text"),
+        preferences=UserPreferences(),
+    )
+    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
+         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
+         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
+         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
+         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
+         patch.object(llm_curate, "llm_merge_duplicates", _pass):
+        out = await two_pass.run_two_pass_extraction(profile)
+
+    assert out.cv_data.career_domain == "data_and_ai"

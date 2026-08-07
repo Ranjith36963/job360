@@ -25,6 +25,7 @@ from src.models import Job
 from src.repositories import pg
 from src.services.feed import FeedService
 from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
+from src.services.job_signals import signal_backed_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
 from src.services.skill_matcher import JobScorer
@@ -158,7 +159,12 @@ async def score_and_ingest(
     # always calling get(None). Reads `job.id` directly rather than through
     # getattr — the getattr dance existed only because the field was previously
     # stapled on at runtime and might genuinely be absent.
-    enrichment_lookup_fn = lambda job: enrichment_lookup_dict.get(job.id)  # noqa: E731
+    # Wrapped so the deterministic detectors fill what the LLM left 'unknown'
+    # (job_signals.signal_backed_lookup explains why this is the only seam that
+    # can see both the enrichment record and the job's own title/location).
+    enrichment_lookup_fn = signal_backed_lookup(
+        lambda job: enrichment_lookup_dict.get(job.id)
+    )
 
     def _scorer_for(user_id: str) -> JobScorer:
         if user_id not in user_scorers:

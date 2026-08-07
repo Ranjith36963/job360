@@ -151,7 +151,6 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
     from src.models import Job
     from src.services import job_enrichment as je
     from src.services.job_enrichment_schema import (
-        EmployerType,
         EmploymentType,
         ExperienceLevel,
         JobCategory,
@@ -172,7 +171,6 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
             category=JobCategory.MACHINE_LEARNING,
             employment_type=EmploymentType.FULL_TIME,
             workplace_type=WorkplaceType.HYBRID,
-            locations=["London"],
             salary=SalaryBand(min=60000, max=90000, currency="GBP", frequency=SalaryFrequency.ANNUAL),
             required_skills=["python"],
             preferred_skills=[],
@@ -180,7 +178,6 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
             experience_level=ExperienceLevel.MID,
             requirements_summary="Build models.",
             language="en",
-            employer_type=EmployerType.STARTUP,
             visa_sponsorship=VisaSponsorship.UNKNOWN,
             seniority=SeniorityLevel.MID,
             remote_region=None,

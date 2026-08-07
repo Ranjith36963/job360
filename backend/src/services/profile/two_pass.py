@@ -282,6 +282,24 @@ def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
         cv.summary = llm_cv.summary
     if not cv.experience_text and llm_cv.experience_text:
         cv.experience_text = llm_cv.experience_text
+    # ADAPTER-PARITY FIX (2026-08-07). Every OTHER CV-owned scalar in this
+    # function was merged; `career_domain` was not, so even once the prompt
+    # asks for it (cv_parser._CV_PROMPT) and the schema adapter surfaces it
+    # (schemas.cv_schema_to_cvdata), the value stopped here — one layer above
+    # the fix, same shape as the `cv_positions` miss just below. Fill-if-
+    # empty like every scalar above: a re-run that classifies differently
+    # must not clobber a domain the user's profile already carries.
+    if not cv.career_domain and llm_cv.career_domain:
+        cv.career_domain = llm_cv.career_domain
+    # ESCO skill-normalisation map (Step-1.5 S1.5-D). `reset_cv_owned_fields`
+    # has always cleared `cv_skills_esco` on a CV swap — treating it as CV-
+    # owned — but nothing here ever copied it back in, so fixing the adapter
+    # (schemas.cv_schema_to_cvdata) alone still left the live profile at
+    # cv_skills_esco={} after a real re-extraction. Union rather than fill-
+    # once: a later pass can resolve a skill the first pass didn't (ESCO
+    # turned on, or a borderline cosine match), and dropping earlier
+    # resolved entries would silently regress them.
+    cv.cv_skills_esco.update(llm_cv.cv_skills_esco)
     # Structured, dated experience (Pillar-1 audit 2026-08-07). Every OTHER
     # CV-owned field was merged here; cv_positions was not, so a re-extraction
     # produced dated positions and then threw them away one layer above the
