@@ -61,18 +61,49 @@ async def _none() -> None:
     return None
 
 
+EXTRACTOR_VERSION = "2"
+"""Bump this whenever an LLM extraction PROMPT changes in a way that should
+re-read inputs the system has already seen.
+
+WHY IT EXISTS (measured on a live profile, 2026-08-08). The cost cache keyed on
+the INPUT alone: same CV text -> skip the paid pass. Correct for cost, wrong for
+correctness — because it silently means **a prompt improvement never reaches an
+existing user**. Their extraction is frozen at whatever the prompt produced the
+last time their input changed, and re-uploading the same CV cannot fix it (the
+text is identical, so the hash still matches).
+
+Proof: the CV prompt already instructs the LLM to mine skills demonstrated in
+prose ("inside a project, an experience bullet...", ``cv_parser`` RULE 9). A real
+profile's CV names predictive maintenance, fraud detection, IoT, RUL and
+multi-agent workflow in its experience bullets, yet none reached ``cv.skills`` —
+the improved prompt had never run over that CV, because the hash matched.
+
+Including this version in the digest makes a prompt change invalidate the cache
+exactly once per user, which is the intended cost: pay again only when the
+extractor genuinely got better.
+
+Version log — 1: input-only hash (pre-2026-08-08). 2: prose-mining CV prompt.
+"""
+
+
 def _input_hash(raw: Any) -> str:
-    """Stable fingerprint of one extraction input.
+    """Stable fingerprint of one extraction input AND the extractor that read it.
 
     Accepts whatever the four inputs actually are — CV/LinkedIn text are strings,
     ``github_repos_brief`` may be a list of dicts — so a non-string is serialised
     with sorted keys to keep the digest stable across runs (Python dict order is
     insertion-ordered, and a re-fetch could reorder it without the content
     changing, which would look like a change and re-bill the user).
+
+    ``EXTRACTOR_VERSION`` is folded in so improving a prompt re-reads inputs the
+    system has already seen — see the note on that constant. Old stored digests
+    were computed WITHOUT it, so they simply stop matching and every profile
+    re-extracts once, which is the desired behaviour.
     """
     if not isinstance(raw, str):
         raw = json.dumps(raw, sort_keys=True, default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    payload = f"v{EXTRACTOR_VERSION}\x00{raw}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _pass_produced_data(key: str, res: Any) -> bool:
