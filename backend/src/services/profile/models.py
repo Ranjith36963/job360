@@ -101,6 +101,27 @@ class CVData:
     # JSON blob, no migration (storage._filter_fields drops unknown keys, so
     # old rows load with an empty list).
     cv_positions: list[dict[str, Any]] = field(default_factory=list)
+    # ── Upload receipts (2026-08-08) ────────────────────────────────────────
+    # WHAT the user gave us and WHEN. Found on a live smoke test: after
+    # uploading, the only feedback was a small tick the owner said he "didn't
+    # catch", and nothing anywhere named the file — so a user could not tell
+    # WHICH CV was on file, whether a re-upload had actually replaced it, or
+    # when any of it happened. GitHub had no confirmation at all.
+    #
+    # Storing the original filename is consistent with what is already kept:
+    # the full CV text (far more sensitive) lives in ``raw_text``. Keeping the
+    # receipt inside this same blob means the existing account-deletion and
+    # version-snapshot paths carry it automatically — no separate lifecycle.
+    # JSON blob, so no migration (storage._filter_fields drops unknown keys;
+    # old rows load with empty strings and the UI falls back to "uploaded").
+    # Timestamps are ISO-8601 UTC strings, matching the rest of storage.
+    cv_filename: str = ""
+    cv_uploaded_at: str = ""
+    linkedin_filename: str = ""
+    linkedin_uploaded_at: str = ""
+    # GitHub has no file — the handle IS the receipt, alongside when it was
+    # connected and how many repos were read (len(github_repos_brief)).
+    github_connected_at: str = ""
     # Batch 1.1 — archetype classification (CareerDomain enum value).
     # Optional; None means "LLM did not classify". Consumed by
     # archetype-aware scoring (Pillar 1 #10 / Pillar 2).

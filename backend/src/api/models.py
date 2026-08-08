@@ -178,6 +178,18 @@ class ProfileSummary(BaseModel):
     has_github: bool
     education: list[str]
     experience_level: str
+    # Upload receipts — what the user gave us and when, per input. Defaults
+    # keep every existing caller and old stored profile valid (a profile saved
+    # before 2026-08-08 has no receipt, and the UI falls back to a plain
+    # "uploaded" state). ``github_repo_count`` is the GitHub equivalent of a
+    # filename: proof of what we actually read.
+    cv_filename: str = ""
+    cv_uploaded_at: str = ""
+    linkedin_filename: str = ""
+    linkedin_uploaded_at: str = ""
+    github_username: str = ""
+    github_connected_at: str = ""
+    github_repo_count: int = 0
 
 
 class CVDetail(BaseModel):

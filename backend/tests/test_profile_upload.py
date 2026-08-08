@@ -513,3 +513,135 @@ class TestCapturedCvReplacesRatherThanBlends:
         assert profile.cv_data.raw_text == "ORIGINAL CV TEXT"
         assert profile.cv_data.name == "Alice Anderson"
         assert profile.cv_data.skills == ["Airflow", "Spark"]
+
+
+# ---------------------------------------------------------------------------
+# Upload receipts — WHAT was uploaded, and WHEN
+# ---------------------------------------------------------------------------
+# Found on a live smoke test 2026-08-08. After uploading, the only feedback was
+# a small tick the owner said he "didn't catch", and nothing named the file, so
+# a user could not tell WHICH CV was on file or whether a re-upload replaced it.
+# GitHub had no confirmation at all.
+#
+# VALUE-presence tests, not schema-presence (rule #21): every receipt field
+# defaults to "", so `assert "cv_filename" in body` would pass against a
+# serializer that never reads it. Each test runs a real upload end-to-end and
+# asserts the ACTUAL filename.
+#
+# These live HERE rather than in their own file on purpose: the `api` fixture
+# gives each test its own DB path (hence its own Postgres schema). Importing it
+# into another module double-imports this one, and registration then lands in a
+# different schema than the login reads — every auth call fails with "invalid
+# credentials". Same-file tests share the fixture correctly.
+
+def _stub_extraction(monkeypatch, text: str = "cv text") -> None:
+    """Mock the parser + the paid two-pass extraction (offline, rule #4)."""
+    import src.api.routes.profile as profile_route
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: text)
+
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        return profile
+
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
+
+
+class TestCVReceipt:
+    def test_upload_records_the_real_filename_and_a_timestamp(self, api, monkeypatch) -> None:
+        _stub_extraction(monkeypatch)
+        _register_and_login(api, "receipt1@example.com")
+        r = api.post(
+            "/api/profile/cv",
+            files={"cv": ("Ranjith_CV_2026.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"),
+                          "application/pdf")},
+        )
+        assert r.status_code == 200, r.text
+        summary = r.json()["summary"]
+        # VALUE presence — the actual name the user uploaded, not a default.
+        assert summary["cv_filename"] == "Ranjith_CV_2026.pdf"
+        assert summary["cv_uploaded_at"], "no upload timestamp recorded"
+        assert summary["cv_uploaded_at"].startswith("20"), summary["cv_uploaded_at"]
+
+    def test_reupload_replaces_the_receipt(self, api, monkeypatch) -> None:
+        """A stale name is worse than none — it confirms the WRONG document."""
+        _stub_extraction(monkeypatch)
+        _register_and_login(api, "receipt2@example.com")
+        api.post(
+            "/api/profile/cv",
+            files={"cv": ("old_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+        )
+        r = api.post(
+            "/api/profile/cv",
+            files={"cv": ("new_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+        )
+        assert r.json()["summary"]["cv_filename"] == "new_cv.pdf"
+
+    def test_rejected_upload_does_not_touch_the_existing_receipt(
+        self, api, monkeypatch
+    ) -> None:
+        """A 415 must not claim we hold a file we never read.
+
+        Stronger than asserting an empty receipt: it proves a REJECTED upload
+        cannot overwrite the good one already on file. The route's own ordering
+        guard (every 413/415/503 raises before the profile is touched) is what
+        makes this hold.
+        """
+        _stub_extraction(monkeypatch)
+        _register_and_login(api, "receipt3@example.com")
+        api.post(
+            "/api/profile/cv",
+            files={"cv": ("good_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+        )
+        bad = api.post(
+            "/api/profile/cv",
+            files={"cv": ("notes.txt", io.BytesIO(b"plain text"), "text/plain")},
+        )
+        assert bad.status_code == 415
+        got = api.get("/api/profile").json()["summary"]
+        assert got["cv_filename"] == "good_cv.pdf", "a rejected upload clobbered the receipt"
+
+    def test_only_the_basename_is_kept(self, api, monkeypatch) -> None:
+        """A browser can send a path-ish value; the directory is not ours."""
+        _stub_extraction(monkeypatch)
+        _register_and_login(api, "receipt4@example.com")
+        r = api.post(
+            "/api/profile/cv",
+            files={"cv": ("C:/Users/secret/Documents/cv.pdf",
+                          io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+        )
+        assert r.json()["summary"]["cv_filename"] == "cv.pdf"
+
+
+class TestGitHubReceipt:
+    def test_github_connect_records_handle_and_time(self, api, monkeypatch) -> None:
+        """GitHub has no file — the handle IS the receipt."""
+        import src.api.routes.profile as profile_route
+
+        _stub_extraction(monkeypatch)
+
+        async def _fake_fetch(username):
+            return {"username": username, "languages": {"Python": 100}, "repos": []}
+
+        monkeypatch.setattr(profile_route, "fetch_github_profile", _fake_fetch)
+        _register_and_login(api, "receipt5@example.com")
+        r = api.post("/api/profile/github", data={"username": "Ranjith36963"})
+        assert r.status_code == 200, r.text
+        got = api.get("/api/profile").json()["summary"]
+        assert got["github_username"] == "Ranjith36963"
+        assert got["github_connected_at"], "no connection timestamp recorded"
+
+
+class TestReceiptsSurviveOldRows:
+    def test_profile_saved_before_receipts_existed_still_loads(self) -> None:
+        """Old rows have no receipt fields — they must default, never crash."""
+        from src.services.profile.models import CVData
+        from src.services.profile.storage import _filter_fields
+
+        legacy_blob = {"raw_text": "old cv", "skills": ["Python"], "unknown_old_key": 1}
+        cv = CVData(**_filter_fields(legacy_blob, CVData))
+        assert cv.cv_filename == ""
+        assert cv.cv_uploaded_at == ""
+        assert cv.linkedin_filename == ""
+        assert cv.github_connected_at == ""
