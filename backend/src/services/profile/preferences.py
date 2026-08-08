@@ -41,14 +41,19 @@ _ABOUT_ME_SPLIT_RE = re.compile(r"[,;|/•·‧]+|\s+and\s+")
 # LLM judge, embeddings and skill tiering (at the top 3.0 weight), so every
 # match is scored against "June 2025 – September 2025" as if it were a skill.
 #
-# This drops ONLY what provably cannot be a user-typed skill. Two families,
-# both safe:
-#   1. VERBATIM CV CONTENT — an entry equal to a CV job title / company /
+# This drops ONLY what provably cannot be — or need not be — a user-typed extra
+# skill. Three families, all safe:
+#   1. ALREADY-EXTRACTED SKILLS — an entry that is a verbatim skill already in
+#      an extracted shelf (cv.skills / linkedin_skills / github_*). This is the
+#      big one: on the live profile 77 of 103 entries were exact duplicates of
+#      the CV skills. Dropping them is ZERO-LOSS — the skill still shows under
+#      its source shelf; only the mislabelled "Added by you" copy goes.
+#   2. VERBATIM CV CONTENT — an entry equal to a CV job title / company /
 #      location / education line, or contained in an experience bullet. Dropping
 #      it is ZERO-LOSS BY CONSTRUCTION: matching still sees that content via
 #      `cv_data`, so removing the duplicate from the preference box changes no
 #      ranking. This is the rule that catches the sentence fragments.
-#   2. STRUCTURAL NON-SKILLS — a date range, a string ending in "." , one
+#   3. STRUCTURAL NON-SKILLS — a date range, a string ending in "." , one
 #      carrying a "NN%" metric, or absurdly long (>60 chars). No skill tag looks
 #      like these.
 # NO skill vocabulary or denylist is used (rule #28) — only structure and
@@ -58,6 +63,24 @@ _ABOUT_ME_SPLIT_RE = re.compile(r"[,;|/•·‧]+|\s+and\s+")
 # "October 2024 – January 2025", "(2024)".
 _DATE_RANGE = re.compile(r"(19|20)\d{2}")
 _METRIC = re.compile(r"\d{1,3}\s?%")
+
+
+def _is_section_header(entry: str) -> bool:
+    """An ALL-CAPS multi-word phrase is a CV section header, not a skill tag.
+
+    'PROFESSIONAL EXPERIENCE', 'TECHNICAL SKILLS', 'WORK HISTORY' — skill tags
+    are Title Case ('Machine Learning') or short acronyms ('CI/CD', 'IoT'),
+    never a multi-word all-caps phrase. STRUCTURE check, not a denylist (#28):
+    it keys off casing + word-count, not a fixed vocabulary. Single tokens
+    ('AI', 'RUL', 'IoT') are left alone.
+    """
+    e = entry.strip()
+    letters = [c for c in e if c.isalpha()]
+    return (
+        len(e.split()) >= 2
+        and bool(letters)
+        and all(c.isupper() for c in letters)
+    )
 
 
 def _is_structural_non_skill(entry: str) -> bool:
@@ -70,7 +93,50 @@ def _is_structural_non_skill(entry: str) -> bool:
         return True
     if _METRIC.search(e):
         return True
+    if _is_section_header(e):
+        return True
     return False
+
+
+def _cv_get(cv_data: Any, name: str, default: Any) -> Any:
+    """Read a field off a CVData OR a dict — defensively, never raising."""
+    if isinstance(cv_data, dict):
+        return cv_data.get(name, default)
+    return getattr(cv_data, name, default)
+
+
+# Every EXTRACTED skill shelf. A skill sitting in one of these was captured by
+# extraction — it is not something the user "added on top". Having it ALSO in
+# `additional_skills` (the "Added by you" box) is pure duplication.
+_EXTRACTED_SKILL_SHELVES = (
+    "skills",                 # CV skills
+    "linkedin_skills",        # LinkedIn skills
+    "github_llm_skills",      # GitHub skills the LLM read
+    "github_skills_inferred", # GitHub skills from structure
+    "cv_skills_esco",         # CV skills mapped to ESCO
+)
+
+
+def _extracted_skills_index(cv_data: Any) -> set[str]:
+    """Case-folded set of every skill already captured in an EXTRACTED shelf.
+
+    Dropping an `additional_skills` entry that appears here is ZERO-LOSS: the
+    skill still lives in its source shelf (shown under CV/LinkedIn/GitHub skills
+    and fed to matching/tiering from there), so only the mislabelled "Added by
+    you" copy goes. This is the rule that removes the bulk of the live pollution
+    — 77 of one user's 103 entries were exact duplicates of his CV skills.
+    Entries may be plain strings OR ``{name|skill|label: ...}`` dicts (ESCO).
+    """
+    idx: set[str] = set()
+    for field in _EXTRACTED_SKILL_SHELVES:
+        for v in (_cv_get(cv_data, field, []) or []):
+            if isinstance(v, str) and v.strip():
+                idx.add(v.strip().casefold())
+            elif isinstance(v, dict):
+                name = v.get("name") or v.get("skill") or v.get("label") or ""
+                if isinstance(name, str) and name.strip():
+                    idx.add(name.strip().casefold())
+    return idx
 
 
 def _cv_content_index(cv_data: Any) -> tuple[set[str], set[str]]:
@@ -80,23 +146,37 @@ def _cv_content_index(cv_data: Any) -> tuple[set[str], set[str]]:
     defensively so the sanitizer never raises on an odd shape.
     """
     def g(name: str, default: Any) -> Any:
-        if isinstance(cv_data, dict):
-            return cv_data.get(name, default)
-        return getattr(cv_data, name, default)
+        return _cv_get(cv_data, name, default)
 
     exact: set[str] = set()
+
+    def _add_loc(value: str) -> None:
+        """Add a location and each comma/pipe-split part ('Stevenage, UK'
+        -> 'Stevenage' + 'United Kingdom' as standalone polluted chips)."""
+        if not (isinstance(value, str) and value.strip()):
+            return
+        exact.add(value.strip().casefold())
+        for part in re.split(r"[,;/|]", value):
+            if part.strip():
+                exact.add(part.strip().casefold())
+
     for field in ("job_titles", "companies", "education"):
         for v in (g(field, []) or []):
             if isinstance(v, str) and v.strip():
                 exact.add(v.strip().casefold())
-    loc = g("location", "")
-    if isinstance(loc, str) and loc.strip():
-        exact.add(loc.strip().casefold())
-        # "Stevenage, United Kingdom" -> also match "Stevenage" and
-        # "United Kingdom" as standalone polluted chips.
-        for part in re.split(r"[,;/|]", loc):
-            if part.strip():
-                exact.add(part.strip().casefold())
+    _add_loc(g("location", ""))
+
+    # Dated work history holds the same content in a nested shape — a chip equal
+    # to a position's title / company / location is CV content, not a user skill.
+    for field in ("cv_positions", "linkedin_positions"):
+        for pos in (g(field, []) or []):
+            if not isinstance(pos, dict):
+                continue
+            for key in ("title", "company"):
+                v = pos.get(key)
+                if isinstance(v, str) and v.strip():
+                    exact.add(v.strip().casefold())
+            _add_loc(pos.get("location") or "")
 
     prose: set[str] = set()
     exp = g("experience_text", "") or ""
@@ -131,8 +211,11 @@ def _is_prose_clause(entry: str) -> bool:
     return len(words) > 1 and words[0].casefold() in _CLAUSE_VERBS
 
 
-def _clean_skill_list(items: list[str], exact: set[str], prose: set[str]) -> list[str]:
+def _clean_skill_list(
+    items: list[str], exact: set[str], prose: set[str], extracted: set[str]
+) -> list[str]:
     out: list[str] = []
+    seen: set[str] = set()
     for raw in items:
         if not isinstance(raw, str):
             continue
@@ -140,8 +223,14 @@ def _clean_skill_list(items: list[str], exact: set[str], prose: set[str]) -> lis
         if not e:
             continue
         ef = e.casefold()
+        if ef in extracted:
+            continue  # already in an extracted skill shelf — duplicate, and
+            #            ZERO-LOSS to drop: the skill still shows under its
+            #            source (CV/LinkedIn/GitHub). This is the main rule.
         if ef in exact:
             continue  # verbatim CV job-title/company/location/education
+        if ef in seen:
+            continue  # duplicate within the box itself
         if ef in prose:
             continue  # IS a whole experience bullet (exact, not substring —
             #            a real skill can appear inside a bullet, so substring
@@ -150,6 +239,7 @@ def _clean_skill_list(items: list[str], exact: set[str], prose: set[str]) -> lis
             continue  # date / ends-with-period / metric / over-long
         if _is_prose_clause(e):
             continue  # verb-led bullet fragment
+        seen.add(ef)
         out.append(e)
     return out
 
@@ -165,8 +255,9 @@ def sanitize_preferences(
     no-op.
     """
     exact, prose = _cv_content_index(cv_data)
+    extracted = _extracted_skills_index(cv_data)
     clean_skills = _clean_skill_list(
-        list(prefs.additional_skills or []), exact, prose
+        list(prefs.additional_skills or []), exact, prose, extracted
     )
     # target_job_titles: a preference for roles the user WANTS, so an entry
     # equal to one of their PAST roles (cv.job_titles) is pollution, not a
