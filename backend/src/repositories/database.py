@@ -325,6 +325,19 @@ class JobDatabase:
         if await cursor.fetchone():
             await self._add_missing_columns("users", [("timezone", "TEXT NOT NULL DEFAULT 'UTC'")])
 
+        # Migration 0030 — snapshot_id on user_profile_versions (see that
+        # migration's up.sql for the full rationale). Like the table itself,
+        # user_profile_versions is created ONLY by the external migration
+        # runner (never by the CREATE TABLE block above), so this mirror only
+        # needs the column, guarded by the same table-existence check used
+        # for users.timezone above — a DB that has the table via the runner
+        # but predates 0030 still gets the column on the next init_db() boot.
+        cursor = await self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='user_profile_versions'"
+        )
+        if await cursor.fetchone():
+            await self._add_missing_columns("user_profile_versions", [("snapshot_id", "TEXT")])
+
         await self._db.commit()
 
     async def _add_missing_columns(self, table: str, migrations: list[tuple[str, str]]) -> None:

@@ -465,7 +465,12 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         det_li = deterministic_linkedin_fields(cv.linkedin_raw_text)  # det-LI-output
         llm_li: dict[str, Any] = _llm_li_res or {}                   # llm-LI-output
         merged_li = merge_linkedin_fields(det_li, llm_li)            # → MERGED LI
-        enrich_cv_from_linkedin(cv, merged_li)
+        # `_llm_li_res is None` means the cost cache skipped the LinkedIn LLM
+        # pass because the raw text was unchanged. The five LLM-only sections
+        # must then be left alone — overwriting them with the empty lists a
+        # deterministic-only merge produces wiped real user data on every
+        # subsequent save (measured 2026-08-08).
+        enrich_cv_from_linkedin(cv, merged_li, llm_ran=_llm_li_res is not None)
 
     # ── ③ GitHub ── raw = cv.github_repos_brief ────────────────────────
     if cv.github_repos_brief:

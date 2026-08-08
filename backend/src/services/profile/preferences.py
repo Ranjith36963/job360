@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from typing import Any
 
 from src.services.profile.models import UserPreferences
@@ -189,17 +190,25 @@ def merge_cv_and_preferences(
             merged_skills.append(skill)
             seen_skills.add(key)
 
-    return UserPreferences(
+    # dataclasses.replace, NOT a hand-listed constructor.
+    #
+    # This function only derives two fields (titles and skills); everything else
+    # is meant to pass through untouched. Listing the pass-through fields by
+    # hand meant every field added to UserPreferences afterwards was silently
+    # dropped here — and this runs on EVERY profile save once a user has any
+    # extracted data.
+    #
+    # Measured 2026-08-08: `needs_visa` True -> False and `preferred_workplace`
+    # 'remote' -> None on every save. A user who ticked "I need visa
+    # sponsorship" had it reset before it reached the database, so the visa
+    # scoring gate went dark for exactly the person who asked for it. No error,
+    # no log. `experience_level_inferred` (added the same week) was being lost
+    # the same way.
+    #
+    # `replace` copies every field the dataclass has, so a field added tomorrow
+    # cannot be forgotten here. The bug class is closed, not just its instance.
+    return replace(
+        prefs,
         target_job_titles=merged_titles,
         additional_skills=merged_skills,
-        excluded_skills=prefs.excluded_skills,
-        preferred_locations=prefs.preferred_locations,
-        industries=prefs.industries,
-        salary_min=prefs.salary_min,
-        salary_max=prefs.salary_max,
-        work_arrangement=prefs.work_arrangement,
-        experience_level=prefs.experience_level,
-        negative_keywords=prefs.negative_keywords,
-        about_me=prefs.about_me,
-        github_username=prefs.github_username,
     )

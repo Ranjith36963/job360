@@ -330,6 +330,21 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     """
     pref_dict = json.loads(preferences_json)
     existing = profile.preferences or UserPreferences()
+
+    # Bridge work_arrangement -> preferred_workplace (2026-08-08).
+    #
+    # The model documents preferred_workplace as "the enum form of
+    # work_arrangement so the dimension scorer can match" — but nothing ever
+    # built that bridge. The form sends work_arrangement; the WORKPLACE scoring
+    # dimension (weight 6, workplace_score) reads preferred_workplace; there is
+    # no preferred_workplace control anywhere in the frontend. So the field the
+    # scorer reads stayed None for every user and the whole workplace dimension
+    # was permanently dead — the "dead pair" the shelf X-ray flagged was caused
+    # HERE, not by users failing to fill anything. Same vocabulary on both
+    # sides ("remote"/"hybrid"/"onsite"), so an empty string maps to None
+    # ("no preference" -> neutral score, per the model comment).
+    _wa = pref_dict.get("work_arrangement", "")
+    _derived_workplace = _wa.strip().lower() or None if isinstance(_wa, str) else None
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -343,7 +358,11 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
         github_username=pref_dict.get("github_username", existing.github_username),
-        preferred_workplace=pref_dict.get("preferred_workplace", existing.preferred_workplace),
+        # Explicit value wins (a future dedicated control); otherwise derive
+        # from work_arrangement; only then fall back to the stored value.
+        preferred_workplace=pref_dict.get("preferred_workplace")
+        or _derived_workplace
+        or existing.preferred_workplace,
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
 

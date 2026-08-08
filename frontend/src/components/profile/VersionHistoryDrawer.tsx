@@ -159,6 +159,14 @@ export function VersionHistoryDrawer({
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {formatDate(version.created_at)}
                     </p>
+                    {version.snapshot_id && (
+                      <p
+                        className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/70"
+                        title={version.snapshot_id}
+                      >
+                        {version.snapshot_id}
+                      </p>
+                    )}
                     {idx === 0 && (
                       <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
                         Current

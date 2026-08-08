@@ -2149,6 +2149,8 @@ export interface components {
             preferences: {
                 [key: string]: unknown;
             };
+            /** Snapshot Id */
+            snapshot_id?: string | null;
             /** Source Action */
             source_action: string;
         };

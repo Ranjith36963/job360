@@ -262,6 +262,10 @@ class ProfileVersionSummary(BaseModel):
     source_action: str
     cv_data: dict[Any, Any]
     preferences: dict[Any, Any]
+    # Migration 0030 — human-readable intake id, "SNAP-YYYYMMDD-<user4>-
+    # <content8>" (see services/profile/snapshot.py). None for rows saved
+    # before 0030 shipped — no snapshot id was ever computed for them.
+    snapshot_id: Optional[str] = None
 
 
 class ProfileVersionsListResponse(BaseModel):

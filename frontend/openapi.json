@@ -1674,6 +1674,17 @@
             "title": "Preferences",
             "type": "object"
           },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
           "source_action": {
             "title": "Source Action",
             "type": "string"
