@@ -8,6 +8,7 @@ import { User, CheckCircle, AlertCircle, History, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { CVUpload } from "@/components/profile/CVUpload";
+import { CVViewer } from "@/components/profile/CVViewer";
 import { PreferencesForm } from "@/components/profile/PreferencesForm";
 import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer";
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
@@ -329,6 +330,20 @@ export default function ProfilePage() {
                 loading={loadingProfile}
               />
             </div>
+
+            {/* ── What we extracted (readable content, not just counts) ──
+                The API already returns name/summary/skills/dated work
+                history/education/certs/LinkedIn detail/GitHub detail — this
+                was the only place none of it was ever rendered. Each
+                sub-section inside CVViewer renders only when it has data. */}
+            {profile?.cv_detail && (
+              <CVViewer
+                cv={profile.cv_detail}
+                skillProvenance={profile.skill_provenance}
+                linkedinSubsections={profile.linkedin_subsections}
+                githubTemporal={profile.github_temporal}
+              />
+            )}
 
             {/* ── Your Skills (grouped by source) ────────── */}
             {(() => {

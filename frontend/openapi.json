@@ -188,6 +188,15 @@
             "title": "Companies",
             "type": "array"
           },
+          "cv_positions": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cv Positions",
+            "type": "array"
+          },
           "education": {
             "default": [],
             "items": {

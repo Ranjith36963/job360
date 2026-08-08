@@ -128,6 +128,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         headline=getattr(cv, "headline", ""),
         location=getattr(cv, "location", ""),
         achievements=getattr(cv, "achievements", []),
+        cv_positions=getattr(cv, "cv_positions", []) or [],
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 
@@ -193,6 +194,11 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
 
     # Step-1.5 S3-E — LinkedIn sub-sections + GitHub temporal map.
     linkedin_subsections: dict[str, list[dict[str, Any]]] = {
+        # LinkedIn work history — parsed and stored since Batch 1.5 but never
+        # exposed here, so it drove only the has_linkedin boolean and the user
+        # could never SEE their LinkedIn experience. Same "stored but not shown"
+        # gap as cv_positions, closed 2026-08-08.
+        "positions": list(getattr(cv, "linkedin_positions", []) or []),
         "languages": list(getattr(cv, "linkedin_languages", []) or []),
         "projects": list(getattr(cv, "linkedin_projects", []) or []),
         "volunteer": list(getattr(cv, "linkedin_volunteer", []) or []),
