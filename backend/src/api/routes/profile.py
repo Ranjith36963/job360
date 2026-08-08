@@ -38,6 +38,7 @@ from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
 from src.services.profile.models import UserPreferences, UserProfile
+from src.services.profile.preferences import sanitize_preferences
 from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
@@ -371,6 +372,15 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         or existing.preferred_workplace,
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
+    # Scrub extraction pollution before it is stored. The frontend autosaves the
+    # loaded preference chips straight back, so a profile whose additional_skills
+    # / target_job_titles were polluted by an older extraction merge would keep
+    # re-saving that junk on every touch. Running the sanitizer HERE means every
+    # save self-heals — including a stale open tab autosaving the old chips.
+    # Zero-loss by construction: it only drops CV-duplicate content and
+    # structural non-skills (dates, sentences, verb-led clauses), never a real
+    # skill. See sanitize_preferences for the rules.
+    profile.preferences = sanitize_preferences(profile.preferences, profile.cv_data)
 
 
 async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
