@@ -259,14 +259,17 @@ def sanitize_preferences(
     clean_skills = _clean_skill_list(
         list(prefs.additional_skills or []), exact, prose, extracted
     )
-    # target_job_titles: a preference for roles the user WANTS, so an entry
-    # equal to one of their PAST roles (cv.job_titles) is pollution, not a
-    # target. Structural junk is dropped too; verbatim past-role match is the
-    # main rule.
+    # target_job_titles: the roles the user WANTS. Drop ONLY structural junk (a
+    # date / metric / section-header / over-long string a form should never have
+    # stored). A title equal to a PAST role is NOT dropped — targeting the same
+    # level again is a legitimate choice, and unlike the additional_skills dedup
+    # (zero-loss: the skill still lives in its source shelf) removing a target
+    # title would be a REAL loss. Extraction no longer writes this field
+    # (guarded by test_empty_prefs_stay_empty_after_extraction), so any value
+    # here is user intent — keep it.
     clean_titles = [
         t for t in (prefs.target_job_titles or [])
         if isinstance(t, str) and t.strip()
-        and t.strip().casefold() not in exact
         and not _is_structural_non_skill(t)
     ]
     return replace(

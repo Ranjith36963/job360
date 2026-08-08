@@ -105,13 +105,18 @@ class TestSanitizerIsZeroLoss:
         ])
         assert sanitize_preferences(prefs, _cv()).additional_skills == []
 
-    def test_target_titles_drop_past_roles(self) -> None:
+    def test_target_titles_keep_user_choices_drop_only_junk(self) -> None:
+        # A target equal to a PAST role is a legitimate choice (want the same
+        # level again) — KEEP it. Only structural junk (a date range) is dropped.
         prefs = UserPreferences(
-            target_job_titles=["ML Engineer Intern", "Staff ML Engineer"]
+            target_job_titles=[
+                "ML Engineer Intern",          # == a past role — still a valid target
+                "Staff ML Engineer",           # a fresh target
+                "October 2024 – January 2025", # a date range — junk
+            ]
         )
         out = sanitize_preferences(prefs, _cv())
-        assert "ML Engineer Intern" not in out.target_job_titles  # a past role
-        assert "Staff ML Engineer" in out.target_job_titles       # a real target
+        assert out.target_job_titles == ["ML Engineer Intern", "Staff ML Engineer"]
 
     def test_clean_input_is_a_noop(self) -> None:
         prefs = UserPreferences(
