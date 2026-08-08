@@ -889,8 +889,17 @@ def parse_linkedin_pdf(file_path: str) -> dict[str, Any]:
 
 # ── Merge into CVData (UNCHANGED — contract with downstream) ─────
 
-def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData:
-    """Merge LinkedIn data into existing CVData, deduplicating."""
+def enrich_cv_from_linkedin(
+    cv: CVData, linkedin_data: dict[str, Any], *, llm_ran: bool = True
+) -> CVData:
+    """Merge LinkedIn data into existing CVData, deduplicating.
+
+    ``llm_ran`` tells this function whether the LinkedIn LLM pass actually
+    executed for this call. Defaults True so every existing caller keeps
+    its current behaviour; only the two-pass orchestrator, which knows the
+    cost cache skipped the pass, passes False. See the section comment
+    below for why an empty value is ambiguous without it.
+    """
     # Skills
     seen_skills = {s.lower() for s in cv.skills}
     new_linkedin_skills = []
@@ -918,7 +927,18 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData
     # Certifications
     existing_certs = {c.lower() for c in cv.certifications}
     for cert in linkedin_data.get("certifications", []):
-        name = cert.get("name", "")
+        # An LLM returns this section as EITHER a list of objects
+        # ({"name": ...}) or a bare list of strings, depending on how it read
+        # the page — both are reasonable readings of "certifications". The
+        # object-only assumption raised AttributeError and aborted the WHOLE
+        # LinkedIn merge, so one loosely-shaped section could silently cost a
+        # user every LinkedIn field. Accept both shapes.
+        if isinstance(cert, str):
+            name = cert.strip()
+        elif isinstance(cert, dict):
+            name = str(cert.get("name") or cert.get("title") or "").strip()
+        else:
+            continue
         if name and name.lower() not in existing_certs:
             cv.certifications.append(name)
             existing_certs.add(name.lower())
@@ -928,9 +948,24 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData
         cv.summary = linkedin_data["summary"]
 
     # Store LinkedIn-specific fields
-    cv.linkedin_positions = linkedin_data.get("positions", [])
+    # These five sections are LLM-ONLY output — the deterministic pass
+    # explicitly leaves them alone. So an empty value here means one of two
+    # very different things, and the caller is the only one who knows which:
+    #   * the LLM ran and this profile genuinely has no such section, or
+    #   * the LLM pass was SKIPPED by the cost cache (unchanged raw text)
+    # Overwriting on the second case destroyed real data. Measured 2026-08-08:
+    # upload LinkedIn (positions/languages/projects/volunteer/courses all
+    # populate), then touch ANYTHING else on the profile — the LLM pass is
+    # correctly skipped, the merge still ran, and all five were wiped to []
+    # permanently. Nothing short of uploading a DIFFERENT PDF restored them.
+    #
+    # `llm_ran` lets the canonical-source intent survive (a real re-parse still
+    # replaces, so removing a section from LinkedIn removes it here) without
+    # the cache-hit path being able to erase anything.
+    if llm_ran:
+        cv.linkedin_positions = linkedin_data.get("positions", [])
     cv.linkedin_skills = new_linkedin_skills
-    cv.linkedin_industry = linkedin_data.get("industry", "")
+    cv.linkedin_industry = linkedin_data.get("industry", "") or cv.linkedin_industry
     # Two-pass — keep the raw text (if the parser supplied it) so the LLM
     # pass can re-run offline. Only overwrite when a non-empty value arrives,
     # so a partial re-enrich never wipes a previously-stored transcript.
@@ -940,9 +975,10 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData
     # Batch 1.5 — expanded sections. Overwrite rather than merge: LinkedIn
     # is the canonical source for these, and re-parsing a profile should
     # reflect the new state rather than accumulate stale entries.
-    cv.linkedin_languages = linkedin_data.get("languages", [])
-    cv.linkedin_projects = linkedin_data.get("projects", [])
-    cv.linkedin_volunteer = linkedin_data.get("volunteer", [])
-    cv.linkedin_courses = linkedin_data.get("courses", [])
+    if llm_ran:
+        cv.linkedin_languages = linkedin_data.get("languages", [])
+        cv.linkedin_projects = linkedin_data.get("projects", [])
+        cv.linkedin_volunteer = linkedin_data.get("volunteer", [])
+        cv.linkedin_courses = linkedin_data.get("courses", [])
 
     return cv

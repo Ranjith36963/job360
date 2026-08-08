@@ -1,0 +1,28 @@
+-- 0030_profile_snapshot_id: a human-readable identity for one profile intake.
+--
+-- WHY (2026-08-08, owner request). Every `save_profile()` call already writes
+-- a row to `user_profile_versions` (migration 0007), but that row's only
+-- identity is a bare autoincrement `id` (47, 48, 49...). That number says
+-- nothing about WHEN the user submitted it, WHOSE it is, or WHETHER two saves
+-- came from the exact same CV/LinkedIn/GitHub/preferences the user typed. The
+-- owner wants a proper name for "one set of information on one day" — a code
+-- he can read in a log line or a support ticket without a DB lookup.
+--
+-- `snapshot_id` is computed in `services/profile/snapshot.py::make_snapshot_id`
+-- and takes the shape `SNAP-YYYYMMDD-<user4>-<content8>`:
+--   YYYYMMDD  UTC date of the save
+--   user4     first 4 hex of sha256(user_id) — never the raw user_id, since
+--             this id is designed to appear in logs
+--   content8  first 8 hex of sha256(the RAW INPUTS the user supplied — CV
+--             text, LinkedIn text, GitHub username, preference values).
+--             Deliberately NOT a hash of the extracted output: re-running
+--             extraction (a re-parse, a model swap, a bug fix) on the SAME
+--             inputs must produce the SAME snapshot id, because the user's
+--             submission did not change. See snapshot.py's module docstring
+--             for the full rationale.
+--
+-- Additive and nullable: existing rows get NULL (no snapshot id was ever
+-- computed for them), which is fine — they keep working off their bare `id`
+-- exactly as before. No backfill; the value only has meaning going forward
+-- from the save that computed it.
+ALTER TABLE user_profile_versions ADD COLUMN IF NOT EXISTS snapshot_id TEXT;

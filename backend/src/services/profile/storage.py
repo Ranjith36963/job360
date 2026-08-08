@@ -31,6 +31,7 @@ from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.repositories import pgsync
 from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.snapshot import make_snapshot_id
 
 logger = logging.getLogger("job360.profile.storage")
 
@@ -69,13 +70,23 @@ def save_profile(
     ``"legacy_hydrate"``. Callers pass it when they know; default is
     ``"user_edit"`` so legacy call-sites continue to work.
 
+    Migration 0030 — the snapshot also gets a human-readable
+    ``snapshot_id`` (``SNAP-YYYYMMDD-<user4>-<content8>``, see
+    ``services/profile/snapshot.py``). Computed from the SAME ``now`` used
+    for ``created_at`` so the date segment always matches the row's own
+    timestamp.
+
     The writes happen in one transaction: if the snapshot insert fails
     (e.g. missing migration in a stale DB), the tip upsert also rolls
     back rather than leaving the two tables inconsistent.
     """
     cv_json = json.dumps(asdict(profile.cv_data), default=str)
     pref_json = json.dumps(asdict(profile.preferences), default=str)
-    now = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
+    snapshot_id = make_snapshot_id(
+        user_id, profile.cv_data, profile.preferences, when=now_dt
+    )
     with pgsync.connect(str(DB_PATH)) as conn:
         conn.execute(
             """
@@ -97,10 +108,10 @@ def save_profile(
             conn.execute(
                 """
                 INSERT INTO user_profile_versions
-                    (user_id, created_at, source_action, cv_data, preferences)
-                VALUES (?, ?, ?, ?, ?)
+                    (user_id, created_at, source_action, cv_data, preferences, snapshot_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, now, source_action, cv_json, pref_json),
+                (user_id, now, source_action, cv_json, pref_json, snapshot_id),
             )
             _prune_old_versions(conn, user_id)
         except pgsync.OperationalError as e:
@@ -204,14 +215,16 @@ def restore_profile_version(user_id: str, version_id: int) -> Optional[UserProfi
 def list_profile_versions(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
     """Return the most-recent snapshots for ``user_id``, newest first.
 
-    Each row is a dict with ``id`` / ``created_at`` / ``source_action``
-    plus parsed ``cv_data`` + ``preferences``. Callers typically render
-    these in a history UI — not used on the hot scoring path.
+    Each row is a dict with ``id`` / ``created_at`` / ``source_action`` /
+    ``snapshot_id`` plus parsed ``cv_data`` + ``preferences``. Callers
+    typically render these in a history UI — not used on the hot scoring
+    path. ``snapshot_id`` is ``None`` for rows saved before migration 0030
+    (no snapshot id was ever computed for them).
     """
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             """
-            SELECT id, created_at, source_action, cv_data, preferences
+            SELECT id, created_at, source_action, cv_data, preferences, snapshot_id
             FROM user_profile_versions
             WHERE user_id = ?
             ORDER BY created_at DESC, id DESC
@@ -228,6 +241,7 @@ def list_profile_versions(user_id: str, limit: int = 10) -> list[dict[str, Any]]
             "source_action": row[2],
             "cv_data": json.loads(row[3]) if row[3] else {},
             "preferences": json.loads(row[4]) if row[4] else {},
+            "snapshot_id": row[5],
         })
     return out
 
