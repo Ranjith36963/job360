@@ -31,19 +31,56 @@ def _cv() -> CVData:
     )
 
 
-class TestSanitizerIsZeroLoss:
-    """It must drop the pollution and KEEP every real skill — even a skill that
-    also appears inside an experience bullet (PyTorch, TensorFlow)."""
+class TestDropsDuplicatesOfExtractedShelves:
+    """THE live-bug fix. A skill already in an extracted shelf (CV/LinkedIn/
+    GitHub) must NOT also sit in "Added by you" — it is a duplicate, and dropping
+    it is zero-loss because it still shows under its source shelf."""
 
-    def test_real_skills_survive_even_when_named_in_a_bullet(self) -> None:
+    def test_cv_skills_are_dropped_as_duplicates(self) -> None:
+        # Python + PyTorch are in cv.skills -> must leave the "Added by you" box.
+        prefs = UserPreferences(additional_skills=["Python", "PyTorch"])
+        assert sanitize_preferences(prefs, _cv()).additional_skills == []
+
+    def test_linkedin_and_github_skills_are_dropped_as_duplicates(self) -> None:
+        cv = CVData(
+            skills=["Python"],
+            linkedin_skills=["Kubernetes"],
+            github_llm_skills=["Terraform"],
+            github_skills_inferred=["Ansible"],
+        )
         prefs = UserPreferences(additional_skills=[
-            "Python", "PyTorch", "TensorFlow", "Generative AI", "AWS Bedrock",
-            "Docker", "RAG",
+            "Kubernetes", "Terraform", "Ansible", "Redis",  # Redis is genuinely new
+        ])
+        out = sanitize_preferences(prefs, cv)
+        assert out.additional_skills == ["Redis"]
+
+    def test_case_and_whitespace_insensitive(self) -> None:
+        prefs = UserPreferences(additional_skills=["  python ", "PYTORCH"])
+        assert sanitize_preferences(prefs, _cv()).additional_skills == []
+
+    def test_intra_box_duplicates_collapse(self) -> None:
+        prefs = UserPreferences(additional_skills=["Redis", "redis", "Kafka"])
+        assert sanitize_preferences(prefs, _cv()).additional_skills == ["Redis", "Kafka"]
+
+
+class TestSanitizerIsZeroLoss:
+    """It must drop the pollution and KEEP every GENUINE addition — a skill the
+    user typed that is NOT already extracted, even if it appears inside a bullet."""
+
+    def test_genuine_additions_survive(self) -> None:
+        # None of these are in cv.skills/linkedin/github -> all kept.
+        prefs = UserPreferences(additional_skills=[
+            "Kubernetes", "Rust", "Terraform", "GraphQL",
         ])
         out = sanitize_preferences(prefs, _cv())
-        for skill in ["Python", "PyTorch", "TensorFlow", "Generative AI",
-                      "AWS Bedrock", "Docker", "RAG"]:
-            assert skill in out.additional_skills, f"{skill} was wrongly dropped"
+        assert out.additional_skills == ["Kubernetes", "Rust", "Terraform", "GraphQL"]
+
+    def test_skill_named_in_a_bullet_but_not_extracted_survives(self) -> None:
+        # TensorFlow appears in a cv_positions bullet but is NOT in cv.skills.
+        # Substring matching would wrongly eat it; exact-bullet matching keeps it.
+        prefs = UserPreferences(additional_skills=["TensorFlow"])
+        out = sanitize_preferences(prefs, _cv())
+        assert out.additional_skills == ["TensorFlow"]
 
     def test_cv_content_is_dropped(self) -> None:
         prefs = UserPreferences(additional_skills=[
@@ -68,13 +105,18 @@ class TestSanitizerIsZeroLoss:
         ])
         assert sanitize_preferences(prefs, _cv()).additional_skills == []
 
-    def test_target_titles_drop_past_roles(self) -> None:
+    def test_target_titles_keep_user_choices_drop_only_junk(self) -> None:
+        # A target equal to a PAST role is a legitimate choice (want the same
+        # level again) — KEEP it. Only structural junk (a date range) is dropped.
         prefs = UserPreferences(
-            target_job_titles=["ML Engineer Intern", "Staff ML Engineer"]
+            target_job_titles=[
+                "ML Engineer Intern",          # == a past role — still a valid target
+                "Staff ML Engineer",           # a fresh target
+                "October 2024 – January 2025", # a date range — junk
+            ]
         )
         out = sanitize_preferences(prefs, _cv())
-        assert "ML Engineer Intern" not in out.target_job_titles  # a past role
-        assert "Staff ML Engineer" in out.target_job_titles       # a real target
+        assert out.target_job_titles == ["ML Engineer Intern", "Staff ML Engineer"]
 
     def test_clean_input_is_a_noop(self) -> None:
         prefs = UserPreferences(
