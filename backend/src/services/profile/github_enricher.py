@@ -58,9 +58,15 @@ def normalize_github_username(raw: str) -> str:
     match = re.search(r"github\.com/+([^/?#\s]+)", s, re.IGNORECASE)
     if match:
         return match.group(1)
-    # Otherwise treat the whole thing as a handle, but still strip any
-    # stray path/query so "torvalds/repo" -> "torvalds".
-    return re.split(r"[/?#\s]", s, maxsplit=1)[0]
+    else:
+        # Otherwise treat the whole thing as a handle, but still strip any
+        # stray path/query so "torvalds/repo" -> "torvalds".
+        s = re.split(r"[/?#\s]", s, maxsplit=1)[0]
+    # SELF-VALIDATE. The old contract left validation "to the caller", so a
+    # caller that forgot (the _apply_preferences fallback) stored "https:" for a
+    # real user and silently broke GitHub enrichment. A handle that fails the
+    # GitHub rule is not a handle — return "" so no caller can persist poison.
+    return s if _GITHUB_USERNAME_RE.match(s) else ""
 
 
 from src.core.settings import GITHUB_TOKEN

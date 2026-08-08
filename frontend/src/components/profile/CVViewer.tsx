@@ -244,7 +244,7 @@ export function CVViewer({
       <div className="glass-card rounded-xl p-6">
         <h3 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
-          What we extracted from your CV
+          What we extracted from your profile
         </h3>
 
         {/* Identity */}
