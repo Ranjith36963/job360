@@ -364,7 +364,14 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         experience_level=pref_dict.get("experience_level", ""),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
-        github_username=pref_dict.get("github_username", existing.github_username),
+        # normalize_github_username here too, not only in the dedicated GitHub
+        # route: a raw value reaching this fallback path stored "https:" for a
+        # real user (2026-08-08), which silently broke GitHub enrichment. A
+        # value that doesn't reduce to a valid handle normalizes to "" — better
+        # an empty handle than a poisoned one.
+        github_username=normalize_github_username(
+            pref_dict.get("github_username") or existing.github_username or ""
+        ),
         # Explicit value wins (a future dedicated control); otherwise derive
         # from work_arrangement; only then fall back to the stored value.
         preferred_workplace=pref_dict.get("preferred_workplace")

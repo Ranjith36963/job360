@@ -250,3 +250,34 @@ class TestNeedsVisaRoundTripsThroughTheRoute:
         out = self._apply({"target_job_titles": ["ML"]},
                           existing=UserPreferences(needs_visa=True))
         assert out.needs_visa is True
+
+
+class TestGithubUsernameFallbackIsNormalized:
+    """github_username reaching the _apply_preferences fallback path was stored
+    raw — a real user ended up with 'https:' (2026-08-08), which silently broke
+    GitHub enrichment (0 languages/skills, no GitHub bucket). The dedicated
+    GitHub route already normalized; this pins the fallback path too."""
+
+    def _apply(self, form: dict, existing_username: str = ""):
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+        p = UserProfile(
+            cv_data=CVData(),
+            preferences=UserPreferences(github_username=existing_username),
+        )
+        _apply_preferences(json.dumps(form), p)
+        return p.preferences.github_username
+
+    def test_a_url_is_reduced_to_a_handle(self) -> None:
+        assert self._apply({"github_username": "https://github.com/Ranjith36963"}) == "Ranjith36963"
+
+    def test_a_stored_bad_value_is_scrubbed_on_next_save(self) -> None:
+        # 'https:' can never be a valid handle -> normalizes to "" rather than
+        # persisting the poison.
+        assert self._apply({}, existing_username="https:") == ""
+
+    def test_a_clean_handle_survives(self) -> None:
+        assert self._apply({"github_username": "torvalds"}) == "torvalds"
