@@ -210,3 +210,43 @@ class TestWorkplaceBridge:
         neutral score), never a manufactured value."""
         assert self._apply({"work_arrangement": ""}).preferred_workplace is None
         assert self._apply({}).preferred_workplace is None
+
+
+class TestNeedsVisaRoundTripsThroughTheRoute:
+    """needs_visa gates the VISA scoring dimension (weight 6) but had NO UI
+    control until 2026-08-08. The frontend form now sends it; this pins the
+    BACKEND half — that _apply_preferences stores what the form sends, and that
+    a save which omits it (an older client) does not silently wipe a stored
+    True (the preferences-wipe class this file's first test covers).
+    """
+
+    def _apply(self, form: dict, existing=None):
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+        p = UserProfile(
+            cv_data=CVData(),
+            preferences=existing or UserPreferences(),
+        )
+        _apply_preferences(json.dumps(form), p)
+        return p.preferences
+
+    def test_form_sending_true_is_stored(self) -> None:
+        assert self._apply({"needs_visa": True}).needs_visa is True
+
+    def test_form_sending_false_is_stored(self) -> None:
+        from src.services.profile.models import UserPreferences
+
+        out = self._apply({"needs_visa": False},
+                          existing=UserPreferences(needs_visa=True))
+        assert out.needs_visa is False
+
+    def test_a_save_that_omits_it_preserves_the_stored_value(self) -> None:
+        """An older client that never sends the key must not wipe a stored True."""
+        from src.services.profile.models import UserPreferences
+
+        out = self._apply({"target_job_titles": ["ML"]},
+                          existing=UserPreferences(needs_visa=True))
+        assert out.needs_visa is True
