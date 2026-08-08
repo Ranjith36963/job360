@@ -1,8 +1,8 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-08 by /sync -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
-> (the 28 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
+> (the 31 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
 > algorithm, DB schema, phase history) lives in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
 > read that first. This file only adds backend-local essentials so they're at hand
 > when you're working in this directory. Keep it thin; do not duplicate the root.
