@@ -196,6 +196,11 @@ class CVDetail(BaseModel):
     headline: str = ""
     location: str = ""
     achievements: list[str] = []
+    # Dated work history {company, title, dates, location, bullets}. Stored
+    # since 2026-08-06 but never exposed to the frontend, so the user could
+    # never SEE their parsed experience — only a "Roles: N" count. Part of
+    # the "stored but not shown" gap closed 2026-08-08.
+    cv_positions: list[dict[str, Any]] = []
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []

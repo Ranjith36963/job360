@@ -1512,6 +1512,13 @@ export interface components {
              */
             companies: string[];
             /**
+             * Cv Positions
+             * @default []
+             */
+            cv_positions: {
+                [key: string]: unknown;
+            }[];
+            /**
              * Education
              * @default []
              */
