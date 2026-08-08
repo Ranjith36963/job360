@@ -48,7 +48,9 @@ because nothing *errors* — it just returns nothing.
 | `workday` | **5 of 8** ✅ | healthiest ATS — nvidia 2,000 · intel 623 · astrazeneca 191 · shell 78 |
 | `smartrecruiters` | 2 of 10 | 8 return `totalFound: 0` |
 | `workable` | 1 of 10 | 9 return `total: 0` |
-| `greenhouse` | ~1 of 4 sampled | `deliveroo`, `wise`, `starlingbank` all 404 |
+| `greenhouse` | **3 of 8** | monzo/stripe/cloudflare live (928 jobs); 5 slugs 404 |
+| `lever` | **3 of 8** | healx/spotify/palantir live (410 jobs); 4 slugs 404, mistral empty |
+| `ashby` | **6 of 8** | 1,458 jobs; anthropic + discord 404 |
 | `recruitee` / `pinpoint` / `personio` | 1 of 19 / 15 / 12 | |
 | `rippling` / `successfactors` | 0 | |
 
@@ -72,6 +74,19 @@ and the shelf looks identical to "the provider doesn't offer this."
 | 7 | `pinpoint` | `isinstance(comp, dict)` | `compensation` is a **string** | condition never true → salary `None` |
 | 8 | `successfactors` | ns `sitemaps.org/…` | QinetiQ serves **`google.com/schemas/sitemap/0.9`** | **0/162 URLs matched** |
 | 9 | `nhs_jobs` | `<vacancy>`, `closingDate`, `advertUrl`, flat `<location>` | **`<vacancyDetails>`, `closeDate`, `url`, nested `<locations><location>`** | total outage |
+| 10 | `ashby` | `applicationUrl` (falls back to `jobUrl`) | **`applyUrl`** (100% of 1,458 jobs) | apply link points at the info page, not the form |
+
+### The apply-URL pattern — three sources, all user-facing
+`apply_url` is the one shelf a user actually *clicks*. Three sources get it wrong:
+
+| Source | Result |
+|---|---|
+| `himalayas` | **empty string** — no apply link at all |
+| `ashby` | silently falls back to `jobUrl` (description page) instead of `applyUrl` (the form) |
+| `lever` | reads `hostedUrl` (info page); `applyUrl` is filled 100% and unused |
+
+`himalayas` is a hard break; `ashby` and `lever` are quality downgrades — an extra click
+between the user and the application form on every job from those two.
 
 ### Plus one correctness risk
 **`nofluffjobs`** returns `salary.currency` at 100% fill — **19,229 of 20,631 jobs are PLN**.
@@ -123,6 +138,15 @@ as if GBP. A 15,000 PLN salary reads as £15,000.
 - `realworkfromanywhere` — `<author>` (100%) is the exact company name; we split the title instead.
 - `uni_jobs` — `applyOnlineUrl` (92%) is a direct apply form; we link to the listing page.
 - `devitjobs` — `redirectJobUrl` (99.6%) is the real apply URL; we guess a slug.
+- **`greenhouse` — `company_name` filled on 100% of 928 jobs and never read.** We derive the
+  name from the URL slug (`slug.replace("-"," ").title()`) and maintain a hand-written
+  **40+-entry `COMPANY_NAME_OVERRIDES` dict** (`companies.py:142-181`) purely to patch what
+  the slug mangles (`darktracelimited`→Darktrace, `checkoutcom`→Checkout.com). Reading the
+  upstream field would make that entire dict unnecessary.
+- `greenhouse` — `first_published` reconfirmed at **100% of 928 jobs** across 3 boards.
+- `lever` — `country` is a clean ISO-2 code at **100%**; the UK gate string-matches free-text
+  city names instead. `categories.allLocations` / `ashby.secondaryLocations` (57-70%) mean
+  multi-office postings collapse to one location and the rest are dropped.
 - `workday` / `personio` / `workable` — real ISO dates (`startDate`, `createdAt`, `published`,
   all ~100%) discarded in favour of `"fabricated"` / relative-text parsing.
 
@@ -150,6 +174,11 @@ Not every empty shelf is a bug. Confirmed absent in the live payload:
 - `devitjobs` — no prose description upstream (code already composes one from tech tags).
 - **No source of 46 exposes an explicit visa-sponsorship boolean** except `devitjobs`
   (`hasVisaSponsorship`). `himalayas.locationRestrictions` is the nearest adjacent signal.
+
+**Do NOT "fix" these — the field exists but is empty upstream:**
+- `greenhouse.application_deadline` — real field, **0% filled across 928 jobs**.
+- `lever.salaryRange` — real structured field, **0.2% (1 of 410)**.
+- `ashby` salary — grepped the full 747-job OpenAI response: **zero** salary/compensation keys.
 
 ---
 
