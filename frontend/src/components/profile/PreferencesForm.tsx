@@ -160,6 +160,7 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     negative_keywords: asArr(raw.negative_keywords),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
     excluded_companies: asArr(raw.excluded_companies),
+    needs_visa: raw.needs_visa === true,
   };
 }
 
@@ -179,6 +180,7 @@ function serializePrefs(p: PreferencesRequest): string {
     p.negative_keywords,
     p.about_me,
     p.excluded_companies,
+    p.needs_visa,
   ]);
 }
 
@@ -205,6 +207,7 @@ export function PreferencesForm({
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
   const [excludedCompanies, setExcludedCompanies] = useState<string[]>([]);
+  const [needsVisa, setNeedsVisa] = useState(false);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
   // green "Changes save automatically" line as a successful one, so once the
@@ -231,6 +234,7 @@ export function PreferencesForm({
     setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
     setWorkArrangement(p.work_arrangement ?? "any");
     setExperienceLevel(p.experience_level ?? "mid");
+    setNeedsVisa(p.needs_visa === true);
     setNegativeKeywords(p.negative_keywords ?? []);
     setAboutMe(p.about_me ?? "");
     setExcludedCompanies(p.excluded_companies ?? []);
@@ -253,6 +257,7 @@ export function PreferencesForm({
       negative_keywords: negativeKeywords,
       about_me: aboutMe,
       excluded_companies: excludedCompanies,
+      needs_visa: needsVisa,
     }),
     [
       targetTitles,
@@ -267,6 +272,7 @@ export function PreferencesForm({
       negativeKeywords,
       aboutMe,
       excludedCompanies,
+      needsVisa,
     ]
   );
 
@@ -438,6 +444,21 @@ export function PreferencesForm({
             </Select>
           </div>
         </div>
+
+        {/* ── Visa sponsorship ──────────────────────
+            Gates the backend VISA scoring dimension. Before this control
+            existed the field was always the default False, so sponsors could
+            never be ranked up for the people who need them. Empty/unchecked is
+            a real answer ("I don't need sponsorship"), not a missing one. */}
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-input"
+            checked={needsVisa}
+            onChange={(e) => setNeedsVisa(e.target.checked)}
+          />
+          I need visa sponsorship to work in the UK
+        </label>
 
         <Separator />
 
