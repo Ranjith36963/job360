@@ -906,13 +906,22 @@ def test_pinpoint_parses_response():
                     "description": "ML role with deep learning and Python",
                     "url": "https://test.pinpointhq.com/postings/pp-201",
                     "location": {"name": "London, UK"},
-                    "compensation": {"min": 65000, "max": 85000},
+                    # Live schema (probed 2026-08-08): `compensation` is a plain
+                    # STRING (e.g. "Competitive"); the real numbers live in the
+                    # top-level compensation_minimum / compensation_maximum
+                    # fields. The old mock used a nested dict that Pinpoint has
+                    # never actually returned, so the parser silently never
+                    # populated salary in production.
+                    "compensation": "Competitive",
+                    "compensation_minimum": 65000,
+                    "compensation_maximum": 85000,
                 }])
                 source = PinpointSource(session, companies=["test"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "pinpoint"
                 assert jobs[0].salary_min == 65000
+                assert jobs[0].salary_max == 85000
         finally:
             await session.close()
     _run(_test())
@@ -1618,6 +1627,11 @@ def test_nofluffjobs_skips_non_uk():
             payload = [{
                 "id": "ml-de",
                 "title": "ML Engineer",
+                # Live schema (probed 2026-08-08): the employer is carried in
+                # `name`; a `company` key does not exist on this endpoint
+                # (0 of 20,631 postings had one). Kept alongside `name` so the
+                # legacy-fallback path stays covered.
+                "name": "GermanCo",
                 "company": "GermanCo",
                 "category": "AI",
                 "technology": ["python"],

@@ -39,8 +39,29 @@ class RecruiteeSource(BaseJobSource):
                 raw_published = item.get("published_at")
                 posted_at, confidence = normalize_posted_at(raw_published)
 
-                salary_min = item.get("min_salary")
-                salary_max = item.get("max_salary")
+                # Live schema (verified 2026-08-08): salary is a NESTED object,
+                # not flat min_salary/max_salary keys — those never existed.
+                salary_obj = item.get("salary")
+                if not isinstance(salary_obj, dict):
+                    salary_obj = {}
+                salary_min = salary_obj.get("min")
+                salary_max = salary_obj.get("max")
+
+                # close_at is the offer's closing date. Null in the sample, so
+                # guard for it — a missing/unparseable value must never crash
+                # or fabricate a deadline.
+                deadline = None
+                deadline_source = None
+                raw_close_at = item.get("close_at")
+                if raw_close_at:
+                    try:
+                        deadline = datetime.fromisoformat(
+                            str(raw_close_at).replace("Z", "+00:00")
+                        ).date().isoformat()
+                        deadline_source = "listing"
+                    except ValueError:
+                        pass
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -54,6 +75,8 @@ class RecruiteeSource(BaseJobSource):
                     date_posted_raw=raw_published,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
                 ))
         logger.info("Recruitee: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

@@ -39,12 +39,29 @@ class PinpointSource(BaseJobSource):
                     location = loc.get("name", str(loc))
                 else:
                     location = str(loc) if loc else ""
-                comp = item.get("compensation", {})
-                salary_min = None
-                salary_max = None
-                if isinstance(comp, dict):
-                    salary_min = comp.get("min")
-                    salary_max = comp.get("max")
+                # Live schema (verified 2026-08-08): top-level `compensation`
+                # is a plain string (e.g. "Competitive"), never the numeric
+                # object the old code guarded for — that branch never fired.
+                # The real numeric fields are compensation_minimum /
+                # compensation_maximum (compensation_currency / _frequency
+                # also exist but aren't stored on Job yet).
+                salary_min = item.get("compensation_minimum")
+                salary_max = item.get("compensation_maximum")
+
+                # deadline_at exists on this endpoint — guard for null, never
+                # crash or fabricate.
+                deadline = None
+                deadline_source = None
+                raw_deadline_at = item.get("deadline_at")
+                if raw_deadline_at:
+                    try:
+                        deadline = datetime.fromisoformat(
+                            str(raw_deadline_at).replace("Z", "+00:00")
+                        ).date().isoformat()
+                        deadline_source = "listing"
+                    except ValueError:
+                        pass
+
                 apply_url = item.get("url", f"https://{slug}.pinpointhq.com/postings/{item.get('id', '')}")
                 jobs.append(Job(
                     title=title,
@@ -55,10 +72,15 @@ class PinpointSource(BaseJobSource):
                     source=self.name,
                     date_found=datetime.now(timezone.utc).isoformat(),
                     posted_at=None,
-                    date_confidence="fabricated",
+                    # Pinpoint genuinely has no posted-date field (verified
+                    # live) — "low" is the honest confidence for an absent
+                    # date, never the invalid "fabricated" literal.
+                    date_confidence="low",
                     date_posted_raw=None,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Pinpoint: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

@@ -14,6 +14,7 @@ from src.core.companies import COMPANY_NAME_OVERRIDES, PERSONIO_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.personio")
 
@@ -22,7 +23,7 @@ _INTER_COMPANY_DELAY = 3.0
 
 
 class PersonioSource(BaseJobSource):
-    """Personio ATS XML feed — multi-sector company job boards."""
+    """Personio ATS XML feed - multi-sector company job boards."""
     name = "personio"
     category = "ats"
 
@@ -63,6 +64,8 @@ class PersonioSource(BaseJobSource):
             title = (position.findtext("name") or "").strip()
             office = (position.findtext("office") or "").strip()
             pos_id = (position.findtext("id") or "").strip()
+            seniority = (position.findtext("seniority") or "").strip()
+            created_at_raw = (position.findtext("createdAt") or "").strip() or None
 
             # Get job descriptions
             desc_elem = position.find("jobDescriptions")
@@ -78,6 +81,14 @@ class PersonioSource(BaseJobSource):
 
             apply_url = f"https://{slug}.jobs.personio.de/job/{pos_id}" if pos_id else f"https://{slug}.jobs.personio.de/"
 
+            # Date fix (2026-08-08): the feed carries a real ISO createdAt
+            # per posting - route it through normalize_posted_at() instead of
+            # the old hardcoded "fabricated" literal (an invalid enum value:
+            # the schema is high|medium|low). Absent/unparseable createdAt
+            # falls back to no posted_at with low confidence, same as any
+            # other source with a missing date field.
+            posted_at, date_confidence = normalize_posted_at(created_at_raw)
+
             jobs.append(Job(
                 title=title,
                 company=company_name,
@@ -86,9 +97,10 @@ class PersonioSource(BaseJobSource):
                 apply_url=apply_url,
                 source=self.name,
                 date_found=datetime.now(timezone.utc).isoformat(),
-                posted_at=None,
-                date_confidence="fabricated",
-                date_posted_raw=None,
+                posted_at=posted_at,
+                date_confidence=date_confidence,
+                date_posted_raw=created_at_raw,
+                experience_level=seniority,
             ))
 
         return jobs
