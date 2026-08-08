@@ -1610,9 +1610,19 @@
       },
       "ProfileSummary": {
         "properties": {
+          "cv_filename": {
+            "default": "",
+            "title": "Cv Filename",
+            "type": "string"
+          },
           "cv_length": {
             "title": "Cv Length",
             "type": "integer"
+          },
+          "cv_uploaded_at": {
+            "default": "",
+            "title": "Cv Uploaded At",
+            "type": "string"
           },
           "education": {
             "items": {
@@ -1623,6 +1633,21 @@
           },
           "experience_level": {
             "title": "Experience Level",
+            "type": "string"
+          },
+          "github_connected_at": {
+            "default": "",
+            "title": "Github Connected At",
+            "type": "string"
+          },
+          "github_repo_count": {
+            "default": 0,
+            "title": "Github Repo Count",
+            "type": "integer"
+          },
+          "github_username": {
+            "default": "",
+            "title": "Github Username",
             "type": "string"
           },
           "has_github": {
@@ -1643,6 +1668,16 @@
             },
             "title": "Job Titles",
             "type": "array"
+          },
+          "linkedin_filename": {
+            "default": "",
+            "title": "Linkedin Filename",
+            "type": "string"
+          },
+          "linkedin_uploaded_at": {
+            "default": "",
+            "title": "Linkedin Uploaded At",
+            "type": "string"
           },
           "skills_count": {
             "title": "Skills Count",

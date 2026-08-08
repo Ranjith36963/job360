@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -113,6 +114,15 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         has_github=bool(profile.cv_data.github_languages),
         education=profile.cv_data.education,
         experience_level=profile.preferences.experience_level,
+        # Upload receipts (2026-08-08) — getattr so a CVData loaded from a row
+        # saved before these fields existed still renders.
+        cv_filename=getattr(profile.cv_data, "cv_filename", "") or "",
+        cv_uploaded_at=getattr(profile.cv_data, "cv_uploaded_at", "") or "",
+        linkedin_filename=getattr(profile.cv_data, "linkedin_filename", "") or "",
+        linkedin_uploaded_at=getattr(profile.cv_data, "linkedin_uploaded_at", "") or "",
+        github_username=profile.preferences.github_username or "",
+        github_connected_at=getattr(profile.cv_data, "github_connected_at", "") or "",
+        github_repo_count=len(getattr(profile.cv_data, "github_repos_brief", []) or []),
     )
     cv = profile.cv_data
     cv_detail = CVDetail(
@@ -321,6 +331,13 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # the new one is known to be readable.
         reset_cv_owned_fields(profile.cv_data)
         profile.cv_data.raw_text = raw_text
+        # Upload receipt — WHAT was uploaded and WHEN. Set here, right where the
+        # new CV replaces the old one, so a re-upload always names the CURRENT
+        # file (a stale name would be worse than none: it would confirm the
+        # wrong document). Only the base name is kept — a browser can send a
+        # path-ish value, and the directory part is neither useful nor ours.
+        profile.cv_data.cv_filename = os.path.basename(filename or "")[:255]
+        profile.cv_data.cv_uploaded_at = datetime.now(timezone.utc).isoformat()
     finally:
         try:
             os.unlink(tmp_path)
@@ -512,6 +529,11 @@ async def upload_linkedin(
         if merged:
             profile = load_profile(user.id) or UserProfile()
             profile.cv_data.linkedin_raw_text = text
+            # Upload receipt — see the CV path. Recorded only on a MERGED
+            # upload: a PDF we could not read as LinkedIn changes nothing, so
+            # claiming a successful upload would be a lie on screen.
+            profile.cv_data.linkedin_filename = os.path.basename(file.filename or "")[:255]
+            profile.cv_data.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
             await _extract_save_trigger(profile, user.id)
     finally:
         try:
@@ -539,6 +561,9 @@ async def upload_github(
     # the GitHub LLM pass and re-runs the others from stored raw.
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
+    # Connection receipt — GitHub has no file, so the handle + when we read it
+    # is the receipt (repo count comes from len(github_repos_brief)).
+    profile.cv_data.github_connected_at = datetime.now(timezone.utc).isoformat()
     await _extract_save_trigger(profile, user.id)
     return GitHubResponse(ok=True, merged=True)
 

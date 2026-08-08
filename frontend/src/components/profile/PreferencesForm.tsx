@@ -339,15 +339,10 @@ export function PreferencesForm({
           description="Skills beyond what your CV contains"
         />
 
-        {/* ── Excluded Skills ────────────────────── */}
-        <TagInput
-          label="Excluded Skills"
-          tags={excludedSkills}
-          onChange={setExcludedSkills}
-          placeholder="e.g. COBOL, Fortran"
-          description="Skills you don't want to work with (penalized in scoring)"
-          variant="destructive"
-        />
+        {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
+            excluded_skills field, scoring penalty, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         <Separator />
 
@@ -462,16 +457,10 @@ export function PreferencesForm({
 
         <Separator />
 
-        {/* ── Negative Keywords ──────────────────── */}
-        <TagInput
-          label="Negative Keywords"
-          icon={<AlertCircle className="h-3.5 w-3.5" />}
-          tags={negativeKeywords}
-          onChange={setNegativeKeywords}
-          placeholder="e.g. intern, junior, volunteer"
-          description="Job title keywords to penalize"
-          variant="destructive"
-        />
+        {/* Negative Keywords input removed from UI (owner, 2026-08-08) — the
+            negative_keywords field, scoring penalty, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
@@ -487,16 +476,10 @@ export function PreferencesForm({
           />
         </div>
 
-        {/* ── Excluded Companies ──────────────────── */}
-        <TagInput
-          label="Excluded Companies"
-          icon={<Building2 className="h-3.5 w-3.5" />}
-          tags={excludedCompanies}
-          onChange={setExcludedCompanies}
-          placeholder="e.g. Acme Corp"
-          description="Companies to zero-out from results"
-          variant="destructive"
-        />
+        {/* Excluded Companies input removed from UI (owner, 2026-08-08) — the
+            excluded_companies field, scoring zero-out, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         {/* ── Auto-save status ───────────────────────
             No "Save" button — preferences save automatically a moment after

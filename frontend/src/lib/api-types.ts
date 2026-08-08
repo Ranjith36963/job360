@@ -2119,12 +2119,37 @@ export interface components {
         };
         /** ProfileSummary */
         ProfileSummary: {
+            /**
+             * Cv Filename
+             * @default
+             */
+            cv_filename: string;
             /** Cv Length */
             cv_length: number;
+            /**
+             * Cv Uploaded At
+             * @default
+             */
+            cv_uploaded_at: string;
             /** Education */
             education: string[];
             /** Experience Level */
             experience_level: string;
+            /**
+             * Github Connected At
+             * @default
+             */
+            github_connected_at: string;
+            /**
+             * Github Repo Count
+             * @default 0
+             */
+            github_repo_count: number;
+            /**
+             * Github Username
+             * @default
+             */
+            github_username: string;
             /** Has Github */
             has_github: boolean;
             /** Has Linkedin */
@@ -2133,6 +2158,16 @@ export interface components {
             is_complete: boolean;
             /** Job Titles */
             job_titles: string[];
+            /**
+             * Linkedin Filename
+             * @default
+             */
+            linkedin_filename: string;
+            /**
+             * Linkedin Uploaded At
+             * @default
+             */
+            linkedin_uploaded_at: string;
             /** Skills Count */
             skills_count: number;
         };

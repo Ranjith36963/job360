@@ -181,7 +181,14 @@ describe("CVViewer — extracted sections", () => {
     expect(screen.queryByText("LinkedIn detail")).not.toBeInTheDocument();
     expect(screen.queryByText("GitHub detail")).not.toBeInTheDocument();
     expect(screen.queryByText(/Skills Extracted/)).not.toBeInTheDocument();
-    // The always-present "Full CV Text" toggle still renders.
-    expect(screen.getByText("Full CV Text")).toBeInTheDocument();
+    // The "Full CV Text" panel was REMOVED from this view on 2026-08-08 (owner
+    // decision): the identical text already renders in the "CV Uploaded" card
+    // on the same page, and showing the same wall of text twice is noise. This
+    // assertion is inverted deliberately — it now guards against the duplicate
+    // coming back, and the section header below proves the view still renders.
+    expect(screen.queryByText("Full CV Text")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("What we extracted from your profile")
+    ).toBeInTheDocument();
   });
 });

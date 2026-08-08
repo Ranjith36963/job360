@@ -1,10 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import {
   FileText,
-  ChevronDown,
-  ChevronUp,
   Briefcase,
   GraduationCap,
   Award,
@@ -36,48 +33,6 @@ interface CVViewerProps {
   linkedinSubsections?: Record<string, Record<string, unknown>[]>;
   /** ProfileResponse.github_temporal — { languages: {lang: bytes}, topics: {topic: 1} }. */
   githubTemporal?: Record<string, Record<string, unknown>>;
-}
-
-/** Highlight extracted terms within the full CV text. */
-function highlightText(
-  text: string,
-  terms: string[],
-  className: string
-): React.ReactNode[] {
-  if (!terms.length) return [text];
-
-  // A skill can wrap across a line in the PDF text ("Machine" end of one line,
-  // "Learning" start of the next), so the space inside a term must match ANY
-  // whitespace — including a newline. Escape regex specials first, then turn each
-  // run of spaces into \s+ so "Machine Learning" also matches "Machine\nLearning".
-  const escaped = terms
-    .filter((t) => t.trim().length > 2)
-    .map((t) =>
-      t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")
-    )
-    .sort((a, b) => b.length - a.length);
-
-  if (!escaped.length) return [text];
-
-  // Compare on whitespace-collapsed, lower-cased forms so a wrapped match
-  // ("Machine\nLearning") still equals its term ("Machine Learning").
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-  const termSet = new Set(terms.map(norm));
-
-  const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
-  const parts = text.split(pattern);
-
-  return parts.map((part, i) => {
-    const isMatch = termSet.has(norm(part));
-    if (isMatch) {
-      return (
-        <mark key={i} className={className}>
-          {part}
-        </mark>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
 }
 
 // ── Dict helpers — cv_positions / linkedin subsections arrive as loosely
@@ -202,13 +157,8 @@ export function CVViewer({
   linkedinSubsections,
   githubTemporal,
 }: CVViewerProps) {
-  const [showFullCV, setShowFullCV] = useState(false);
-
-  // All terms to highlight (combine skills + titles for unified highlighting)
-  const allHighlightTerms = [
-    ...cv.skills,
-    ...cv.job_titles,
-  ];
+  // (The showFullCV toggle and its highlight terms went with the "Full CV
+  // Text" panel — that text now lives only in the CV Uploaded card.)
 
   const positions = (cv.cv_positions ?? [])
     .map((raw) => normalizePosition(raw as Record<string, unknown>))
@@ -435,44 +385,12 @@ export function CVViewer({
         )}
       </div>
 
-      {/* ── Full CV with highlights toggle ────────────── */}
-      <div className="glass-card rounded-xl p-6">
-        <button
-          onClick={() => setShowFullCV(!showFullCV)}
-          className="w-full flex items-center justify-between gap-2 group"
-        >
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
-            <h3 className="font-heading text-base font-semibold">
-              Full CV Text
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              (extracted skills are{" "}
-              <mark className="bg-primary/20 text-primary px-1 rounded text-xs">
-                highlighted
-              </mark>
-              )
-            </span>
-          </div>
-          {showFullCV ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-          )}
-        </button>
-
-        {showFullCV && (
-          <div className="mt-4 rounded-lg bg-muted/30 border border-border/50 p-4 max-h-[600px] overflow-y-auto">
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground/85">
-              {highlightText(
-                cv.raw_text,
-                allHighlightTerms,
-                "bg-primary/20 text-primary rounded px-0.5"
-              )}
-            </pre>
-          </div>
-        )}
-      </div>
+      {/* The "Full CV Text" panel used to sit here. REMOVED 2026-08-08 (owner
+          decision): the identical full CV text is already rendered in the "CV
+          Uploaded" card at the top of this same page, with the same
+          highlighting — the same wall of text twice on one screen. The card
+          keeps it, because that is where a user looks for the CV they just
+          uploaded; this view stays focused on what we EXTRACTED from it. */}
 
       {/* ── LinkedIn detail ────────────────────────────── */}
       {hasLinkedinDetail && (
