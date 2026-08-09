@@ -45,19 +45,46 @@ interface GithubRepoEntry {
   description: string;
   topics: string[];
   stars: number;
+  forks: number;
+  archived: boolean;
+  homepage: string;
   pushed_at: string;
+  created_at: string;
+}
+
+function numField(obj: Record<string, unknown>, key: string): number {
+  const v = obj[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 function normalizeGithubRepo(raw: Record<string, unknown>): GithubRepoEntry {
-  const stars = raw["stars"];
   return {
     name: strField(raw, "name"),
     language: strField(raw, "language"),
     description: strField(raw, "description"),
     topics: strArrField(raw, "topics"),
-    stars: typeof stars === "number" ? stars : 0,
+    stars: numField(raw, "stars"),
+    forks: numField(raw, "forks"),
+    archived: raw["archived"] === true,
+    homepage: strField(raw, "homepage"),
     pushed_at: strField(raw, "pushed_at"),
+    created_at: strField(raw, "created_at"),
   };
+}
+
+/** "2 yrs" / "8 mo" — how long this repo has been alive, first commit to last.
+ *  Tenure is a different claim from recency: "touched last week" vs "worked on
+ *  for two years". Empty when either end is missing or unparseable. */
+function repoTenure(createdAt: string, pushedAt: string): string {
+  if (!createdAt || !pushedAt) return "";
+  const a = new Date(createdAt).getTime();
+  const b = new Date(pushedAt).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return "";
+  const months = Math.round((b - a) / (1000 * 60 * 60 * 24 * 30.44));
+  if (months < 1) return "";
+  if (months < 12) return `${months} mo`;
+  const years = Math.floor(months / 12);
+  return years === 1 ? "1 yr" : `${years} yrs`;
 }
 
 /** "updated 3 Aug 2026" — a repo's recency, in words, in the viewer's locale. */
@@ -238,11 +265,57 @@ export function CVViewer({
   const ghFrameworks = asStrings(ghDetail.frameworks);
   const ghInferred = asStrings(ghDetail.skills_inferred);
   const ghLlmSkills = asStrings(ghDetail.llm_skills);
+  // Structured identity → label/value rows. Only fields the person actually
+  // filled in appear; an unset field stays absent rather than rendering an
+  // empty row (rule #29). `hireable` is tri-state: shown only when GitHub has
+  // a real boolean, because "never said" is not "not looking".
+  const ghIdentity =
+    typeof ghDetail.identity === "object" && ghDetail.identity !== null
+      ? (ghDetail.identity as Record<string, unknown>)
+      : {};
+  const ghIdentityRows: [string, string][] = (
+    [
+      ["Name", strField(ghIdentity, "name")],
+      ["Company", strField(ghIdentity, "company")],
+      ["Location", strField(ghIdentity, "location")],
+      ["Website", strField(ghIdentity, "blog")],
+      [
+        "Twitter/X",
+        strField(ghIdentity, "twitter") ? `@${strField(ghIdentity, "twitter")}` : "",
+      ],
+      [
+        "Open to work",
+        ghIdentity.hireable === true
+          ? "Yes"
+          : ghIdentity.hireable === false
+            ? "No"
+            : "",
+      ],
+      [
+        "On GitHub since",
+        formatRepoDate(strField(ghIdentity, "account_created_at")),
+      ],
+      [
+        "Public repos",
+        numField(ghIdentity, "public_repos")
+          ? String(numField(ghIdentity, "public_repos"))
+          : "",
+      ],
+      [
+        "Followers",
+        numField(ghIdentity, "followers")
+          ? String(numField(ghIdentity, "followers"))
+          : "",
+      ],
+    ] as [string, string][]
+  ).filter(([, v]) => Boolean(v));
+
   const ghBio = typeof ghDetail.bio === "string" ? ghDetail.bio : "";
   const ghProfileReadme =
     typeof ghDetail.profile_readme === "string" ? ghDetail.profile_readme : "";
 
   const hasGithubDetail =
+    ghIdentityRows.length > 0 ||
     ghLanguagesSorted.length > 0 ||
     ghTopics.length > 0 ||
     ghRepos.length > 0 ||
@@ -618,6 +691,23 @@ export function CVViewer({
             GitHub detail
           </h3>
 
+          {/* Identity — the developer's OWN words about themselves, kept as
+              values rather than a sentence. "Open to work" and location are
+              the two that a future matcher can actually act on. */}
+          {ghIdentityRows.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Profile" />
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+                {ghIdentityRows.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="text-foreground/85">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {ghLanguagesSorted.length > 0 && (
             <div className="mb-5">
               <SectionLabel icon={Code2} text={`Languages (${ghLanguagesSorted.length})`} />
@@ -683,6 +773,21 @@ export function CVViewer({
                       {repo.stars > 0 && (
                         <span className="text-[11px] text-muted-foreground">
                           ★ {repo.stars}
+                        </span>
+                      )}
+                      {repo.forks > 0 && (
+                        <span className="text-[11px] text-muted-foreground">
+                          ⑂ {repo.forks}
+                        </span>
+                      )}
+                      {repo.archived && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+                          archived
+                        </span>
+                      )}
+                      {repoTenure(repo.created_at, repo.pushed_at) && (
+                        <span className="text-[11px] text-muted-foreground">
+                          built over {repoTenure(repo.created_at, repo.pushed_at)}
                         </span>
                       )}
                       {repo.pushed_at && (

@@ -90,6 +90,23 @@ class CVData:
     #               page GitHub renders at the top of a profile.
     github_bio: str = ""
     github_profile_readme: str = ""
+    # STRUCTURED GitHub identity (2026-08-09): name, company, location, blog,
+    # twitter, hireable, account_created_at, followers, public_repos.
+    #
+    # All of these were ALREADY fetched in the same /users/{u} request and then
+    # flattened into ``github_bio`` as one sentence — fine for a human or an LLM
+    # prompt, useless to anything that must compare, filter or score. You cannot
+    # match on a sentence.
+    #
+    # Two are matching-grade: ``hireable`` is GitHub's own "open to work" flag,
+    # and ``location`` is a place claim the UK gate reasons about. ``hireable``
+    # is TRI-STATE (True/False/None) for the same reason visa status is —
+    # "never said" is not "not looking" (rule #31).
+    #
+    # Kept as a dict so new identity fields need no migration: profiles store as
+    # a JSON blob and ``storage._filter_fields`` drops unknown keys, so old rows
+    # load with {}.
+    github_identity: dict[str, Any] = field(default_factory=dict)
     # CV experience, STRUCTURED (2026-08-06). The CV LLM prompt has always
     # asked for {company, title, dates, location, bullets} per role, but the
     # adapter flattened it into unpaired ``job_titles`` + ``companies`` lists
