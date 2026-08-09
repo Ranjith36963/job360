@@ -238,6 +238,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         "frameworks": list(getattr(cv, "github_frameworks", []) or []),
         "skills_inferred": list(getattr(cv, "github_skills_inferred", []) or []),
         "llm_skills": list(getattr(cv, "github_llm_skills", []) or []),
+        "identity": dict(getattr(cv, "github_identity", {}) or {}),
         "bio": getattr(cv, "github_bio", "") or "",
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
     }
@@ -706,6 +707,7 @@ def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
     cv.github_repos_brief = []
     cv.github_bio = ""
     cv.github_profile_readme = ""
+    cv.github_identity = {}
     cv.github_connected_at = ""
     cv.llm_input_hashes.pop("github", None)
     prefs.github_username = ""  # the handle belongs to this section

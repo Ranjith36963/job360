@@ -892,6 +892,13 @@ class TestEveryGithubShelfReachesTheApi:
             "skills_inferred": ["TypeScript"],
             "bio": "Builds things",
             "profile_readme": "# Hello",
+            "identity": {
+                "name": "Ada", "company": "Analytical Engines",
+                "location": "London, UK", "blog": "https://ada.dev",
+                "twitter": "ada", "hireable": True,
+                "account_created_at": "2019-04-01T00:00:00Z",
+                "followers": 12, "public_repos": 30,
+            },
         })
         _register_and_login(api, "gh-detail@example.com")
         _seed_cv(api)
@@ -915,6 +922,16 @@ class TestEveryGithubShelfReachesTheApi:
         assert "TypeScript" in detail["skills_inferred"]
         assert detail["bio"] == "Builds things"
         assert detail["profile_readme"] == "# Hello"
+        # STRUCTURED identity. These were already fetched in the same
+        # /users/{u} request and then flattened into the bio SENTENCE — you
+        # cannot match on a sentence. Two are matching-grade: `location` (the
+        # UK gate reasons about places) and `hireable` (GitHub's own "open to
+        # work" flag), so they must survive as typed values.
+        ident = detail["identity"]
+        assert ident["location"] == "London, UK"
+        assert ident["hireable"] is True
+        assert ident["company"] == "Analytical Engines"
+        assert ident["public_repos"] == 30
 
     def test_no_github_means_an_empty_detail_not_a_crash(
         self, api, monkeypatch

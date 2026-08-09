@@ -72,6 +72,69 @@ function renderViewer(detail: Record<string, unknown> | undefined) {
 }
 
 describe("GitHub detail shows everything GitHub gave us", () => {
+  it("renders the structured identity — open-to-work and location included", () => {
+    renderViewer({
+      ...githubDetail,
+      identity: {
+        name: "Ada Lovelace",
+        company: "Analytical Engines Ltd",
+        location: "London, UK",
+        blog: "https://ada.dev",
+        twitter: "ada",
+        hireable: true,
+        account_created_at: "2019-04-01T00:00:00Z",
+        followers: 12,
+        public_repos: 30,
+      },
+    });
+    expect(screen.getByText("Analytical Engines Ltd")).toBeTruthy();
+    // The two matching-grade fields: a place the UK gate can reason about,
+    // and GitHub's own "open to work" flag.
+    expect(screen.getByText("London, UK")).toBeTruthy();
+    expect(screen.getByText("Open to work")).toBeTruthy();
+    expect(screen.getByText("Yes")).toBeTruthy();
+    expect(screen.getByText("@ada")).toBeTruthy();
+    expect(screen.getByText(/2019/)).toBeTruthy();
+  });
+
+  it("hireable is TRI-STATE — 'never said' is not 'not looking'", () => {
+    // hireable: null must render NO row at all, exactly like the visa signal:
+    // silence is not a negative answer (rule #31).
+    renderViewer({ identity: { location: "Leeds", hireable: null } });
+    expect(screen.getByText("Leeds")).toBeTruthy();
+    expect(screen.queryByText("Open to work")).not.toBeInTheDocument();
+  });
+
+  it("an unset identity field renders no empty row (rule #29)", () => {
+    renderViewer({ identity: { location: "Leeds" } });
+    expect(screen.getByText("Leeds")).toBeTruthy();
+    expect(screen.queryByText("Company")).not.toBeInTheDocument();
+    expect(screen.queryByText("Followers")).not.toBeInTheDocument();
+  });
+
+  it("shows repo tenure, forks and archived state", () => {
+    renderViewer({
+      repos: [
+        {
+          name: "long-runner",
+          language: "Python",
+          description: "",
+          topics: [],
+          stars: 0,
+          forks: 4,
+          archived: true,
+          created_at: "2023-01-01T00:00:00Z",
+          pushed_at: "2025-06-01T00:00:00Z",
+        },
+      ],
+    });
+    // Tenure is a DIFFERENT claim from recency: built over 2 yrs vs touched
+    // last week. Both are on screen.
+    expect(screen.getByText(/built over 2 yrs/)).toBeTruthy();
+    expect(screen.getByText(/⑂ 4/)).toBeTruthy();
+    expect(screen.getByText("archived")).toBeTruthy();
+  });
+
   it("renders repositories with language, stars and last-updated", () => {
     renderViewer(githubDetail);
     expect(screen.getByText("job360")).toBeTruthy();

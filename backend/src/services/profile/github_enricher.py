@@ -267,6 +267,48 @@ async def _fetch_user(session: aiohttp.ClientSession, username: str) -> dict[str
     return data if isinstance(data, dict) else {}
 
 
+def _identity_fields(user: dict[str, Any]) -> dict[str, Any]:
+    """The /users/{u} identity block kept as TYPED VALUES, not a sentence.
+
+    ``_compose_bio`` folds these same fields into one display string. That is
+    fine for a human and for an LLM prompt, and useless for anything that has
+    to compare, filter or score — you cannot match on a sentence.
+
+    Two are genuine matching signals, which is why these are shelves and not
+    decoration:
+      * ``hireable``  — GitHub's own "open to work" flag, stated by the person.
+      * ``location``  — a place claim the UK eligibility gate can reason about.
+    The rest (account age, followers, public repo count) are cheap tenure and
+    activity proxies for later ranking work.
+
+    Costs nothing: this is the SAME response ``_compose_bio`` already reads.
+    Every value is read defensively — GitHub omits fields on sparse profiles,
+    and a missing field must be absent, never ``None`` leaking into the UI.
+    """
+    def s(key: str) -> str:
+        v = user.get(key)
+        return v.strip() if isinstance(v, str) and v.strip() else ""
+
+    def i(key: str) -> int:
+        v = user.get(key)
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+    return {
+        "name": s("name"),
+        "company": s("company"),
+        "location": s("location"),
+        "blog": s("blog"),
+        "twitter": s("twitter_username"),
+        # Tri-state on purpose: True / False / None are three different facts.
+        # None means "never said", which is NOT "not looking" — the same
+        # distinction the visa signal makes (rule #31).
+        "hireable": user.get("hireable") if isinstance(user.get("hireable"), bool) else None,
+        "account_created_at": s("created_at"),
+        "followers": i("followers"),
+        "public_repos": i("public_repos"),
+    }
+
+
 def _compose_bio(user: dict[str, Any]) -> str:
     """Fold the /users/{u} identity fields into one short self-description
     string for the LLM pass. Only non-empty fields are included, so a sparse
@@ -412,6 +454,19 @@ async def fetch_github_profile(
                 "stars": repo.get("stargazers_count", 0),
                 "topics": repo.get("topics", []),
                 "pushed_at": repo.get("pushed_at"),
+                # Already in this response; kept because each answers a
+                # question matching will want later:
+                #   created_at — TENURE. pushed_at says "recently touched";
+                #     created_at + pushed_at together say "worked on this for
+                #     two years", which is a different, stronger claim.
+                #   archived   — a dead project. Evidence, but weaker evidence.
+                #   forks      — reuse by others, a quieter quality signal
+                #     than stars and less gameable.
+                #   homepage   — a shipped, reachable product.
+                "created_at": repo.get("created_at") or "",
+                "archived": bool(repo.get("archived")),
+                "forks": repo.get("forks_count", 0) or 0,
+                "homepage": (repo.get("homepage") or "").strip(),
             }
             repositories.append(repo_info)
             all_topics.update(repo.get("topics", []))
@@ -523,9 +578,12 @@ async def fetch_github_profile(
                 # ``stars`` is the one public quality signal on a repo. Both are
                 # already in the /users/{u}/repos payload, so keeping them costs
                 # nothing and closes the last GitHub field with no shelf.
-                "stars": int(r.get("stargazers_count", 0) or 0),
+                "stars": int(r.get("stars", 0) or 0),
                 "pushed_at": r.get("pushed_at", "") or "",
-                "url": r.get("html_url", "") or "",
+                "created_at": r.get("created_at", "") or "",
+                "archived": bool(r.get("archived")),
+                "forks": int(r.get("forks", 0) or 0),
+                "homepage": r.get("homepage", "") or "",
             }
             if excerpt:
                 brief["readme_excerpt"] = excerpt
@@ -550,6 +608,17 @@ async def fetch_github_profile(
             "repos_brief": repos_brief,
             "bio": bio,
             "profile_readme": profile_readme,
+            # STRUCTURED identity. Every field below was ALREADY fetched in the
+            # same /users/{u} request and then flattened into the `bio` string —
+            # readable by a human and by the LLM, but unqueryable by anything
+            # else. A string cannot be matched on.
+            #
+            # Two of these are matching-grade signals, which is why this is not
+            # cosmetic: `hireable` is GitHub's own "open to work" flag, and
+            # `location` is a place claim that the UK gate reasons about. Costs
+            # zero extra requests — it is the same response, kept instead of
+            # concatenated.
+            "identity": _identity_fields(user_obj),
         }
     finally:
         if own_session:
@@ -765,5 +834,9 @@ def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
         cv.github_bio = github_data["bio"]
     if github_data.get("profile_readme"):
         cv.github_profile_readme = github_data["profile_readme"]
+    # Structured identity — same "only overwrite on a non-empty fetch" rule as
+    # the two above, so a rate-limited partial re-enrich never blanks it.
+    if github_data.get("identity"):
+        cv.github_identity = dict(github_data["identity"])
 
     return cv
