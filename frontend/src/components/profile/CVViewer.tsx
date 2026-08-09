@@ -33,6 +33,43 @@ interface CVViewerProps {
   linkedinSubsections?: Record<string, Record<string, unknown>[]>;
   /** ProfileResponse.github_temporal — { languages: {lang: bytes}, topics: {topic: 1} }. */
   githubTemporal?: Record<string, Record<string, unknown>>;
+  /** ProfileResponse.github_detail — repos, frameworks, inferred + LLM-read
+   *  skills, bio, profile README. Everything GitHub gave us beyond languages
+   *  and topics, which until 2026-08-09 was stored and rendered nowhere. */
+  githubDetail?: Record<string, unknown>;
+}
+
+interface GithubRepoEntry {
+  name: string;
+  language: string;
+  description: string;
+  topics: string[];
+  stars: number;
+  pushed_at: string;
+}
+
+function normalizeGithubRepo(raw: Record<string, unknown>): GithubRepoEntry {
+  const stars = raw["stars"];
+  return {
+    name: strField(raw, "name"),
+    language: strField(raw, "language"),
+    description: strField(raw, "description"),
+    topics: strArrField(raw, "topics"),
+    stars: typeof stars === "number" ? stars : 0,
+    pushed_at: strField(raw, "pushed_at"),
+  };
+}
+
+/** "updated 3 Aug 2026" — a repo's recency, in words, in the viewer's locale. */
+function formatRepoDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 // ── Dict helpers — cv_positions / linkedin subsections arrive as loosely
@@ -156,6 +193,7 @@ export function CVViewer({
   skillProvenance,
   linkedinSubsections,
   githubTemporal,
+  githubDetail,
 }: CVViewerProps) {
   // (The showFullCV toggle and its highlight terms went with the "Full CV
   // Text" panel — that text now lives only in the CV Uploaded card.)
@@ -186,7 +224,33 @@ export function CVViewer({
   const ghLanguageTotal = ghLanguages.reduce((sum, [, bytes]) => sum + bytes, 0);
   const ghLanguagesSorted = [...ghLanguages].sort((a, b) => b[1] - a[1]);
   const ghTopics = Object.keys(githubTemporal?.topics ?? {});
-  const hasGithubDetail = ghLanguagesSorted.length > 0 || ghTopics.length > 0;
+
+  // ── The rest of GitHub — read defensively, same as every other loosely
+  // typed block on this page. Each renders only when it has content, so a
+  // profile with no GitHub (or a partial fetch) stays silent (rule #29).
+  const ghDetail = githubDetail ?? {};
+  const ghRepos = (Array.isArray(ghDetail.repos) ? ghDetail.repos : [])
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .map(normalizeGithubRepo)
+    .filter((r) => r.name);
+  const asStrings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const ghFrameworks = asStrings(ghDetail.frameworks);
+  const ghInferred = asStrings(ghDetail.skills_inferred);
+  const ghLlmSkills = asStrings(ghDetail.llm_skills);
+  const ghBio = typeof ghDetail.bio === "string" ? ghDetail.bio : "";
+  const ghProfileReadme =
+    typeof ghDetail.profile_readme === "string" ? ghDetail.profile_readme : "";
+
+  const hasGithubDetail =
+    ghLanguagesSorted.length > 0 ||
+    ghTopics.length > 0 ||
+    ghRepos.length > 0 ||
+    ghFrameworks.length > 0 ||
+    ghInferred.length > 0 ||
+    ghLlmSkills.length > 0 ||
+    Boolean(ghBio) ||
+    Boolean(ghProfileReadme);
 
   return (
     <div className="space-y-6 animate-fade-in-up stagger-2">
@@ -574,7 +638,7 @@ export function CVViewer({
           )}
 
           {ghTopics.length > 0 && (
-            <div>
+            <div className="mb-5">
               <SectionLabel icon={Hash} text={`Topics (${ghTopics.length})`} />
               <ul className="flex flex-wrap gap-1.5 pl-5">
                 {ghTopics.map((topic) => (
@@ -586,6 +650,149 @@ export function CVViewer({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* ── Everything below was FETCHED, STORED, and shown to nobody ──
+              Measured 2026-08-09 on a live profile: 49 frameworks, 13 repos and
+              30 LLM-read skills sat in the database while only languages and
+              topics reached the screen. It is the input where invisibility
+              costs most — a CV CLAIMS "FastAPI", a requirements.txt in shipped
+              code PROVES it, which is why skill tiering already weights this
+              evidence above a CV mention. It was scoring their matches
+              already; they just could not see it. */}
+
+          {ghRepos.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={GitBranch} text={`Repositories (${ghRepos.length})`} />
+              <ul className="space-y-2 pl-5">
+                {ghRepos.map((repo, i) => (
+                  <li
+                    key={`${repo.name}-${i}`}
+                    className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-sm font-medium text-foreground">
+                        {repo.name}
+                      </span>
+                      {repo.language && (
+                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400">
+                          {repo.language}
+                        </span>
+                      )}
+                      {repo.stars > 0 && (
+                        <span className="text-[11px] text-muted-foreground">
+                          ★ {repo.stars}
+                        </span>
+                      )}
+                      {repo.pushed_at && (
+                        <span className="ml-auto text-[11px] text-muted-foreground">
+                          updated {formatRepoDate(repo.pushed_at)}
+                        </span>
+                      )}
+                    </div>
+                    {repo.description && (
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {repo.description}
+                      </p>
+                    )}
+                    {repo.topics.length > 0 && (
+                      <ul className="mt-1.5 flex flex-wrap gap-1">
+                        {repo.topics.map((t) => (
+                          <li
+                            key={t}
+                            className="rounded-full bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground"
+                          >
+                            {t}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghFrameworks.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Wrench}
+                text={`Frameworks & libraries (${ghFrameworks.length})`}
+              />
+              {/* The strongest evidence on the page: read from real dependency
+                  files (package.json / requirements.txt), so this is
+                  DEMONSTRATED usage, not a claim. Said plainly, because the
+                  distinction is the whole value. */}
+              <p className="pl-5 mb-1.5 text-[11px] text-muted-foreground">
+                Found in your dependency files — used in shipped code, not just listed.
+              </p>
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghFrameworks.map((f) => (
+                  <li
+                    key={f}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghLlmSkills.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={BookOpen}
+                text={`Skills read from your READMEs (${ghLlmSkills.length})`}
+              />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghLlmSkills.map((s) => (
+                  <li
+                    key={s}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghInferred.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Code2}
+                text={`Skills inferred from repos (${ghInferred.length})`}
+              />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghInferred.map((s) => (
+                  <li
+                    key={s}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghBio && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Bio" />
+              <p className="pl-5 text-sm leading-relaxed text-foreground/80">
+                {ghBio}
+              </p>
+            </div>
+          )}
+
+          {ghProfileReadme && (
+            <div>
+              <SectionLabel icon={FileText} text="Profile README" />
+              <pre className="ml-5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-muted/10 p-3 font-sans text-xs leading-relaxed text-foreground/80">
+                {ghProfileReadme}
+              </pre>
             </div>
           )}
         </div>

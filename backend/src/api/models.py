@@ -259,6 +259,12 @@ class ProfileResponse(BaseModel):
     # (top-K by volume) + topic frequencies. Pure metric surface — UI
     # renders trend graphs without backend re-shaping.
     github_temporal: dict[str, dict[Any, Any]] = {}
+    # Everything else GitHub gave us: repos (name/language/description/topics/
+    # README excerpt/stars/pushed_at), dependency-file frameworks, inferred and
+    # LLM-read skills, bio, profile README. Measured 2026-08-09: 92 pieces of
+    # this were stored and rendered NOWHERE while only languages+topics showed.
+    # Defaults to {} so every existing caller and older profile stays valid.
+    github_detail: dict[str, Any] = {}
     # Step-1.5 S3-E — newest snapshot id from ``user_profile_versions``;
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.

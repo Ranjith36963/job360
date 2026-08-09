@@ -861,6 +861,74 @@ def _seed_full_profile(api_client, monkeypatch):
     )
 
 
+class TestEveryGithubShelfReachesTheApi:
+    """A shelf the API never returns is a shelf the user can never see.
+
+    Measured 2026-08-09: GitHub gave a live profile 14 languages, 10 topics, 49
+    frameworks, 13 repos, 25 inferred and 30 LLM-read skills — and only
+    languages + topics were exposed. 92 pieces of signal stored and shown to
+    nobody, which is the same failure as cv_positions and the upload receipts.
+    VALUE-presence, not schema-presence (rule #21): every field below defaults
+    to empty, so asserting the KEY exists would pass against a serializer that
+    never reads the column.
+    """
+
+    def test_github_detail_carries_repos_frameworks_and_skills(
+        self, api, monkeypatch
+    ) -> None:
+        _stub(monkeypatch, {
+            "username": "octocat",
+            "languages": {"Python": 500},
+            "repos": [{"name": "job360", "language": "Python"}],
+            "repos_brief": [{
+                "name": "job360",
+                "language": "Python",
+                "description": "A UK job search engine",
+                "topics": ["fastapi"],
+                "stars": 7,
+                "pushed_at": "2026-08-01T10:00:00Z",
+            }],
+            "frameworks_inferred": ["fastapi", "langgraph"],
+            "skills_inferred": ["TypeScript"],
+            "bio": "Builds things",
+            "profile_readme": "# Hello",
+        })
+        _register_and_login(api, "gh-detail@example.com")
+        _seed_cv(api)
+        assert api.post(
+            "/api/profile/github", data={"username": "octocat"}
+        ).status_code == 200
+
+        detail = api.get("/api/profile").json()["github_detail"]
+        assert detail["username"] == "octocat"
+        assert detail["connected_at"], "no connection receipt"
+        # The repo brief must carry RECENCY and WEIGHT — both were fetched from
+        # /users/{u}/repos and thrown away before this change, and pushed_at is
+        # the only skill-recency signal the engine gets from anywhere.
+        repo = detail["repos"][0]
+        assert repo["name"] == "job360"
+        assert repo["description"] == "A UK job search engine"
+        assert repo["stars"] == 7
+        assert repo["pushed_at"].startswith("2026")
+        # Dependency-file evidence: DEMONSTRATED usage, not a CV claim.
+        assert "langgraph" in detail["frameworks"]
+        assert "TypeScript" in detail["skills_inferred"]
+        assert detail["bio"] == "Builds things"
+        assert detail["profile_readme"] == "# Hello"
+
+    def test_no_github_means_an_empty_detail_not_a_crash(
+        self, api, monkeypatch
+    ) -> None:
+        """Empty shelves stay silent (rule #29) — and must not 500."""
+        _stub(monkeypatch, {})
+        _register_and_login(api, "gh-nodetail@example.com")
+        _seed_cv(api)
+        detail = api.get("/api/profile").json()["github_detail"]
+        assert detail["repos"] == []
+        assert detail["frameworks"] == []
+        assert detail["username"] == ""
+
+
 class TestClearSectionRemovesOnlyThatSection:
     def test_clearing_the_cv_leaves_linkedin_and_github(self, api, monkeypatch) -> None:
         _register_and_login(api, "clear-cv@example.com")

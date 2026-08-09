@@ -386,6 +386,7 @@ export default function ProfilePage() {
                 skillProvenance={profile.skill_provenance}
                 linkedinSubsections={profile.linkedin_subsections}
                 githubTemporal={profile.github_temporal}
+                githubDetail={profile.github_detail}
               />
             )}
 

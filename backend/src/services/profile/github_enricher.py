@@ -516,6 +516,16 @@ async def fetch_github_profile(
                 "language": r.get("language", "") or "",
                 "description": r.get("description", ""),
                 "topics": list(r.get("topics", []) or []),
+                # RECENCY and WEIGHT were fetched and thrown away. ``pushed_at``
+                # is the only recency signal GitHub hands us — the engine has no
+                # skill-recency input anywhere, and "used this in the last
+                # month" is a different claim from "used it in 2019".
+                # ``stars`` is the one public quality signal on a repo. Both are
+                # already in the /users/{u}/repos payload, so keeping them costs
+                # nothing and closes the last GitHub field with no shelf.
+                "stars": int(r.get("stargazers_count", 0) or 0),
+                "pushed_at": r.get("pushed_at", "") or "",
+                "url": r.get("html_url", "") or "",
             }
             if excerpt:
                 brief["readme_excerpt"] = excerpt

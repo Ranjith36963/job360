@@ -220,6 +220,27 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         "languages": dict(getattr(cv, "github_languages", {}) or {}),
         "topics": {t: 1 for t in (getattr(cv, "github_topics", []) or [])},
     }
+    # EVERYTHING ELSE GitHub gave us. Measured on a live profile 2026-08-09:
+    # languages (14) and topics (10) reached the screen, while 49 frameworks,
+    # 13 repos and 30 LLM-read skills sat in the database appearing NOWHERE —
+    # 92 pieces of signal stored and shown to nobody, the same shape as
+    # cv_positions and the upload receipts before them.
+    #
+    # This is the input where it matters most: GitHub evidence outranks a CV
+    # claim. A CV says "FastAPI"; a requirements.txt in shipped code PROVES it,
+    # which is why skill_tiering weights github_dep/github_llm (1.5) above
+    # github_lang (1.0). That evidence was already scoring the user's matches —
+    # they simply could not see it.
+    github_detail: dict[str, Any] = {
+        "username": profile.preferences.github_username or "",
+        "connected_at": getattr(cv, "github_connected_at", "") or "",
+        "repos": list(getattr(cv, "github_repos_brief", []) or []),
+        "frameworks": list(getattr(cv, "github_frameworks", []) or []),
+        "skills_inferred": list(getattr(cv, "github_skills_inferred", []) or []),
+        "llm_skills": list(getattr(cv, "github_llm_skills", []) or []),
+        "bio": getattr(cv, "github_bio", "") or "",
+        "profile_readme": getattr(cv, "github_profile_readme", "") or "",
+    }
 
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
@@ -243,6 +264,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         ai_suggestions=ai_suggestions,
         linkedin_subsections=linkedin_subsections,
         github_temporal=github_temporal,
+        github_detail=github_detail,
         current_version_id=current_version_id,
     )
 
