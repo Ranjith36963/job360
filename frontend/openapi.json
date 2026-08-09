@@ -4686,7 +4686,7 @@
     },
     "/api/profile/github": {
       "post": {
-        "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.",
+        "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.\n\nFAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``\nunconditionally, so a handle that reduced to nothing still produced a green\n\"GitHub profile enriched\" toast \u2014 and, once receipts shipped, a \"GitHub\nconnected\" row on the profile page \u2014 while zero repos were read. Measured on\na live profile: ``github_connected_at`` stamped, ``github_username`` empty,\n0 repos. A receipt that confirms something that did not happen is worse than\nno receipt at all.\n\nA handle that does not reduce to a valid GitHub username is now a 400 with\nwording the person can act on. ``normalize_github_username`` accepts a\nprofile URL and an @handle, but NOT a ``<user>.github.io`` portfolio URL \u2014\nwhich is exactly what a user is likely to paste, since a CV lists that as\n\"Portfolio\". The message therefore names what we DO accept.",
         "operationId": "upload_github_api_profile_github_post",
         "parameters": [
           {

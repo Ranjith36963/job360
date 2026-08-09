@@ -799,6 +799,20 @@ export interface paths {
          *
          *     Accepts a full profile URL or @handle, not just a bare username —
          *     ``normalize_github_username`` reduces it to the handle before lookup.
+         *
+         *     FAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``
+         *     unconditionally, so a handle that reduced to nothing still produced a green
+         *     "GitHub profile enriched" toast — and, once receipts shipped, a "GitHub
+         *     connected" row on the profile page — while zero repos were read. Measured on
+         *     a live profile: ``github_connected_at`` stamped, ``github_username`` empty,
+         *     0 repos. A receipt that confirms something that did not happen is worse than
+         *     no receipt at all.
+         *
+         *     A handle that does not reduce to a valid GitHub username is now a 400 with
+         *     wording the person can act on. ``normalize_github_username`` accepts a
+         *     profile URL and an @handle, but NOT a ``<user>.github.io`` portfolio URL —
+         *     which is exactly what a user is likely to paste, since a CV lists that as
+         *     "Portfolio". The message therefore names what we DO accept.
          */
         post: operations["upload_github_api_profile_github_post"];
         delete?: never;

@@ -645,3 +645,125 @@ class TestReceiptsSurviveOldRows:
         assert cv.cv_uploaded_at == ""
         assert cv.linkedin_filename == ""
         assert cv.github_connected_at == ""
+
+
+# ---------------------------------------------------------------------------
+# A GitHub enrich that read NOTHING must say so
+# ---------------------------------------------------------------------------
+# Measured on a live profile 2026-08-08: the route returned ok=True/merged=True
+# unconditionally, so a handle that reduced to "" still produced a green
+# "GitHub profile enriched" toast and — once receipts shipped — a "GitHub
+# connected" row, while github_username was empty and 0 repos were read.
+# Stored evidence: github_connected_at=21:14:16, github_username="", repos=[].
+# A receipt that confirms something that did not happen is the exact failure
+# receipts exist to prevent.
+#
+# Likely input: normalize_github_username accepts a profile URL and an @handle
+# but NOT a "<user>.github.io" portfolio URL — which is what people paste,
+# because a CV lists that under "Portfolio".
+#
+# These live HERE (not a separate module) for the schema-isolation reason
+# documented above the upload-receipt tests.
+
+import pytest
+
+
+def _stub(monkeypatch, payload):
+    """Mock the GitHub fetch + the paid extraction (offline, rule #4)."""
+    import src.api.routes.profile as profile_route
+
+    async def _fake_fetch(username):
+        return payload
+
+    async def _fake_extract(profile):
+        return profile
+
+    monkeypatch.setattr(profile_route, "fetch_github_profile", _fake_fetch)
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
+
+
+def _seed_cv(api_client):
+    api_client.post(
+        "/api/profile/cv",
+        files={"cv": ("cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+    )
+
+
+class TestUnusableHandleIsRejected:
+    # The four "which strings reduce to nothing" cases used to live here as a
+    # parametrized ROUTE test. Each one cost ~50s (this fixture builds a fresh
+    # schema and runs every migration per test) to assert what a pure function
+    # decides in microseconds — 200s of CI time to exercise a regex, and it
+    # quadrupled the targeted gate. They are now unit tests over
+    # normalize_github_username in tests/test_github_username_normalize.py.
+    # What stays HERE is only what genuinely needs the route: that a rejected
+    # handle is never persisted and leaves no receipt.
+
+    def test_a_rejected_handle_is_never_stored(self, api, monkeypatch) -> None:
+        _stub(monkeypatch, {"username": "x", "languages": {}, "repos": []})
+        _register_and_login(api, "gh-not-stored@example.com")
+        _seed_cv(api)
+        api.post("/api/profile/github", data={"username": "ranjith36963.github.io"})
+        got = api.get("/api/profile").json()["summary"]
+        assert got["github_username"] == ""
+        # AND no receipt — the page must not claim a connection that failed.
+        assert got["github_connected_at"] == ""
+
+
+class TestEmptyLookupDoesNotFakeSuccess:
+    def test_a_valid_handle_with_no_public_data_is_a_404(
+        self, api, monkeypatch
+    ) -> None:
+        # Well-formed handle, but GitHub returned nothing (missing user, rate
+        # limit, outage). The old code called this a success.
+        _stub(monkeypatch, {"username": "ghost", "languages": {}, "repos": []})
+        _register_and_login(api, "gh-empty@example.com")
+        _seed_cv(api)
+        r = api.post("/api/profile/github", data={"username": "ghost"})
+        assert r.status_code == 404, r.text
+        got = api.get("/api/profile").json()["summary"]
+        assert got["github_connected_at"] == "", "receipt stamped for a failed enrich"
+        assert got["github_username"] == ""
+
+
+class TestRealDataStillWorks:
+    def test_a_good_enrich_stores_the_handle_and_stamps_the_receipt(
+        self, api, monkeypatch
+    ) -> None:
+        _stub(
+            monkeypatch,
+            {
+                "username": "Ranjith36963",
+                "languages": {"Python": 5000},
+                "repos": [{"name": "job360", "language": "Python"}],
+            },
+        )
+        _register_and_login(api, "gh-good@example.com")
+        _seed_cv(api)
+        r = api.post("/api/profile/github", data={"username": "Ranjith36963"})
+        assert r.status_code == 200, r.text
+        assert r.json()["merged"] is True
+        got = api.get("/api/profile").json()["summary"]
+        assert got["github_username"] == "Ranjith36963"
+        assert got["github_connected_at"], "a successful enrich must leave a receipt"
+
+    def test_a_profile_url_still_works(self, api, monkeypatch) -> None:
+        _stub(
+            monkeypatch,
+            {
+                "username": "Ranjith36963",
+                "languages": {"Python": 1},
+                "repos": [{"name": "r", "language": "Python"}],
+            },
+        )
+        _register_and_login(api, "gh-url@example.com")
+        _seed_cv(api)
+        r = api.post(
+            "/api/profile/github",
+            data={"username": "https://github.com/Ranjith36963"},
+        )
+        assert r.status_code == 200, r.text
+        assert api.get("/api/profile").json()["summary"]["github_username"] == (
+            "Ranjith36963"
+        )
