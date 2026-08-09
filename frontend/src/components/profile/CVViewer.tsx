@@ -237,12 +237,39 @@ export function CVViewer({
   const liProjects = linkedinSubsections?.projects ?? [];
   const liVolunteer = linkedinSubsections?.volunteer ?? [];
   const liCourses = linkedinSubsections?.courses ?? [];
+  // 2026-08-09 — the seven sections the parser split and nobody read, plus the
+  // Contact block. Same "stored but never rendered" gap that hid 92 GitHub
+  // signals; closed here for the other input.
+  const liHonors = linkedinSubsections?.honors ?? [];
+  const liPublications = linkedinSubsections?.publications ?? [];
+  const liPatents = linkedinSubsections?.patents ?? [];
+  const liOrganizations = linkedinSubsections?.organizations ?? [];
+  const liTestScores = linkedinSubsections?.test_scores ?? [];
+  const liRecommendations = linkedinSubsections?.recommendations ?? [];
+  const liInterests = linkedinSubsections?.interests ?? [];
+  const liContact = (linkedinSubsections?.contact ?? [])[0] ?? {};
+  const liContactRows: [string, string][] = (
+    [
+      ["Email", strField(liContact, "email")],
+      ["Phone", strField(liContact, "phone")],
+      ["LinkedIn", strField(liContact, "linkedin_url")],
+      ["Websites", strArrField(liContact, "websites").join(", ")],
+    ] as [string, string][]
+  ).filter(([, v]) => Boolean(v));
   const hasLinkedinDetail =
     liPositions.length > 0 ||
     liLanguages.length > 0 ||
     liProjects.length > 0 ||
     liVolunteer.length > 0 ||
-    liCourses.length > 0;
+    liCourses.length > 0 ||
+    liHonors.length > 0 ||
+    liPublications.length > 0 ||
+    liPatents.length > 0 ||
+    liOrganizations.length > 0 ||
+    liTestScores.length > 0 ||
+    liRecommendations.length > 0 ||
+    liInterests.length > 0 ||
+    liContactRows.length > 0;
 
   // ── GitHub temporal (languages by byte share + topics) ─────
   const ghLanguages = Object.entries(githubTemporal?.languages ?? {}).filter(
@@ -574,6 +601,208 @@ export function CVViewer({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Contact — parsed today only to confirm the file WAS a LinkedIn
+              export, then discarded. Structured now; `websites` excludes the
+              linkedin.com URL itself, which is already its own row. */}
+          {liContactRows.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Contact" />
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+                {liContactRows.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="break-all text-foreground/85">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
+          {/* ── The seven sections that were split and then dropped ──
+              Each renders only when the profile carries it, so a LinkedIn
+              export without them stays silent (rule #29). */}
+
+          {liRecommendations.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={HeartHandshake}
+                text={`Recommendations (${liRecommendations.length})`}
+              />
+              {/* Third-party evidence — other people's words about this
+                  person's work, the LinkedIn analogue of a GitHub README. */}
+              <ul className="space-y-2 pl-5">
+                {liRecommendations.map((item, i) => {
+                  const text = strField(item, "text");
+                  if (!text) return null;
+                  const author = strField(item, "author");
+                  const rel = strField(item, "relationship");
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                    >
+                      <p className="text-xs leading-relaxed text-foreground/85">
+                        {text}
+                      </p>
+                      {(author || rel) && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {[author, rel].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liPublications.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={BookOpen}
+                text={`Publications (${liPublications.length})`}
+              />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liPublications.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "publisher"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liPatents.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Award} text={`Patents (${liPatents.length})`} />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liPatents.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "number"),
+                    strField(item, "status"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liHonors.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Trophy} text={`Honors & awards (${liHonors.length})`} />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liHonors.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "issuer"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liOrganizations.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Building}
+                text={`Organisations (${liOrganizations.length})`}
+              />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liOrganizations.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  const meta = [
+                    strField(item, "role"),
+                    [strField(item, "start"), strField(item, "end")]
+                      .filter(Boolean)
+                      .join(" – "),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{name}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liTestScores.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Award} text={`Test scores (${liTestScores.length})`} />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {liTestScores.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  const score = strField(item, "score");
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-400"
+                    >
+                      {name}
+                      {score ? ` · ${score}` : ""}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liInterests.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Hash} text={`Interests (${liInterests.length})`} />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {liInterests.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-full bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
+                    >
+                      {name}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 

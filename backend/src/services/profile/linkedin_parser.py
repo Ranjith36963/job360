@@ -226,6 +226,68 @@ def _extract_header_fields(header_text: str) -> dict[str, str]:
     return {"name": name, "headline": headline, "industry": industry}
 
 
+# NOTE: deliberately NOT named _EMAIL_RE. One already exists further down this
+# module with a CAPTURE GROUP, and being defined later it would shadow this one
+# — `findall` would then return only the group (the local part), silently
+# storing "ada" instead of "ada@example.com". Caught by running the parser over
+# a real export rather than a fixture.
+_CONTACT_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?[\w-]+\.[\w.-]+(?:/[\w./?%&=~-]*)?")
+
+
+def _extract_contact_fields(contact_text: str) -> dict[str, Any]:
+    """Structure the LinkedIn "Contact" block instead of discarding it.
+
+    That section was SPLIT (so it bounded its neighbours) and then read by
+    nobody — the same "parsed and thrown away" shape as GitHub's identity block.
+    It holds the person's email, phone, profile URL and personal sites.
+
+    Deterministic on purpose (rule #28 territory): emails, phone numbers and
+    URLs are PATTERNS, not semantics, so this needs no LLM and cannot
+    hallucinate. Anything ambiguous is simply left out.
+
+    ``websites`` excludes the linkedin.com URL itself — that is already
+    ``linkedin_url``, and repeating it as a "personal site" would be wrong.
+    """
+    text = contact_text or ""
+    if not text.strip():
+        return {}
+
+    emails = _CONTACT_EMAIL_RE.findall(text)
+    li_match = _LINKEDIN_URL_RE.search(text.replace("\n", ""))
+
+    phones: list[str] = []
+    for cand in _PHONE_RE.findall(text):
+        digits = re.sub(r"\D", "", cand)
+        # A real number, not a year or a stray page reference.
+        if 9 <= len(digits) <= 15:
+            phones.append(cand.strip())
+
+    websites: list[str] = []
+    for line in text.splitlines():
+        if _CONTACT_EMAIL_RE.search(line):
+            continue  # an address is not a website
+        for url in _URL_RE.findall(line):
+            u = url.strip().rstrip(".,;)")
+            if "." not in u or "linkedin.com" in u.lower():
+                continue
+            if u.lower() in {w.lower() for w in websites}:
+                continue
+            websites.append(u)
+
+    out: dict[str, Any] = {}
+    if emails:
+        out["email"] = emails[0]
+    if phones:
+        out["phone"] = phones[0]
+    if li_match:
+        out["linkedin_url"] = li_match.group(0)
+    if websites:
+        out["websites"] = websites
+    return out
+
+
 _TECH_LINE = re.compile(
     r"^\s*(?:technologies|tech stack|tools|skills|continuously learning)\s*:\s*(.*)$",
     re.IGNORECASE,
@@ -440,6 +502,109 @@ _VOLUNTEER_PROMPT = (
     "---"
 )
 
+# ── The seven sections the splitter recognised and nobody read ──────────────
+# ``_SECTION_HEADINGS`` lists 20 headings; only 11 had an extractor. The rest
+# were split purely so they acted as boundaries, then dropped. Each below is
+# real evidence on the profiles that carry it — see CVData for why each earns a
+# shelf. Same shape as the prompts above: one section of text in, typed rows
+# out, empty list when the section is absent.
+
+_HONORS_PROMPT = """Extract every award from the LinkedIn Honors & Awards section text below.
+Return JSON: {{"honors": [{{"title": str, "issuer": str, "date": str, "description": str}}, ...]}}
+
+Rules:
+- "title" = the award name as written.
+- "issuer" = the awarding body if present. Empty if missing.
+- "date" verbatim as written. Empty if missing.
+- "description" = any prose body. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_PUBLICATIONS_PROMPT = """Extract every publication from the LinkedIn Publications section text below.
+Return JSON: {{"publications": [{{"title": str, "publisher": str, "date": str, "url": str, "description": str}}, ...]}}
+
+Rules:
+- "title" = the paper/article title.
+- "publisher" = journal, conference or outlet if present. Empty if missing.
+- "date" verbatim. Empty if missing.
+- "url" = link if present in the text; empty otherwise.
+- "description" = abstract/summary prose. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_PATENTS_PROMPT = """Extract every patent from the LinkedIn Patents section text below.
+Return JSON: {{"patents": [{{"title": str, "number": str, "status": str, "date": str}}, ...]}}
+
+Rules:
+- "title" = the patent title.
+- "number" = patent/application number if present. Empty if missing.
+- "status" = e.g. "Issued", "Pending". Empty if not stated.
+- "date" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_ORGANIZATIONS_PROMPT = """Extract every organisation from the LinkedIn Organizations section text below.
+Return JSON: {{"organizations": [{{"name": str, "role": str, "start": str, "end": str}}, ...]}}
+
+Rules:
+- "name" = the organisation or professional body (e.g. "BCS", "IEEE").
+- "role" = the stated position/membership if present. Empty if missing.
+- "start"/"end" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_TEST_SCORES_PROMPT = """Extract every test score from the LinkedIn Test Scores section text below.
+Return JSON: {{"test_scores": [{{"name": str, "score": str, "date": str}}, ...]}}
+
+Rules:
+- "name" = the test (e.g. "IELTS", "GRE", "TOEFL").
+- "score" = the score exactly as written, including any band/section detail.
+- "date" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_RECOMMENDATIONS_PROMPT = """Extract every recommendation from the LinkedIn Recommendations section text below.
+Return JSON: {{"recommendations": [{{"author": str, "relationship": str, "text": str}}, ...]}}
+
+Rules:
+- "author" = who wrote it, if named. Empty if missing.
+- "relationship" = how they know this person (e.g. "managed directly"). Empty if missing.
+- "text" = the recommendation prose, verbatim, trimmed to 600 characters.
+- These are OTHER PEOPLE's words about this person — do not paraphrase or
+  summarise them, and never invent one.
+
+TEXT:
+---
+{text}
+---"""
+
+_INTERESTS_PROMPT = """Extract every followed company, group or influencer from the LinkedIn Interests section text below.
+Return JSON: {{"interests": ["Name One", "Name Two", ...]}}
+
+Rules:
+- One entry per line/name as written. Names only, no commentary.
+- Return [] if the section holds nothing nameable.
+
+TEXT:
+---
+{text}
+---"""
+
 _COURSES_PROMPT = """Extract every course from the LinkedIn Courses section text below.
 Return JSON: {{"courses": [{{"title": str, "institution": str, "date": str}}, ...]}}
 
@@ -648,6 +813,32 @@ def _coerce_volunteer(raw: Any) -> list[dict[str, str]]:
     return out
 
 
+def _coerce_rows(raw: Any, fields: tuple[str, ...]) -> list[dict[str, str]]:
+    """Coerce an LLM row list to typed dicts with exactly ``fields``.
+
+    One shared cleaner for the seven sections added 2026-08-09 (honors,
+    publications, patents, organizations, test scores, recommendations). Their
+    shapes differ only in FIELD NAMES, so a coercer each would be six copies of
+    the same defensive loop — and six places for a future fix to be applied five
+    times.
+
+    A row is kept only when its FIRST field (the identifying one: title / name /
+    author) has content, mirroring the existing per-section coercers: a row with
+    no identity is LLM noise, not an entry.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        row = {f: coerce_str(item.get(f)).strip() for f in fields}
+        if not row[fields[0]]:
+            continue
+        out.append(row)
+    return out
+
+
 def _coerce_courses(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
@@ -680,6 +871,15 @@ def _empty_linkedin_data() -> dict[str, Any]:
         "projects": [],
         "volunteer": [],
         "courses": [],
+        # 2026-08-09 — the seven sections that were split and then discarded.
+        "honors": [],
+        "publications": [],
+        "patents": [],
+        "organizations": [],
+        "test_scores": [],
+        "recommendations": [],
+        "interests": [],
+        "contact": {},
         # Two-pass — raw text kept for offline LLM re-runs (empty here).
         "raw_text": "",
     }
@@ -751,6 +951,10 @@ def deterministic_linkedin_fields(text: str) -> dict[str, Any]:
         "summary": summary,
         "industry": header.get("industry", ""),
         "headline": header.get("headline", ""),
+        # The Contact block, structured rather than discarded. Deterministic:
+        # emails/phones/URLs are patterns, so this costs no LLM call and
+        # cannot hallucinate.
+        "contact": _extract_contact_fields(sections.get("contact", "")),
         # Keep the extracted text so the passes can re-run on a later profile
         # change without the user re-uploading the PDF.
         "raw_text": text,
@@ -784,6 +988,16 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     projects_text = sections.get("projects", "")
     volunteer_text = sections.get("volunteer experience", "")
     courses_text = sections.get("courses", "")
+    # 2026-08-09 — the seven sections that were split and then discarded.
+    honors_text = (
+        sections.get("honors & awards", "") or sections.get("honors-awards", "")
+    )
+    publications_text = sections.get("publications", "")
+    patents_text = sections.get("patents", "")
+    organizations_text = sections.get("organizations", "")
+    test_scores_text = sections.get("test scores", "")
+    recommendations_text = sections.get("recommendations", "")
+    interests_text = sections.get("interests", "")
 
     # Seven section LLM calls + the prose-skills pass, in parallel — only the
     # ones with text actually hit a provider (``_maybe`` short-circuits blanks).
@@ -795,6 +1009,8 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     (
         exp_raw, edu_raw, cert_raw,
         lang_raw, proj_raw, vol_raw, course_raw, prose_skills,
+        honors_raw, pubs_raw, patents_raw, orgs_raw,
+        scores_raw, recs_raw, interests_raw,
     ) = await asyncio.gather(
         _maybe(_EXPERIENCE_PROMPT, experience_text, "positions"),
         _maybe(_EDUCATION_PROMPT, education_text, "education"),
@@ -804,6 +1020,16 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         _maybe(_VOLUNTEER_PROMPT, volunteer_text, "volunteer"),
         _maybe(_COURSES_PROMPT, courses_text, "courses"),
         llm_infer_linkedin_skills(text),
+        # ``_maybe`` short-circuits an absent section without touching a
+        # provider, so a profile with none of these costs exactly nothing —
+        # which is why adding seven calls does not add seven calls.
+        _maybe(_HONORS_PROMPT, honors_text, "honors"),
+        _maybe(_PUBLICATIONS_PROMPT, publications_text, "publications"),
+        _maybe(_PATENTS_PROMPT, patents_text, "patents"),
+        _maybe(_ORGANIZATIONS_PROMPT, organizations_text, "organizations"),
+        _maybe(_TEST_SCORES_PROMPT, test_scores_text, "test_scores"),
+        _maybe(_RECOMMENDATIONS_PROMPT, recommendations_text, "recommendations"),
+        _maybe(_INTERESTS_PROMPT, interests_text, "interests"),
     )
 
     def _get(r: Any, key: str) -> Any:
@@ -818,6 +1044,34 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         "volunteer": _coerce_volunteer(_get(vol_raw, "volunteer")),
         "courses": _coerce_courses(_get(course_raw, "courses")),
         "skills": list(prose_skills) if isinstance(prose_skills, list) else [],
+        # The seven previously-discarded sections. Coerced through one shared
+        # row cleaner rather than seven near-identical ones — the shapes differ
+        # only in their field names, and a per-section coercer for each would be
+        # six copies of the same defensive loop.
+        "honors": _coerce_rows(
+            _get(honors_raw, "honors"), ("title", "issuer", "date", "description")
+        ),
+        "publications": _coerce_rows(
+            _get(pubs_raw, "publications"),
+            ("title", "publisher", "date", "url", "description"),
+        ),
+        "patents": _coerce_rows(
+            _get(patents_raw, "patents"), ("title", "number", "status", "date")
+        ),
+        "organizations": _coerce_rows(
+            _get(orgs_raw, "organizations"), ("name", "role", "start", "end")
+        ),
+        "test_scores": _coerce_rows(
+            _get(scores_raw, "test_scores"), ("name", "score", "date")
+        ),
+        "recommendations": _coerce_rows(
+            _get(recs_raw, "recommendations"), ("author", "relationship", "text")
+        ),
+        "interests": [
+            s.strip()
+            for s in (_get(interests_raw, "interests") or [])
+            if isinstance(s, str) and s.strip()
+        ],
     }
 
 
@@ -972,6 +1226,12 @@ def enrich_cv_from_linkedin(
     if linkedin_data.get("raw_text"):
         cv.linkedin_raw_text = linkedin_data["raw_text"]
 
+    # Contact is deterministic, so it is stored OUTSIDE the ``llm_ran`` gate:
+    # a re-parse that skipped the paid passes must still refresh it. Only
+    # overwrite on a non-empty parse so a failed read never blanks it.
+    if linkedin_data.get("contact"):
+        cv.linkedin_contact = dict(linkedin_data["contact"])
+
     # Batch 1.5 — expanded sections. Overwrite rather than merge: LinkedIn
     # is the canonical source for these, and re-parsing a profile should
     # reflect the new state rather than accumulate stale entries.
@@ -980,5 +1240,15 @@ def enrich_cv_from_linkedin(
         cv.linkedin_projects = linkedin_data.get("projects", [])
         cv.linkedin_volunteer = linkedin_data.get("volunteer", [])
         cv.linkedin_courses = linkedin_data.get("courses", [])
+        # Same overwrite rule: LinkedIn is canonical for its own sections, so a
+        # re-parse reflects the CURRENT profile instead of accumulating entries
+        # the person has since deleted.
+        cv.linkedin_honors = linkedin_data.get("honors", [])
+        cv.linkedin_publications = linkedin_data.get("publications", [])
+        cv.linkedin_patents = linkedin_data.get("patents", [])
+        cv.linkedin_organizations = linkedin_data.get("organizations", [])
+        cv.linkedin_test_scores = linkedin_data.get("test_scores", [])
+        cv.linkedin_recommendations = linkedin_data.get("recommendations", [])
+        cv.linkedin_interests = linkedin_data.get("interests", [])
 
     return cv
