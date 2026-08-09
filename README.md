@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-09 by /sync -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -346,7 +346,7 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/              # 26 forward+reverse SQL migration pairs (0000 → 0025) + runner.py
+│   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
