@@ -215,6 +215,21 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         "projects": list(getattr(cv, "linkedin_projects", []) or []),
         "volunteer": list(getattr(cv, "linkedin_volunteer", []) or []),
         "courses": list(getattr(cv, "linkedin_courses", []) or []),
+        # 2026-08-09 — seven sections the parser split and nobody read, plus
+        # the Contact block. Same "stored but not shown" gap that hid 92
+        # GitHub signals, closed on the other input.
+        "honors": list(getattr(cv, "linkedin_honors", []) or []),
+        "publications": list(getattr(cv, "linkedin_publications", []) or []),
+        "patents": list(getattr(cv, "linkedin_patents", []) or []),
+        "organizations": list(getattr(cv, "linkedin_organizations", []) or []),
+        "test_scores": list(getattr(cv, "linkedin_test_scores", []) or []),
+        "recommendations": list(getattr(cv, "linkedin_recommendations", []) or []),
+        "interests": [
+            {"name": i} for i in (getattr(cv, "linkedin_interests", []) or [])
+        ],
+        "contact": [getattr(cv, "linkedin_contact", {}) or {}]
+        if getattr(cv, "linkedin_contact", None)
+        else [],
     }
     github_temporal: dict[str, dict[str, Any]] = {
         "languages": dict(getattr(cv, "github_languages", {}) or {}),
@@ -695,6 +710,14 @@ def _clear_linkedin(cv: CVData) -> None:
     cv.linkedin_courses = []
     cv.linkedin_filename = ""
     cv.linkedin_uploaded_at = ""
+    cv.linkedin_honors = []
+    cv.linkedin_publications = []
+    cv.linkedin_patents = []
+    cv.linkedin_organizations = []
+    cv.linkedin_test_scores = []
+    cv.linkedin_recommendations = []
+    cv.linkedin_interests = []
+    cv.linkedin_contact = {}
     cv.llm_input_hashes.pop("linkedin", None)
 
 

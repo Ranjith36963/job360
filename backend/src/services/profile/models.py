@@ -61,6 +61,39 @@ class CVData:
     linkedin_projects: list[dict[str, Any]] = field(default_factory=list)
     linkedin_volunteer: list[dict[str, Any]] = field(default_factory=list)
     linkedin_courses: list[dict[str, Any]] = field(default_factory=list)
+    # ── LinkedIn sections the parser SPLIT but nobody read (2026-08-09) ──
+    #
+    # ``_SECTION_HEADINGS`` recognises 20 headings; only 11 had an extractor and
+    # a shelf. The other seven were split out purely so they acted as
+    # boundaries, then discarded — the same "fetched and thrown away" shape as
+    # GitHub's identity block.
+    #
+    # Each of these is real matching evidence on the profiles that carry it:
+    #   honors        — awards, the achievement claim a CV usually buries
+    #   publications  — research output; decisive for research/ML roles
+    #   patents       — the strongest single technical credibility signal
+    #   organizations — professional bodies (BCS, IEEE) => domain + seniority
+    #   test_scores   — IELTS/TOEFL/GRE; language proficiency, and UK-visa
+    #                   relevant, which no other input states
+    #   recommendations — other people's PROSE about this person's work. Third-
+    #                   party evidence, the LinkedIn analogue of a GitHub README
+    #   interests     — companies and groups followed => industry preference
+    #
+    # JSON blob, so no migration: ``storage._filter_fields`` drops unknown keys
+    # and old rows load with empty lists.
+    linkedin_honors: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_publications: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_patents: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_organizations: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_test_scores: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_recommendations: list[dict[str, Any]] = field(default_factory=list)
+    linkedin_interests: list[str] = field(default_factory=list)
+    # STRUCTURED contact block. The LinkedIn PDF's "Contact" section carries
+    # email, phone, the profile URL and personal websites — parsed today only to
+    # confirm the file IS a LinkedIn export, then dropped. ``location`` matters
+    # most: it is a place claim the UK eligibility gate can reason about (#30),
+    # and LinkedIn states it even when a CV does not.
+    linkedin_contact: dict[str, Any] = field(default_factory=dict)
     # GitHub-sourced data
     github_languages: dict[str, int] = field(default_factory=dict)
     github_topics: list[str] = field(default_factory=list)
