@@ -1368,6 +1368,32 @@ async def run_search(
                 matcher_stats=matcher_telemetry().as_dict(),
             )
 
+            # Zero-result alarm. Source rot is SILENT by construction: a 404
+            # makes _get_json return None, a renamed XML tag makes the parse
+            # loop never execute — the source returns [], nothing raises, and
+            # the circuit breaker never trips. nhs_jobs and successfactors sat
+            # at zero for months this way. logger.error() is picked up by
+            # Sentry via its logging integration, so this needs no new channel.
+            # Only REGRESSIONS are reported (a source that once worked and
+            # stopped) — flagging permanently-zero sources every run is how an
+            # alert becomes noise and stops being read.
+            try:
+                dead = await db.get_silently_dead_sources(hours=48)
+                if dead:
+                    logger.error(
+                        "SOURCE ROT: %d source(s) returned ZERO jobs for 48h "
+                        "despite working before — %s",
+                        len(dead),
+                        ", ".join(
+                            f"{name} (peak {peak})"
+                            for name, peak in sorted(
+                                dead.items(), key=lambda kv: -kv[1]
+                            )
+                        ),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("zero-result alarm check failed: %s", exc)
+
             # Step-5 — export metrics snapshots after every run (non-fatal).
             try:
                 await export_pipeline_metrics(path)
