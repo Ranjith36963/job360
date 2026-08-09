@@ -713,6 +713,34 @@ class TestUnusableHandleIsRejected:
         # AND no receipt — the page must not claim a connection that failed.
         assert got["github_connected_at"] == ""
 
+    @pytest.mark.parametrize(
+        "li",
+        [
+            "linkedin.com/in/ranjith-ai-engineer",
+            "https://www.linkedin.com/in/ranjith-ai-engineer/",
+        ],
+    )
+    def test_a_linkedin_url_says_where_linkedin_actually_goes(
+        self, api, monkeypatch, li
+    ) -> None:
+        """Name the mistake instead of restating the rule.
+
+        Both boxes sit in the same "Enrich Your Profile" card and a CV lists
+        both links side by side, so pasting the LinkedIn URL into the GitHub
+        box is the likeliest wrong paste there is. "That does not look like a
+        GitHub username" is true and useless — it never says where LinkedIn
+        DOES go, and LinkedIn cannot be read from a link at all (measured:
+        HTTP 999 + a sign-in wall for a server), which is why the PDF exists.
+        """
+        _stub(monkeypatch, {"username": "x", "languages": {}, "repos": []})
+        _register_and_login(api, f"gh-li-{abs(hash(li)) % 9999}@example.com")
+        _seed_cv(api)
+        r = api.post("/api/profile/github", data={"username": li})
+        assert r.status_code == 400, r.text
+        body = r.text.lower()
+        assert "linkedin" in body
+        assert "pdf" in body, "must point at the upload that actually works"
+
     def test_a_github_pages_url_now_resolves(self, api, monkeypatch) -> None:
         """The owner's own Portfolio URL must work — the handle is in it."""
         _stub(monkeypatch, {

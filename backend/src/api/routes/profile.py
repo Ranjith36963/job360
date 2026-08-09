@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -569,6 +570,24 @@ async def upload_github(
     """
     clean_username = normalize_github_username(username)
     if not clean_username:
+        # Name the mistake when we can recognise it. A LinkedIn URL in the
+        # GitHub box is the single most likely wrong paste — both boxes live in
+        # the same "Enrich Your Profile" card, and a CV lists both links side by
+        # side. Telling that user "that does not look like a GitHub username" is
+        # true and useless: it does not say where their LinkedIn DOES go, and
+        # LinkedIn cannot be read from a link at all (measured: linkedin.com
+        # answers a server with HTTP 999 and a sign-in wall, no profile data),
+        # which is exactly why the PDF export exists.
+        if re.search(r"linkedin\.com", username or "", re.IGNORECASE):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "That is a LinkedIn URL, and this box is for GitHub. "
+                    "LinkedIn cannot be read from a link — use \"Enrich "
+                    "LinkedIn\" above and upload the PDF (on LinkedIn: your "
+                    "profile -> More -> Save to PDF)."
+                ),
+            )
         raise HTTPException(
             status_code=400,
             detail=(
