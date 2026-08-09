@@ -92,6 +92,19 @@
         "title": "ApplicationTimelineResponse",
         "type": "object"
       },
+      "Body_clear_profile_section_api_profile_clear_post": {
+        "properties": {
+          "section": {
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section"
+        ],
+        "title": "Body_clear_profile_section_api_profile_clear_post",
+        "type": "object"
+      },
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
@@ -4619,6 +4632,66 @@
           }
         },
         "summary": "Upsert Profile",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/clear": {
+      "post": {
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing to extract, and a\npaid LLM round-trip to rebuild an empty profile would be waste. The stored\nsnapshot taken by ``save_profile`` is what makes this reversible.",
+        "operationId": "clear_profile_section_api_profile_clear_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_clear_profile_section_api_profile_clear_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Profile Section",
         "tags": [
           "profile"
         ]

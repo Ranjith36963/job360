@@ -764,6 +764,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Profile Section
+         * @description Empty ONE input (or the whole profile), so the next upload starts clean.
+         *
+         *     ``section``: cv | linkedin | github | preferences | all.
+         *
+         *     Deliberately does NOT re-run extraction: there is nothing to extract, and a
+         *     paid LLM round-trip to rebuild an empty profile would be waste. The stored
+         *     snapshot taken by ``save_profile`` is what makes this reversible.
+         */
+        post: operations["clear_profile_section_api_profile_clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -1468,6 +1494,11 @@ export interface components {
             job_id: number;
             /** Timeline */
             timeline: components["schemas"]["TimelineEntry"][];
+        };
+        /** Body_clear_profile_section_api_profile_clear_post */
+        Body_clear_profile_section_api_profile_clear_post: {
+            /** Section */
+            section: string;
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
@@ -3682,6 +3713,41 @@ export interface operations {
         requestBody?: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_upsert_profile_api_profile_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_profile_section_api_profile_clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_clear_profile_section_api_profile_clear_post"];
             };
         };
         responses: {

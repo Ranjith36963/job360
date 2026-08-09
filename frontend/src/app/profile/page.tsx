@@ -12,14 +12,26 @@ import { CVViewer } from "@/components/profile/CVViewer";
 import { PreferencesForm } from "@/components/profile/PreferencesForm";
 import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer";
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
+import { ClearButton } from "@/components/profile/ClearButton";
 import {
   getProfile,
   uploadProfile,
   uploadLinkedin,
   uploadGithub,
+  clearProfileSection,
+  type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse, PreferencesRequest } from "@/lib/types";
+
+/** Human names for the clear toasts — "cv" is not what a person calls it. */
+const SECTION_LABEL: Record<ClearSection, string> = {
+  cv: "CV",
+  linkedin: "LinkedIn",
+  github: "GitHub",
+  preferences: "Preferences",
+  all: "Profile",
+};
 
 // ── Completeness calculation ────────────────────────────────
 
@@ -163,6 +175,25 @@ export default function ProfilePage() {
     [fetchProfile]
   );
 
+  // One handler for all five clear buttons — the section is the only thing
+  // that differs. The response IS the rebuilt profile, so the page updates from
+  // it directly rather than re-fetching.
+  const handleClear = useCallback(async (section: ClearSection) => {
+    setError(null);
+    try {
+      const data = await clearProfileSection(section);
+      setProfile(data);
+      toast.success(
+        section === "all" ? "Profile cleared" : `${SECTION_LABEL[section]} cleared`,
+        { description: "Undo it from History if that was a mistake." }
+      );
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, "Failed to clear");
+      setError(msg);
+      toast.error(msg);
+    }
+  }, []);
+
   const handleSavePreferences = useCallback(
     async (prefs: PreferencesRequest) => {
       setError(null);
@@ -234,6 +265,17 @@ export default function ProfilePage() {
                 <History className="h-3.5 w-3.5" />
                 History
               </Button>
+              {/* Sits next to History deliberately: History is the undo for it.
+                  A profile you can empty in one click is what makes "upload a
+                  CV and see exactly what came out" a clean experiment instead
+                  of a reading of everything ever uploaded. */}
+              {profile && (
+                <ClearButton
+                  label="Clear profile"
+                  confirmLabel="Click again to clear everything"
+                  onConfirm={() => handleClear("all")}
+                />
+              )}
             </div>
 
             {/* Completeness badge */}
@@ -318,6 +360,7 @@ export default function ProfilePage() {
                 onUpload={handleCVUpload}
                 onLinkedinUpload={handleLinkedinUpload}
                 onGithubEnrich={handleGithubEnrich}
+                onClearSection={handleClear}
                 profile={profile?.summary ?? null}
                 cvDetail={profile?.cv_detail ?? null}
                 loading={loadingProfile}
@@ -327,6 +370,7 @@ export default function ProfilePage() {
               <PreferencesForm
                 preferences={profile?.preferences ?? {}}
                 onSave={handleSavePreferences}
+                onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
               />
             </div>

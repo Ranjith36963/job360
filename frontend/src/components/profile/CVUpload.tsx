@@ -18,12 +18,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { ClearButton } from "@/components/profile/ClearButton";
 import type { ProfileSummary, CVDetail } from "@/lib/types";
 
 interface CVUploadProps {
   onUpload: (file: File) => Promise<void>;
   onLinkedinUpload?: (file: File) => Promise<void>;
   onGithubEnrich?: (username: string) => Promise<void>;
+  /** Empty ONE input so the next upload starts from nothing. Undoable via History. */
+  onClearSection?: (section: "cv" | "linkedin" | "github") => Promise<void>;
   profile: ProfileSummary | null;
   cvDetail?: CVDetail | null;
   loading: boolean;
@@ -168,6 +171,7 @@ export function CVUpload({
   onUpload,
   onLinkedinUpload,
   onGithubEnrich,
+  onClearSection,
   profile,
   cvDetail,
   loading,
@@ -514,17 +518,28 @@ export function CVUpload({
               </span>
             </div>
 
-            {/* Re-upload button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || loading}
-              className="gap-2"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Re-upload CV
-            </Button>
+            {/* Re-upload + clear, side by side: the two things you do to a CV
+                that is already here. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || loading}
+                className="gap-2"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Re-upload CV
+              </Button>
+              {onClearSection && (
+                <ClearButton
+                  label="Clear CV"
+                  confirmLabel="Click again to clear the CV"
+                  disabled={uploading || loading}
+                  onConfirm={() => onClearSection("cv")}
+                />
+              )}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -585,10 +600,21 @@ export function CVUpload({
             </Button>
           </div>
           {profile?.has_linkedin && (
-            <UploadReceipt
-              name={profile.linkedin_filename || "LinkedIn profile on file"}
-              at={profile.linkedin_uploaded_at}
-            />
+            <>
+              <UploadReceipt
+                name={profile.linkedin_filename || "LinkedIn profile on file"}
+                at={profile.linkedin_uploaded_at}
+              />
+              {onClearSection && (
+                <ClearButton
+                  label="Clear LinkedIn"
+                  confirmLabel="Click again to clear LinkedIn"
+                  disabled={linkedinLoading}
+                  onConfirm={() => onClearSection("linkedin")}
+                  className="w-full"
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -642,21 +668,32 @@ export function CVUpload({
               count as proof of what we actually read. This card previously had
               NO confirmation of any kind after a successful enrich. */}
           {profile?.has_github && (
-            <UploadReceipt
-              name={
-                profile.github_username
-                  ? `@${profile.github_username}`
-                  : "GitHub connected"
-              }
-              at={profile.github_connected_at}
-              meta={
-                profile.github_repo_count
-                  ? `${profile.github_repo_count} public ${
-                      profile.github_repo_count === 1 ? "repo" : "repos"
-                    } read`
-                  : undefined
-              }
-            />
+            <>
+              <UploadReceipt
+                name={
+                  profile.github_username
+                    ? `@${profile.github_username}`
+                    : "GitHub connected"
+                }
+                at={profile.github_connected_at}
+                meta={
+                  profile.github_repo_count
+                    ? `${profile.github_repo_count} public ${
+                        profile.github_repo_count === 1 ? "repo" : "repos"
+                      } read`
+                    : undefined
+                }
+              />
+              {onClearSection && (
+                <ClearButton
+                  label="Clear GitHub"
+                  confirmLabel="Click again to clear GitHub"
+                  disabled={githubLoading}
+                  onConfirm={() => onClearSection("github")}
+                  className="w-full"
+                />
+              )}
+            </>
           )}
         </div>
 
