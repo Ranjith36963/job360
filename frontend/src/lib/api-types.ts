@@ -2111,6 +2111,13 @@ export interface components {
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
             /**
+             * Github Detail
+             * @default {}
+             */
+            github_detail: {
+                [key: string]: unknown;
+            };
+            /**
              * Github Temporal
              * @default {}
              */

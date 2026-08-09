@@ -1543,6 +1543,12 @@
               }
             ]
           },
+          "github_detail": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Github Detail",
+            "type": "object"
+          },
           "github_temporal": {
             "additionalProperties": {
               "additionalProperties": true,
