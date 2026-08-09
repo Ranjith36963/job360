@@ -834,11 +834,11 @@ export interface paths {
          *     0 repos. A receipt that confirms something that did not happen is worse than
          *     no receipt at all.
          *
-         *     A handle that does not reduce to a valid GitHub username is now a 400 with
-         *     wording the person can act on. ``normalize_github_username`` accepts a
-         *     profile URL and an @handle, but NOT a ``<user>.github.io`` portfolio URL —
-         *     which is exactly what a user is likely to paste, since a CV lists that as
-         *     "Portfolio". The message therefore names what we DO accept.
+         *     A handle that does not reduce to a valid GitHub username is a 400 with
+         *     wording the person can act on. ``normalize_github_username`` accepts a bare
+         *     handle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL
+         *     (whose subdomain IS the username — a CV lists that under "Portfolio", so it
+         *     is exactly what people paste here).
          */
         post: operations["upload_github_api_profile_github_post"];
         delete?: never;

@@ -561,11 +561,11 @@ async def upload_github(
     0 repos. A receipt that confirms something that did not happen is worse than
     no receipt at all.
 
-    A handle that does not reduce to a valid GitHub username is now a 400 with
-    wording the person can act on. ``normalize_github_username`` accepts a
-    profile URL and an @handle, but NOT a ``<user>.github.io`` portfolio URL —
-    which is exactly what a user is likely to paste, since a CV lists that as
-    "Portfolio". The message therefore names what we DO accept.
+    A handle that does not reduce to a valid GitHub username is a 400 with
+    wording the person can act on. ``normalize_github_username`` accepts a bare
+    handle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL
+    (whose subdomain IS the username — a CV lists that under "Portfolio", so it
+    is exactly what people paste here).
     """
     clean_username = normalize_github_username(username)
     if not clean_username:
@@ -573,8 +573,8 @@ async def upload_github(
             status_code=400,
             detail=(
                 "That does not look like a GitHub username. Enter your handle "
-                "(e.g. octocat) or your profile URL (github.com/octocat) — a "
-                "portfolio site such as octocat.github.io is not a username."
+                "(e.g. octocat), your profile URL (github.com/octocat), or your "
+                "GitHub Pages site (octocat.github.io)."
             ),
         )
     github_data = await fetch_github_profile(clean_username)

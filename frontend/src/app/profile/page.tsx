@@ -135,7 +135,7 @@ export default function ProfilePage() {
         });
         toast.success("CV uploaded and parsed");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to upload CV";
+        const msg = apiErrorMessage(err, "Failed to upload CV");
         setError(msg);
         toast.error(msg);
       }
@@ -151,7 +151,7 @@ export default function ProfilePage() {
         await fetchProfile();
         toast.success("LinkedIn profile enriched");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to upload LinkedIn data";
+        const msg = apiErrorMessage(err, "Failed to upload LinkedIn data");
         setError(msg);
         toast.error(msg);
       }
@@ -167,7 +167,7 @@ export default function ProfilePage() {
         await fetchProfile();
         toast.success("GitHub profile enriched");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to enrich GitHub";
+        const msg = apiErrorMessage(err, "Failed to enrich GitHub");
         setError(msg);
         toast.error(msg);
       }
@@ -202,7 +202,7 @@ export default function ProfilePage() {
         setProfile(data);
         toast.success("Preferences saved");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to save preferences";
+        const msg = apiErrorMessage(err, "Failed to save preferences");
         setError(msg);
         toast.error(msg);
       }

@@ -701,14 +701,35 @@ class TestUnusableHandleIsRejected:
     # handle is never persisted and leaves no receipt.
 
     def test_a_rejected_handle_is_never_stored(self, api, monkeypatch) -> None:
+        # NB: a "<user>.github.io" Pages URL is NOT rejected — its subdomain is
+        # the username, so it resolves. Use input with no handle in it at all.
         _stub(monkeypatch, {"username": "x", "languages": {}, "repos": []})
         _register_and_login(api, "gh-not-stored@example.com")
         _seed_cv(api)
-        api.post("/api/profile/github", data={"username": "ranjith36963.github.io"})
+        r = api.post("/api/profile/github", data={"username": "not a handle!!"})
+        assert r.status_code == 400, r.text
         got = api.get("/api/profile").json()["summary"]
         assert got["github_username"] == ""
         # AND no receipt — the page must not claim a connection that failed.
         assert got["github_connected_at"] == ""
+
+    def test_a_github_pages_url_now_resolves(self, api, monkeypatch) -> None:
+        """The owner's own Portfolio URL must work — the handle is in it."""
+        _stub(monkeypatch, {
+            "username": "Ranjith36963",
+            "languages": {"Python": 1},
+            "repos": [{"name": "r", "language": "Python"}],
+            "repos_brief": [{"name": "r", "language": "Python"}],
+        })
+        _register_and_login(api, "gh-pages@example.com")
+        _seed_cv(api)
+        r = api.post(
+            "/api/profile/github", data={"username": "ranjith36963.github.io"}
+        )
+        assert r.status_code == 200, r.text
+        assert api.get("/api/profile").json()["summary"]["github_username"] == (
+            "ranjith36963"
+        )
 
 
 class TestEmptyLookupDoesNotFakeSuccess:
