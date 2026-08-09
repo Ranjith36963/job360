@@ -236,6 +236,30 @@ _PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
 _URL_RE = re.compile(r"(?:https?://)?(?:www\.)?[\w-]+\.[\w.-]+(?:/[\w./?%&=~-]*)?")
 
 
+def _is_linkedin_host(url: str) -> bool:
+    """True when ``url``'s HOST is linkedin.com (or a subdomain of it).
+
+    Compares the parsed hostname, never a substring. ``"linkedin.com" in url``
+    is wrong in both directions and CodeQL flags it (py/incomplete-url-
+    substring-sanitization, high):
+      * ``linkedin.com.attacker.io``  would be TREATED as LinkedIn, and
+      * ``notlinkedin.com``           would be wrongly dropped from a person's
+        own website list.
+
+    A scheme is added before parsing because these come out of a PDF as bare
+    hosts ("www.linkedin.com/in/ada"), which ``urlparse`` would otherwise read
+    as a path with no host at all.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415 — stdlib, used once here
+
+    candidate = url if "://" in url else f"http://{url}"
+    try:
+        host = (urlparse(candidate).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
 def _extract_contact_fields(contact_text: str) -> dict[str, Any]:
     """Structure the LinkedIn "Contact" block instead of discarding it.
 
@@ -270,7 +294,7 @@ def _extract_contact_fields(contact_text: str) -> dict[str, Any]:
             continue  # an address is not a website
         for url in _URL_RE.findall(line):
             u = url.strip().rstrip(".,;)")
-            if "." not in u or "linkedin.com" in u.lower():
+            if "." not in u or _is_linkedin_host(u):
                 continue
             if u.lower() in {w.lower() for w in websites}:
                 continue
