@@ -36,6 +36,14 @@ class TestAcceptsWhatPeopleActuallyPaste:
             ("github.com/Ranjith36963/job360", "Ranjith36963"),
             ("www.github.com/Ranjith36963?tab=repositories", "Ranjith36963"),
             ("Ranjith36963/", "Ranjith36963"),
+            # A GitHub PAGES url carries the username in its SUBDOMAIN. A CV
+            # lists this under "Portfolio", so it is exactly what gets pasted
+            # into a box labelled "GitHub Profile" — and the handle really is
+            # in there, so refusing it was over-strict.
+            ("ranjith36963.github.io", "ranjith36963"),
+            ("https://ranjith36963.github.io", "ranjith36963"),
+            ("http://ranjith36963.github.io/", "ranjith36963"),
+            ("ranjith36963.github.io/some-project", "ranjith36963"),
         ],
     )
     def test_reduces_to_the_bare_handle(self, raw: str, expected: str) -> None:
@@ -46,14 +54,15 @@ class TestRejectsWhatIsNotAHandle:
     @pytest.mark.parametrize(
         "raw",
         [
-            "ranjith36963.github.io",          # a PORTFOLIO url — the real trap
-            "https://ranjith36963.github.io",  # ditto, with scheme
             "https:",                          # junk that once got STORED verbatim
             "   ",
             "",
             "-leading-dash",                   # GitHub handles cannot start with -
             "has space",
             "a" * 40,                          # over GitHub's 39-char limit
+            "github.io",                       # no subdomain = no username in it
+            ".github.io",
+            "example.com/octocat",             # some other site entirely
         ],
     )
     def test_returns_empty_so_no_caller_can_persist_poison(self, raw: str) -> None:

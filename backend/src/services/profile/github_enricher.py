@@ -63,6 +63,21 @@ def normalize_github_username(raw: str) -> str:
         return ""
     # Drop a leading @ that users copy from social handles.
     s = s.lstrip("@").strip()
+    # A GitHub PAGES url encodes the username in its SUBDOMAIN:
+    # "octocat.github.io" IS octocat. Checked BEFORE the github.com rule, since
+    # the string also contains "github.io" not "github.com".
+    #
+    # This case is not academic: a CV lists the Pages site under "Portfolio", so
+    # it is exactly what someone pastes into a box labelled "GitHub Profile".
+    # Rejecting it told the owner his own URL was "not a GitHub username" while
+    # the username was sitting in it — over-strict, and it read as a bug.
+    pages = re.match(
+        r"^(?:https?://)?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)\.github\.io(?:/.*)?$",
+        s,
+        re.IGNORECASE,
+    )
+    if pages:
+        return pages.group(1)
     # If it mentions github.com, take the first path segment after it.
     # Tolerates http(s)://, www., a trailing path, query string, or fragment.
     match = re.search(r"github\.com/+([^/?#\s]+)", s, re.IGNORECASE)
