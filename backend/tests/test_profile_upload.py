@@ -767,3 +767,153 @@ class TestRealDataStillWorks:
         assert api.get("/api/profile").json()["summary"]["github_username"] == (
             "Ranjith36963"
         )
+
+
+# ---------------------------------------------------------------------------
+# Clearing an input — you cannot trust a test you cannot reset
+# ---------------------------------------------------------------------------
+# Every contamination bug found on the owner's live profile (another person's
+# GitHub, then their LinkedIn, then their education/certs/titles merged into the
+# CV fields) was hard to SEE because stale data lingered and each upload merged
+# into it. These pin the two properties that make a reset trustworthy:
+#   1. a scope clears what that input OWNS and nothing else, and
+#   2. the cached LLM hash goes with it, so re-uploading the SAME file really
+#      re-extracts instead of being skipped as "already read".
+
+
+def _seed_full_profile(api_client, monkeypatch):
+    """A profile carrying CV + LinkedIn + GitHub + typed preferences."""
+    import json as _json
+
+    import src.api.routes.profile as profile_route
+
+    _stub(monkeypatch, {
+        "username": "octocat",
+        "languages": {"Python": 10},
+        "repos": [{"name": "r", "language": "Python"}],
+        "repos_brief": [{"name": "r", "language": "Python"}],
+    })
+    monkeypatch.setattr(profile_route, "extract_linkedin_text", lambda p: "LinkedIn text")
+    monkeypatch.setattr(profile_route, "_looks_like_linkedin", lambda t: True)
+
+    api_client.post(
+        "/api/profile/cv",
+        files={"cv": ("my_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+    )
+    api_client.post(
+        "/api/profile/linkedin",
+        files={"file": ("li.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+    )
+    api_client.post("/api/profile/github", data={"username": "octocat"})
+    api_client.post(
+        "/api/profile/preferences",
+        data={"preferences": _json.dumps({"additional_skills": ["Rust"],
+                                          "target_job_titles": ["SRE"]})},
+    )
+
+
+class TestClearSectionRemovesOnlyThatSection:
+    def test_clearing_the_cv_leaves_linkedin_and_github(self, api, monkeypatch) -> None:
+        _register_and_login(api, "clear-cv@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "cv"})
+        assert r.status_code == 200, r.text
+        s = r.json()["summary"]
+        assert s["cv_length"] == 0
+        assert s["cv_filename"] == ""
+        # The OTHER inputs survive. Asserted on the RECEIPT, not on
+        # `has_linkedin`: that flag is derived from EXTRACTED skills/positions,
+        # and extraction is stubbed here — so it is false even before the clear
+        # and would pass this test for the wrong reason.
+        assert s["linkedin_filename"] == "li.pdf", "clearing the CV took LinkedIn too"
+        assert s["has_github"] is True
+        assert s["github_username"] == "octocat"
+
+    def test_clearing_linkedin_leaves_the_cv(self, api, monkeypatch) -> None:
+        _register_and_login(api, "clear-li@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "linkedin"})
+        assert r.status_code == 200, r.text
+        s = r.json()["summary"]
+        assert s["has_linkedin"] is False
+        assert s["linkedin_filename"] == ""
+        assert s["cv_length"] > 0, "clearing LinkedIn destroyed the CV"
+        assert s["has_github"] is True
+
+    def test_clearing_github_drops_the_handle_and_receipt(self, api, monkeypatch) -> None:
+        _register_and_login(api, "clear-gh@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "github"})
+        assert r.status_code == 200, r.text
+        s = r.json()["summary"]
+        assert s["has_github"] is False
+        assert s["github_username"] == ""
+        assert s["github_connected_at"] == ""
+        assert s["cv_length"] > 0
+
+    def test_clearing_preferences_keeps_the_github_handle(self, api, monkeypatch) -> None:
+        # The handle is owned by the GitHub section — clearing PREFERENCES
+        # alone must not silently disconnect GitHub.
+        _register_and_login(api, "clear-prefs@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "preferences"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["preferences"].get("additional_skills") in ([], None)
+        assert body["preferences"].get("target_job_titles") in ([], None)
+        assert body["summary"]["github_username"] == "octocat"
+        assert body["summary"]["cv_length"] > 0
+
+    def test_clear_all_empties_everything(self, api, monkeypatch) -> None:
+        _register_and_login(api, "clear-all@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "all"})
+        assert r.status_code == 200, r.text
+        s = r.json()["summary"]
+        assert s["cv_length"] == 0
+        assert s["has_linkedin"] is False
+        assert s["has_github"] is False
+        assert s["github_username"] == ""
+        assert s["skills_count"] == 0
+        assert r.json()["preferences"].get("additional_skills") in ([], None)
+
+
+class TestClearIsSafeAndReversible:
+    def test_an_unknown_section_is_rejected(self, api, monkeypatch) -> None:
+        _register_and_login(api, "clear-bad@example.com")
+        _seed_full_profile(api, monkeypatch)
+        r = api.post("/api/profile/clear", data={"section": "everything"})
+        assert r.status_code == 400
+        assert "cv" in r.text and "all" in r.text
+
+    def test_clearing_snapshots_first_so_it_can_be_undone(
+        self, api, monkeypatch
+    ) -> None:
+        _register_and_login(api, "clear-undo@example.com")
+        _seed_full_profile(api, monkeypatch)
+        api.post("/api/profile/clear", data={"section": "all"})
+        versions = api.get("/api/profile/versions").json()["versions"]
+        # The pre-clear state is still recoverable from History.
+        assert any(v.get("source_action") == "clear_all" for v in versions)
+        assert len(versions) >= 2, "no snapshot to roll back to"
+
+    def test_re_uploading_the_same_cv_after_a_clear_really_re_extracts(
+        self, api, monkeypatch
+    ) -> None:
+        """The cached LLM hash must go with the cleared input.
+
+        Otherwise the identical file is treated as "already read", the passes
+        are skipped, and the profile stays empty — a reset that does not reset.
+        """
+        _register_and_login(api, "clear-rerun@example.com")
+        _seed_full_profile(api, monkeypatch)
+        api.post("/api/profile/clear", data={"section": "cv"})
+        r = api.post(
+            "/api/profile/cv",
+            files={"cv": ("my_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"),
+                          "application/pdf")},
+        )
+        assert r.status_code == 200, r.text
+        s = r.json()["summary"]
+        assert s["cv_length"] > 0, "the same CV did not re-extract after a clear"
+        assert s["cv_filename"] == "my_cv.pdf"

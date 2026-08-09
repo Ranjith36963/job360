@@ -38,7 +38,7 @@ from src.services.profile.linkedin_parser import (
 from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
-from src.services.profile.models import UserPreferences, UserProfile
+from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.preferences import sanitize_preferences
 from src.services.profile.storage import (
     list_profile_versions,
@@ -610,6 +610,114 @@ async def upload_github(
         )
     await _extract_save_trigger(profile, user.id)
     return GitHubResponse(ok=True, merged=merged)
+
+
+# ── Clearing an input ────────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS. You cannot trust a test you cannot reset. Every contamination
+# bug found on this profile (another person's GitHub, then their LinkedIn, then
+# their education/certs/titles merged into the CV fields) was hard to see
+# precisely because stale data lingered and every upload MERGED into it. Without
+# a reset, "upload a CV and check what came out" is never a clean experiment —
+# you are always reading the sum of every previous attempt.
+#
+# Each scope clears the fields that input OWNS, and nothing else, so clearing
+# LinkedIn cannot take the CV with it. Two details matter:
+#   * the matching ``llm_input_hashes`` entry is dropped, or a later re-upload of
+#     the SAME file would be treated as "already read" and skipped; and
+#   * every clear goes through ``save_profile``, which snapshots first — so a
+#     clear is undoable from the History drawer, which is what makes an
+#     irreversible-sounding button safe.
+
+_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
+
+
+def _clear_cv(cv: CVData) -> None:
+    """Everything the CV owns, including its receipt and quality verdict."""
+    reset_cv_owned_fields(cv)  # the canonical "what the CV owns" list
+    cv.raw_text = ""
+    cv.cv_filename = ""
+    cv.cv_uploaded_at = ""
+    cv.extraction_score = {}
+    cv.llm_input_hashes.pop("cv", None)
+
+
+def _clear_linkedin(cv: CVData) -> None:
+    cv.linkedin_raw_text = ""
+    cv.linkedin_positions = []
+    cv.linkedin_skills = []
+    cv.linkedin_industry = ""
+    cv.linkedin_languages = []
+    cv.linkedin_projects = []
+    cv.linkedin_volunteer = []
+    cv.linkedin_courses = []
+    cv.linkedin_filename = ""
+    cv.linkedin_uploaded_at = ""
+    cv.llm_input_hashes.pop("linkedin", None)
+
+
+def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
+    cv.github_languages = {}
+    cv.github_topics = []
+    cv.github_skills_inferred = []
+    cv.github_frameworks = []
+    cv.github_llm_skills = []
+    cv.github_repos_brief = []
+    cv.github_bio = ""
+    cv.github_profile_readme = ""
+    cv.github_connected_at = ""
+    cv.llm_input_hashes.pop("github", None)
+    prefs.github_username = ""  # the handle belongs to this section
+
+
+@router.post("/profile/clear", response_model=ProfileResponse)
+async def clear_profile_section(
+    section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> ProfileResponse:
+    """Empty ONE input (or the whole profile), so the next upload starts clean.
+
+    ``section``: cv | linkedin | github | preferences | all.
+
+    Deliberately does NOT re-run extraction: there is nothing to extract, and a
+    paid LLM round-trip to rebuild an empty profile would be waste. The stored
+    snapshot taken by ``save_profile`` is what makes this reversible.
+    """
+    if section not in _CLEAR_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
+        )
+    profile = load_profile(user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile to clear")
+
+    cv = profile.cv_data
+    prefs = profile.preferences or UserPreferences()
+
+    if section in ("cv", "all"):
+        _clear_cv(cv)
+    if section in ("linkedin", "all"):
+        _clear_linkedin(cv)
+    if section in ("github", "all"):
+        _clear_github(cv, prefs)
+    if section in ("preferences", "all"):
+        # A fresh preferences object — but the GitHub handle is owned by the
+        # GitHub section, so clearing PREFERENCES alone must not disconnect it.
+        keep_handle = "" if section == "all" else prefs.github_username
+        prefs = UserPreferences(github_username=keep_handle)
+    if section == "all":
+        # about_me-derived skills live on the CV object but are owned by the
+        # preferences the user typed, so a full clear takes them too.
+        cv.about_me_inferred_skills = []
+        cv.llm_input_hashes.pop("about_me", None)
+
+    profile.preferences = prefs
+    save_profile(profile, user.id, f"clear_{section}")
+    logger.info(
+        "profile_cleared", extra={"event": "profile_cleared", "section": section}
+    )
+    return _build_profile_response(profile)
 
 
 # ── Step-1.5 S3-A,B,C — profile version + JSON Resume endpoints. ──

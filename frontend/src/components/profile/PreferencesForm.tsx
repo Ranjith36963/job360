@@ -23,11 +23,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { ClearButton } from "@/components/profile/ClearButton";
 import type { PreferencesRequest } from "@/lib/types";
 
 interface PreferencesFormProps {
   preferences: Record<string, unknown>;
   onSave: (prefs: PreferencesRequest) => Promise<void>;
+  /** Empty every typed preference. Undoable from History. Omitted when there
+   *  is no profile yet — there is nothing to clear. */
+  onClear?: () => Promise<void>;
   loading: boolean;
 }
 
@@ -193,6 +197,7 @@ const AUTOSAVE_DELAY_MS = 800;
 export function PreferencesForm({
   preferences,
   onSave,
+  onClear,
   loading,
 }: PreferencesFormProps) {
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
@@ -317,6 +322,19 @@ export function PreferencesForm({
             Customize your job search criteria
           </p>
         </div>
+        {/* In the card header, not at the bottom: this form autosaves, so there
+            is no "Save" row to sit beside, and the header is where a
+            card-scoped action belongs. */}
+        {onClear && (
+          <div className="ml-auto">
+            <ClearButton
+              label="Clear"
+              confirmLabel="Click again to clear"
+              disabled={loading}
+              onConfirm={onClear}
+            />
+          </div>
+        )}
       </div>
 
       <div className="space-y-6">
