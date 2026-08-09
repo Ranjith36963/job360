@@ -51,6 +51,16 @@ def normalize_github_username(raw: str) -> str:
     s = raw.strip()
     if not s:
         return ""
+    # INTERNAL whitespace means this is not a handle — a GitHub username cannot
+    # contain a space. The old code split on whitespace and kept the first part,
+    # so "john smith" quietly became "john" and we would fetch a STRANGER's
+    # account into this user's profile. That is not hypothetical: a live profile
+    # was found holding another person's entire GitHub (bio, repos, and the
+    # skills derived from them, all scoring the wrong jobs). Guessing is the
+    # failure mode here, so ambiguous input is refused and the caller asks.
+    # (Leading/trailing spaces are already gone — .strip() above.)
+    if re.search(r"\s", s):
+        return ""
     # Drop a leading @ that users copy from social handles.
     s = s.lstrip("@").strip()
     # If it mentions github.com, take the first path segment after it.

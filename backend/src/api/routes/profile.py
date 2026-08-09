@@ -552,8 +552,31 @@ async def upload_github(
 
     Accepts a full profile URL or @handle, not just a bare username —
     ``normalize_github_username`` reduces it to the handle before lookup.
+
+    FAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``
+    unconditionally, so a handle that reduced to nothing still produced a green
+    "GitHub profile enriched" toast — and, once receipts shipped, a "GitHub
+    connected" row on the profile page — while zero repos were read. Measured on
+    a live profile: ``github_connected_at`` stamped, ``github_username`` empty,
+    0 repos. A receipt that confirms something that did not happen is worse than
+    no receipt at all.
+
+    A handle that does not reduce to a valid GitHub username is now a 400 with
+    wording the person can act on. ``normalize_github_username`` accepts a
+    profile URL and an @handle, but NOT a ``<user>.github.io`` portfolio URL —
+    which is exactly what a user is likely to paste, since a CV lists that as
+    "Portfolio". The message therefore names what we DO accept.
     """
     clean_username = normalize_github_username(username)
+    if not clean_username:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "That does not look like a GitHub username. Enter your handle "
+                "(e.g. octocat) or your profile URL (github.com/octocat) — a "
+                "portfolio site such as octocat.github.io is not a username."
+            ),
+        )
     github_data = await fetch_github_profile(clean_username)
     profile = load_profile(user.id) or UserProfile()
     # enrich_cv_from_github captures the RAW GitHub signals (repos_brief,
@@ -561,11 +584,32 @@ async def upload_github(
     # the GitHub LLM pass and re-runs the others from stored raw.
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
-    # Connection receipt — GitHub has no file, so the handle + when we read it
-    # is the receipt (repo count comes from len(github_repos_brief)).
-    profile.cv_data.github_connected_at = datetime.now(timezone.utc).isoformat()
+    # Did the lookup actually YIELD anything? A handle that is well-formed but
+    # does not exist (or a rate-limited/unreachable GitHub) returns an empty
+    # payload, and enrich_cv_from_github then merges nothing.
+    merged = bool(
+        getattr(profile.cv_data, "github_repos_brief", None)
+        or getattr(profile.cv_data, "github_languages", None)
+        or getattr(profile.cv_data, "github_bio", "")
+    )
+    if merged:
+        # Connection receipt — GitHub has no file, so the handle + when we read
+        # it is the receipt (repo count comes from len(github_repos_brief)).
+        # Stamped ONLY on a lookup that produced data: the receipt must never
+        # confirm a connection that did not happen.
+        profile.cv_data.github_connected_at = datetime.now(timezone.utc).isoformat()
+    else:
+        # Nothing came back — do not leave a handle behind claiming otherwise.
+        profile.preferences.github_username = ""
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"GitHub has no public data for '{clean_username}'. Check the "
+                "spelling, and note that private repositories are not visible."
+            ),
+        )
     await _extract_save_trigger(profile, user.id)
-    return GitHubResponse(ok=True, merged=True)
+    return GitHubResponse(ok=True, merged=merged)
 
 
 # ── Step-1.5 S3-A,B,C — profile version + JSON Resume endpoints. ──
