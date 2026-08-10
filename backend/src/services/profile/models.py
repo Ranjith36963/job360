@@ -47,6 +47,21 @@ class CVData:
     linkedin_positions: list[dict[str, Any]] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
     linkedin_industry: str = ""
+    # The LinkedIn "About" section, in the person's own words.
+    #
+    # It was already parsed, and then thrown away in the common case: the merge
+    # only wrote it into ``summary`` when the CV had none
+    # (``enrich_cv_from_linkedin``'s fill-if-empty rule), so anyone whose CV has
+    # a professional summary — most people — lost their LinkedIn About entirely.
+    # Meanwhile ``embeddings.py`` had been reading a ``linkedin_summary`` field
+    # for months. It never existed, so that read returned "" on every profile,
+    # forever, and getattr-with-a-default cannot fail loudly.
+    #
+    # Now it has a shelf of its own. The two texts are different documents, not
+    # duplicates: a CV summary is written for recruiters and is heavily edited;
+    # a LinkedIn About is looser, first-person, and states motivation and
+    # direction that a CV omits — exactly the prose the LLM judge reads best.
+    linkedin_summary: str = ""
     # Two-pass extraction — the raw text pdfplumber pulled from the LinkedIn
     # "Save to PDF" export. Stored so the LLM pass can re-run on any profile
     # change WITHOUT the user re-uploading the file (the temp file is deleted
@@ -173,15 +188,29 @@ class CVData:
     # connected and how many repos were read (len(github_repos_brief)).
     github_connected_at: str = ""
     # Batch 1.1 — archetype classification (CareerDomain enum value).
-    # Optional; None means "LLM did not classify". Consumed by
-    # archetype-aware scoring (Pillar 1 #10 / Pillar 2).
+    # Optional; None means "LLM did not classify".
+    #
+    # This comment used to claim it was "consumed by archetype-aware scoring".
+    # That was false for months: no scorer, judge or vector read it, and the
+    # claim sent readers hunting for code that did not exist. As of 2026-08-09 it
+    # genuinely is consumed — ``embeddings.build_profile_embedding_text`` and
+    # ``llm_matcher.profile_to_matcher_text``. There is still no archetype
+    # WEIGHTING; if one is added, say so here then, not before.
     career_domain: Optional[str] = None
     # Batch 1.x.1 (review fix #1) — CV-extracted fields that the
     # CVSchema already parses but the original adapter silently
     # dropped. Separate from ``linkedin_*`` equivalents so the JSON
     # Resume export distinguishes CV-stated languages/industries from
     # LinkedIn-stated ones.
-    industries: list[str] = field(default_factory=list)
+    # RENAMED from ``industries`` (2026-08-09). ``UserPreferences`` declares an
+    # ``industries`` too, and the two mean opposite things: this one is a FACT
+    # extracted from the CV (where the person has worked), the other is a
+    # PREFERENCE the user typed (where they want to work). Sharing one name meant
+    # every name-keyed tool in the project silently merged them, and rule #29
+    # turns on exactly that distinction — a fact may be inferred, a preference
+    # never may. No migration needed: profiles store as a JSON blob and
+    # ``storage._filter_fields`` drops unknown keys, so old rows load with [].
+    cv_industries: list[str] = field(default_factory=list)
     cv_languages: list[str] = field(default_factory=list)
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
     # ``cv_parser._llm_result_to_cvdata`` when ``SEMANTIC_ENABLED=true`` and

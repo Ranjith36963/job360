@@ -61,7 +61,7 @@ async def _none() -> None:
     return None
 
 
-EXTRACTOR_VERSION = "2"
+EXTRACTOR_VERSION = "3"
 """Bump this whenever an LLM extraction PROMPT changes in a way that should
 re-read inputs the system has already seen.
 
@@ -82,7 +82,16 @@ Including this version in the digest makes a prompt change invalidate the cache
 exactly once per user, which is the intended cost: pay again only when the
 extractor genuinely got better.
 
+THE FAILURE MODE IS SILENT IN BOTH DIRECTIONS, so bump on any prompt change.
+Seven new LinkedIn section prompts shipped on 2026-08-09 while this still read
+"2". Every existing user's LinkedIn hash therefore still matched, the pass was
+skipped as a cache hit, and the new sections could never populate for anyone who
+had already uploaded — which was every user. Nothing errored; the shelves simply
+stayed empty and looked like profiles that genuinely had no honors or patents.
+
 Version log — 1: input-only hash (pre-2026-08-08). 2: prose-mining CV prompt.
+3: the seven LinkedIn section prompts (honors, publications, patents,
+organizations, test_scores, recommendations, interests) + the contact block.
 """
 
 
@@ -257,7 +266,7 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     cv.companies.clear()
     cv.education.clear()
     cv.certifications.clear()
-    cv.industries.clear()
+    cv.cv_industries.clear()
     cv.cv_languages.clear()
     cv.cv_skills_esco.clear()
     cv.summary = ""
@@ -301,7 +310,7 @@ def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     _merge_str_list(cv.education, llm_cv.education)
     _merge_str_list(cv.certifications, llm_cv.certifications)
     _merge_str_list(cv.achievements, llm_cv.achievements)
-    _merge_str_list(cv.industries, llm_cv.industries)
+    _merge_str_list(cv.cv_industries, llm_cv.cv_industries)
     _merge_str_list(cv.cv_languages, llm_cv.cv_languages)
     # Fill empty scalars only — never overwrite a value the user already has.
     if not cv.name and llm_cv.name:

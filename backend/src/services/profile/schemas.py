@@ -279,7 +279,7 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         # being silently dropped. They are now plumbed through to the
         # matching CVData fields so the JSON Resume export shows real
         # values for CVs that list them.
-        industries=list(schema.industries),
+        cv_industries=list(schema.industries),
         cv_languages=list(schema.languages),
         cv_skills_esco=cv_skills_esco,
     )

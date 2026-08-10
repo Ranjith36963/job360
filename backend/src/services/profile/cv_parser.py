@@ -971,7 +971,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
         location=location,
         achievements=achievements,
         cv_skills_esco=cv_skills_esco,
-        industries=industries,
+        cv_industries=industries,
         cv_languages=cv_languages,
         career_domain=career_domain,
     )

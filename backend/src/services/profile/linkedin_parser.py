@@ -1102,34 +1102,51 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
 def merge_linkedin_fields(det: dict[str, Any], llm: dict[str, Any]) -> dict[str, Any]:
     """Merge the two independent LinkedIn passes into ONE canonical dict.
 
-    ``det`` (structure: skills/summary/header) + ``llm`` (LLM: positions/
-    education/…/prose-skills) → one dict ready for ``enrich_cv_from_linkedin``.
-    Skills are unioned (deterministic Top-Skills/inline first, then LLM prose),
-    so neither pass can clobber the other. Used by both ``parse_linkedin_from_text``
-    and the two-pass orchestrator so the merge logic lives in exactly one place.
+    ``det`` (structure: skills/summary/header/contact) + ``llm`` (LLM:
+    positions/education/…/prose-skills) → one dict ready for
+    ``enrich_cv_from_linkedin``. Used by both ``parse_linkedin_from_text`` and
+    the two-pass orchestrator so the merge logic lives in exactly one place.
+
+    BUILT FROM ``_empty_linkedin_data()``, NOT FROM A HAND-LISTED SET OF KEYS.
+    That is the whole point of this shape. This function used to return a
+    literal with twelve keys, which made it a THIRD hand-maintained copy of the
+    LinkedIn schema alongside ``_empty_linkedin_data`` and
+    ``llm_linkedin_fields``. When eight new sections shipped on 2026-08-09 the
+    other two copies were updated and this one was not, so those eight keys were
+    dropped here — and because ``enrich_cv_from_linkedin`` then does
+    ``cv.linkedin_honors = data.get("honors", [])``, the shelves were not merely
+    left unfilled, they were ASSIGNED EMPTY on every extraction.
+
+    Deriving the key set from the schema means a section added tomorrow flows
+    through automatically. There is now one place to add a LinkedIn section, not
+    three that must be kept in step by memory.
+
+    Ownership: the LLM pass owns the section lists (assigned wholesale, empties
+    included, so a genuine re-parse can still clear a section the person
+    deleted); the deterministic pass owns the structural header and contact
+    block and overrides only where it actually parsed something; skills are
+    unioned so neither pass can clobber the other.
     """
     det = det or {}
     llm = llm or {}
+
+    out = _empty_linkedin_data()
+    for key, value in llm.items():
+        if key in out:
+            out[key] = value
+    for key, value in det.items():
+        if key in out and value:
+            out[key] = value
+
     skills = list(det.get("skills", []))
     seen = {s.lower() for s in skills}
     for s in llm.get("skills", []):
         if s.lower() not in seen:
             skills.append(s)
             seen.add(s.lower())
-    return {
-        "positions": llm.get("positions", []),
-        "skills": skills,
-        "education": llm.get("education", []),
-        "certifications": llm.get("certifications", []),
-        "summary": det.get("summary", ""),
-        "industry": det.get("industry", ""),
-        "headline": det.get("headline", ""),
-        "languages": llm.get("languages", []),
-        "projects": llm.get("projects", []),
-        "volunteer": llm.get("volunteer", []),
-        "courses": llm.get("courses", []),
-        "raw_text": det.get("raw_text", "") or llm.get("raw_text", ""),
-    }
+    out["skills"] = skills
+    out["raw_text"] = det.get("raw_text", "") or llm.get("raw_text", "")
+    return out
 
 
 async def parse_linkedin_from_text(text: str) -> dict[str, Any]:
@@ -1221,9 +1238,15 @@ def enrich_cv_from_linkedin(
             cv.certifications.append(name)
             existing_certs.add(name.lower())
 
-    # Summary — only fill if empty
-    if not cv.summary and linkedin_data.get("summary"):
-        cv.summary = linkedin_data["summary"]
+    # The About section always gets its own shelf. Keeping the fill-if-empty
+    # copy into ``cv.summary`` preserves the old behaviour for profiles with no
+    # CV summary, but the copy is no longer the ONLY home — before this, anyone
+    # whose CV had a summary lost their LinkedIn About completely, and it is the
+    # most self-authored prose either document contains.
+    if linkedin_data.get("summary"):
+        cv.linkedin_summary = linkedin_data["summary"]
+        if not cv.summary:
+            cv.summary = linkedin_data["summary"]
 
     # Store LinkedIn-specific fields
     # These five sections are LLM-ONLY output — the deterministic pass

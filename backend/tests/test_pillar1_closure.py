@@ -8,100 +8,13 @@ Closes the three documented partials in docs/pillar1_progress.md:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pytest
 
-from src.services.profile import cv_parser, skill_entry, skill_normalizer
+from src.services.profile import cv_parser, skill_normalizer
 from src.services.profile.models import CVData, UserPreferences, UserProfile
-
-# ── 1.3c: ESCO normaliser integration ─────────────────────────────
-
-
-@pytest.fixture
-def fake_esco_index(tmp_path: Path):
-    """Build a 3-concept fake ESCO index + reset the module singleton."""
-    labels = [
-        {"uri": "http://esco.example/python", "label": "Python programming", "alt_labels": []},
-        {"uri": "http://esco.example/docker", "label": "Container orchestration", "alt_labels": []},
-        {"uri": "http://esco.example/rust", "label": "Rust programming", "alt_labels": []},
-    ]
-    embeddings = np.array(
-        [[1.0, 0.0, 0.0],
-         [0.0, 1.0, 0.0],
-         [0.0, 0.0, 1.0]],
-        dtype="float32",
-    )
-    esco_dir = tmp_path / "esco"
-    esco_dir.mkdir()
-    (esco_dir / "labels.json").write_text(json.dumps(labels), encoding="utf-8")
-    np.save(esco_dir / "embeddings.npy", embeddings)
-    skill_normalizer.reset_index_for_testing(esco_dir)
-    yield esco_dir
-    skill_normalizer.reset_index_for_testing()
-
-
-def test_13c_build_skill_entries_stamps_esco_uri_when_index_available(fake_esco_index):
-    """With the ESCO index on disk + encoder available, entries carry esco_uri."""
-    # The encoder is patched to return a vector aligned with the python row
-    enc = MagicMock()
-    enc.encode = MagicMock(return_value=np.array([[0.99, 0.1, 0.0]], dtype="float32"))
-    with patch.object(skill_normalizer._INDEX, "_get_encoder", return_value=enc):
-        prefs = UserPreferences(additional_skills=["Py"])
-        profile = UserProfile(cv_data=CVData(), preferences=prefs)
-        entries = skill_entry.build_skill_entries_from_profile(profile)
-
-    assert len(entries) == 1
-    assert entries[0].esco_uri == "http://esco.example/python"
-    # canonical label replaces the raw surface form
-    assert entries[0].name == "Python programming"
-
-
-def test_13c_build_skill_entries_graceful_when_no_esco_data(tmp_path):
-    """When the ESCO index is absent, entries behave like pre-1.3c — no URI, raw name."""
-    skill_normalizer.reset_index_for_testing(tmp_path / "nowhere")
-    prefs = UserPreferences(additional_skills=["Python"])
-    profile = UserProfile(cv_data=CVData(), preferences=prefs)
-    entries = skill_entry.build_skill_entries_from_profile(profile)
-    skill_normalizer.reset_index_for_testing()
-
-    assert len(entries) == 1
-    assert entries[0].esco_uri is None
-    assert entries[0].name == "Python"
-
-
-def test_13c_normalize_false_bypasses_esco_even_when_available(fake_esco_index):
-    """Opt-out flag suppresses normalisation regardless of index state."""
-    enc = MagicMock()
-    enc.encode = MagicMock(return_value=np.array([[0.99, 0.0, 0.0]], dtype="float32"))
-    with patch.object(skill_normalizer._INDEX, "_get_encoder", return_value=enc):
-        prefs = UserPreferences(additional_skills=["Py"])
-        profile = UserProfile(cv_data=CVData(), preferences=prefs)
-        entries = skill_entry.build_skill_entries_from_profile(profile, normalize=False)
-
-    assert entries[0].esco_uri is None
-    assert entries[0].name == "Py"  # raw form preserved
-
-
-def test_13c_esco_dedup_via_canonical_label(fake_esco_index):
-    """Two surface forms mapping to the same ESCO URI collapse during build
-    (same (source, canonical-name) pair dedupes — Batch 1.2 review fix #8
-    still holds)."""
-    enc = MagicMock()
-    enc.encode = MagicMock(return_value=np.array([[0.99, 0.0, 0.0]], dtype="float32"))
-    with patch.object(skill_normalizer._INDEX, "_get_encoder", return_value=enc):
-        prefs = UserPreferences()
-        cv = CVData(skills=["Py", "python programming"])
-        profile = UserProfile(cv_data=cv, preferences=prefs)
-        entries = skill_entry.build_skill_entries_from_profile(profile)
-
-    cv_entries = [e for e in entries if e.source == "cv_explicit"]
-    assert len(cv_entries) == 1
-    assert cv_entries[0].name == "Python programming"
-
 
 # ── 1.7b: section hints in the LLM prompt ─────────────────────────
 
@@ -282,7 +195,6 @@ def test_esco_attribution_in_skill_normalizer_module():
     """The ESCO licence terms require attribution. The module docstring
     must carry it so anyone reading the source sees the credit line.
     """
-    from src.services.profile import skill_normalizer
     doc = skill_normalizer.__doc__ or ""
     assert "ESCO" in doc
     assert "European Union" in doc

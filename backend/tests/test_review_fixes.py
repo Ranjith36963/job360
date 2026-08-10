@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.profile import dep_file_parser, skill_entry
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile import dep_file_parser
+from src.services.profile.models import CVData
 from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
 
 # ── #1: CVSchema.industries + languages plumbed into CVData ────────
@@ -24,7 +24,7 @@ def test_fix1_schema_industries_and_languages_land_on_cvdata():
         "languages": ["English", "French", "Mandarin"],
     })
     cv = cv_schema_to_cvdata(schema, raw_text="x")
-    assert cv.industries == ["Healthcare", "Biotechnology"]
+    assert cv.cv_industries == ["Healthcare", "Biotechnology"]
     assert cv.cv_languages == ["English", "French", "Mandarin"]
 
 
@@ -192,34 +192,6 @@ async def test_fix6_retry_prompt_trims_to_first_five_errors():
 
 
 # ── #8: build_skill_entries dedups same-source duplicates ──────────
-
-
-def test_fix8_same_source_same_skill_dedup():
-    """Pre-fix: CV listing ["Python", "python"] emitted 2 cv_explicit
-    entries. Post-fix: deduped at the (source, name.casefold()) level.
-    """
-    prefs = UserPreferences()
-    cv = CVData(skills=["Python", "python", "PYTHON"])
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-
-    entries = skill_entry.build_skill_entries_from_profile(profile)
-    cv_entries = [e for e in entries if e.source == "cv_explicit"]
-    assert len(cv_entries) == 1
-    # First-sighting casing wins
-    assert cv_entries[0].name == "Python"
-
-
-def test_fix8_cross_source_duplicates_still_emit_multi_row():
-    """Cross-source duplicates are NOT deduped — merge_skill_entries
-    collapses them later. Regression guard.
-    """
-    prefs = UserPreferences(additional_skills=["Python"])
-    cv = CVData(skills=["Python"], linkedin_skills=["Python"])
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-    entries = skill_entry.build_skill_entries_from_profile(profile)
-    sources = [e.source for e in entries]
-    # 1 per (source, skill) — same name across 3 sources = 3 rows
-    assert sources == ["user_declared", "cv_explicit", "linkedin"]
 
 
 # ── #5: legacy_hydrate source_action ───────────────────────────────

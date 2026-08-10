@@ -370,15 +370,19 @@ class TestParseLinkedInPdfEndToEnd:
             skills=["Python"], certifications=["Cert"],
         )
         data = parse_linkedin_pdf(str(path))
-        # Batch 1.5 expanded the canonical dict with 4 new section keys
-        # (languages, projects, volunteer, courses). The assertion is
-        # updated rather than relaxed so the shape remains explicit.
-        assert set(data.keys()) == {
-            "positions", "skills", "education", "certifications",
-            "summary", "industry", "headline",
-            "languages", "projects", "volunteer", "courses",
-            "raw_text",
-        }
+        # Asserted against the SCHEMA OF RECORD, not a hand-typed key list.
+        #
+        # This assertion used to spell out twelve keys. That made it a fourth
+        # hand-maintained copy of the LinkedIn schema, alongside
+        # _empty_linkedin_data, llm_linkedin_fields and merge_linkedin_fields —
+        # and when eight sections were added on 2026-08-09, the copies drifted:
+        # the merger silently dropped the new keys, and this test PASSED,
+        # because it was asserting the same stale shape the merger produced.
+        # A test that pins a hand-typed duplicate of the thing under test can
+        # only ever confirm that both copies are wrong in the same way.
+        from src.services.profile.linkedin_parser import _empty_linkedin_data
+
+        assert set(data.keys()) == set(_empty_linkedin_data().keys())
         assert data["skills"] == ["Python"]
 
     @pytest.mark.asyncio
