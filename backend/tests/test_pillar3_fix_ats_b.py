@@ -224,7 +224,16 @@ def test_pinpoint_reads_flat_compensation_fields_not_the_string():
     _run(_test())
 
 
-def test_pinpoint_date_confidence_is_low_never_fabricated():
+def test_pinpoint_keeps_fabricated_confidence_so_recency_scores_zero():
+    """Pinpoint has NO posted-date field in its 24-key schema (verified live).
+
+    "fabricated" is NOT an invalid value — it is a deliberate 4th state that
+    skill_matcher._recency_points() reads to return 0, refusing any freshness
+    credit for a date we invented. An earlier version of this fix downgraded
+    it to "low", which would have let the job fall through to
+    `date_found * 0.6` and quietly earn 60% recency for a date that does not
+    exist. This test pins the honest label down.
+    """
     async def _test():
         session = aiohttp.ClientSession()
         try:
@@ -238,8 +247,7 @@ def test_pinpoint_date_confidence_is_low_never_fabricated():
                 source = PinpointSource(session, companies=["test"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1
-                assert jobs[0].date_confidence != "fabricated"
-                assert jobs[0].date_confidence == "low"
+                assert jobs[0].date_confidence == "fabricated"
                 assert jobs[0].posted_at is None
         finally:
             await session.close()

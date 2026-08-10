@@ -72,10 +72,16 @@ class PinpointSource(BaseJobSource):
                     source=self.name,
                     date_found=datetime.now(timezone.utc).isoformat(),
                     posted_at=None,
-                    # Pinpoint genuinely has no posted-date field (verified
-                    # live) — "low" is the honest confidence for an absent
-                    # date, never the invalid "fabricated" literal.
-                    date_confidence="low",
+                    # Pinpoint genuinely has no posted-date field anywhere in
+                    # its 24-key schema (verified live 2026-08-08), so
+                    # "fabricated" is the CORRECT label — it is not an invalid
+                    # value, it is a deliberate 4th state that
+                    # skill_matcher._recency_points() reads to return 0 and
+                    # refuse any recency credit (Batch 2.1 precedence rule).
+                    # Downgrading this to "low" would let the job fall through
+                    # to `date_found * 0.6` and earn 60% freshness credit for a
+                    # date that does not exist. Do not "simplify" this.
+                    date_confidence="fabricated",
                     date_posted_raw=None,
                     salary_min=salary_min,
                     salary_max=salary_max,
