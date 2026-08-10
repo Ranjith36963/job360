@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-10 by /sync -->
 
 > **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
 
@@ -40,7 +40,7 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 26 forward/reverse SQL migrations (0000 → 0025) + runner.py
+│   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile

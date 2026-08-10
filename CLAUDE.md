@@ -1,5 +1,5 @@
 # CLAUDE.md
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-10 by /sync -->
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -231,12 +231,12 @@ job360/
 │   ├── main.py                # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml         # Deps + ruff/mypy/pytest config
 │   ├── data/                  # Runtime: jobs.db, user_profile.json, exports/, reports/, logs/, chroma/
-│   ├── migrations/            # forward+reverse SQL migration pairs 0000 → 0025 (count drifts; see the dir) + runner.py
+│   ├── migrations/            # forward+reverse SQL migration pairs 0000 → 0030 (count drifts; see the dir) + runner.py
 │   ├── src/
 │   │   ├── main.py            # Pipeline orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
 │   │   ├── cli.py             # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── models.py          # Job dataclass with normalized_key() for dedup
-│   │   ├── api/               # FastAPI app + 13 route modules (71 endpoints, all per-user routes gated)
+│   │   ├── api/               # FastAPI app + 13 route modules (72 endpoints, all per-user routes gated)
 │   │   ├── core/              # settings, keywords, companies, skill_synonyms, fx, tenancy
 │   │   ├── services/          # skill_matcher, deduplicator, scoring_dimensions, retrieval, embeddings, vector_index, job_enrichment, prefilter, scheduler, circuit_breaker, conditional_cache, ghost_detection, salary, domain_classifier, feed, auth/, channels/, notifications/, profile/
 │   │   ├── repositories/      # database, csv_export
