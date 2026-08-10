@@ -146,6 +146,10 @@ class CVSchema(BaseModel):
     languages: list[str] = Field(default_factory=list)
 
     experience_level: Optional[str] = ""
+    # TRI-STATE by design (rule #31): "" means the CV never said, which is
+    # NOT the same as "needs sponsorship". Free text, not an enum — a UK CV
+    # states this a dozen different ways and an enum would force a guess.
+    right_to_work: Optional[str] = ""
     career_domain: Optional[CareerDomain] = None
 
     @field_validator(
@@ -281,5 +285,9 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         # values for CVs that list them.
         cv_industries=list(schema.industries),
         cv_languages=list(schema.languages),
+        # Asked for by the prompt, declared by the schema, and until 2026-08-09
+        # dropped right here.
+        cv_experience_level=(schema.experience_level or "").strip(),
+        cv_right_to_work=(schema.right_to_work or "").strip(),
         cv_skills_esco=cv_skills_esco,
     )

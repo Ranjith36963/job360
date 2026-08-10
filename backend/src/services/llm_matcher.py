@@ -202,6 +202,16 @@ def profile_to_matcher_text(profile: Any) -> str:
         domain = (getattr(cv, "career_domain", "") or "").strip()
         if domain:
             lines.append(f"Career domain: {domain}")
+        # The rubric asks about seniority fit; without this the judge had to
+        # infer a level from titles it was also being asked to judge.
+        cv_level = (getattr(cv, "cv_experience_level", "") or "").strip()
+        if cv_level:
+            lines.append(f"Seniority (stated on CV): {cv_level}")
+        # Decisive for a UK role and stated by no other input. Silent when
+        # the CV did not say — never inferred (rule #31).
+        rtw = (getattr(cv, "cv_right_to_work", "") or "").strip()
+        if rtw:
+            lines.append(f"Right to work (stated on CV): {rtw}")
 
         # LinkedIn sections that are real hiring evidence and are stated
         # NOWHERE else. Rendered as labelled rows because a judge reads

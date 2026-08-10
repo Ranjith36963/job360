@@ -61,7 +61,7 @@ async def _none() -> None:
     return None
 
 
-EXTRACTOR_VERSION = "3"
+EXTRACTOR_VERSION = "4"
 """Bump this whenever an LLM extraction PROMPT changes in a way that should
 re-read inputs the system has already seen.
 
@@ -92,6 +92,7 @@ stayed empty and looked like profiles that genuinely had no honors or patents.
 Version log — 1: input-only hash (pre-2026-08-08). 2: prose-mining CV prompt.
 3: the seven LinkedIn section prompts (honors, publications, patents,
 organizations, test_scores, recommendations, interests) + the contact block.
+4: the CV ``right_to_work`` prompt field.
 """
 
 
@@ -599,8 +600,14 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     # or the original if that merge did not run). Never raises — a failed
     # inference just leaves the field empty and the dimension stays neutral.
     try:
-        profile.preferences.experience_level_inferred = infer_experience_level(
-            cv.cv_positions, cv.linkedin_positions
+        # Dated job TITLES are the stronger, structural signal, so they win.
+        # But they answer nothing when no title carries a seniority word, and
+        # the dimension then went dark for that user. The CV LLM read the whole
+        # document and already stated a level — fall back to it rather than to
+        # nothing.
+        from_titles = infer_experience_level(cv.cv_positions, cv.linkedin_positions)
+        profile.preferences.experience_level_inferred = (
+            from_titles or (cv.cv_experience_level or "").strip()
         )
     except Exception as exc:  # noqa: BLE001 - inference must never cost a save
         logger.warning("seniority inference failed (non-fatal): %s", exc)

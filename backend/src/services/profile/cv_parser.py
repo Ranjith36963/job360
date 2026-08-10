@@ -63,6 +63,7 @@ Return a JSON object with exactly these fields:
   "experience_level": "One of: intern, junior, mid, senior, lead, principal, director — infer from experience duration and roles",
   "industries": ["Industries/domains they have experience in"],
   "languages": ["Human languages they speak, if mentioned"],
+  "right_to_work": "Their stated work-authorisation status, VERBATIM, if the CV says it (e.g. 'British citizen', 'Indefinite Leave to Remain', 'Graduate Route visa until 2027', 'requires sponsorship'). Return null if the CV does not mention it — never infer it from nationality, name or place of study.",
   "career_domain": "The ONE coarse career bucket that best fits this person's OVERALL career. Must be EXACTLY one of: software_engineering, data_and_ai, product_and_design, marketing_and_growth, sales_and_bizdev, finance_and_accounting, operations_and_supply, human_resources, legal_and_compliance, healthcare_and_lifesciences, education_and_research, engineering_physical, customer_support, media_and_content, skilled_trades, other. Return null (not a guess) when the CV genuinely does not fit any bucket clearly."
 }}
 

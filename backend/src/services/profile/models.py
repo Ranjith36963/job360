@@ -212,6 +212,34 @@ class CVData:
     # ``storage._filter_fields`` drops unknown keys, so old rows load with [].
     cv_industries: list[str] = field(default_factory=list)
     cv_languages: list[str] = field(default_factory=list)
+    # The CV's own statement of seniority, as the LLM read it.
+    #
+    # ``cv_parser``'s prompt has always asked for this ("One of: intern, junior,
+    # mid, senior, lead, principal, director — infer from experience duration
+    # and roles") and ``CVSchema`` has always declared it. The adapter never
+    # passed it on, so it was paid for on every CV parse and dropped.
+    #
+    # That left ``experience_level_inferred`` depending solely on
+    # ``seniority.infer_experience_level``, which reads dated job TITLES — so a
+    # CV whose titles carry no seniority word produced no level at all and the
+    # seniority dimension sat at its neutral fallback.
+    #
+    # A FACT about the document, like ``skills`` — NOT a preference. It fills
+    # the scoring seam only where the titles found nothing, and it must never
+    # reach a gate that deletes jobs (rule #29; see tests/test_prefilter_wiring).
+    cv_experience_level: str = ""
+    # Work authorisation, as the CV states it — the one UK-specific fact a CV
+    # carries that nothing here read. Rule #30 refuses jobs the user cannot
+    # take because of WHERE they are and rule #31 treats sponsorship as a
+    # spotlight, but both act on the JOB. The user side had only the
+    # ``needs_visa`` boolean, which almost nobody ticks.
+    #
+    # TRI-STATE like the job-side signal, for the same reason: "" means the CV
+    # never said it, which is the opposite fact from "needs sponsorship".
+    # Free text, because a UK CV states this a dozen ways and forcing an enum
+    # would make the extractor guess. Never inferred from nationality or
+    # place of study — that would be discrimination dressed up as a feature.
+    cv_right_to_work: str = ""
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
     # ``cv_parser._llm_result_to_cvdata`` when ``SEMANTIC_ENABLED=true`` and
     # the ESCO index is on disk. Maps the *canonical* skill label (which
