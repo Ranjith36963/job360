@@ -2,7 +2,7 @@
 
 Two ignore files describe the same intent from opposite directions, and nothing
 made them agree. `.gitignore` ignores `data/` and then un-ignores
-`backend/data/uk_gazetteer/**` and `backend/data/job_signals/**` — the exemptions
+`backend/src/data/uk_gazetteer/**` and `backend/data/job_signals/**` — the exemptions
 are the reason those files are in the repository at all. `.dockerignore` ignored
 `data/` with no exemptions, and the Dockerfile is `COPY . .`, so the image was
 built without precisely the files someone had gone out of their way to commit.
@@ -69,7 +69,15 @@ class TestTheImageShipsWhatTheRepoCommits:
             "no error while every local test passes."
         )
 
-    @pytest.mark.parametrize("rel", ["data/uk_gazetteer", "data/job_signals"])
+    # uk_gazetteer MOVED into the package (backend/src/data/) so that
+    # `pip install .` actually carries it — the wheel, not the working tree,
+    # is what runs in the container. Before that it resolved to
+    # <site-packages>/data/uk_gazetteer, which never existed, and the gate ran
+    # blind from 2026-08-07 while still logging "blocked N jobs".
+    # job_signals has the SAME latent bug (services/job_signals.py:111) and has
+    # NOT moved yet — it stays on the old path here deliberately, so this list
+    # keeps telling the truth about where each one actually lives.
+    @pytest.mark.parametrize("rel", ["src/data/uk_gazetteer", "data/job_signals"])
     def test_the_committed_data_actually_exists(self, rel: str) -> None:
         """The exemption is worthless if the directory is empty — that would
         look identical to the bug it prevents."""

@@ -1,4 +1,8 @@
-# Runtime data — never bake into the image; mount as a volume.
+# Runtime data (jobs.db, logs, exports, reports) — never bake into the image.
+# This pattern is ROOT-ANCHORED: it excludes `backend/data/` only. Do NOT widen
+# it to `**/data` — `src/data/uk_gazetteer/` is packaged code-data that the UK
+# gate cannot run without, and shipping without it is issue #260 (four days of
+# foreign jobs in a UK-only catalog, with every instrument green).
 data/
 
 # ...EXCEPT the data that is not runtime state but SHIPPED REFERENCE DATA.
@@ -21,8 +25,13 @@ data/
 #
 # Both failure modes are invisible: empty data, no exception, no log line.
 # `tests/test_shipped_data.py` now pins the two ignore files together.
-!data/uk_gazetteer/
-!data/uk_gazetteer/**
+# uk_gazetteer is NOT listed here any more, and its absence is deliberate:
+# the data moved to `src/data/uk_gazetteer/`, and the `data/` rule above is
+# ROOT-ANCHORED, so it never reached inside src/ in the first place. An
+# exemption for a path nothing excludes is noise that reads like protection.
+# What actually carries it into the image is
+# `[tool.setuptools.package-data]` in backend/pyproject.toml plus
+# `pip install .` — the wheel, not this file.
 !data/job_signals/
 !data/job_signals/**
 

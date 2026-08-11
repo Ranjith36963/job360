@@ -119,6 +119,19 @@ job360 = "src.cli:cli"
 where = ["."]
 include = ["src*"]
 
+# ISSUE #260 — WITHOUT THIS BLOCK THE UK GATE SHIPS BLIND.
+#
+# `include = ["src*"]` copies .py files only. The UK gate is data-driven by
+# design (rule #30: UK places are matched from a 52k-row gazetteer, never a
+# hand-typed city list), so its .txt files are as load-bearing as its code.
+# They used to live in `backend/data/`, outside every package, and production
+# runs `pip install .` — so they never reached site-packages and the gate
+# degraded silently to empty sets for four days. Verify after any packaging
+# change with:
+#   pip wheel . --no-deps -w /tmp/wh && unzip -l /tmp/wh/job360-*.whl | grep gazetteer
+[tool.setuptools.package-data]
+src = ["data/uk_gazetteer/*.txt", "data/uk_gazetteer/NOTICE"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
