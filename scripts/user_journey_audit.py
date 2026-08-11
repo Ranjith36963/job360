@@ -12,6 +12,16 @@ person. Found live 2026-08-03 by the first run of this script:
 Neither throws an error. Neither fails a test. Both are somebody's product
 being quietly useless.
 
+CORRECTION (2026-08-11, issue #198). The 7edd5b59 finding above was a
+MISDIAGNOSIS, and it re-fired every morning for nine days. That account never
+confirmed its email; `POST /api/search` is gated on that, and `user_feed` is
+only ever written by a search or a profile-change re-score — so it could not
+have feed rows, and nothing was broken. Traced in prod: zero `run_log` rows for
+it, and its single profile write (11:53) predates the first job in the catalog
+(18:46) by seven hours. STAGE 1b below is the fix. The lesson is not "be less
+sensitive": it is that a detector naming the WRONG stage costs more than one
+that stays quiet, because everyone who reads it hunts a bug that isn't there.
+
 THE IDEA: the pipeline is a chain of stages. For each user, walk the chain and
 report the FIRST stage that broke. That turns "the product feels off" into
 "extraction works for this user, search config is empty, so the feed is empty" —
@@ -49,12 +59,14 @@ def mask(email: str | None) -> str:
     return f"{email[0]}***@{email.split('@')[-1]}"
 
 
-def audit_user(cur, uid, email) -> tuple[str, str, dict]:
+def audit_user(cur, uid, email, verified=True) -> tuple[str, str, dict]:
     """Return (stage_reached, verdict, facts) for one user.
 
     verdict is 'ok', 'broken', or 'not-started'.
+
+    ``verified`` is ``users.email_verified_at IS NOT NULL``. See STAGE 1b.
     """
-    f: dict = {}
+    f: dict = {"email_confirmed": bool(verified)}
 
     def one(q, default=0):
         cur.execute(q, (uid,))
@@ -79,6 +91,28 @@ def audit_user(cur, uid, email) -> tuple[str, str, dict]:
     f["extra_skills"] = len(pref.get("additional_skills") or [])
     f["has_linkedin"] = bool(cv.get("linkedin_raw_text"))
     f["has_github"] = bool(cv.get("github_repos_brief"))
+
+    # STAGE 1b — the product's own front door.
+    #
+    # `POST /api/search` is gated on a confirmed email (api/routes/search.py:177
+    # -> auth_deps.require_verified_user), and `user_feed` is ONLY ever written
+    # by a search or by a profile-change re-score. So an account that never
+    # confirmed its email cannot have feed rows — not because anything broke,
+    # but because it never got through the door.
+    #
+    # This cost 9 days. Issue #198 reported user 7edd5b59 "BROKEN at feed -
+    # only 0 jobs reached this user" every morning from 2026-08-03. Verified
+    # against prod 2026-08-11: that account confirmed no email, ran no search
+    # (`run_log` has zero rows for it), and its single profile write at
+    # 11:53:40 predates the FIRST job in the catalog (18:46) by seven hours.
+    # There was no feed bug. A detector that names the wrong stage sends every
+    # reader after a bug that does not exist, which is worse than silence.
+    #
+    # Not swallowed: these users are reported in their own section, because a
+    # signup funnel leaking at email confirmation is worth knowing about. It is
+    # just not an alarm — nothing is broken to fix.
+    if not verified:
+        return "email-not-confirmed", "not-started", f
 
     # STAGE 2 — extraction. Input went in; did anything come out?
     if f["cv_chars"] and f["skills"] < MIN_SKILLS:
@@ -137,9 +171,15 @@ def main() -> int:
 
     try:
         with psycopg.connect(dsn, connect_timeout=25) as conn, conn.cursor() as cur:
-            cur.execute("SELECT id, email FROM users ORDER BY created_at")
+            cur.execute(
+                "SELECT id, email, email_verified_at IS NOT NULL "
+                "FROM users ORDER BY created_at"
+            )
             users = cur.fetchall()
-            results = [(uid, email, *audit_user(cur, uid, email)) for uid, email in users]
+            results = [
+                (uid, email, *audit_user(cur, uid, email, verified=bool(ok)))
+                for uid, email, ok in users
+            ]
     except Exception as exc:  # noqa: BLE001
         print(f"::error::user journey audit could not run: {exc}")
         return 2
@@ -172,7 +212,12 @@ def main() -> int:
     for uid, email, stage, verdict, f in results:
         tag = {"ok": "OK", "broken": "**BROKEN**", "not-started": "-"}[verdict]
         if verdict == "not-started":
-            ev = "never uploaded a CV or set preferences"
+            ev = (
+                "signed up and gave us input, but never confirmed their email - "
+                "search is gated on it, so no job can reach them"
+                if stage == "email-not-confirmed"
+                else "never uploaded a CV or set preferences"
+            )
         elif verdict == "broken":
             ev = {
                 "extraction": f"CV has {f.get('cv_chars',0)} chars but only "
@@ -192,6 +237,20 @@ def main() -> int:
                   f"{f.get('llm_verdicts',0)} AI verdicts")
         print(f"| `{str(uid)[:8]}` {mask(email)} | {tag} | {stage} | {ev} |")
     print()
+
+    # Stalled at the front door. Not an alarm — nothing is broken, so there is
+    # nothing to repair. But a signup funnel that leaks here is still a real
+    # product fact, and burying it would just swap one blind spot for another.
+    stalled = [r for r in results if r[2] == "email-not-confirmed"]
+    if stalled:
+        print("## Signed up, gave us input, never confirmed their email\n")
+        print("Not a failure of ours: `POST /api/search` requires a confirmed "
+              "email, and the feed is only written by a search or a profile "
+              "re-score. These people cannot have a feed by design.\n")
+        for uid, _email, _stage, _verdict, f in stalled:
+            print(f"- `{str(uid)[:8]}` - {f.get('skills', 0)} skills, "
+                  f"{f.get('cv_chars', 0)} CV chars extracted, then stopped")
+        print()
 
     # Quality warnings: healthy users can still have a degraded experience.
     warnings = []
