@@ -170,7 +170,7 @@ class TestMatchingCoverageDoesNotRegress:
     # nine matching modules); raised to 46 by the shelf-completeness batch, which
     # wired the LinkedIn evidence sections, cv_industries, cv_languages,
     # career_domain and linkedin_summary into the judge and the vector.
-    BASELINE = 48
+    BASELINE = 49
 
     def test_matching_shelf_count_never_falls(self) -> None:
         current = sum(1 for n in shelf_names() if is_matching_shelf(n))

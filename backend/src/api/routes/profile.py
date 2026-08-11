@@ -231,6 +231,9 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         "summary": [{"text": (getattr(cv, "linkedin_summary", "") or "").strip()}]
         if (getattr(cv, "linkedin_summary", "") or "").strip()
         else [],
+        "headline": [{"text": (getattr(cv, "linkedin_headline", "") or "").strip()}]
+        if (getattr(cv, "linkedin_headline", "") or "").strip()
+        else [],
     }
     github_temporal: dict[str, dict[str, Any]] = {
         "languages": dict(getattr(cv, "github_languages", {}) or {}),

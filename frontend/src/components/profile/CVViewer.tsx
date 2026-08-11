@@ -252,6 +252,10 @@ export function CVViewer({
   // discarded whenever the CV already had a summary, so most profiles lost it
   // entirely; now it has a shelf, reaches the judge, and is finally shown.
   const liSummary = strField((linkedinSubsections?.summary ?? [])[0] ?? {}, "text");
+  // The LinkedIn headline. Empty on every two-column export until the LLM was
+  // asked for it — the flattened left rail pushes the name and tagline into the
+  // middle of the text, where no structural reader was looking.
+  const liHeadline = strField((linkedinSubsections?.headline ?? [])[0] ?? {}, "text");
   const liContactRows: [string, string][] = (
     [
       ["Email", strField(liContact, "email")],
@@ -274,7 +278,8 @@ export function CVViewer({
     liRecommendations.length > 0 ||
     liInterests.length > 0 ||
     liContactRows.length > 0 ||
-    liSummary.length > 0;
+    liSummary.length > 0 ||
+    liHeadline.length > 0;
 
   // ── GitHub temporal (languages by byte share + topics) ─────
   const ghLanguages = Object.entries(githubTemporal?.languages ?? {}).filter(
@@ -606,6 +611,18 @@ export function CVViewer({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Headline — LinkedIn's tagline. Empty on every two-column export
+              until the LLM was asked for it; often states the stack AND current
+              availability ("Open to X roles UK"), which no other input says. */}
+          {liHeadline.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Headline" />
+              <p className="pl-5 text-xs leading-relaxed text-foreground/85">
+                {liHeadline}
+              </p>
             </div>
           )}
 

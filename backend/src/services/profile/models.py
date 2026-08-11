@@ -62,6 +62,23 @@ class CVData:
     # a LinkedIn About is looser, first-person, and states motivation and
     # direction that a CV omits — exactly the prose the LLM judge reads best.
     linkedin_summary: str = ""
+    # The LinkedIn HEADLINE — the tagline under the person's name.
+    #
+    # Empty on every two-column export until 2026-08-11, and for a structural
+    # reason: LinkedIn's "Save to PDF" flattens the left rail (Contact, Top
+    # Skills, Certifications) FIRST, so the name and headline land in the middle
+    # of the text rather than at the top. ``_split_sections`` looks for a header
+    # block before the first heading, finds nothing, and returns 0 characters.
+    # The deterministic pass is structure-only by design, and this layout
+    # defeats structure — so the headline is read by the LLM instead (rule #28
+    # safe: prose comprehension, not a keyword table).
+    #
+    # It is worth its own shelf rather than filling ``headline``, which the CV
+    # owns. On a real profile the two say different things: the CV's was
+    # "AI/ML Engineer | Generative AI Specialist" while LinkedIn's names the
+    # stack AND states "Open to AI/ML Engineer Roles UK" — an availability,
+    # role and location claim that appears in no other input.
+    linkedin_headline: str = ""
     # Two-pass extraction — the raw text pdfplumber pulled from the LinkedIn
     # "Save to PDF" export. Stored so the LLM pass can re-run on any profile
     # change WITHOUT the user re-uploading the file (the temp file is deleted

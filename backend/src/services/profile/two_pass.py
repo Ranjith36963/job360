@@ -61,7 +61,7 @@ async def _none() -> None:
     return None
 
 
-EXTRACTOR_VERSION = "4"
+EXTRACTOR_VERSION = "5"
 """Bump this whenever an LLM extraction PROMPT changes in a way that should
 re-read inputs the system has already seen.
 
@@ -92,7 +92,8 @@ stayed empty and looked like profiles that genuinely had no honors or patents.
 Version log — 1: input-only hash (pre-2026-08-08). 2: prose-mining CV prompt.
 3: the seven LinkedIn section prompts (honors, publications, patents,
 organizations, test_scores, recommendations, interests) + the contact block.
-4: the CV ``right_to_work`` prompt field.
+4: the CV ``right_to_work`` prompt field. 5: the LinkedIn ``headline``
+prompt — empty on every two-column export before it.
 """
 
 
