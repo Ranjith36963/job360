@@ -62,6 +62,41 @@ logger = logging.getLogger("job360.api.profile")
 _rescore_bg_tasks: set[Any] = set()
 
 
+def _rescore_finished(task: Any) -> None:
+    """Discard the task reference AND say something when it failed.
+
+    The previous callback was ``_rescore_bg_tasks.discard`` — it dropped the
+    reference and never touched ``task.exception()``. asyncio only reports an
+    unretrieved exception when the task object is garbage-collected, and by then
+    the message is detached from the user it belonged to. The surrounding
+    ``except`` covers SCHEDULING, not execution, so a re-score that started and
+    then died left the feed permanently stale with nothing in the logs.
+
+    Measured in production 2026-08-11: 9,708 user_feed rows carry a
+    profile_version older than their user's current one, and all 9,708 point at
+    jobs still in the catalog (0 orphans) — so every one of them was reachable
+    and simply never got re-scored. One user sits at profile_version 10 while
+    their current version is 15: five profile changes, no completed re-score,
+    no error anywhere.
+
+    This does not FIX that (see the note in _maybe_trigger_rescore); it makes the
+    failure visible, which is the difference between a bug you can find and one
+    you cannot.
+    """
+    _rescore_bg_tasks.discard(task)
+    if task.cancelled():
+        logger.warning("rescore: background re-score was CANCELLED — feed left stale")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "rescore: background re-score FAILED, feed left on a stale "
+            "profile_version: %r",
+            exc,
+            exc_info=exc,
+        )
+
+
 async def _maybe_trigger_rescore(user_id: str) -> None:
     """Fire-and-forget: schedule a background re-score if the profile content changed.
 
@@ -72,6 +107,15 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
     to ``_rescore_bg_tasks`` to prevent GC loss.
     Never lets scheduling errors propagate — the profile save must never 500.
     Lazy imports keep the hot GET/POST paths import-cycle-free (rule #16).
+
+    KNOWN LIMITATION — this is fire-and-forget IN THE WEB PROCESS, and that is
+    why issue #271 exists. There is no queue entry, no retry and no ledger:
+    ``grep -c rescore src/workers/tasks.py`` is 0, so nothing outside this
+    process ever knows a re-score was owed. Any restart kills an in-flight run,
+    and `main` auto-deploys on every merge, so deploys alone can drop them.
+    The durable fix is an ARQ job (the worker and Redis already exist) with a
+    retry and a completion record — a change to how production schedules work,
+    so it is deliberately NOT bundled with the logging fix below.
     """
     try:
         from src.services.profile.storage import (  # noqa: PLC0415
@@ -91,7 +135,7 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
 
         task = asyncio.create_task(rescore_user_feed(user_id))
         _rescore_bg_tasks.add(task)
-        task.add_done_callback(_rescore_bg_tasks.discard)
+        task.add_done_callback(_rescore_finished)
         logger.info("rescore: background re-score scheduled for user %s", user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
