@@ -298,6 +298,40 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     cv.llm_input_hashes.pop("cv", None)
 
 
+# Scalar CVData fields the CV pass must NOT write, each with the reason it is
+# somebody else's to own. Everything else that is a plain string is CV-owned.
+_NOT_CV_OWNED_SCALARS: dict[str, str] = {
+    "raw_text": "the source document itself — written by the upload route",
+    "cv_filename": "upload receipt, stamped by the API route",
+    "cv_uploaded_at": "upload receipt, stamped by the API route",
+    "linkedin_filename": "upload receipt, stamped by the API route",
+    "linkedin_uploaded_at": "upload receipt, stamped by the API route",
+    "github_connected_at": "connection receipt, stamped by the API route",
+}
+
+_SCALAR_ANNOTATIONS = frozenset({"str", "Optional[str]"})
+
+
+def _cv_owned_scalars() -> tuple[str, ...]:
+    """Every plain-string CVData field the CV pass is allowed to fill.
+
+    Fields belonging to the other passes are excluded by PREFIX rather than by
+    name, so a new ``linkedin_*`` or ``github_*`` scalar can never be clobbered
+    by a CV re-parse just because someone forgot to list it here.
+    """
+    import dataclasses as _dc
+
+    out: list[str] = []
+    for f in _dc.fields(CVData):
+        if f.name in _NOT_CV_OWNED_SCALARS:
+            continue
+        if f.name.startswith(("linkedin_", "github_", "about_me_")):
+            continue
+        if str(f.type) in _SCALAR_ANNOTATIONS:
+            out.append(f.name)
+    return tuple(out)
+
+
 def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     """Merge the CV-OWNED fields of an LLM result into the live ``cv``.
 
@@ -314,25 +348,23 @@ def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     _merge_str_list(cv.cv_industries, llm_cv.cv_industries)
     _merge_str_list(cv.cv_languages, llm_cv.cv_languages)
     # Fill empty scalars only — never overwrite a value the user already has.
-    if not cv.name and llm_cv.name:
-        cv.name = llm_cv.name
-    if not cv.headline and llm_cv.headline:
-        cv.headline = llm_cv.headline
-    if not cv.location and llm_cv.location:
-        cv.location = llm_cv.location
-    if not cv.summary and llm_cv.summary:
-        cv.summary = llm_cv.summary
-    if not cv.experience_text and llm_cv.experience_text:
-        cv.experience_text = llm_cv.experience_text
-    # ADAPTER-PARITY FIX (2026-08-07). Every OTHER CV-owned scalar in this
-    # function was merged; `career_domain` was not, so even once the prompt
-    # asks for it (cv_parser._CV_PROMPT) and the schema adapter surfaces it
-    # (schemas.cv_schema_to_cvdata), the value stopped here — one layer above
-    # the fix, same shape as the `cv_positions` miss just below. Fill-if-
-    # empty like every scalar above: a re-run that classifies differently
-    # must not clobber a domain the user's profile already carries.
-    if not cv.career_domain and llm_cv.career_domain:
-        cv.career_domain = llm_cv.career_domain
+    #
+    # DERIVED FROM THE DATACLASS, not hand-listed. This function has now lost a
+    # field three separate times, always the same way: the prompt is taught to
+    # extract something, the schema declares it, the adapter surfaces it, and
+    # then this merge — which names each scalar individually — silently drops it
+    # one layer above the fix. It happened to `career_domain` (2026-08-07), then
+    # to `cv_experience_level` and `cv_right_to_work` (2026-08-10), the latter
+    # two verified EMPTY on a live production profile after a real re-extraction
+    # while every unit test passed, because the tests set the field directly
+    # instead of letting the LLM pass produce it.
+    #
+    # A scalar added to CVData tomorrow is now carried automatically. The
+    # exclusions are the only thing that needs maintaining, and each one states
+    # WHY it is not the CV pass's to write.
+    for name in _cv_owned_scalars():
+        if not getattr(cv, name, None) and getattr(llm_cv, name, None):
+            setattr(cv, name, getattr(llm_cv, name))
     # ESCO skill-normalisation map (Step-1.5 S1.5-D). `reset_cv_owned_fields`
     # has always cleared `cv_skills_esco` on a CV swap — treating it as CV-
     # owned — but nothing here ever copied it back in, so fixing the adapter
