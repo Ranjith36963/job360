@@ -6,10 +6,14 @@ inference:
 * **Dependency-file parsing** — fetches ``package.json`` /
   ``requirements.txt`` / ``pyproject.toml`` / ``Cargo.toml`` / ``Gemfile``
   / ``go.mod`` / ``composer.json`` via the GitHub Contents API, runs
-  each through ``dep_file_parser``, and maps dep names to skills via
-  ``dependency_map.lookup_skill``. Typically yields 3-5× more skills
-  than language-only inference because frameworks (React, Django,
-  Laravel) don't map 1:1 to a language.
+  each through ``dep_file_parser``, and keeps the dependency names
+  VERBATIM — canonicalising them to skills is the LLM pass's job. An
+  earlier version routed them through a hand-typed
+  ``dependency_map.lookup_skill``; that module was deleted under rule #28
+  (no hardcoded skill vocabularies) and this line described it for weeks
+  after it was gone. Typically yields 3-5× more signal than
+  language-only inference, because frameworks (React, Django, Laravel)
+  don't map 1:1 to a language.
 
 * **Temporal weighting** — repos pushed within the last 12 months
   contribute 3× their code-bytes to the ranking. This pushes "what

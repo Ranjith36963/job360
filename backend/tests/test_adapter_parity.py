@@ -178,7 +178,7 @@ class TestAdapterFieldParity:
             live, fallback = _build_both_adapters()
 
         assert live.career_domain == fallback.career_domain == "engineering_physical"
-        assert set(live.industries) == set(fallback.industries) == {"Construction", "Infrastructure"}
+        assert set(live.cv_industries) == set(fallback.cv_industries) == {"Construction", "Infrastructure"}
         assert set(live.cv_languages) == set(fallback.cv_languages) == {"English", "Spanish"}
 
     def test_a_field_populated_on_only_one_adapter_fails_the_test(self):

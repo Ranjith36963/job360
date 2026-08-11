@@ -238,8 +238,10 @@ class ProfileResponse(BaseModel):
     skill_esco: dict[str, str] = {}
     # Step-1.5 S3-E — provenance map: skill name → list of source labels
     # (``cv_explicit`` / ``linkedin`` / ``github_dep`` / ``github_lang`` /
-    # ``user_declared``). Computed from the SkillEntry merge — empty
-    # when the profile has no skills.
+    # ``user_declared``). Computed from ``skill_tiering.SkillEvidence.sources``
+    # — empty when the profile has no skills. (It never came from "the
+    # SkillEntry merge", as this comment claimed for months: that module had no
+    # caller and has been deleted.)
     skill_provenance: dict[str, list[str]] = {}
     # Skills grouped by WHERE they came from — for the source-based profile view
     # (From CV / From LinkedIn / From GitHub / From Preferences). Derived from

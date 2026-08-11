@@ -170,6 +170,16 @@ def profile_to_embedding_text(profile: Any) -> str:
             "cv_skills_esco",
         ):
             _add_all(getattr(cv, field, []))
+        # Facts about the candidate that had a shelf but no consumer until
+        # 2026-08-09: where they have worked (cv_industries), which human
+        # languages they speak (cv_languages — a real requirement on UK ads),
+        # and the domain the CV pass classified them into (career_domain, whose
+        # own comment claimed for months that a scorer read it; none did).
+        _add_all(getattr(cv, "cv_industries", []))
+        _add_all(getattr(cv, "cv_languages", []))
+        domain = getattr(cv, "career_domain", "") or ""
+        if isinstance(domain, str) and domain.strip():
+            parts.append(domain.strip())
         for text_field in ("summary", "experience_text", "linkedin_summary"):
             v = getattr(cv, text_field, "") or ""
             if isinstance(v, str) and v.strip():

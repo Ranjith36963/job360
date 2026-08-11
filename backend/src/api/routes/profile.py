@@ -101,7 +101,7 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
         )
 
 
-def _build_profile_response(profile: UserProfile) -> ProfileResponse:
+def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileResponse:
     summary = ProfileSummary(
         is_complete=profile.is_complete,
         job_titles=profile.cv_data.job_titles,
@@ -151,9 +151,6 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     skill_tiers: dict[str, list[str]] = {}
     skill_provenance: dict[str, list[str]] = {}
     try:
-        from src.services.profile.skill_entry import (  # noqa: PLC0415 — lazy
-            build_skill_entries_from_profile,
-        )
         from src.services.profile.skill_tiering import (  # noqa: PLC0415 — lazy
             collect_evidence_from_profile,
             tier_skills_by_evidence,
@@ -171,10 +168,6 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         # Skip ESCO normalisation here so the route stays cheap on a hot
         # GET; ProfileResponse.skill_esco already carries the URI map.
         skill_provenance = {ev.name: list(set(ev.sources)) for ev in evidence}
-        # Side benefit — ensure SkillEntry import path stays exercised
-        # so a future refactor that moves the import doesn't silently
-        # break the response shape.
-        _ = build_skill_entries_from_profile
     except Exception:
         skill_tiers = {}
         skill_provenance = {}
@@ -263,7 +256,7 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     # migration just returns None.
     current_version_id: int | None = None
     try:
-        versions = list_profile_versions(_user_id_for(profile), limit=1)
+        versions = list_profile_versions(user_id, limit=1)
         if versions:
             current_version_id = versions[0]["id"]
     except Exception:
@@ -285,16 +278,14 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     )
 
 
-def _user_id_for(profile: UserProfile) -> str:
-    """Pull a user_id off the profile if the caller stamped one; fall back
-    to the default tenant. Used only for current_version_id lookup —
-    the per-route handlers always pass the authenticated user_id directly."""
-    user_id = getattr(profile, "user_id", None)
-    if isinstance(user_id, str) and user_id:
-        return user_id
-    from src.core.tenancy import DEFAULT_TENANT_ID  # noqa: PLC0415
-
-    return DEFAULT_TENANT_ID
+# ``_user_id_for(profile)`` used to live here. It did
+# ``getattr(profile, "user_id", None)`` against a ``UserProfile``, which has no
+# such field and never had one, and nothing in the codebase ever stamped it — so
+# it returned None every time and fell through to DEFAULT_TENANT_ID. Every
+# user's ``current_version_id`` was therefore looked up against the default
+# tenant instead of themselves: a cross-tenant read that could not fail loudly,
+# because getattr-with-a-default cannot. All six callers already had the
+# authenticated ``user.id`` in scope, so the fix was to pass it.
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -308,7 +299,7 @@ async def get_profile(user: CurrentUser = Depends(require_user)) -> ProfileRespo
     profile = load_profile(user.id)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 # ── Shared profile-input helpers — the upload pipeline in ONE place ──
@@ -502,7 +493,7 @@ async def upload_cv(
     content = await cv.read(10 * 1024 * 1024 + 1)
     await _capture_cv_raw(content, cv.filename, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile/preferences", response_model=ProfileResponse)
@@ -514,7 +505,7 @@ async def upsert_preferences(
     profile = load_profile(user.id) or UserProfile()
     _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile", response_model=ProfileResponse)
@@ -535,7 +526,7 @@ async def upsert_profile(
     if preferences is not None:
         _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile/linkedin", response_model=LinkedInResponse)
@@ -783,7 +774,7 @@ async def clear_profile_section(
     logger.info(
         "profile_cleared", extra={"event": "profile_cleared", "section": section}
     )
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 # ── Step-1.5 S3-A,B,C — profile version + JSON Resume endpoints. ──
@@ -826,7 +817,7 @@ async def restore_version(
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    return _build_profile_response(restored)
+    return _build_profile_response(restored, user.id)
 
 
 def _get_profile_version_for_user(version_id: int, user_id: str) -> dict[str, Any] | None:

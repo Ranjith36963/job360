@@ -151,6 +151,120 @@ class TestLinkedInSectionsSurviveACacheHit:
         )
 
 
+class TestEveryLinkedInShelfSurvivesTheMerge:
+    """The same data-loss shape as the class above, one shelf-generation later.
+
+    ``merge_linkedin_fields`` hand-lists the keys it forwards. On 2026-08-09
+    eight new LinkedIn shelves shipped — honors, publications, patents,
+    organizations, test_scores, recommendations, interests and contact — with
+    extractors, prompts, storage, an API field and a rendered UI section each.
+    The merger was not updated, so it forwarded twelve keys and dropped those
+    eight. ``enrich_cv_from_linkedin`` then does
+    ``cv.linkedin_honors = linkedin_data.get("honors", [])`` against a dict that
+    never had the key, so the shelves were not merely unfilled — they were
+    ASSIGNED EMPTY on every extraction.
+
+    Every layer was verified in isolation and the feature was reported working;
+    a live profile even showed a populated contact block, because it had been
+    backfilled by a one-off script that bypassed the merge. The pipeline was
+    never once exercised end to end.
+
+    So this test is deliberately NOT another hand-listed tuple — that is the
+    construct that failed. It reads the shelves off the dataclass, so a shelf
+    added tomorrow is covered the moment it is declared.
+    """
+
+    # Shelves whose value does not travel as its own key through this merge.
+    # Each needs a reason; "hard to test" is not one.
+    _NOT_A_MERGE_KEY = {
+        "linkedin_raw_text": "the raw document, carried as raw_text",
+        "linkedin_industry": "deterministic header field, not an LLM section",
+        "linkedin_skills": "unioned from both passes, covered by its own tests",
+        "linkedin_filename": "upload receipt, stamped by the API route",
+        "linkedin_uploaded_at": "upload receipt, stamped by the API route",
+    }
+
+    def _section_shelves(self) -> list[str]:
+        import dataclasses
+
+        return [
+            f.name
+            for f in dataclasses.fields(CVData)
+            if f.name.startswith("linkedin_") and f.name not in self._NOT_A_MERGE_KEY
+        ]
+
+    def test_every_linkedin_section_reaches_the_shelf(self) -> None:
+        shelves = self._section_shelves()
+        assert len(shelves) >= 12, "sanity: the LinkedIn shelves should not vanish"
+
+        # Payload keys are the shelf names minus the prefix — the naming
+        # contract the merger is supposed to honour.
+        payload: dict = {}
+        for shelf in shelves:
+            key = shelf[len("linkedin_"):]
+            payload[key] = (
+                {"email": "probe@example.com"} if key == "contact" else [{"probe": key}]
+            )
+
+        async def ran(*a, **kw):
+            return dict(payload)
+
+        profile = UserProfile(
+            cv_data=CVData(linkedin_raw_text="Some LinkedIn text"),
+            preferences=UserPreferences(),
+        )
+        after = asyncio.run(_drive(profile, ran))
+
+        dropped = [s for s in shelves if not getattr(after.cv_data, s)]
+        assert not dropped, (
+            "These LinkedIn shelves were produced by the pass and then dropped "
+            f"before reaching CVData: {dropped}. merge_linkedin_fields forwards a "
+            "hand-listed set of keys; anything missing from that list is silently "
+            "discarded and then overwritten with an empty value."
+        )
+
+
+class TestTheExtractorVersionTracksThePrompts:
+    """A cost cache keyed on the INPUT hides a change to the EXTRACTOR.
+
+    ``_input_hash`` folds ``EXTRACTOR_VERSION`` into the hash precisely so that
+    improving a prompt re-reads inputs that have not changed. Shipping seven new
+    LinkedIn section prompts WITHOUT bumping it meant every existing user's
+    LinkedIn hash still matched, the LLM pass was skipped as a cache hit, and the
+    new sections could never populate for anyone who had already uploaded —
+    which is every current user.
+    """
+
+    def test_bumping_the_version_invalidates_a_stored_hash(self) -> None:
+        from src.services.profile import two_pass
+
+        raw = "same unchanged LinkedIn text"
+        before = two_pass._input_hash(raw)
+
+        original = two_pass.EXTRACTOR_VERSION
+        try:
+            two_pass.EXTRACTOR_VERSION = f"{original}-next"
+            after = two_pass._input_hash(raw)
+        finally:
+            two_pass.EXTRACTOR_VERSION = original
+
+        assert before != after, (
+            "EXTRACTOR_VERSION is not reaching the hash, so a prompt change can "
+            "never re-read an unchanged input."
+        )
+
+    def test_the_version_is_ahead_of_the_linkedin_section_prompts(self) -> None:
+        """Pins the specific miss: the version at the time the seven section
+        prompts landed was "2". Any later prompt change must move it again."""
+        from src.services.profile.two_pass import EXTRACTOR_VERSION
+
+        assert EXTRACTOR_VERSION != "2", (
+            "EXTRACTOR_VERSION is still '2', the value in force before the "
+            "LinkedIn section prompts shipped — existing users will keep hitting "
+            "the cache and never receive them."
+        )
+
+
 class TestCertificationsAcceptBothShapes:
     """An LLM returns this section as EITHER objects or bare strings — both are
     reasonable readings of "certifications". The object-only assumption raised
