@@ -98,6 +98,57 @@ class TestAnUnstatedPreferenceNeverDeletesAJob:
         assert passes_prefilter(fp, _job(title="Principal ML Engineer")) is False
 
 
+class TestACountryLevelPreferenceIsNotAConstraint:
+    """The hazard created by wiring this gate at all.
+
+    ``location_ok`` compares by SUBSTRING. Before the prefilter was fed, that
+    never ran on real data. Once it did, the single most natural thing a UK user
+    can type — "United Kingdom" — matched neither direction of "London", so the
+    gate would have deleted almost the entire feed the moment anyone set it.
+
+    The catalogue is UK-only by construction (rule #30 refuses the rest at
+    ingestion), so a country-level preference carries no information this gate
+    can act on. It passes.
+    """
+
+    def _fp(self, monkeypatch, locations):
+        profile = UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"]),
+            preferences=UserPreferences(preferred_locations=locations),
+        )
+        monkeypatch.setattr(
+            "src.workers.tasks._user_profile_for", lambda _uid: profile
+        )
+        return _filter_profile_for("u1")
+
+    def test_united_kingdom_does_not_delete_a_london_job(self, monkeypatch) -> None:
+        fp = self._fp(monkeypatch, ["United Kingdom"])
+        assert passes_prefilter(fp, _job()) is True, (
+            "a country-level location preference deleted a UK job — the whole "
+            "catalogue is UK-only, so this preference constrains nothing"
+        )
+
+    def test_every_way_of_naming_the_uk_behaves_the_same(self, monkeypatch) -> None:
+        for name in ("UK", "uk", "United Kingdom", "Great Britain", "England",
+                     "Scotland", "Wales", "Northern Ireland"):
+            fp = self._fp(monkeypatch, [name])
+            assert passes_prefilter(fp, _job()) is True, f"{name!r} filtered a UK job"
+
+    def test_a_real_city_preference_still_filters(self, monkeypatch) -> None:
+        """The fix must not turn the gate back into a no-op: a CITY the user
+        named is a genuine constraint and must still apply."""
+        fp = self._fp(monkeypatch, ["Manchester"])
+        assert passes_prefilter(fp, _job()) is False  # the job is in London
+
+    def test_a_country_preference_alongside_a_city_still_passes_both(
+        self, monkeypatch
+    ) -> None:
+        fp = self._fp(monkeypatch, ["United Kingdom", "Manchester"])
+        # London matches the country entry, so it survives — the user asking for
+        # "UK or Manchester" wants UK-wide results.
+        assert passes_prefilter(fp, _job()) is True
+
+
 class TestSkillsStayOutUntilMeasured:
     """Extracted skills are NOT a stated preference, and the one measurement we
     have says wiring them here deletes 71% of the catalogue. If a future change
