@@ -198,7 +198,9 @@ def profile_to_embedding_text(profile: Any) -> str:
                 blob = " ".join(b for b in bits if b)
                 if blob:
                     parts.append(blob)
-        for proj in getattr(cv, "linkedin_projects", []) or []:
+        for proj in list(getattr(cv, "cv_projects", []) or []) + list(
+            getattr(cv, "linkedin_projects", []) or []
+        ):
             if isinstance(proj, dict):
                 blob = f"{proj.get('title') or ''} {proj.get('description') or ''}".strip()
                 if blob:

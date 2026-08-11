@@ -141,6 +141,7 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         location=getattr(cv, "location", ""),
         achievements=getattr(cv, "achievements", []),
         cv_positions=getattr(cv, "cv_positions", []) or [],
+        cv_projects=getattr(cv, "cv_projects", []) or [],
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 

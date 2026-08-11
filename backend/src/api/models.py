@@ -213,6 +213,10 @@ class CVDetail(BaseModel):
     # never SEE their parsed experience — only a "Roles: N" count. Part of
     # the "stored but not shown" gap closed 2026-08-08.
     cv_positions: list[dict[str, Any]] = []
+    # Projects stated on the CV. A Projects heading was already used as a
+    # section boundary and then discarded — for a junior or career-changing
+    # candidate it is often the strongest evidence on the document.
+    cv_projects: list[dict[str, Any]] = []
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []

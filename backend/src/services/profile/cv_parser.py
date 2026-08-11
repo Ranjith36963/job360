@@ -54,6 +54,14 @@ Return a JSON object with exactly these fields:
       "details": ["Coursework, dissertation, projects — each as separate string"]
     }}
   ],
+  "projects": [
+    {{
+      "name": "Project name",
+      "description": "What it does and what they built, in their words",
+      "technologies": ["Each tool/framework named for THIS project"],
+      "dates": "Date range if written"
+    }}
+  ],
   "certifications": [
     "Each certification with issuer and date, as a single string"
   ],

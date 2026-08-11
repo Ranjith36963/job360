@@ -1564,6 +1564,13 @@ export interface components {
                 [key: string]: unknown;
             }[];
             /**
+             * Cv Projects
+             * @default []
+             */
+            cv_projects: {
+                [key: string]: unknown;
+            }[];
+            /**
              * Education
              * @default []
              */

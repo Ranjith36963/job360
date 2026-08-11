@@ -225,6 +225,17 @@ export function CVViewer({
   // (The showFullCV toggle and its highlight terms went with the "Full CV
   // Text" panel — that text now lives only in the CV Uploaded card.)
 
+  // Projects the CV states. Defensive field reads for the same reason as
+  // cv_positions: these rows are LLM output with no strict wire schema.
+  const cvProjects = ((cv.cv_projects ?? []) as Record<string, unknown>[])
+    .map((raw) => ({
+      name: strField(raw, "name"),
+      description: strField(raw, "description"),
+      technologies: strArrField(raw, "technologies"),
+      dates: strField(raw, "dates"),
+    }))
+    .filter((p) => p.name || p.description);
+
   const positions = (cv.cv_positions ?? [])
     .map((raw) => normalizePosition(raw as Record<string, unknown>))
     .filter((p) => p.company || p.title);
@@ -539,6 +550,42 @@ export function CVViewer({
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Projects stated on the CV. A "Projects" heading was already
+            recognised — as a boundary that stops a skills block — and then
+            discarded. For a junior or career-changing candidate these are
+            often the strongest evidence on the document. */}
+        {cvProjects.length > 0 && (
+          <div className="mb-5">
+            <SectionLabel icon={FolderKanban} text={`Projects (${cvProjects.length})`} />
+            <div className="space-y-3 pl-5">
+              {cvProjects.map((proj, i) => (
+                <div key={i}>
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-sm font-medium text-foreground">{proj.name}</span>
+                    {proj.dates && (
+                      <span className="text-xs text-muted-foreground">{proj.dates}</span>
+                    )}
+                  </div>
+                  {proj.description && (
+                    <p className="text-xs leading-relaxed text-foreground/80">
+                      {proj.description}
+                    </p>
+                  )}
+                  {proj.technologies.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {proj.technologies.map((t, j) => (
+                        <Badge key={j} variant="secondary" className="text-[10px]">
+                          {t}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
