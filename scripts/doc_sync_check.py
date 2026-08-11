@@ -134,7 +134,14 @@ def hard_rule_count() -> int:
     and exactly the class of number that rots every time a rule is added.
     """
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
-    return len(re.findall(r"^\d+\. \*\*", text, re.M))
+    # Count distinct rule NUMBERS, not list lines. Two rules that share one entry
+    # ("11 + 16. **Never import ...") are still two rules to the agent reading them,
+    # and the agent is this number's consumer. Counting lines made the checker
+    # report 29 while the document visibly numbered up to 31.
+    numbers: set[int] = set()
+    for m in re.finditer(r"^(\d+(?:\s*\+\s*\d+)*)\. \*\*", text, re.M):
+        numbers.update(int(n) for n in re.findall(r"\d+", m.group(1)))
+    return len(numbers)
 
 
 def route_module_count() -> int:
