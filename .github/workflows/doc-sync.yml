@@ -48,6 +48,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # BLOCKING, and deliberately separate from the drift report below.
+      # The drift report is non-blocking on purpose: it is a daily signal the
+      # fixer loop repairs. The size budget is not that kind of thing -- it is a
+      # hard ceiling with one deterministic answer, on a file auto-loaded into
+      # every session, so an over-budget merge taxes every future turn.
+      # It was claimed as "CI enforces this" in CLAUDE.md while the step below
+      # swallowed exit 1 (`[ "$code" -le 1 ]`). This step makes the claim true.
+      # Verified by deliberately breaking it: +30 words -> exit 1.
+      - name: CLAUDE.md size budget (blocking)
+        run: python scripts/doc_sync_check.py --budget-only
+
       - name: Run doc drift check
         id: check
         run: |
@@ -220,7 +231,7 @@ jobs:
           # "Markdown only" is NOT a sufficient cage, because the files that
           # CAGE EVERY OTHER LOOP ARE MARKDOWN.
           #
-          # CLAUDE.md holds the 28 Hard Rules, and repair.yml + pr-repair.yml
+          # CLAUDE.md holds the 31 Hard Rules, and repair.yml + pr-repair.yml
           # feed exactly that text to their blind checker as INVARIANTS. Every
           # `.claude/**` file is agent instruction. So under the old rule this
           # loop's model could edit the constraints that every other loop's

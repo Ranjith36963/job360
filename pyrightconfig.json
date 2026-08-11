@@ -1,0 +1,28 @@
+{
+  "//": "LSP config for Claude Code and IDEs. WHY THIS FILE EXISTS: installing the",
+  "// ": "pyright binary is NOT enough — without a root, pyright analyses one file at",
+  "//  ": "a time and cannot resolve `from src.models import ...`. Measured 2026-08-11:",
+  "//   ": "findReferences on models.py:103 normalized_key returned 1 (the definition",
+  "//    ": "itself) while grep found 78 hits. Hard rules #1/#2/#8 are all reference-",
+  "//     ": "tracing rules, so a blind LSP silently degrades exactly the rules that",
+  "//      ": "most need it. executionEnvironments below gives it the backend/ root.",
+  "include": ["backend/src", "backend/tests", "backend/scripts", "backend/migrations"],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.mypy_cache*",
+    "**/.pytest_cache",
+    "backend/data",
+    "frontend",
+    "**/.claude/worktrees",
+    "**/.venv",
+    "**/venv"
+  ],
+  "executionEnvironments": [
+    { "root": "backend", "extraPaths": ["backend"] }
+  ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "off",
+  "//typeCheckingMode": "OFF on purpose: mypy --strict is already the CI gate (backend/pyproject.toml [tool.mypy], ratchet at scripts/mypy_ratchet.py). Pyright is here for NAVIGATION only — go-to-definition and find-references. Turning type checking on would add a second, disagreeing type authority and produce noise nobody acts on.",
+  "reportMissingImports": "none"
+}
