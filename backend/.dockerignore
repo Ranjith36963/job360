@@ -1,6 +1,31 @@
 # Runtime data — never bake into the image; mount as a volume.
 data/
 
+# ...EXCEPT the data that is not runtime state but SHIPPED REFERENCE DATA.
+#
+# `.gitignore` deliberately un-ignores these same two directories, which is the
+# whole reason they are committed. This file did not mirror that, and the
+# Dockerfile is `COPY . .`, so the build threw away exactly the files someone had
+# gone to the trouble of exempting — and nothing rebuilds them at deploy time.
+# Railway volumes start empty, so no mount could supply them either.
+#
+# What that cost, silently and with no error:
+#   uk_gazetteer/  — the ~52k UK place names rule #30 is built on. Without it
+#                    `uk_gate._read()` returns an empty frozenset (it degrades
+#                    rather than raising), so no job can match a UK place and the
+#                    gate falls through to source-trust and ad-text evidence.
+#   job_signals/   — the seniority / workplace / location term tables behind
+#                    `signal_backed_lookup`, which fills 'unknown' enrichment at
+#                    read time, and `detect_seniority`. `_load_terms` returns {}
+#                    on a missing file, so those detectors quietly answer nothing.
+#
+# Both failure modes are invisible: empty data, no exception, no log line.
+# `tests/test_shipped_data.py` now pins the two ignore files together.
+!data/uk_gazetteer/
+!data/uk_gazetteer/**
+!data/job_signals/
+!data/job_signals/**
+
 # Python caches
 __pycache__/
 *.pyc
