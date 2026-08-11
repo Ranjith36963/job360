@@ -61,7 +61,7 @@ async def _none() -> None:
     return None
 
 
-EXTRACTOR_VERSION = "5"
+EXTRACTOR_VERSION = "6"
 """Bump this whenever an LLM extraction PROMPT changes in a way that should
 re-read inputs the system has already seen.
 
@@ -93,7 +93,8 @@ Version log — 1: input-only hash (pre-2026-08-08). 2: prose-mining CV prompt.
 3: the seven LinkedIn section prompts (honors, publications, patents,
 organizations, test_scores, recommendations, interests) + the contact block.
 4: the CV ``right_to_work`` prompt field. 5: the LinkedIn ``headline``
-prompt — empty on every two-column export before it.
+prompt — empty on every two-column export before it. 6: the CV
+``projects`` prompt field.
 """
 
 
@@ -348,6 +349,10 @@ def _merge_cv_llm_into(cv: CVData, llm_cv: CVData) -> None:
     _merge_str_list(cv.achievements, llm_cv.achievements)
     _merge_str_list(cv.cv_industries, llm_cv.cv_industries)
     _merge_str_list(cv.cv_languages, llm_cv.cv_languages)
+    # Structured rows, replaced wholesale like cv_positions: a re-parse of a
+    # NEW CV must reflect that CV, not accumulate projects from an old one.
+    if llm_cv.cv_projects:
+        cv.cv_projects = list(llm_cv.cv_projects)
     # Fill empty scalars only — never overwrite a value the user already has.
     #
     # DERIVED FROM THE DATACLASS, not hand-listed. This function has now lost a

@@ -222,6 +222,8 @@ def profile_to_matcher_text(profile: Any) -> str:
         # NOWHERE else. Rendered as labelled rows because a judge reads
         # structure; each stays silent when the person has none (rule #29).
         for label, field, keys in (
+            ("Projects (from the CV)", "cv_projects",
+             ("name", "description", "technologies")),
             ("Recommendations (written by others)", "linkedin_recommendations",
              ("author", "relationship", "text")),
             ("Publications", "linkedin_publications", ("title", "publisher", "date")),
