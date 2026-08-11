@@ -25,8 +25,13 @@ data/
 #
 # Both failure modes are invisible: empty data, no exception, no log line.
 # `tests/test_shipped_data.py` now pins the two ignore files together.
-!data/uk_gazetteer/
-!data/uk_gazetteer/**
+# uk_gazetteer is NOT listed here any more, and its absence is deliberate:
+# the data moved to `src/data/uk_gazetteer/`, and the `data/` rule above is
+# ROOT-ANCHORED, so it never reached inside src/ in the first place. An
+# exemption for a path nothing excludes is noise that reads like protection.
+# What actually carries it into the image is
+# `[tool.setuptools.package-data]` in backend/pyproject.toml plus
+# `pip install .` — the wheel, not this file.
 !data/job_signals/
 !data/job_signals/**
 
