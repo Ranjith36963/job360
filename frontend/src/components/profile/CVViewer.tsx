@@ -248,6 +248,10 @@ export function CVViewer({
   const liRecommendations = linkedinSubsections?.recommendations ?? [];
   const liInterests = linkedinSubsections?.interests ?? [];
   const liContact = (linkedinSubsections?.contact ?? [])[0] ?? {};
+  // The LinkedIn "About" — the person's own first-person prose. It was
+  // discarded whenever the CV already had a summary, so most profiles lost it
+  // entirely; now it has a shelf, reaches the judge, and is finally shown.
+  const liSummary = strField((linkedinSubsections?.summary ?? [])[0] ?? {}, "text");
   const liContactRows: [string, string][] = (
     [
       ["Email", strField(liContact, "email")],
@@ -269,7 +273,8 @@ export function CVViewer({
     liTestScores.length > 0 ||
     liRecommendations.length > 0 ||
     liInterests.length > 0 ||
-    liContactRows.length > 0;
+    liContactRows.length > 0 ||
+    liSummary.length > 0;
 
   // ── GitHub temporal (languages by byte share + topics) ─────
   const ghLanguages = Object.entries(githubTemporal?.languages ?? {}).filter(
@@ -601,6 +606,19 @@ export function CVViewer({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* About — the person's own words. This was extracted, stored and
+              MATCHED ON while being invisible to the person it describes: the
+              third way a shelf goes dark, after a broken extractor and a
+              dropping merge. */}
+          {liSummary.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="About" />
+              <p className="whitespace-pre-line pl-5 text-xs leading-relaxed text-foreground/85">
+                {liSummary}
+              </p>
             </div>
           )}
 

@@ -223,6 +223,14 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         "contact": [getattr(cv, "linkedin_contact", {}) or {}]
         if getattr(cv, "linkedin_contact", None)
         else [],
+        # The About section. It reaches the judge and the vector, and would
+        # otherwise be the one thing on this profile that is extracted, stored
+        # and MATCHED ON while being invisible to the person it describes — the
+        # third way a shelf goes dark, after a broken extractor and a dropping
+        # merge. Shown as a single row so it renders like every other section.
+        "summary": [{"text": (getattr(cv, "linkedin_summary", "") or "").strip()}]
+        if (getattr(cv, "linkedin_summary", "") or "").strip()
+        else [],
     }
     github_temporal: dict[str, dict[str, Any]] = {
         "languages": dict(getattr(cv, "github_languages", {}) or {}),
