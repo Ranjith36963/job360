@@ -7,7 +7,11 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
-.mypy_cache/
+.mypy_cache*/
+# The glob matters: this repo carries .mypy_cache_core/, .mypy_cache_prof/ and
+# .mypy_cache_routes/ (26.1 MB, untracked from git in 57625b6 but still on disk).
+# A bare `.mypy_cache/` matches none of them, so a `railway up` from a developer
+# machine shipped them into the image (backend/Dockerfile:13 is `COPY . .`).
 *.egg-info/
 
 # Virtual environments
