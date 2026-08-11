@@ -210,6 +210,15 @@
             "title": "Cv Positions",
             "type": "array"
           },
+          "cv_projects": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cv Projects",
+            "type": "array"
+          },
           "education": {
             "default": [],
             "items": {

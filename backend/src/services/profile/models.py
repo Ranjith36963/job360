@@ -257,6 +257,18 @@ class CVData:
     # would make the extractor guess. Never inferred from nationality or
     # place of study — that would be discrimination dressed up as a feature.
     cv_right_to_work: str = ""
+    # Projects stated on the CV: {name, description, technologies, dates}.
+    #
+    # A Projects heading was already recognised — as a section BOUNDARY, to
+    # stop a skills block (cv_parser lines 268/322/373) — and then thrown
+    # away. Exactly the 'split it out, then drop it' shape as the seven
+    # LinkedIn sections, one input over.
+    #
+    # For a junior or career-changing candidate this is often the strongest
+    # evidence they have: the CV lists two short roles but five real builds.
+    # GitHub already contributes ``github_repos_brief`` for people who push
+    # code publicly; this is the same signal for the people who do not.
+    cv_projects: list[dict[str, Any]] = field(default_factory=list)
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
     # ``cv_parser._llm_result_to_cvdata`` when ``SEMANTIC_ENABLED=true`` and
     # the ESCO index is on disk. Maps the *canonical* skill label (which

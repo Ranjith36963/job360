@@ -144,6 +144,12 @@ class CVSchema(BaseModel):
     achievements: list[str] = Field(default_factory=list)
     industries: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
+    # A CV Projects section was recognised as a section BOUNDARY (it stops a
+    # skills block) and then discarded — the same 'split it out, then drop
+    # it' shape as the seven LinkedIn sections. For a junior or
+    # career-changing candidate, projects are often the strongest evidence
+    # they have.
+    projects: list[dict[str, Any]] = Field(default_factory=list)
 
     experience_level: Optional[str] = ""
     # TRI-STATE by design (rule #31): "" means the CV never said, which is
@@ -289,5 +295,6 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         # dropped right here.
         cv_experience_level=(schema.experience_level or "").strip(),
         cv_right_to_work=(schema.right_to_work or "").strip(),
+        cv_projects=[p for p in (schema.projects or []) if isinstance(p, dict)],
         cv_skills_esco=cv_skills_esco,
     )
