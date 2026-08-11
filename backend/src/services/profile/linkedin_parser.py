@@ -617,6 +617,34 @@ TEXT:
 {text}
 ---"""
 
+_HEADLINE_PROMPT = """Below is the raw text of a LinkedIn profile PDF export.
+
+Find the person's HEADLINE — the one-line professional tagline LinkedIn shows
+directly under their name. Return it verbatim, joining any lines the PDF wrapped
+mid-phrase back into a single line.
+
+WHY THIS NEEDS YOU AND NOT A PARSER. The export is TWO COLUMNS. The left rail
+(Contact, Top Skills, Certifications) is flattened first, so the name and
+headline do not appear at the top of the text at all — they land in the middle,
+after the last left-column section. A structural reader looking for a header
+block finds nothing, which is why this field was empty on every two-column
+export.
+
+RULES:
+1. The headline is the line or lines immediately AFTER the person's full name
+   and BEFORE their location or the Summary section.
+2. It is a self-description, often with "|" or "•" separators. It is NOT a
+   certification, a job title with an employer, or a section heading.
+3. Return the location line separately if one directly follows the headline.
+4. If you genuinely cannot find a headline, return empty strings. Never invent
+   one and never assemble one from their job titles.
+
+Return ONLY JSON: {{"headline": "<verbatim, unwrapped>", "location": "<or empty>"}}
+
+TEXT:
+{text}
+"""
+
 _INTERESTS_PROMPT = """Extract every followed company, group or influencer from the LinkedIn Interests section text below.
 Return JSON: {{"interests": ["Name One", "Name Two", ...]}}
 
@@ -1034,7 +1062,7 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         exp_raw, edu_raw, cert_raw,
         lang_raw, proj_raw, vol_raw, course_raw, prose_skills,
         honors_raw, pubs_raw, patents_raw, orgs_raw,
-        scores_raw, recs_raw, interests_raw,
+        scores_raw, recs_raw, interests_raw, headline_raw,
     ) = await asyncio.gather(
         _maybe(_EXPERIENCE_PROMPT, experience_text, "positions"),
         _maybe(_EDUCATION_PROMPT, education_text, "education"),
@@ -1054,6 +1082,9 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         _maybe(_TEST_SCORES_PROMPT, test_scores_text, "test_scores"),
         _maybe(_RECOMMENDATIONS_PROMPT, recommendations_text, "recommendations"),
         _maybe(_INTERESTS_PROMPT, interests_text, "interests"),
+        # Reads the FULL text, not a section: in a 2-column export the
+        # header has no section to read — that is the bug being fixed.
+        _maybe(_HEADLINE_PROMPT, text, "headline"),
     )
 
     def _get(r: Any, key: str) -> Any:
@@ -1096,6 +1127,9 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
             for s in (_get(interests_raw, "interests") or [])
             if isinstance(s, str) and s.strip()
         ],
+        "headline": (_get(headline_raw, "headline") or "").strip()
+        if isinstance(_get(headline_raw, "headline"), str)
+        else "",
     }
 
 
@@ -1247,6 +1281,15 @@ def enrich_cv_from_linkedin(
         cv.linkedin_summary = linkedin_data["summary"]
         if not cv.summary:
             cv.summary = linkedin_data["summary"]
+
+    # Same rule for the headline: LinkedIn's is stored in its own shelf, and
+    # only fills the CV-owned ``headline`` when the CV had none. They are
+    # genuinely different claims — a CV headline is a role label, a LinkedIn
+    # one often states the stack and current availability.
+    if linkedin_data.get("headline"):
+        cv.linkedin_headline = linkedin_data["headline"]
+        if not cv.headline:
+            cv.headline = linkedin_data["headline"]
 
     # Store LinkedIn-specific fields
     # These five sections are LLM-ONLY output — the deterministic pass

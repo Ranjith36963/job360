@@ -180,7 +180,10 @@ def profile_to_embedding_text(profile: Any) -> str:
         domain = getattr(cv, "career_domain", "") or ""
         if isinstance(domain, str) and domain.strip():
             parts.append(domain.strip())
-        for text_field in ("summary", "experience_text", "linkedin_summary"):
+        for text_field in (
+            "summary", "experience_text", "linkedin_summary",
+            "linkedin_headline",
+        ):
             v = getattr(cv, text_field, "") or ""
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())

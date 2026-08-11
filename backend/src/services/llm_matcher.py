@@ -148,6 +148,11 @@ def profile_to_matcher_text(profile: Any) -> str:
         li_summary = (getattr(cv, "linkedin_summary", "") or "").strip()
         if li_summary and li_summary != summary:
             lines.append(f"In their own words (LinkedIn): {li_summary}")
+        # The LinkedIn tagline. Often states the stack AND current availability
+        # ("Open to X roles UK"), which appears in no other input.
+        li_headline = (getattr(cv, "linkedin_headline", "") or "").strip()
+        if li_headline:
+            lines.append(f"LinkedIn headline: {li_headline}")
 
         # Skills BY SOURCE — the judge can then weigh evidence strength
         # ("proven in GitHub repos" outranks "listed on a CV").

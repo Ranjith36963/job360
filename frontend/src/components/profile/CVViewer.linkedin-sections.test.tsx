@@ -94,6 +94,18 @@ describe("LinkedIn detail shows every section", () => {
     ).toBeTruthy();
   });
 
+  it("renders the LinkedIn headline", () => {
+    // Empty on every two-column export until the LLM was asked for it: the
+    // flattened left rail pushes the name and tagline into the middle of the
+    // text, where the structural header reader was not looking.
+    renderWith({
+      headline: [{ text: "AI Engineer | Open to AI/ML Engineer Roles UK" }],
+    });
+    expect(
+      screen.getByText(/Open to AI\/ML Engineer Roles UK/),
+    ).toBeTruthy();
+  });
+
   it("stays silent when there is no About text", () => {
     renderWith({ summary: [{ text: "" }] });
     expect(screen.queryByText("About")).not.toBeInTheDocument();
