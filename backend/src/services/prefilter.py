@@ -22,6 +22,12 @@ from typing import Iterable
 
 from src.models import Job
 
+# One definition of "this string names the UK", shared with the ingestion gate
+# (rule #30). A second copy here would drift, and the two would disagree about
+# what counts as a country — which is exactly the class of bug this module has
+# just been fixed for.
+from src.services.uk_gate import _UK_SELF
+
 # Experience level ladder — lower index = more junior.
 _LEVEL_ORDER = {
     "intern": 0,
@@ -76,6 +82,16 @@ def location_ok(profile: FilterProfile, job: Job) -> bool:
         return True
 
     for pref in _lower(profile.preferred_locations):
+        # A COUNTRY-level preference is not a constraint here. The catalogue is
+        # UK-only by construction (rule #30 — `uk_gate.check_uk` refuses the
+        # rest at ingestion), so "United Kingdom" says nothing this gate can
+        # act on. Matching it literally is worse than useless: the test is a
+        # substring one, and "united kingdom" appears in neither direction of
+        # "London" — so the single most natural thing a UK user can type would
+        # have deleted almost the entire feed. Reuses the gate's own set so
+        # there is one definition of "names the UK", not two.
+        if pref in _UK_SELF:
+            return True
         if pref in loc or loc in pref:
             return True
     # If user has no preferred location list but a non-remote arrangement
