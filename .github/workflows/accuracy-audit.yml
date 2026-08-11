@@ -46,6 +46,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # GROQ is the 4th provider the judge chain will try (llm_provider.py) and
+          # was the only one this job never passed through. One more free fallback.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SESSION_SECRET: audit-only-not-used-0000000000000000
           CHANNEL_ENCRYPTION_KEY: sk9vWl9wZmMtc2VjcmV0LWtleS0zMzMzMzMzMzM=
         run: |
@@ -53,32 +56,77 @@ jobs:
           python scripts/eval_ranking.py 2>&1 | tee audit.out
           echo "rc=$?" >> "$GITHUB_OUTPUT"
         continue-on-error: true
-      - name: Notify on regression (or auto-close when healthy)
+      # TWO DIFFERENT ALARMS, because they have two different fixes.
+      #
+      #   "REGRESSED"        -> we measured the ranking and the number is bad. Engineering work.
+      #   "CANNOT RUN"       -> we measured NOTHING. Config work (usually a missing secret).
+      #
+      # They shared one title until 2026-08-11, so runs 31107748440 and 31368793516 —
+      # where all 160 judge calls died on "No LLM API key configured", because an
+      # unset Actions secret renders as an EMPTY string — were filed as an accuracy
+      # regression (issue #238). A config error wearing a quality-regression costume
+      # is how a week of eval data gets misread.
+      - name: Notify (config failure and accuracy regression are DIFFERENT alarms)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          title="Accuracy audit REGRESSED (weekly ranking eval)"
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ steps.audit.outcome }}" = "failure" ] || \
-             grep -q "REGRESSED" backend/audit.out; then
+          set -uo pipefail
+          REG_TITLE="Accuracy audit REGRESSED (weekly ranking eval)"
+          BROKEN_TITLE="Accuracy audit CANNOT RUN (instrument broken, not a regression)"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          find_issue() {
+            gh issue list --state open --json number,title \
+              --jq ".[] | select(.title==\"$1\") | .number" | head -1
+          }
+          raise() { # $1 = title, $2 = body file
+            n=$(find_issue "$1")
+            if [ -z "$n" ]; then
+              new=$(gh issue create --title "$1" --body-file "$2" --label harness)
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n raised but triage could not be woken"
+            else
+              gh issue comment "$n" --body-file "$2"
+            fi
+          }
+          close_if_open() { # $1 = title, $2 = closing comment
+            n=$(find_issue "$1")
+            if [ -n "$n" ]; then gh issue close "$n" --comment "$2"; fi
+          }
+
+          if grep -q "INSTRUMENT BROKEN" backend/audit.out; then
+            { echo "**The weekly ranking audit measured NOTHING — the instrument is broken.**"
+              echo
+              echo "This is a CONFIG failure. Do **not** read it as a ranking regression:"
+              echo "no accuracy number was produced at all."
+              echo
+              echo '```'
+              { grep -E "INSTRUMENT BROKEN|ERROR:" backend/audit.out || tail -20 backend/audit.out; } | head -8 || true
+              echo '```'
+              echo
+              echo "Usual cause: an unset repo Actions secret renders as an EMPTY string, so"
+              echo "the judge gets no key. Set ONE of \`OPENAI_API_KEY\` (recommended),"
+              echo "\`GEMINI_API_KEY\`, \`GROQ_API_KEY\`, \`CEREBRAS_API_KEY\` and re-run"
+              echo "(\`gh workflow run accuracy-audit.yml\`) — no code change is needed."
+              echo
+              echo "- Run: $RUN_URL"
+              echo "- Instrument: backend/scripts/eval_ranking.py (exit 3 = broken, exit 2 = regressed)"
+            } > body.md
+            raise "$BROKEN_TITLE" body.md
+          elif [ "${{ steps.audit.outcome }}" = "failure" ] || \
+               grep -q "REGRESSED" backend/audit.out; then
             { echo "The weekly ground-truth ranking audit fell below its alarm floors."
               echo
               echo '```'
               grep -A 12 "ACCURACY SCOREBOARD" backend/audit.out || tail -20 backend/audit.out
               echo '```'
               echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "- Run: $RUN_URL"
               echo "- Instrument: backend/scripts/eval_ranking.py (floors: EVAL_MIN_STRONG_100, EVAL_MAX_GEMS)"
             } > body.md
-            if [ -z "$num" ]; then
-              new=$(gh issue create --title "$title" --body-file body.md --label harness)
-              n="${new##*/}"
-              gh workflow run triage.yml -f issue="$n" \
-                || echo "::warning::issue #$n raised but triage could not be woken"
-            else
-              gh issue comment "$num" --body-file body.md
-            fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" --comment "Accuracy back within benchmark as of run ${{ github.run_id }}. (auto-close)"
+            raise "$REG_TITLE" body.md
+          else
+            close_if_open "$REG_TITLE" "Accuracy back within benchmark as of run $RUN_URL. (auto-close)"
+            close_if_open "$BROKEN_TITLE" "The instrument ran and produced judgments again as of run $RUN_URL. (auto-close)"
           fi
