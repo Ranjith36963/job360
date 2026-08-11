@@ -1501,7 +1501,13 @@ def test_careerjet_parses_response():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.get(re.compile(r"https://search\.api\.careerjet\.net/.*"),
+                # Careerjet has two APIs taking different credentials. The v4
+                # host (search.api.careerjet.net) wants an API KEY via Basic
+                # Auth plus an allow-listed IP; an affiliate ID only works on
+                # the public affiliate endpoint, over http, with a Referer
+                # header. Verified live 2026-08-11 — v4 answered 401/403 for a
+                # valid affid, the endpoint below returned 8,600 hits.
+                m.get(re.compile(r"http://public\.api\.careerjet\.net/search.*"),
                       payload=CAREERJET_PAYLOAD, repeat=True)
                 source = CareerjetSource(session, affid="test-affid", search_config=_sc_ai_defaults())
                 jobs = await source.fetch_jobs()
