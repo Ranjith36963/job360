@@ -287,6 +287,25 @@ def main() -> int:
         drift.append((f, ln, "dead-path", claimed, "this path does not exist"))
 
 
+    # CLAUDE.md declares its own size budget in an HTML comment at the top. Until
+    # now the only enforcement was the text "Check with: wc -w CLAUDE.md" -- a
+    # manual step nobody runs, which is how it reached 6,125 words against a 2,000
+    # ceiling. A budget with no guard is a wish. The number is parsed out of the
+    # file itself, so the doc stays the single source of truth for its own limit.
+    claude_md = ROOT / "CLAUDE.md"
+    if claude_md.is_file():
+        _cm = claude_md.read_text(encoding="utf-8", errors="replace")
+        _budget_m = re.search(r"SIZE BUDGET:\s*<=\s*([\d,]+)\s*words", _cm)
+        if _budget_m:
+            _budget = int(_budget_m.group(1).replace(",", ""))
+            _words = len(_cm.split())
+            if _words > _budget:
+                drift.append(
+                    ("CLAUDE.md", "-", "size-budget", f"{_words} words",
+                     f"<= {_budget} -- move the detail into the doc it belongs to "
+                     f"and leave a one-line pointer"),
+                )
+
     print("# Doc-sync drift report (Loop 3)\n")
     print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "
           f"unique source classes = **{unique_classes}**, "

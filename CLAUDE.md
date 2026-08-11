@@ -4,7 +4,7 @@
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
      docs/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
      .claude/skills/. If you are about to add a paragraph here, add it there and
-     leave a one-line pointer. Check with: wc -w CLAUDE.md -->
+     leave a one-line pointer. CI enforces this (doc_sync_check.py). -->
 
 ## How to talk to me (STRICT — always follow)
 
@@ -38,7 +38,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 ## Quick Orientation
 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface on divergence — never silent rebase.
-- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test — not SQLite. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
+- **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3**) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. **Live on Railway at job360.uk** since 2026-07-02; five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
 - **What automation is actually running:** the **GitHub Actions harness** — 22 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd, dependabot-auto…). The old agent loop (worker/integrator/scout/health, `docs/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**. **Do not wait on it.**
 - **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but 46 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches **five** files (#8/#13). Migrations auto-apply on FastAPI boot via `lifespan` in `src/api/dependencies.py`.
@@ -81,7 +81,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 27. **Multi-dim weights add 30 on top of the legacy 100 (raw max 130); the clamp to `[0, 100]` is load-bearing** — never remove it.
 
 ### Extraction must be data-driven
-28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Standing owner rule — non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV. prose→skill mapping belongs to the LLM. **FACT (verified 2026-08-11): no ontology is consulted.** Extraction is LLM + structural passes (CV headings, dependency manifests, GitHub language/topic stats). **ESCO is inert scaffolding, never built or shipped** — do not cite it as running; reviving it means shipping artefacts, not flipping `SEMANTIC_ENABLED`. Full absence chain + the two call sites: `docs/PILLAR1_EXTRACTION_AUDIT.md`. **Carve-out: `core/skill_synonyms.py` is RETAINED** — scoring/search vocabulary, reads no CV input.
+28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV; prose→skill mapping belongs to the LLM. **FACT (verified 2026-08-11): no ontology is consulted.** Extraction is LLM + structural passes (CV headings, dependency manifests, GitHub language/topic stats). **ESCO is inert scaffolding, never built or shipped** — never cite it as running; reviving it means shipping artefacts, not flipping `SEMANTIC_ENABLED`. Absence chain + both call sites: `docs/PILLAR1_EXTRACTION_AUDIT.md`. **Carve-out: `core/skill_synonyms.py` is RETAINED** — scoring/search vocabulary, reads no CV input.
 
 ### Notifications
 23. **ONE `notification_rules` row per user** (`UNIQUE(user_id)`) governing ALL their channels. Dispatch converts UTC `now` to `users.timezone` via stdlib `zoneinfo` (**not `pytz`**) before comparing quiet hours — skipping it leaks notifications across BST/DST.
