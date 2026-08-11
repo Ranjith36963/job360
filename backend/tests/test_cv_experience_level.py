@@ -98,6 +98,74 @@ class TestItFillsTheScoringSeamOnlyWhenTitlesCannot:
         assert after.preferences.experience_level_inferred == ""
 
 
+class TestEveryCvScalarSurvivesTheMerge:
+    """The bug the tests above MISSED, caught by production.
+
+    ``_merge_cv_llm_into`` named every scalar individually. Adding
+    ``cv_experience_level`` and ``cv_right_to_work`` to the prompt, the schema
+    and the adapter was not enough — the merge dropped both one layer above the
+    fix, and a live re-extraction produced two empty shelves while every unit
+    test passed. The tests passed because they SET the field on the CVData
+    directly instead of letting the CV pass produce it, so the merge was never
+    exercised.
+
+    This is the third time this function has lost a field that way
+    (``career_domain`` was the first). So the assertion is structural: whatever
+    the CV pass produces on a CV-owned scalar must reach the profile — no list
+    of names to keep in step.
+    """
+
+    def _merged(self, produced: CVData) -> CVData:
+        from src.services.profile.two_pass import _merge_cv_llm_into
+
+        cv = CVData(raw_text="x")
+        _merge_cv_llm_into(cv, produced)
+        return cv
+
+    def test_every_cv_owned_scalar_the_pass_produces_is_carried(self) -> None:
+        from src.services.profile.two_pass import _cv_owned_scalars
+
+        names = _cv_owned_scalars()
+        assert names, "no CV-owned scalars detected — the derivation is broken"
+
+        produced = CVData(**{n: f"value-for-{n}" for n in names})
+        merged = self._merged(produced)
+
+        dropped = [n for n in names if not getattr(merged, n)]
+        assert not dropped, (
+            f"the CV merge dropped these scalars the pass produced: {dropped}. "
+            "They will be empty on every live profile no matter how correct the "
+            "prompt, schema and adapter are."
+        )
+
+    def test_the_two_shelves_production_caught_are_covered(self) -> None:
+        from src.services.profile.two_pass import _cv_owned_scalars
+
+        assert "cv_experience_level" in _cv_owned_scalars()
+        assert "cv_right_to_work" in _cv_owned_scalars()
+
+    def test_another_passes_scalar_is_never_clobbered_by_a_cv_reparse(self) -> None:
+        """The exclusions are load-bearing: a CV re-parse must not overwrite the
+        LinkedIn About or a GitHub bio, which the CV pass knows nothing about."""
+        from src.services.profile.two_pass import _cv_owned_scalars
+
+        for name in ("linkedin_summary", "github_bio", "github_profile_readme",
+                     "raw_text", "cv_filename"):
+            assert name not in _cv_owned_scalars(), (
+                f"{name} is not the CV pass's to write"
+            )
+
+    def test_a_populated_scalar_is_not_overwritten(self) -> None:
+        from src.services.profile.two_pass import _merge_cv_llm_into
+
+        cv = CVData(raw_text="x", cv_experience_level="senior")
+        _merge_cv_llm_into(cv, CVData(cv_experience_level="junior"))
+        assert cv.cv_experience_level == "senior", (
+            "fill-if-empty, never overwrite — a re-run that reads differently "
+            "must not clobber what the profile already carries"
+        )
+
+
 class TestTheJudgeSeesIt:
     def test_the_level_reaches_the_candidate_text(self) -> None:
         from src.services.llm_matcher import profile_to_matcher_text
