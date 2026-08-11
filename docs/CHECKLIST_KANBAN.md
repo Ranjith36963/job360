@@ -114,7 +114,7 @@ not code). Postgres remains the recommended long-term scale upgrade behind the #
   verified live earlier this session on the main checkout (with `.env` keys); see Part 1 / the prod-build pass.
 
 ### Reported / not-a-bug (owner domain or intentional)
-- #5 run-time vs re-score keyword score differs → **Pillar 2, owner-handled, hands-off.**
+- #5 run-time vs re-score keyword score differs → Pillar 2. **Hands-off repealed 2026-07-26** — editable under normal rules (TDD + gate + PR).
 - #9 metrics export "no such table: run_log" → worktree DB-path / telemetry only.
 - #4 dashboard double `/api/jobs` fetch → intentional (feed vs count badges).
 

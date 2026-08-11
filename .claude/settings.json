@@ -61,6 +61,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/claude-md-proposal.sh",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
