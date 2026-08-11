@@ -12,6 +12,29 @@ from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.recruitee")
 
+
+def _coerce_salary(value: Any) -> Optional[float]:
+    """Recruitee sends salary.min/max as STRINGS ('0', '25000', '13.40').
+
+    Verified live 2026-08-10 across the 31-slug list: 53 of 671 UK/remote
+    offers carry string salaries (first offender: transperfect / "Marketing
+    Lead - Legal Solutions", min='0' max='0'). `Job.__post_init__`
+    (models.py:92) compares salary_min against an int, so an un-coerced
+    string raised TypeError and killed the ENTIRE source mid-loop — the
+    scheduler recorded it as a failure (scheduler.py:186) and recruitee
+    contributed 0 jobs every run. Coerce here, in the source, so the shared
+    Job model keeps its numeric contract.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 class RecruiteeSource(BaseJobSource):
     name = "recruitee"
     category = "ats"
@@ -44,8 +67,8 @@ class RecruiteeSource(BaseJobSource):
                 salary_obj = item.get("salary")
                 if not isinstance(salary_obj, dict):
                     salary_obj = {}
-                salary_min = salary_obj.get("min")
-                salary_max = salary_obj.get("max")
+                salary_min = _coerce_salary(salary_obj.get("min"))
+                salary_max = _coerce_salary(salary_obj.get("max"))
 
                 # close_at is the offer's closing date. Null in the sample, so
                 # guard for it — a missing/unparseable value must never crash

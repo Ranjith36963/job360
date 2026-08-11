@@ -6,7 +6,6 @@ import aiohttp
 from aioresponses import aioresponses
 
 from src.services.profile.models import SearchConfig
-from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
 from src.sources.apis_free.himalayas import HimalayasSource
@@ -30,20 +29,15 @@ from src.sources.ats.lever import LeverSource
 from src.sources.ats.personio import PersonioSource
 from src.sources.ats.pinpoint import PinpointSource
 from src.sources.ats.recruitee import RecruiteeSource
-from src.sources.ats.rippling import RipplingSource
 from src.sources.ats.smartrecruiters import SmartRecruitersSource
 from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.ats.workable import WorkableSource
 from src.sources.ats.workday import WorkdaySource
 from src.sources.base import _is_uk_or_remote
-from src.sources.feeds.biospace import BioSpaceSource
-from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
 from src.sources.feeds.nhs_jobs import NHSJobsSource
-from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
 from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
 from src.sources.feeds.uni_jobs import UniJobsSource
 from src.sources.feeds.weworkremotely import WeWorkRemotelySource
-from src.sources.feeds.workanywhere import WorkAnywhereSource
 from src.sources.other.hackernews import HackerNewsSource
 from src.sources.other.indeed import JobSpySource
 from src.sources.other.nofluffjobs import NoFluffJobsSource
@@ -948,6 +942,64 @@ def test_recruitee_parses_response():
     _run(_test())
 
 
+def test_recruitee_coerces_string_salary():
+    """Recruitee sends salary.min/max as STRINGS — verified live 2026-08-10.
+
+    Regression guard: un-coerced, the string hit `Job.__post_init__`'s
+    `salary_min < 10000` comparison (models.py:92) and raised TypeError,
+    which aborted the whole fetch loop mid-slug. The scheduler scored that
+    as a source failure (scheduler.py:186), so recruitee returned 0 of its
+    671 live UK/remote offers on every run and would eventually trip its
+    circuit breaker. Values below 10k are still nulled by the model's own
+    sanity rule, so assert on the max (which survives).
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.recruitee\.com/api/offers/.*"), payload={"offers": [{
+                    "id": "rc-302", "title": "Marketing Lead - Legal Solutions",
+                    "description": "Marketing role",
+                    "location": "London, UK",
+                    "careers_url": "https://test.recruitee.com/o/marketing-lead",
+                    "published_at": "2026-08-01",
+                    # strings, exactly as the live API returns them
+                    "salary": {"min": "25000", "max": "30000"},
+                }]})
+                source = RecruiteeSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].salary_min == 25000
+                assert jobs[0].salary_max == 30000
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_recruitee_survives_unparseable_salary():
+    """A junk salary string must yield None, never abort the fetch loop."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.recruitee\.com/api/offers/.*"), payload={"offers": [{
+                    "id": "rc-303", "title": "Data Engineer",
+                    "description": "Data role",
+                    "location": "Manchester, UK",
+                    "careers_url": "https://test.recruitee.com/o/data-engineer",
+                    "published_at": "2026-08-01",
+                    "salary": {"min": "Competitive", "max": None},
+                }]})
+                source = RecruiteeSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].salary_min is None
+                assert jobs[0].salary_max is None
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_jobspy_parses_dataframe():
     """Test JobSpySource by mocking the scrape_jobs function."""
     import sys
@@ -1316,67 +1368,7 @@ def test_source_returns_empty_on_error():
     _run(_test())
 
 
-# ---- AI-Jobs.net ----
-
-AIJOBS_PAYLOAD = [
-    {
-        "title": "ML Engineer",
-        "company": "DeepTech",
-        "location": "London, UK",
-        "description": "Machine learning engineer role with Python and PyTorch",
-        "url": "https://aijobs.net/jobs/ml-engineer",
-        "date": "2024-01-15",
-    },
-    {
-        "title": "Marketing Manager",
-        "company": "SomeCo",
-        "location": "London",
-        "description": "Marketing role",
-        "url": "https://aijobs.net/jobs/marketing",
-        "date": "2024-01-15",
-    },
-]
-
-
-def test_aijobs_parses_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
-                      payload=AIJOBS_PAYLOAD)
-                source = AIJobsSource(session)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) >= 1
-                assert jobs[0].title == "ML Engineer"
-                assert jobs[0].company == "DeepTech"
-                assert jobs[0].source == "aijobs"
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_aijobs_skips_non_uk():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            payload = [{
-                "title": "ML Engineer",
-                "company": "USCo",
-                "location": "San Francisco, CA",
-                "description": "Machine learning role",
-                "url": "https://aijobs.net/jobs/ml-us",
-                "date": "2024-01-15",
-            }]
-            with aioresponses() as m:
-                m.get(re.compile(r"https://aijobs\.net/api/list-jobs/.*"),
-                      payload=payload)
-                source = AIJobsSource(session)
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
+# ---- AI-Jobs.net: source removed 2026-08-10 (aijobs.net/api/list-jobs/ 404) ----
 
 
 # ---- The Muse ----
@@ -1705,44 +1697,7 @@ def test_hn_jobs_returns_empty_on_no_ids():
     _run(_test())
 
 
-# ---- jobs.ac.uk ----
-
-JOBS_AC_UK_RSS = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-<channel>
-<title>jobs.ac.uk - Computer Sciences</title>
-<item>
-  <title>AI Research Fellow - University of Oxford</title>
-  <link>https://www.jobs.ac.uk/job/ABC123</link>
-  <description>Machine learning research position in deep learning and NLP</description>
-  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
-</item>
-<item>
-  <title>Administrative Assistant - University of Oxford</title>
-  <link>https://www.jobs.ac.uk/job/DEF456</link>
-  <description>Office administration role</description>
-  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
-</item>
-</channel>
-</rss>"""
-
-
-def test_jobs_ac_uk_parses_rss():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(re.compile(r"https://www\.jobs\.ac\.uk/feeds/.*"),
-                      body=JOBS_AC_UK_RSS, content_type="application/xml", repeat=True)
-                source = JobsAcUkSource(session)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) >= 1
-                assert jobs[0].source == "jobs_ac_uk"
-                assert "AI Research Fellow" in jobs[0].title
-                assert jobs[0].company == "University of Oxford"
-        finally:
-            await session.close()
-    _run(_test())
+# ---- jobs.ac.uk: source removed 2026-08-10 (all 4 feed URLs 404) ----
 
 
 # ---- NHS Jobs ----
@@ -1877,38 +1832,7 @@ def test_personio_skips_non_uk():
     _run(_test())
 
 
-# ---- WorkAnywhere ----
-
-WORKANYWHERE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-<channel>
-<title>WorkAnywhere - Data/AI</title>
-<item>
-  <title>ML Engineer at RemoteTech</title>
-  <link>https://workanywhere.pro/job/ml-engineer</link>
-  <description>Machine learning engineer role with Python. Remote - UK/Europe timezone.</description>
-  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
-</item>
-</channel>
-</rss>"""
-
-
-def test_workanywhere_parses_rss():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(re.compile(r"https://workanywhere\.pro/rss.*"),
-                      body=WORKANYWHERE_RSS, content_type="application/xml", repeat=True)
-                source = WorkAnywhereSource(session)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) >= 1
-                assert jobs[0].source == "workanywhere"
-                assert "ML Engineer" in jobs[0].title
-                assert jobs[0].company == "RemoteTech"
-        finally:
-            await session.close()
-    _run(_test())
+# ---- WorkAnywhere: source removed 2026-08-10 (HTTP 429 bot-checkpoint) ----
 
 
 # ---- WeWorkRemotely ----
@@ -1980,37 +1904,7 @@ def test_realworkfromanywhere_parses_rss():
     _run(_test())
 
 
-# ---- BioSpace ----
-
-BIOSPACE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-<channel>
-<title>BioSpace Jobs</title>
-<item>
-  <title>AI Research Scientist at PharmaCo</title>
-  <link>https://www.biospace.com/job/ai-research-123</link>
-  <description>Bioinformatics and machine learning role in London drug discovery lab.</description>
-  <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
-</item>
-</channel>
-</rss>"""
-
-
-def test_biospace_parses_rss():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(re.compile(r"https://www\.biospace\.com/rss/.*"),
-                      body=BIOSPACE_RSS, content_type="application/xml", repeat=True)
-                source = BioSpaceSource(session)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) >= 1
-                assert jobs[0].source == "biospace"
-                assert "AI Research Scientist" in jobs[0].title
-        finally:
-            await session.close()
-    _run(_test())
+# ---- BioSpace: source removed 2026-08-10 (all 3 job RSS URLs 404) ----
 
 
 # ---- Climatebase ----
@@ -2489,8 +2383,8 @@ def test_aijobs_ai_normal_page_logs_no_structure_warning(caplog):
 
 
 # =============================================================================
-# Batch 3 new sources: Teaching Vacancies, GOV.UK Apprenticeships,
-# NHS Jobs XML, Rippling ATS, Comeet ATS
+# Batch 3 new sources: Teaching Vacancies, GOV.UK Apprenticeships
+# (NHS Jobs XML, Rippling ATS and Comeet ATS have since been removed — dead upstreams)
 # =============================================================================
 
 
@@ -2570,158 +2464,11 @@ def test_teaching_vacancies_handles_http_error():
     _run(_test())
 
 
-# ---- NHS Jobs XML ----
-
-NHS_JOBS_XML_FEED = """<?xml version="1.0" encoding="UTF-8"?>
-<vacancies>
-  <vacancy>
-    <id>V001</id>
-    <title>Clinical Data Scientist</title>
-    <employer>NHS Digital</employer>
-    <location>Leeds</location>
-    <createdDate>2026-04-16T08:30:00Z</createdDate>
-    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/V001</advertUrl>
-  </vacancy>
-  <vacancy>
-    <id>V002</id>
-    <title>Senior ML Engineer</title>
-    <employer>NHS England</employer>
-    <location>London</location>
-    <createdDate>2026-04-15T14:00:00Z</createdDate>
-    <advertUrl>https://www.jobs.nhs.uk/candidate/jobadvert/V002</advertUrl>
-  </vacancy>
-</vacancies>"""
+# ---- NHS Jobs XML: source removed 2026-08-10 (feed serves HTML, retired).
+#      The separate nhs_jobs source is ALIVE and still tested above. ----
 
 
-def test_nhs_jobs_xml_parses_feed():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(NHSJobsXMLSource.FEED_URL, body=NHS_JOBS_XML_FEED,
-                      content_type="application/xml")
-                source = NHSJobsXMLSource(session)
-                jobs = await source.fetch_jobs()
-                assert len(jobs) == 2
-                assert jobs[0].source == "nhs_jobs_xml"
-                # Batch 1 contract: createdDate is a real posting date → high
-                assert jobs[0].date_confidence == "high"
-                assert jobs[0].posted_at == "2026-04-16T08:30:00Z"
-                assert jobs[0].company == "NHS Digital"
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_nhs_jobs_xml_empty_feed():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(NHSJobsXMLSource.FEED_URL,
-                      body="<?xml version='1.0'?><vacancies/>",
-                      content_type="application/xml")
-                source = NHSJobsXMLSource(session)
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_nhs_jobs_xml_parse_error():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(NHSJobsXMLSource.FEED_URL, body="not xml at all",
-                      content_type="text/plain")
-                source = NHSJobsXMLSource(session)
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-# ---- Rippling ATS ----
-
-RIPPLING_PAYLOAD = {
-    "jobs": [
-        {
-            "id": "r-123",
-            "name": "Backend Engineer",
-            "locations": [{"name": "London, UK"}],
-            "createdAt": "2026-04-17T10:00:00Z",
-            "hostedUrl": "https://ats.rippling.com/rippling/apply/r-123",
-            "description": "Python + distributed systems",
-        },
-        {
-            "id": "r-124",
-            "name": "US Only Role",
-            "locations": [{"name": "San Francisco"}],
-            "createdAt": "2026-04-17T10:00:00Z",
-            "hostedUrl": "https://ats.rippling.com/rippling/apply/r-124",
-            "description": "US-only",
-        },
-    ]
-}
-
-
-def test_rippling_parses_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
-                    payload=RIPPLING_PAYLOAD, repeat=True,
-                )
-                source = RipplingSource(session, companies=["rippling"])
-                jobs = await source.fetch_jobs()
-                # US-only filtered out by _is_uk_or_remote
-                assert len(jobs) == 1
-                assert jobs[0].source == "rippling"
-                assert jobs[0].title == "Backend Engineer"
-                assert jobs[0].date_confidence == "high"
-                assert jobs[0].posted_at == "2026-04-17T10:00:00Z"
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_rippling_empty_response():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
-                    payload={"jobs": []}, repeat=True,
-                )
-                source = RipplingSource(session, companies=["rippling"])
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
-
-
-def test_rippling_http_error():
-    async def _test():
-        session = aiohttp.ClientSession()
-        try:
-            with aioresponses() as m:
-                m.get(
-                    re.compile(r"https://ats\.rippling\.com/api/board/.*/jobs"),
-                    status=500, repeat=True,
-                )
-                source = RipplingSource(session, companies=["rippling"])
-                jobs = await source.fetch_jobs()
-                assert jobs == []
-        finally:
-            await session.close()
-    _run(_test())
+# ---- Rippling ATS: source removed 2026-08-10 (board API gone, all slugs 404) ----
 
 
 # ---- JobSpy glassdoor disabled (2026-06: Glassdoor blocks the location lookup) ----

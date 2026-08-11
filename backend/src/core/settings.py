@@ -304,7 +304,6 @@ RATE_LIMITS: dict[str, RateLimitConfig] = {
     "google_jobs": {"concurrent": 1, "delay": 2.0},
     "devitjobs": {"concurrent": 2, "delay": 1.0},
     "landingjobs": {"concurrent": 2, "delay": 1.0},
-    "aijobs": {"concurrent": 2, "delay": 1.0},
     "themuse": {"concurrent": 1, "delay": 2.0},
     "hackernews": {"concurrent": 2, "delay": 1.0},
     "careerjet": {"concurrent": 1, "delay": 2.0},
@@ -313,13 +312,10 @@ RATE_LIMITS: dict[str, RateLimitConfig] = {
     "nofluffjobs": {"concurrent": 2, "delay": 1.5},
     # New sources (Phase 4)
     "hn_jobs": {"concurrent": 3, "delay": 0.5},
-    "jobs_ac_uk": {"concurrent": 1, "delay": 2.0},
     "nhs_jobs": {"concurrent": 1, "delay": 2.0},
     "personio": {"concurrent": 1, "delay": 3.0},
-    "workanywhere": {"concurrent": 1, "delay": 5.0},
     "weworkremotely": {"concurrent": 1, "delay": 2.0},
     "realworkfromanywhere": {"concurrent": 1, "delay": 2.0},
-    "biospace": {"concurrent": 1, "delay": 2.0},
     "climatebase": {"concurrent": 1, "delay": 3.0},
     "eightykhours": {"concurrent": 1, "delay": 2.0},
     "bcs_jobs": {"concurrent": 1, "delay": 3.0},
@@ -328,8 +324,8 @@ RATE_LIMITS: dict[str, RateLimitConfig] = {
     "aijobs_ai": {"concurrent": 1, "delay": 2.0},
     # Batch 3 additions — published rate-limits cited in each source's tests
     "teaching_vacancies": {"concurrent": 1, "delay": 2.0},  # no stated cap, polite
-    "nhs_jobs_xml": {"concurrent": 1, "delay": 2.0},  # feed XML, 15-min tier
-    "rippling": {"concurrent": 2, "delay": 1.5},  # ATS, 60s tier
+    # Removed 2026-08-10 (upstreams dead, verified live): aijobs, jobs_ac_uk,
+    # biospace, rippling, nhs_jobs_xml, workanywhere. nhs_jobs (non-XML) stays.
 }
 
 # Retry
