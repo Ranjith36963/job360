@@ -110,6 +110,30 @@ async function gotoOK(p) {
   if (!r || r.status() >= 400) throw new Error(`GET ${p} → HTTP ${r ? r.status() : "no response"}`);
   await page.waitForTimeout(1200);
 }
+
+// AN HTTP 200 IS NOT PROOF YOU ARE LOGGED IN.
+//
+// 2026-08-09 → 2026-08-11: the synthetic session cookie went stale. `middleware.ts`
+// did exactly the right thing — it 307'd every protected path to
+// `/login?next=…` — and because a redirect lands on a page that returns 200,
+// `gotoOK` was happy. NINE authed corners reported OK for three days while the
+// robot was staring at the sign-in card (proof: run 31492026104, the
+// FAIL-profile screenshot is the login page, and report.json logs a 401).
+// Only the ONE corner that asserted something specific went red, and it went red
+// for an unrelated reason — so the alarm named the wrong thing.
+//
+// Rule: an authed corner must prove it is still authed. Landing on /login is a
+// FAILURE, never a pass.
+async function gotoAuthed(p) {
+  await gotoOK(p);
+  const landed = new URL(page.url()).pathname;
+  if (landed.startsWith("/login") || landed.startsWith("/register")) {
+    throw new Error(
+      `bounced to ${landed} — the walk is NOT authenticated, so nothing past this ` +
+      `point tests the logged-in app. Refresh the SMOKE_SESSION secret.`,
+    );
+  }
+}
 const seeText = (re, timeout = 15000) => page.getByText(re).first().waitFor({ state: "visible", timeout });
 
 console.log(`\n=== LIVE SMOKE vs ${FE} ${SESSION ? "(authed)" : "(public only — no SMOKE_SESSION)"} ===`);
@@ -159,10 +183,10 @@ async function scanPoison(where) {
 }
 
 const AUTHED = [
-  ["dashboard loads", async () => { await gotoOK("/dashboard"); await page.waitForTimeout(2500); }],
+  ["dashboard loads", async () => { await gotoAuthed("/dashboard"); await page.waitForTimeout(2500); }],
 
   ["dashboard renders no impossible text", async () => {
-    await gotoOK("/dashboard");
+    await gotoAuthed("/dashboard");
     await page.waitForTimeout(2500);
     await scanPoison("dashboard");
   }],
@@ -177,7 +201,7 @@ const AUTHED = [
     // limit=100. So the screen contradicted itself while every backend check
     // passed. No SQL invariant can ever catch this shape; only reading the
     // rendered page can.
-    await gotoOK("/dashboard");
+    await gotoAuthed("/dashboard");
     await page.waitForTimeout(2500);
     const text = await page.evaluate(() => document.body.innerText || "");
 
@@ -201,11 +225,18 @@ const AUTHED = [
   }],
 
   [ALLOW_WRITES ? "profile + CV upload → extraction" : "profile page renders (read-only)", async () => {
-    await gotoOK("/profile");
+    await gotoAuthed("/profile");
     if (!ALLOW_WRITES) {
       // READ-ONLY: just prove the profile page renders. No upload → no profile overwrite,
       // no LLM call. Safe to point at a real user's account.
-      await page.locator("input, button").first().waitFor({ state: "visible", timeout: 15000 });
+      //
+      // `:visible` is load-bearing. `locator("input, button").first()` picks the first
+      // match in DOM ORDER, and the first button in the header is the mobile-nav
+      // sheet-trigger — permanently hidden at this 1440px viewport. The locator then
+      // waits 15s for an element that can never be visible, so the corner failed even
+      // on a perfectly healthy page. Filtering in the selector makes `.first()` mean
+      // "the first control a human can actually see".
+      await page.locator("input:visible, button:visible").first().waitFor({ state: "visible", timeout: 15000 });
       return;
     }
     // MUTATING (opt-in, synthetic accounts only): upload a sample CV and wait for extraction.
@@ -216,15 +247,47 @@ const AUTHED = [
     // extraction is a real LLM call on prod — wait, then assert a skill from the sample CV shows up
     await page.getByText(/python|airflow|data engineer/i).first().waitFor({ timeout: 90000 });
   }],
-  ["jobs / search", async () => { await gotoOK("/jobs"); await page.waitForTimeout(2500); }],
-  ["pipeline (kanban)", async () => { await gotoOK("/pipeline"); await page.waitForTimeout(1500); }],
-  ["channels", async () => { await gotoOK("/channels"); await page.waitForTimeout(1500); }],
-  ["settings", async () => { await gotoOK("/settings"); await page.waitForTimeout(1500); }],
-  ["notifications", async () => { await gotoOK("/notifications"); await page.waitForTimeout(1500); }],
+  ["jobs / search", async () => { await gotoAuthed("/jobs"); await page.waitForTimeout(2500); }],
+  ["pipeline (kanban)", async () => { await gotoAuthed("/pipeline"); await page.waitForTimeout(1500); }],
+  ["channels", async () => { await gotoAuthed("/channels"); await page.waitForTimeout(1500); }],
+  ["settings", async () => { await gotoAuthed("/settings"); await page.waitForTimeout(1500); }],
+  ["notifications", async () => { await gotoAuthed("/notifications"); await page.waitForTimeout(1500); }],
 ];
 
+// ── The session gate ────────────────────────────────────────────────────────
+// Ask the backend whether SMOKE_SESSION is still a real session BEFORE walking
+// nine authed corners with it. A dead cookie is a CONFIG problem with a one-line
+// fix (refresh the secret); letting it leak into the corners turns it into nine
+// misleading results and buries the actual cause. One honest red beats a puzzle.
+async function sessionIsLive() {
+  try {
+    const r = await fetch(`${BE}/api/auth/me`, {
+      headers: { Cookie: `job360_session=${SESSION}` },
+    });
+    return { ok: r.ok, status: r.status };
+  } catch (e) {
+    return { ok: false, status: `unreachable (${String(e && e.message ? e.message : e).slice(0, 80)})` };
+  }
+}
+
 if (SESSION) {
-  for (const [name, fn] of AUTHED) await corner(name, fn);
+  const gate = await sessionIsLive();
+  if (gate.ok) {
+    for (const [name, fn] of AUTHED) await corner(name, fn);
+  } else {
+    const reason =
+      `SMOKE_SESSION is not a valid session — GET ${BE}/api/auth/me returned ${gate.status}. ` +
+      `The cookie is set but dead (expired or revoked), so every protected page would ` +
+      `redirect to /login and each corner would "pass" against the sign-in card. ` +
+      `FIX: log in as the synthetic account, copy its fresh job360_session cookie, and ` +
+      `update the SMOKE_SESSION repo secret. This is NOT a production outage.`;
+    results.push({ corner: "synthetic session is valid (SMOKE_SESSION)", ok: false, reason });
+    console.log(`  FAIL  synthetic session is valid (SMOKE_SESSION) — ${reason}`);
+    for (const [name] of AUTHED) {
+      results.push({ corner: name, ok: null, reason: "BLOCKED — SMOKE_SESSION is dead; not walked (a pass here would be a lie)" });
+      console.log(`  SKIP  ${name} — blocked by a dead SMOKE_SESSION`);
+    }
+  }
 } else {
   for (const [name] of AUTHED) {
     results.push({ corner: name, ok: null, reason: "SKIPPED — set SMOKE_SESSION (a verified synthetic account cookie) to walk authed corners" });
