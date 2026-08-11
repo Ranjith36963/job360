@@ -12,6 +12,17 @@ from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.jsearch")
 
+# JSearch's canonical home is now OpenWeb Ninja's own infrastructure; RapidAPI
+# is an alternate channel. Keys issued by the OpenWeb Ninja portal ONLY work
+# against this host — the old jsearch.p.rapidapi.com host returns 403 for them.
+#
+# Use `/search`, NOT `/search-v2`: both return HTTP 200, but v2 wraps results in
+# a dict while `/search` returns `data` as a flat list of job objects — the
+# shape this module's parser (and the RapidAPI channel) expects. Verified live
+# 2026-08-11: /search -> data=list[10 dicts], /search-v2 -> data=dict.
+_JSEARCH_URL = "https://api.openwebninja.com/jsearch/search"
+
+
 class JSearchSource(BaseJobSource):
     name = "jsearch"
     category = "keyed_api"
@@ -30,7 +41,15 @@ class JSearchSource(BaseJobSource):
             return []
         jobs = []
         consecutive_failures = 0
+        # JSearch moved to OpenWeb Ninja's own infrastructure (verified live
+        # 2026-08-11). RapidAPI is now just an alternate distribution channel —
+        # identical endpoints, params and response shape, but a DIFFERENT host
+        # and auth header. A key issued by the OpenWeb Ninja portal returns 403
+        # against the old rapidapi host, which is what this source was doing.
+        # `x-api-key` is ignored by RapidAPI and vice-versa, so sending both
+        # keeps either style of key working without needing to detect which.
         headers = {
+            "x-api-key": self._api_key,
             "X-RapidAPI-Key": self._api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
@@ -50,7 +69,7 @@ class JSearchSource(BaseJobSource):
                 "date_posted": "week",
             }
             data = await self._get_json(
-                "https://jsearch.p.rapidapi.com/search",
+                _JSEARCH_URL,
                 params=params,
                 headers=headers,
             )

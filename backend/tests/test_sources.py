@@ -303,7 +303,10 @@ def test_jsearch_parses_response():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.get(re.compile(r"https://jsearch\.p\.rapidapi\.com/search.*"), payload=JSEARCH_PAYLOAD, repeat=True)
+                # JSearch moved off RapidAPI to OpenWeb Ninja's own host
+                # (verified live 2026-08-11) — keys issued by the OpenWeb Ninja
+                # portal get HTTP 403 from the old rapidapi host.
+                m.get(re.compile(r"https://api\.openwebninja\.com/jsearch/search.*"), payload=JSEARCH_PAYLOAD, repeat=True)
                 sc = _make_search_config(["GenAI Engineer UK"])
                 source = JSearchSource(session, api_key="test-key", search_config=sc)
                 jobs = await source.fetch_jobs()
