@@ -80,6 +80,25 @@ describe("LinkedIn detail shows every section", () => {
     expect(screen.getByText(/IELTS · 8\.0/)).toBeTruthy();
   });
 
+  it("renders the LinkedIn About section", () => {
+    // This text is the person's own first-person prose. It was discarded
+    // whenever the CV already carried a summary — so most profiles lost it —
+    // and once it finally had a shelf it went straight to the judge and the
+    // vector while remaining invisible on screen. Extracted, stored and matched
+    // on but never shown is the third way a shelf goes dark.
+    renderWith({
+      summary: [{ text: "AI/ML Engineer building production GenAI systems." }],
+    });
+    expect(
+      screen.getByText(/AI\/ML Engineer building production GenAI systems\./),
+    ).toBeTruthy();
+  });
+
+  it("stays silent when there is no About text", () => {
+    renderWith({ summary: [{ text: "" }] });
+    expect(screen.queryByText("About")).not.toBeInTheDocument();
+  });
+
   it("renders interests", () => {
     renderWith({ interests: [{ name: "DeepMind" }, { name: "Royal Society" }] });
     expect(screen.getByText("DeepMind")).toBeTruthy();
