@@ -78,10 +78,20 @@ async def enqueue_job(
         redis_settings = RedisSettings.from_dsn(redis_url)
         redis_settings.conn_retries = 0
         redis_settings.conn_timeout = ENQUEUE_CONNECT_TIMEOUT_SECONDS
+        # BOTH calls are bounded, not just the connect. Found by adversarial
+        # review: only create_pool was wrapped, and arq maps conn_timeout to the
+        # CONNECT phase only — a Redis that accepts the TCP connection and then
+        # stops responding (failing-over, paused, packet-black-holed) leaves
+        # `enqueue_job` awaiting forever. That hangs a user-facing profile save
+        # AND never reaches the in-process fallback below, so the work is lost —
+        # which is exactly the safety claim this module exists to make.
         pool = await asyncio.wait_for(
             create_pool(redis_settings), timeout=ENQUEUE_CONNECT_TIMEOUT_SECONDS
         )
-        await pool.enqueue_job(function_name, *args, _job_id=job_id, **kwargs)
+        await asyncio.wait_for(
+            pool.enqueue_job(function_name, *args, _job_id=job_id, **kwargs),
+            timeout=ENQUEUE_CONNECT_TIMEOUT_SECONDS,
+        )
         return True
     except Exception as exc:  # noqa: BLE001 — a dead queue must never raise here
         logger.warning(
