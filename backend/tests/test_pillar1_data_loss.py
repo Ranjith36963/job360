@@ -14,7 +14,14 @@ import pytest
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
 _LI_FIELDS = ("linkedin_positions", "linkedin_languages", "linkedin_projects",
-              "linkedin_volunteer", "linkedin_courses")
+              "linkedin_volunteer", "linkedin_courses",
+              # Added 2026-08-12. Skills have the same two-pass shape as the
+              # five above and the same cache-hit failure, but the assignment
+              # sat one line OUTSIDE the llm_ran gate the original fix added —
+              # so a real profile's 13 LinkedIn skills collapsed to the 3 in the
+              # deterministic sidebar on any unrelated profile edit. The tuple
+              # not covering it is why the original fix looked complete.
+              "linkedin_skills")
 
 
 async def _noop(*a, **kw):
@@ -108,6 +115,11 @@ class TestLinkedInSectionsSurviveACacheHit:
             "projects": [{"title": "Thing"}],
             "volunteer": [{"role": "Mentor"}],
             "courses": [{"title": "K8s"}],
+            # Skills come from BOTH LinkedIn passes, so they belong in this
+            # cache-hit test exactly like the five sections above. They were
+            # absent from this payload, which is why the assignment sitting
+            # outside the llm_ran gate went unnoticed for four days.
+            "skills": ["LangGraph", "Multi-agent Systems"],
         }
 
         async def ran(*a, **kw):
