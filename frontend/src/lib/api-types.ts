@@ -1557,6 +1557,11 @@ export interface components {
              */
             companies: string[];
             /**
+             * Cv Experience Level
+             * @default
+             */
+            cv_experience_level: string;
+            /**
              * Cv Positions
              * @default []
              */
@@ -1570,6 +1575,11 @@ export interface components {
             cv_projects: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Cv Right To Work
+             * @default
+             */
+            cv_right_to_work: string;
             /**
              * Education
              * @default []

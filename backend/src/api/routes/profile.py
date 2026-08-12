@@ -186,6 +186,8 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         achievements=getattr(cv, "achievements", []),
         cv_positions=getattr(cv, "cv_positions", []) or [],
         cv_projects=getattr(cv, "cv_projects", []) or [],
+        cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
+        cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 

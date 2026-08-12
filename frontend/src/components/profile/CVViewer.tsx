@@ -553,6 +553,30 @@ export function CVViewer({
           </div>
         )}
 
+        {/* Seniority and right-to-work, as the CV states them. Both are read by
+            the LLM judge, so they were being SCORED ON while invisible to the
+            person they describe - the same gap that hid linkedin_summary, made
+            again one commit later on the shelves that replaced it. */}
+        {(cv.cv_experience_level || cv.cv_right_to_work) && (
+          <div className="mb-5">
+            <SectionLabel icon={Briefcase} text="Stated on your CV" />
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+              {cv.cv_experience_level && (
+                <div className="contents">
+                  <dt className="text-muted-foreground">Seniority</dt>
+                  <dd className="text-foreground/85">{cv.cv_experience_level}</dd>
+                </div>
+              )}
+              {cv.cv_right_to_work && (
+                <div className="contents">
+                  <dt className="text-muted-foreground">Right to work</dt>
+                  <dd className="text-foreground/85">{cv.cv_right_to_work}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
         {/* Projects stated on the CV. A "Projects" heading was already
             recognised — as a boundary that stops a skills block — and then
             discarded. For a junior or career-changing candidate these are

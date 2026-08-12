@@ -172,6 +172,22 @@ class TestMatchingCoverageDoesNotRegress:
     # career_domain and linkedin_summary into the judge and the vector.
     BASELINE = 50
 
+    def test_the_headline_number_is_broken_down_by_reach(self) -> None:
+        """A single "N shelves feed matching" figure counts a shelf the LLM
+        judge reads on a capped window the same as one the keyword engine reads
+        on every row. Those are not the same claim, and the flattering one is
+        the easy one to repeat. This pins the honest breakdown as something the
+        code computes rather than something a summary asserts."""
+        from src.services.profile.shelf_audit import matching_shelves, matching_tiers
+
+        tiers = matching_tiers()
+        assert set(tiers) == {"every_job", "judge_only", "semantic_only"}
+        total = sum(len(v) for v in tiers.values())
+        assert total == len(matching_shelves()), "a shelf fell out of every tier"
+        # The every-job tier is the one worth quoting: it changes the rank of
+        # every job in the feed. If it hits zero the engine is nominal.
+        assert tiers["every_job"], "no shelf reaches the engine that ranks every job"
+
     def test_matching_shelf_count_never_falls(self) -> None:
         current = sum(1 for n in shelf_names() if is_matching_shelf(n))
         assert current >= self.BASELINE, (
@@ -179,12 +195,33 @@ class TestMatchingCoverageDoesNotRegress:
             "stopped feeding the engines — find which consumer stopped reading it."
         )
 
-    def test_every_matching_role_is_a_real_role(self) -> None:
-        used = set()
+    def test_every_matching_role_is_actually_used(self) -> None:
+        """This test used to read ``used & MATCHING_ROLES - MATCHING_ROLES``.
+
+        ``&`` and ``-`` bind left to right at equal precedence, so that is
+        ``(used & M) - M`` — the empty set for EVERY possible value of ``used``.
+        It could not fail. It sat inside a regression class and read like
+        coverage, which is worse than no test: it is the exact assertion that
+        should have caught a declared matching role reading zero shelves.
+        """
+        used: set[str] = set()
         for name in shelf_names():
             used |= readers(name)
-        unknown = used & MATCHING_ROLES - MATCHING_ROLES
-        assert not unknown
+
+        # A role we CLAIM is a matching role must earn it by being read by at
+        # least one shelf. A role nobody reads inflates the headline "N shelves
+        # feed matching" with a module that contributes none of them.
+        idle = sorted(MATCHING_ROLES - used)
+        assert not idle, (
+            f"These roles are declared matching but read zero shelves: {idle}. "
+            "Wire them or remove them from MATCHING_ROLES — a role with no "
+            "reader makes the matching count claim more than it delivers."
+        )
+
+        from src.services.profile.shelf_audit import _ROLES
+
+        undefined = sorted(used - set(_ROLES.values()))
+        assert not undefined, f"readers() returned undefined roles: {undefined}"
 
 
 @pytest.mark.parametrize("name", list(shelf_names()))

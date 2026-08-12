@@ -198,9 +198,35 @@ def profile_to_embedding_text(profile: Any) -> str:
                 blob = " ".join(b for b in bits if b)
                 if blob:
                     parts.append(blob)
-        for proj in list(getattr(cv, "cv_projects", []) or []) + list(
-            getattr(cv, "linkedin_projects", []) or []
-        ):
+        # TWO DIFFERENTLY-SHAPED LISTS, SO TWO KEY SETS. The CV pass writes
+        # {name, description, technologies}; the LinkedIn pass writes
+        # {title, description}. Reading one shared key set across both meant a
+        # CV project contributed only its description — its NAME and its whole
+        # technology list, the most matchable part of a project, reached the
+        # vector as nothing at all. Concatenating the two lists and reading
+        # "title" is exactly the shape of bug this batch keeps finding: one
+        # hand-written assumption covering two things that are not the same.
+        for proj in getattr(cv, "cv_projects", []) or []:
+            if not isinstance(proj, dict):
+                continue
+            techs = proj.get("technologies")
+            tech_txt = (
+                " ".join(str(t) for t in techs if isinstance(t, str))
+                if isinstance(techs, list)
+                else ""
+            )
+            blob = " ".join(
+                b
+                for b in (
+                    str(proj.get("name") or "").strip(),
+                    str(proj.get("description") or "").strip(),
+                    tech_txt.strip(),
+                )
+                if b
+            ).strip()
+            if blob:
+                parts.append(blob)
+        for proj in getattr(cv, "linkedin_projects", []) or []:
             if isinstance(proj, dict):
                 blob = f"{proj.get('title') or ''} {proj.get('description') or ''}".strip()
                 if blob:

@@ -285,6 +285,22 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     # documented "not classified" sentinel on CVData.
     cv.career_domain = None
 
+    # EVERY REMAINING CV-OWNED SCALAR, DERIVED — not hand-listed.
+    #
+    # This function's own docstring says its field list "must stay in lockstep
+    # with _merge_cv_llm_into". It did not. Three shelves added on 2026-08-10
+    # (cv_experience_level, cv_right_to_work, cv_projects) were merged in but
+    # never cleared here, so uploading a DIFFERENT person's CV left the previous
+    # person's stated seniority and work-authorisation on the profile — the
+    # exact failure this function exists to prevent, and worse than the missing
+    # data because it is confidently wrong.
+    #
+    # Both halves now read the same source, so the two cannot drift again.
+    for name in _cv_owned_scalars():
+        if getattr(cv, name, None):
+            setattr(cv, name, "")
+    cv.cv_projects.clear()
+
     # Regenerated wholesale from the merged skill set on every two-pass run, but
     # cleared so a failed re-extract cannot leave suggestions computed from a
     # different person's skills.
@@ -298,6 +314,23 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     # GitHub and about_me data deliberately survives a CV swap, so their
     # hashes must survive too.
     cv.llm_input_hashes.pop("cv", None)
+    # AND the LinkedIn hash — because three of the lists cleared above are
+    # JOINTLY OWNED, not CV-owned.
+    #
+    # ``education``, ``certifications`` and ``job_titles`` are written by BOTH
+    # passes: the CV pass fills them, then ``enrich_cv_from_linkedin`` appends
+    # LinkedIn's entries into the same lists (they have no linkedin_* shelf of
+    # their own). Clearing them here while KEEPING the LinkedIn hash meant the
+    # LinkedIn pass was a cache hit on the re-run, contributed an empty list,
+    # and LinkedIn's degrees, certifications and roles were gone permanently —
+    # not recoverable by re-uploading the same LinkedIn PDF, because its text is
+    # unchanged so the hash still matches.
+    #
+    # The reasoning in the comment above is right for the linkedin_* shelves,
+    # which have their own home and genuinely survive a CV swap untouched. It is
+    # wrong for the three shared lists. Cost of the fix: one extra LinkedIn LLM
+    # call per CV upload. Cost of the bug: silent, permanent data loss.
+    cv.llm_input_hashes.pop("linkedin", None)
 
 
 # Scalar CVData fields the CV pass must NOT write, each with the reason it is
