@@ -37,26 +37,47 @@ def _sanitize_xml(text: str) -> str:
 
 
 def _is_uk_or_remote(location: str) -> bool:
-    """Cheap fetch-time skip for jobs that NAME a place outside the UK.
+    """Fetch-time skip for jobs whose LOCATION FIELD names a place outside the UK.
 
     This is NOT the door. One chokepoint decides what enters the catalog —
-    `services/uk_gate.check_uk`, called in `main.py` before storage, with the
+    `services/uk_gate.check_uk`, called in `main.py` before storage with the
     source name and the ad body in hand. This only avoids carrying obviously
-    foreign rows through scoring and the O(n²) dedup first, so the fetch
-    volume stays where it is (see docs/plans/2026-07-26-uk-first-location-
-    eligibility.md, adversary catch #2).
+    foreign rows through scoring and the O(n^2) dedup (see
+    docs/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
 
-    It used to answer that from `FOREIGN_INDICATORS`, a hand-typed set of
-    foreign cities and US state codes — an unbounded set, so it rotted:
-    "seoul" and "ottawa" were never in it. It now asks the gate itself
-    (`names_foreign_place`), which matches a COMPLETE, data-built set of
-    countries and first-level admin divisions. Refusing only on that verdict
-    keeps this strictly weaker than the door: anything it lets through, the
-    door still judges; nothing it drops would have been admitted later.
+    WHY IT ONLY EVER SEES A LOCATION, AND WHY THAT IS LOAD-BEARING
+    -------------------------------------------------------------
+    It used to answer from `FOREIGN_INDICATORS`, a hand-typed set of foreign
+    cities and US state codes. That set is unbounded by nature, so it rotted
+    ("seoul" and "ottawa" were never in it) and it mis-fired ("Belfast, Northern
+    Ireland" matched its "ireland" entry, docking a genuinely UK job). Rule #30
+    bans exactly that. It now asks the gate's `names_foreign_place`, which reads
+    a COMPLETE, data-built set of countries and first-level admin divisions.
+
+    But a complete set of ISO codes contains `LI`, `BR`, `TD`, `TR`, `TH`, `HR` —
+    Liechtenstein, Brazil, Chad, Turkey, Thailand, Croatia. Four callers pass an
+    ad DESCRIPTION here, and the gate splits on `/`, so the closing tag `</li>`
+    yields the segment `li` and ordinary HTML markup reads as a foreign country.
+    A first version of this function did exactly that and would have silently
+    dropped UK-eligible jobs at fetch, before anything could log them.
+
+    So this refuses ONLY on a bare location string, and only when the whole
+    trimmed value names a foreign place. Anything containing markup, or any text
+    long enough to be prose rather than a place, is passed straight to the door,
+    which has the source name and the full body and can judge properly.
+
+    The invariant to preserve if you touch this: nothing dropped here may be
+    something the door would have admitted. Guarded by
+    `tests/test_sources.py::test_fetch_filter_never_drops_what_the_door_admits`.
     """
     if not location:
         return True  # Unknown — might be UK, the door decides
-    return not names_foreign_place(location)
+
+    text = location.strip()
+    # Markup or prose is not a location. Hand it to the door untouched.
+    if "<" in text or ">" in text or "\n" in text or len(text) > 120:
+        return True
+    return not names_foreign_place(text)
 
 
 class BaseJobSource(ABC):
