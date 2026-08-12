@@ -201,6 +201,11 @@
             "title": "Companies",
             "type": "array"
           },
+          "cv_experience_level": {
+            "default": "",
+            "title": "Cv Experience Level",
+            "type": "string"
+          },
           "cv_positions": {
             "default": [],
             "items": {
@@ -218,6 +223,11 @@
             },
             "title": "Cv Projects",
             "type": "array"
+          },
+          "cv_right_to_work": {
+            "default": "",
+            "title": "Cv Right To Work",
+            "type": "string"
           },
           "education": {
             "default": [],
