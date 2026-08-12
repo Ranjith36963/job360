@@ -13,7 +13,7 @@ from src.core.settings import MAX_RETRIES, RATE_LIMITS, REQUEST_TIMEOUT, RETRY_B
 from src.models import Job
 from src.services.conditional_cache import CachedEntry, ConditionalCache
 from src.services.profile.models import SearchConfig
-from src.services.skill_matcher import FOREIGN_INDICATORS, REMOTE_TERMS, UK_TERMS
+from src.services.uk_gate import names_foreign_place
 from src.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger("job360.sources")
@@ -37,26 +37,26 @@ def _sanitize_xml(text: str) -> str:
 
 
 def _is_uk_or_remote(location: str) -> bool:
-    """Return True if a job location is likely UK, remote, or unknown.
+    """Cheap fetch-time skip for jobs that NAME a place outside the UK.
 
-    Uses word-boundary matching (not plain substring `in`) so a term like
-    "uk" only matches the standalone token, not a substring embedded in an
-    unrelated word — e.g. "Milwaukee" or "Ukraine" must not false-match
-    "uk" (S3 fix; see docs/FABLE_FINDINGS.md).
+    This is NOT the door. One chokepoint decides what enters the catalog —
+    `services/uk_gate.check_uk`, called in `main.py` before storage, with the
+    source name and the ad body in hand. This only avoids carrying obviously
+    foreign rows through scoring and the O(n²) dedup first, so the fetch
+    volume stays where it is (see docs/plans/2026-07-26-uk-first-location-
+    eligibility.md, adversary catch #2).
+
+    It used to answer that from `FOREIGN_INDICATORS`, a hand-typed set of
+    foreign cities and US state codes — an unbounded set, so it rotted:
+    "seoul" and "ottawa" were never in it. It now asks the gate itself
+    (`names_foreign_place`), which matches a COMPLETE, data-built set of
+    countries and first-level admin divisions. Refusing only on that verdict
+    keeps this strictly weaker than the door: anything it lets through, the
+    door still judges; nothing it drops would have been admitted later.
     """
     if not location:
-        return True  # Unknown — might be UK, don't filter
-    loc_lower = location.lower()
-    for term in UK_TERMS:
-        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
-            return True
-    for term in REMOTE_TERMS:
-        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
-            return True
-    for indicator in FOREIGN_INDICATORS:
-        if re.search(rf"\b{re.escape(indicator)}\b", loc_lower):
-            return False
-    return True  # Unknown location, don't filter out
+        return True  # Unknown — might be UK, the door decides
+    return not names_foreign_place(location)
 
 
 class BaseJobSource(ABC):

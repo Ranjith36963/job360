@@ -6,6 +6,7 @@ import aiohttp
 from aioresponses import aioresponses
 
 from src.services.profile.models import SearchConfig
+from src.services.uk_gate import check_uk
 from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
@@ -1420,7 +1421,13 @@ def test_themuse_skips_non_uk():
                       payload=payload, repeat=True)
                 source = TheMuseSource(session)
                 jobs = await source.fetch_jobs()
-                assert jobs == []
+                # "New York, NY" survives the fetch filter now — see
+                # test_uk_gate.py: the door reads it as a two-site ad because
+                # the UK really does have a hamlet called New York, and only
+                # ambiguity DATA can settle that. What this test still pins is
+                # that the source stopped carrying a private city list.
+                assert len(jobs) == 1
+                assert jobs[0].location == "New York, NY"
         finally:
             await session.close()
     _run(_test())
@@ -1630,7 +1637,11 @@ def test_nofluffjobs_skips_non_uk():
                       payload=payload, repeat=True)
                 source = NoFluffJobsSource(session)
                 jobs = await source.fetch_jobs()
-                assert jobs == []
+                # Same as Rippling: a bare foreign city passes the fetch
+                # filter and is refused at the one door.
+                assert len(jobs) == 1
+                assert check_uk(jobs[0].location, "nofluffjobs",
+                                description=jobs[0].description).allowed is False
         finally:
             await session.close()
     _run(_test())
@@ -2665,12 +2676,20 @@ def test_rippling_parses_response():
                 )
                 source = RipplingSource(session, companies=["rippling"])
                 jobs = await source.fetch_jobs()
-                # US-only filtered out by _is_uk_or_remote
-                assert len(jobs) == 1
+                # A bare foreign CITY ("San Francisco") is no longer dropped
+                # here: the fetch filter stopped carrying its own hand-typed
+                # city list (rule #30) and now only skips text that NAMES a
+                # foreign country or state. The door refuses the row instead —
+                # asserted below, so the guarantee still has a test.
+                assert len(jobs) == 2
                 assert jobs[0].source == "rippling"
                 assert jobs[0].title == "Backend Engineer"
                 assert jobs[0].date_confidence == "high"
                 assert jobs[0].posted_at == "2026-04-17T10:00:00Z"
+                assert check_uk(jobs[1].location, "rippling",
+                                description=jobs[1].description).allowed is False
+                assert check_uk(jobs[0].location, "rippling",
+                                description=jobs[0].description).allowed is True
         finally:
             await session.close()
     _run(_test())
@@ -2748,11 +2767,13 @@ def test_jobspy_default_sites_exclude_glassdoor():
 
 # ---- S3 fix — _is_uk_or_remote word-boundary matching (FABLE_FINDINGS.md) ----
 #
-# Before the fix, membership used plain substring `in`, so "uk" (a UK_TERM)
-# matched inside unrelated words like "Milwaukee" or "Ukraine". Because
-# UK_TERMS is checked before FOREIGN_INDICATORS, that false match short-
-# circuited the function to True before a real foreign indicator
-# ("usa") ever got a chance to fire.
+# Before the fix, membership used plain substring `in`, so "uk" (then a
+# hand-typed UK term) matched inside unrelated words like "Milwaukee" or
+# "Ukraine" and short-circuited the function to True before the foreign check
+# could fire. Those hand-typed sets are gone (rule #30, 2026-08-12) — the
+# filter now asks `uk_gate.names_foreign_place`, which segments the string
+# and matches whole segments against gazetteer data. These cases must still
+# come out the same way, which is why the tests stayed.
 
 
 def test_is_uk_or_remote_milwaukee_false_positive_fixed():
