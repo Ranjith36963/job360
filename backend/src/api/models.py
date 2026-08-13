@@ -217,6 +217,12 @@ class CVDetail(BaseModel):
     # section boundary and then discarded — for a junior or career-changing
     # candidate it is often the strongest evidence on the document.
     cv_projects: list[dict[str, Any]] = []
+    # Both are MATCHING shelves (the judge reads them) and both were
+    # invisible to the person they describe until 2026-08-12 - the same
+    # "scored on but never shown" gap that hid linkedin_summary, repeated
+    # one commit later on the shelves that replaced it.
+    cv_experience_level: str = ""
+    cv_right_to_work: str = ""
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []

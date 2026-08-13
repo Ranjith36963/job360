@@ -73,8 +73,20 @@ _ROLES: dict[str, str] = {
     "llm_matcher": "judge",
     "prefilter": "prefilter",
     "embeddings": "semantic",
+    # retrieval.py is mapped to the same role deliberately: it reads ZERO
+    # profile shelves today (verified: no cv./prefs./getattr access at all), so
+    # it contributes nothing on its own. The "semantic" role is earned entirely
+    # by embeddings.py. Keeping the mapping costs nothing and means a future
+    # profile read in retrieval.py is counted automatically.
     "retrieval": "semantic",
-    "feed": "feed",
+    # "feed" was here as its own MATCHING role. services/feed.py also reads zero
+    # profile shelves, so unlike "semantic" nothing else earned it — it was a
+    # declared matching role with no reader, quietly inflating the headline
+    # "N shelves feed matching" number with a module that contributes none.
+    # Removed until feed.py actually reads a shelf. This is exactly what the
+    # de-tautologised test_every_matching_role_is_actually_used caught on its
+    # first real run.
+    "feed": "persistence",
     # Not matching — kept so the manifest can show WHERE a shelf does surface.
     "profile": "api",
     "jobs": "api",
@@ -82,8 +94,17 @@ _ROLES: dict[str, str] = {
     "snapshot": "api",
 }
 
+# Roles whose consumer can change what a user actually sees. Every one of these
+# must be READ BY AT LEAST ONE SHELF — a declared role with no reader inflates
+# the count with a module that contributes nothing, which is why
+# test_every_matching_role_is_actually_used exists.
+#
+# NOT equal reach, and the difference matters when quoting the number:
+#   scorer / search-keywords / tiering / prefilter -> rank EVERY job
+#   judge                                          -> the top slice only
+#   semantic                                       -> only when the vector runs
 MATCHING_ROLES = frozenset(
-    {"search-keywords", "tiering", "scorer", "judge", "prefilter", "semantic", "feed"}
+    {"search-keywords", "tiering", "scorer", "judge", "prefilter", "semantic"}
 )
 
 # Modules that WRITE shelves. Extraction lives under services/profile/, but the
@@ -447,3 +468,38 @@ def is_matching_shelf(shelf: str) -> bool:
 
 def matching_shelves() -> tuple[str, ...]:
     return tuple(n for n in shelf_names() if is_matching_shelf(n))
+
+
+# Roles whose consumer ranks EVERY job in the feed, as opposed to a slice of it.
+EVERY_JOB_ROLES = frozenset({"scorer", "search-keywords", "tiering", "prefilter"})
+
+
+def matching_tiers() -> dict[str, tuple[str, ...]]:
+    """The matching count broken down by REACH, because one number misleads.
+
+    "50 shelves feed matching" is true as wiring and misleading as impact: it
+    counts a shelf read only by the LLM judge the same as one the keyword scorer
+    reads. They are not comparable —
+
+        every_job  the keyword engine ranks all ~7,000 rows in a feed
+        judge      the LLM judge sees a capped window (tens, not thousands)
+        semantic   the vector, and only when the index actually covers the job
+
+    This exists so the honest figure is COMPUTED rather than asserted in prose.
+    A headline number that cannot be recomputed from the code is exactly the
+    kind of claim this whole batch has been correcting.
+    """
+    every, judge, semantic = [], [], []
+    for name in matching_shelves():
+        roles = readers(name)
+        if roles & EVERY_JOB_ROLES:
+            every.append(name)
+        elif "judge" in roles:
+            judge.append(name)
+        else:
+            semantic.append(name)
+    return {
+        "every_job": tuple(every),
+        "judge_only": tuple(judge),
+        "semantic_only": tuple(semantic),
+    }
