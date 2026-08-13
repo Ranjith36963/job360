@@ -4,14 +4,68 @@
 # human and, on any failure, screenshots it + logs the REASON into the server log system
 # (POST /api/client-log). Fails red → GitHub emails the owner (scheduled-workflow default).
 #
-# Public corners always run. Authed corners run only when the SMOKE_SESSION secret is set
-# to a VERIFIED synthetic account's job360_session cookie (prod email-verification can't be
-# automated in CI). See tests/synthetic/live-smoke.mjs.
+# Public corners always run. Authed corners run only after the robot LOGS ITSELF IN as a
+# dedicated synthetic account and the backend confirms whose account that is.
+#
+# ── The chore this removed ──────────────────────────────────────────────────────────
+# This used to run on SMOKE_SESSION: a `job360_session` cookie the owner pasted into a
+# repo secret by hand. Sessions expire after exactly 30 days with no renewal
+# (backend/src/services/auth/sessions.py:25), so that secret died on a clock and took the
+# check with it — 2026-08-09 → 2026-08-11, nine authed corners reported OK while the
+# browser sat on the login page. A recurring manual chore attached to a safety check is a
+# countdown on that check, and the owner is one person; he will eventually miss it.
+#
+# Now: SMOKE_EMAIL (repo VARIABLE) + SMOKE_PASSWORD (repo SECRET), set ONCE. The run logs
+# in through POST /api/auth/login every time. Nothing expires on a clock.
+# SMOKE_SESSION still works as a fallback, but the run now WARNS before it dies.
+#
+# ── Why the email is a variable and not a secret ────────────────────────────────────
+# GitHub masks secret values in logs. If the address were a secret, the refusal message
+# "refused to run as <address>" would print as "refused to run as ***" — the one fact you
+# need in order to fix it. It is an address, not a credential; the password is the secret.
+#
+# ── The safety rule (frontend/tests/synthetic/session-gate.mjs) ─────────────────────
+# The walk refuses to proceed unless the BACKEND says the session belongs to a synthetic
+# address. Not the string we were handed — the server's own answer, so it holds for the
+# pasted-cookie path too.
+#
+# ── The drill ───────────────────────────────────────────────────────────────────────
+# Run this workflow by hand with `drill: dead-session` or `drill: wrong-account` to prove
+# the check still goes RED. A synthetic monitor that cannot fail is the original bug.
+#
+# ── OWNER: one-time setup, then never again ─────────────────────────────────────────
+# 1. Create the robot account on prod. NO MAILBOX IS NEEDED — `POST /api/auth/register`
+#    takes an email + password and the account can sign in immediately
+#    (backend/tests/test_auth_routes.py::test_register_creates_user_but_does_not_auto_login).
+#    The nine corners this walks (dashboard/profile/jobs/pipeline/channels/settings/
+#    notifications) are gated on `require_user`, NOT `require_verified_user` — only
+#    `search.py:177` and `tailor.py` need a verified email, and neither is walked. So an
+#    unverified robot account is enough.
+#      curl -X POST https://<backend>/api/auth/register \
+#        -H 'Content-Type: application/json' \
+#        -d '{"email":"synthetic@job360.uk","password":"<a long random password>"}'
+# 2. Repo VARIABLE  SMOKE_EMAIL    = that address (must satisfy the synthetic rule).
+#    Repo SECRET    SMOKE_PASSWORD = that password.
+# 3. DELETE the SMOKE_SESSION secret. It exists only as a fallback and it is the chore.
+# 4. Run this workflow by hand once with `drill: dead-session` and confirm it goes RED.
+#    A guard nobody has ever seen fire is a guess.
+# Magic-link is NOT usable here: an account created that way gets a random unguessable
+# password (services/auth/magic_link.py:180-186), so it can never log in with one.
 name: synthetic-live
 on:
   schedule:
     - cron: "0 */6 * * *" # every 6h; tune to taste (authed run makes a real LLM call)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: "Fire a DRILL instead of a real walk — proves this check can go RED."
+        type: choice
+        required: false
+        default: "none"
+        options:
+          - "none"
+          - "dead-session" # a syntactically valid but dead cookie -> must fail
+          - "wrong-account" # a NON-synthetic address -> must refuse before sending anything
 
 # Least-privilege token (CodeQL actions/missing-workflow-permissions):
 # these jobs only check out code and run tests/uploads — no repo writes.
@@ -35,11 +89,55 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Walk live production
+        if: inputs.drill == '' || inputs.drill == 'none'
         env:
           SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
           SMOKE_API_URL: ${{ vars.SMOKE_API_URL }}
+          # Log in at run time — nothing here expires on a clock.
+          SMOKE_EMAIL: ${{ vars.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          # Legacy pasted-cookie fallback. Kept so this change can never make the
+          # check worse than it was; the run warns when it is nearing its 30 days.
           SMOKE_SESSION: ${{ secrets.SMOKE_SESSION }}
+          # Only the SCHEDULE demands an authed walk. Deleting the credentials would
+          # otherwise turn nine corners off silently and the run would stay green —
+          # which is exactly how the last three checks died. A hand-run
+          # (workflow_dispatch) may legitimately walk the public corners only.
+          SMOKE_REQUIRE_AUTHED: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: node tests/synthetic/live-smoke.mjs
+
+      # ── THE DRILL ─────────────────────────────────────────────────────────────
+      # Fire the failure on purpose and assert the script EXITS NON-ZERO. Two loops
+      # in this repo were dead on arrival and only firing them deliberately revealed
+      # it, so every guard gets an entrance you can walk through.
+      #
+      # Neither drill needs a real credential: `dead-session` uses a made-up cookie
+      # (the signature cannot verify, so it is refused), and `wrong-account` is
+      # refused BEFORE any network call because the address is not synthetic — the
+      # dummy password is never transmitted.
+      - name: DRILL — prove this check can still go RED
+        if: inputs.drill != '' && inputs.drill != 'none'
+        env:
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+          SMOKE_API_URL: ${{ vars.SMOKE_API_URL }}
+          SMOKE_EMAIL: ${{ inputs.drill == 'wrong-account' && 'a-real-human@example.com' || '' }}
+          SMOKE_PASSWORD: ${{ inputs.drill == 'wrong-account' && 'not-a-real-password' || '' }}
+          SMOKE_SESSION: ${{ inputs.drill == 'dead-session' && 'deadbeef0123456789abcdef.an2pww.this-signature-is-not-valid' || '' }}
+        run: |
+          echo "DRILL: ${{ inputs.drill }} — the script MUST exit non-zero."
+          # GitHub runs `run:` blocks under `bash -e`, so a non-zero node exit would
+          # abort the step before we could check it. `set +e` is load-bearing here:
+          # a FAILING script is the PASSING outcome of a drill.
+          set +e
+          node tests/synthetic/live-smoke.mjs
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::DRILL FAILED — live-smoke.mjs exited 0 on a deliberately broken session (${{ inputs.drill }}). The session gate is NOT working: a monitor that cannot go red reports OK about nothing."
+            exit 1
+          fi
+          echo "DRILL PASSED — the gate refused and the script exited $code." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload report + failure screenshots
         if: always()
         uses: actions/upload-artifact@v7
