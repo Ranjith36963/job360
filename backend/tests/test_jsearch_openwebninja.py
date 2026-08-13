@@ -14,6 +14,7 @@ Two traps this pins down, both found live on 2026-08-11:
 """
 import asyncio
 import re
+from urllib.parse import urlsplit
 
 import aiohttp
 from aioresponses import aioresponses
@@ -51,9 +52,17 @@ _PAYLOAD = {
 
 
 def test_calls_openwebninja_not_rapidapi():
-    """The old host 403s OpenWeb Ninja keys — we must not call it."""
-    assert "openwebninja.com" in _JSEARCH_URL
-    assert "rapidapi.com" not in _JSEARCH_URL
+    """The old host 403s OpenWeb Ninja keys — we must not call it.
+
+    Compare the parsed HOSTNAME, never `"openwebninja.com" in url`: a substring
+    test passes for `https://evil.example/?x=openwebninja.com`, so it does not
+    actually pin the host it claims to (CodeQL py/incomplete-url-substring-
+    sanitization, flagged high on PR #273). Exact-match is also a stricter
+    assertion — it catches a typo'd subdomain that a substring check waves through.
+    """
+    host = urlsplit(_JSEARCH_URL).hostname or ""
+    assert host == "api.openwebninja.com", f"unexpected JSearch host: {host!r}"
+    assert host != "jsearch.p.rapidapi.com"
 
 
 def test_uses_the_flat_search_endpoint_not_v2():

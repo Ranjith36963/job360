@@ -50,7 +50,7 @@ class ReedSource(BaseJobSource):
         # for real HTTP latency and parsing.
         _max_requests = max(1, int((SOURCE_FETCH_TIMEOUT * 0.6) / _delay))
         _max_titles = max(1, _max_requests // len(locations))
-        queries = self.job_titles[:_max_titles]
+        queries = self.search_titles[:_max_titles]
         for query in queries:
             for loc in locations:
                 params = {

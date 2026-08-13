@@ -64,7 +64,7 @@ class WorkdaySource(BaseJobSource):
             api_url = f"{base_url}/wday/cxs/{tenant}/{site}/jobs"
 
             company_failed = False
-            for query in self.job_titles[:8]:
+            for query in self.search_titles[:8]:
                 if company_failed:
                     break
                 body = {

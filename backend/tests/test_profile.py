@@ -352,6 +352,299 @@ class TestKeywordGenerator:
 
 
 # -----------------------------------------------------------------------
+# Search titles — the QUERY list (what a job board actually receives)
+#
+# Ground truth: the three real profiles on live Postgres, measured
+# 2026-08-13. User 88e7d907… is the worst case — `target_job_titles` is
+# empty, so his ENTIRE 9-role history became the search, including the
+# bare word "Intern", an "– R&D Department" suffix and a "(SDET)"
+# parenthetical. No posting on any board carries those as its title, so
+# those requests came back near-empty and every downstream ranking
+# improvement was capped by what was never fetched.
+# -----------------------------------------------------------------------
+
+
+# The nine `cv.job_titles` of live user 88e7d9075f32421292a869228c030666,
+# verbatim and in order. The dash in #1 is a real U+2013 EN DASH — live
+# Postgres was queried directly and stores it correctly.
+_U88E7_CV_TITLES = [
+    "AI Solutions Engineer – R&D Department",
+    "AI/ML Engineer Intern",
+    "Blockchain Engineer Intern",
+    "Software Development Engineer in Test (SDET)",
+    "Intern",
+    "Founder & Product Analyst",
+    "Blockchain Developer",
+    "QA Engineer",
+    "Software Engineer",
+]
+
+# His six LinkedIn positions — all duplicates of CV titles (one differs only
+# by case), so they must add nothing.
+_U88E7_LINKEDIN_TITLES = [
+    "Founder & Product analyst",
+    "Intern",
+    "Blockchain Developer",
+    "QA Engineer",
+    "Software Engineer",
+    "Intern",
+]
+
+
+class TestSearchTitles:
+    def _profile(self, cv_titles=None, linkedin_titles=None, targets=None, locations=None):
+        return UserProfile(
+            cv_data=CVData(
+                raw_text="test cv",
+                job_titles=list(cv_titles or []),
+                linkedin_positions=[{"title": t} for t in (linkedin_titles or [])],
+            ),
+            preferences=UserPreferences(
+                target_job_titles=list(targets or []),
+                preferred_locations=list(locations or []),
+            ),
+        )
+
+    def _u88e7(self):
+        return self._profile(
+            cv_titles=_U88E7_CV_TITLES,
+            linkedin_titles=_U88E7_LINKEDIN_TITLES,
+            targets=[],
+        )
+
+    # --- step 1: SPLIT -------------------------------------------------
+
+    def test_dash_clause_is_cut(self):
+        """'… – R&D Department' is org structure, not a job board's title."""
+        cfg = generate_search_config(self._profile(cv_titles=[_U88E7_CV_TITLES[0]]))
+        assert cfg.search_titles == ["AI Solutions Engineer"]
+
+    def test_replacement_character_is_treated_as_the_dash_it_was(self):
+        """Defensive: if an en-dash ever fails to decode it becomes U+FFFD, the
+        Unicode REPLACEMENT CHARACTER — never part of a real word, so it must
+        never reach an HTTP query string. (Live prod stores a clean en-dash;
+        this guards a future decode failure.)"""
+        mangled = "AI Solutions Engineer � R&D Department"
+        cfg = generate_search_config(self._profile(cv_titles=[mangled]))
+        assert cfg.search_titles == ["AI Solutions Engineer"]
+        assert not any("�" in q for q in cfg.search_queries)
+
+    def test_parenthetical_becomes_its_own_query(self):
+        """'(SDET)' is another NAME for the same role, so it earns a query of
+        its own instead of being thrown away with the brackets."""
+        cfg = generate_search_config(self._profile(cv_titles=[_U88E7_CV_TITLES[3]]))
+        assert cfg.search_titles == ["Software Development Engineer in Test", "SDET"]
+
+    def test_only_an_acronym_parenthetical_earns_its_own_query(self):
+        """Promoting EVERY bracket manufactured junk queries: 'Staff Nurse
+        (Band 5)' asked boards for 'Band 5', and 'Product Manager (Growth)
+        (Contract)' asked for 'Growth' and 'Contract'. None of those name a job.
+        Only an acronym is an alternative NAME for the role. Structural test —
+        one token, all-caps, 2-6 chars — not a list of banned words (rule #28).
+        """
+        assert generate_search_config(
+            self._profile(cv_titles=["Staff Nurse (Band 5)"])
+        ).search_titles == ["Staff Nurse"]
+
+        assert generate_search_config(
+            self._profile(cv_titles=["Product Manager (Growth) (Contract)"])
+        ).search_titles == ["Product Manager"]
+
+        # …while the acronym case above still works. Both halves matter: a fix
+        # that dropped '(SDET)' too would trade one lost query for another.
+        assert "SDET" in generate_search_config(
+            self._profile(cv_titles=["Software Development Engineer in Test (SDET)"])
+        ).search_titles
+
+    def test_single_word_head_does_not_collapse_the_title(self):
+        """The >=2-token guard: cutting at the dash here would leave the
+        useless query 'Engineer', so the whole title is kept instead."""
+        cfg = generate_search_config(self._profile(cv_titles=["Engineer - Data Platform"]))
+        assert cfg.search_titles == ["Engineer - Data Platform"]
+
+    def test_hyphen_inside_a_word_is_not_a_separator(self):
+        cfg = generate_search_config(self._profile(cv_titles=["E-commerce Manager"]))
+        assert cfg.search_titles == ["E-commerce Manager"]
+
+    # --- step 3: ADMIT -------------------------------------------------
+
+    def test_rank_only_title_is_never_a_query(self):
+        """'Intern' names a rank, not a domain — every board returns an
+        unusable everything-list for it."""
+        cfg = generate_search_config(
+            self._profile(cv_titles=["Blockchain Developer", "Intern"])
+        )
+        assert "Intern" not in cfg.search_titles
+        assert cfg.search_titles == ["Blockchain Developer"]
+
+    def test_no_search_title_is_rank_only(self):
+        cfg = generate_search_config(self._u88e7())
+        from src.services.profile.keyword_generator import _ROLE_WORDS, _title_tokens
+
+        for title in cfg.search_titles:
+            assert _title_tokens(title) - _ROLE_WORDS, f"rank-only query: {title!r}"
+
+    def test_thin_but_real_title_survives_the_admit_gate(self):
+        """Deliberately WEAK gate: an 'Actuarial Analyst' with no corroborating
+        skill must still get a query, not an empty catalog."""
+        cfg = generate_search_config(self._profile(cv_titles=["Actuarial Analyst"]))
+        assert cfg.search_titles == ["Actuarial Analyst"]
+
+    # --- step 4: DEDUP BY CONTAINMENT ----------------------------------
+
+    def test_narrower_title_is_dropped_when_a_broader_one_is_kept(self):
+        """'AI/ML Engineer Intern' is 'AI/ML Engineer' + a rank word, so under
+        AND-of-terms matching the broader query already returns it. A
+        redundancy argument, NOT a seniority judgement."""
+        cfg = generate_search_config(
+            self._profile(
+                targets=["AI/ML Engineer"],
+                cv_titles=["AI/ML Engineer Intern"],
+            )
+        )
+        assert cfg.search_titles == ["AI/ML Engineer"]
+
+    def test_a_different_role_is_not_treated_as_redundant(self):
+        cfg = generate_search_config(
+            self._profile(
+                targets=["AI/ML Engineer"],
+                cv_titles=["Blockchain Engineer Intern"],
+            )
+        )
+        assert cfg.search_titles == ["AI/ML Engineer", "Blockchain Engineer Intern"]
+
+    # --- step 5: ORDER + CAP -------------------------------------------
+
+    def test_typed_targets_come_first_and_are_never_dropped(self):
+        """The user typed it, so it is not a guess — even a rank-only target
+        is honoured (rule #29: match on what the user filled)."""
+        cfg = generate_search_config(
+            self._profile(targets=["Intern"], cv_titles=["Blockchain Developer"])
+        )
+        assert cfg.search_titles[0] == "Intern"
+
+    def test_typed_targets_are_exempt_from_the_total_cap(self):
+        typed = [f"Domain{i} Engineer" for i in range(8)]
+        cfg = generate_search_config(self._profile(targets=typed))
+        assert cfg.search_titles == typed
+
+    def test_history_is_capped_so_old_roles_do_not_flood_the_search(self):
+        cfg = generate_search_config(self._u88e7())
+        assert len(cfg.search_titles) <= 6
+        assert "Software Engineer" not in cfg.search_titles
+
+    # --- the whole pipeline, on the real worst-case profile -------------
+
+    def test_u88e7_search_titles_are_the_six_real_searches(self):
+        """Six, not five: a second per-role cap used to stop the walk after 4
+        roles and hand back 5 queries out of an allowed 6, spending the last
+        slot on nothing. One cap (the query budget) governs now."""
+        cfg = generate_search_config(self._u88e7())
+        assert cfg.search_titles == [
+            "AI Solutions Engineer",
+            "AI/ML Engineer Intern",
+            "Blockchain Engineer Intern",
+            "Software Development Engineer in Test",
+            "SDET",
+            "Founder & Product Analyst",
+        ]
+
+    def test_the_oldest_roles_stay_out_of_the_search(self):
+        """A CV lists roles newest-first, so the budget keeps the most RECENT
+        roles. This user's 'QA Engineer' and 'Software Engineer' are their
+        oldest jobs — searching those is how a stale, irrelevant catalog gets
+        built, so losing them to the budget is the desired outcome, not a
+        casualty. Volume is not the objective; recency is."""
+        cfg = generate_search_config(self._u88e7())
+        assert "QA Engineer" not in cfg.search_titles
+        assert "Software Engineer" not in cfg.search_titles
+
+    def test_u88e7_queries_lose_the_junk(self):
+        """THE regression this whole change exists for: eight queries went out,
+        including 'Intern UK' and an '– R&D Department' suffix."""
+        cfg = generate_search_config(self._u88e7())
+        assert cfg.search_queries == [
+            "AI Solutions Engineer UK",
+            "AI/ML Engineer Intern UK",
+            "Blockchain Engineer Intern UK",
+            "Software Development Engineer in Test UK",
+            "SDET UK",
+            "Founder & Product Analyst UK",
+        ]
+        assert "Intern UK" not in cfg.search_queries
+        assert not any("Department" in q for q in cfg.search_queries)
+        assert not any("(" in q or ")" in q for q in cfg.search_queries)
+
+    def test_u7edd_queries(self):
+        """Live user 7edd5b59…: two typed targets, no preferred locations."""
+        cfg = generate_search_config(
+            self._profile(
+                targets=[
+                    "AI Solutions Engineer – R&D Department",
+                    "AI/ML Engineer Intern",
+                ]
+            )
+        )
+        assert cfg.search_queries == [
+            "AI Solutions Engineer UK",
+            "AI/ML Engineer Intern UK",
+        ]
+
+    def test_uad13_queries(self):
+        """Live user ad13c75d…: typed targets first, history fills the rest,
+        and 'AI/ML Engineer Intern' drops out as redundant against the typed
+        'AI/ML Engineer'."""
+        cfg = generate_search_config(
+            self._profile(
+                targets=["AI/ML Engineer", "Machine Learning Engineer"],
+                cv_titles=[
+                    "AI Solutions Engineer – R&D Department",
+                    "AI/ML Engineer Intern",
+                    "AI / ML intern",
+                ],
+            )
+        )
+        assert cfg.search_titles == [
+            "AI/ML Engineer",
+            "Machine Learning Engineer",
+            "AI Solutions Engineer",
+            "AI / ML intern",
+        ]
+
+    # --- invariants -----------------------------------------------------
+
+    def test_job_titles_are_untouched_by_query_hygiene(self):
+        """GOLDEN / scoring-neutrality guard. `job_titles` is the SCORER's
+        evidence list and must keep every raw title, uncapped and unfiltered —
+        cleaning it would silently re-rank every existing user's feed.
+        Also pins the revert of an earlier WIP that collapsed this to one."""
+        cfg = generate_search_config(self._u88e7())
+        assert cfg.job_titles == _U88E7_CV_TITLES
+
+    def test_search_never_empty_when_the_profile_has_any_title(self):
+        """Silence is fine for a scoring input; for a query it means an EMPTY
+        CATALOG. Even an all-rank-only history must yield something."""
+        cfg = generate_search_config(self._profile(cv_titles=["Intern", "Trainee"]))
+        assert cfg.search_titles
+        assert cfg.search_queries
+
+    def test_no_titles_at_all_yields_no_queries(self):
+        cfg = generate_search_config(self._profile())
+        assert cfg.search_titles == []
+        assert cfg.search_queries == []
+
+    def test_search_titles_carry_no_location_suffix(self):
+        cfg = generate_search_config(
+            self._profile(cv_titles=_U88E7_CV_TITLES, locations=["London"])
+        )
+        assert cfg.search_titles
+        for title in cfg.search_titles:
+            assert not title.endswith(" UK")
+            assert not title.endswith(" London")
+        assert all(q.endswith(" London") for q in cfg.search_queries)
+
+
+# -----------------------------------------------------------------------
 # JobScorer — dynamic scoring with SearchConfig
 # -----------------------------------------------------------------------
 

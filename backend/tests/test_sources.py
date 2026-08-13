@@ -50,8 +50,14 @@ from src.sources.scrapers.linkedin import LinkedInSource
 
 
 def _make_search_config(queries: list[str]) -> SearchConfig:
-    """Return a minimal SearchConfig with the given search queries."""
-    return SearchConfig(search_queries=queries)
+    """Return a minimal SearchConfig with the given search queries.
+
+    `search_titles` is populated with the same strings: sources that pass a
+    location parameter separately (linkedin, nhs_jobs, findwork) read
+    `search_titles`, not `search_queries`, so that the " UK" suffix the query
+    strings carry is not sent as a dead keyword.
+    """
+    return SearchConfig(search_queries=queries, search_titles=queries)
 
 
 def _sc_ai_defaults() -> SearchConfig:

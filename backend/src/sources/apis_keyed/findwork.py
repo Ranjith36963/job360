@@ -30,9 +30,11 @@ class FindworkSource(BaseJobSource):
 
         jobs = []
         headers = {"Authorization": f"Token {self._api_key}"}
+        # `search_titles`, not `search_queries`: this source loops its own
+        # ("uk", "london") location terms below, so the " UK" the query strings
+        # carry would be the word "uk" twice in one request.
         search_term = (
-            self.search_queries[0] if self.search_queries
-            else self.job_titles[0] if self.job_titles
+            self.search_titles[0] if self.search_titles
             else "software engineer"
         )
         # Findwork's location filter does NOT understand "united kingdom" —

@@ -48,9 +48,13 @@ class LinkedInSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         seen_urls = set()
-        queries = self.search_queries[:5]
+        # `search_titles`, not `search_queries`: the query strings carry a " UK"
+        # suffix for sources that send no location, and this request already
+        # passes location="United Kingdom" below. Under AND-of-terms keyword
+        # matching a dead token can only shrink the result set.
+        queries = self.search_titles[:5]
         if not queries:
-            logger.info("LinkedIn: no search queries in profile, skipping")
+            logger.info("LinkedIn: no search titles in profile, skipping")
             return []
         for query in queries:
             params = {

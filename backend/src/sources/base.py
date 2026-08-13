@@ -96,6 +96,20 @@ class BaseJobSource(ABC):
         return _DEFAULT_JOB_TITLES
 
     @property
+    def search_titles(self) -> list[str]:
+        """The titles this source may put in a search request.
+
+        Distinct from `job_titles`, which is the scorer's EVIDENCE list and
+        holds raw CV strings ("… - R&D Department", "… (SDET)", bare "Intern")
+        that no job board indexes. Falls back to `job_titles` so a config built
+        before the split — or a no-profile default config — behaves exactly as
+        it did.
+        """
+        if self._search_config is not None and self._search_config.search_titles:
+            return self._search_config.search_titles
+        return self.job_titles
+
+    @property
     def search_queries(self) -> list[str]:
         if self._search_config is not None and self._search_config.search_queries:
             return self._search_config.search_queries

@@ -534,7 +534,31 @@ async def test_worker_startup_populates_ctx(monkeypatch):
     assert ws.WorkerSettings.max_jobs == 1
 
 
-def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
+@pytest.fixture
+def profile_db(migrated_db_path, monkeypatch):
+    """Point every captured ``DB_PATH`` at a FULLY MIGRATED schema.
+
+    The two tests below call ``save_profile`` directly, which writes through a
+    module-level ``DB_PATH`` rather than a passed-in handle — so without this
+    they land in a schema where migrations never ran and ``user_profiles`` does
+    not exist. They used to pass only because test schemas kept ``public`` on
+    their ``search_path``: the write silently resolved to the SHARED profile
+    table instead of failing. That fallback is gone, so the requirement is now
+    explicit, which is the point.
+
+    Patches every already-imported module, not just ``storage``: a
+    ``from src.core.settings import DB_PATH`` binds the VALUE at import time,
+    so each importer holds its own copy (same loop conftest uses).
+    """
+    import sys
+
+    for _name, _mod in list(sys.modules.items()):
+        if _name.startswith(("src.", "migrations")) and getattr(_mod, "DB_PATH", None) is not None:
+            monkeypatch.setattr(_mod, "DB_PATH", migrated_db_path, raising=False)
+    return migrated_db_path
+
+
+def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run(profile_db):
     """The scheduled refresh MUST pass user_id=None.
 
     Cost safety, structural rather than promised: in `main.run_search` every
@@ -585,7 +609,7 @@ def test_refresh_catalog_is_shared_only_so_the_paid_llm_stages_cannot_run():
     assert result["new_jobs"] == 7
 
 
-def test_refresh_catalog_fetches_with_the_union_of_all_user_configs():
+def test_refresh_catalog_fetches_with_the_union_of_all_user_configs(profile_db):
     """Issue #170, second root cause: passing user_id=None made run_search fall
     back to DEFAULT_TENANT_ID, which has no profile row in prod — so the cron
     aborted with sources_queried=0 every night (once the read-only-disk crash

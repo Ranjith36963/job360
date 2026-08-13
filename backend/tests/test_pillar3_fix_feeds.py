@@ -35,7 +35,9 @@ def _run(coro):
 
 
 def _sc(queries: list[str]) -> SearchConfig:
-    return SearchConfig(search_queries=queries)
+    # `search_titles` too: NHS Jobs reads the title list (it is a UK-only
+    # board, so the " UK" a query string carries is dead weight in `keywords`).
+    return SearchConfig(search_queries=queries, search_titles=queries)
 
 
 # =============================================================================

@@ -1304,6 +1304,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         profiles_used += 1
         for attr in (
             "job_titles",
+            # Must be unioned too: if it were left empty the sources would fall
+            # back to the union of raw `job_titles` (BaseJobSource.search_titles)
+            # and the catalog refill would send the junk queries again.
+            "search_titles",
             "primary_skills",
             "secondary_skills",
             "tertiary_skills",

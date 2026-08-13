@@ -24,9 +24,11 @@ class NHSJobsSource(BaseJobSource):
         jobs = []
         seen_ids = set()
 
-        queries = self.search_queries[:6]  # Bounded to prevent source timeout
+        # `search_titles`, not `search_queries`: NHS Jobs is a UK-only board, so
+        # the " UK" suffix the query strings carry is pure noise in `keywords`.
+        queries = self.search_titles[:6]  # Bounded to prevent source timeout
         if not queries:
-            logger.info("NHS Jobs: no search queries in profile, skipping")
+            logger.info("NHS Jobs: no search titles in profile, skipping")
             return []
         for query in queries:
             xml_text = await self._get_text(
