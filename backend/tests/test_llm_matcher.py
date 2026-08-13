@@ -242,6 +242,47 @@ async def test_match_batch_persists_skips_and_survives_errors(mem_db):
     assert len(calls) == 2
 
 
+@pytest.mark.asyncio
+async def test_match_batch_does_not_swallow_a_missing_key_as_a_judged_nothing(mem_db):
+    """A missing key is not a per-job judge failure — it is the SAME fault for
+    every job, and swallowing it per job is exactly the masquerade that cost a
+    week of eval data.
+
+    Before: no key -> N warnings "judge failed for job X" -> ``[None, None]``.
+    A caller counting verdicts sees "judged 0/2" and reads a quality problem.
+    After: the config fault escapes as itself, once.
+    """
+    import src.services.profile.llm_provider as lp
+
+    conn = mem_db
+    uid = "user-nokey-001"
+    ids = []
+    for title in ("Job A", "Job B"):
+        cur = await conn.execute(
+            "INSERT INTO jobs(title, company, apply_url, source, date_found) "
+            "VALUES (?,?,?,?,?)",
+            (title, "CorpA", f"https://a.com/{title}", "greenhouse", _NOW),
+        )
+        ids.append(cur.lastrowid)
+        await conn.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+            (uid, ids[-1], 50, "top"),
+        )
+    await conn.commit()
+
+    jobs = []
+    for title, jid in zip(("Job A", "Job B"), ids):
+        j = _make_job(title=title)
+        j.id = jid  # type: ignore[attr-defined]
+        jobs.append(j)
+
+    # conftest._offline_openai already blanks all four keys — the production
+    # shape of an unset GitHub secret. No fn is injected, so the real chain runs.
+    lp.reset_llm_key_alarm()
+    with pytest.raises(lp.LLMKeyMissing):
+        await match_batch(jobs, user_id=uid, profile_text="p", conn=conn)
+
+
 def test_flag_defaults_off(monkeypatch):
     monkeypatch.delenv("MATCHER_ENABLED", raising=False)
     import importlib

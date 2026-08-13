@@ -29,8 +29,11 @@ DESIGN RULES:
 
 CONTRACT:
     exit 0  every configured provider authenticated
-    exit 1  at least one is dead -> raise
+    exit 1  at least one is dead (rotate it) -> raise
     exit 2  the probe itself is broken / nothing was configured to probe
+    exit 3  a whole CAPABILITY has no credential at all (create one) -> raise.
+            Different fix from exit 1, so a different alarm: 1 means a key we
+            own stopped working, 3 means we never had one.
 """
 
 from __future__ import annotations
@@ -46,6 +49,27 @@ if hasattr(sys.stdout, "reconfigure"):
 
 TIMEOUT = int(os.getenv("PROBE_TIMEOUT_S", "25"))
 FORCE_RED = os.getenv("PROBE_FORCE_RED", "") == "1"
+
+# ── The one exception to "absent is not broken" ──────────────────────────────
+#
+# ABSENT IS NOT BROKEN — unless EVERY provider of a capability is absent. Then
+# the capability is DOWN, and it is down silently, which is worse than a dead
+# key: a dead key at least 401s somewhere.
+#
+# Measured shape of the bug this fixes: with all four LLM keys unset but ONE
+# other credential present (Resend is always configured — it is the login path),
+# `results` was non-empty, so this probe printed "Every configured credential
+# authenticated" and exited 0. GREEN. DAILY. FOREVER. Meanwhile the judge could
+# not make a single call, and the weekly eval was filing that as an accuracy
+# regression. The four names were reported in a footnote that reads as
+# reassurance: "absent is not broken".
+#
+# These four names are the same list as `llm_provider.LLM_KEY_VARS`. They are
+# re-typed here ONLY because this script is deliberately stdlib-only — it runs
+# in external-health.yml with no `pip install` of the backend at all — so it
+# cannot import the shared constant. `backend/tests/test_missing_llm_key_is_loud.py`
+# pins the two lists together so they cannot drift apart in silence.
+LLM_KEY_VARS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
 
 
 def _probe(url: str, headers: dict[str, str], payload: dict | None = None) -> tuple[str, str]:
@@ -203,6 +227,9 @@ def main() -> int:
         )
         return 2
 
+    # A whole capability with no credential at all is DOWN, not "off".
+    no_llm_key = all(not env(name) for name in LLM_KEY_VARS)
+
     dead = [r for r in results if r[1] == "DEAD"]
     print("# Provider key probe — is every credential still alive?\n")
     print("| provider | verdict | detail |")
@@ -212,6 +239,30 @@ def main() -> int:
         print(f"| `{name}` | {mark} | {detail} |")
     if absent:
         print(f"\n_Not configured, so not probed (absent is not broken): {', '.join(absent)}._")
+
+    if no_llm_key:
+        print("\n## No LLM provider is configured at all — the judge is DOWN\n")
+        print(
+            f"::error::All {len(LLM_KEY_VARS)} LLM keys are empty "
+            f"({', '.join(LLM_KEY_VARS)}) — the judge, CV parsing and job "
+            "enrichment cannot make a single call."
+        )
+        print(
+            "\nThis is a CONFIG failure, not a quality problem — and it is the one "
+            "case where absence IS breakage, because there is no fallback left. It "
+            "is also invisible everywhere else: scoring silently falls back to "
+            "keywords, `llm_fit_score` stays NULL, and the weekly accuracy audit "
+            "reports it as a RANKING REGRESSION (that is exactly what happened for a "
+            "week — issue #238).\n"
+        )
+        print(
+            "**Any ONE of the four fixes it, and three are free:** `GEMINI_API_KEY`, "
+            "`GROQ_API_KEY`, `CEREBRAS_API_KEY` all have a free tier, and all four "
+            "SDKs are already installed (`backend/pyproject.toml`). `OPENAI_API_KEY` "
+            "is the paid primary. Add one as a repo Actions secret AND to the Railway "
+            "backend/worker services — an unset Actions secret renders as an EMPTY "
+            "string, which is how this hid."
+        )
 
     if dead:
         print("\n## Dead credentials\n")
@@ -225,6 +276,13 @@ def main() -> int:
             "link is the only way in."
         )
         return 1
+
+    if no_llm_key:
+        # Its OWN code, deliberately. "Rotate the dead key" and "you never had a
+        # key" are different jobs for the human, and an alarm that blurs them
+        # sends him to the wrong page — which is the whole failure this file is
+        # here to stop.
+        return 3
 
     print("\nEvery configured credential authenticated.")
     return 0
