@@ -356,7 +356,12 @@ jobs:
           else
             # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
             # The docs-only + no-destruction asserts above ARE the gate.
-            gh pr merge "${pr:-$branch}" --squash --delete-branch
+            # --admin is REQUIRED once main has a ruleset. `gh pr merge` refuses
+            # CLIENT-SIDE on mergeStateStatus=BLOCKED and never calls the API, so
+            # the bypass_actors entry never gets a chance to apply (cli/cli#13388).
+            # Without this flag the daily doc-sync self-merge dies the moment the
+            # ruleset goes active, and the standing PR silently piles up forever.
+            gh pr merge "${pr:-$branch}" --squash --delete-branch --admin
             echo "docs PR #${pr:-?} shipped and merged" >> "$GITHUB_STEP_SUMMARY"
           fi
 
