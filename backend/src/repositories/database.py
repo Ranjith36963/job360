@@ -600,6 +600,24 @@ class JobDatabase:
         row = await cursor.fetchone()
         return int(row[0])
 
+    async def count_unexpired_jobs_for_source(self, source: str) -> int:
+        """How many of ``source``'s jobs are still being served as live.
+
+        Used only for observability: when a source's fetch fails, the absence
+        sweep is skipped for it (a failed scrape is not evidence that jobs
+        vanished), which means every one of these rows stops ageing and keeps
+        being presented as ``active``. Logging the COUNT turns "a source
+        failed" into "N live listings stopped ageing", which is the thing a
+        user actually feels.
+        """
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM jobs WHERE source = ? "
+            "AND (staleness_state IS NULL OR staleness_state != 'confirmed_expired')",
+            (source,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0])
+
     async def log_run(
         self,
         stats: dict[str, Any],
