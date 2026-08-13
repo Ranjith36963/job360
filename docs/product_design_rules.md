@@ -95,7 +95,7 @@ so a hand-written **sample** of them rots silently and misses forever.
 
 So the polarity is inverted. **UK places are FINITE** (~52k populated places,
 published; settlements do not churn), compiled from GeoNames by
-`scripts/build_uk_gazetteer.py` into `data/uk_gazetteer/`. Every future miss is
+`scripts/build_uk_gazetteer.py` into `src/data/uk_gazetteer/`. Every future miss is
 a data refresh, never a code edit.
 
 **The distinction that matters:** countries (~250) and first-level admin

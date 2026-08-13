@@ -1,4 +1,0 @@
-UK gazetteer data derived from GeoNames (https://www.geonames.org/),
-licensed under Creative Commons Attribution 4.0 (CC BY 4.0).
-Files: GB.zip, countryInfo.txt, admin1CodesASCII.txt, cities500.zip.
-Rebuild with: python scripts/build_uk_gazetteer.py

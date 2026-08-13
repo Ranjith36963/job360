@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
 
 > **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
 
@@ -26,7 +26,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) + ESCO skill normalisation activate
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -40,13 +40,13 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
-│   ├── migrations/                   # 26 forward/reverse SQL migrations (0000 → 0025) + runner.py
+│   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (72 endpoints, all per-user routes gated)
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
@@ -572,7 +572,7 @@ NotificationChannel (ABC)
 
 ## Database Schema
 
-> This section shows the baseline schema. The full schema is built by 26 forward-migrations (0000–0025). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by 31 forward-migrations (0000–0030). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -640,22 +640,47 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 ### Environment Variables (.env)
 
+> **This table is the canonical env-var reference.** It was moved here verbatim from
+> the root `CLAUDE.md` (2026-08-11) — the root file is auto-loaded by every session
+> and must stay pointers-only. It replaced a shorter, staler table that listed only
+> the source API keys. Runtime source of truth is always `backend/src/core/settings.py`.
+
+- `.env` lives in the repo root (see `.env.example`). **39 of 47 sources work without any keys.**
+- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `user_profile.json`, `chroma/`.
+
 | Variable | Required | Used by |
 |----------|----------|---------|
-| `REED_API_KEY` | No | ReedSource |
-| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | No | AdzunaSource |
-| `JSEARCH_API_KEY` | No | JSearchSource |
-| `JOOBLE_API_KEY` | No | JoobleSource |
-| `SERPAPI_KEY` | No | GoogleJobsSource |
-| `CAREERJET_AFFID` | No | CareerjetSource |
-| `FINDWORK_API_KEY` | No | FindworkSource |
-| `GITHUB_TOKEN` | No | GitHub profile enrichment (higher rate limits) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` | No | Email notifications |
-| `SLACK_WEBHOOK_URL` | No | Slack notifications |
-| `DISCORD_WEBHOOK_URL` | No | Discord notifications |
-| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range sorting (default 40k-120k) |
-
-All API keys are optional — 39 of 47 sources work without any keys.
+| `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
+| `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
+| `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
+| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:24). Enforced by `validate_required_env()` |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:56-63) |
+| `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
+| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
+| `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
+| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
+| `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
+| `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
+| `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
+| `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:139) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:136) |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:135) — in practice the REAL selection lever, not the threshold |
+| Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
+| `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
+| `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
+| `ENGINE1_ENABLED` / `ENGINE2_ENABLED` / `ENGINE3_ENABLED` / `ENGINE4_ENABLED` | No (E1 default `true`; E2/E3/E4 default to their legacy flag) | **Independent per-engine switches** — any combo. Effective gate is `ENGINEx_ENABLED OR <legacy flag>` (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`). E1 (keyword) had no prior flag. |
+| `ENRICHMENT_ENABLED` / `SEMANTIC_ENABLED` | No (default `false`) | Pillar 2 opt-in toggles (legacy gates for E2 / E3) |
+| `MIN_TITLE_GATE` / `MIN_SKILL_GATE` | No (default `0.15` / `0.15`) | Pillar 2.2 gate thresholds |
+| `SALARY_WEIGHT` / `SENIORITY_WEIGHT` / `VISA_WEIGHT` / `WORKPLACE_WEIGHT` | No (defaults 10/8/6/6) | Pillar 2.9 dimension weights — see rule #27 (raw max 130, clamped to [0,100]) |
+| `MATCHER_ENABLED` | No (default `false`) | LLM judge (engine #4) opt-in toggle |
+| `MATCHER_THRESHOLD` | No (default `30`) | Min keyword score for a job to be judged |
+| `MATCHER_MAX_JOBS` | No (default `30`) | Max jobs per user per run sent to the judge |
+| `SOURCE_FETCH_TIMEOUT` | No (default `60`) | Per-source fetch ceiling in seconds |
+| `SOURCE_FETCH_TIMEOUT_ATS` | No (default `240`) | ATS category fetch ceiling in seconds |
+| `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
 
 ### Constants (`settings.py`)
 
@@ -704,37 +729,48 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 ### Production (backend/pyproject.toml)
 
+> **Source of truth is `backend/pyproject.toml` — read it, don't trust this table.**
+> This is the merged tech-stack table moved here from the root `CLAUDE.md`
+> (2026-08-11), reconciled against `pyproject.toml`'s `dependencies` list on the
+> same day. Two corrections were made in the merge: **`aiosqlite` is NOT a
+> dependency** (it was listed here and is not in `pyproject.toml`; `pg.py` merely
+> shims its shape over Postgres), and the psycopg extra is `[binary,pool]`.
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| aiohttp | >=3.14.1 | Async HTTP client for source fetching (unpinned from <3.14 to close 11 CVEs; aioresponses gap covered by a test-only shim in `tests/conftest.py`) |
+| defusedxml | >=0.7.1 | XXE-safe parsing of untrusted RSS/XML job feeds (M18) |
+| psycopg[binary,pool] | >=3.2 | Async PostgreSQL driver — ALL storage. SQLite is fully removed; `pg.py` shims an aiosqlite-shaped API over it, but **aiosqlite is NOT a dependency** |
+| python-dotenv | >=1.0.0 | .env file loading |
+| jinja2 | >=3.1.0 | HTML report templates |
+| click | >=8.1.0 | CLI framework |
+| pandas | >=2.0.0 | DataFrame support for python-jobspy (Indeed/Glassdoor) |
+| pdfplumber | >=0.10.0 | PDF text extraction (CV parsing) |
+| python-docx | >=1.1.0 | DOCX text extraction (CV parsing) |
+| rich | >=13.0.0 | Terminal table rendering |
+| humanize | >=4.9.0 | Relative time formatting |
+| fastapi | >=0.115.0 | API server for the Next.js frontend (`backend/src/api/`) |
+| uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
+| python-multipart | >=0.0.9 | File upload support |
+| httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
+| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:154`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
+| google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
+| argon2-cffi / itsdangerous / cryptography / email-validator | >=23.1.0 / >=2.2.0 / >=42.0.0 / >=2.1.0 | Auth + signed sessions + Fernet channel-credential encryption (Batch 2) |
+| apprise | >=1.7.0 | Multi-channel notification dispatch (Batch 2; **lazy-imported**, rule #11) |
+| rapidfuzz / scikit-learn | >=3.0 / >=1.4 | Pillar 2 dedup layers 2–3 (**lazy-imported**, rule #16) |
+| arq | >=0.25 | Async task queue (worker process) |
+| sentry-sdk | >=1.40.0 | Error tracking + performance monitoring (Phase 3) |
+| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings + ChromaDB (**lazy-imported**, opt-in) |
+
+### Dev (`pip install -e ".[dev]"` from `backend/`)
+
 | Package | Purpose |
 |---------|---------|
-| aiohttp >=3.9.0 | Async HTTP client for source fetching |
-| psycopg[binary] >=3.2 | Postgres driver — actual job storage backend since 2026-07-02 |
-| aiosqlite >=0.19.0 | Legacy driver-shaped API only; `pg.py` shims it over Postgres (real storage is not SQLite) |
-| python-dotenv >=1.0.0 | .env file loading |
-| jinja2 >=3.1.0 | HTML report templates |
-| click >=8.1.0 | CLI framework |
-| pandas >=2.0.0 | DataFrame support for python-jobspy (Indeed/Glassdoor) |
-| pdfplumber >=0.10.0 | PDF text extraction (CV parsing) |
-| python-docx >=1.1.0 | DOCX text extraction (CV parsing) |
-| rich >=13.0.0 | Terminal table rendering |
-| humanize >=4.9.0 | Relative time formatting |
-| fastapi >=0.115.0 | API server for Next.js frontend (`backend/src/api/`) |
-| uvicorn[standard] >=0.30.0 | ASGI server for FastAPI |
-| python-multipart >=0.0.9 | File upload support for FastAPI |
-| httpx >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| google-generativeai >=0.8.0 | Gemini LLM provider for CV parsing |
-| groq >=0.11.0 | Groq LLM provider for CV parsing |
-| cerebras-cloud-sdk >=1.0.0 | Cerebras LLM provider for CV parsing |
-
-### Dev (requirements-dev.txt)
-
-Includes all production deps (via `-r backend/pyproject.toml`) plus:
-
-| Package | Purpose |
-|---------|---------|
-| pytest >=8.0.0 | Test framework |
-| pytest-asyncio >=0.23.0 | Async test support |
-| aioresponses >=0.7.0 | Mock aiohttp responses |
-| fpdf2 >=2.7.0 | Generate test PDF files for CV parser tests |
+| pytest / pytest-asyncio | Test framework + async test support |
+| aioresponses | Mock aiohttp responses (rule #4 — the suite must run offline) |
+| fpdf2 | Generate test PDF files for CV parser tests |
+| pytest-randomly | Random test ordering (disable with `-p no:randomly` for the canonical run) |
+| ruff / pre-commit | Lint + commit hooks |
 
 ### Optional (not in backend/pyproject.toml)
 

@@ -23,11 +23,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { ClearButton } from "@/components/profile/ClearButton";
 import type { PreferencesRequest } from "@/lib/types";
 
 interface PreferencesFormProps {
   preferences: Record<string, unknown>;
   onSave: (prefs: PreferencesRequest) => Promise<void>;
+  /** Empty every typed preference. Undoable from History. Omitted when there
+   *  is no profile yet — there is nothing to clear. */
+  onClear?: () => Promise<void>;
   loading: boolean;
 }
 
@@ -193,6 +197,7 @@ const AUTOSAVE_DELAY_MS = 800;
 export function PreferencesForm({
   preferences,
   onSave,
+  onClear,
   loading,
 }: PreferencesFormProps) {
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
@@ -317,6 +322,19 @@ export function PreferencesForm({
             Customize your job search criteria
           </p>
         </div>
+        {/* In the card header, not at the bottom: this form autosaves, so there
+            is no "Save" row to sit beside, and the header is where a
+            card-scoped action belongs. */}
+        {onClear && (
+          <div className="ml-auto">
+            <ClearButton
+              label="Clear"
+              confirmLabel="Click again to clear"
+              disabled={loading}
+              onConfirm={onClear}
+            />
+          </div>
+        )}
       </div>
 
       <div className="space-y-6">
@@ -339,15 +357,10 @@ export function PreferencesForm({
           description="Skills beyond what your CV contains"
         />
 
-        {/* ── Excluded Skills ────────────────────── */}
-        <TagInput
-          label="Excluded Skills"
-          tags={excludedSkills}
-          onChange={setExcludedSkills}
-          placeholder="e.g. COBOL, Fortran"
-          description="Skills you don't want to work with (penalized in scoring)"
-          variant="destructive"
-        />
+        {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
+            excluded_skills field, scoring penalty, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         <Separator />
 
@@ -462,16 +475,10 @@ export function PreferencesForm({
 
         <Separator />
 
-        {/* ── Negative Keywords ──────────────────── */}
-        <TagInput
-          label="Negative Keywords"
-          icon={<AlertCircle className="h-3.5 w-3.5" />}
-          tags={negativeKeywords}
-          onChange={setNegativeKeywords}
-          placeholder="e.g. intern, junior, volunteer"
-          description="Job title keywords to penalize"
-          variant="destructive"
-        />
+        {/* Negative Keywords input removed from UI (owner, 2026-08-08) — the
+            negative_keywords field, scoring penalty, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
@@ -487,16 +494,10 @@ export function PreferencesForm({
           />
         </div>
 
-        {/* ── Excluded Companies ──────────────────── */}
-        <TagInput
-          label="Excluded Companies"
-          icon={<Building2 className="h-3.5 w-3.5" />}
-          tags={excludedCompanies}
-          onChange={setExcludedCompanies}
-          placeholder="e.g. Acme Corp"
-          description="Companies to zero-out from results"
-          variant="destructive"
-        />
+        {/* Excluded Companies input removed from UI (owner, 2026-08-08) — the
+            excluded_companies field, scoring zero-out, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         {/* ── Auto-save status ───────────────────────
             No "Save" button — preferences save automatically a moment after

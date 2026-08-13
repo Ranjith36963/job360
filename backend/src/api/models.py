@@ -178,6 +178,18 @@ class ProfileSummary(BaseModel):
     has_github: bool
     education: list[str]
     experience_level: str
+    # Upload receipts — what the user gave us and when, per input. Defaults
+    # keep every existing caller and old stored profile valid (a profile saved
+    # before 2026-08-08 has no receipt, and the UI falls back to a plain
+    # "uploaded" state). ``github_repo_count`` is the GitHub equivalent of a
+    # filename: proof of what we actually read.
+    cv_filename: str = ""
+    cv_uploaded_at: str = ""
+    linkedin_filename: str = ""
+    linkedin_uploaded_at: str = ""
+    github_username: str = ""
+    github_connected_at: str = ""
+    github_repo_count: int = 0
 
 
 class CVDetail(BaseModel):
@@ -201,6 +213,16 @@ class CVDetail(BaseModel):
     # never SEE their parsed experience — only a "Roles: N" count. Part of
     # the "stored but not shown" gap closed 2026-08-08.
     cv_positions: list[dict[str, Any]] = []
+    # Projects stated on the CV. A Projects heading was already used as a
+    # section boundary and then discarded — for a junior or career-changing
+    # candidate it is often the strongest evidence on the document.
+    cv_projects: list[dict[str, Any]] = []
+    # Both are MATCHING shelves (the judge reads them) and both were
+    # invisible to the person they describe until 2026-08-12 - the same
+    # "scored on but never shown" gap that hid linkedin_summary, repeated
+    # one commit later on the shelves that replaced it.
+    cv_experience_level: str = ""
+    cv_right_to_work: str = ""
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []
@@ -226,8 +248,10 @@ class ProfileResponse(BaseModel):
     skill_esco: dict[str, str] = {}
     # Step-1.5 S3-E — provenance map: skill name → list of source labels
     # (``cv_explicit`` / ``linkedin`` / ``github_dep`` / ``github_lang`` /
-    # ``user_declared``). Computed from the SkillEntry merge — empty
-    # when the profile has no skills.
+    # ``user_declared``). Computed from ``skill_tiering.SkillEvidence.sources``
+    # — empty when the profile has no skills. (It never came from "the
+    # SkillEntry merge", as this comment claimed for months: that module had no
+    # caller and has been deleted.)
     skill_provenance: dict[str, list[str]] = {}
     # Skills grouped by WHERE they came from — for the source-based profile view
     # (From CV / From LinkedIn / From GitHub / From Preferences). Derived from
@@ -247,6 +271,12 @@ class ProfileResponse(BaseModel):
     # (top-K by volume) + topic frequencies. Pure metric surface — UI
     # renders trend graphs without backend re-shaping.
     github_temporal: dict[str, dict[Any, Any]] = {}
+    # Everything else GitHub gave us: repos (name/language/description/topics/
+    # README excerpt/stars/pushed_at), dependency-file frameworks, inferred and
+    # LLM-read skills, bio, profile README. Measured 2026-08-09: 92 pieces of
+    # this were stored and rendered NOWHERE while only languages+topics showed.
+    # Defaults to {} so every existing caller and older profile stays valid.
+    github_detail: dict[str, Any] = {}
     # Step-1.5 S3-E — newest snapshot id from ``user_profile_versions``;
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.

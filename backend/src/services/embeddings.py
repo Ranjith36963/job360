@@ -170,7 +170,20 @@ def profile_to_embedding_text(profile: Any) -> str:
             "cv_skills_esco",
         ):
             _add_all(getattr(cv, field, []))
-        for text_field in ("summary", "experience_text", "linkedin_summary"):
+        # Facts about the candidate that had a shelf but no consumer until
+        # 2026-08-09: where they have worked (cv_industries), which human
+        # languages they speak (cv_languages — a real requirement on UK ads),
+        # and the domain the CV pass classified them into (career_domain, whose
+        # own comment claimed for months that a scorer read it; none did).
+        _add_all(getattr(cv, "cv_industries", []))
+        _add_all(getattr(cv, "cv_languages", []))
+        domain = getattr(cv, "career_domain", "") or ""
+        if isinstance(domain, str) and domain.strip():
+            parts.append(domain.strip())
+        for text_field in (
+            "summary", "experience_text", "linkedin_summary",
+            "linkedin_headline",
+        ):
             v = getattr(cv, text_field, "") or ""
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())
@@ -185,6 +198,34 @@ def profile_to_embedding_text(profile: Any) -> str:
                 blob = " ".join(b for b in bits if b)
                 if blob:
                     parts.append(blob)
+        # TWO DIFFERENTLY-SHAPED LISTS, SO TWO KEY SETS. The CV pass writes
+        # {name, description, technologies}; the LinkedIn pass writes
+        # {title, description}. Reading one shared key set across both meant a
+        # CV project contributed only its description — its NAME and its whole
+        # technology list, the most matchable part of a project, reached the
+        # vector as nothing at all. Concatenating the two lists and reading
+        # "title" is exactly the shape of bug this batch keeps finding: one
+        # hand-written assumption covering two things that are not the same.
+        for proj in getattr(cv, "cv_projects", []) or []:
+            if not isinstance(proj, dict):
+                continue
+            techs = proj.get("technologies")
+            tech_txt = (
+                " ".join(str(t) for t in techs if isinstance(t, str))
+                if isinstance(techs, list)
+                else ""
+            )
+            blob = " ".join(
+                b
+                for b in (
+                    str(proj.get("name") or "").strip(),
+                    str(proj.get("description") or "").strip(),
+                    tech_txt.strip(),
+                )
+                if b
+            ).strip()
+            if blob:
+                parts.append(blob)
         for proj in getattr(cv, "linkedin_projects", []) or []:
             if isinstance(proj, dict):
                 blob = f"{proj.get('title') or ''} {proj.get('description') or ''}".strip()

@@ -138,9 +138,8 @@ async def score_and_ingest(
     if users_override is not None:
         targets = users_override
     else:
-        # No per-user profile storage yet; fall back to "all users see all jobs".
         users = await _load_users(db)
-        targets = [(u["id"], FilterProfile(), 80) for u in users]
+        targets = [(u["id"], _filter_profile_for(u["id"]), 80) for u in users]
 
     # Stage 4 of the 99% cascade (decisions doc D8): per-user scoring via
     # JobScorer. Batch 3.5.2: each user scores against THEIR OWN SearchConfig
@@ -397,6 +396,47 @@ def _user_profile_for(user_id: str) -> Optional[UserProfile]:
     except Exception:  # noqa: BLE001, S110 — defensive, multi-dim is opt-in
         pass
     return None
+
+
+def _filter_profile_for(user_id: str) -> FilterProfile:
+    """Build the funnel's first gate from the user's ACTUAL stored profile.
+
+    Until 2026-08-09 the caller passed a bare ``FilterProfile()`` — every field
+    at its default — so all three prefilter stages took their "no preference
+    declared, pass everything" branch. The cheap gate that exists to spare the
+    expensive stages filtered nothing, for every user, since it was written.
+
+    Rule #29 is preserved by construction: each stage already passes everything
+    when its side is empty, so a user who has stated no locations, no workplace
+    and no level is filtered exactly as much as before (not at all).
+
+    Both omissions below were MEASURED against 2,000 live jobs, not guessed.
+
+    SKILLS ARE NOT WIRED. ``skill_overlap_ok`` drops any job whose
+    title+description mentions none of the user's skills. Dry-run on the real
+    catalogue with the owner's real 80-skill profile: it keeps 40% and the
+    combined gate keeps 28.8% — it would silently delete SEVEN JOBS IN TEN
+    before anything scored them. That is a product decision with evidence
+    attached, not a wiring detail.
+
+    THE EXPERIENCE LEVEL IS THE **TYPED** ONE ONLY, never
+    ``resolve_experience_level``. That helper falls back to
+    ``experience_level_inferred``, a value read off the CV's dated job titles
+    rather than stated by anyone. Feeding it to a HARD GATE dropped 24.5% of the
+    catalogue for an owner whose typed level is empty — every senior+ role
+    removed on the strength of a guess he never made. Rule #29 draws exactly
+    this line: an unstated preference means "don't care", so a soft score may
+    lean on an inference but a gate that deletes jobs may not.
+    """
+    profile = _user_profile_for(user_id)
+    if profile is None:
+        return FilterProfile()
+    prefs = profile.preferences
+    return FilterProfile(
+        preferred_locations=list(prefs.preferred_locations or []),
+        work_arrangement=prefs.work_arrangement or "",
+        experience_level=prefs.experience_level or "",
+    )
 
 
 def _search_config_for(user_id: str) -> SearchConfig:

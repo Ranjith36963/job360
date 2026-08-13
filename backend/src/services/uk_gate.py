@@ -14,7 +14,7 @@ out of this list? Then you missed that." Correct — foreign cities are an
 UNBOUNDED set, and a hand-written sample of an unbounded set rots silently.
 
 So the polarity is inverted. UK places are a FINITE set (~52k populated places,
-published, and settlements do not churn), compiled into `data/uk_gazetteer/` by
+published, and settlements do not churn), compiled into `src/data/uk_gazetteer/` by
 `scripts/build_uk_gazetteer.py`. Every future miss is a data refresh, never a
 code edit.
 
@@ -41,6 +41,7 @@ corroborating signal; on a UK-native source they pass.
 """
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -50,7 +51,22 @@ from typing import Optional
 
 from src.services.skill_matcher import REMOTE_TERMS
 
-_DATA = Path(__file__).resolve().parent.parent.parent / "data" / "uk_gazetteer"
+logger = logging.getLogger(__name__)
+
+# THE DATA LIVES INSIDE THE PACKAGE, AND THAT IS LOAD-BEARING (issue #260).
+#
+# It used to sit in `backend/data/uk_gazetteer/`. Production installs the app
+# with `pip install .`, which copies only the `src*` packages into
+# site-packages — so `backend/data/` never shipped, this path resolved to a
+# directory that did not exist, and `_gazetteer()` degraded to empty sets.
+# The gate then ran BLIND for four days: the 2026-08-11 04:06 UTC prod run
+# blocked 372 jobs without a single `foreign_location` verdict among them, and
+# jobs in Berlin, Warsaw and São Paulo were stored as if they were UK roles.
+#
+# Under `src/` the files are package data (`pyproject.toml`
+# `[tool.setuptools.package-data]`), so the dev tree and the installed wheel
+# resolve the SAME relative path. Moving them back out re-opens #260.
+_DATA = Path(__file__).resolve().parent.parent / "data" / "uk_gazetteer"
 
 # Sources whose catalog is UK-only by construction. Adding a source? It
 # defaults to GLOBAL (strict) — a new source opts INTO trust, never inherits it.
@@ -108,6 +124,11 @@ def _gazetteer() -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     A missing data directory degrades to source-trust + evidence rather than
     blocking everything: a deploy that forgot the data files must not empty the
     catalog.
+
+    But it SAYS SO. Silent degradation is what made #260 invisible — every
+    instrument stayed green (no errors, no failing tests, a gate that logged
+    blocks every run) while the two decisive sets were empty. Degrade quietly
+    and you have a guard that cannot be seen failing.
     """
     def _read(name: str) -> frozenset[str]:
         path = _DATA / name
@@ -117,7 +138,19 @@ def _gazetteer() -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
             ln for ln in path.read_text(encoding="utf-8").split("\n") if ln
         )
 
-    return _read("uk_places.txt"), _read("foreign_admin.txt"), _read("ambiguous.txt")
+    places = _read("uk_places.txt")
+    foreign = _read("foreign_admin.txt")
+    ambiguous = _read("ambiguous.txt")
+    if not places or not foreign:
+        logger.error(
+            "UK GATE DEGRADED — gazetteer missing or empty at %s "
+            "(uk_places=%d, foreign_admin=%d, ambiguous=%d). Foreign jobs will "
+            "be stored: the country override and the place lookup both need "
+            "this data. This is issue #260 — check that the files ship with "
+            "the package.",
+            _DATA, len(places), len(foreign), len(ambiguous),
+        )
+    return places, foreign, ambiguous
 
 
 def _norm(s: str) -> str:
@@ -135,6 +168,49 @@ def _segments(location: str) -> list[str]:
     """
     parts = re.split(r"[,;/|()\[\]–—]|\s+-\s+", location or "")
     return [seg for seg in (_norm(p) for p in parts) if seg]
+
+
+# Single-word remote terms, derived from the one shared constant so the two can
+# never drift. Multi-word terms ("work from home") are left out on purpose:
+# stripping "home" or "work" out of an ordinary place name would change
+# verdicts far outside the case this exists for.
+_REMOTE_TOKENS = frozenset(t for t in REMOTE_TERMS if " " not in t)
+
+
+def _foreign_hit(
+    seg: str,
+    foreign: frozenset[str],
+    places: frozenset[str],
+    ambiguous: frozenset[str],
+) -> Optional[str]:
+    """Return the foreign country/admin name this segment names, or None.
+
+    Whole-segment equality first — that is the safe test, and it stays the
+    only one for ordinary segments. `foreign_admin.txt` is a complete closed
+    set of countries and first-level divisions, so it necessarily contains
+    two-letter codes and generic words ("in" is India's ISO code, "west" and
+    "manchester" are real admin divisions abroad). Matching those ANYWHERE
+    inside a segment was measured over the 4,647 live rows and wrongly blocked
+    "North West England", "Manchester Science Park" and "Shoreham-by-Sea".
+
+    The one extra case: a remote word glued to a country — "US-Remote",
+    "Remote India", "US Remote". Normalisation turns those into ONE segment
+    ("us remote"), so whole-segment equality missed them and the remote branch
+    downstream admitted the job. Strip the remote tokens and re-test the
+    REMAINDER as a whole segment; a UK place wins over a foreign twin, so
+    "Manchester Remote" is unaffected. Measured effect: 28 rows of 4,647 flip
+    to blocked, all US-only remotes; 0 UK rows lost.
+    """
+    if seg in foreign:
+        return seg
+    tokens = seg.split()
+    rest = [t for t in tokens if t not in _REMOTE_TOKENS]
+    if not rest or len(rest) == len(tokens):
+        return None  # no remote word here — decided exactly as before
+    remainder = " ".join(rest)
+    if remainder in places and remainder not in ambiguous:
+        return None
+    return remainder if remainder in foreign else None
 
 
 def _uk_hit(seg: str, places: frozenset[str]) -> Optional[str]:
@@ -192,7 +268,7 @@ def check_uk(
     uk_place = next((m for s in segs if (m := _uk_hit(s, places))), None)
 
     # 1. A named foreign country or state loses — whoever listed it.
-    if any(s in foreign for s in segs):
+    if any(_foreign_hit(s, foreign, places, ambiguous) for s in segs):
         # The dual-site escape ("London / New York" — keep it, the user can
         # take the UK half) demands an UNAMBIGUOUS UK signal. A bare gazetteer
         # hit is not enough: the UK has a hamlet called Sydney, so

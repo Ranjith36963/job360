@@ -1625,3 +1625,70 @@ on their engine flags (rule #18 pattern) with `0`-value off-switches
 **Open at batch close:** prod `SEMANTIC_ENABLED`/`ENGINE3_ENABLED` still false
 (owner env flip — embedding machinery inert until then); linkedin scraper text
 (107 jobs, auth-walled) deferred; enrichment converging autonomously.
+
+
+---
+
+# Phase / batch summaries (moved verbatim out of the root `CLAUDE.md`, 2026-08-11)
+
+> **Why this section exists.** The root `CLAUDE.md` is auto-loaded by every
+> session, so it must stay pointers-and-gotchas only. These phase summaries were
+> long-form history living at the root; they were moved here **verbatim, nothing
+> deleted**. The root file now carries a one-line pointer to this section.
+> Everything below is unchanged text — treat it as historical record, and prefer
+> the dated batch entries above it when the two disagree.
+
+### Phase summaries (current invariants only — full history in `docs/IMPLEMENTATION_LOG.md`)
+
+The codebase has accumulated 4 major phases of work. Each section here gives **only the invariants that future Claude needs to respect**. Long-form history (what shipped when, reviewer findings, deferred items, decision rationales) lives in `docs/IMPLEMENTATION_LOG.md` and the per-step plan files under `docs/`.
+
+#### Phase 1–2.5 (legacy, profile system + reliability)
+
+Dynamic per-user profile (CV + LinkedIn PDF + GitHub) replaces hard-coded AI/ML keywords; clean-architecture restructure (rename of `filters/` → `services/`, `notifications/` + `profile/` → `services/{notifications,profile}/`, `storage/` → `repositories/`, `config/` → `core/`); LLM-only CV parsing via Gemini/Groq/Cerebras fallback chain.
+
+#### Pillar 3 Batch 2 (multi-user delivery layer)
+
+Adds: auth (`users`, `sessions`), per-tenant isolation (`user_actions` / `applications` rebuilt with `user_id`), SSOT `user_feed`, `notification_ledger` (per-channel idempotency), Fernet-encrypted `user_channels`, ARQ worker, Apprise dispatcher (lazy-imported per rule #11), `_schema_migrations` registry. Pre-Batch-2 rows backfilled to `DEFAULT_TENANT_ID` (`00000000-0000-0000-0000-000000000001`). The `jobs` table remains shared catalog (rule #10). Rules added: #10 / #11 / #12.
+
+#### Pillar 3 Batch 3 (tiered polling + source expansion)
+
+Adds: `TieredScheduler` (60s ATS / 5m keyed / 15m RSS / 60m scrapers), per-source `CircuitBreaker` (5-failure threshold, 300s cooldown), FIFO `ConditionalCache` for ETag/Last-Modified validators. Rules added: #13 / #14 / #15. (Source add/drop history + the current count live in the Sources section, Common Gotchas, and `STATUS.md`.)
+
+#### Pillar 2 (search & match engine upgrade)
+
+Adds: `skill_synonyms.py` (493-entry alias dict), `fx.py` (18-currency → GBP), `domain_classifier.py` (source routing), `salary.py` (cadence normalizer), 4 new dim scorers (`scoring_dimensions.py`), `JobEnrichment` Pydantic schema (18 fields, 8 enums), `embeddings.py` + `vector_index.py` (ChromaDB-backed), `retrieval.py` (RRF + cross-encoder rerank), 4-layer `deduplicator.py`. Tables: `job_enrichment` (migration 0008), `job_embeddings` (migration 0009) — both shared catalog. Toggles: `ENRICHMENT_ENABLED`, `SEMANTIC_ENABLED` (both default off, rule #18). Rules added: #16 / #17 / #18 / #19 / #20 / #21 / #22.
+
+#### Step 3 (control-surface batch — closed at origin/main `7194d0e` PR #9)
+
+Adds: 8 new endpoints (account-mgmt × 3, notification-rules × 4, runs × 1, plus `/jobs/{id}/duplicates`, `/profile/versions/{a}/diff/{b}`, `/pipeline/{id}/{timeline,notes}`); migrations 0012 (`notification_rules` + `users.timezone`), 0013 (`user_notification_digests`), 0014 (`applications.{last_advanced_at,interview_dates,notes_history}` + `application_stage_history`); dispatcher rule consultation with timezone-aware quiet hours; ARQ periodic tasks `send_daily_digest` + `nightly_ghost_sweep`; new `/settings/*` + `/notifications` frontend pages; KanbanBoard polish. Rules added: #23 / #24 / #25 / #26. (Carry-overs — RHF+zod validation, CV upload caps, OpenAPI→TS codegen, dnd-kit a11y — all shipped.)
+
+#### Matcher batch (funnel → judge, post-Step-3)
+
+Adds engine #4 — the LLM judge: `services/llm_matcher.py` (`MatchVerdict`, `match_batch` with semaphore-3 concurrency, skip-existing logic); migration 0017 (`user_feed` gains `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`); `_run_matcher_stage` pipeline stage runs after the per-user feed write in `src/main.py`; API `/api/jobs` response now exposes `llm_*` fields; `user_feed` reads rank by `COALESCE(llm_fit_score, score) DESC`; frontend dashboard shows an AI-verdict badge and sorts by the judge score.
+
+**Rule analog (same spirit as rule #18):** `MATCHER_ENABLED` defaults `false`. With the flag off, pipeline behaviour is byte-identical to pre-batch — no extra LLM calls, no extra DB writes. With it on, only jobs whose keyword `match_score >= MATCHER_THRESHOLD` (default 30) are judged, up to `MATCHER_MAX_JOBS` (default 30) per user per run.
+
+**Profile-version re-score (automatic, no new flags).** Every `user_feed` row is now stamped with the `user_profile_versions` ID that produced its score. Two modes:
+- **Profile changes** → the API trigger in `profile.py` detects the change, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile (keyword re-score always; LLM re-judge only if `MATCHER_ENABLED=true`).
+- **Ordinary search** → only newly-fetched jobs are scored; existing rows keep their scores and verdicts untouched.
+A job's score changes only when the profile changes — never just because time passed.
+
+#### Two-pass profile extraction (branch `feat/two-pass-profile-extraction`, 2026-06-17)
+
+Every profile input now runs a **deterministic pass** (plain code) AND an **LLM enhance pass**, merged into one `CVData`. The two passes per input:
+- **CV** — `cv_parser.deterministic_cv_fields(raw_text)` (no-LLM skills/summary) + `cv_parser.llm_cv_fields_from_text(raw_text)` (LLM).
+- **LinkedIn** — deterministic header/skills split + `linkedin_parser.parse_linkedin_from_text` (LLM prose). Now stores `cv.linkedin_raw_text`.
+- **GitHub** — deterministic lookup tables + NEW `github_enricher.llm_infer_github_skills(repos_brief)` (LLM reads repo prose). Stores `cv.github_repos_brief`.
+- **Preferences** — plain form parse + NEW `preferences.llm_infer_from_about_me(about_me)` (LLM mines free text).
+
+`services/profile/two_pass.py` orchestrates: `run_two_pass_extraction(profile)` re-runs both passes for all four inputs **from stored data only** (no re-upload, no GitHub re-fetch); each pass no-ops when its input/keys are absent and never raises. `reextract_and_rescore(user_id)` = load → re-extract → `save_profile(..., "two_pass_reextract")` (new version id) → `rescore_user_feed`. The `profile.py` change trigger now schedules `reextract_and_rescore` instead of bare `rescore_user_feed`.
+
+**Rule analog (same spirit as #18):** new `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`, `about_me_inferred_skills`) need **no migration** — profiles store as a JSON blob and `storage._filter_fields` drops unknown keys, so old rows load with defaults. New skill-tiering sources: `about_me_llm` (2.0) and `github_llm` (1.5) in `skill_tiering._SOURCE_WEIGHTS`. **Cost note:** any input change re-runs all LLM passes in the background (faithful to design); gate behind a flag later if it proves expensive. M2 / the LLM judge is untouched.
+
+#### Postgres migration + Railway launch + auth flows (2026-07-02)
+
+The DB backend moved from SQLite to **Postgres (psycopg3)**. `src/repositories/pg.py` is the single door — an `aiosqlite`-shaped async driver whose `translate()` (pg.py:229) rewrites legacy SQLite SQL (`?`→`%s`, `PRAGMA`, `AUTOINCREMENT`, `INSERT OR IGNORE`, FK-clause stripping, `sqlite_master` emulation) to Postgres at runtime. Every module does `from src.repositories import pg as aiosqlite`, so call-sites are unchanged. `DATABASE_URL` is now a **prod-required** env var (`settings.py:268`). Auth gained: passwordless **magic-link** (`services/auth/magic_link.py`, migration 0022), **password-reset** (`services/auth/password_reset.py`, migration 0015), **email verification** enforced on app routes (`services/auth/email_verification.py`, migration 0016 — unverified users 403 on gated routes). Email delivery is **Resend** (`services/auth/email_sender.py`), not SES. Ops layer: `api/middleware.py` (request-id + access-log + security-headers), `api/errors.py`, `repositories/db_retry.py`.
+
+#### Tailored documents — AI CV & cover-letter generator (2026-07-04)
+
+A full-stack, **shipped and live** feature. Per-job, the user generates a tailored CV + cover letter via a paid LLM call. Backend: `services/tailoring/` (`generator.py`, `docx.py`, `pdf.py`, `patterns.py`, `prompts.py`, `provenance.py`, `integrity.py`) + route `api/routes/tailor.py`; migrations 0023 (`tailored_documents`) + 0024 (adds the `flagged_terms` JSON **column** to `tailored_documents` — there is NO `tailored_flagged_terms` table; an agent that queries one will crash). Frontend: `components/tailor/{TailorPanel,TailorButton,TailorSection}.tsx`, wired into `JobDetailClient.tsx`, `JobCard.tsx`, `KanbanBoard.tsx`. Guardrail: `TAILOR_FREE_PER_MONTH` (settings.py:146, default 10) caps free usage — one generation = one CV + cover letter for one job; premium bypass is designed but no plan column exists yet. Design doc: `docs/peruser_cv_coverletter.md`.

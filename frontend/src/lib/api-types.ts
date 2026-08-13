@@ -764,6 +764,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Profile Section
+         * @description Empty ONE input (or the whole profile), so the next upload starts clean.
+         *
+         *     ``section``: cv | linkedin | github | preferences | all.
+         *
+         *     Deliberately does NOT re-run extraction: there is nothing to extract, and a
+         *     paid LLM round-trip to rebuild an empty profile would be waste. The stored
+         *     snapshot taken by ``save_profile`` is what makes this reversible.
+         */
+        post: operations["clear_profile_section_api_profile_clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -799,6 +825,20 @@ export interface paths {
          *
          *     Accepts a full profile URL or @handle, not just a bare username —
          *     ``normalize_github_username`` reduces it to the handle before lookup.
+         *
+         *     FAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``
+         *     unconditionally, so a handle that reduced to nothing still produced a green
+         *     "GitHub profile enriched" toast — and, once receipts shipped, a "GitHub
+         *     connected" row on the profile page — while zero repos were read. Measured on
+         *     a live profile: ``github_connected_at`` stamped, ``github_username`` empty,
+         *     0 repos. A receipt that confirms something that did not happen is worse than
+         *     no receipt at all.
+         *
+         *     A handle that does not reduce to a valid GitHub username is a 400 with
+         *     wording the person can act on. ``normalize_github_username`` accepts a bare
+         *     handle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL
+         *     (whose subdomain IS the username — a CV lists that under "Portfolio", so it
+         *     is exactly what people paste here).
          */
         post: operations["upload_github_api_profile_github_post"];
         delete?: never;
@@ -1455,6 +1495,11 @@ export interface components {
             /** Timeline */
             timeline: components["schemas"]["TimelineEntry"][];
         };
+        /** Body_clear_profile_section_api_profile_clear_post */
+        Body_clear_profile_section_api_profile_clear_post: {
+            /** Section */
+            section: string;
+        };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
             /**
@@ -1512,12 +1557,29 @@ export interface components {
              */
             companies: string[];
             /**
+             * Cv Experience Level
+             * @default
+             */
+            cv_experience_level: string;
+            /**
              * Cv Positions
              * @default []
              */
             cv_positions: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Cv Projects
+             * @default []
+             */
+            cv_projects: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Cv Right To Work
+             * @default
+             */
+            cv_right_to_work: string;
             /**
              * Education
              * @default []
@@ -2066,6 +2128,13 @@ export interface components {
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
             /**
+             * Github Detail
+             * @default {}
+             */
+            github_detail: {
+                [key: string]: unknown;
+            };
+            /**
              * Github Temporal
              * @default {}
              */
@@ -2119,12 +2188,37 @@ export interface components {
         };
         /** ProfileSummary */
         ProfileSummary: {
+            /**
+             * Cv Filename
+             * @default
+             */
+            cv_filename: string;
             /** Cv Length */
             cv_length: number;
+            /**
+             * Cv Uploaded At
+             * @default
+             */
+            cv_uploaded_at: string;
             /** Education */
             education: string[];
             /** Experience Level */
             experience_level: string;
+            /**
+             * Github Connected At
+             * @default
+             */
+            github_connected_at: string;
+            /**
+             * Github Repo Count
+             * @default 0
+             */
+            github_repo_count: number;
+            /**
+             * Github Username
+             * @default
+             */
+            github_username: string;
             /** Has Github */
             has_github: boolean;
             /** Has Linkedin */
@@ -2133,6 +2227,16 @@ export interface components {
             is_complete: boolean;
             /** Job Titles */
             job_titles: string[];
+            /**
+             * Linkedin Filename
+             * @default
+             */
+            linkedin_filename: string;
+            /**
+             * Linkedin Uploaded At
+             * @default
+             */
+            linkedin_uploaded_at: string;
             /** Skills Count */
             skills_count: number;
         };
@@ -3633,6 +3737,41 @@ export interface operations {
         requestBody?: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_upsert_profile_api_profile_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_profile_section_api_profile_clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_clear_profile_section_api_profile_clear_post"];
             };
         };
         responses: {

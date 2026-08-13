@@ -141,6 +141,18 @@ def profile_to_matcher_text(profile: Any) -> str:
         summary = (getattr(cv, "summary", "") or "").strip()
         if summary:
             lines.append(f"Summary: {summary}")
+        # The LinkedIn About, in the candidate's own first-person words. A CV
+        # summary is written for recruiters and heavily edited; the About states
+        # motivation and direction a CV omits. It used to be discarded whenever
+        # the CV had a summary, so the judge never saw it.
+        li_summary = (getattr(cv, "linkedin_summary", "") or "").strip()
+        if li_summary and li_summary != summary:
+            lines.append(f"In their own words (LinkedIn): {li_summary}")
+        # The LinkedIn tagline. Often states the stack AND current availability
+        # ("Open to X roles UK"), which appears in no other input.
+        li_headline = (getattr(cv, "linkedin_headline", "") or "").strip()
+        if li_headline:
+            lines.append(f"LinkedIn headline: {li_headline}")
 
         # Skills BY SOURCE — the judge can then weigh evidence strength
         # ("proven in GitHub repos" outranks "listed on a CV").
@@ -183,10 +195,55 @@ def profile_to_matcher_text(profile: Any) -> str:
         for label, field in (
             ("Education", "education"),
             ("Certifications", "certifications"),
+            # Facts that had a shelf but reached no consumer until 2026-08-09.
+            ("Industries worked in", "cv_industries"),
+            ("Languages spoken", "cv_languages"),
+            ("Follows / interested in", "linkedin_interests"),
         ):
             joined = _join(getattr(cv, field, []))
             if joined:
                 lines.append(f"{label}: {joined}")
+
+        domain = (getattr(cv, "career_domain", "") or "").strip()
+        if domain:
+            lines.append(f"Career domain: {domain}")
+        # The rubric asks about seniority fit; without this the judge had to
+        # infer a level from titles it was also being asked to judge.
+        cv_level = (getattr(cv, "cv_experience_level", "") or "").strip()
+        if cv_level:
+            lines.append(f"Seniority (stated on CV): {cv_level}")
+        # Decisive for a UK role and stated by no other input. Silent when
+        # the CV did not say — never inferred (rule #31).
+        rtw = (getattr(cv, "cv_right_to_work", "") or "").strip()
+        if rtw:
+            lines.append(f"Right to work (stated on CV): {rtw}")
+
+        # LinkedIn sections that are real hiring evidence and are stated
+        # NOWHERE else. Rendered as labelled rows because a judge reads
+        # structure; each stays silent when the person has none (rule #29).
+        for label, field, keys in (
+            ("Projects (from the CV)", "cv_projects",
+             ("name", "description", "technologies")),
+            ("Recommendations (written by others)", "linkedin_recommendations",
+             ("author", "relationship", "text")),
+            ("Publications", "linkedin_publications", ("title", "publisher", "date")),
+            ("Patents", "linkedin_patents", ("title", "number", "status")),
+            ("Awards", "linkedin_honors", ("title", "issuer", "date")),
+            ("Professional bodies", "linkedin_organizations", ("name", "role", "start")),
+            # IELTS/TOEFL. Language proficiency and UK-visa relevant, and no
+            # other input states it.
+            ("Test scores", "linkedin_test_scores", ("name", "score", "date")),
+        ):
+            rows: list[str] = []
+            for row in getattr(cv, field, []) or []:
+                if not isinstance(row, dict):
+                    continue
+                bits = [str(row.get(k) or "").strip() for k in keys]
+                text = " · ".join(b for b in bits if b)
+                if text:
+                    rows.append(f"  - {text}")
+            if rows:
+                lines.append(f"{label}:\n" + "\n".join(rows))
 
     if prefs is not None:
         pref_bits: list[str] = []

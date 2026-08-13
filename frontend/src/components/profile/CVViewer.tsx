@@ -1,10 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import {
   FileText,
-  ChevronDown,
-  ChevronUp,
   Briefcase,
   GraduationCap,
   Award,
@@ -36,47 +33,69 @@ interface CVViewerProps {
   linkedinSubsections?: Record<string, Record<string, unknown>[]>;
   /** ProfileResponse.github_temporal — { languages: {lang: bytes}, topics: {topic: 1} }. */
   githubTemporal?: Record<string, Record<string, unknown>>;
+  /** ProfileResponse.github_detail — repos, frameworks, inferred + LLM-read
+   *  skills, bio, profile README. Everything GitHub gave us beyond languages
+   *  and topics, which until 2026-08-09 was stored and rendered nowhere. */
+  githubDetail?: Record<string, unknown>;
 }
 
-/** Highlight extracted terms within the full CV text. */
-function highlightText(
-  text: string,
-  terms: string[],
-  className: string
-): React.ReactNode[] {
-  if (!terms.length) return [text];
+interface GithubRepoEntry {
+  name: string;
+  language: string;
+  description: string;
+  topics: string[];
+  stars: number;
+  forks: number;
+  archived: boolean;
+  homepage: string;
+  pushed_at: string;
+  created_at: string;
+}
 
-  // A skill can wrap across a line in the PDF text ("Machine" end of one line,
-  // "Learning" start of the next), so the space inside a term must match ANY
-  // whitespace — including a newline. Escape regex specials first, then turn each
-  // run of spaces into \s+ so "Machine Learning" also matches "Machine\nLearning".
-  const escaped = terms
-    .filter((t) => t.trim().length > 2)
-    .map((t) =>
-      t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")
-    )
-    .sort((a, b) => b.length - a.length);
+function numField(obj: Record<string, unknown>, key: string): number {
+  const v = obj[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
 
-  if (!escaped.length) return [text];
+function normalizeGithubRepo(raw: Record<string, unknown>): GithubRepoEntry {
+  return {
+    name: strField(raw, "name"),
+    language: strField(raw, "language"),
+    description: strField(raw, "description"),
+    topics: strArrField(raw, "topics"),
+    stars: numField(raw, "stars"),
+    forks: numField(raw, "forks"),
+    archived: raw["archived"] === true,
+    homepage: strField(raw, "homepage"),
+    pushed_at: strField(raw, "pushed_at"),
+    created_at: strField(raw, "created_at"),
+  };
+}
 
-  // Compare on whitespace-collapsed, lower-cased forms so a wrapped match
-  // ("Machine\nLearning") still equals its term ("Machine Learning").
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-  const termSet = new Set(terms.map(norm));
+/** "2 yrs" / "8 mo" — how long this repo has been alive, first commit to last.
+ *  Tenure is a different claim from recency: "touched last week" vs "worked on
+ *  for two years". Empty when either end is missing or unparseable. */
+function repoTenure(createdAt: string, pushedAt: string): string {
+  if (!createdAt || !pushedAt) return "";
+  const a = new Date(createdAt).getTime();
+  const b = new Date(pushedAt).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return "";
+  const months = Math.round((b - a) / (1000 * 60 * 60 * 24 * 30.44));
+  if (months < 1) return "";
+  if (months < 12) return `${months} mo`;
+  const years = Math.floor(months / 12);
+  return years === 1 ? "1 yr" : `${years} yrs`;
+}
 
-  const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
-  const parts = text.split(pattern);
-
-  return parts.map((part, i) => {
-    const isMatch = termSet.has(norm(part));
-    if (isMatch) {
-      return (
-        <mark key={i} className={className}>
-          {part}
-        </mark>
-      );
-    }
-    return <span key={i}>{part}</span>;
+/** "updated 3 Aug 2026" — a repo's recency, in words, in the viewer's locale. */
+function formatRepoDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
   });
 }
 
@@ -201,14 +220,21 @@ export function CVViewer({
   skillProvenance,
   linkedinSubsections,
   githubTemporal,
+  githubDetail,
 }: CVViewerProps) {
-  const [showFullCV, setShowFullCV] = useState(false);
+  // (The showFullCV toggle and its highlight terms went with the "Full CV
+  // Text" panel — that text now lives only in the CV Uploaded card.)
 
-  // All terms to highlight (combine skills + titles for unified highlighting)
-  const allHighlightTerms = [
-    ...cv.skills,
-    ...cv.job_titles,
-  ];
+  // Projects the CV states. Defensive field reads for the same reason as
+  // cv_positions: these rows are LLM output with no strict wire schema.
+  const cvProjects = ((cv.cv_projects ?? []) as Record<string, unknown>[])
+    .map((raw) => ({
+      name: strField(raw, "name"),
+      description: strField(raw, "description"),
+      technologies: strArrField(raw, "technologies"),
+      dates: strField(raw, "dates"),
+    }))
+    .filter((p) => p.name || p.description);
 
   const positions = (cv.cv_positions ?? [])
     .map((raw) => normalizePosition(raw as Record<string, unknown>))
@@ -222,12 +248,49 @@ export function CVViewer({
   const liProjects = linkedinSubsections?.projects ?? [];
   const liVolunteer = linkedinSubsections?.volunteer ?? [];
   const liCourses = linkedinSubsections?.courses ?? [];
+  // 2026-08-09 — the seven sections the parser split and nobody read, plus the
+  // Contact block. Same "stored but never rendered" gap that hid 92 GitHub
+  // signals; closed here for the other input.
+  const liHonors = linkedinSubsections?.honors ?? [];
+  const liPublications = linkedinSubsections?.publications ?? [];
+  const liPatents = linkedinSubsections?.patents ?? [];
+  const liOrganizations = linkedinSubsections?.organizations ?? [];
+  const liTestScores = linkedinSubsections?.test_scores ?? [];
+  const liRecommendations = linkedinSubsections?.recommendations ?? [];
+  const liInterests = linkedinSubsections?.interests ?? [];
+  const liContact = (linkedinSubsections?.contact ?? [])[0] ?? {};
+  // The LinkedIn "About" — the person's own first-person prose. It was
+  // discarded whenever the CV already had a summary, so most profiles lost it
+  // entirely; now it has a shelf, reaches the judge, and is finally shown.
+  const liSummary = strField((linkedinSubsections?.summary ?? [])[0] ?? {}, "text");
+  // The LinkedIn headline. Empty on every two-column export until the LLM was
+  // asked for it — the flattened left rail pushes the name and tagline into the
+  // middle of the text, where no structural reader was looking.
+  const liHeadline = strField((linkedinSubsections?.headline ?? [])[0] ?? {}, "text");
+  const liContactRows: [string, string][] = (
+    [
+      ["Email", strField(liContact, "email")],
+      ["Phone", strField(liContact, "phone")],
+      ["LinkedIn", strField(liContact, "linkedin_url")],
+      ["Websites", strArrField(liContact, "websites").join(", ")],
+    ] as [string, string][]
+  ).filter(([, v]) => Boolean(v));
   const hasLinkedinDetail =
     liPositions.length > 0 ||
     liLanguages.length > 0 ||
     liProjects.length > 0 ||
     liVolunteer.length > 0 ||
-    liCourses.length > 0;
+    liCourses.length > 0 ||
+    liHonors.length > 0 ||
+    liPublications.length > 0 ||
+    liPatents.length > 0 ||
+    liOrganizations.length > 0 ||
+    liTestScores.length > 0 ||
+    liRecommendations.length > 0 ||
+    liInterests.length > 0 ||
+    liContactRows.length > 0 ||
+    liSummary.length > 0 ||
+    liHeadline.length > 0;
 
   // ── GitHub temporal (languages by byte share + topics) ─────
   const ghLanguages = Object.entries(githubTemporal?.languages ?? {}).filter(
@@ -236,7 +299,79 @@ export function CVViewer({
   const ghLanguageTotal = ghLanguages.reduce((sum, [, bytes]) => sum + bytes, 0);
   const ghLanguagesSorted = [...ghLanguages].sort((a, b) => b[1] - a[1]);
   const ghTopics = Object.keys(githubTemporal?.topics ?? {});
-  const hasGithubDetail = ghLanguagesSorted.length > 0 || ghTopics.length > 0;
+
+  // ── The rest of GitHub — read defensively, same as every other loosely
+  // typed block on this page. Each renders only when it has content, so a
+  // profile with no GitHub (or a partial fetch) stays silent (rule #29).
+  const ghDetail = githubDetail ?? {};
+  const ghRepos = (Array.isArray(ghDetail.repos) ? ghDetail.repos : [])
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .map(normalizeGithubRepo)
+    .filter((r) => r.name);
+  const asStrings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const ghFrameworks = asStrings(ghDetail.frameworks);
+  const ghInferred = asStrings(ghDetail.skills_inferred);
+  const ghLlmSkills = asStrings(ghDetail.llm_skills);
+  // Structured identity → label/value rows. Only fields the person actually
+  // filled in appear; an unset field stays absent rather than rendering an
+  // empty row (rule #29). `hireable` is tri-state: shown only when GitHub has
+  // a real boolean, because "never said" is not "not looking".
+  const ghIdentity =
+    typeof ghDetail.identity === "object" && ghDetail.identity !== null
+      ? (ghDetail.identity as Record<string, unknown>)
+      : {};
+  const ghIdentityRows: [string, string][] = (
+    [
+      ["Name", strField(ghIdentity, "name")],
+      ["Company", strField(ghIdentity, "company")],
+      ["Location", strField(ghIdentity, "location")],
+      ["Website", strField(ghIdentity, "blog")],
+      [
+        "Twitter/X",
+        strField(ghIdentity, "twitter") ? `@${strField(ghIdentity, "twitter")}` : "",
+      ],
+      [
+        "Open to work",
+        ghIdentity.hireable === true
+          ? "Yes"
+          : ghIdentity.hireable === false
+            ? "No"
+            : "",
+      ],
+      [
+        "On GitHub since",
+        formatRepoDate(strField(ghIdentity, "account_created_at")),
+      ],
+      [
+        "Public repos",
+        numField(ghIdentity, "public_repos")
+          ? String(numField(ghIdentity, "public_repos"))
+          : "",
+      ],
+      [
+        "Followers",
+        numField(ghIdentity, "followers")
+          ? String(numField(ghIdentity, "followers"))
+          : "",
+      ],
+    ] as [string, string][]
+  ).filter(([, v]) => Boolean(v));
+
+  const ghBio = typeof ghDetail.bio === "string" ? ghDetail.bio : "";
+  const ghProfileReadme =
+    typeof ghDetail.profile_readme === "string" ? ghDetail.profile_readme : "";
+
+  const hasGithubDetail =
+    ghIdentityRows.length > 0 ||
+    ghLanguagesSorted.length > 0 ||
+    ghTopics.length > 0 ||
+    ghRepos.length > 0 ||
+    ghFrameworks.length > 0 ||
+    ghInferred.length > 0 ||
+    ghLlmSkills.length > 0 ||
+    Boolean(ghBio) ||
+    Boolean(ghProfileReadme);
 
   return (
     <div className="space-y-6 animate-fade-in-up stagger-2">
@@ -418,6 +553,66 @@ export function CVViewer({
           </div>
         )}
 
+        {/* Seniority and right-to-work, as the CV states them. Both are read by
+            the LLM judge, so they were being SCORED ON while invisible to the
+            person they describe - the same gap that hid linkedin_summary, made
+            again one commit later on the shelves that replaced it. */}
+        {(cv.cv_experience_level || cv.cv_right_to_work) && (
+          <div className="mb-5">
+            <SectionLabel icon={Briefcase} text="Stated on your CV" />
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+              {cv.cv_experience_level && (
+                <div className="contents">
+                  <dt className="text-muted-foreground">Seniority</dt>
+                  <dd className="text-foreground/85">{cv.cv_experience_level}</dd>
+                </div>
+              )}
+              {cv.cv_right_to_work && (
+                <div className="contents">
+                  <dt className="text-muted-foreground">Right to work</dt>
+                  <dd className="text-foreground/85">{cv.cv_right_to_work}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
+        {/* Projects stated on the CV. A "Projects" heading was already
+            recognised — as a boundary that stops a skills block — and then
+            discarded. For a junior or career-changing candidate these are
+            often the strongest evidence on the document. */}
+        {cvProjects.length > 0 && (
+          <div className="mb-5">
+            <SectionLabel icon={FolderKanban} text={`Projects (${cvProjects.length})`} />
+            <div className="space-y-3 pl-5">
+              {cvProjects.map((proj, i) => (
+                <div key={i}>
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-sm font-medium text-foreground">{proj.name}</span>
+                    {proj.dates && (
+                      <span className="text-xs text-muted-foreground">{proj.dates}</span>
+                    )}
+                  </div>
+                  {proj.description && (
+                    <p className="text-xs leading-relaxed text-foreground/80">
+                      {proj.description}
+                    </p>
+                  )}
+                  {proj.technologies.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {proj.technologies.map((t, j) => (
+                        <Badge key={j} variant="secondary" className="text-[10px]">
+                          {t}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Achievements — returned by the API since day one, rendered
             nowhere until now. Same "stored but not shown" shape as
             cv_positions was. */}
@@ -435,44 +630,12 @@ export function CVViewer({
         )}
       </div>
 
-      {/* ── Full CV with highlights toggle ────────────── */}
-      <div className="glass-card rounded-xl p-6">
-        <button
-          onClick={() => setShowFullCV(!showFullCV)}
-          className="w-full flex items-center justify-between gap-2 group"
-        >
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
-            <h3 className="font-heading text-base font-semibold">
-              Full CV Text
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              (extracted skills are{" "}
-              <mark className="bg-primary/20 text-primary px-1 rounded text-xs">
-                highlighted
-              </mark>
-              )
-            </span>
-          </div>
-          {showFullCV ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-          )}
-        </button>
-
-        {showFullCV && (
-          <div className="mt-4 rounded-lg bg-muted/30 border border-border/50 p-4 max-h-[600px] overflow-y-auto">
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground/85">
-              {highlightText(
-                cv.raw_text,
-                allHighlightTerms,
-                "bg-primary/20 text-primary rounded px-0.5"
-              )}
-            </pre>
-          </div>
-        )}
-      </div>
+      {/* The "Full CV Text" panel used to sit here. REMOVED 2026-08-08 (owner
+          decision): the identical full CV text is already rendered in the "CV
+          Uploaded" card at the top of this same page, with the same
+          highlighting — the same wall of text twice on one screen. The card
+          keeps it, because that is where a user looks for the CV they just
+          uploaded; this view stays focused on what we EXTRACTED from it. */}
 
       {/* ── LinkedIn detail ────────────────────────────── */}
       {hasLinkedinDetail && (
@@ -519,6 +682,233 @@ export function CVViewer({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Headline — LinkedIn's tagline. Empty on every two-column export
+              until the LLM was asked for it; often states the stack AND current
+              availability ("Open to X roles UK"), which no other input says. */}
+          {liHeadline.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Headline" />
+              <p className="pl-5 text-xs leading-relaxed text-foreground/85">
+                {liHeadline}
+              </p>
+            </div>
+          )}
+
+          {/* About — the person's own words. This was extracted, stored and
+              MATCHED ON while being invisible to the person it describes: the
+              third way a shelf goes dark, after a broken extractor and a
+              dropping merge. */}
+          {liSummary.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="About" />
+              <p className="whitespace-pre-line pl-5 text-xs leading-relaxed text-foreground/85">
+                {liSummary}
+              </p>
+            </div>
+          )}
+
+          {/* Contact — parsed today only to confirm the file WAS a LinkedIn
+              export, then discarded. Structured now; `websites` excludes the
+              linkedin.com URL itself, which is already its own row. */}
+          {liContactRows.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Contact" />
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+                {liContactRows.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="break-all text-foreground/85">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
+          {/* ── The seven sections that were split and then dropped ──
+              Each renders only when the profile carries it, so a LinkedIn
+              export without them stays silent (rule #29). */}
+
+          {liRecommendations.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={HeartHandshake}
+                text={`Recommendations (${liRecommendations.length})`}
+              />
+              {/* Third-party evidence — other people's words about this
+                  person's work, the LinkedIn analogue of a GitHub README. */}
+              <ul className="space-y-2 pl-5">
+                {liRecommendations.map((item, i) => {
+                  const text = strField(item, "text");
+                  if (!text) return null;
+                  const author = strField(item, "author");
+                  const rel = strField(item, "relationship");
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                    >
+                      <p className="text-xs leading-relaxed text-foreground/85">
+                        {text}
+                      </p>
+                      {(author || rel) && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {[author, rel].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liPublications.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={BookOpen}
+                text={`Publications (${liPublications.length})`}
+              />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liPublications.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "publisher"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liPatents.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Award} text={`Patents (${liPatents.length})`} />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liPatents.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "number"),
+                    strField(item, "status"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liHonors.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Trophy} text={`Honors & awards (${liHonors.length})`} />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liHonors.map((item, i) => {
+                  const title = strField(item, "title");
+                  if (!title) return null;
+                  const meta = [
+                    strField(item, "issuer"),
+                    strField(item, "date"),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{title}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liOrganizations.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Building}
+                text={`Organisations (${liOrganizations.length})`}
+              />
+              <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+                {liOrganizations.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  const meta = [
+                    strField(item, "role"),
+                    [strField(item, "start"), strField(item, "end")]
+                      .filter(Boolean)
+                      .join(" – "),
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li key={i} className="leading-relaxed">
+                      <span className="font-medium">{name}</span>
+                      {meta && (
+                        <span className="text-xs text-muted-foreground"> — {meta}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liTestScores.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Award} text={`Test scores (${liTestScores.length})`} />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {liTestScores.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  const score = strField(item, "score");
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-400"
+                    >
+                      {name}
+                      {score ? ` · ${score}` : ""}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {liInterests.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={Hash} text={`Interests (${liInterests.length})`} />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {liInterests.map((item, i) => {
+                  const name = strField(item, "name");
+                  if (!name) return null;
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-full bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
+                    >
+                      {name}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 
@@ -636,6 +1026,23 @@ export function CVViewer({
             GitHub detail
           </h3>
 
+          {/* Identity — the developer's OWN words about themselves, kept as
+              values rather than a sentence. "Open to work" and location are
+              the two that a future matcher can actually act on. */}
+          {ghIdentityRows.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Profile" />
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pl-5 text-xs">
+                {ghIdentityRows.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="text-foreground/85">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {ghLanguagesSorted.length > 0 && (
             <div className="mb-5">
               <SectionLabel icon={Code2} text={`Languages (${ghLanguagesSorted.length})`} />
@@ -656,7 +1063,7 @@ export function CVViewer({
           )}
 
           {ghTopics.length > 0 && (
-            <div>
+            <div className="mb-5">
               <SectionLabel icon={Hash} text={`Topics (${ghTopics.length})`} />
               <ul className="flex flex-wrap gap-1.5 pl-5">
                 {ghTopics.map((topic) => (
@@ -668,6 +1075,164 @@ export function CVViewer({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* ── Everything below was FETCHED, STORED, and shown to nobody ──
+              Measured 2026-08-09 on a live profile: 49 frameworks, 13 repos and
+              30 LLM-read skills sat in the database while only languages and
+              topics reached the screen. It is the input where invisibility
+              costs most — a CV CLAIMS "FastAPI", a requirements.txt in shipped
+              code PROVES it, which is why skill tiering already weights this
+              evidence above a CV mention. It was scoring their matches
+              already; they just could not see it. */}
+
+          {ghRepos.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel icon={GitBranch} text={`Repositories (${ghRepos.length})`} />
+              <ul className="space-y-2 pl-5">
+                {ghRepos.map((repo, i) => (
+                  <li
+                    key={`${repo.name}-${i}`}
+                    className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-sm font-medium text-foreground">
+                        {repo.name}
+                      </span>
+                      {repo.language && (
+                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400">
+                          {repo.language}
+                        </span>
+                      )}
+                      {repo.stars > 0 && (
+                        <span className="text-[11px] text-muted-foreground">
+                          ★ {repo.stars}
+                        </span>
+                      )}
+                      {repo.forks > 0 && (
+                        <span className="text-[11px] text-muted-foreground">
+                          ⑂ {repo.forks}
+                        </span>
+                      )}
+                      {repo.archived && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+                          archived
+                        </span>
+                      )}
+                      {repoTenure(repo.created_at, repo.pushed_at) && (
+                        <span className="text-[11px] text-muted-foreground">
+                          built over {repoTenure(repo.created_at, repo.pushed_at)}
+                        </span>
+                      )}
+                      {repo.pushed_at && (
+                        <span className="ml-auto text-[11px] text-muted-foreground">
+                          updated {formatRepoDate(repo.pushed_at)}
+                        </span>
+                      )}
+                    </div>
+                    {repo.description && (
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {repo.description}
+                      </p>
+                    )}
+                    {repo.topics.length > 0 && (
+                      <ul className="mt-1.5 flex flex-wrap gap-1">
+                        {repo.topics.map((t) => (
+                          <li
+                            key={t}
+                            className="rounded-full bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground"
+                          >
+                            {t}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghFrameworks.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Wrench}
+                text={`Frameworks & libraries (${ghFrameworks.length})`}
+              />
+              {/* The strongest evidence on the page: read from real dependency
+                  files (package.json / requirements.txt), so this is
+                  DEMONSTRATED usage, not a claim. Said plainly, because the
+                  distinction is the whole value. */}
+              <p className="pl-5 mb-1.5 text-[11px] text-muted-foreground">
+                Found in your dependency files — used in shipped code, not just listed.
+              </p>
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghFrameworks.map((f) => (
+                  <li
+                    key={f}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghLlmSkills.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={BookOpen}
+                text={`Skills read from your READMEs (${ghLlmSkills.length})`}
+              />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghLlmSkills.map((s) => (
+                  <li
+                    key={s}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghInferred.length > 0 && (
+            <div className="mb-5">
+              <SectionLabel
+                icon={Code2}
+                text={`Skills inferred from repos (${ghInferred.length})`}
+              />
+              <ul className="flex flex-wrap gap-1.5 pl-5">
+                {ghInferred.map((s) => (
+                  <li
+                    key={s}
+                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ghBio && (
+            <div className="mb-5">
+              <SectionLabel icon={User} text="Bio" />
+              <p className="pl-5 text-sm leading-relaxed text-foreground/80">
+                {ghBio}
+              </p>
+            </div>
+          )}
+
+          {ghProfileReadme && (
+            <div>
+              <SectionLabel icon={FileText} text="Profile README" />
+              <pre className="ml-5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-muted/10 p-3 font-sans text-xs leading-relaxed text-foreground/80">
+                {ghProfileReadme}
+              </pre>
             </div>
           )}
         </div>

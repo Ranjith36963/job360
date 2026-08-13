@@ -66,7 +66,7 @@ def _raw_input_payload(cv_data: CVData, preferences: UserPreferences) -> dict[st
         by the user — see that field's own docstring in ``models.py``.
         Hashing it would reproduce the same failure mode as above.
       - ``preferences.industries`` (a preference the user set) IS included;
-        it is distinct from ``cv_data.industries``, which is CV-extracted
+        it is distinct from ``cv_data.cv_industries``, which is CV-extracted
         output and is excluded for the same reason as the other CVData
         fields above.
     """
