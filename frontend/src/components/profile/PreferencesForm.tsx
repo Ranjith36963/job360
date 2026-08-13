@@ -28,6 +28,17 @@ import type { PreferencesRequest } from "@/lib/types";
 
 interface PreferencesFormProps {
   preferences: Record<string, unknown>;
+  /** Adjacent skills the extractor proposed. Shown as one-tap chips beside
+   *  Additional Skills.
+   *
+   *  These live INSIDE this form on purpose. Accepting one only changes local
+   *  state, so the existing debounced auto-save persists it — several taps cost
+   *  ONE save. Handling the tap in the parent instead would mean a save per
+   *  chip (each one triggering a paid re-extraction), and the resulting
+   *  `setProfile` would hand this component a brand-new `preferences` object,
+   *  re-firing the hydration effect and wiping whatever the user was part-way
+   *  through typing in any other field. */
+  suggestions?: string[];
   onSave: (prefs: PreferencesRequest) => Promise<void>;
   /** Empty every typed preference. Undoable from History. Omitted when there
    *  is no profile yet — there is nothing to clear. */
@@ -46,6 +57,10 @@ interface TagInputProps {
   placeholder?: string;
   description?: string;
   variant?: "default" | "destructive";
+  /** One-tap chips shown under the input. Already-added ones are hidden. */
+  suggestions?: string[];
+  suggestionsLabel?: string;
+  suggestionsHint?: string;
 }
 
 function TagInput({
@@ -56,19 +71,36 @@ function TagInput({
   placeholder = "Type and press Enter",
   description,
   variant = "default",
+  suggestions,
+  suggestionsLabel,
+  suggestionsHint,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
+  // Shared by typing and by tapping a suggestion. It used to live inline in
+  // addTag; a suggestion handler that re-implemented the comparison would
+  // eventually disagree with it and let "Python" sit next to "python".
+  const appendTag = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      if (tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) return;
+      onChange([...tags, trimmed]);
+    },
+    [tags, onChange]
+  );
+
   const addTag = useCallback(() => {
-    const trimmed = inputValue.trim();
-    if (!trimmed) return;
-    if (tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
-      setInputValue("");
-      return;
-    }
-    onChange([...tags, trimmed]);
+    appendTag(inputValue);
     setInputValue("");
-  }, [inputValue, tags, onChange]);
+  }, [appendTag, inputValue]);
+
+  // Hide a suggestion once it has been taken, so the row shrinks as the user
+  // works through it and never offers something already on the list.
+  const openSuggestions = (suggestions ?? []).filter(
+    (s) =>
+      s.trim() && !tags.some((t) => t.toLowerCase() === s.trim().toLowerCase())
+  );
 
   const removeTag = useCallback(
     (index: number) => {
@@ -134,6 +166,38 @@ function TagInput({
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
+
+      {openSuggestions.length > 0 && (
+        <div className="pt-1">
+          {suggestionsLabel && (
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
+              {suggestionsLabel}
+            </p>
+          )}
+          {suggestionsHint && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              {suggestionsHint}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {openSuggestions.map((s) => (
+              <button
+                key={`suggest-${s}`}
+                type="button"
+                // Not "add" / "save" in the accessible name: the form's tests
+                // assert there is no button matching /save preferences/i, and
+                // this control must stay clearly distinct from one.
+                aria-label={`Add ${s} to ${label}`}
+                onClick={() => appendTag(s)}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+              >
+                <Plus className="h-3 w-3" />
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -202,6 +266,7 @@ const AUTOSAVE_DELAY_MS = 800;
 
 export function PreferencesForm({
   preferences,
+  suggestions,
   onSave,
   onClear,
   loading,
@@ -365,6 +430,9 @@ export function PreferencesForm({
           onChange={setAdditionalSkills}
           placeholder="e.g. Python, SQL, Terraform"
           description="Skills beyond what your CV contains"
+          suggestions={suggestions}
+          suggestionsLabel="Skills that often go with yours"
+          suggestionsHint="Tap any you actually have. Nothing is added until you tap."
         />
 
         {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
@@ -485,10 +553,21 @@ export function PreferencesForm({
 
         <Separator />
 
-        {/* Negative Keywords input removed from UI (owner, 2026-08-08) — the
-            negative_keywords field, scoring penalty, and payload key are kept
-            fully intact; every existing user's value is empty in prod, so
-            hiding the control drops no data and changes no live score. */}
+        {/* ── Words to avoid in job titles ────────── */}
+        {/* Restored 2026-08-13 with copy that matches what the code does.
+            Verified in skill_matcher.py: the check reads job.title ONLY (never
+            the description), matches whole words (so "sales" does not match
+            "Wholesale"), and subtracts a flat 30 points on the first match —
+            it never hides the job. The old label "Negative Keywords" implied a
+            filter, which is why the copy below says "ranked lower" instead. */}
+        <TagInput
+          label="Words to avoid in job titles"
+          tags={negativeKeywords}
+          onChange={setNegativeKeywords}
+          placeholder="e.g. sales, recruiter"
+          description="A job whose TITLE contains one of these drops 30 points. It still shows up — this pushes it down the list, it doesn't hide it."
+          variant="destructive"
+        />
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">

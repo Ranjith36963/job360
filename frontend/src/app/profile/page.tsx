@@ -369,6 +369,11 @@ export default function ProfilePage() {
               {/* Right column: Preferences */}
               <PreferencesForm
                 preferences={profile?.preferences ?? {}}
+                // Suggestions are rendered INSIDE the form, next to Additional
+                // Skills, so a tap edits local state and rides the form's own
+                // debounced save. They used to sit further down this page as
+                // dead chips whose helper text told the user to retype them.
+                suggestions={profile?.ai_suggestions ?? []}
                 onSave={handleSavePreferences}
                 onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
@@ -392,13 +397,7 @@ export default function ProfilePage() {
 
             {/* ── Your Skills (grouped by source) ────────── */}
             {(() => {
-              const bySource =
-                (profile as unknown as {
-                  skills_by_source?: Record<string, string[]>;
-                })?.skills_by_source ?? {};
-              const aiSuggestions =
-                (profile as unknown as { ai_suggestions?: string[] })
-                  ?.ai_suggestions ?? [];
+              const bySource = profile?.skills_by_source ?? {};
               const GROUPS: {
                 key: string;
                 label: string;
@@ -430,8 +429,10 @@ export default function ProfilePage() {
                   (bySource[g.key] ?? []).map((s) => s.toLowerCase())
                 )
               ).size;
-              const hasAny = total > 0 || aiSuggestions.length > 0;
-              if (!hasAny) return null;
+              // Suggestions no longer keep this block alive: they moved into
+              // the preferences form. This panel shows skills the user HAS, so
+              // with none of those there is nothing to show.
+              if (total === 0) return null;
               return (
                 <div className="animate-fade-in-up glass-card rounded-xl p-6">
                   <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
@@ -466,32 +467,6 @@ export default function ProfilePage() {
                     })}
                   </div>
 
-                  {/* AI Suggestions — opt-in, never counted in matching */}
-                  {aiSuggestions.length > 0 && (
-                    <div className="mt-5 border-t border-border/50 pt-4">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                        AI suggestions
-                      </p>
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        Related skills that fit your profile. These aren&apos;t
-                        counted — add the ones you actually have under{" "}
-                        <span className="text-foreground">
-                          Additional Skills
-                        </span>
-                        .
-                      </p>
-                      <ul className="flex flex-wrap gap-1.5">
-                        {aiSuggestions.map((skill) => (
-                          <li
-                            key={`ai-${skill}`}
-                            className="rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90"
-                          >
-                            + {skill}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               );
             })()}
