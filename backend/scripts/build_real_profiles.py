@@ -21,7 +21,7 @@ PEOPLE = [
         "linkedin": None,
         "github": None,
         "prefs": dict(experience_level="senior", work_arrangement="remote",
-                      preferred_workplace="remote", salary_min=50000, salary_max=85000,
+                      salary_min=50000, salary_max=85000,
                       needs_visa=True),
     },
     {
@@ -30,7 +30,7 @@ PEOPLE = [
         "linkedin": f"{ROOT}/User_info/Linkedin_pdf/rohith_Profile .pdf",
         "github": None,
         "prefs": dict(experience_level="senior", work_arrangement="hybrid",
-                      preferred_workplace="hybrid", salary_min=70000, salary_max=110000,
+                      salary_min=70000, salary_max=110000,
                       needs_visa=False),
     },
     {
@@ -39,7 +39,7 @@ PEOPLE = [
         "linkedin": f"{ROOT}/User_info/Linkedin_pdf/Sofia LinkedIn.pdf",
         "github": "sofiashajilekha",
         "prefs": dict(experience_level="junior", work_arrangement="remote",
-                      preferred_workplace="remote", salary_min=30000, salary_max=50000,
+                      salary_min=30000, salary_max=50000,
                       needs_visa=True),
     },
 ]

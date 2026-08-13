@@ -78,7 +78,7 @@ UserProfile
 | target_job_titles · additional_skills · excluded_skills | U | targeting |
 | preferred_locations · industries · negative_keywords | U | filters |
 | salary_min · salary_max | U | pay range |
-| work_arrangement · **preferred_workplace** | U | remote/hybrid/office |
+| work_arrangement | U | remote/hybrid/onsite. `preferred_workplace` is a read-only property derived from it, not a second stored field (2026-08-13). |
 | experience_level · **needs_visa** | U | level + visa |
 | about_me | U | free text |
 | **about_me_inferred_skills** | L | skills the LLM mines from about_me |

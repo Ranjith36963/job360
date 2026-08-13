@@ -433,30 +433,49 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
             pass
 
 
+def _normalize_work_arrangement(value: object) -> str:
+    """Store "I don't mind" as SILENCE, not as the literal string "any".
+
+    The preferences select seeds itself at ``"any"`` and posts that value, so
+    "any" reached the database as though the user had stated a constraint. Two
+    consumers then read it RAW, not through the ``preferred_workplace`` property
+    that maps it to None:
+
+      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
+        every judged job was told ``work_arrangement=any``, spending real tokens
+        to state a preference the user explicitly declined to make;
+      * the semantic vector appended "any" as a candidate token.
+
+    The property protects the keyword scorer, but a property cannot protect a
+    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    point where the sentinel can enter — and it holds for the CLI and any older
+    client too, which a frontend-side fix would not.
+
+    Rule #29: an unstated preference is silence. "Any" IS unstated.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in {"remote", "hybrid", "onsite"} else ""
+
+
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     """Parse the preferences JSON form and set it on the profile.
 
     Fields the form does NOT carry (``github_username`` — set by the separate
-    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
+    GitHub route — plus ``needs_visa`` and ``work_arrangement``) fall back to the
     EXISTING preferences so a routine preferences save never silently wipes them.
     """
     pref_dict = json.loads(preferences_json)
     existing = profile.preferences or UserPreferences()
 
-    # Bridge work_arrangement -> preferred_workplace (2026-08-08).
+    # The work_arrangement -> preferred_workplace bridge used to live here.
     #
-    # The model documents preferred_workplace as "the enum form of
-    # work_arrangement so the dimension scorer can match" — but nothing ever
-    # built that bridge. The form sends work_arrangement; the WORKPLACE scoring
-    # dimension (weight 6, workplace_score) reads preferred_workplace; there is
-    # no preferred_workplace control anywhere in the frontend. So the field the
-    # scorer reads stayed None for every user and the whole workplace dimension
-    # was permanently dead — the "dead pair" the shelf X-ray flagged was caused
-    # HERE, not by users failing to fill anything. Same vocabulary on both
-    # sides ("remote"/"hybrid"/"onsite"), so an empty string maps to None
-    # ("no preference" -> neutral score, per the model comment).
-    _wa = pref_dict.get("work_arrangement", "")
-    _derived_workplace = _wa.strip().lower() or None if isinstance(_wa, str) else None
+    # It existed because the form wrote one field and the scorer read another,
+    # so the workplace dimension was dead for every user until it was built.
+    # A bridge keeps two boxes holding one answer, and they drift: cli.py's
+    # setup-profile writes work_arrangement and has never written the other, so
+    # that entry point produced a divergent profile from the day it was written.
+    # preferred_workplace is now a derived @property on UserPreferences, so
+    # there is exactly one stored answer and the two cannot disagree.
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -465,7 +484,14 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         industries=pref_dict.get("industries", []),
         salary_min=pref_dict.get("salary_min"),
         salary_max=pref_dict.get("salary_max"),
-        work_arrangement=pref_dict.get("work_arrangement", ""),
+        # An OMITTED key keeps the stored value; an explicit "" still clears it.
+        # The old default of "" meant any partial save wiped the answer, and
+        # the damage was hidden by the preferred_workplace fallback that this
+        # change removes — so without this line the workplace dimension would
+        # go dark again, which is the exact regression the bridge was added for.
+        work_arrangement=_normalize_work_arrangement(
+            pref_dict.get("work_arrangement", existing.work_arrangement)
+        ),
         experience_level=pref_dict.get("experience_level", ""),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
@@ -477,11 +503,6 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         github_username=normalize_github_username(
             pref_dict.get("github_username") or existing.github_username or ""
         ),
-        # Explicit value wins (a future dedicated control); otherwise derive
-        # from work_arrangement; only then fall back to the stored value.
-        preferred_workplace=pref_dict.get("preferred_workplace")
-        or _derived_workplace
-        or existing.preferred_workplace,
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the

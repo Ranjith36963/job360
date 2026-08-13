@@ -508,7 +508,10 @@ class JobScorer:
         Optional kwargs (Batch 2.9):
           * ``user_preferences`` — a `UserPreferences` dataclass with
             `salary_min`, `salary_max`, `experience_level`, `needs_visa`,
-            `preferred_workplace` fields consulted by the new dimensions.
+            `work_arrangement` fields consulted by the new dimensions.
+            (The workplace dimension reads `preferred_workplace`, which is
+            a read-only property derived from `work_arrangement` — there is
+            only one stored answer.)
           * ``enrichment_lookup`` — a callable `(job) -> JobEnrichment | None`
             that returns the enriched row for a given job. Defaults to a
             lambda that returns None (no enrichment dims contribute).

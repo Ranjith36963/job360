@@ -170,7 +170,20 @@ class TestMatchingCoverageDoesNotRegress:
     # nine matching modules); raised to 46 by the shelf-completeness batch, which
     # wired the LinkedIn evidence sections, cv_industries, cv_languages,
     # career_domain and linkedin_summary into the judge and the vector.
-    BASELINE = 50
+    #
+    # 50 -> 49 on 2026-08-13, and this is the ONE legitimate reason to lower a
+    # ratchet that is otherwise up-only. No engine lost an input. Two shelf NAMES
+    # collapsed into one: ``preferred_workplace`` was a stored copy of
+    # ``work_arrangement``, written by a bridge in the profile route on every
+    # save. It is now a read-only property, so the pair is one shelf that every
+    # consumer reads, and the audit counts it once instead of twice.
+    #
+    # The proof that nothing went dark is in the READER SET, not the count:
+    # ``work_arrangement`` now lists ``scorer`` among its readers, which it never
+    # did before, because a read of a derived view is folded into its source (see
+    # ``shelf_audit.derived_shelves``). Deduplication should lower this number.
+    # A shelf falling out of matching should not, and still fails the test below.
+    BASELINE = 49
 
     def test_the_headline_number_is_broken_down_by_reach(self) -> None:
         """A single "N shelves feed matching" figure counts a shelf the LLM
@@ -230,3 +243,57 @@ def test_every_shelf_has_both_a_writer_and_a_reader(name: str) -> None:
     assert writers(name), f"{name}: nothing can write it"
     if name not in ALLOWED_UNREAD:
         assert readers(name), f"{name}: nothing reads it"
+
+
+class TestDerivedViewsAreFoldedIntoTheirSource:
+    """Rule 5, added 2026-08-13 with the workplace collapse.
+
+    A ``@property`` on a profile dataclass is a VIEW: no storage, no writer, so
+    it is correctly absent from ``shelf_names()`` — rule 1 would fail it, and
+    should. But consumers read it BY NAME, and that read is a real read of the
+    shelf underneath.
+
+    Miss that and the audit lies in the direction that flatters it: the stored
+    shelf looks less used than it is. ``work_arrangement`` would have reported
+    as judge-and-vector-only while in fact it ranks every job in the feed
+    through ``preferred_workplace``.
+    """
+
+    def test_the_mapping_is_parsed_from_the_source_not_hand_listed(self) -> None:
+        """The point of deriving it: a property renamed or repointed tomorrow
+        updates this map for free. A hand-typed dict would be one more copy to
+        drift — the exact bug class this module exists to catch."""
+        from src.services.profile.shelf_audit import derived_shelves
+
+        assert derived_shelves().get("preferred_workplace") == ("work_arrangement",)
+
+    def test_a_derived_view_is_not_itself_a_shelf(self) -> None:
+        """It has no writer and never can have one. Counting it as a shelf would
+        force a permanent exemption in rule 1 — the honest answer is that it is
+        not a shelf at all."""
+        from src.services.profile.shelf_audit import derived_shelves
+
+        for view in derived_shelves():
+            assert view not in shelf_names(), (
+                f"{view} is a property AND a stored field — one of the two is a "
+                "copy that can disagree with the other"
+            )
+
+    def test_reading_the_view_credits_the_source(self) -> None:
+        """The assertion that actually protects the audit's honesty. The keyword
+        scorer reads ``prefs.preferred_workplace``; ``work_arrangement`` is what
+        holds that answer, so ``work_arrangement`` must show the scorer."""
+        assert "scorer" in readers("work_arrangement"), (
+            "work_arrangement lost its every-job reader — either the scorer "
+            "stopped reading the workplace preference, or the derived-view fold "
+            "broke and the audit is now under-reporting this shelf's reach"
+        )
+
+    def test_every_derived_view_points_at_real_shelves(self) -> None:
+        from src.services.profile.shelf_audit import derived_shelves
+
+        names = set(shelf_names())
+        for view, sources in derived_shelves().items():
+            assert sources, f"{view}: derived from nothing"
+            unknown = sorted(set(sources) - names)
+            assert not unknown, f"{view}: derived from non-shelves {unknown}"

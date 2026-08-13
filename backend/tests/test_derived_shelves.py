@@ -1,23 +1,27 @@
 """Two shelves are DERIVED VIEWS of other shelves. Pin them so they stay that way.
 
-The shelf audit found four duplicate pairs. Two were genuine defects and were
-fixed by deleting a copy (``skill_entry`` duplicated ``skill_tiering``;
-``industries`` was declared on both dataclasses). These two are different: they
-are stored derivations with real consumers, and they cause no wrong behaviour.
-
     github_skills_inferred  == github_languages (by bytes) + github_topics
-    preferred_workplace     == work_arrangement, lower-cased
+    preferred_workplace     == work_arrangement, as a strict enum
 
-Deleting either is the wrong trade. ``github_skills_inferred`` has genuine
-ASSIGNMENT writers (``github_enricher`` and the clear route), so making it a
-read-only property would break them — and ``two_pass`` mutates it in place, which
-a property would silently swallow. ``preferred_workplace`` is what the scoring
-dimension reads, with no frontend control of its own.
+The risk is not the duplication. It is DIVERGENCE: a derived field that quietly
+stops matching its source becomes a third, wrong truth that nothing can detect —
+the failure mode behind most of this batch.
 
-So the risk worth guarding is not the duplication. It is DIVERGENCE: a derived
-field that quietly stops matching its source becomes a third, wrong truth that
-nothing can detect — the exact failure mode behind every other bug in this batch.
-These tests make divergence loud.
+The two are guarded DIFFERENTLY, on purpose, because only one of them could be
+collapsed:
+
+``github_skills_inferred`` stays a stored field. It has genuine ASSIGNMENT
+writers (``github_enricher`` and the clear route) that a read-only property would
+break, and ``two_pass`` mutates it in place, which a property would silently
+swallow. So divergence here is possible and the tests below have to catch it.
+
+``preferred_workplace`` was collapsed into a read-only property (2026-08-13).
+It had no writer of its own — the profile route bridged it from
+``work_arrangement`` on every save — so nothing was lost by deleting the storage,
+and divergence became structurally impossible instead of merely tested. Verified
+against production before shipping: 3 live profiles and 20 history versions, zero
+rows holding an answer only under the old key. What its tests guard now is the
+TRANSLATION, including the "any" sentinel that was scoring users a live penalty.
 """
 from __future__ import annotations
 
@@ -58,34 +62,109 @@ class TestGithubSkillsInferredIsPurelyDerived:
         assert derived <= allowed, f"invented: {sorted(derived - allowed)}"
 
 
-class TestPreferredWorkplaceMirrorsWorkArrangement:
-    """``preferred_workplace`` is the enum form of ``work_arrangement``, bridged
-    in the profile route because the scoring dimension reads the former while the
-    form writes the latter. Rule #29 makes the empty case the important one: an
-    unstated arrangement must NOT become a stated workplace preference."""
+class TestPreferredWorkplaceIsDerivedNotStored:
+    """``preferred_workplace`` is no longer a field. It is a read-only property
+    computed from ``work_arrangement``, so the two CANNOT diverge — divergence is
+    now a structural impossibility rather than something a test has to catch.
 
-    def _bridge(self, arrangement: str):
-        from src.services.profile.models import CVData, UserPreferences
-        from src.services.profile.preferences import sanitize_preferences
+    What this class guards instead is the TRANSLATION, which is still a real
+    decision with a real bug history:
 
-        prefs = UserPreferences(work_arrangement=arrangement)
-        return sanitize_preferences(prefs, CVData())
+      * only the three enum values the scorer understands may pass through;
+      * everything else — including the form's own ``"any"`` default — must come
+        out as None, i.e. as SILENCE, not as a stated preference.
+
+    The old test asserted the mirror conditionally (``if x is not None``), which
+    could pass while saying nothing. This one has no escape hatch.
+    """
+
+    def _prefs(self, arrangement: str):
+        from src.services.profile.models import UserPreferences
+
+        return UserPreferences(work_arrangement=arrangement)
+
+    def test_it_is_a_property_not_a_stored_field(self) -> None:
+        """The whole point of the collapse: there is exactly ONE place the
+        answer lives. A field here would let a writer set it independently and
+        re-open the divergence this class used to police."""
+        from dataclasses import fields
+
+        from src.services.profile.models import UserPreferences
+
+        names = {f.name for f in fields(UserPreferences)}
+        assert "preferred_workplace" not in names, (
+            "preferred_workplace is a stored field again — it can now hold an "
+            "answer that contradicts work_arrangement, with no way to tell which "
+            "one the user actually chose"
+        )
+        assert isinstance(
+            getattr(UserPreferences, "preferred_workplace", None), property
+        )
 
     @pytest.mark.parametrize("value", ["remote", "hybrid", "onsite"])
-    def test_a_stated_arrangement_agrees_with_the_workplace(self, value: str) -> None:
-        out = self._bridge(value)
-        if out.preferred_workplace is not None:
-            assert out.preferred_workplace == out.work_arrangement.lower(), (
-                "the two have diverged — the scorer and the prefilter would now "
-                "act on different answers to the same question"
-            )
+    def test_a_stated_arrangement_passes_through(self, value: str) -> None:
+        assert self._prefs(value).preferred_workplace == value
 
-    def test_an_unstated_arrangement_never_becomes_a_preference(self) -> None:
-        """Rule #29 at its sharpest: silence must stay silence. A default written
-        here is indistinguishable from a choice the user made."""
-        out = self._bridge("")
-        assert not out.work_arrangement
-        assert out.preferred_workplace in (None, ""), (
-            "an empty work_arrangement produced a workplace preference — that is "
-            "a fake constraint the user never stated"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [("Remote", "remote"), ("  ONSITE  ", "onsite"), ("Hybrid", "hybrid")],
+    )
+    def test_case_and_padding_are_normalised(self, raw: str, expected: str) -> None:
+        """The scorer compares lower-case strings. A stored "Remote" used to
+        score as a non-match against its own value."""
+        assert self._prefs(raw).preferred_workplace == expected
+
+    @pytest.mark.parametrize("value", ["", "   ", "any", "Any", "flexible", "n/a"])
+    def test_anything_not_in_the_enum_is_silence(self, value: str) -> None:
+        """THE BUG THIS FIXES, and it was live.
+
+        The preferences form seeds the select at ``"any"``. That is the user
+        saying "I don't mind" — but ``workplace_score`` only branches on the
+        three enum values, so ``"any"`` fell past every branch and scored **0**,
+        while an EMPTY preference returns the neutral **3**. Choosing "I don't
+        mind" therefore scored worse, on every single job, than never answering.
+
+        Rule #29: an unstated preference must be silence, never a penalty.
+        """
+        assert self._prefs(value).preferred_workplace is None
+
+    def test_a_dont_mind_answer_scores_the_same_as_no_answer(self) -> None:
+        """The rule #29 violation stated as the outcome the user FELT, not as
+        the mechanism.
+
+        A real ``JobEnrichment`` on purpose. The obvious way to write this — a
+        ``{"workplace_type": "onsite"}`` dict — passes without proving anything,
+        because both branches return the neutral score before ever touching the
+        enrichment, so the wrong type is never noticed. That is the same
+        vacuous-pass shape this file replaced in the old test; a green tick from
+        a test that cannot fail is worse than no test.
+        """
+        from src.services.job_enrichment_schema import (
+            JobCategory,
+            JobEnrichment,
+            WorkplaceType,
+        )
+        from src.services.scoring_dimensions import workplace_score
+
+        onsite_job = JobEnrichment(
+            title_canonical="X",
+            category=JobCategory.SOFTWARE_ENGINEERING,
+            workplace_type=WorkplaceType.ONSITE,
+        )
+        silent = workplace_score(onsite_job, self._prefs("").preferred_workplace)
+        dont_mind = workplace_score(onsite_job, self._prefs("any").preferred_workplace)
+        stated = workplace_score(onsite_job, self._prefs("remote").preferred_workplace)
+
+        # The control: a STATED, opposite preference must still score lower.
+        # Without this the test would also pass if the scorer stopped
+        # discriminating at all.
+        assert stated < silent, (
+            "a remote preference no longer costs anything on an onsite job — "
+            "the dimension has gone flat and the assertion below is meaningless"
+        )
+        assert dont_mind == silent, (
+            f'"any" scored {dont_mind} but silence scored {silent} — saying '
+            f'"I don\'t mind" is punished relative to saying nothing. Before the '
+            f"collapse this was live: the raw \"any\" reached the scorer, matched "
+            f"no branch, and fell through to 0 on every job."
         )

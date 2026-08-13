@@ -157,8 +157,14 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     industries: asArr(raw.industries),
     salary_min: raw.salary_min != null ? Number(raw.salary_min) : null,
     salary_max: raw.salary_max != null ? Number(raw.salary_max) : null,
+    // "any" is this form's WORD for "not set"; the server's word is "". Both
+    // read-points must agree, or the saved baseline ("") would never match the
+    // form state ("any") and the dirty check would report unsaved changes on a
+    // freshly loaded, untouched form.
     work_arrangement:
-      typeof raw.work_arrangement === "string" ? raw.work_arrangement : "any",
+      typeof raw.work_arrangement === "string" && raw.work_arrangement
+        ? raw.work_arrangement
+        : "any",
     experience_level:
       typeof raw.experience_level === "string" ? raw.experience_level : "mid",
     negative_keywords: asArr(raw.negative_keywords),
@@ -237,7 +243,11 @@ export function PreferencesForm({
     setIndustries(p.industries ?? []);
     setSalaryMin(p.salary_min != null ? String(p.salary_min) : "");
     setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
-    setWorkArrangement(p.work_arrangement ?? "any");
+    // `||`, not `??`: the server now stores "I don't mind" as "" rather than the
+    // literal "any", because "any" was reaching the LLM judge as a stated
+    // constraint. `??` only falls back on null/undefined, so an empty string
+    // would leave this select showing nothing at all.
+    setWorkArrangement(p.work_arrangement || "any");
     setExperienceLevel(p.experience_level ?? "mid");
     setNeedsVisa(p.needs_visa === true);
     setNegativeKeywords(p.negative_keywords ?? []);
