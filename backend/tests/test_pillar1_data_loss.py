@@ -396,6 +396,33 @@ class TestWorkplaceReachesTheScorer:
             f"to make. Prompt was:\n{text}"
         )
 
+    def test_the_sentinel_never_becomes_a_search_location(self) -> None:
+        """The THIRD consumer that read this field raw, and the worst of them.
+
+        ``keyword_generator`` appends ``work_arrangement.capitalize()`` to the
+        search LOCATIONS list. "any" is truthy, so a place called "Any" was sent
+        to the job sources as somewhere the user wanted to work.
+
+        Three separate consumers bypassed the derived property — scorer-adjacent
+        keyword generation, the judge prompt, and the vector. That is the
+        argument for normalising on SAVE rather than at each reader: a fourth
+        consumer written next month gets the fix for free, and the property
+        alone would not have given it to any of these three.
+        """
+        from src.services.profile.keyword_generator import generate_search_config
+        from src.services.profile.models import CVData, UserProfile
+
+        prefs = self._apply({"work_arrangement": "any"})
+        cfg = generate_search_config(
+            UserProfile(
+                cv_data=CVData(job_titles=["ML Engineer"], skills=["python"]),
+                preferences=prefs,
+            )
+        )
+        assert "Any" not in cfg.locations, (
+            f'"Any" is being searched as a place. Locations: {cfg.locations}'
+        )
+
     def test_a_real_choice_still_reaches_the_judge(self) -> None:
         """The control. Without it, deleting the line entirely would also pass
         the test above."""
