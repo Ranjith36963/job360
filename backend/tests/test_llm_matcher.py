@@ -283,6 +283,39 @@ async def test_match_batch_does_not_swallow_a_missing_key_as_a_judged_nothing(me
         await match_batch(jobs, user_id=uid, profile_text="p", conn=conn)
 
 
+@pytest.mark.asyncio
+async def test_match_batch_still_propagates_cancellation(mem_db):
+    """Guard on the `return_exceptions=True` above. It lets every judge settle
+    before speaking, which is right — but it also turns a child's exception into
+    a VALUE, and silently eating a CancelledError is how a shutdown hangs.
+    Anything that escapes `_one` (which already swallows ordinary errors itself)
+    must still come out."""
+    conn = mem_db
+    uid = "user-cancel-001"
+    cur = await conn.execute(
+        "INSERT INTO jobs(title, company, apply_url, source, date_found) VALUES (?,?,?,?,?)",
+        ("Cancel Job", "CorpA", "https://a.com/c", "greenhouse", _NOW),
+    )
+    jid = cur.lastrowid
+    await conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+        (uid, jid, 50, "top"),
+    )
+    await conn.commit()
+
+    job = _make_job(title="Cancel Job")
+    job.id = jid  # type: ignore[attr-defined]
+
+    async def cancelled(prompt, schema, system):
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await match_batch(
+            [job], user_id=uid, profile_text="p", conn=conn,
+            llm_extract_validated_fn=cancelled,
+        )
+
+
 def test_flag_defaults_off(monkeypatch):
     monkeypatch.delenv("MATCHER_ENABLED", raising=False)
     import importlib

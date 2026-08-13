@@ -459,11 +459,18 @@ async def match_batch(
     # a WinError 10038 during teardown). Let every judge settle, THEN speak.
     outcomes = await asyncio.gather(*[_one(j) for j in jobs], return_exceptions=True)
     for out in outcomes:
-        if isinstance(out, LLMKeyMissing):
-            # One config fault, raised once, carrying the four key names and the
-            # fix — instead of N log lines that look like N bad judgments.
+        if isinstance(out, BaseException):
+            # ANYTHING that escapes `_one` is meant to escape: it already
+            # swallows ordinary per-job errors itself, so what is left is the
+            # LLMKeyMissing config fault (raised once, carrying the four key
+            # names and the fix, instead of N lines that look like N bad
+            # judgments) or a BaseException like CancelledError, which must
+            # never be turned into a quiet ``None`` by `return_exceptions=True`.
             # Both live callers still catch Exception (main.py
             # _run_matcher_stage, rescore.py gem-rescue), so the run survives;
-            # what changes is that their line now names the cause.
+            # what changes is that their log line now names the cause.
             raise out
-    return [None if isinstance(o, BaseException) else o for o in outcomes]
+    # The loop above raised on every exception, so nothing is filtered out here
+    # — order and length are preserved. Written as a comprehension so the type
+    # narrows without a cast.
+    return [o for o in outcomes if not isinstance(o, BaseException)]
