@@ -67,6 +67,17 @@ class JSearchSource(BaseJobSource):
                 "page": "1",
                 "num_pages": "1",
                 "date_posted": "week",
+                # WHY THIS MATTERS: JSearch indexes Google for Jobs worldwide
+                # and its `country` parameter defaults to the US. We never sent
+                # it, so every request asked a US-scoped index for UK-shaped
+                # queries — which is why American postings leaked into a
+                # UK-only product and why the UK supply came back thin. "uk" is
+                # a documented country code (openwebninja.com/api/jsearch).
+                #
+                # This is a catalog-scope decision, not a user filter: a job the
+                # user cannot take because it is abroad is a defect at
+                # ingestion (rule #30). Nothing here is inferred about the user.
+                "country": "uk",
             }
             data = await self._get_json(
                 _JSEARCH_URL,

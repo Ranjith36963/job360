@@ -2,7 +2,7 @@
 
 Two ignore files describe the same intent from opposite directions, and nothing
 made them agree. `.gitignore` ignores `data/` and then un-ignores
-`backend/src/data/uk_gazetteer/**` and `backend/data/job_signals/**` — the exemptions
+`backend/src/data/uk_gazetteer/**` and `backend/src/data/job_signals/**` — the exemptions
 are the reason those files are in the repository at all. `.dockerignore` ignored
 `data/` with no exemptions, and the Dockerfile is `COPY . .`, so the image was
 built without precisely the files someone had gone out of their way to commit.
@@ -32,12 +32,12 @@ _BACKEND = Path(__file__).resolve().parent.parent
 _REPO = _BACKEND.parent
 
 
-def _negations(path: Path) -> set[str]:
-    """Un-ignore patterns (`!...`) under a data/ directory, normalised.
+def _negations(path: Path, *, prefix: str) -> set[str]:
+    """Un-ignore patterns (`!...`) under `prefix`, normalised.
 
-    Both files are read into the same namespace: `.gitignore` sits at the repo
-    root and writes `backend/data/...`, `.dockerignore` sits in `backend/` and
-    writes `data/...`. Stripping the `backend/` prefix makes them comparable.
+    `.gitignore` sits at the repo root and writes `backend/src/data/...`;
+    `.dockerignore` sits in `backend/` and writes `src/data/...`. Stripping the
+    `backend/` prefix makes them comparable.
     """
     if not path.exists():
         return set()
@@ -48,36 +48,56 @@ def _negations(path: Path) -> set[str]:
             continue
         pattern = line[1:].strip().lstrip("/")
         pattern = re.sub(r"^backend/", "", pattern)
-        if pattern.startswith("data/"):
-            out.add(pattern.rstrip("/").removesuffix("/**"))
+        pattern = pattern.rstrip("/").removesuffix("/**")
+        if pattern.startswith(prefix) and pattern != prefix.rstrip("/"):
+            out.add(pattern)
     return out
 
 
 class TestTheImageShipsWhatTheRepoCommits:
-    def test_dockerignore_exempts_everything_gitignore_exempts(self) -> None:
-        wanted = _negations(_REPO / ".gitignore")
+    """WHAT CHANGED 2026-08-13, and why this test changed shape with it.
+
+    Both reference-data directories now live INSIDE the package
+    (`backend/src/data/`), so `.dockerignore` no longer needs an exemption for
+    either — its `data/` rule is root-anchored and never reached inside `src/`.
+    Comparing the two ignore files therefore has nothing left to compare.
+
+    The exemption was never the real guarantee anyway. It only put the files at
+    `/app/data`, which the API process happens to see because
+    `uvicorn main:app` runs `sys.path.insert(0, ".")`. The ARQ worker runs the
+    console script `arq`, and arq/cli.py does `sys.path.append(os.getcwd())` —
+    APPEND — so site-packages wins the `import src` and the `/app` copy is never
+    loaded. What actually carries data into BOTH processes is
+    `[tool.setuptools.package-data]` + `pip install .`. So that is what this
+    test now pins.
+    """
+
+    def test_package_data_covers_every_committed_src_data_dir(self) -> None:
+        wanted = _negations(_REPO / ".gitignore", prefix="src/data/")
         assert wanted, (
-            "no data/ exemptions found in .gitignore — if the committed "
+            "no src/data/ exemptions found in .gitignore — if the committed "
             "reference data moved, this test needs to move with it"
         )
-        have = _negations(_BACKEND / ".dockerignore")
-        missing = sorted(wanted - have)
+        pyproject = (_BACKEND / "pyproject.toml").read_text(encoding="utf-8")
+        missing = sorted(
+            d for d in wanted if f'"{d.removeprefix("src/")}/' not in pyproject
+        )
         assert not missing, (
-            "These directories are deliberately committed to the repo but "
-            f"excluded from the Docker image: {missing}. The loaders degrade "
-            "silently on a missing file, so production answers 'nothing' with "
-            "no error while every local test passes."
+            f"{missing} are committed on purpose but absent from "
+            "[tool.setuptools.package-data] in backend/pyproject.toml, so "
+            "`pip install .` leaves them out of site-packages. The loaders "
+            "degrade silently on a missing file, so the worker answers "
+            "'nothing' with no error while every local test passes."
         )
 
-    # uk_gazetteer MOVED into the package (backend/src/data/) so that
-    # `pip install .` actually carries it — the wheel, not the working tree,
-    # is what runs in the container. Before that it resolved to
-    # <site-packages>/data/uk_gazetteer, which never existed, and the gate ran
-    # blind from 2026-08-07 while still logging "blocked N jobs".
-    # job_signals has the SAME latent bug (services/job_signals.py:111) and has
-    # NOT moved yet — it stays on the old path here deliberately, so this list
-    # keeps telling the truth about where each one actually lives.
-    @pytest.mark.parametrize("rel", ["src/data/uk_gazetteer", "data/job_signals"])
+    # BOTH now live inside the package (backend/src/data/) so that
+    # `pip install .` actually carries them — the wheel, not the working tree,
+    # is what runs in the container. uk_gazetteer moved first (issue #260);
+    # job_signals followed on 2026-08-13 once the worker path was measured:
+    # `arq` is a console script and arq/cli.py does `sys.path.append(cwd)`, so
+    # site-packages wins the `import src` and the old `/app/data/job_signals`
+    # was invisible to every worker process.
+    @pytest.mark.parametrize("rel", ["src/data/uk_gazetteer", "src/data/job_signals"])
     def test_the_committed_data_actually_exists(self, rel: str) -> None:
         """The exemption is worthless if the directory is empty — that would
         look identical to the bug it prevents."""
@@ -105,3 +125,37 @@ class TestTheLoadersStillDegradeQuietly:
         from src.services.job_signals import _load_terms
 
         assert _load_terms("definitely-not-a-real-file.txt") == {}
+
+
+class TestTheVocabularyIsActuallyThere:
+    """The counterweight to the class above.
+
+    "Degrades quietly" is the right runtime behaviour and the wrong test
+    posture: every consumer of these tables would keep passing against an empty
+    vocabulary. `keyword_generator.strip_seniority` in particular becomes a
+    silent no-op — the rank word stays in the query and the ~99.9% recall loss
+    it exists to prevent comes straight back, with nothing red anywhere. These
+    assertions are the loud part.
+    """
+
+    def test_seniority_vocabulary_loads_and_is_not_empty(self) -> None:
+        from src.services.job_signals import _seniority_terms
+
+        terms = _seniority_terms()
+        assert terms, "seniority_terms.txt did not load — check job_signals._DATA"
+        assert "intern" in terms and "senior" in terms
+
+    def test_workplace_vocabularies_load_and_are_not_empty(self) -> None:
+        from src.services.job_signals import _location_terms, _workplace_terms
+
+        assert _workplace_terms(), "workplace_terms.txt did not load"
+        assert _location_terms(), "workplace_location_terms.txt did not load"
+
+    def test_data_resolves_inside_the_package_not_beside_it(self) -> None:
+        """Pins the move itself. The old `backend/data/job_signals` path is
+        invisible to the ARQ worker (site-packages wins the import), so a
+        revert to it must fail here rather than in production silence."""
+        from src.services import job_signals
+
+        assert job_signals._DATA == job_signals._PACKAGE_DATA
+        assert job_signals._DATA.parent.parent.name == "src"

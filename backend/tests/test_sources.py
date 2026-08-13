@@ -136,6 +136,90 @@ def test_reed_skips_without_key():
     _run(_test())
 
 
+def _reed_calls(m):
+    """Every (params dict) Reed was actually called with, in order."""
+    return [
+        call.kwargs.get("params", {})
+        for key, calls in m.requests.items()
+        if "reed.co.uk" in str(key[1])
+        for call in calls
+    ]
+
+
+def test_reed_sends_no_location_and_asks_for_the_full_page():
+    """Measured live 2026-08-13: locationName="UK" returned 29 of 486 jobs (6%)
+    because Reed searches a RADIUS around the named place and
+    distanceFromLocation defaults to 10 miles. Omitting it returned all 486.
+
+    So the request must carry NO locationName at all, and must ask for Reed's
+    documented maximum page of 100 (we were asking for 50 — half of what the
+    same single request would have served).
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"),
+                      payload=REED_PAYLOAD, repeat=True)
+                source = ReedSource(session, api_key="test-key", search_config=_sc_ai_defaults())
+                await source.fetch_jobs()
+
+                sent = _reed_calls(m)
+                assert sent, "Reed was never called"
+                for params in sent:
+                    assert "locationName" not in params, (
+                        f"locationName must not be sent — it costs ~94% of the "
+                        f"supply to a 10-mile radius: {params}"
+                    )
+                    assert params["resultsToTake"] == 100, (
+                        f"Reed's documented max page is 100: {params}"
+                    )
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_reed_pages_through_a_full_result_set():
+    """Reed does not rerank, so page 2 is 100 jobs page 1 could not carry.
+    A FULL page must be followed by resultsToSkip=100, then 200."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            full_page = {"results": [dict(REED_PAYLOAD["results"][0], jobId=i)
+                                     for i in range(100)]}
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"),
+                      payload=full_page, repeat=True)
+                sc = SearchConfig(job_titles=["AI Engineer"], search_titles=["AI Engineer"])
+                source = ReedSource(session, api_key="test-key", search_config=sc)
+                await source.fetch_jobs()
+
+                skips = [p.get("resultsToSkip") for p in _reed_calls(m)]
+                assert skips == [0, 100, 200], f"expected 3 paged requests, got {skips}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_reed_stops_paging_on_a_short_page():
+    """A page shorter than 100 is the last one. Asking for the next costs a
+    full rate-limiter delay to be told nothing."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"),
+                      payload=REED_PAYLOAD, repeat=True)  # 1 result < 100
+                sc = SearchConfig(job_titles=["AI Engineer"], search_titles=["AI Engineer"])
+                source = ReedSource(session, api_key="test-key", search_config=sc)
+                await source.fetch_jobs()
+
+                assert len(_reed_calls(m)) == 1, "must not page past a short page"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_reed_caps_title_fanout():
     """S2 regression: Reed used to loop job_titles[:12] x 3 locations (36
     requests, >72s of limiter sleeps). A 20-title profile must not exceed
@@ -156,6 +240,55 @@ def test_reed_caps_title_fanout():
                 assert len(queried_titles) <= 8, f"expected <=8 distinct titles, got {queried_titles}"
         finally:
             await session.close()
+    _run(_test())
+
+
+def test_reed_stops_early_instead_of_timing_out(monkeypatch):
+    """A slow network must cost SOME jobs, never ALL of them.
+
+    Reed sizes its fan-out from SOURCE_FETCH_TIMEOUT, but that maths can only
+    see the ENFORCED DELAY between requests — it is blind to real latency.
+    Measured live 2026-08-13: 18 requests = 36.0s of delay + 14.2s of latency =
+    50.2s against a 60s ceiling, on a fast connection. Railway's latency is not
+    this machine's, and at ~2x it the source blows the ceiling.
+
+    That failure is asymmetric: a timeout discards every row already fetched,
+    so our largest source silently reports nothing — indistinguishable from
+    "Reed had no jobs today". The guard must therefore RETURN WHAT IT HAS.
+
+    Simulated by shrinking the deadline to zero: the first request must still
+    go out (a guard that can fire before any call would make the source
+    permanently silent), and its jobs must survive the early exit.
+    """
+    from src.sources.apis_keyed import reed as reed_mod
+
+    monkeypatch.setattr(reed_mod, "SOURCE_FETCH_TIMEOUT", 0.0, raising=True)
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://www\.reed\.co\.uk/api/1\.0/search.*"),
+                    payload=REED_PAYLOAD,
+                    repeat=True,
+                )
+                sc = SearchConfig(
+                    job_titles=[f"Job Title {i}" for i in range(6)],
+                    relevance_keywords=["python"],
+                )
+                source = ReedSource(session, api_key="test-key", search_config=sc)
+                jobs = await source.fetch_jobs()
+
+                n_requests = sum(len(c) for c in m.requests.values())
+                # Exactly one: the first is always attempted, the guard then
+                # stops the rest because no budget remains.
+                assert n_requests == 1, f"expected 1 request, got {n_requests}"
+                # And the point of the whole guard — the work is kept.
+                assert jobs, "early stop threw away the jobs it had already fetched"
+        finally:
+            await session.close()
+
     _run(_test())
 
 
@@ -319,6 +452,36 @@ def test_jsearch_parses_response():
                 assert len(jobs) >= 1
                 assert jobs[0].title == "GenAI Engineer"
                 assert jobs[0].source == "jsearch"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_jsearch_sends_country_uk():
+    """JSearch indexes Google for Jobs worldwide and `country` defaults to the
+    US. We never sent it, so a UK-only product was querying a US-scoped index —
+    that is how American postings leaked in. "uk" is a documented code."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.openwebninja\.com/jsearch/search.*"),
+                      payload=JSEARCH_PAYLOAD, repeat=True)
+                source = JSearchSource(session, api_key="test-key",
+                                       search_config=_sc_ai_defaults())
+                await source.fetch_jobs()
+
+                sent = [
+                    call.kwargs.get("params", {})
+                    for key, calls in m.requests.items()
+                    if "openwebninja" in str(key[1])
+                    for call in calls
+                ]
+                assert sent, "JSearch was never called"
+                for params in sent:
+                    assert params.get("country") == "uk", (
+                        f"every JSearch request must be UK-scoped: {params}"
+                    )
         finally:
             await session.close()
     _run(_test())
@@ -732,6 +895,80 @@ def test_linkedin_missing_jsonld_degrades_to_empty():
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].description == ""
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_returns_jobs_when_the_budget_runs_out():
+    """LinkedIn kept ZERO jobs on every run (measured live 2026-08-13): the
+    detail pass cost ~120s inside a 60s ceiling, and `asyncio.wait_for` CANCELS
+    an overrunning source — so it lost every job it was holding.
+
+    With the budget already spent, the source must still return the jobs from
+    its first query, with empty descriptions, and must not spend another
+    request on either a further query or a detail fetch.
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            search_html = """
+            <h3 class="base-search-card__title">AI Engineer</h3>
+            <h4 class="base-search-card__subtitle">DeepTech Ltd</h4>
+            <span class="job-search-card__location">London, UK</span>
+            <a href="https://uk.linkedin.com/jobs/view/1234567890">View</a>
+            """
+            view_html = (
+                '<html><script type="application/ld+json">'
+                '{"@type":"JobPosting","description":"Full description here."}'
+                "</script></html>"
+            )
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.linkedin\.com/jobs-guest/.*"),
+                      body=search_html, content_type="text/html", repeat=True)
+                m.get("https://uk.linkedin.com/jobs/view/1234567890",
+                      body=view_html, content_type="text/html", repeat=True)
+                sc = _make_search_config(["q1 UK", "q2 UK", "q3 UK"])
+                source = LinkedInSource(session, search_config=sc, time_budget=0)
+                jobs = await source.fetch_jobs()
+
+                assert len(jobs) == 1, "the first query must always run"
+                assert jobs[0].description == "", (
+                    "detail fetch must be skipped when the budget is gone"
+                )
+                # Count CALLS, not keys: a regex-registered mock files every
+                # matching request under the one pattern key, so `len(requests)`
+                # would read 1 no matter how many requests were really sent.
+                def _calls(fragment):
+                    return sum(
+                        len(calls) for key, calls in m.requests.items()
+                        if fragment in str(key[1])
+                    )
+
+                assert _calls("jobs-guest") == 1, (
+                    f"expected 1 search request, got {_calls('jobs-guest')}"
+                )
+                assert _calls("jobs/view") == 0, (
+                    f"expected no detail requests, got {_calls('jobs/view')}"
+                )
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_linkedin_budget_defaults_to_the_source_ceiling():
+    """The budget is DERIVED from SOURCE_FETCH_TIMEOUT, not hand-picked, so a
+    later change to the ceiling cannot silently put this source back over it."""
+    from src.core.settings import SOURCE_FETCH_TIMEOUT
+
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            source = LinkedInSource(session)
+            assert 0 < source._time_budget < SOURCE_FETCH_TIMEOUT
+            # One rate-limited request must fit inside the budget, else the
+            # source could never make its detail pass at all.
+            assert source._request_cost < source._time_budget
         finally:
             await session.close()
     _run(_test())

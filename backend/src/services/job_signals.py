@@ -32,7 +32,7 @@ short-circuits before any text is touched.
 VOCABULARY LIVES IN DATA FILES (rule #28's rationale, extended past its
 literal scope of profile extraction — the same brittleness applies here: a
 hand-typed keyword dict means "new term = code edit").
-`data/job_signals/workplace_terms.txt`, `workplace_location_terms.txt` and
+`src/data/job_signals/workplace_terms.txt`, `workplace_location_terms.txt` and
 `seniority_terms.txt` are TSV: one `<enum_value><TAB><phrase>` pair per
 line; blank lines and lines starting with `#` are ignored. Loaded lazily and
 cached with `lru_cache`, exactly like `uk_gate._gazetteer()` — and, like
@@ -108,7 +108,33 @@ from typing import Any, Callable, Optional
 
 from src.services.job_enrichment_schema import SeniorityLevel, WorkplaceType
 
-_DATA = Path(__file__).resolve().parent.parent.parent / "data" / "job_signals"
+# WHERE THE VOCABULARY LIVES — and why it MOVED (2026-08-13).
+#
+# It used to be `backend/data/job_signals/`, i.e. OUTSIDE the `src` package, and
+# `tests/test_shipped_data.py` already flagged that as "the SAME latent bug" as
+# issue #260's uk_gazetteer. Measured, not guessed:
+#
+#   * `.dockerignore` excludes `data/` but exempts `data/job_signals/**`, so the
+#     files DO land in the image at `/app/data/job_signals`.
+#   * The API container survives on that: `uvicorn main:app` runs
+#     `sys.path.insert(0, ".")` (uvicorn/main.py), so `/app` is sys.path[0] and
+#     `/app/src/services/job_signals.py` is the module that loads — its
+#     `__file__` sits next to `/app/data/`.
+#   * The WORKER container does NOT. `Dockerfile.worker` runs the console script
+#     `arq src.workers.settings.WorkerSettings`, and arq/cli.py does
+#     `sys.path.APPEND(os.getcwd())` — append, not insert. site-packages
+#     therefore wins, `pip install .` copied `src*` there, and that copy has no
+#     `../data/` beside it. `_load_terms` degrades silently to `{}`, so every
+#     `detect_seniority` / `detect_workplace` call in the worker answered UNKNOWN
+#     with no error and no log line.
+#
+# Living inside the package + `[tool.setuptools.package-data]` in pyproject.toml
+# is what actually guarantees the files travel with the code, exactly as #260
+# concluded for the gazetteer. The legacy path is still probed second so an
+# older checkout (or a stale image) keeps working instead of going quiet.
+_PACKAGE_DATA = Path(__file__).resolve().parent.parent / "data" / "job_signals"
+_LEGACY_DATA = Path(__file__).resolve().parent.parent.parent / "data" / "job_signals"
+_DATA = _PACKAGE_DATA if _PACKAGE_DATA.is_dir() else _LEGACY_DATA
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +489,75 @@ def detect_seniority(
         return SenioritySignal(description_hit, "description")
 
     return SenioritySignal(SeniorityLevel.UNKNOWN, "no_signal")
+
+
+def _all_seniority_phrases() -> tuple[str, ...]:
+    """Every rank phrase across every tier, as ONE tuple.
+
+    Deliberately derived from `_seniority_terms()` rather than re-typed: this
+    is the single vocabulary CLAUDE.md rule #28 (and `profile/seniority.py`'s
+    "no parallel word list") insists on. Adding a rank word stays a one-line
+    data edit.
+
+    NOT `lru_cache`d, on purpose. `_seniority_terms()` already is, and
+    `_phrase_pattern` is keyed on the returned tuple, so the only work repeated
+    here is building an identical small tuple. A second cache layer would just
+    be a second thing to forget to invalidate — which is exactly the bug
+    `tests/test_job_signals.py`'s missing-file tests kept re-creating.
+    """
+    return tuple(p for phrases in _seniority_terms().values() for p in phrases)
+
+
+# Trailing junk a strip can expose: "Director of Engineering" -> "of
+# Engineering", "Senior, Data Engineer" -> ", Data Engineer". Punctuation only
+# — no vocabulary.
+_STRIP_EDGE = " -–—,/&:·|�"
+
+
+def strip_seniority(text: str) -> str:
+    """Return `text` with its RANK words removed, keeping the DOMAIN.
+
+    "AI/ML Engineer Intern" -> "AI/ML Engineer". "Senior Data Engineer" ->
+    "Data Engineer". "Intern" -> "" (nothing but a rank).
+
+    WHY THIS EXISTS (measured live, 2026-08-13). Reed, Adzuna and Careerjet
+    match a query as AND-of-terms, so one extra rank token collapses the result
+    set instead of re-ranking it: "Machine Learning Engineer" returned 486 /
+    806 / 856 jobs, "Machine Learning Engineer Intern" returned 0 / 1 / 1. A
+    control query with a nonsense word ("… Banana") returned 0 everywhere,
+    proving it is the AND, not the word. So a rank word in a QUERY is a ~99.9%
+    recall loss.
+
+    WHY IT REUSES THE JOB-SIDE VOCABULARY. `seniority_terms.txt` is already
+    tuned for exactly the traps a naive intern/junior/senior list walks into:
+    bare "staff" is absent (NHS "Staff Nurse" is an entry grade) and bare
+    "executive" is absent ("Account Executive" is a UK entry title), so both
+    survive this function untouched. `_SENIORITY_NOISE` is honoured too, so
+    "Lead Generation Executive" keeps its "lead".
+
+    Never raises; returns the input unchanged when the vocabulary is
+    unavailable (see `_load_terms`'s degrade-quietly contract).
+    """
+    if not text:
+        return text
+    pattern = _phrase_pattern(_all_seniority_phrases())
+    if pattern is None:
+        return text
+    protected = [m.span() for m in _SENIORITY_NOISE.finditer(text)]
+
+    def _is_protected(start: int, end: int) -> bool:
+        return any(ps <= start and end <= pe for ps, pe in protected)
+
+    out: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        if _is_protected(*match.span()):
+            continue
+        out.append(text[cursor : match.start()])
+        cursor = match.end()
+    out.append(text[cursor:])
+    return re.sub(r"\s+", " ", "".join(out)).strip(_STRIP_EDGE)
+
 
 # ---------------------------------------------------------------------------
 # Wiring the detectors into scoring

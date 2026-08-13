@@ -141,8 +141,21 @@ include = ["src*"]
 # degraded silently to empty sets for four days. Verify after any packaging
 # change with:
 #   pip wheel . --no-deps -w /tmp/wh && unzip -l /tmp/wh/job360-*.whl | grep gazetteer
+#
+# job_signals JOINED THIS BLOCK 2026-08-13, for the identical reason. It lived
+# at `backend/data/job_signals/` — outside every package — and the API image got
+# away with it only because `uvicorn main:app` puts `/app` on sys.path FIRST.
+# The WORKER does not: `arq` is a console script and arq/cli.py APPENDS cwd, so
+# site-packages wins and that copy had no `data/` beside it. `_load_terms`
+# returns {} on a missing file, so every seniority/workplace detection in the
+# worker answered UNKNOWN, silently. Same verification command:
+#   pip wheel . --no-deps -w /tmp/wh && unzip -l /tmp/wh/job360-*.whl | grep job_signals
 [tool.setuptools.package-data]
-src = ["data/uk_gazetteer/*.txt", "data/uk_gazetteer/NOTICE"]
+src = [
+    "data/uk_gazetteer/*.txt",
+    "data/uk_gazetteer/NOTICE",
+    "data/job_signals/*.txt",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

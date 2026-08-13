@@ -6,6 +6,7 @@ import re
 
 from src.core.keywords import LOCATIONS, VISA_KEYWORDS
 from src.core.skill_synonyms import canonicalize_skill
+from src.services.job_signals import strip_seniority
 from src.services.profile.models import CVData, SearchConfig, UserProfile
 from src.services.profile.skill_tiering import (
     collect_evidence_from_profile,
@@ -65,10 +66,43 @@ _ROLE_WORDS = {
 #   1 SPLIT     one raw title -> 1-2 candidates (dash clause cut, parenthetical
 #               promoted to its own candidate — "(SDET)" is a real search term)
 #   2 NORMALISE collapse whitespace, strip edge punctuation
+#   2a DERANK   drop the RANK word, keep the DOMAIN noun (see below)
+#   2b UNSLASH  "AI/ML Engineer" -> "AI Engineer" + "ML Engineer" (see below)
 #   3 ADMIT     keep only titles that name a DOMAIN, not just a rank
 #   4 DEDUP     drop a title that is a kept title + rank words (redundant under
 #               AND-of-terms matching: the broader query already returns it)
-#   5 ORDER+CAP typed targets first (never dropped, never capped), then history
+#   5 ORDER+CAP typed targets first (never dropped, never capped), then the CV
+#               HEADLINE, then work history
+#
+# THE SECOND DEFECT — A RANK WORD IN THE QUERY DESTROYS THE RESULT SET
+# (measured live 2026-08-13, same three boards):
+#
+#                                     Reed   Adzuna  Careerjet
+#   "Machine Learning Engineer"        486     806      856
+#   "Machine Learning Engineer Intern"   0       1        1
+#   "Machine Learning Engineer Banana"   0       0        0   <- control
+#
+# The nonsense control returning 0 everywhere is the proof: these boards match
+# AND-of-terms, so an extra token does not RE-RANK the results, it DELETES them.
+# "Intern" in a query is therefore a ~99.9% recall loss — the user's own past
+# rank silently censors every step-up job they were searching for. Stripping
+# rank words alone, same six queries and the same request budget, took Adzuna
+# from 168 to 222 unique jobs (+32%).
+#
+# THE THIRD DEFECT — "/" MEANS "OR" ON REED AND "AND" ON ADZUNA:
+#   Reed:  "AI" -> 4452, "ML" -> 176, "AI/ML" -> 4475 (~the union)
+#          "AI/ML Engineer Intern" -> 4453, i.e. IDENTICAL to bare "AI";
+#          zero of the 100 titles returned contained "intern", and the top hits
+#          were "AI Marketing Operations Manager" / "Recruitment Consultant".
+#   Adzuna: the SAME string -> 0.
+# One query, two opposite failures — junk on one board, nothing on the other.
+# So a slash is split into separate queries instead of being sent as one.
+#
+# WHY THIS IS NOT A RULE-#29 GUESS. Nothing here infers a LEVEL. It removes a
+# word from a QUERY; a query with no rank word is the free NEUTRAL that returns
+# every level, which is exactly what rule #29 asks for when the user has stated
+# no preference. `preferences.experience_level_inferred` is neither read nor
+# written here, and no inferred level reaches scoring.
 #
 # Rule #28 note: steps 3 and 4 reuse `_ROLE_WORDS` above — vocabulary that
 # already existed in this file for `supporting_role_words`. Nothing new is
@@ -152,6 +186,146 @@ def _normalise_title(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(_EDGE_PUNCT)
 
 
+def _derank(text: str) -> str:
+    """STEP 2a — the same role, minus its RANK word.
+
+    "AI/ML Engineer Intern" -> "AI/ML Engineer". "Senior Data Engineer" ->
+    "Data Engineer". See the module header for the measurement that makes this
+    the single highest-value edit in the file.
+
+    THE VOCABULARY IS NOT DEFINED HERE, on purpose (CLAUDE.md rule #28, and
+    `profile/seniority.py`'s explicit "no parallel word list"). It comes from
+    `job_signals.strip_seniority`, i.e. `src/data/job_signals/seniority_terms.txt`,
+    which is already tuned for the two traps a hand-typed list walks straight
+    into: bare "staff" is absent because "Staff Nurse" is an NHS Band 5 ENTRY
+    grade, and bare "executive" is absent because "Account Executive" is a UK
+    entry title. Both come out of this function unchanged.
+
+    THE SAFETY RULE — never trade a working query for a useless one. The
+    stripped form is used ONLY when it still carries >= 2 meaningful words.
+    Otherwise the original is returned untouched. That one condition covers
+    every degenerate case at once:
+
+      "Intern"                -> ""            -> keep "Intern"   (R4: a bad
+                                                   query beats no query)
+      "Graduate Engineer"     -> "Engineer"    -> keep the original: "Engineer"
+                                                  is a role noun, not a domain,
+                                                  and the admit gate would drop
+                                                  it anyway
+      "Head of Data"          -> "Data"        -> keep the original
+      "Director of Engineering" -> "of Engineering" -> keep the original
+
+    So this function can only ever make a query BROADER or leave it alone. It
+    can never empty the list (R4) and never removes a term that was previously
+    fetching supply for the shared catalog (R5).
+    """
+    stripped = _normalise_title(strip_seniority(text))
+    if len(_title_tokens(stripped)) >= 2:
+        return stripped
+    return text
+
+
+# A slash BETWEEN WORDS, e.g. the "AI/ML" of "AI/ML Engineer". Letters only, so
+# "24/7" (digits) is never touched, and at most three branches so one title
+# cannot swallow the whole query budget. Structural, not vocabulary.
+_SLASH_GROUP_RE = re.compile(r"^[A-Za-z]+(?:/[A-Za-z]+){1,2}$")
+# The spaced form, "AI / ML" or "Software Engineer / Data Scientist", where the
+# slash separates whole titles rather than words.
+_SPACED_SLASH_RE = re.compile(r"\s+/\s+")
+
+
+def _expand_slashes(title: str) -> list[str]:
+    """STEP 2b — one slashed title becomes several unslashed queries.
+
+    "AI/ML Engineer" -> ["AI Engineer", "ML Engineer"], because that string is
+    read as OR by Reed (returning 4,475 rows for what is effectively bare "AI")
+    and as AND by Adzuna (returning 0). Neither board answers the question the
+    user meant.
+
+    Expansion is REFUSED whenever any branch would be left with fewer than two
+    meaningful words — "AI / ML" would become the queries "AI" and "ML", which
+    is precisely the 4,452-row junk result the split exists to avoid. In that
+    case the title is passed through unchanged, so this step, like `_derank`,
+    can only improve a query or leave it alone.
+    """
+    if "/" not in title:
+        return [title]
+
+    spaced = [p for p in (_SPACED_SLASH_RE.split(title)) if p.strip()]
+    branches: list[str] = []
+    if len(spaced) > 1:
+        branches = [_normalise_title(p) for p in spaced]
+    else:
+        words = title.split()
+        for i, word in enumerate(words):
+            if "/" in word and _SLASH_GROUP_RE.match(word):
+                branches = [
+                    _normalise_title(" ".join(words[:i] + [part] + words[i + 1 :]))
+                    for part in word.split("/")
+                ]
+                break
+
+    if not branches or any(len(_title_tokens(b)) < 2 for b in branches):
+        return [title]
+    return branches
+
+
+# A headline is a TAGLINE, not a sentence: people separate its claims with
+# pipes, commas, bullets or a SPACED dash ("AI/ML Engineer | Generative AI
+# Specialist"). The dash must be spaced so "E-commerce Manager" survives, and
+# "/" is deliberately NOT a separator here — `_expand_slashes` owns that, and
+# splitting the headline on it would turn "AI/ML Engineer" into the useless
+# fragment "AI" plus "ML Engineer".
+_HEADLINE_SPLIT_RE = re.compile(r"\s*[|;·•]\s*|\s*,\s*|\s+[-–—]\s+")
+# A headline segment longer than this is prose, not a role name. Structural
+# (a word count), not a vocabulary.
+_MAX_HEADLINE_TOKENS = 5
+
+
+def _headline_titles(cv: CVData) -> list[str]:
+    """The CV headline, split into candidate role names.
+
+    WHY THIS FIELD (measured across all three live profiles, 2026-08-13).
+    ``cv.headline`` is populated 3 of 3 and is ALREADY role-shaped — the real
+    value is "AI/ML Engineer | Generative AI Specialist" — yet
+    `keyword_generator` referenced it exactly zero times. Meanwhile
+    ``about_me``, ``preferred_locations`` and a typed ``experience_level`` were
+    populated 0 of 3. A headline says what the person IS AND WANTS; a work
+    history title says only what they WERE, which is how an ex-intern's search
+    ends up made of intern titles.
+
+    It is placed AHEAD of work history and BEHIND typed targets: it is more
+    forward-looking than history and less explicit than something the user
+    typed into the field designed for it.
+
+    ``cv.summary`` was considered as a second source and deliberately SKIPPED.
+    It is prose ("Experienced professional with five years…"), so pulling a
+    role out of it reliably needs an LLM call, and this function runs on every
+    profile save.
+
+    ``cv.linkedin_headline`` is skipped for the same reason: the repo's own
+    documented example is "Open to AI/ML Engineer Roles UK" — an availability
+    sentence, not a title. It would need the same prose comprehension.
+    """
+    raw = (getattr(cv, "headline", "") or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for segment in _HEADLINE_SPLIT_RE.split(raw):
+        candidate = _normalise_title(segment or "")
+        if not candidate:
+            continue
+        tokens = _title_tokens(candidate)
+        if not tokens or len(tokens) > _MAX_HEADLINE_TOKENS:
+            continue
+        if candidate.lower() in seen:
+            continue
+        seen.add(candidate.lower())
+        out.append(candidate)
+    return out
+
+
 def _split_title(raw: str) -> list[str]:
     """STEP 1 — turn one raw CV title into 1-2 searchable candidates.
 
@@ -179,10 +353,16 @@ def _split_title(raw: str) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
     for cand in [primary, *aliases]:
-        cand = _normalise_title(cand)
-        if cand and cand.lower() not in seen:
-            seen.add(cand.lower())
-            candidates.append(cand)
+        # STEP 2a then 2b — drop the rank word, then unpick a slash. Order
+        # matters: deranking first means "AI/ML Engineer Intern" reaches the
+        # slash step as "AI/ML Engineer", so the branches come out clean
+        # ("AI Engineer", "ML Engineer") instead of carrying the rank into
+        # both of them.
+        for expanded in _expand_slashes(_derank(_normalise_title(cand))):
+            expanded = _normalise_title(expanded)
+            if expanded and expanded.lower() not in seen:
+                seen.add(expanded.lower())
+                candidates.append(expanded)
     return candidates
 
 
@@ -215,13 +395,26 @@ def _is_redundant(tokens: frozenset[str], kept: list[frozenset[str]]) -> bool:
     return any(k <= tokens and (tokens - k) <= _ROLE_WORDS for k in kept)
 
 
-def _build_search_titles(typed: list[str], history: list[str]) -> list[str]:
+def _build_search_titles(
+    typed: list[str], headline: list[str], history: list[str]
+) -> list[str]:
     """STEP 5 — the ordered, capped query list.
 
     ``typed`` (``preferences.target_job_titles``) comes first, in the user's
     own order, and is NEVER dropped for lack of a domain word: the user typed
-    it, so second-guessing it would be exactly the rule-#29 mistake. Only then
-    does work history fill the remaining budget.
+    it, so second-guessing it would be exactly the rule-#29 mistake. Then the
+    CV HEADLINE (see `_headline_titles` — forward-looking, populated on every
+    real profile, previously unread), and only then does work history fill the
+    remaining budget.
+
+    Typed targets still get the same hygiene as everything else — a dash clause
+    was already cut from them before this change, and the rank/slash steps are
+    more of the same. Hygiene is about what a job board can ANSWER, not about
+    overriding the user: a typed "AI/ML Engineer Intern" returned 0 jobs on
+    Adzuna and 4,453 junk rows on Reed, so honouring it literally honours
+    nothing. A typed title that is ONLY a rank ("Intern") is still emitted
+    verbatim — `_derank` leaves it alone and the domain gate never applies to
+    typed input.
 
     WHY A HISTORY FALLBACK IS NOT A RULE-#29 GUESS. Rule #29 says an empty
     preference means "don't care" — never a penalty, never a default. Four
@@ -276,7 +469,7 @@ def _build_search_titles(typed: list[str], history: list[str]) -> list[str]:
     # high-yield board queries — were never even considered, while the narrower
     # 'SDET' was. Two caps meant the wrong one decided the catalog.
     budget = max(_MAX_SEARCH_TITLES, len(kept))
-    for raw in history:
+    for raw in list(headline) + list(history):
         if len(kept) >= budget:
             break
         for candidate in _split_title(raw):
@@ -287,7 +480,7 @@ def _build_search_titles(typed: list[str], history: list[str]) -> list[str]:
     if not kept:
         # LAST RESORT — every title was rank-only ("Intern" and nothing else).
         # "Intern UK" is a poor query; NO query is a worse one (empty catalog).
-        for raw in list(typed) + list(history):
+        for raw in list(typed) + list(headline) + list(history):
             for candidate in _split_title(raw):
                 if _admit(candidate, require_domain=False):
                     return kept
@@ -318,7 +511,9 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
 
     # --- Search titles (QUERIES — the only titles a job board ever sees) ---
     typed_targets = [t for t in prefs.target_job_titles if t and t.strip()]
-    search_titles = _build_search_titles(typed_targets, _history_titles(cv))
+    search_titles = _build_search_titles(
+        typed_targets, _headline_titles(cv), _history_titles(cv)
+    )
 
     # --- Skills (Batch 1.3a — evidence-based tiering by source + frequency) ---
     # Replaces the naive position-based thirds split (pillar_1_report #1).
@@ -433,8 +628,46 @@ def generate_search_config(profile: UserProfile) -> SearchConfig:
             queries.append(f"{title} {loc}")
     queries = queries[:16]
 
+    # --- PART 2: the RANKING ratchet -------------------------------------
+    # Fixing the fetch is not enough. `job_titles` is the SCORER's evidence and
+    # still holds "AI/ML Engineer Intern" verbatim, so `_title_score` awards the
+    # full 40/40 only to a posting titled exactly that — an INTERN posting —
+    # while the step-up "AI/ML Engineer" posting can reach at best 20 (PASS 2
+    # containment) or the 30-band. Perfect queries would fetch the right jobs
+    # and then rank them below the wrong ones; the user opens the feed, still
+    # sees intern jobs on top, and correctly reports the bug as unfixed.
+    #
+    # So the RANK-FREE form of a held title is added as ADDITIONAL evidence.
+    # Nothing is removed — that is the invariant `job_titles` has always
+    # carried, and it still holds.
+    #
+    # WHY THIS IS A FACT-READ, NOT AN INVENTED LEVEL (R1/R2). "AI/ML Engineer"
+    # is the SAME string the user already wrote on their CV, minus one word. It
+    # asserts no level: it does not claim they are senior, junior or anything
+    # else, and `preferences.experience_level_inferred` is neither read nor
+    # written here. Contrast the thing R2 forbids — writing an inferred LEVEL,
+    # which `scoring_dimensions.seniority_score` would turn into a NEGATIVE
+    # (down to -100% of the weight at 4 ranks apart) and use to re-rank jobs
+    # against each other. This change cannot go negative and cannot demote
+    # anything: it only lets a rank-free posting reach a tier the intern
+    # posting already had. Both end up at 40; nothing is pushed down.
+    #
+    # DELIBERATELY NOT USED for the vocabulary built above. `relevance_keywords`
+    # is unaffected either way (a rank-free title's tokens are a subset), but
+    # `core_domain_words` counts DISTINCT title token-sets, and "Senior Data
+    # Engineer" vs "Data Engineer" are different sets — feeding both would let
+    # one CV title fake the cross-title corroboration that gate is built on. So
+    # the loops above read `titles`; only the emitted evidence list is widened.
+    evidence_titles = list(titles)
+    evidence_seen = {t.lower() for t in evidence_titles}
+    for raw in titles:
+        rank_free = _derank(raw)
+        if rank_free and rank_free.lower() not in evidence_seen:
+            evidence_titles.append(rank_free)
+            evidence_seen.add(rank_free.lower())
+
     return SearchConfig(
-        job_titles=titles,
+        job_titles=evidence_titles,
         search_titles=search_titles,
         primary_skills=_canonicalize_skill_list(primary),
         secondary_skills=_canonicalize_skill_list(secondary),

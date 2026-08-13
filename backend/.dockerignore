@@ -32,8 +32,14 @@ data/
 # What actually carries it into the image is
 # `[tool.setuptools.package-data]` in backend/pyproject.toml plus
 # `pip install .` — the wheel, not this file.
-!data/job_signals/
-!data/job_signals/**
+# NOTHING IS EXEMPTED HERE ANY MORE, and that is the fix, not a regression.
+# job_signals/ MOVED to `src/data/job_signals/` on 2026-08-13, following the
+# gazetteer. The `data/` rule above is ROOT-ANCHORED, so it never reached inside
+# src/ — and, more importantly, an exemption here was never enough on its own:
+# it put the files at /app/data, which only the API process can see (uvicorn
+# inserts "." at sys.path[0]). The ARQ worker imports src from site-packages
+# (arq/cli.py appends cwd) and found nothing. `[tool.setuptools.package-data]`
+# in pyproject.toml is what carries them now — the wheel, not this file.
 
 # Python caches
 __pycache__/

@@ -1594,6 +1594,14 @@
             "title": "Preferences",
             "type": "object"
           },
+          "search_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Search Titles",
+            "type": "array"
+          },
           "skill_esco": {
             "additionalProperties": {
               "type": "string"

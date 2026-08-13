@@ -402,6 +402,34 @@ class TestSeniorityEnrichmentWins:
 
 
 class TestMissingDataFileDegradesGracefully:
+    @pytest.fixture(autouse=True)
+    def _clear_every_vocabulary_cache(self):
+        """A REAL leak these tests were causing, found 2026-08-13.
+
+        Each test below cleared only the ONE cache it was named after, but
+        `detect_workplace` touches two: `test_location_terms_file_missing`
+        calls it with a title, so `_detect_prose_signal` populated
+        `_workplace_terms` as {} while `_DATA` was still monkeypatched — and
+        nothing cleared it. Every later test in the SESSION then saw an empty
+        workplace vocabulary. It stayed invisible only because no other test
+        asserted the vocabulary was non-empty; `tests/test_shipped_data.py`
+        now does, and caught it. Under `pytest-randomly` this could have
+        surfaced anywhere.
+
+        Clearing all three on both sides is the fix — the caches are module
+        globals, so per-test cleanup belongs here, not in each test's finally.
+        """
+        from src.services import job_signals
+
+        def _clear() -> None:
+            job_signals._workplace_terms.cache_clear()
+            job_signals._seniority_terms.cache_clear()
+            job_signals._location_terms.cache_clear()
+
+        _clear()
+        yield
+        _clear()
+
     def test_workplace_terms_file_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.services import job_signals
 

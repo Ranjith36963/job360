@@ -37,8 +37,12 @@ data/
 # every scored job and their tests must pass OFFLINE (hard rule #4). CI proved
 # this the hard way — without the files committed, the detectors correctly
 # degraded to UNKNOWN and 4 tests failed in CI while passing locally.
-!backend/data/job_signals/
-!backend/data/job_signals/**
+# MOVED 2026-08-13 from `backend/data/job_signals/` to inside the package, the
+# same fix issue #260 applied to the gazetteer: the ARQ worker imports `src`
+# from site-packages (arq/cli.py APPENDS cwd, so it loses to site-packages), and
+# that copy had no sibling `data/`. Only package-data travels with the wheel.
+!backend/src/data/job_signals/
+!backend/src/data/job_signals/**
 .secrets/
 
 # Playwright MCP cache + ad-hoc test screenshots

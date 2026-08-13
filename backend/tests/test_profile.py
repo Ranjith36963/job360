@@ -392,11 +392,19 @@ _U88E7_LINKEDIN_TITLES = [
 
 
 class TestSearchTitles:
-    def _profile(self, cv_titles=None, linkedin_titles=None, targets=None, locations=None):
+    def _profile(
+        self,
+        cv_titles=None,
+        linkedin_titles=None,
+        targets=None,
+        locations=None,
+        headline="",
+    ):
         return UserProfile(
             cv_data=CVData(
                 raw_text="test cv",
                 job_titles=list(cv_titles or []),
+                headline=headline,
                 linkedin_positions=[{"title": t} for t in (linkedin_titles or [])],
             ),
             preferences=UserPreferences(
@@ -466,6 +474,122 @@ class TestSearchTitles:
         cfg = generate_search_config(self._profile(cv_titles=["E-commerce Manager"]))
         assert cfg.search_titles == ["E-commerce Manager"]
 
+    # --- step 2a: DERANK -----------------------------------------------
+
+    def test_the_rank_word_is_dropped_and_the_domain_kept(self):
+        """The measurement this whole step exists for: on Reed/Adzuna/Careerjet
+        "Machine Learning Engineer" returns 486/806/856 jobs and the same
+        string + "Intern" returns 0/1/1. A nonsense control word returns 0
+        everywhere, so it is the AND, not the word — a rank word in a query is
+        a ~99.9% recall loss, not a ranking nudge."""
+        cfg = generate_search_config(
+            self._profile(cv_titles=["Machine Learning Engineer Intern"])
+        )
+        assert cfg.search_titles == ["Machine Learning Engineer"]
+
+        assert generate_search_config(
+            self._profile(cv_titles=["Senior Data Engineer"])
+        ).search_titles == ["Data Engineer"]
+
+    def test_a_title_that_is_only_a_rank_word_keeps_its_original_form(self):
+        """R4 — stripping must never empty the list. "Intern" is a poor query;
+        NO query is a worse one."""
+        cfg = generate_search_config(self._profile(cv_titles=["Intern"]))
+        assert cfg.search_titles == ["Intern"]
+        assert cfg.search_queries == ["Intern UK"]
+
+    def test_entry_titles_that_only_look_like_ranks_survive_intact(self):
+        """The two traps a hand-typed intern/junior/senior list walks into.
+        "Staff Nurse" is an NHS Band 5 ENTRY grade and "Account Executive" is a
+        UK entry title — `seniority_terms.txt` deliberately omits bare "staff"
+        and bare "executive", which is exactly why this reuses that file
+        instead of a new list (rule #28)."""
+        assert generate_search_config(
+            self._profile(cv_titles=["Staff Nurse"])
+        ).search_titles == ["Staff Nurse"]
+        assert generate_search_config(
+            self._profile(cv_titles=["Account Executive"])
+        ).search_titles == ["Account Executive"]
+
+    def test_stripping_never_trades_a_query_for_a_worse_one(self):
+        """Deranking is used ONLY when >= 2 meaningful words survive. Each of
+        these would otherwise collapse to a single generic noun ("Engineer",
+        "Data") or to a stopword fragment ("of Engineering")."""
+        for title in ("Graduate Engineer", "Head of Data", "Director of Engineering"):
+            assert generate_search_config(
+                self._profile(cv_titles=[title])
+            ).search_titles == [title], title
+
+    # --- step 2b: UNSLASH ----------------------------------------------
+
+    def test_a_slash_becomes_two_queries(self):
+        """Reed reads "/" as OR: "AI/ML Engineer Intern" returned 4,453 rows —
+        identical to bare "AI" — with zero "intern" in the top 100 titles,
+        while the SAME string returned 0 on Adzuna, which reads it as AND."""
+        cfg = generate_search_config(self._profile(cv_titles=["AI/ML Engineer"]))
+        assert cfg.search_titles == ["AI Engineer", "ML Engineer"]
+
+    def test_a_slash_is_left_alone_when_a_branch_would_be_one_word(self):
+        """"AI / ML" would become the queries "AI" (4,452 junk rows on Reed)
+        and "ML". Refused."""
+        cfg = generate_search_config(self._profile(cv_titles=["AI / ML intern"]))
+        assert cfg.search_titles == ["AI / ML"]
+
+    def test_digits_around_a_slash_are_never_split(self):
+        cfg = generate_search_config(self._profile(cv_titles=["24/7 Support Analyst"]))
+        assert cfg.search_titles == ["24/7 Support Analyst"]
+
+    # --- step 5 source: the CV HEADLINE ---------------------------------
+
+    def test_the_headline_becomes_searches_and_outranks_work_history(self):
+        """`cv.headline` is populated on 3 of 3 live profiles and is already
+        role-shaped — the real value is "AI/ML Engineer | Generative AI
+        Specialist" — yet this module referenced it ZERO times. A headline says
+        what the person IS AND WANTS; a history title says only what they
+        WERE, which is how an ex-intern's search ends up made of intern
+        titles."""
+        cfg = generate_search_config(
+            self._profile(
+                cv_titles=["Blockchain Developer"],
+                headline="AI/ML Engineer | Generative AI Specialist",
+            )
+        )
+        assert cfg.search_titles == [
+            "AI Engineer",
+            "ML Engineer",
+            "Generative AI Specialist",
+            "Blockchain Developer",
+        ]
+
+    def test_a_typed_target_still_outranks_the_headline(self):
+        cfg = generate_search_config(
+            self._profile(
+                targets=["Data Scientist"],
+                headline="AI/ML Engineer | Generative AI Specialist",
+            )
+        )
+        assert cfg.search_titles[0] == "Data Scientist"
+
+    def test_headline_prose_is_not_turned_into_a_query(self):
+        """A word-count guard (structure, not vocabulary): a headline segment
+        longer than a role name is a sentence, and no board can answer it."""
+        cfg = generate_search_config(
+            self._profile(
+                cv_titles=["Blockchain Developer"],
+                headline=(
+                    "Passionate about building things that genuinely matter to "
+                    "people | Data Scientist"
+                ),
+            )
+        )
+        assert cfg.search_titles == ["Data Scientist", "Blockchain Developer"]
+
+    def test_no_headline_changes_nothing(self):
+        assert (
+            generate_search_config(self._profile(cv_titles=_U88E7_CV_TITLES, headline="")).search_titles
+            == generate_search_config(self._profile(cv_titles=_U88E7_CV_TITLES)).search_titles
+        )
+
     # --- step 3: ADMIT -------------------------------------------------
 
     def test_rank_only_title_is_never_a_query(self):
@@ -495,14 +619,19 @@ class TestSearchTitles:
     def test_narrower_title_is_dropped_when_a_broader_one_is_kept(self):
         """'AI/ML Engineer Intern' is 'AI/ML Engineer' + a rank word, so under
         AND-of-terms matching the broader query already returns it. A
-        redundancy argument, NOT a seniority judgement."""
+        redundancy argument, NOT a seniority judgement.
+
+        UPDATED 2026-08-13: both now arrive DERANKED and UNSLASHED, so the
+        dedup happens one step earlier — the history title reduces to the same
+        two branches the typed target produced and is dropped on the seen-set.
+        Same outcome, one fewer wasted request."""
         cfg = generate_search_config(
             self._profile(
                 targets=["AI/ML Engineer"],
                 cv_titles=["AI/ML Engineer Intern"],
             )
         )
-        assert cfg.search_titles == ["AI/ML Engineer"]
+        assert cfg.search_titles == ["AI Engineer", "ML Engineer"]
 
     def test_a_different_role_is_not_treated_as_redundant(self):
         cfg = generate_search_config(
@@ -511,7 +640,11 @@ class TestSearchTitles:
                 cv_titles=["Blockchain Engineer Intern"],
             )
         )
-        assert cfg.search_titles == ["AI/ML Engineer", "Blockchain Engineer Intern"]
+        assert cfg.search_titles == [
+            "AI Engineer",
+            "ML Engineer",
+            "Blockchain Engineer",
+        ]
 
     # --- step 5: ORDER + CAP -------------------------------------------
 
@@ -538,16 +671,47 @@ class TestSearchTitles:
     def test_u88e7_search_titles_are_the_six_real_searches(self):
         """Six, not five: a second per-role cap used to stop the walk after 4
         roles and hand back 5 queries out of an allowed 6, spending the last
-        slot on nothing. One cap (the query budget) governs now."""
+        slot on nothing. One cap (the query budget) governs now.
+
+        UPDATED 2026-08-13 — THIS ASSERTION PINNED THE BUG. Its previous value
+        contained "AI/ML Engineer Intern" and "Blockchain Engineer Intern",
+        which live measurement then showed are not narrow queries but DEAD
+        ones: on Reed/Adzuna/Careerjet "Machine Learning Engineer" returns
+        486/806/856 jobs and the same string + "Intern" returns 0/1/1, and a
+        nonsense control word returns 0 everywhere, proving the boards AND
+        their terms. "AI/ML Engineer Intern" specifically returned 0 on Adzuna
+        and, on Reed, 4,453 rows identical to bare "AI" (the slash reads as OR)
+        with not one "intern" among the top 100 titles.
+
+        "Founder & Product Analyst" drops out of the budget because the slash
+        split turns one dead query into two live ones. That is the intended
+        trade, not a casualty: it buys the user's actual domain two working
+        searches in place of one broken one.
+        """
         cfg = generate_search_config(self._u88e7())
         assert cfg.search_titles == [
             "AI Solutions Engineer",
-            "AI/ML Engineer Intern",
-            "Blockchain Engineer Intern",
+            "AI Engineer",
+            "ML Engineer",
+            "Blockchain Engineer",
             "Software Development Engineer in Test",
             "SDET",
-            "Founder & Product Analyst",
         ]
+
+    def test_no_search_title_carries_a_rank_word(self):
+        """The rule the assertion above now enforces, stated directly."""
+        cfg = generate_search_config(self._u88e7())
+        from src.services.job_signals import strip_seniority
+
+        for title in cfg.search_titles:
+            assert strip_seniority(title) == title, f"rank word in query: {title!r}"
+
+    def test_no_search_title_contains_a_slash_between_words(self):
+        """Reed reads "/" as OR and Adzuna as AND — one string, two opposite
+        failures. Neither may be sent."""
+        cfg = generate_search_config(self._u88e7())
+        for title in cfg.search_titles:
+            assert "/" not in title, f"slash in query: {title!r}"
 
     def test_the_oldest_roles_stay_out_of_the_search(self):
         """A CV lists roles newest-first, so the budget keeps the most RECENT
@@ -565,18 +729,25 @@ class TestSearchTitles:
         cfg = generate_search_config(self._u88e7())
         assert cfg.search_queries == [
             "AI Solutions Engineer UK",
-            "AI/ML Engineer Intern UK",
-            "Blockchain Engineer Intern UK",
+            "AI Engineer UK",
+            "ML Engineer UK",
+            "Blockchain Engineer UK",
             "Software Development Engineer in Test UK",
             "SDET UK",
-            "Founder & Product Analyst UK",
         ]
         assert "Intern UK" not in cfg.search_queries
         assert not any("Department" in q for q in cfg.search_queries)
         assert not any("(" in q or ")" in q for q in cfg.search_queries)
 
     def test_u7edd_queries(self):
-        """Live user 7edd5b59…: two typed targets, no preferred locations."""
+        """Live user 7edd5b59…: two typed targets, no preferred locations.
+
+        The typed "AI/ML Engineer Intern" becomes two queries. A typed value is
+        never second-guessed as a PREFERENCE — but a query is an instrument,
+        and that exact string fetched 0 jobs on Adzuna and 4,453 wrong ones on
+        Reed. Honouring it literally honours nothing. (A typed title that is
+        ONLY a rank, e.g. "Intern", is still sent verbatim — see
+        `test_typed_targets_come_first_and_are_never_dropped`.)"""
         cfg = generate_search_config(
             self._profile(
                 targets=[
@@ -587,13 +758,19 @@ class TestSearchTitles:
         )
         assert cfg.search_queries == [
             "AI Solutions Engineer UK",
-            "AI/ML Engineer Intern UK",
+            "AI Engineer UK",
+            "ML Engineer UK",
         ]
 
     def test_uad13_queries(self):
         """Live user ad13c75d…: typed targets first, history fills the rest,
-        and 'AI/ML Engineer Intern' drops out as redundant against the typed
-        'AI/ML Engineer'."""
+        and 'AI/ML Engineer Intern' drops out — it deranks and unslashes to the
+        very branches the typed 'AI/ML Engineer' already produced.
+
+        'AI / ML intern' loses its rank word but is NOT split: the branches
+        would be the bare queries "AI" and "ML", which is the 4,452-row junk
+        result the split exists to avoid. Expansion is refused whenever a
+        branch would fall below two meaningful words."""
         cfg = generate_search_config(
             self._profile(
                 targets=["AI/ML Engineer", "Machine Learning Engineer"],
@@ -605,28 +782,87 @@ class TestSearchTitles:
             )
         )
         assert cfg.search_titles == [
-            "AI/ML Engineer",
+            "AI Engineer",
+            "ML Engineer",
             "Machine Learning Engineer",
             "AI Solutions Engineer",
-            "AI / ML intern",
+            "AI / ML",
         ]
 
     # --- invariants -----------------------------------------------------
 
-    def test_job_titles_are_untouched_by_query_hygiene(self):
-        """GOLDEN / scoring-neutrality guard. `job_titles` is the SCORER's
-        evidence list and must keep every raw title, uncapped and unfiltered —
-        cleaning it would silently re-rank every existing user's feed.
-        Also pins the revert of an earlier WIP that collapsed this to one."""
-        cfg = generate_search_config(self._u88e7())
-        assert cfg.job_titles == _U88E7_CV_TITLES
+    def test_job_titles_keep_every_raw_title_in_order(self):
+        """GOLDEN guard. `job_titles` is the SCORER's evidence list and must
+        keep every raw title, uncapped and unfiltered — REMOVING one would
+        silently re-rank every existing user's feed. Also pins the revert of an
+        earlier WIP that collapsed this to one.
 
-    def test_search_never_empty_when_the_profile_has_any_title(self):
-        """Silence is fine for a scoring input; for a query it means an EMPTY
-        CATALOG. Even an all-rank-only history must yield something."""
-        cfg = generate_search_config(self._profile(cv_titles=["Intern", "Trainee"]))
+        RENAMED + WIDENED 2026-08-13. The old name said "untouched by query
+        hygiene" and asserted equality, which pinned "nothing is ADDED" as
+        well. That was right for the query-hygiene batch and is wrong now: it
+        blocked the ranking fix. The invariant that actually protects users is
+        that nothing is REMOVED and the order is stable, which is what this
+        asserts. Additions are covered by the test below."""
+        assert generate_search_config(self._u88e7()).job_titles[
+            : len(_U88E7_CV_TITLES)
+        ] == _U88E7_CV_TITLES
+
+    def test_rank_free_forms_join_the_scorer_evidence(self):
+        """PART 2 — the RANKING ratchet.
+
+        Fixing the fetch is not enough. `_title_score` awards the full 40/40
+        only on an EXACT match against a config title. With only
+        "AI/ML Engineer Intern" in the list, an INTERN posting scored 40 and
+        the step-up "AI/ML Engineer" posting capped at 20 — so a perfect search
+        would fetch the right jobs and rank them below the wrong ones.
+
+        This reads a FACT off the CV (the same title, minus one word), it does
+        not invent a LEVEL: nothing here writes
+        `preferences.experience_level_inferred`, and nothing can go negative
+        the way `scoring_dimensions.seniority_score` can. Both postings end up
+        at 40; nothing is demoted."""
+        from src.services.skill_matcher import TITLE_WEIGHT, JobScorer
+
+        cfg = generate_search_config(self._u88e7())
+        assert "AI/ML Engineer" in cfg.job_titles
+        assert "Blockchain Engineer" in cfg.job_titles
+        # A rank-only title has no rank-free form to add.
+        assert cfg.job_titles.count("Intern") == 1
+
+        scorer = JobScorer(cfg)
+        assert scorer._title_score("AI/ML Engineer") == TITLE_WEIGHT
+        # …and the intern posting is not pushed down to make room.
+        assert scorer._title_score("AI/ML Engineer Intern") == TITLE_WEIGHT
+
+    @pytest.mark.parametrize(
+        "titles",
+        [
+            ["Intern", "Trainee"],
+            ["Intern"],
+            ["Graduate"],
+            ["Senior"],
+            ["AI / ML"],
+            ["Head of"],
+            ["Staff Nurse (Band 5)"],
+            _U88E7_CV_TITLES,
+        ],
+    )
+    def test_search_never_empty_when_the_profile_has_any_title(self, titles):
+        """R4 — silence is fine for a scoring input; for a query it means an
+        EMPTY CATALOG. Every new filter in this file (derank, unslash, the
+        headline word-count guard) is a chance to empty the list for exactly
+        the users it was meant to help, and `sources/base.py` then falls back
+        to the RAW `job_titles` — uncapped, unhygienised junk. So this is
+        swept, not spot-checked."""
+        cfg = generate_search_config(self._profile(cv_titles=titles))
         assert cfg.search_titles
         assert cfg.search_queries
+
+    def test_search_is_not_empty_for_a_headline_only_profile(self):
+        cfg = generate_search_config(
+            self._profile(headline="AI/ML Engineer | Generative AI Specialist")
+        )
+        assert cfg.search_titles == ["AI Engineer", "ML Engineer", "Generative AI Specialist"]
 
     def test_no_titles_at_all_yields_no_queries(self):
         cfg = generate_search_config(self._profile())

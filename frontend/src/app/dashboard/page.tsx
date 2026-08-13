@@ -9,9 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { JobList } from "@/components/jobs/JobList";
 import { TimeBuckets } from "@/components/jobs/TimeBuckets";
+import { SearchingFor } from "@/components/jobs/SearchingFor";
 import { FilterPanel, DEFAULT_MIN_SCORE } from "@/components/jobs/FilterPanel";
 import {
   getJobs,
+  getProfile,
   getStatus,
   startSearch,
   getSearchStatus,
@@ -22,7 +24,13 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "@/lib/toast";
 import { apiErrorMessage } from "@/lib/api-error";
-import type { JobFilters, JobListResponse, JobResponse, StatusResponse } from "@/lib/types";
+import type {
+  JobFilters,
+  JobListResponse,
+  JobResponse,
+  ProfileResponse,
+  StatusResponse,
+} from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Bucket helpers — count jobs client-side by age
@@ -188,6 +196,24 @@ export default function DashboardPage() {
     // Best-effort — don't block the page if the backend is slow
     retry: 1,
   });
+
+  // ---------------------------------------------------------------------------
+  // TanStack Query — the search titles we actually send to the job boards
+  // ---------------------------------------------------------------------------
+
+  // Purely informational, so it is deliberately the cheapest query on the page:
+  // no retry, a long staleTime, and every failure mode is silence. A user with
+  // no profile yet gets a 404 here — that is the NORMAL case for a new account,
+  // not an error worth showing. `search_titles` is served by the same
+  // `generate_search_config` call the pipeline runs, so this line reports what
+  // the boards were really asked, not a re-derivation that could drift.
+  const { data: profileData } = useQuery<ProfileResponse>({
+    queryKey: queryKeys.profile(),
+    queryFn: getProfile,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const searchTitles = profileData?.search_titles;
 
   // ---------------------------------------------------------------------------
   // Bucket changes
@@ -557,6 +583,12 @@ export default function DashboardPage() {
             counts={counts}
           />
         </div>
+
+        {/* ---- What we actually searched for ----
+              Sits directly above the results it explains. Renders nothing at
+              all when there are no titles (new account, failed fetch), so it
+              can never turn into an empty label or an error. ---- */}
+        <SearchingFor titles={searchTitles} />
 
         {/* ---- Job list error banner (H9) — a fetch failure must never look
               like "you have zero matches"; render a distinct error state

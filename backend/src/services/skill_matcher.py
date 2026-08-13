@@ -35,7 +35,18 @@ from src.services.scoring_dimensions import ScoreBreakdown
 #   4 = title matching repaired: whole-word phrase containment (was a raw
 #       substring test, so "Intern" matched "Internal Auditor") + the exact
 #       match is reachable again (was shadowed by a longer list-mate)
-SCORER_VERSION = 4
+#   5 = the RANK-FREE form of each held title joins `config.job_titles` as
+#       extra scorer evidence (keyword_generator, "PART 2: the RANKING
+#       ratchet"). Before this, an ex-intern's "AI/ML Engineer Intern" was the
+#       only exact match in the list, so INTERN postings scored 40/40 on title
+#       while the step-up "AI/ML Engineer" posting capped at 20 — the feed
+#       ranked the jobs the user was trying to leave above the ones they were
+#       searching for. Nothing is demoted; the rank-free posting simply becomes
+#       reachable at the same tier. No code in this module changed, but the
+#       score a given (job, profile) pair produces does, so existing
+#       `user_feed` rows must re-score — which is exactly what this constant is
+#       for.
+SCORER_VERSION = 5
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
