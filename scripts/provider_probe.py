@@ -219,16 +219,39 @@ def main() -> int:
     if FORCE_RED:
         results.append(("DRILL", "DEAD", "forced red to prove the chain — no key is actually broken"))
 
+    # ORDER IS LOAD-BEARING. This check used to sit BELOW the `if not results`
+    # guard, which made the whole LLM alarm dead on arrival: an environment with
+    # no provider secrets at all returns 2 from that guard and never reaches
+    # here. Measured on the live scheduled run 31683129750 (2026-08-13T08:40) —
+    # `no provider credentials are configured` + exit 2 — and external-health has
+    # conclusion=failure on 8 of 8 runs since 2026-08-06. It has NEVER been green.
+    #
+    # So the promised "within 24 hours an issue appears saying no LLM key is
+    # configured" would never have happened: the job would just go red the same
+    # way it already does, with no issue and no triage. An environment with zero
+    # secrets trivially has zero LLM keys — that is the SAME alarm, not a
+    # separate blind-probe case, and it must be reported as such.
+    no_llm_key = all(not env(name) for name in LLM_KEY_VARS)
+
     if not results:
         print("::error::no provider credentials are configured, so nothing could be probed.")
         print(
             "This is a BLIND result, not a clean one. Add the provider keys as repo "
             "secrets, or this loop will report success forever while proving nothing."
         )
+        if no_llm_key:
+            print()
+            print("## No LLM provider is configured at all — the judge is DOWN")
+            print()
+            print(
+                "None of " + ", ".join("`" + n + "`" for n in LLM_KEY_VARS) + " is set. "
+                "Any ONE of them unblocks the judge; GROQ, GEMINI and CEREBRAS have "
+                "free tiers. Until one is set, every ranking eval reports "
+                "'produced no judgments' — which reads as a QUALITY regression and "
+                "is not one."
+            )
+            return 3
         return 2
-
-    # A whole capability with no credential at all is DOWN, not "off".
-    no_llm_key = all(not env(name) for name in LLM_KEY_VARS)
 
     dead = [r for r in results if r[1] == "DEAD"]
     print("# Provider key probe — is every credential still alive?\n")
