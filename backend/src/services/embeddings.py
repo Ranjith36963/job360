@@ -250,7 +250,9 @@ def profile_to_embedding_text(profile: Any) -> str:
     if prefs is not None:
         _add_all(getattr(prefs, "industries", []))
         _add_all(getattr(prefs, "preferred_locations", []))
-        for attr in ("preferred_workplace", "experience_level", "work_arrangement"):
+        # preferred_workplace dropped: it is derived from work_arrangement, so it
+        # only duplicated a token already in the vector text.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())

@@ -247,7 +247,9 @@ def profile_to_matcher_text(profile: Any) -> str:
 
     if prefs is not None:
         pref_bits: list[str] = []
-        for attr in ("experience_level", "work_arrangement", "preferred_workplace"):
+        # work_arrangement only — preferred_workplace is now derived FROM it, so
+        # listing both sent the judge the same answer twice on every job.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if v:
                 pref_bits.append(f"{attr}={v}")

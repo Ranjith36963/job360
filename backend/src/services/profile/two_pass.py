@@ -46,6 +46,7 @@ from src.services.profile.preferences import (
     deterministic_about_me_fields,
     llm_infer_from_about_me,
     merge_cv_and_preferences,
+    skills_already_held,
 )
 from src.services.profile.seniority import infer_experience_level
 
@@ -643,16 +644,20 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
 
     # Adjacent-skill SUGGESTIONS (opt-in, never auto-counted) from the full set of
     # skills the user actually has across all sources.
-    _all_skills = list(
-        dict.fromkeys(
-            (cv.skills or [])
-            + (cv.linkedin_skills or [])
-            + (cv.github_llm_skills or [])
-            + list((cv.github_languages or {}).keys())
-            + (prefs.additional_skills or [])
-        )
+    #
+    # This list USED to be hand-assembled here, and it disagreed with the list
+    # `sanitize_preferences` strips against: it read `github_languages` instead
+    # of `github_skills_inferred` (which is languages PLUS repo topics) and left
+    # out `cv_skills_esco`. So a topic-derived skill could be offered as a
+    # suggestion, accepted by the user, and then stripped from
+    # `additional_skills` on the very next save — the accepted chip just
+    # disappeared, with nothing on screen to explain it.
+    #
+    # Both sides now derive from `skills_already_held`, so the suggester cannot
+    # offer something the sanitizer will immediately take away.
+    cv.suggested_skills = await llm_suggest_adjacent_skills(
+        skills_already_held(cv, prefs)
     )
-    cv.suggested_skills = await llm_suggest_adjacent_skills(_all_skills)
 
     # ── Fold the freshly-extracted CV skills/titles into preferences ──
     # (Was done in the CV upload route; lives here now so the SINGLE extractor

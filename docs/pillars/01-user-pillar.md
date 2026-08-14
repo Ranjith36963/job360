@@ -252,7 +252,9 @@ Free-text and select fields the user fills in on `/profile`:
 - `negative_keywords` (e.g. "intern", "junior")
 - `about_me` (free-form), `github_username`
 - `needs_visa` (boolean)
-- `preferred_workplace` (Pillar 2 addition)
+- `preferred_workplace` — DERIVED, not stored: a read-only property over
+  `work_arrangement` (2026-08-13). It was a stored copy kept in step by a
+  bridge in the profile route; the copy is gone, so the two cannot diverge.
 
 ### 3.3 The data model — `backend/src/services/profile/models.py`
 

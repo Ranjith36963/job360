@@ -179,7 +179,7 @@ class TestPreferences:
             cv_data=CVData(),
             preferences=UserPreferences(
                 github_username="ranjith36963",
-                preferred_workplace="remote",
+                work_arrangement="remote",
                 needs_visa=True,
             ),
         )
