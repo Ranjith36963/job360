@@ -183,6 +183,27 @@ jobs:
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
+      # FALLBACK LAST MILE. All three branches above key off `announce`, which
+      # the notify step only writes once it reaches the end of whichever arm it
+      # took. If notify dies first — an unbound variable under `set -u`, a gh
+      # 403, a missing audit.out — none of them fire and a weekly quality
+      # measurement vanishes without a sound. The loop would look GREEN.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.notify.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "accuracy-audit: the ALARM step failed — the weekly result is unreported"
+          body: |
+            The audit ran but the step that files/closes its tracking issues
+            failed, so none of the three normal messages could be sent. Nobody
+            knows whether the ranking regressed, the instrument broke, or it
+            passed. This means the messenger broke, not that accuracy is fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
       - name: Slack — accuracy within benchmark
         if: always() && steps.notify.outputs.announce == 'ok'
         uses: ./.github/actions/slack

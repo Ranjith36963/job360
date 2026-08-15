@@ -661,8 +661,41 @@ jobs:
             Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
+      # FALLBACK LAST MILE for the verdict step. Everything the checker decides
+      # — the label, the retry dispatch, and the `capped` output the alert above
+      # keys off — is written by ONE step, and that step is `continue-on-error`,
+      # so if it dies the job stays green and every branch that quotes it simply
+      # skips. Silently. Including the retry: a rejected repair would never be
+      # re-dispatched and nobody would be told the loop had stopped thinking.
+      - name: Slack — the checker/retry step itself broke
+        if: always() && steps.verdict.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Repair loop: the CHECKER step failed on issue #${{ steps.issue.outputs.num }}"
+          body: |
+            The blind checker's verdict step died, so no verdict was posted and
+            no automatic retry was dispatched. A PR may still be open and
+            unreviewed. This message means the reviewer broke, not that the
+            repair is fine.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.issue.outputs.num }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # GATE: `steps.ship.outcome != 'success'`, NOT a bare `failure()`.
+      # `failure()` means "ANY step in this job has failed" — including the
+      # Slack step above. So a Slack rate-limit or a rotated token used to turn
+      # this on AFTER the PR had already been opened, and the loop would tell
+      # the owner it had failed while the fix sat waiting to merge. The alerting
+      # path must never be able to change the reported outcome of the work it is
+      # describing. `ship` is exactly the question this step is asking: did a PR
+      # get opened? success = yes; failure or skipped (cage refused, no edits,
+      # verify red, an earlier step died) = no. Machine-enforced by
+      # scripts/check_alert_paths.py (RULE A).
       - name: Report back when it could not fix it
-        if: always() && steps.token.outputs.have == 'true' && (steps.cage.outputs.changed == '' || failure())
+        if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -697,8 +730,11 @@ jobs:
       # taking it by hand are all human choices — so: needs-your-decision.
       # Without this the issue just sits there, which is precisely the failure
       # mode that left 6 issues with zero comments for 3-8 days.
+      # Same gate as the issue comment above, and for the same reason: a broken
+      # Slack step must not be able to make this loop announce a failure that
+      # did not happen.
       - name: Slack — the repair loop could not fix it
-        if: always() && steps.token.outputs.have == 'true' && (steps.cage.outputs.changed == '' || failure())
+        if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome != 'success'
         uses: ./.github/actions/slack
         with:
           channel: needs-your-decision

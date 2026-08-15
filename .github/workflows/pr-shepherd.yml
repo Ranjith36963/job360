@@ -171,3 +171,25 @@ jobs:
             All checks passed, no conflicts, not drafts. The shepherd will never
             merge these — merging is an authorization and stays with you.
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE. The message above keys off `greencount`, which the
+      # sweep step only writes at the very end of its run. If the sweep dies
+      # part way — a gh rate limit mid-loop is the likely one, it makes an API
+      # call per PR — the output never exists, the alert skips, and green PRs
+      # wait forever on a click nobody was told to make. That is exactly how
+      # this repo's PRs piled up before the shepherd existed.
+      - name: Slack — the shepherd sweep itself broke
+        if: always() && steps.sweep.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "pr-shepherd: the SWEEP step failed — green PRs may be unannounced"
+          body: |
+            The shepherd could not finish reading the open PRs, so the
+            "waiting on your click" message could not be sent. There may be
+            green PRs sitting unmerged. This means the messenger broke, not
+            that there is nothing to merge.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

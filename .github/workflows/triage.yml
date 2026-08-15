@@ -368,14 +368,43 @@ jobs:
       # when triage FAILED just as much as when it succeeded. A harness that
       # only tells you about problems it understood is useless for the problems
       # that matter most.
+      #
+      # EVERY INPUT HAS A LITERAL FALLBACK. `always()` only guarantees the step
+      # RUNS; it does not guarantee `compose` produced anything. If compose dies
+      # (it is `set -uo pipefail` over model output), `channel` is empty — and
+      # the slack action treats an empty channel as a hard failure, so the alert
+      # is LOST at the exact moment triage itself has just broken. The whole
+      # point of this loop is that the worst breakages still reach a human, so
+      # the defaults route to needs-your-decision and say plainly that the
+      # composer failed. Machine-enforced by scripts/check_alert_paths.py.
       - name: Tell the owner in Slack
         if: always()
         uses: ./.github/actions/slack
         with:
-          channel: ${{ steps.compose.outputs.channel }}
-          severity: ${{ steps.compose.outputs.sev }}
-          title: "#${{ steps.issue.outputs.num }} — ${{ steps.compose.outputs.label }}"
-          body: ${{ steps.compose.outputs.body }}
+          channel: ${{ steps.compose.outputs.channel || 'needs-your-decision' }}
+          severity: ${{ steps.compose.outputs.sev || 'warn' }}
+          title: "#${{ steps.issue.outputs.num || '?' }} — ${{ steps.compose.outputs.label || 'TRIAGE FAILED' }}"
+          body: ${{ steps.compose.outputs.body || 'Triage produced no message at all — the compose step itself failed. Open the run and look at this issue by hand.' }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE. The step above now DELIVERS when compose dies, but a
+      # delivered message built from defaults looks like an ordinary triage
+      # verdict. This one says out loud that the composer broke, so the reader
+      # knows the diagnosis is missing rather than merely thin.
+      - name: Slack — the triage composer itself broke
+        if: always() && steps.compose.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "triage: the COMPOSE step failed — issue #${{ steps.issue.outputs.num }} was not diagnosed"
+          body: |
+            Triage could not build its alert, so anything it did work out was
+            lost. The issue is open and undiagnosed. This means the messenger
+            broke, not that the issue is unimportant.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.issue.outputs.num }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       # SUPERSEDED — kept wired but inert: RESEND_API_KEY is not set in Actions,

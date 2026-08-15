@@ -156,8 +156,12 @@ jobs:
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
+      # `always()` is load-bearing, not decoration: without it GitHub wraps this
+      # gate in an implicit `success()`, so the DOWN alert above failing (a
+      # rate-limit, a rotated token) would silently skip this one too — one
+      # broken alert taking a second, unrelated alert down with it.
       - name: Slack — recovered
-        if: steps.raise.outputs.announce == 'recovered'
+        if: always() && steps.raise.outputs.announce == 'recovered'
         uses: ./.github/actions/slack
         with:
           channel: log-github-ci

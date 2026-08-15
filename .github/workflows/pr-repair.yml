@@ -540,8 +540,17 @@ jobs:
           gh pr edit "$prnum" --add-label "$label" 2>/dev/null || true
           echo "checker: $v" >> "$GITHUB_STEP_SUMMARY"
 
+      # GATE: `steps.ship.outcome != 'success'`, NOT a bare `failure()`.
+      # `failure()` means "ANY step in this job has failed" — including the
+      # Slack step above. So a Slack rate-limit or a rotated token used to turn
+      # this on AFTER the fix had already been pushed, and this comment would
+      # tell the owner "Nothing was pushed. The branch is exactly as you left
+      # it" — about a branch that had just been written to. The alerting path
+      # must never be able to change the reported outcome of the work it is
+      # describing. `ship` is the question this step is asking: did anything get
+      # pushed? Machine-enforced by scripts/check_alert_paths.py (RULE A).
       - name: Report back when it could not fix it
-        if: always() && steps.token.outputs.have == 'true' && failure()
+        if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -550,8 +559,11 @@ jobs:
 
       # The loop tried and stopped. The PR is still red and still yours — what
       # happens next is a human choice, so: needs-your-decision.
+      # Same gate as the PR comment above, for the same reason — and it doubles
+      # as the fallback last mile for `ship` itself: if the push step dies, this
+      # fires (RULE B in scripts/check_alert_paths.py).
       - name: Slack — PR repair could not finish
-        if: always() && steps.token.outputs.have == 'true' && failure()
+        if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome != 'success'
         uses: ./.github/actions/slack
         with:
           channel: needs-your-decision

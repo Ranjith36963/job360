@@ -411,8 +411,11 @@ jobs:
       # judgement about knowledge, the auto-merge was withheld, and the PR is
       # sitting open waiting for a human to decide. One sentence, and it is a
       # real choice — so it clears the bar for needs-your-decision.
+      # `always()` is load-bearing: without it GitHub wraps this gate in an
+      # implicit `success()`, so the "auto-synced" alert above failing would
+      # silently skip this one — the LOUDER of the two — as well.
       - name: Slack — the doc fixer wants to delete something
-        if: steps.ship.outputs.announce == 'destructive'
+        if: always() && steps.ship.outputs.announce == 'destructive'
         uses: ./.github/actions/slack
         with:
           channel: needs-your-decision
@@ -428,8 +431,31 @@ jobs:
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
+      # FALLBACK LAST MILE. Both alerts above key off `steps.ship.outputs.announce`,
+      # which the ship step only writes once it reaches that line. If it dies —
+      # a push rejected, a gh 403, the constitution cage tripping — the output
+      # never exists, both branches skip, and a doc PR sits open unannounced.
+      # Every branch above is silence; this is the one that speaks.
+      - name: Slack — the doc-sync ship step itself broke
+        if: always() && steps.ship.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "doc-sync: the SHIP step failed — a doc fix may be unreported"
+          body: |
+            The doc-sync fixer ran but the step that commits, opens and merges
+            the PR failed, so neither the "synced" nor the "wants to delete"
+            message could be sent. A PR may be open, or nothing may have
+            shipped. This means the messenger broke, not that the docs are fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # `always()`: this note is about configuration, not about whether an
+      # earlier alert step managed to reach Slack.
       - name: Note when fixer is not configured
-        if: steps.token.outputs.have != 'true'
+        if: always() && steps.token.outputs.have != 'true'
         run: echo "CLAUDE_CODE_OAUTH_TOKEN secret not set — drift issue filed, auto-fix skipped." >> "$GITHUB_STEP_SUMMARY"
 
   # ── HYGIENE gear (CURATE) — monthly ────────────────────────────────────────
@@ -516,6 +542,24 @@ jobs:
             The monthly doc-clutter ratchet fired: the estate got WORSE than the
             committed budget. Report-only — deleting docs is a judgement about
             knowledge, so no fixer runs here.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE, same shape as the truth gear above: the alert keys
+      # off an output the issue step only writes if it reaches that line, so a
+      # gh failure would leave a regressed doc estate completely unannounced.
+      - name: Slack — the clutter alarm path itself broke
+        if: always() && steps.clutterissue.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "doc-sync (CURATE): the ALARM step failed — clutter status is unknown"
+          body: |
+            The monthly clutter gear could not open/update/close its tracking
+            issue, so the normal notification did not run. Check the run summary
+            by hand — this means the messenger broke, not that the estate is fine.
 
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

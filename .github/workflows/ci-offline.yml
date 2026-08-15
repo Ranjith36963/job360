@@ -157,6 +157,59 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly
 
+  # ── The harness checks its own alarm wiring ───────────────────────────────
+  # A guard nobody RUNS is not a guard — it is a file. Both checkers below were
+  # written, drilled by hand, and then had no entrance: exactly the "an artifact
+  # with no notifier dies" law this repo measured (0 of 4 survived). So they run
+  # on every PR, and `--drill` runs with them: a checker that has only ever
+  # printed PASS is indistinguishable from one that always prints PASS, so CI
+  # re-proves on every run that each rule can still go RED on purpose.
+  # No DB, no secrets, no network — seconds, not minutes.
+  alarm-wiring:
+    name: The harness's alarm paths still work
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pyyaml
+
+      # Wiring: every Slack step resolves, is passed the token, and every
+      # `run:` block is valid bash.
+      - name: Slack wiring is intact
+        run: python scripts/check_workflow_slack_wiring.py
+      - name: ...and its drill can still go RED
+        run: python scripts/check_workflow_slack_wiring.py --drill
+
+      # Semantics: no alert can flip the verdict of the work it describes, and
+      # no alert dies silently with the step it quotes.
+      - name: No alert can flip a verdict, and none can go silent
+        run: python scripts/check_alert_paths.py
+      - name: ...and its drill can still go RED
+        run: python scripts/check_alert_paths.py --drill
+
+      # The concrete case that started all this: a mid-job Slack outage must not
+      # make the repair loops report a failure that did not happen.
+      - name: A Slack outage cannot make the repair loops lie
+        run: python scripts/drill_slack_cannot_lie.py
+
+      # LAST WORD. A drill that damages the repo is worse than no drill: the
+      # earlier version of the wiring checker mutated .github/workflows in place
+      # and restored it in a Python `finally`, which a Ctrl-C does not run. If
+      # any drill above wrote to the tree, say so here and fail.
+      - name: The drills left the working tree untouched
+        run: |
+          set -euo pipefail
+          dirty=$(git status --porcelain)
+          if [ -n "$dirty" ]; then
+            echo "::error::a drill wrote to the working tree — that is the bug drills exist to avoid"
+            echo "$dirty"
+            exit 1
+          fi
+          echo "working tree clean after every drill"
+
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
   # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
@@ -167,7 +220,7 @@ jobs:
   # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
   notify:
     name: Report failure as an issue
-    needs: [offline-suite, frontend-e2e, loop2-e2e-spotlight]
+    needs: [offline-suite, frontend-e2e, loop2-e2e-spotlight, alarm-wiring]
     if: >-
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
