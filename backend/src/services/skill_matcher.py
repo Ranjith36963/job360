@@ -32,7 +32,10 @@ from src.services.scoring_dimensions import ScoreBreakdown
 #   1 = pre-2026-08-06 (legacy title matching)
 #   2 = revived title lever: evidence-based core domain words + domain+role band
 #   3 = skill-score length normalisation (long ads no longer out-score tight ones)
-SCORER_VERSION = 3
+#   4 = foreign-location penalty removed (rule #30: the UK gate is a DOOR, not a
+#       penalty). Every job that named a non-UK place scored 15 points too low;
+#       those rows must re-score or the old deficit stays frozen in user_feed.
+SCORER_VERSION = 4
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -95,127 +98,6 @@ LOCATION_ALIASES = {
 }
 
 REMOTE_TERMS = {"remote", "anywhere", "work from home", "wfh"}
-
-# Countries, major non-UK cities, and US state abbreviations that indicate non-UK jobs
-FOREIGN_INDICATORS = {
-    # Countries
-    "united states",
-    "usa",
-    "canada",
-    "australia",
-    "india",
-    "germany",
-    "france",
-    "spain",
-    "italy",
-    "netherlands",
-    "sweden",
-    "norway",
-    "denmark",
-    "finland",
-    "switzerland",
-    "austria",
-    "belgium",
-    "ireland",
-    "singapore",
-    "japan",
-    "china",
-    "brazil",
-    "mexico",
-    "south korea",
-    "israel",
-    "poland",
-    "portugal",
-    "czech",
-    "romania",
-    "turkey",
-    "south africa",
-    "new zealand",
-    "philippines",
-    # Major non-UK cities
-    "new york",
-    "san francisco",
-    "los angeles",
-    "chicago",
-    "seattle",
-    "austin",
-    "boston",
-    "denver",
-    "toronto",
-    "vancouver",
-    "montreal",
-    "sydney",
-    "melbourne",
-    "berlin",
-    "munich",
-    "paris",
-    "amsterdam",
-    "stockholm",
-    "copenhagen",
-    "oslo",
-    "helsinki",
-    "zurich",
-    "dubai",
-    "bangalore",
-    "hyderabad",
-    "mumbai",
-    "pune",
-    "tokyo",
-    "tel aviv",
-    # Canadian provinces that overlap with UK city names
-    "ontario",
-    "quebec",
-    # US state abbreviations (with comma prefix to avoid false matches)
-    ", ca",
-    ", ny",
-    ", tx",
-    ", wa",
-    ", ma",
-    ", co",
-    ", il",
-    ", ga",
-    ", nc",
-    ", va",
-    ", fl",
-    ", pa",
-    ", oh",
-    ", nj",
-    ", or",
-    ", az",
-    ", mn",
-    ", ct",
-    ", md",
-}
-
-# Terms that confirm UK / remote (checked before foreign indicators)
-UK_TERMS = {
-    "uk",
-    "united kingdom",
-    "london",
-    "manchester",
-    "birmingham",
-    "bristol",
-    "cambridge",
-    "oxford",
-    "edinburgh",
-    "glasgow",
-    "belfast",
-    "leeds",
-    "liverpool",
-    "nottingham",
-    "sheffield",
-    "southampton",
-    "reading",
-    "hatfield",
-    "hertfordshire",
-    "england",
-    "scotland",
-    "wales",
-    "greater london",
-    "city of london",
-    "gb",
-    "great britain",
-}
 
 # Experience level patterns
 _EXPERIENCE_PATTERNS = {
@@ -397,23 +279,26 @@ def _negative_penalty(job_title: str) -> int:
     return 0
 
 
-def _foreign_location_penalty(location: str) -> int:
-    """Return penalty if the location indicates a non-UK job."""
-    if not location:
-        return 0  # Unknown location — might be UK, don't penalise
-    loc_lower = location.lower()
-    # Check foreign indicators FIRST — catches "London, Ontario" etc.
-    for indicator in FOREIGN_INDICATORS:
-        if indicator in loc_lower:
-            return 15
-    # Then check UK / remote terms — if present, no penalty
-    for term in UK_TERMS:
-        if term in loc_lower:
-            return 0
-    for term in REMOTE_TERMS:
-        if term in loc_lower:
-            return 0
-    return 0  # Unknown location — don't penalise
+# NO FOREIGN-LOCATION PENALTY LIVES HERE — deliberately (rule #30).
+#
+# There used to be a `_foreign_location_penalty()` docking 15 points off any
+# job whose location matched a hand-typed set of foreign cities, countries and
+# US state codes (`FOREIGN_INDICATORS`). It is gone, and both halves of that
+# are the point:
+#
+#   * WRONG SHAPE. UK-only is a DOOR, not a ranking preference. A foreign job
+#     is refused once, at `services/uk_gate.check_uk` (called in `main.py`
+#     before storage). A penalty ADMITS the job and then argues about its
+#     rank — so the catalog still contained Warsaw and Indianapolis roles,
+#     merely 15 points lower.
+#   * WRONG DATA. Foreign cities are an UNBOUNDED set, so a hand-typed sample
+#     of them rots by construction: "seoul" and "ottawa" were never in the
+#     list, so those jobs paid nothing, while "London, Ontario" and any UK job
+#     mentioning a foreign office paid 15 for nothing. The gate matches UK
+#     places from DATA instead (`src/data/uk_gazetteer/`).
+#
+# Guards: `tests/test_scorer.py::test_no_foreign_penalty_symbol_survives` and
+# the `test_*_gives_foreign_location_no_penalty` pair.
 
 
 def detect_experience_level(title: str) -> str:
@@ -468,8 +353,7 @@ def score_job(job: Job) -> int:
     location_pts = _location_score(job.location)
     recency_pts = recency_score_for_job(job)
     penalty = _negative_penalty(job.title)
-    foreign_penalty = _foreign_location_penalty(job.location)
-    total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+    total = title_pts + skill_pts + location_pts + recency_pts - penalty
     return min(max(total, 0), 100)
 
 
@@ -606,8 +490,7 @@ class JobScorer:
             location_pts = _location_score(job.location)
             recency_pts = recency_score_for_job(job)
             penalty = self._negative_penalty(job.title)
-            foreign_penalty = _foreign_location_penalty(job.location)
-            base = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+            base = title_pts + skill_pts + location_pts + recency_pts - penalty
         else:
             # Engine 1 OFF — keyword contributes nothing. Only Engine 2 dims
             # (computed below, if enrichment + preferences exist) drive the score.

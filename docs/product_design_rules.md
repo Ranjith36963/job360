@@ -44,14 +44,14 @@ comply. One contradiction found and reported:
   answered. Schema fix (`Optional[bool]`, default `None`) awaiting owner
   decision.
 
-**Deliberate exception (documented, not a violation):** the legacy scorer's
-foreign-location penalty (−15) applies even with no location preference. That
-is UK-market product scope — every source is UK/remote by design — not an
-inference from an empty user field. **Superseded in practice by Rule 2**: the
-UK gate now refuses foreign jobs at ingestion, so the penalty should rarely
-have anything left to fire on. It stays as a belt-and-braces backstop for rows
-that predate the gate; if it is ever found penalising a job the gate admitted,
-that is a gate bug to fix, not a penalty to tune.
+**The exception this doc used to carve out is GONE (2026-08-12).** The legacy
+scorer's foreign-location penalty (−15) was deleted along with the hand-typed
+`FOREIGN_INDICATORS` list behind it — Rule 2 says UK-only is a door, and a
+second, rotting copy of that decision in the scorer is not a backstop. Measured
+on the live catalog the day it was removed: 379 of 9,196 rows were paying the
+−15, and 9 of them were UK jobs docked by accident ("Belfast, Northern
+Ireland" matched "ireland"). If a foreign job is found scoring well, that is a
+gate bug to fix, never a penalty to reinstate.
 
 **The test for new code:** take any scoring/filter change, empty ONE user
 field, and re-rank. If any job's position changes *relative to another job*
@@ -69,8 +69,8 @@ because it is in another country is a **catalog defect**, not a low-ranking
 job. It is refused at ingestion; it never reaches storage, a feed, an
 enrichment budget, an embedding, or a candidate-shelf slot.
 
-**Why not the penalty.** The legacy scorer applies −15 for a foreign location.
-That admits the job and then argues about its rank — so it still consumes
+**Why not the penalty.** The legacy scorer applied −15 for a foreign location
+(deleted 2026-08-12). That admits the job and then argues about its rank — so it still consumes
 every downstream budget and can still surface when the other dimensions score
 well. Measured 2026-08-07: 156 clearly foreign jobs were live in prod
 (Shanghai, São Paulo, Lima, Ottawa, München) despite the penalty existing.

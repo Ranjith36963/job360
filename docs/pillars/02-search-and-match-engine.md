@@ -110,7 +110,7 @@ Survives. Goes to scoring. (Per blueprint §2, ~99% of jobs are eliminated *befo
 | --- | --- | --- |
 | Title | Exact match against `search_config.job_titles[0]` ("Senior Python Engineer") | **40** / 40 |
 | Skill | title+desc grep with `aliases_for()` expansion: `python` (primary +3), `aws` (primary +3), `docker` (primary +3), `kubernetes` aka `k8s` (secondary +2), `postgres`→`postgresql` (tertiary +1) | **12** / 40 |
-| Location | "London, UK" matches `UK_TERMS` after alias normalisation | **10** / 10 |
+| Location | "London, UK" matches `LOCATIONS` after alias normalisation | **10** / 10 |
 | Recency | `date_confidence="high"` + `posted_at` is today → full band | **10** / 10 |
 
 **Batch-2.9 multi-dim** (only fires because `user_preferences` + `enrichment_lookup` are both passed):
@@ -140,7 +140,7 @@ JobEnrichment(
 - Title-gate check: 40 ≥ 6 (MIN_TITLE_GATE × 40) ✓
 - Skill-gate check: 12 ≥ 6 (MIN_SKILL_GATE × 40) ✓
 - Negative title keywords: none present → no –30
-- Foreign location: "London, UK" doesn't match `FOREIGN_INDICATORS` → no –15
+- Foreign location: no such penalty exists (deleted 2026-08-12, rule #30) — the UK gate refuses foreign jobs at ingestion instead
 
 **Sum:** 40 + 12 + 10 + 10 + 8 + 10 + 0 + 3 = **93**, clamped to [0, 100] → **`match_score = 93`**.
 
@@ -262,7 +262,7 @@ Each scorer reads from the `JobEnrichment` row (a no-op if the row is missing or
 #### 3.3 Penalties + gates
 
 - **Negative title** (`-30`) — title contains a word from `NEGATIVE_TITLE_KEYWORDS`. *Note:* the list is empty by default now, so this fires only when the user populates negative keywords on their profile.
-- **Foreign location** (`-15`) — location matches `FOREIGN_INDICATORS` (63 entries — countries, major non-UK cities, US state abbreviations like `, CA`).
+- **Foreign location** — REMOVED 2026-08-12 (rule #30). `FOREIGN_INDICATORS` is deleted; `services/uk_gate.check_uk` refuses non-UK jobs before storage.
 - **Title-gate / Skill-gate** (`MIN_TITLE_GATE=0.15`, `MIN_SKILL_GATE=0.15`) — if **both** components are below 15 % of their max (6 pts of 40 each — an AND, not OR; `skill_matcher.py:396`), the entire score collapses to `max(10, (title+skill)*0.25)`. This prevents a perfect location + recency from elevating an obviously-irrelevant job.
 
 #### 3.4 Final clamp
@@ -560,7 +560,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | Classic 4-component scoring (title / skill / location / recency) | ✅ | `skill_matcher.py:391` (`score_job`) + `JobScorer.score()` |
 | Title-gate / skill-gate (`MIN_TITLE_GATE=0.15`) | ✅ | prevents location-only inflation |
-| Negative-title penalty (-30), foreign-location penalty (-15) | ✅ | `UK_TERMS` (19), `REMOTE_TERMS` (4), `FOREIGN_INDICATORS` (63) |
+| Negative-title penalty (-30) only — the foreign-location penalty was deleted 2026-08-12 | ✅ | `REMOTE_TERMS` (4); UK/foreign matching lives in `uk_gate` data |
 | Batch 2.9 multi-dim (seniority / salary / visa / workplace) | ✅ | `scoring_dimensions.py`, env-tunable weights |
 | 9-field `ScoreBreakdown` dataclass | ✅ | replaces flat int return |
 | Skill synonym expansion (529 aliases) | ✅ | `skill_synonyms.py` + `_text_contains_skill` |

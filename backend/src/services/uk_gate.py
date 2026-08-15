@@ -247,6 +247,34 @@ class GateVerdict:
     reason: str
 
 
+def names_foreign_place(text: str) -> bool:
+    """True only when this text NAMES a non-UK country or admin division.
+
+    The fetch-time filter in `sources/base.py` used to answer this from a
+    hand-typed list of foreign cities — an unbounded set, so it rotted (rule
+    #30). This routes the question through the SAME function the door uses,
+    so the two can never disagree.
+
+    It answers CONSERVATIVELY, on purpose. Only the `foreign_location`
+    verdict counts:
+
+      * The weaker refusals ("unverified location", "no location on a global
+        source", "ambiguous place name") depend on WHO the source is and what
+        the ad body says — context the door has and a fetch filter does not.
+        Treating them as foreign here would drop UK jobs from UK-native
+        sources.
+      * `remote_restricted_to_other_region` is excluded too, and that one was
+        measured: four callers pass a DESCRIPTION rather than a location, and
+        an ad reading "Remote - UK/Europe timezone" trips the region-fencing
+        regex in prose. Those are UK-eligible jobs. The door still applies
+        that rule to the real location field.
+
+    Nothing this returns False for is admitted by that alone — the door
+    judges every job again, with the full context.
+    """
+    return check_uk(text, "").reason == "foreign_location"
+
+
 def check_uk(
     location: Optional[str],
     source: str,
@@ -277,7 +305,51 @@ def check_uk(
         # "Sydney, Australia" was being admitted as a dual-site posting.
         # Requiring either an explicit UK country/postcode or a non-ambiguous
         # place keeps London/New York while dropping Sydney/Australia.
-        if uk_named or (uk_place and uk_place not in ambiguous):
+        #
+        # AND THE UK HALF MUST NOT BE THE FOREIGN HALF. The UK has hamlets
+        # called California, New York, Maryland and Washington — all of which
+        # are also US states, so they sit in the gazetteer AND in
+        # foreign_admin. "San Jose, California, US" therefore collected a
+        # "UK" gazetteer hit on `california` and walked straight through as a
+        # two-site ad. Measured on the live catalog 2026-08-12: 373 rows were
+        # riding this escape. So when the location names several places, the
+        # UK signal has to come from a segment that is NOT itself a foreign
+        # name — `london` in "London / New York", never `california` in a
+        # Californian address.
+        #
+        # The trigger is an ORPHAN segment: one that names a foreign place and
+        # has no UK reading whatsoever ("US", "Virginia", "Ontario"). That is
+        # an address marker, and the segments beside it belong to that same
+        # address. Deliberately narrow — dry-run over the live catalog
+        # 2026-08-12 (rule #30) showed the wider version ("the UK signal must
+        # always come from a non-foreign segment") also refused three genuine
+        # UK rows, "Manchester, Greater Manchester" and "Manchester - Main
+        # Office", because Manchester is itself an admin division abroad.
+        # Never false-block a UK job to catch a foreign one.
+        #
+        # A location naming ONE place is exempt too: plain "Manchester" (or
+        # "Manchester, Remote" — a remote word is not a second place) reads
+        # both ways, and the UK reading is the right one; 238 live UK rows
+        # depend on it.
+        #
+        # KNOWN GAP, left deliberately: "London, Ontario", "New York, NY" and
+        # "Remote - New York" still pass, for exactly the reason "London, New
+        # York" is asserted to pass two tests up — a UK city name beside a
+        # foreign region is how BOTH a foreign address and a genuine two-site
+        # ad get written, and "New York" is also a real (tiny) UK hamlet.
+        # Splitting those needs ambiguity DATA — a gazetteer rebuild marking
+        # `new york` and `california` ambiguous, which is where the knowledge
+        # belongs — not another branch here.
+        named = [s for s in segs if any(t not in _REMOTE_TOKENS for t in s.split())]
+        escape_place = uk_place
+        if len(named) > 1 and any(
+            s in foreign and not _uk_hit(s, places) for s in named
+        ):
+            escape_place = next(
+                (m for s in named if s not in foreign and (m := _uk_hit(s, places))),
+                None,
+            )
+        if uk_named or (escape_place and escape_place not in ambiguous):
             return GateVerdict(True, "dual_site_includes_uk")
         return GateVerdict(False, "foreign_location")
 
