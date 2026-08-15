@@ -102,6 +102,79 @@ else
   bad "triage.yml runs the COMMITTED predicate, not the working-tree copy" "a prompt-injected triage agent could edit the file and authorise itself"
 fi
 
+# ── WIRE 1b: THE GLUE, not the box ───────────────────────────────────────────
+# Everything above tests the PREDICATE — the box. The box was never broken.
+# The 17-day outage was a WIRING bug: the value that
+# `gh issue view --json author --jq .author.login` actually returns
+# ("app/github-actions") did not match what the caller compared it against
+# ("github-actions[bot]"). Feeding hand-typed strings into the predicate can
+# NEVER see that class of bug, because the test types both ends itself.
+#
+# So pin the wire: the CALL SHAPE that produces the value, the literals the
+# predicate accepts, the OTHER door that gates on the other spelling, and —
+# when a token is available — the real value the real API really returns.
+# Rename either side of any of these and this section goes red.
+
+# End A — the call shape. Change `--json author`, or the `--jq` path, and the
+# returned value changes shape; nothing below would still be testing it.
+if grep -qF -- '--json author --jq .author.login' "$ROOT/.github/workflows/triage.yml"; then
+  ok "triage.yml still reads the author via '--json author --jq .author.login'"
+else
+  bad "triage.yml still reads the author via '--json author --jq .author.login'" \
+    "the call shape changed — whatever it returns now has never been tested against the predicate; that is exactly how this broke for 17 days"
+fi
+
+# End B — both accepted spellings are literals IN the predicate. Delete one and
+# a whole door closes silently (webhook door, or API door).
+for spelling in 'github-actions[bot]' 'app/github-actions'; do
+  if grep -qF -- "\"$spelling\"" "$TRUST"; then
+    ok "predicate still carries the literal \"$spelling\""
+  else
+    bad "predicate still carries the literal \"$spelling\"" \
+      "one of the two spellings of our own bot was renamed or removed — one of the two doors is now dead"
+  fi
+done
+
+# End C — the OTHER door, read out of the workflow rather than retyped.
+# triage.yml's job-level `if:` gates on the WEBHOOK spelling. If someone edits
+# that literal, the predicate must accept the new one too, or the same
+# two-spellings-of-one-bot break returns at the other end of the wire.
+webhook_login="$(grep -oE "github\.event\.issue\.user\.login == '[^']+'" \
+  "$ROOT/.github/workflows/triage.yml" | head -1 | sed -E "s/.*== '([^']+)'/\1/")"
+if [ -z "$webhook_login" ]; then
+  bad "triage.yml's job gate names a bot login the predicate accepts" \
+    "could not find \`github.event.issue.user.login == '...'\` in triage.yml — the two ends can no longer be compared"
+elif trusts "$webhook_login" "$INV"; then
+  ok "the login triage.yml's job gate uses ($webhook_login) is accepted by the predicate"
+else
+  bad "the login triage.yml's job gate uses ($webhook_login) is accepted by the predicate" \
+    "triage.yml lets this author in at the door but the predicate rejects it — auto-authorisation is dead again"
+fi
+
+# End D — LIVE. The only assertion that can catch a NEW spelling GitHub starts
+# returning: run the real command against a real bot-authored issue and check
+# the predicate accepts what came back. Needs a token; ci.yml (job `harness`)
+# supplies `github.token` + `GH_REPO` so this runs on every PR.
+live_repo="${GH_REPO:-${GITHUB_REPOSITORY:-Ranjith36963/job360}}"
+live_issue="${HARNESS_SELFTEST_LIVE_ISSUE:-316}"
+live_author=""
+live_title=""
+if command -v gh > /dev/null 2>&1; then
+  # The EXACT two calls triage.yml makes, in the same shape (see End A).
+  live_author="$(GH_REPO="$live_repo" gh issue view "$live_issue" --json author --jq .author.login 2> /dev/null || true)"
+  live_title="$(GH_REPO="$live_repo" gh issue view "$live_issue" --json title --jq .title 2> /dev/null || true)"
+fi
+if [ -n "$live_author" ] && [ -n "$live_title" ]; then
+  if trusts "$live_author" "$live_title"; then
+    ok "LIVE: gh returns author=\"$live_author\" for bot-opened #$live_issue and the predicate ACCEPTS it"
+  else
+    bad "LIVE: gh returns author=\"$live_author\" for bot-opened #$live_issue and the predicate ACCEPTS it" \
+      "the real API value is rejected — auto-authorisation is structurally dead RIGHT NOW, same as 2026-07-29..2026-08-15"
+  fi
+else
+  echo "  note LIVE glue check skipped — no authenticated \`gh\` (needs GH_TOKEN + network). Static ends A-C still ran."
+fi
+
 # ── WIRE 2: the blind checker's diff capture ─────────────────────────────────
 # `git diff … | head -800` under `set -euo pipefail`: on Linux git takes
 # SIGPIPE and exits 141, pipefail promotes it, set -e kills the step. Measured
@@ -278,6 +351,170 @@ for line in roster_drift():
     bad "watchdog roster matches the workflows on disk" "$drift"
   fi
 fi
+
+# ── WIRE 4: the tamper alarm must FAIL THE RUN ───────────────────────────────
+# triage.yml's route step detects the worst thing this repo can detect: the
+# triage agent REWRITING ITS OWN AUTHORISATION CHECK on disk. It used to print
+# `::error::`, post a comment, and fall through — step green, run green.
+# Everything downstream reads that green: the run list, the status badge, the
+# watchdog, the subject line of the owner's email. So the alarm existed and no
+# consumer of it could hear it.
+#
+# This is the only test in the repo that EXECUTES a workflow step. It pulls the
+# real `run:` block out of triage.yml (so it cannot drift from the file GitHub
+# runs), stubs `gh`, and drives both paths:
+#   TAMPERED -> non-zero exit, comment still posted, NO agent:fix, NO repair.
+#   CLEAN    -> exit 0, agent:fix applied, repair dispatched.
+# The second half matters as much as the first: a tamper check that fails
+# everything is just a broken loop wearing a security badge.
+
+echo
+echo "WIRE 4 — triage's tamper alarm (does the guard turn the run RED?)"
+
+TRIAGE_YML="$ROOT/.github/workflows/triage.yml"
+STEP_NAME="Post the diagnosis and apply ONE routing label"
+
+# Pull the step's shell out of the YAML: skip to the named step, then to its
+# `run: |`, then take every line indented 10 spaces (the block body) and dedent.
+extract_route_step() {
+  awk '
+    index($0, "- name: " NAME) { instep = 1; next }
+    instep && /^ *run: \|/     { inrun = 1; next }
+    inrun {
+      if ($0 ~ /^[[:space:]]*$/) { print ""; next }
+      if (substr($0, 1, 10) == "          ") { print substr($0, 11); next }
+      exit
+    }
+  ' NAME="$STEP_NAME" "$TRIAGE_YML"
+}
+
+drill="$(mktemp -d)"
+mkdir -p "$drill/bin"
+route_sh="$drill/route_step.sh"
+# `${{ ... }}` is GitHub's, not bash's — replace every expression with a fixed
+# token so the block is runnable shell.
+extract_route_step | sed -E 's/\$\{\{[^}]*\}\}/DRILL/g' > "$route_sh"
+
+if [ ! -s "$route_sh" ]; then
+  bad "the route step could be extracted from triage.yml" "step '$STEP_NAME' not found — WIRE 4 tested NOTHING"
+elif ! grep -q 'triage_trusted_origin.sh' "$route_sh"; then
+  bad "the extracted block is really the authorisation step" "no reference to the predicate — extraction grabbed the wrong lines"
+else
+  ok "extracted triage.yml's real route step ($(wc -l < "$route_sh" | tr -d '[:space:]') lines)"
+
+  # A `gh` that records instead of calling GitHub.
+  cat > "$drill/bin/gh" << 'STUB'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "issue view")
+    if printf '%s\n' "$@" | grep -qx -- '.author.login'; then printf '%s\n' "$STUB_AUTHOR"; exit 0; fi
+    if printf '%s\n' "$@" | grep -qx -- '.title';        then printf '%s\n' "$STUB_TITLE";  exit 0; fi
+    exit 0 ;;
+  "issue comment")
+    body=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --body)      body="$2"; shift 2 ;;
+        --body-file) body="$(cat "$2")"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    printf '%s\n' "$body" >> "$GH_COMMENTS"
+    exit 0 ;;
+esac
+exit 0
+STUB
+  chmod +x "$drill/bin/gh"
+
+  # A repo whose HEAD carries the predicate, so `git show HEAD:` has something
+  # to read and `git diff` has something to compare against.
+  work="$drill/repo"
+  mkdir -p "$work/scripts"
+  cp "$TRUST" "$work/scripts/triage_trusted_origin.sh"
+  (
+    cd "$work" || exit 1
+    git init -q .
+    git config user.email t@t.t
+    git config user.name t
+    git add -A
+    git commit -qm base
+  ) > /dev/null 2>&1
+
+  # $1 = label for messages, $2 = "tamper" | "clean". Echoes: <rc>
+  run_route_step() {
+    (
+      cd "$work" || exit 1
+      printf 'VERDICT: auto-fixable\n\n## What failed\nx\n' > triage.md
+      git checkout -q -- scripts/triage_trusted_origin.sh
+      if [ "$1" = "tamper" ]; then
+        # Exactly what a prompt-injected agent would write: neuter the check.
+        printf '#!/usr/bin/env bash\nexit 0\n' > scripts/triage_trusted_origin.sh
+      fi
+      export PATH="$drill/bin:$PATH"
+      export GH_LOG="$drill/gh-$1.log"
+      export GH_COMMENTS="$drill/comments-$1.txt"
+      export STUB_AUTHOR="app/github-actions"
+      export STUB_TITLE="INVARIANT: paid_verdicts_are_visible violated in production"
+      export GITHUB_OUTPUT="$drill/out-$1.txt"
+      export GITHUB_STEP_SUMMARY="$drill/summary-$1.txt"
+      : > "$GH_LOG"
+      : > "$GH_COMMENTS"
+      : > "$GITHUB_OUTPUT"
+      : > "$GITHUB_STEP_SUMMARY"
+      bash "$route_sh" > "$drill/stdout-$1.txt" 2>&1
+    )
+  }
+
+  # ── TAMPERED ────────────────────────────────────────────────────────────
+  run_route_step tamper
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    ok "TAMPERED predicate: the step EXITS NON-ZERO (rc=$rc) — the run goes red"
+  else
+    bad "TAMPERED predicate: the step EXITS NON-ZERO" \
+      "rc=0 — the agent rewrote its own authorisation check and the run is GREEN. A tamper alarm may never be advisory."
+  fi
+  if grep -qi 'modified' "$drill/comments-tamper.txt" 2> /dev/null; then
+    ok "TAMPERED: the record was posted to the issue BEFORE the step died"
+  else
+    bad "TAMPERED: the record was posted to the issue BEFORE the step died" \
+      "no comment — failing loudly but silently is only half a guard"
+  fi
+  if grep -q 'agent:fix' "$drill/gh-tamper.log" 2> /dev/null; then
+    bad "TAMPERED: agent:fix is NOT applied" "the write-capable agent was authorised by a tampered check"
+  else
+    ok "TAMPERED: agent:fix is NOT applied"
+  fi
+  if grep -q 'workflow run repair.yml' "$drill/gh-tamper.log" 2> /dev/null; then
+    bad "TAMPERED: repair.yml is NOT dispatched" "a write-capable agent was STARTED after a tamper detection"
+  else
+    ok "TAMPERED: repair.yml is NOT dispatched"
+  fi
+
+  # ── CLEAN ───────────────────────────────────────────────────────────────
+  # The happy path must still work, or WIRE 4 would pass on a step that fails
+  # every time — which is its own kind of dead guard.
+  run_route_step clean
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok "CLEAN predicate: the step succeeds (rc=0)"
+  else
+    bad "CLEAN predicate: the step succeeds" "rc=$rc — triage now fails on ordinary issues: $(tail -3 "$drill/stdout-clean.txt" 2>/dev/null | tr '\n' ' ')"
+  fi
+  if grep -q 'agent:fix' "$drill/gh-clean.log" 2> /dev/null; then
+    ok "CLEAN + trusted detector: agent:fix IS applied"
+  else
+    bad "CLEAN + trusted detector: agent:fix IS applied" "auto-authorisation did not fire on a real detector issue"
+  fi
+  if grep -q 'workflow run repair.yml' "$drill/gh-clean.log" 2> /dev/null; then
+    ok "CLEAN + trusted detector: repair.yml IS dispatched"
+  else
+    bad "CLEAN + trusted detector: repair.yml IS dispatched" "the label was applied but nothing started — GITHUB_TOKEN raises no workflow run"
+  fi
+fi
+
+rm -rf "$drill"
 
 echo
 echo "harness selftest: $PASS passed, $FAIL failed"

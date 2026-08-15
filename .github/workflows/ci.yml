@@ -152,9 +152,20 @@ jobs:
     name: Harness self-test (the loops' own logic)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Read-only, and only so WIRE 1's LIVE glue check can run for real: it calls
+    # `gh issue view --json author --jq .author.login` against a real
+    # bot-authored issue and asserts the trusted-origin predicate accepts what
+    # the API ACTUALLY returns. Without a token that check skips itself, and a
+    # check that always skips is the house failure mode.
+    permissions:
+      contents: read
+      issues: read
     steps:
       - uses: actions/checkout@v7
       - name: Run the harness self-test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: bash scripts/harness_selftest.sh
 
   # ── Make this loop LOUD ───────────────────────────────────────────────────

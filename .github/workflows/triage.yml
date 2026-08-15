@@ -1,5 +1,17 @@
 name: Triage loop (diagnose every new issue)
 
+# ── ORDERING DEPENDENCY — READ BEFORE ENABLING ────────────────────────────────
+# DO NOT enable the auto-authorisation path in this file (the block at
+# "TRUSTED-ORIGIN AUTO-AUTHORISATION" below, which applies `agent:fix` and
+# dispatches repair.yml) until the Slack notification branch
+# `feat/harness-speaks-in-slack` has landed on main.
+#
+# Why, in one sentence: this file is the first thing in the repo that lets a
+# WRITE-capable agent start with no human click, and until the Slack branch
+# lands the only place that says so is an email step at the bottom of this
+# workflow — so if this merges first, agents edit code unattended and the owner
+# has no live channel telling him it happened.
+#
 # THE MISSING LINK between "a detector opened an issue" and "a loop fixes it".
 #
 # Before this, every issue landed raw and waited for the owner to be the router:
@@ -282,9 +294,32 @@ jobs:
           # progress, not a curiosity.
           git show "HEAD:scripts/triage_trusted_origin.sh" > /tmp/trusted_origin.sh
           if ! git diff --quiet -- scripts/triage_trusted_origin.sh; then
-            echo "::error::scripts/triage_trusted_origin.sh was MODIFIED during this run — the triage agent tried to edit its own authorisation check. Refusing to auto-authorise."
+            # ── A TAMPER ALARM MAY NEVER BE ADVISORY ───────────────────────
+            # This branch fires when the agent REWROTE ITS OWN AUTHORISATION
+            # CHECK. That is the single most serious signal this repo can
+            # emit, and there is no benign reading of it: nothing in a normal
+            # triage run touches scripts/, so the only ways here are a
+            # prompt-injected agent editing its own cage or a defect in the
+            # cage itself. Both need a human, now.
+            #
+            # It used to print `::error::`, comment, and FALL THROUGH — the
+            # step still succeeded and the run went GREEN. A green tick is
+            # what everything downstream reads: the run list, the branch
+            # status, the watchdog, the owner's inbox subject line. So the
+            # loudest alarm in the harness was invisible to every consumer of
+            # its result. That is the house failure mode exactly — a guard
+            # that detects the right thing and then reports "fine".
+            #
+            # Order matters: POST THE RECORD FIRST so it survives even though
+            # the step dies, THEN fail. A tamper detection that cannot turn
+            # the run red is a log line, not a control.
             gh issue comment "$num" --body \
-              "The triage agent modified \`scripts/triage_trusted_origin.sh\` during this run — its own authorisation check. Auto-authorisation was refused and this needs a human look. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "🚨 The triage agent modified \`scripts/triage_trusted_origin.sh\` during this run — its own authorisation check. Auto-authorisation was refused, this run was FAILED on purpose, and this needs a human look. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              || echo "::error::tamper detected AND the issue comment could not be posted — the only record of this is the run itself."
+            gh issue edit "$num" --add-label "triage:needs-human" || true
+            echo "::error::scripts/triage_trusted_origin.sh was MODIFIED during this run — the triage agent tried to edit its own authorisation check. Refusing to auto-authorise, and FAILING this run so the alarm is visible to everything that reads a run status."
+            echo "TAMPER: triage modified its own authorisation check on #$num — run failed deliberately" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           elif [ "$label" = "triage:auto-fixable" ] \
                && bash /tmp/trusted_origin.sh "$issue_author" "$issue_title"; then
             auto="yes"
