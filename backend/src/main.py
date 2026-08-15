@@ -661,7 +661,18 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
             # `encode_job`), and a probe for the real package would wrongly stop
             # a run that never needed it. Failing first, then escalating, can
             # only fire when embedding genuinely could not happen.
-            if not semantic_stack_installed():
+            # BOTH halves are required. Testing only "is the stack absent?"
+            # escalates on a failure that has nothing to do with it — CI caught
+            # exactly that: a test poisons ONE row with RuntimeError("encoder
+            # blew up") and expects the sweep to skip it and carry on, but CI
+            # also has no sentence-transformers installed, so the sweep
+            # abandoned instead. The message check is what makes this specific:
+            # it is the marker `embeddings._load_encoder` raises when the import
+            # fails, so an unrelated encoder error can never be mistaken for a
+            # missing package.
+            if "sentence-transformers is not installed" in str(
+                e
+            ) and not semantic_stack_installed():
                 logger.error(
                     "SEMANTIC_ENABLED is on but sentence-transformers is not "
                     "installed in this process — abandoning the embed backfill "
