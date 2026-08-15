@@ -72,10 +72,61 @@ class TestEveryShelfIsRead:
         )
 
     def test_the_allowlist_does_not_rot(self) -> None:
-        """An allowlisted shelf that HAS gained a reader must leave the list, or
-        the list slowly becomes a place where live fields hide."""
-        stale = [name for name in ALLOWED_UNREAD if readers(name)]
+        """An allowlisted shelf can go stale two ways, and both must be caught:
+
+        1. It names a shelf that HAS gained a reader — the exemption is no
+           longer needed and should be deleted, or the list becomes a place
+           where live fields hide.
+        2. It names a shelf that no longer EXISTS on either dataclass — a
+           rename or deletion left a dead entry exempting nothing.
+
+        ALLOWED_UNREAD is empty right now, and that is the healthy state:
+        every shelf currently earns its keep by being read. That also means
+        BOTH checks below pass vacuously against production data today — an
+        empty dict has no stale entries by definition. That is not what makes
+        this test meaningful; see ``test_the_rot_check_can_actually_fail``
+        immediately below, which proves the checking logic against a
+        fabricated entry so the day someone adds a real exemption, this test
+        is already known to bite.
+        """
+        known = frozenset(shelf_names())
+        unknown = [name for name in ALLOWED_UNREAD if name not in known]
+        stale = [name for name in ALLOWED_UNREAD if name in known and readers(name)]
+        assert not unknown, (
+            f"ALLOWED_UNREAD names shelves that no longer exist: {unknown}. "
+            "The field was renamed or removed — delete the exemption."
+        )
         assert not stale, f"ALLOWED_UNREAD is stale — these now have readers: {stale}"
+
+    def test_the_rot_check_can_actually_fail(self) -> None:
+        """Proof the assertions above are not vacuous.
+
+        With ALLOWED_UNREAD empty, ``test_the_allowlist_does_not_rot`` passes
+        no matter what the checking logic does — even a check that always
+        returned ``[]`` would look green forever, which is exactly the shape
+        of bug this whole file exists to catch (see the module docstring).
+        This test runs the SAME two checks against a fabricated allowlist
+        entry and confirms each one actually fires.
+        """
+        known = frozenset(shelf_names())
+        real_shelf_with_a_reader = next(name for name in shelf_names() if readers(name))
+
+        fake_allowlist = {
+            "not_a_real_shelf_name": "made up for this test",
+            real_shelf_with_a_reader: "pretend this used to be unread",
+        }
+
+        unknown = [name for name in fake_allowlist if name not in known]
+        stale = [name for name in fake_allowlist if name in known and readers(name)]
+
+        assert unknown == ["not_a_real_shelf_name"], (
+            "the unknown-shelf check did not fire against a name that isn't "
+            "a real shelf — it cannot protect against a renamed/deleted field"
+        )
+        assert stale == [real_shelf_with_a_reader], (
+            "the has-a-reader check did not fire against a shelf known to "
+            "have a reader — it cannot protect against a stale exemption"
+        )
 
 
 class TestNoPhantomReads:

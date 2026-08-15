@@ -212,6 +212,16 @@ function TagInput({
 const asArr = (val: unknown): string[] =>
   Array.isArray(val) ? val.map(String) : [];
 
+// The Select can't display "nothing chosen" as a real selected option, so it
+// needs its OWN word for that state -- same trick work_arrangement plays with
+// "any" a few fields down. The difference: nothing on the backend translates
+// this back to "" the way `_normalize_work_arrangement` does for
+// work_arrangement -- `_apply_preferences` stores experience_level with a bare
+// `.get(pref_dict, "experience_level", "")`, no normalizer. So BOTH directions
+// of the "" <-> sentinel translation have to happen here, or the sentinel word
+// itself would be posted to the server as though the user had typed it.
+const EXPERIENCE_UNSET = "unspecified";
+
 function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
   return {
     target_job_titles: asArr(raw.target_job_titles),
@@ -229,11 +239,16 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
       typeof raw.work_arrangement === "string" && raw.work_arrangement
         ? raw.work_arrangement
         : "any",
+    // Rule #29: an unstated level is silence, never a guess. This is the WIRE
+    // value (fed to the auto-save baseline below), so it stays the server's
+    // own word -- "" for "not chosen" -- not the Select's display sentinel.
+    // Substituting "mid" here used to post a seniority the user never chose:
+    // it drives real scoring at SENIORITY_WEIGHT=8, is stated to the LLM
+    // judge, and goes into the semantic vector.
     experience_level:
-      typeof raw.experience_level === "string" ? raw.experience_level : "mid",
+      typeof raw.experience_level === "string" ? raw.experience_level : "",
     negative_keywords: asArr(raw.negative_keywords),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
-    excluded_companies: asArr(raw.excluded_companies),
     needs_visa: raw.needs_visa === true,
   };
 }
@@ -253,7 +268,6 @@ function serializePrefs(p: PreferencesRequest): string {
     p.experience_level,
     p.negative_keywords,
     p.about_me,
-    p.excluded_companies,
     p.needs_visa,
   ]);
 }
@@ -279,10 +293,9 @@ export function PreferencesForm({
   const [salaryMin, setSalaryMin] = useState("");
   const [salaryMax, setSalaryMax] = useState("");
   const [workArrangement, setWorkArrangement] = useState("any");
-  const [experienceLevel, setExperienceLevel] = useState("mid");
+  const [experienceLevel, setExperienceLevel] = useState(EXPERIENCE_UNSET);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
-  const [excludedCompanies, setExcludedCompanies] = useState<string[]>([]);
   const [needsVisa, setNeedsVisa] = useState(false);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
@@ -313,11 +326,16 @@ export function PreferencesForm({
     // constraint. `??` only falls back on null/undefined, so an empty string
     // would leave this select showing nothing at all.
     setWorkArrangement(p.work_arrangement || "any");
-    setExperienceLevel(p.experience_level ?? "mid");
+    // See EXPERIENCE_UNSET above: `p.experience_level` is the server's wire
+    // word ("" for "not chosen"). The Select needs an actual item selected,
+    // so an empty value becomes the display sentinel here -- and buildPrefs
+    // mirrors this translation back to "" on the way out. Both read-points
+    // must agree, or the dirty-check reports unsaved changes on a freshly
+    // loaded, untouched form.
+    setExperienceLevel(p.experience_level || EXPERIENCE_UNSET);
     setNeedsVisa(p.needs_visa === true);
     setNegativeKeywords(p.negative_keywords ?? []);
     setAboutMe(p.about_me ?? "");
-    setExcludedCompanies(p.excluded_companies ?? []);
     baselineRef.current = serializePrefs(p);
   }, [preferences]);
 
@@ -333,10 +351,14 @@ export function PreferencesForm({
       salary_min: salaryMin ? Number(salaryMin) : null,
       salary_max: salaryMax ? Number(salaryMax) : null,
       work_arrangement: workArrangement,
-      experience_level: experienceLevel,
+      // Mirror the EXPERIENCE_UNSET translation back the other way: the
+      // Select's display sentinel is a form-only word and must never reach
+      // the wire, or "unspecified" would be stored as though it were a real
+      // typed answer.
+      experience_level:
+        experienceLevel === EXPERIENCE_UNSET ? "" : experienceLevel,
       negative_keywords: negativeKeywords,
       about_me: aboutMe,
-      excluded_companies: excludedCompanies,
       needs_visa: needsVisa,
     }),
     [
@@ -351,7 +373,6 @@ export function PreferencesForm({
       experienceLevel,
       negativeKeywords,
       aboutMe,
-      excludedCompanies,
       needsVisa,
     ]
   );
@@ -526,6 +547,10 @@ export function PreferencesForm({
                 <SelectValue placeholder="Select..." />
               </SelectTrigger>
               <SelectContent>
+                {/* Form-only word for "not chosen" -- see EXPERIENCE_UNSET.
+                    Listed first since it is the actual starting state for
+                    every account until they pick one. */}
+                <SelectItem value={EXPERIENCE_UNSET}>No preference</SelectItem>
                 <SelectItem value="entry">Entry</SelectItem>
                 <SelectItem value="mid">Mid</SelectItem>
                 <SelectItem value="senior">Senior</SelectItem>
@@ -583,10 +608,12 @@ export function PreferencesForm({
           />
         </div>
 
-        {/* Excluded Companies input removed from UI (owner, 2026-08-08) — the
-            excluded_companies field, scoring zero-out, and payload key are kept
-            fully intact; every existing user's value is empty in prod, so
-            hiding the control drops no data and changes no live score. */}
+        {/* Excluded Companies removed entirely (not just the UI control) —
+            a grep of backend/src turned up ZERO consumers of the
+            `excluded_companies` key anywhere: no scorer, no route, no
+            model field. The prior comment here claimed a "scoring
+            zero-out" that does not exist in the code. Nothing ever read
+            this, so nothing is lost by no longer collecting or sending it. */}
 
         {/* ── Auto-save status ───────────────────────
             No "Save" button — preferences save automatically a moment after

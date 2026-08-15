@@ -567,12 +567,36 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
     logged and skipped — one bad row never stops the sweep. Returns embedded
     count. Callers gate on SEMANTIC_ENABLED.
     """
-    from src.services.embeddings import MODEL_NAME, encode_job  # noqa: PLC0415 — lazy (rule #16)
+    # PREFLIGHT — say it ONCE, loudly, before the loop.
+    #
+    # The caller has already checked SEMANTIC_ENABLED, so reaching here means
+    # semantic is switched ON. If the stack is not installed in this process,
+    # every single job below would raise, be caught by the per-job handler, and
+    # log an identical "job <id> failed" warning that names neither the cause
+    # nor the fix. That is exactly what the worker has been doing: its image is
+    # built from Dockerfile.worker with a plain `pip install .`, so the daily
+    # refresh_catalog cron ingests jobs it can never embed. Coverage sat at 687
+    # of 9,977 with no error anywhere — the failure was real and invisible.
+    from src.services.embeddings import (  # noqa: PLC0415 — lazy (rule #16)
+        MODEL_NAME,
+        encode_job,
+        semantic_stack_installed,  # noqa: PLC0415
+    )
     from src.services.job_enrichment import load_enrichment  # noqa: PLC0415
     from src.services.pg_vector_index import (  # noqa: PLC0415
         PgVectorIndex,
         vector_column_available,
     )
+
+    if not semantic_stack_installed():
+        logger.error(
+            "SEMANTIC_ENABLED is on but sentence-transformers is not installed in "
+            "this process — embedding is skipped entirely, so semantic search "
+            "cannot improve. Install the extra for THIS service "
+            "(pip install '.[semantic]'), or turn SEMANTIC_ENABLED off so the "
+            "gap is intentional rather than silent."
+        )
+        return 0
 
     try:
         vix = PgVectorIndex()

@@ -92,6 +92,19 @@ _ROLES: dict[str, str] = {
     "jobs": "api",
     "tailor": "tailor",
     "snapshot": "api",
+    # two_pass.py was in _WRITER_ROLES but MISSING here, so every READ performed
+    # by the extraction orchestrator — the single most shelf-heavy module on the
+    # user side — was invisible to readers(). Found 2026-08-15 while auditing a
+    # doc that called `llm_input_hashes` a dead, unread shelf: it is read at
+    # two_pass.py:220, `cv.llm_input_hashes.get(key) == _input_hash(raw)`, a
+    # real value comparison that decides whether a PAID LLM call is skipped.
+    # The instrument reported only {"api"} for it, and the doc believed the
+    # instrument.
+    #
+    # NOT a matching role: two_pass decides what gets extracted and cached, it
+    # never ranks a job. Adding it here fixes the "is anything reading this?"
+    # answer without touching the matching count.
+    "two_pass": "extraction",
 }
 
 # Roles whose consumer can change what a user actually sees. Every one of these

@@ -487,6 +487,81 @@ class TestNeedsVisaRoundTripsThroughTheRoute:
         assert out.needs_visa is True
 
 
+class TestExperienceLevelIsNotWipedOrPolluted:
+    """`experience_level` reached `UserPreferences` via a bare
+    `pref_dict.get("experience_level", "")` -- no normalisation, and an
+    OMITTED key silently defaulted to "" exactly like an explicit clear.
+
+    Two separate bugs share that one line:
+
+      1. No validation. `resolve_experience_level` says "typed always wins" --
+         a typed value skips the CV-inferred fallback and drives
+         `seniority_score` at full weight (up to 8 points, either direction) on
+         every job. An unrecognised string reaching that seam the same way
+         "any" reached the workplace one is exactly the class of bug already
+         fixed one field over (`_normalize_work_arrangement`).
+      2. No partial-save protection. Because the fallback default was "" and
+         not the STORED value, saving anything else on the preferences form
+         (salary, locations, about_me...) silently wiped a previously-chosen
+         experience level -- the identical shape as the workplace regression
+         `TestWorkplaceReachesTheScorer` guards, one field over.
+
+    NOTE on "mid": the live defect proven for THIS field (a brand-new account
+    posting "mid" it never chose) is a FRONTEND bug -- `prefsFromRaw` in
+    PreferencesForm.tsx substitutes "mid" for a missing `experience_level`,
+    fixed in `PreferencesForm.experience.test.tsx`. "mid" is a real,
+    selectable option in the dropdown (same list as "entry"/"senior"/"lead"/
+    "executive"), so the backend must NOT silence it -- doing so would drop a
+    genuine choice for every user who actually picks "Mid", which is a worse
+    bug than the one being fixed. This class guards the backend's own half:
+    validating genuinely unrecognised strings and protecting partial saves.
+    """
+
+    def _apply(self, form: dict, existing=None):
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+        p = UserProfile(
+            cv_data=CVData(), preferences=existing or UserPreferences()
+        )
+        _apply_preferences(json.dumps(form), p)
+        return p.preferences.experience_level
+
+    def test_each_real_level_round_trips(self) -> None:
+        # The control: without it, "normalise everything to empty" would also
+        # pass every other test in this class.
+        for level in ("entry", "mid", "senior", "lead", "executive"):
+            assert self._apply({"experience_level": level}) == level, (
+                f"{level} is a real dropdown option and must survive a save"
+            )
+
+    def test_an_unrecognised_value_is_silenced(self) -> None:
+        # Not a real dropdown option. Before normalisation this reached the
+        # DB, the LLM judge prompt and the semantic vector as though the user
+        # had stated it -- the same failure `_normalize_work_arrangement`
+        # already fixed for "any".
+        assert self._apply({"experience_level": "ninja-wizard"}) == ""
+
+    def test_an_omitted_key_keeps_the_stored_answer(self) -> None:
+        """The partial-save bug: the old `.get(key, "")` treated an absent
+        key the same as an explicit clear, so saving any OTHER field on the
+        form silently wiped a previously-chosen experience level."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(experience_level="senior")
+        assert self._apply({"salary_min": 40000}, stored) == "senior"
+
+    def test_an_explicit_empty_string_still_clears_it(self) -> None:
+        """Rule #29 cuts both ways -- a preference the user cleared must go
+        back to silence, not keep the old stored value forever."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(experience_level="senior")
+        assert self._apply({"experience_level": ""}, stored) == ""
+
+
 class TestGithubUsernameFallbackIsNormalized:
     """github_username reaching the _apply_preferences fallback path was stored
     raw — a real user ended up with 'https:' (2026-08-08), which silently broke
