@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -44,6 +45,30 @@ DISPLAY_FLOOR = int(os.getenv("PA_DISPLAY_FLOOR", "0"))
 # A feature that produced rows and then produced none for this long has stopped.
 # Generous on purpose: this must catch "dead", not "quiet week".
 STALE_FEATURE_DAYS = int(os.getenv("PA_STALE_FEATURE_DAYS", "14"))
+# How far the newest user_feed row may fall behind the newest job before the
+# PIPE between them counts as severed. Its own constant, deliberately NOT
+# STALE_FEATURE_DAYS: that knob is 14 DAYS and guards job_enrichment /
+# job_embeddings, where a quiet fortnight is plausible. The catalog refresh runs
+# DAILY, so one missed night is normal and two is not — 48 hours is the first
+# threshold that cannot be explained away by a single skipped run. Measured
+# against the real outage: 93 hours. At 14 days it would never have fired.
+FEED_LAG_MAX_HOURS = float(os.getenv("PA_FEED_LAG_MAX_HOURS", "48"))
+# How old the newest job in the catalog may be before ingestion counts as dead.
+# Same daily-refresh reasoning, and a separate knob for the same reason: this
+# watches `jobs` itself, FEED_LAG_MAX_HOURS watches the pipe OUT of it, and
+# either can break while the other is fine.
+CATALOG_MAX_AGE_HOURS = float(os.getenv("PA_CATALOG_MAX_AGE_HOURS", "48"))
+# The "produced rows, then stopped" guard and the timestamp column it must read
+# on each table. THESE NAMES ARE LOAD-BEARING: the guard used to hardcode
+# `created_at`, which exists on NEITHER table (they are `enriched_at` and
+# `embedding_updated_at`), so every run raised UndefinedColumn into a bare
+# `except` and skipped the check in silence. Cross-checked against the
+# migrations by backend/tests/test_feed_lag_edge.py so a rename cannot quietly
+# disarm it a second time.
+FEATURE_FRESHNESS_TABLES: tuple[tuple[str, str, str], ...] = (
+    ("job_enrichment", "LLM enrichment", "enriched_at"),
+    ("job_embeddings", "semantic embeddings", "embedding_updated_at"),
+)
 # A notification threshold is a CLAIM that some jobs will clear it. If under
 # this share of the feed can, the feature is on-but-silent — the worst state,
 # because it looks configured and produces nothing.
@@ -60,8 +85,6 @@ def _age_days(iso: str) -> int | None:
     failure must degrade to "cannot tell" rather than crash the whole detector
     or, worse, silently read as fresh.
     """
-    from datetime import datetime, timezone
-
     try:
         dt = datetime.fromisoformat(iso.strip().replace("Z", "+00:00"))
     except (ValueError, AttributeError):
@@ -69,6 +92,55 @@ def _age_days(iso: str) -> int | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return max(0, (datetime.now(timezone.utc) - dt).days)
+
+
+def _parse_iso(value: object) -> datetime | None:
+    """Parse one of the ISO-8601 TEXT timestamp columns, or None.
+
+    Same contract as `_age_days`: these are unconstrained TEXT columns, so a
+    parse failure must mean "cannot tell" — never "fresh".
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _age_hours(iso: object, now: object = None) -> float | None:
+    """Age in HOURS of an ISO-8601 timestamp, or None if unreadable.
+
+    `_age_days` floors to whole days, so it cannot express "36 hours" at all —
+    useless next to an hours-scale threshold. `now` is injectable so the
+    threshold behaviour can be tested without freezing the clock.
+    """
+    then = _parse_iso(iso)
+    if then is None:
+        return None
+    ref = _parse_iso(now) if now is not None else datetime.now(timezone.utc)
+    if ref is None:
+        return None
+    return max(0.0, (ref - then).total_seconds() / 3600.0)
+
+
+def feed_lag_hours(newest_job: object, newest_feed: object) -> float | None:
+    """How many hours the newest FEED row trails the newest CATALOG job.
+
+    This is an EDGE measurement, not a node measurement — the distinction is the
+    whole point of the check that uses it. Both endpoints can be perfectly
+    healthy on their own while the pipe between them is severed, and a row count
+    on either side cannot see that. Returns None when either timestamp is
+    unreadable, so the caller can report "blind" instead of "healthy".
+
+    Never negative: a feed row written after the newest job means the pipe is
+    running ahead, which is fine, not a fault.
+    """
+    job_dt, feed_dt = _parse_iso(newest_job), _parse_iso(newest_feed)
+    if job_dt is None or feed_dt is None:
+        return None
+    return max(0.0, (job_dt - feed_dt).total_seconds() / 3600.0)
 
 
 def main() -> int:
@@ -126,8 +198,7 @@ def main() -> int:
             # 2. A BUILT FEATURE THAT PRODUCES NOTHING.
             # job_enrichment sitting at 0 rows was invisible for weeks.
             # ---------------------------------------------------------------
-            for table, label in (("job_enrichment", "LLM enrichment"),
-                                 ("job_embeddings", "semantic embeddings")):
+            for table, label, ts_col in FEATURE_FRESHNESS_TABLES:
                 try:
                     cur.execute(f"SELECT count(*) FROM {table}")  # noqa: S608 - fixed literals
                     n = cur.fetchone()[0]
@@ -149,12 +220,21 @@ def main() -> int:
                 rows.append((f"{label} rows", str(n),
                              "ok" if n > 0 else "zero - never produced anything"))
                 if n > 0:
+                    # The table EXISTS (the count above succeeded), so a failure
+                    # here is the checker being wrong, not the DB being old — and
+                    # it must be LOUD. Swallowing it is exactly how this guard sat
+                    # disarmed: it asked for `created_at`, which neither table has.
                     try:
-                        cur.execute(f"SELECT max(created_at) FROM {table}")  # noqa: S608 - fixed literals
+                        cur.execute(f"SELECT max({ts_col}) FROM {table}")  # noqa: S608 - literals from FEATURE_FRESHNESS_TABLES
                         newest = cur.fetchone()[0]
-                    except Exception:
+                    except Exception as exc:  # noqa: BLE001
                         conn.rollback()
                         newest = None
+                        check(f"{label} freshness", f"cannot read {table}.{ts_col}", False,
+                              f"the {label} freshness guard cannot run: "
+                              f"{type(exc).__name__} on {table}.{ts_col}. It has been "
+                              f"reporting nothing at all, which reads exactly like "
+                              f"reporting health.")
                     if newest:
                         age_days = _age_days(str(newest))
                         stale = age_days is not None and age_days > STALE_FEATURE_DAYS
@@ -346,6 +426,88 @@ def main() -> int:
                          "ok" if catalog > 0 else "**BROKEN**"))
             if catalog == 0:
                 problems.append("the shared catalog is EMPTY")
+
+            # The heading above promised a STALENESS check and the code below it
+            # was `count(*) > 0` — an existence test wearing a freshness label.
+            # If every source died tonight the catalog would hold its 10,257 rows
+            # forever and this section would stay green forever with them. Rows
+            # are not recency; only the newest timestamp is.
+            cur.execute("SELECT max(first_seen_at) FROM jobs")
+            newest_job_seen = cur.fetchone()[0]
+            if catalog > 0:
+                cat_age = _age_hours(newest_job_seen)
+                if cat_age is None:
+                    check("catalog freshness", "UNREADABLE max(first_seen_at)", False,
+                          f"cannot tell how old the newest job is "
+                          f"(first_seen_at={newest_job_seen!r}) — blind, not healthy.")
+                else:
+                    check(f"catalog freshness (max {CATALOG_MAX_AGE_HOURS:.0f}h)",
+                          f"newest job {cat_age:.1f}h old",
+                          cat_age <= CATALOG_MAX_AGE_HOURS,
+                          f"the newest job in the catalog is {cat_age:.1f}h old. "
+                          f"Ingestion has stopped. The {catalog} rows already there "
+                          f"keep every count green while the product slowly serves "
+                          f"nothing but stale listings.")
+
+            # ---------------------------------------------------------------
+            # 6. THE PIPE BETWEEN TWO HEALTHY TABLES. **THIS IS AN EDGE CHECK,
+            # NOT A NODE CHECK** — and that distinction is the entire lesson.
+            #
+            # Every other assertion in this file asks "is THIS TABLE healthy":
+            # enough rows, recent rows, sane values. This one asks "is the pipe
+            # between two healthy tables still connected".
+            #
+            # Measured live 2026-08-15, read-only from prod:
+            #     newest job (jobs.first_seen_at)  2026-08-15T04:05:15+00:00
+            #     newest feed row (user_feed)      2026-08-11T07:02:12+00:00
+            #     jobs ingested in between         1,345
+            #     lag                              93.05 HOURS
+            # Four days in which nothing new reached any dashboard — and
+            # product-health.yml reported 13/13 GREEN throughout. It could not
+            # do otherwise. `jobs` was healthy: 10,257 rows, newest hours old.
+            # `user_feed` was healthy: 10,508 rows, 210x the floor of 50. Check
+            # 1 above counts feed rows against MIN_FEED_ROWS and never asks
+            # whether any of them are FRESH, so a feed frozen since 8-11 reads
+            # exactly like a feed written this morning.
+            #
+            # The threshold is FEED_LAG_MAX_HOURS (48), not STALE_FEATURE_DAYS
+            # (14 days). See the constant for why: at 336 hours this outage
+            # would have gone completely unnoticed. Guard on the arithmetic and
+            # on the choice of constant: backend/tests/test_feed_lag_edge.py.
+            # ---------------------------------------------------------------
+            newest_job = newest_job_seen
+            cur.execute("SELECT max(created_at) FROM user_feed")
+            newest_feed = cur.fetchone()[0]
+            if newest_job is None or newest_feed is None:
+                # An empty side is not a severed pipe — check 1 (feed rows) and
+                # the catalog count above already own the "nothing here at all"
+                # case, and double-reporting it would just add noise.
+                rows.append(("feed lag behind catalog", "one side empty", "-"))
+            else:
+                lag = feed_lag_hours(newest_job, newest_feed)
+                if lag is None:
+                    # Blindness must never read as health. These are TEXT
+                    # columns; data_invariants.py exists because one of them
+                    # once held a Unix epoch string.
+                    check("feed lag behind catalog", "UNREADABLE timestamps", False,
+                          f"cannot measure the catalog->feed pipe: "
+                          f"jobs.first_seen_at={newest_job!r}, "
+                          f"user_feed.created_at={newest_feed!r}. A check that "
+                          f"cannot see is not a check that passed.")
+                else:
+                    cur.execute(
+                        "SELECT count(*) FROM jobs WHERE first_seen_at > %s",
+                        (str(newest_feed),))
+                    stranded = cur.fetchone()[0]
+                    check(f"feed lag behind catalog (max {FEED_LAG_MAX_HOURS:.0f}h)",
+                          f"{lag:.1f}h, {stranded} jobs stranded",
+                          lag <= FEED_LAG_MAX_HOURS,
+                          f"the newest job is {lag:.1f}h newer than the newest "
+                          f"user_feed row, and {stranded} jobs have been ingested "
+                          f"since anything last reached a dashboard. Both tables "
+                          f"are individually healthy — the PIPE between them is "
+                          f"severed. Ingestion keeps working, users see nothing "
+                          f"new, and no row count on either side can tell.")
 
     except Exception as exc:  # noqa: BLE001
         print(f"::error::product assertions could not run: {exc}")
