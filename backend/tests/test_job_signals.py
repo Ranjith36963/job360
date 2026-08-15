@@ -525,3 +525,116 @@ class TestSignalBackedLookupWiring:
             self._Job(title="Senior Engineer")
         )
         assert out is not None
+
+
+# ---------------------------------------------------------------------------
+# The data has to reach the CONTAINER, not just the developer's disk
+# ---------------------------------------------------------------------------
+
+
+class TestTheDataShipsWithTheInstalledPackage:
+    """THIRD instance of one packaging bug (ESCO was the first, the UK
+    gazetteer — issue #260, PR #312 — the second, this is the third).
+
+    Production installs the app with `pip install .`, and
+    `[tool.setuptools.packages.find] include = ["src*"]` copies ONLY the `src`
+    packages. Anything the code reaches for outside `src/` resolves, inside the
+    container, to `<site-packages>/<whatever>` — a path that does not exist.
+    `job_signals._DATA` pointed at `backend/data/job_signals`, so
+    `_load_terms()` returned `{}` for all three vocabularies and
+    `signal_backed_lookup` / `detect_seniority` answered UNKNOWN for every job
+    in production while every test on this machine passed.
+
+    These tests assert the three things that would have caught it: the RUNTIME
+    path lives inside the package, the packaging config actually copies it, and
+    an empty load is LOUD.
+    """
+
+    def test_data_sits_inside_the_installed_package_tree(self) -> None:
+        from pathlib import Path
+
+        from src.services import job_signals
+
+        package_root = Path(job_signals.__file__).resolve().parent.parent
+        assert job_signals._DATA.is_relative_to(package_root), (
+            f"job_signals reads {job_signals._DATA}, which is outside the "
+            f"installed package ({package_root}). `pip install .` ships only "
+            "`src*`, so in the container that path does not exist and every "
+            "detector silently answers UNKNOWN."
+        )
+
+    @pytest.mark.parametrize("name", [
+        "workplace_terms.txt",
+        "workplace_location_terms.txt",
+        "seniority_terms.txt",
+    ])
+    def test_every_vocabulary_file_is_present_and_non_empty(self, name: str) -> None:
+        from src.services import job_signals
+
+        path = job_signals._DATA / name
+        assert path.exists(), f"{name} is missing from {job_signals._DATA}"
+        assert path.stat().st_size > 100, f"{name} is present but effectively empty"
+
+    def test_packaging_config_ships_the_data_with_the_wheel(self) -> None:
+        """Living under `src/` is necessary but NOT sufficient — setuptools
+        copies non-.py files only when they are declared as package data."""
+        from pathlib import Path
+
+        from src.services import job_signals
+
+        backend = Path(job_signals.__file__).resolve().parent.parent.parent
+        pyproject = (backend / "pyproject.toml").read_text(encoding="utf-8")
+        assert "[tool.setuptools.package-data]" in pyproject
+        assert "data/job_signals" in pyproject, (
+            "pyproject does not declare the job_signals vocabularies as package "
+            "data, so the wheel that production installs does not contain them."
+        )
+
+
+class TestAMissingVocabularyIsLoud:
+    """Graceful degradation is right — a lost data file must not crash the
+    pipeline. SILENT degradation is what let this survive: every instrument
+    stayed green while the detectors decided nothing."""
+
+    def test_missing_file_logs_an_error_naming_the_path(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from src.services import job_signals
+
+        original = job_signals._DATA
+        try:
+            job_signals._DATA = tmp_path / "absent"
+            with caplog.at_level(logging.ERROR):
+                assert job_signals._load_terms("workplace_terms.txt") == {}
+            messages = [r.getMessage() for r in caplog.records]
+            assert any("workplace_terms.txt" in m for m in messages), (
+                "a missing vocabulary must name the path it looked at, loudly; "
+                f"got {messages!r}"
+            )
+        finally:
+            job_signals._DATA = original
+
+    def test_a_file_that_parses_to_nothing_logs_an_error(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Present-but-useless is the nastier case: `path.exists()` is True, so
+        an existence check passes while the vocabulary is still empty."""
+        import logging
+
+        from src.services import job_signals
+
+        (tmp_path / "workplace_terms.txt").write_text(
+            "# only a comment\n\n", encoding="utf-8"
+        )
+        original = job_signals._DATA
+        try:
+            job_signals._DATA = tmp_path
+            with caplog.at_level(logging.ERROR):
+                assert job_signals._load_terms("workplace_terms.txt") == {}
+            assert any(
+                "workplace_terms.txt" in r.getMessage() for r in caplog.records
+            ), "an empty vocabulary must scream in the logs, not pass silently"
+        finally:
+            job_signals._DATA = original
