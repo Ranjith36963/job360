@@ -73,17 +73,51 @@ _ROLES: dict[str, str] = {
     "llm_matcher": "judge",
     "prefilter": "prefilter",
     "embeddings": "semantic",
+    # retrieval.py is mapped to the same role deliberately: it reads ZERO
+    # profile shelves today (verified: no cv./prefs./getattr access at all), so
+    # it contributes nothing on its own. The "semantic" role is earned entirely
+    # by embeddings.py. Keeping the mapping costs nothing and means a future
+    # profile read in retrieval.py is counted automatically.
     "retrieval": "semantic",
-    "feed": "feed",
+    # "feed" was here as its own MATCHING role. services/feed.py also reads zero
+    # profile shelves, so unlike "semantic" nothing else earned it — it was a
+    # declared matching role with no reader, quietly inflating the headline
+    # "N shelves feed matching" number with a module that contributes none.
+    # Removed until feed.py actually reads a shelf. This is exactly what the
+    # de-tautologised test_every_matching_role_is_actually_used caught on its
+    # first real run.
+    "feed": "persistence",
     # Not matching — kept so the manifest can show WHERE a shelf does surface.
     "profile": "api",
     "jobs": "api",
     "tailor": "tailor",
     "snapshot": "api",
+    # two_pass.py was in _WRITER_ROLES but MISSING here, so every READ performed
+    # by the extraction orchestrator — the single most shelf-heavy module on the
+    # user side — was invisible to readers(). Found 2026-08-15 while auditing a
+    # doc that called `llm_input_hashes` a dead, unread shelf: it is read at
+    # two_pass.py:220, `cv.llm_input_hashes.get(key) == _input_hash(raw)`, a
+    # real value comparison that decides whether a PAID LLM call is skipped.
+    # The instrument reported only {"api"} for it, and the doc believed the
+    # instrument.
+    #
+    # NOT a matching role: two_pass decides what gets extracted and cached, it
+    # never ranks a job. Adding it here fixes the "is anything reading this?"
+    # answer without touching the matching count.
+    "two_pass": "extraction",
 }
 
+# Roles whose consumer can change what a user actually sees. Every one of these
+# must be READ BY AT LEAST ONE SHELF — a declared role with no reader inflates
+# the count with a module that contributes nothing, which is why
+# test_every_matching_role_is_actually_used exists.
+#
+# NOT equal reach, and the difference matters when quoting the number:
+#   scorer / search-keywords / tiering / prefilter -> rank EVERY job
+#   judge                                          -> the top slice only
+#   semantic                                       -> only when the vector runs
 MATCHING_ROLES = frozenset(
-    {"search-keywords", "tiering", "scorer", "judge", "prefilter", "semantic", "feed"}
+    {"search-keywords", "tiering", "scorer", "judge", "prefilter", "semantic"}
 )
 
 # Modules that WRITE shelves. Extraction lives under services/profile/, but the
@@ -309,16 +343,75 @@ def _scan(paths: Iterable[Path], shelves: frozenset[str]) -> dict[str, set[str]]
 
 
 @lru_cache(maxsize=1)
-def _reader_index() -> dict[str, set[str]]:
-    """shelf -> set of roles that read it."""
+def derived_shelves() -> dict[str, tuple[str, ...]]:
+    """Read-only VIEW name -> the stored shelf(s) it is computed from.
+
+    A derived shelf is a ``@property`` on one of the profile dataclasses. It has
+    no storage and no writer, so it is deliberately NOT in ``shelf_names()`` —
+    the "every shelf has a writer" rule would fail it, correctly, because
+    nothing can or should fill it.
+
+    But consumers still read it by name, and that read is a real read of the
+    shelf underneath. ``preferred_workplace`` is the live case: the keyword
+    scorer reads it on every job, while the stored answer is
+    ``work_arrangement``. Without this mapping the audit would report
+    ``work_arrangement`` as judge-only and miss that it ranks the entire feed —
+    the instrument would under-report the very thing it exists to measure.
+
+    DERIVED FROM THE SOURCE, never hand-listed: the property bodies are parsed
+    and every ``self.<shelf>`` they read becomes the mapping. A hand-typed map
+    here would be one more copy to drift, which is the bug class this whole
+    module was written to catch.
+    """
+    from src.services.profile import models as _models
+
     shelves = frozenset(shelf_names())
+    out: dict[str, tuple[str, ...]] = {}
+    try:
+        tree = ast.parse(Path(_models.__file__).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, TypeError):  # pragma: no cover - unreadable source
+        return out
+
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        if cls.name not in {"CVData", "UserPreferences", "UserProfile"}:
+            continue
+        for fn in cls.body:
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(
+                isinstance(d, ast.Name) and d.id == "property" for d in fn.decorator_list
+            ):
+                continue
+            sources = {
+                node.attr
+                for node in ast.walk(fn)
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and node.attr in shelves
+            }
+            if sources:
+                out[fn.name] = tuple(sorted(sources))
+    return out
+
+
+@lru_cache(maxsize=1)
+def _reader_index() -> dict[str, set[str]]:
+    """shelf -> set of roles that read it.
+
+    A read of a DERIVED view counts as a read of the shelf it is computed from,
+    because that is what it physically is.
+    """
+    shelves = frozenset(shelf_names())
+    derived = derived_shelves()
     index: dict[str, set[str]] = {name: set() for name in shelves}
-    for stem, found in _scan(_SRC.rglob("*.py"), shelves).items():
+    for stem, found in _scan(_SRC.rglob("*.py"), shelves | frozenset(derived)).items():
         role = _ROLES.get(stem)
         if not role:
             continue
         for name in found:
-            index[name].add(role)
+            for target in derived.get(name, (name,)):
+                index[target].add(role)
     return index
 
 
@@ -447,3 +540,38 @@ def is_matching_shelf(shelf: str) -> bool:
 
 def matching_shelves() -> tuple[str, ...]:
     return tuple(n for n in shelf_names() if is_matching_shelf(n))
+
+
+# Roles whose consumer ranks EVERY job in the feed, as opposed to a slice of it.
+EVERY_JOB_ROLES = frozenset({"scorer", "search-keywords", "tiering", "prefilter"})
+
+
+def matching_tiers() -> dict[str, tuple[str, ...]]:
+    """The matching count broken down by REACH, because one number misleads.
+
+    "50 shelves feed matching" is true as wiring and misleading as impact: it
+    counts a shelf read only by the LLM judge the same as one the keyword scorer
+    reads. They are not comparable —
+
+        every_job  the keyword engine ranks all ~7,000 rows in a feed
+        judge      the LLM judge sees a capped window (tens, not thousands)
+        semantic   the vector, and only when the index actually covers the job
+
+    This exists so the honest figure is COMPUTED rather than asserted in prose.
+    A headline number that cannot be recomputed from the code is exactly the
+    kind of claim this whole batch has been correcting.
+    """
+    every, judge, semantic = [], [], []
+    for name in matching_shelves():
+        roles = readers(name)
+        if roles & EVERY_JOB_ROLES:
+            every.append(name)
+        elif "judge" in roles:
+            judge.append(name)
+        else:
+            semantic.append(name)
+    return {
+        "every_job": tuple(every),
+        "judge_only": tuple(judge),
+        "semantic_only": tuple(semantic),
+    }

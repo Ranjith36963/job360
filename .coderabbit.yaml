@@ -1,0 +1,168 @@
+# CodeRabbit — the third reviewer.
+#
+# WHY THIS FILE EXISTS
+# Two reviewers already read every change here: Claude, which writes most of it, and
+# Codex/GPT, which attacks it. Both are LLMs with overlapping instincts. On 2026-08-11
+# Claude-reviewing-Claude corrected 30 of its own 69 verdicts — good, but it twice agreed
+# with a confident wrong claim ("the pipe is severed" when it was starved; "quality was
+# never measured" when it had measured 39%→66%→78%). A copy of you has no reason to doubt
+# you. This config exists to point a DIFFERENT reviewer at the failure this repo actually
+# has, rather than at style.
+#
+# THE FAILURE THIS REPO ACTUALLY HAS
+# Not bugs. Not types (mypy is at zero). Not tests (2,700+ pass).
+# It ships GUARDS THAT CANNOT FIRE. Eight of them, measured, in one week:
+#   · a size check that swallowed its own exit code
+#   · a sed range whose anchor had been deleted, silently feeding 82 wrong lines
+#   · a drift rule blind to the one file carrying the bug it was written for
+#   · a route test that read a mutable global, so its answer changed with test order
+#   · a Redis timeout that covered connect but not the call
+#   · an LLM alarm sitting below the `return` that fires first
+#   · a freshness guard querying a column neither table has
+#   · an alert path whose missing key made it exit 0, GREEN, for weeks
+# Every one was correct-looking code in the wrong position. Every one reported success
+# about a DIFFERENT QUESTION than the one that mattered.
+#
+# So the review question that earns its keep here is not "is this correct?" — it is:
+#   **If this breaks at 3am, does anyone find out?**
+
+language: "en-GB"
+
+# Max 250 chars. This is the single most load-bearing string in the file.
+tone_instructions: >-
+  Be direct and specific. Skip praise and style nits. Prioritise: can this guard actually
+  fire? does a failure here stay silent? is a claim in a comment or commit message
+  provably false? Cite file:line. Say "I could not verify X" rather than guessing.
+
+reviews:
+  # assertive: the owner asked for brutal. A polite reviewer is a third opinion he ignores.
+  profile: "assertive"
+
+  high_level_summary: true
+  review_status: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  related_issues: true
+  poem: false
+  in_progress_fortune: false
+
+  # Do NOT block the merge button. main auto-deploys to production and the owner is solo;
+  # a third-party reviewer holding the only gate is a single point of failure he cannot
+  # unblock at 2am. Advisory here, enforcement in the branch ruleset.
+  request_changes_workflow: false
+  fail_commit_status: false
+
+  path_filters:
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+    - "!**/__pycache__/**"
+    - "!**/.mypy_cache*/**"
+    - "!backend/src/data/uk_gazetteer/**"   # 52k committed place names, not code
+    - "!backend/data/job_signals/**"        # reference vocabularies, not code
+    - "!docs/_archive/**"
+    - "!docs/fable/**"                      # historical audit records, append-only
+
+  path_instructions:
+    - path: ".github/workflows/**"
+      instructions: >-
+        THE HIGHEST-RISK FILES IN THIS REPO. Every one is an alarm, and eight alarms here
+        have shipped unable to fire.
+        For each detection or alerting step ask, in order:
+        (1) If this step FAILS, does a human find out, or does it exit 0 with a
+        ::warning:: nobody reads? A silent skip in an alerting path IS the bug — the
+        Resend alert action did exactly this and the harness was mute for weeks.
+        (2) Is any later step gated on a bare `failure()` that an unrelated step (e.g. a
+        Slack post) could make true? That makes the loop LIE about its own outcome.
+        (3) Does a step depend on an output that an earlier step only writes on SUCCESS?
+        If the earlier step dies, the branch is skipped and the outage goes unannounced.
+        (4) Pipes under `set -o pipefail`: `cmd | head -N` raises SIGPIPE and kills the
+        step. This exact bug disabled the repair checker on every diff over 800 lines.
+        (5) Bot identity is spelled TWO ways: webhook payloads say `github-actions[bot]`,
+        `gh issue view --json author` returns `app/github-actions`. Comparing the wrong
+        one silently never matches — it cost 17 days of a dead triage loop.
+        (6) Concurrency groups without `github.ref` in the key cancel other PRs' runs.
+        A cancelled required check can never go green.
+
+    - path: "scripts/**"
+      instructions: >-
+        These are the detectors. Judge each check by whether it measures the thing that
+        actually breaks. Specifically: a COUNT is not a FRESHNESS check — asserting
+        `count(*) >= 50` passed 13/13 while the user feed sat frozen for four days.
+        Check that any threshold constant matches the cadence of what it watches (a
+        14-day constant cannot catch a 3-day freeze). Check that a queried column exists
+        on the table. Flag any check that cannot be made to go red on demand.
+
+    - path: "backend/src/api/routes/**"
+      instructions: >-
+        Every per-user route must Depends(require_user) or require_verified_user, and
+        scope EVERY query by user.id. Never accept a user_id from the URL, body or query,
+        including on mutating routes — three real IDORs came from exactly that. If a route
+        is deliberately public, it must be listed with a reason in
+        tests/test_route_auth_coverage.py.
+
+    - path: "backend/src/services/**"
+      instructions: >-
+        Watch for SILENT DEGRADATION: a loader returning {} / [] / None when its data file
+        is missing, so broken looks identical to empty. Three features shipped dead this
+        way (ESCO, uk_gazetteer, job_signals) — each logged nothing and answered "nothing"
+        in production for weeks. Any load of an external file must log an ERROR naming the
+        path when it is absent or empty.
+        Also: never import apprise, sentence_transformers, chromadb, rapidfuzz or sklearn
+        at module scope — lazy-import inside the using function.
+
+    - path: "backend/tests/**"
+      instructions: >-
+        The bar here is: was this test WATCHED FAILING before it passed? A test that was
+        green the moment it existed proves nothing. Flag tests that assert on schema
+        presence rather than a real non-default value (`assert "field" in body` passes
+        against a `= 0` default). Flag tests that read module-level mutable state — one
+        did, and its answer changed with test ORDER, which makes a security check
+        meaningless.
+
+    - path: "**/*.md"
+      instructions: >-
+        Docs here are load-bearing: agents read CLAUDE.md as rules and act on them. Treat
+        every factual claim as a claim to VERIFY, not prose to style-check. Four of 31
+        "hard rules" described code that did not exist, and one pointed at a data
+        directory that was never built. Flag any cited file:line, count, or test name that
+        does not resolve. CLAUDE.md has a hard 2,000-word budget declared in its own
+        header — flag additions that push it over.
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords: ["WIP", "wip:", "chore(deps)"]
+
+  finishing_touches:
+    docstrings:
+      enabled: false      # docstrings here carry incident history; generated ones would flatten that
+    unit_tests:
+      enabled: false      # tests must be watched failing first; generated ones never are
+
+tools:
+  ruff:
+    enabled: true
+  shellcheck:
+    enabled: true         # the SIGPIPE and orphaned-`fi` class lives in shell
+  actionlint:
+    enabled: true         # workflows are the highest-risk files here
+  markdownlint:
+    enabled: false        # style noise on docs that are read for facts, not formatting
+  gitleaks:
+    enabled: true
+  semgrep:
+    enabled: true
+  eslint:
+    enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: "local"        # this repo's lessons are specific to it; do not leak them outward
+  issues:
+    scope: "local"
+  pull_requests:
+    scope: "local"

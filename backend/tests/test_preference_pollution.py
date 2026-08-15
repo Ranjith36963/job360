@@ -169,3 +169,98 @@ class TestExtractionNeverWritesAPreference:
         assert p.target_job_titles == [], p.target_job_titles
         assert p.preferred_locations == []
         assert p.industries == []
+
+
+class TestAnOfferedSuggestionSurvivesBeingAccepted:
+    """The suggester and the sanitizer must agree on "skills the user has".
+
+    They did not. Each hand-maintained its own list and they drifted:
+
+        suggester (two_pass) : skills, linkedin_skills, github_llm_skills,
+                               github_languages, additional_skills
+        sanitizer (this file): skills, linkedin_skills, github_llm_skills,
+                               github_skills_inferred, cv_skills_esco
+
+    ``github_skills_inferred`` is languages PLUS repo topics, so a topic-derived
+    skill was invisible to the suggester and visible to the sanitizer. That gap
+    becomes a user-visible defect the moment suggestions are tappable: the chip
+    is offered, accepted, written to ``additional_skills`` -- and stripped on the
+    very next save. It disappears with nothing on screen to explain it, which
+    reads as the app losing the user's input.
+
+    Measured before the fix: accepting "rag" left additional_skills == [].
+    Both sides now derive from ``skills_already_held``.
+    """
+
+    def _cv_with_a_topic_skill(self) -> CVData:
+        return CVData(
+            skills=["Python"],
+            github_topics=["rag"],
+            github_skills_inferred=["Python", "rag"],
+        )
+
+    def test_a_topic_derived_skill_is_never_offered(self) -> None:
+        """The fix at its source: the suggester's "already have" list must
+        include the topic-derived shelf, so "rag" is filtered out BEFORE it can
+        ever be shown as a suggestion."""
+        from src.services.profile.preferences import skills_already_held
+
+        held = {s.casefold() for s in skills_already_held(self._cv_with_a_topic_skill())}
+        assert "rag" in held, (
+            "the suggester's view of what the user already has still omits "
+            "github_skills_inferred, so it can offer a skill the sanitizer "
+            "will immediately strip"
+        )
+
+    def test_the_two_lists_cannot_drift_again(self) -> None:
+        """The STRUCTURAL guard, and the one that actually matters. Pinning the
+        symptom would let a sixth shelf be added to one list and not the other
+        tomorrow. This asserts the RELATIONSHIP instead: everything the
+        sanitizer strips as "already extracted" must be something the suggester
+        knows the user has."""
+        from src.services.profile.preferences import (
+            _extracted_skills_index,
+            skills_already_held,
+        )
+
+        cv = CVData(
+            skills=["Python"],
+            linkedin_skills=["Kubernetes"],
+            github_llm_skills=["Terraform"],
+            github_skills_inferred=["rag", "Go"],
+            cv_skills_esco=["data engineering"],
+        )
+        stripped = _extracted_skills_index(cv)
+        offered_against = {s.casefold() for s in skills_already_held(cv)}
+        missing = sorted(stripped - offered_against)
+        assert not missing, (
+            f"the sanitizer strips {missing} but the suggester does not know "
+            "the user has them, so each is a chip that can be offered, "
+            "accepted, and then silently deleted"
+        )
+
+    def test_an_accepted_suggestion_survives_the_next_save(self) -> None:
+        """The outcome, end to end. A skill the suggester WOULD offer (because
+        the user genuinely lacks it) must still be there after the save that
+        follows accepting it."""
+        from src.services.profile.preferences import skills_already_held
+
+        cv = self._cv_with_a_topic_skill()
+        held = {s.casefold() for s in skills_already_held(cv)}
+        assert "kubernetes" not in held, "premise broken: pick a skill the user lacks"
+
+        accepted = UserPreferences(additional_skills=["Kubernetes"])
+        out = sanitize_preferences(accepted, cv)
+        assert out.additional_skills == ["Kubernetes"], (
+            "a legitimately-offered suggestion was stripped on save -- accepting "
+            "a chip would appear to do nothing"
+        )
+
+    def test_the_prompt_keeps_the_original_spelling(self) -> None:
+        """``skills_already_held`` feeds the suggestion PROMPT as well as the
+        filter. Lower-casing it would quietly make the prompt worse
+        ("pytorch, aws") without failing anything."""
+        from src.services.profile.preferences import skills_already_held
+
+        cv = CVData(skills=["PyTorch", "AWS"], linkedin_skills=["SQL"])
+        assert skills_already_held(cv) == ["PyTorch", "AWS", "SQL"]

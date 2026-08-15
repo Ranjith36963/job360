@@ -117,6 +117,55 @@ _EXTRACTED_SKILL_SHELVES = (
 )
 
 
+def skills_already_held(cv_data: Any, prefs: Any = None) -> list[str]:
+    """Every skill the user demonstrably already has, from ONE definition.
+
+    Exists because two places needed this idea and each hand-maintained its own
+    list, which then drifted:
+
+      * ``sanitize_preferences`` strips an ``additional_skills`` entry that
+        duplicates an extracted shelf (``_EXTRACTED_SKILL_SHELVES``);
+      * ``llm_suggest_adjacent_skills`` only suggests skills the user does NOT
+        already have, and ``two_pass`` was building that "already have" set by
+        hand — from ``github_languages`` rather than ``github_skills_inferred``,
+        and omitting ``cv_skills_esco`` entirely.
+
+    ``github_skills_inferred`` is languages PLUS repo topics, so a topic-derived
+    skill ("rag") was invisible to the suggester and visible to the sanitizer.
+    Measured: it could be offered as a suggestion, accepted by the user, written
+    to ``additional_skills`` — and then stripped on the very next save. The chip
+    vanishes with nothing to explain it, which reads as the app losing input.
+
+    Both callers now read this, so the suggester can never offer something the
+    sanitizer will immediately take away.
+
+    Returns the skills in their ORIGINAL spelling, deduped case-insensitively.
+    The case matters: this list is also interpolated into the suggestion prompt,
+    and "pytorch, aws, sql" is a worse prompt than "PyTorch, AWS, SQL".
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: Any) -> None:
+        if isinstance(value, dict):  # ESCO entries are {name|skill|label: ...}
+            value = value.get("name") or value.get("skill") or value.get("label")
+        if not isinstance(value, str) or not value.strip():
+            return
+        text = value.strip()
+        key = text.casefold()
+        if key not in seen:
+            seen.add(key)
+            out.append(text)
+
+    for field in _EXTRACTED_SKILL_SHELVES:
+        for v in (_cv_get(cv_data, field, []) or []):
+            _add(v)
+    if prefs is not None:
+        for s in (getattr(prefs, "additional_skills", None) or []):
+            _add(s)
+    return out
+
+
 def _extracted_skills_index(cv_data: Any) -> set[str]:
     """Case-folded set of every skill already captured in an EXTRACTED shelf.
 

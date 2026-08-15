@@ -83,6 +83,20 @@ jobs:
               head_sha=$(gh pr view "$num" --json headRefOid --jq .headRefOid)
               if gh api -X PUT "repos/$GH_REPO/pulls/$num/update-branch" \
                    -f expected_head_sha="$head_sha" >/dev/null 2>&1; then
+                  # The update-branch commit is authored by github-actions[bot], and a
+                  # GITHUB_TOKEN-attributed push PARKS the resulting pull_request runs in
+                  # `action_required` - they never start on their own. pr-repair.yml:410-418
+                  # already handles this after its own push; pr-shepherd did not, so
+                  # "CI re-running" was a claim, not a fact. With a ruleset on main requiring
+                  # those checks a parked run means the PR can NEVER merge - the shepherd
+                  # would quietly create the very deadlock it exists to clear.
+                  sleep 30
+                  brn=$(gh pr view "$num" --json headRefName --jq .headRefName)
+                  for id in $(gh run list --branch "$brn" --limit 10 --json databaseId,conclusion --jq '.[]|select(.conclusion=="action_required")|.databaseId'); do
+                    gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1 \
+                      && echo "  approved parked run $id on #$num" >> "$GITHUB_STEP_SUMMARY" \
+                      || echo "::warning::could not approve parked run $id on PR #$num - approve it in the Actions UI or its checks will never report"
+                  done
                 echo "- #$num UPDATED (was conflicting; merged main in, CI re-running) — $title" >> "$GITHUB_STEP_SUMMARY"
               else
                 marker="<!-- pr-shepherd-conflict -->"

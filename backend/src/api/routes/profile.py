@@ -186,6 +186,8 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         achievements=getattr(cv, "achievements", []),
         cv_positions=getattr(cv, "cv_positions", []) or [],
         cv_projects=getattr(cv, "cv_projects", []) or [],
+        cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
+        cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 
@@ -431,30 +433,96 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
             pass
 
 
+def _normalize_work_arrangement(value: object) -> str:
+    """Store "I don't mind" as SILENCE, not as the literal string "any".
+
+    The preferences select seeds itself at ``"any"`` and posts that value, so
+    "any" reached the database as though the user had stated a constraint. Two
+    consumers then read it RAW, not through the ``preferred_workplace`` property
+    that maps it to None:
+
+      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
+        every judged job was told ``work_arrangement=any``, spending real tokens
+        to state a preference the user explicitly declined to make;
+      * the semantic vector appended "any" as a candidate token.
+
+    The property protects the keyword scorer, but a property cannot protect a
+    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    point where the sentinel can enter — and it holds for the CLI and any older
+    client too, which a frontend-side fix would not.
+
+    Rule #29: an unstated preference is silence. "Any" IS unstated.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in {"remote", "hybrid", "onsite"} else ""
+
+
+# The closed set this route will accept as a STATED experience level — the
+# exact five options the preferences form's Select offers (PreferencesForm.tsx:
+# entry/mid/senior/lead/executive). Anything outside it is not a real answer a
+# user could have picked through this form.
+#
+# scoring_dimensions._USER_EXPERIENCE_RANK recognises a much wider set
+# ("junior", "graduate", "sr", "head", "vp", ...) — that map exists to score
+# whatever string ends up in this field, including values from older data or
+# the CV-inferred fallback, not to define what THIS route should accept as a
+# freshly typed preference. Widening this set to match would let garbage like
+# "graduate" (not offered anywhere in the current UI) reach the DB looking
+# like a deliberate choice, which is the same failure this function exists to
+# stop.
+_VALID_EXPERIENCE_LEVELS = {"entry", "mid", "senior", "lead", "executive"}
+
+
+def _normalize_experience_level(value: object) -> str:
+    """Store an unrecognised experience level as SILENCE, not as a stated preference.
+
+    Mirrors ``_normalize_work_arrangement`` immediately above — same shape,
+    same seam. ``resolve_experience_level`` (scoring_dimensions.py) says
+    "typed always wins": a value in this field skips the CV-inferred fallback
+    entirely and drives ``seniority_score`` at full weight (up to 8 points,
+    either direction, on EVERY job) — the identical amplifier "any" had for
+    ``work_arrangement``. Before this function existed, ``_apply_preferences``
+    stored whatever the client posted with no check at all, so a typo, a stale
+    client sending a value the UI no longer offers, or a future free-text
+    field would reach the judge prompt and the semantic vector as though the
+    user had stated it.
+
+    NOT a fix for "a brand-new account saves 'mid' it never chose" — that
+    defect is the FRONTEND seeding a real, still-selectable dropdown value
+    (`prefsFromRaw`'s missing-key fallback) as if it were a default, fixed in
+    PreferencesForm.tsx/PreferencesForm.experience.test.tsx. "mid" stays in
+    ``_VALID_EXPERIENCE_LEVELS`` and round-trips normally here: it is a real
+    choice a user can make, so silencing it on the backend would drop that
+    choice for everyone who actually picks "Mid" — trading one data-loss bug
+    for a worse one.
+
+    Rule #29: an unstated preference is silence. An unrecognised string IS
+    unstated — the user cannot have meant something the form never offered.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in _VALID_EXPERIENCE_LEVELS else ""
+
+
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     """Parse the preferences JSON form and set it on the profile.
 
     Fields the form does NOT carry (``github_username`` — set by the separate
-    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
-    EXISTING preferences so a routine preferences save never silently wipes them.
+    GitHub route — plus ``needs_visa``, ``work_arrangement`` and
+    ``experience_level``) fall back to the EXISTING preferences so a routine
+    preferences save never silently wipes them.
     """
     pref_dict = json.loads(preferences_json)
     existing = profile.preferences or UserPreferences()
 
-    # Bridge work_arrangement -> preferred_workplace (2026-08-08).
+    # The work_arrangement -> preferred_workplace bridge used to live here.
     #
-    # The model documents preferred_workplace as "the enum form of
-    # work_arrangement so the dimension scorer can match" — but nothing ever
-    # built that bridge. The form sends work_arrangement; the WORKPLACE scoring
-    # dimension (weight 6, workplace_score) reads preferred_workplace; there is
-    # no preferred_workplace control anywhere in the frontend. So the field the
-    # scorer reads stayed None for every user and the whole workplace dimension
-    # was permanently dead — the "dead pair" the shelf X-ray flagged was caused
-    # HERE, not by users failing to fill anything. Same vocabulary on both
-    # sides ("remote"/"hybrid"/"onsite"), so an empty string maps to None
-    # ("no preference" -> neutral score, per the model comment).
-    _wa = pref_dict.get("work_arrangement", "")
-    _derived_workplace = _wa.strip().lower() or None if isinstance(_wa, str) else None
+    # It existed because the form wrote one field and the scorer read another,
+    # so the workplace dimension was dead for every user until it was built.
+    # A bridge keeps two boxes holding one answer, and they drift: cli.py's
+    # setup-profile writes work_arrangement and has never written the other, so
+    # that entry point produced a divergent profile from the day it was written.
+    # preferred_workplace is now a derived @property on UserPreferences, so
+    # there is exactly one stored answer and the two cannot disagree.
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -463,8 +531,22 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         industries=pref_dict.get("industries", []),
         salary_min=pref_dict.get("salary_min"),
         salary_max=pref_dict.get("salary_max"),
-        work_arrangement=pref_dict.get("work_arrangement", ""),
-        experience_level=pref_dict.get("experience_level", ""),
+        # An OMITTED key keeps the stored value; an explicit "" still clears it.
+        # The old default of "" meant any partial save wiped the answer, and
+        # the damage was hidden by the preferred_workplace fallback that this
+        # change removes — so without this line the workplace dimension would
+        # go dark again, which is the exact regression the bridge was added for.
+        work_arrangement=_normalize_work_arrangement(
+            pref_dict.get("work_arrangement", existing.work_arrangement)
+        ),
+        # Same partial-save shape as work_arrangement just above: an OMITTED
+        # key keeps the stored value, an explicit "" clears it. The old
+        # default of "" made no such distinction, so saving any OTHER field
+        # on the form (salary, locations, about_me...) silently wiped a
+        # previously-chosen experience level on every routine save.
+        experience_level=_normalize_experience_level(
+            pref_dict.get("experience_level", existing.experience_level)
+        ),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
         # normalize_github_username here too, not only in the dedicated GitHub
@@ -475,11 +557,6 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         github_username=normalize_github_username(
             pref_dict.get("github_username") or existing.github_username or ""
         ),
-        # Explicit value wins (a future dedicated control); otherwise derive
-        # from work_arrangement; only then fall back to the stored value.
-        preferred_workplace=pref_dict.get("preferred_workplace")
-        or _derived_workplace
-        or existing.preferred_workplace,
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the

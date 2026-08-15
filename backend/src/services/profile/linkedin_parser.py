@@ -1308,7 +1308,22 @@ def enrich_cv_from_linkedin(
     # the cache-hit path being able to erase anything.
     if llm_ran:
         cv.linkedin_positions = linkedin_data.get("positions", [])
-    cv.linkedin_skills = new_linkedin_skills
+        # linkedin_skills belongs INSIDE this gate too, and sat one line outside
+        # it until 2026-08-12.
+        #
+        # The 2026-08-08 fix above covered the five sections it was written for
+        # and stopped there. Skills have the same shape and the same failure:
+        # they come from BOTH passes (the deterministic "Top Skills" sidebar and
+        # the LLM prose reader), so on a cache-hit run merge_linkedin_fields gets
+        # an empty LLM half and this assignment replaced the full list with the
+        # sidebar-only remnant. On a real profile that is 13 skills collapsing to
+        # 3, silently, on any unrelated profile edit — and unrecoverable by
+        # re-uploading the same PDF, because its text is unchanged so the pass is
+        # skipped again.
+        #
+        # A genuine re-parse still REPLACES, so a skill removed on LinkedIn is
+        # removed here. Only the cache-hit path is now unable to erase.
+        cv.linkedin_skills = new_linkedin_skills
     cv.linkedin_industry = linkedin_data.get("industry", "") or cv.linkedin_industry
     # Two-pass — keep the raw text (if the parser supplied it) so the LLM
     # pass can re-run offline. Only overwrite when a non-empty value arrives,
