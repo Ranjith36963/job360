@@ -141,7 +141,7 @@ def _reed_calls(m):
     return [
         call.kwargs.get("params", {})
         for key, calls in m.requests.items()
-        if "reed.co.uk" in str(key[1])
+        if key[1].host == "www.reed.co.uk"
         for call in calls
     ]
 
