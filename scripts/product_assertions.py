@@ -143,6 +143,57 @@ def feed_lag_hours(newest_job: object, newest_feed: object) -> float | None:
     return max(0.0, (job_dt - feed_dt).total_seconds() / 3600.0)
 
 
+def feed_lag_cause(searches_since: int | None) -> str:
+    """Which of the two very different faults produced this lag.
+
+    Same symptom, opposite fixes:
+
+    ``severed``  a user DID search and no feed row came out — a crash, a poison
+                 row, a scoring exception. Fix the code.
+    ``starved``  nobody searched, and NOTHING ELSE writes ``user_feed``. The
+                 ARQ crons are nightly_ghost_sweep, refresh_catalog,
+                 notification_tick and enrichment_sweep
+                 (src/workers/settings.py:210-229), and refresh_catalog passes
+                 ``user_id=None`` deliberately for cost safety, which makes the
+                 feed write structurally unreachable. So new jobs reach a
+                 person only when that person clicks Search. Fix the product.
+    ``unknown``  audit_log could not be read. Never guess — a confident wrong
+                 diagnosis sends the owner hunting a crash that does not exist,
+                 and a guard that cries wolf gets muted.
+    """
+    if searches_since is None:
+        return "unknown"
+    return "severed" if searches_since > 0 else "starved"
+
+
+def feed_lag_explanation(cause: str, lag: float, stranded: int) -> str:
+    """The sentence the owner actually reads. One per cause, on purpose."""
+    head = (f"the newest job is {lag:.1f}h newer than the newest user_feed row, "
+            f"and {stranded} jobs have been ingested since anything last reached "
+            f"a dashboard. ")
+    if cause == "severed":
+        return head + (
+            "Searches DID run in that window and produced no feed row, so the "
+            "pipe between two individually healthy tables is severed — the work "
+            "is being done and thrown away. Look for a crash mid-ingest."
+        )
+    if cause == "starved":
+        return head + (
+            "No search ran in that window at all, and nothing else writes "
+            "user_feed: the only crons are the ghost sweep, the catalog "
+            "refresh (user_id=None by design, so it cannot write a feed row), "
+            "the notification tick and the enrichment sweep. So the product "
+            "puts new jobs in front of a person ONLY when that person happens "
+            "to click Search. Nothing is crashing — there is no scheduled path "
+            "from a new job to a user at all."
+        )
+    return head + (
+        "Could not read audit_log, so it is not possible to say whether a "
+        "search ran and failed or no search ran at all. Both are real faults; "
+        "check run history by hand rather than assuming."
+    )
+
+
 def main() -> int:
     dsn = os.getenv("PROD_DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
     if not dsn:
@@ -474,6 +525,16 @@ def main() -> int:
             # (14 days). See the constant for why: at 336 hours this outage
             # would have gone completely unnoticed. Guard on the arithmetic and
             # on the choice of constant: backend/tests/test_feed_lag_edge.py.
+            #
+            # AND IT MUST NAME THE CAUSE, not just the symptom. Two opposite
+            # faults make the same lag — a search that ran and produced nothing
+            # (fix the code), or no search at all (fix the product, because
+            # NOTHING on a schedule writes user_feed: refresh_catalog passes
+            # user_id=None by design, so the feed write is structurally
+            # unreachable from every cron). Measured during this very outage:
+            # audit_log held ZERO search events, so the true reading is STARVED,
+            # not severed. Shouting "severed" here would have sent the owner
+            # hunting a crash that does not exist — see feed_lag_cause().
             # ---------------------------------------------------------------
             newest_job = newest_job_seen
             cur.execute("SELECT max(created_at) FROM user_feed")
@@ -499,15 +560,22 @@ def main() -> int:
                         "SELECT count(*) FROM jobs WHERE first_seen_at > %s",
                         (str(newest_feed),))
                     stranded = cur.fetchone()[0]
+                    # Red is not enough — it must name the RIGHT cause, because
+                    # "a search crashed" and "nobody searched" need opposite
+                    # fixes. Only the search history separates them.
+                    try:
+                        cur.execute(
+                            "SELECT count(*) FROM audit_log WHERE event = 'search_started' "
+                            "AND occurred_at > %s", (str(newest_feed),))
+                        searches_since: int | None = cur.fetchone()[0]
+                    except Exception:  # noqa: BLE001 - audit_log may predate this DB
+                        conn.rollback()
+                        searches_since = None
+                    cause = feed_lag_cause(searches_since)
                     check(f"feed lag behind catalog (max {FEED_LAG_MAX_HOURS:.0f}h)",
-                          f"{lag:.1f}h, {stranded} jobs stranded",
+                          f"{lag:.1f}h, {stranded} jobs stranded, {cause}",
                           lag <= FEED_LAG_MAX_HOURS,
-                          f"the newest job is {lag:.1f}h newer than the newest "
-                          f"user_feed row, and {stranded} jobs have been ingested "
-                          f"since anything last reached a dashboard. Both tables "
-                          f"are individually healthy — the PIPE between them is "
-                          f"severed. Ingestion keeps working, users see nothing "
-                          f"new, and no row count on either side can tell.")
+                          feed_lag_explanation(cause, lag, stranded))
 
     except Exception as exc:  # noqa: BLE001
         print(f"::error::product assertions could not run: {exc}")

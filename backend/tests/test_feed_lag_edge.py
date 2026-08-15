@@ -84,6 +84,53 @@ def test_stale_feature_days_would_have_stayed_silent(pa: Any) -> None:
     assert pa.FEED_LAG_MAX_HOURS == 48
 
 
+# ── Red is not enough: it must name the RIGHT cause ────────────────────────
+#
+# Two completely different faults produce the same lag, and they need
+# different fixes. Nothing but user_feed's writers can tell them apart:
+#
+#   SEVERED  a user ran a search and no feed row came out of it. A crash,
+#            a poison row, a scoring exception. Fix the code.
+#   STARVED  nobody ran a search at all — and NOTHING ELSE writes user_feed.
+#            Verified in the tree: the only ARQ crons are nightly_ghost_sweep,
+#            refresh_catalog, notification_tick and enrichment_sweep
+#            (src/workers/settings.py:210-229), and refresh_catalog passes
+#            user_id=None ON PURPOSE for cost safety, which makes the feed
+#            write structurally unreachable (its docstring says so). So new
+#            jobs reach a person only when that person clicks Search. Fix the
+#            product, not the code.
+#
+# Measured in prod during the real 93h gap: audit_log held ZERO search events
+# and 1,345 jobs arrived. That is STARVED, not SEVERED. A guard that shouts
+# "the pipe is severed" at a starved feed sends the owner hunting a crash that
+# does not exist — and a guard that cries wolf gets muted, which this repo's
+# own doctrine calls worse than having no guard.
+
+def test_a_search_that_produced_nothing_is_severed(pa: Any) -> None:
+    assert pa.feed_lag_cause(3) == "severed"
+
+
+def test_no_search_at_all_is_starved(pa: Any) -> None:
+    assert pa.feed_lag_cause(0) == "starved"
+
+
+def test_unreadable_search_history_does_not_guess(pa: Any) -> None:
+    """audit_log may be missing on an older DB. Say 'unknown', never pick a
+    cause we cannot see — a confident wrong diagnosis is worse than none."""
+    assert pa.feed_lag_cause(None) == "unknown"
+
+
+def test_every_cause_produces_a_distinct_explanation(pa: Any) -> None:
+    """The whole point is that the owner reads a DIFFERENT sentence and does a
+    DIFFERENT thing. Identical text would make the branch pointless."""
+    texts = {c: pa.feed_lag_explanation(c, lag=93.1, stranded=1345)
+             for c in ("severed", "starved", "unknown")}
+    assert len({t.strip() for t in texts.values()}) == 3
+    assert "93.1" in texts["starved"] and "1345" in texts["starved"]
+    # The starved sentence must not accuse the code of breaking.
+    assert "severed" not in texts["starved"].lower()
+
+
 # ── Where the 48 comes from ────────────────────────────────────────────────
 
 def test_one_missed_night_is_not_an_alarm(pa: Any) -> None:
