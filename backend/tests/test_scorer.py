@@ -1064,8 +1064,19 @@ class TestScoreBreakdown:
         assert breakdown.visa_score == 0
         assert breakdown.workplace_score == 0
 
-    def test_legacy_path_with_prefs_only_still_zero_dims(self):
-        """user_preferences alone (no enrichment_lookup) → dims still 0."""
+    def test_legacy_path_with_prefs_only_neutral_not_zero_dims(self):
+        """user_preferences alone (no real enrichment_lookup) → NEUTRAL halves.
+
+        F5 (rule #29 seam, SCORER_VERSION 6): this test used to assert all
+        four dims stayed at 0 here — but that was the same bug F5 fixes in
+        miniature. `enrichment_lookup` defaults to `lambda job: None`, which
+        is indistinguishable, from inside `score()`, from a real lookup that
+        simply has no row for THIS job yet (the actual F5 scenario: a fresh,
+        not-yet-enriched job). Both must land on each dim function's
+        documented neutral half, not 0. See
+        `test_dims_neutral_not_zero_when_enrichment_missing` below for the
+        assertion on the exact numbers.
+        """
         from src.services.profile.models import UserPreferences
 
         prefs = UserPreferences(
@@ -1077,10 +1088,80 @@ class TestScoreBreakdown:
         )
         scorer = JobScorer(self._config(), user_preferences=prefs)
         breakdown = scorer.score(self._job())
-        assert breakdown.seniority_score == 0
-        assert breakdown.salary_score == 0
-        assert breakdown.visa_score == 0
-        assert breakdown.workplace_score == 0
+        assert breakdown.seniority_score == 4  # SENIORITY_WEIGHT(8) // 2
+        assert breakdown.salary_score == 5  # SALARY_WEIGHT(10) // 2
+        assert breakdown.visa_score == 3  # VISA_WEIGHT(6) // 2 (needs_visa=True)
+        assert breakdown.workplace_score == 3  # WORKPLACE_WEIGHT(6) // 2
+
+    def test_dims_neutral_not_zero_when_enrichment_missing(self):
+        """F5 wiring test — go THROUGH JobScorer.score(), not the isolated
+        dim functions (that's precisely how this shipped green before: the
+        old `if enrichment is not None:` gate inside `score()` never even
+        called the dim functions for an unenriched job, so
+        test_design_rules.py's isolated tests of those functions stayed
+        green while real feed rows were still zero-punished).
+
+        A real production `enrichment_lookup` callable (as every live call
+        site passes — see main.py/jobs.py/rescore.py) that legitimately has
+        no row yet for THIS job must land the four dims on their documented
+        NEUTRAL halves, not 0. Numbers below are exact, not approximate.
+        """
+        from src.services.profile.models import UserPreferences
+
+        config = SearchConfig(
+            job_titles=["ML Engineer"],
+            primary_skills=["Python", "PyTorch"],
+        )
+        prefs = UserPreferences(
+            salary_min=50000,
+            salary_max=80000,
+            experience_level="senior",
+            needs_visa=True,
+            preferred_workplace="remote",
+        )
+        # posted_at + high confidence on purpose. With only date_found, recency
+        # is deliberately discounted to 6 of 10 ("discovery is not posting",
+        # skill_matcher.py:446-448) and the arithmetic below would be 62/77
+        # instead of 66/81. That discount is correct behaviour and has its own
+        # tests — pinning a real posting date here keeps THIS test about the one
+        # thing it exists to prove: missing ENRICHMENT must not zero the dims.
+        job = _make_job(
+            title="ML Engineer",
+            location="London, UK",
+            description="Python PyTorch role.",
+            date_found=datetime.now(timezone.utc).isoformat(),
+            posted_at=datetime.now(timezone.utc).isoformat(),
+            date_confidence="high",
+        )
+        # A REAL lookup callable — not the default — that simply has no
+        # enrichment row for this job. This is the actual F5 scenario: a
+        # fresh job the enrichment pipeline hasn't reached yet.
+        scorer = JobScorer(
+            config, user_preferences=prefs, enrichment_lookup=lambda j: None
+        )
+        breakdown = scorer.score(job)
+
+        # Legacy 4-component base for this job/config: title=40 (exact),
+        # skill=6 (Python+PyTorch primary, 3+3), location=10 (UK), recency=10
+        # (today) = 66.
+        legacy_base = (
+            breakdown.title_score
+            + breakdown.skill_score
+            + breakdown.location_score
+            + breakdown.recency_score
+        )
+        assert legacy_base == 66
+
+        # The four dims must be the NEUTRAL halves — not 0 (the bug).
+        assert breakdown.seniority_score == 4  # SENIORITY_WEIGHT(8) // 2
+        assert breakdown.salary_score == 5  # SALARY_WEIGHT(10) // 2
+        assert breakdown.visa_score == 3  # VISA_WEIGHT(6) // 2 (needs_visa=True)
+        assert breakdown.workplace_score == 3  # WORKPLACE_WEIGHT(6) // 2
+
+        # match_score = legacy_base(66) + neutral dims(4+5+3+3=15) = 81 —
+        # NOT 66 (what the zero-dims bug would have produced).
+        assert breakdown.match_score == 81
+        assert breakdown.match_score > legacy_base
 
     def test_gate_suppressed_path_still_returns_scorebreakdown(self):
         """Gate-suppressed jobs must also return a ScoreBreakdown (not int)."""

@@ -2,7 +2,8 @@
 
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -10,9 +11,11 @@ from migrations import runner
 from src.repositories import pg
 from src.services.prefilter import FilterProfile
 from src.workers.tasks import (
+    MAX_REFRESH_INGEST_IDS,
     idempotency_key,
     mark_ledger_failed,
     mark_ledger_sent,
+    refresh_catalog,
     score_and_ingest,
 )
 
@@ -672,3 +675,323 @@ def test_refresh_catalog_fetches_with_the_union_of_all_user_configs(profile_db):
     assert not cfg.negative_title_keywords, (
         f"personal exclusions leaked into the shared fetch: {cfg.negative_title_keywords}"
     )
+
+
+# ---------- F1 — refresh_catalog fans out into every user's OWN feed -----
+#
+# Before this batch, `refresh_catalog` only refilled the shared `jobs`
+# catalog; `score_and_ingest` (the per-user prefilter + JobScorer + user_feed
+# upsert) had zero production callers. These tests exercise the fan-out that
+# closes that gap: NEW job ids only, capped, no notifications, no LLM call.
+
+
+async def _insert_job(db: "pg.Connection", *, title: str, apply_url: str, date_found: str) -> int:
+    """Minimal raw insert matching the jobs table's NOT NULL columns
+    (mirrors the `worker_db` fixture's INSERT above, but against the fully
+    migrated schema `profile_db` provides).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    cur = await db.execute(
+        """
+        INSERT INTO jobs (title, company, apply_url, source, date_found,
+                          normalized_company, normalized_title, first_seen,
+                          first_seen_at, match_score, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (title, "TestCo", apply_url, "test", date_found, "testco", title.lower(), now, now, 0, "Python"),
+    )
+    await db.commit()
+    return cur.lastrowid
+
+
+async def _deactivate_default_tenant(db: "pg.Connection") -> None:
+    """Soft-delete the well-known placeholder user migration 0002 seeds into
+    EVERY migrated schema (id 00000000-0000-0000-0000-000000000001,
+    `deleted_at IS NULL` by default). Without this, `_load_users()` picks it
+    up alongside the test's own seeded user and every ingested-row count in
+    this section is off by one — not a production bug, just this file's
+    fixture sharing a schema-bootstrap step with the multi-tenant migration.
+    """
+    await db.execute(
+        "UPDATE users SET deleted_at = ? WHERE id = '00000000-0000-0000-0000-000000000001'",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+    await db.commit()
+
+
+def _seed_one_profile(user_id: str = "profile-user") -> None:
+    """Seed a single COMPLETE profile so refresh_catalog's union isn't empty
+    and the function proceeds past the `profiles_used == 0` early-return.
+    """
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"], job_titles=["Engineer"]),
+            preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["python"]),
+        ),
+        user_id=user_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_fans_out_new_jobs_only(profile_db, monkeypatch):
+    """F1 headline behaviour: after the shared fetch, every job inserted
+    THIS tick (date_found >= the timestamp captured before run_search) gets
+    scored into every active user's OWN user_feed. A job that already
+    existed BEFORE this tick must NOT be re-scored — refresh_catalog isn't a
+    full re-score of the whole catalog, only of what just arrived.
+    """
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("real-user", "real@x.example", "!"),
+        )
+        await db.commit()
+        await _deactivate_default_tenant(db)
+
+        old_date = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        old_job_id = await _insert_job(
+            db, title="Old Job", apply_url="https://example.test/old", date_found=old_date
+        )
+
+        new_job_id_holder: dict = {}
+
+        async def _fake_run_search(**kwargs):
+            new_id = await _insert_job(
+                db,
+                title="Fresh Python Engineer",
+                apply_url="https://example.test/fresh",
+                date_found=datetime.now(timezone.utc).isoformat(),
+            )
+            new_job_id_holder["id"] = new_id
+            return {"sources_queried": 3, "total_found": 1, "new_jobs": 1}
+
+        enqueued: list[tuple] = []
+        ctx = {"db": db, "enqueue": lambda *a: _append(enqueued, a)}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)
+
+        cur = await db.execute("SELECT job_id FROM user_feed WHERE user_id = 'real-user'")
+        fed_job_ids = {r[0] for r in await cur.fetchall()}
+
+    assert result["scored_jobs"] == 1
+    assert result["ingested_rows"] == 1
+    assert fed_job_ids == {new_job_id_holder["id"]}, (
+        f"expected only the NEW job in user_feed, got {fed_job_ids} "
+        f"(old job id was {old_job_id})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_respects_the_ingest_cap(profile_db, monkeypatch):
+    """The fan-out must never process more than MAX_REFRESH_INGEST_IDS ids
+    in one tick, however many new jobs the fetch produced.
+    """
+    monkeypatch.setattr("src.workers.tasks.MAX_REFRESH_INGEST_IDS", 2)
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("real-user", "real@x.example", "!"),
+        )
+        await db.commit()
+        await _deactivate_default_tenant(db)
+
+        async def _fake_run_search(**kwargs):
+            for i in range(5):
+                await _insert_job(
+                    db,
+                    title=f"Fresh Job {i}",
+                    apply_url=f"https://example.test/fresh{i}",
+                    date_found=datetime.now(timezone.utc).isoformat(),
+                )
+            return {"sources_queried": 3, "total_found": 5, "new_jobs": 5}
+
+        ctx = {"db": db, "enqueue": lambda *a: None}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)
+
+        cur = await db.execute("SELECT COUNT(*) FROM user_feed WHERE user_id = 'real-user'")
+        (fed_count,) = await cur.fetchone()
+
+    assert result["scored_jobs"] == 2, "must stop at the cap, not process all 5"
+    assert fed_count == 2
+    assert MAX_REFRESH_INGEST_IDS == 1000, "production default must stay documented + unchanged"
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_handles_zero_new_jobs(profile_db):
+    """No new jobs this tick → no fan-out, no error, an honest zero in stats."""
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+
+        async def _fake_run_search(**kwargs):
+            return {"sources_queried": 3, "total_found": 0, "new_jobs": 0}
+
+        ctx = {"db": db, "enqueue": lambda *a: None}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)
+
+    assert result["scored_jobs"] == 0
+    assert result["ingested_rows"] == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_suppresses_instant_notifications(profile_db, monkeypatch):
+    """CLAUDE.md-adjacent product decision, made explicit here: the
+    unattended nightly fan-out must NOT fire instant push notifications even
+    for a job that scores far above the instant threshold. Feed rows /
+    scores still get written; only the outbound send is held back.
+    """
+    from src.services.skill_matcher import ScoreBreakdown
+
+    class _AlwaysHighScorer:
+        def __init__(self, *a, **k):
+            pass
+
+        def score(self, job):
+            return ScoreBreakdown(match_score=99)
+
+    monkeypatch.setattr("src.workers.tasks.JobScorer", _AlwaysHighScorer)
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("real-user", "real@x.example", "!"),
+        )
+        await db.commit()
+        await _deactivate_default_tenant(db)
+
+        async def _fake_run_search(**kwargs):
+            await _insert_job(
+                db,
+                title="Fresh High Scorer",
+                apply_url="https://example.test/highscore",
+                date_found=datetime.now(timezone.utc).isoformat(),
+            )
+            return {"sources_queried": 1, "total_found": 1, "new_jobs": 1}
+
+        enqueued: list[tuple] = []
+        ctx = {"db": db, "enqueue": lambda *a: _append(enqueued, a)}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)
+
+        cur = await db.execute(
+            "SELECT score FROM user_feed WHERE user_id = 'real-user'"
+        )
+        fed_scores = [r[0] for r in await cur.fetchall()]
+        cur2 = await db.execute(
+            "SELECT COUNT(*) FROM notification_ledger WHERE user_id = 'real-user'"
+        )
+        (ledger_count,) = await cur2.fetchone()
+
+    send_calls = [c for c in enqueued if c and c[0] == "send_notification"]
+    assert send_calls == [], f"cron fan-out must never enqueue send_notification, got {send_calls}"
+    assert ledger_count == 0, "no ledger row means no notification was even queued, not just unsent"
+    assert result["ingested_rows"] == 1
+    assert fed_scores == [99], "the score itself must still be written — only the SEND is suppressed"
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_fanout_never_reaches_the_paid_judge(profile_db, monkeypatch):
+    """The fan-out is pure local CPU (prefilter + JobScorer + upsert). It
+    must never reach `_run_matcher_stage` (src/main.py) — the PAID LLM judge
+    gated behind `user_id is not None` in run_search — regardless of how
+    high a job scores.
+    """
+    import src.main as main_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("refresh_catalog's fan-out must never call the paid LLM judge")
+
+    monkeypatch.setattr(main_mod, "_run_matcher_stage", _boom)
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("real-user", "real@x.example", "!"),
+        )
+        await db.commit()
+        await _deactivate_default_tenant(db)
+
+        async def _fake_run_search(**kwargs):
+            # Deliberately does NOT call the real run_search (and therefore
+            # never touches _run_matcher_stage during the FETCH half either)
+            # — this test isolates the FAN-OUT half's own guarantee.
+            await _insert_job(
+                db,
+                title="Fresh Job",
+                apply_url="https://example.test/judge-guard",
+                date_found=datetime.now(timezone.utc).isoformat(),
+            )
+            return {"sources_queried": 1, "total_found": 1, "new_jobs": 1}
+
+        ctx = {"db": db, "enqueue": lambda *a: None}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)  # must not raise
+
+    assert result["scored_jobs"] == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_catalog_hoists_the_enrichment_lookup_once(profile_db, monkeypatch):
+    """Perf guard: `_build_enrichment_lookup` must be called ONCE per
+    refresh tick, not once per job id fanned out — that's the ~40s-at-280-
+    jobs cost this batch was asked to fix. Three new jobs, one lookup call.
+    """
+    import src.workers.tasks as tasks_mod
+
+    calls = {"n": 0}
+    real_build = tasks_mod._build_enrichment_lookup
+
+    async def _counting_build(conn):
+        calls["n"] += 1
+        return await real_build(conn)
+
+    monkeypatch.setattr(tasks_mod, "_build_enrichment_lookup", _counting_build)
+    _seed_one_profile()
+
+    async with pg.connect(profile_db) as db:
+        db.row_factory = pg.Row
+        await db.execute(
+            "INSERT INTO users(id, email, password_hash) VALUES(?, ?, ?)",
+            ("real-user", "real@x.example", "!"),
+        )
+        await db.commit()
+        await _deactivate_default_tenant(db)
+
+        async def _fake_run_search(**kwargs):
+            for i in range(3):
+                await _insert_job(
+                    db,
+                    title=f"Fresh {i}",
+                    apply_url=f"https://example.test/hoist{i}",
+                    date_found=datetime.now(timezone.utc).isoformat(),
+                )
+            return {"sources_queried": 1, "total_found": 3, "new_jobs": 3}
+
+        ctx = {"db": db, "enqueue": lambda *a: None}
+
+        with patch("src.main.run_search", _fake_run_search):
+            result = await refresh_catalog(ctx)
+
+    assert result["scored_jobs"] == 3
+    assert calls["n"] == 1, f"expected exactly one _build_enrichment_lookup call, got {calls['n']}"

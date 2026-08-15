@@ -113,6 +113,33 @@ export default function DashboardPage() {
   // TanStack Query — filtered job list
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // F2 — empty-window fallback
+  // ---------------------------------------------------------------------------
+  // The 7-day default window can legitimately come back with zero rows (a
+  // crawler gap, a brand-new account, a quiet week). A blank dashboard reads
+  // as "broken", not "nothing new this week" — so the first time the 168h
+  // window succeeds with 0 rows, we widen the MAIN list query to "all time"
+  // (hours: undefined) and say so above the grid.
+  //
+  // `fallbackTriggeredRef` is a ref, not just the state flag, so the trigger
+  // effect below can check-and-set in one synchronous step — it makes a
+  // second widen physically impossible, not just unlikely, so this can never
+  // loop even if the widened fetch itself comes back empty too.
+  const [emptyWeekFallback, setEmptyWeekFallback] = useState(false);
+  const fallbackTriggeredRef = useRef(false);
+
+  // Only the MAIN list query widens — the bucket-counts query (allJobsKey,
+  // below) is deliberately left on the real 168h window so its counts stay
+  // honest (all-zero during a fallback is the true story, not a bug).
+  const effectiveFilters = useMemo<JobFilters>(
+    () =>
+      emptyWeekFallback && filters.hours === 168
+        ? { ...filters, hours: undefined }
+        : filters,
+    [filters, emptyWeekFallback]
+  );
+
   const {
     data: jobsData,
     // H10: isFetching stays true during background refetches too — used
@@ -130,11 +157,34 @@ export default function DashboardPage() {
     // #44: refetch drives the error-state "Retry" button (line ~392).
     refetch: refetchJobs,
   } = useQuery<JobListResponse>({
-    queryKey: queryKeys.jobList(filters),
-    queryFn: () => getJobs(filters),
+    queryKey: queryKeys.jobList(effectiveFilters),
+    queryFn: () => getJobs(effectiveFilters),
     staleTime: 30_000,
     placeholderData: (prev) => prev, // keep previous data while re-fetching
   });
+
+  // Trigger the ONE widen: a successful (non-error) response, at the real
+  // 168h default, with zero rows. Changing `effectiveFilters` above changes
+  // the query key, which is what actually drives the re-fetch — this effect
+  // only ever flips the flag once.
+  useEffect(() => {
+    if (
+      fallbackTriggeredRef.current ||
+      jobsIsError ||
+      !jobsData ||
+      filters.hours !== 168 ||
+      jobsData.jobs.length !== 0
+    ) {
+      return;
+    }
+    fallbackTriggeredRef.current = true;
+    setEmptyWeekFallback(true);
+  }, [jobsData, jobsIsError, filters.hours]);
+
+  // Only show the notice while the user is still looking at the 7d bucket —
+  // if they explicitly pick a narrower/other bucket, that's their choice and
+  // an honest empty state for THAT window, not this fallback's business.
+  const showEmptyWeekNotice = emptyWeekFallback && filters.hours === 168;
   // Background refetch in progress while we already have data on screen.
   const refreshing = isFetching && !isLoading && !jobsIsError;
 
@@ -605,6 +655,14 @@ export default function DashboardPage() {
         {/* ---- Job Grid ---- */}
         {!jobsIsError && (
           <div className="animate-fade-in-up stagger-3">
+            {/* F2: the 7-day window came back empty, so we silently widened
+                to all-time above — say so, plainly, right above the grid it
+                explains. */}
+            {showEmptyWeekNotice && (
+              <p className="mb-2 text-sm text-muted-foreground">
+                No new matches this week — showing your most recent matches.
+              </p>
+            )}
             {/* H10: gate the skeleton on isLoading (no data yet). A background
                 refetch (isFetching but data already present) instead shows a
                 subtle inline indicator so the grid never blanks out. */}

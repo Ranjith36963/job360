@@ -488,9 +488,12 @@ export function FilterPanel({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Any</SelectItem>
-                <SelectItem value="ACTIVE">Active only</SelectItem>
-                <SelectItem value="STALE">Include stale</SelectItem>
-                <SelectItem value="GHOST">Ghost listings</SelectItem>
+                {/* Values match the real lowercase DB vocabulary from
+                    ghost_detection.py / src/lib/staleness.ts — the old
+                    ACTIVE/STALE/GHOST literals never existed in the DB. */}
+                <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="likely_stale">May be filled</SelectItem>
+                <SelectItem value="confirmed_expired">Expired</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -46,7 +46,18 @@ from src.services.scoring_dimensions import ScoreBreakdown
 #       score a given (job, profile) pair produces does, so existing
 #       `user_feed` rows must re-score — which is exactly what this constant is
 #       for.
-SCORER_VERSION = 5
+#   6 = F5 (rule #29 seam): JobScorer.score() no longer gates the four
+#       enrichment dims (seniority/salary/visa/workplace) behind
+#       `enrichment is not None`. A job with NO enrichment row used to
+#       contribute 0 on all four dims — a 30-point punishment for pipeline
+#       lag, not a real signal (measured: 45 vs 75 on an otherwise-identical
+#       job). Each dim function already returns its documented neutral half
+#       on `enrichment=None`; they now always run when user_preferences is
+#       set, so an un-enriched job lands near its NEUTRAL total (~15 extra)
+#       instead of losing all 30. Existing `user_feed` rows must re-score for
+#       this fix to reach a real feed (PR #224 lesson) — that's what bumping
+#       this constant does.
+SCORER_VERSION = 6
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -678,24 +689,36 @@ class JobScorer:
         visa_pts = 0
         workplace_pts = 0
         if self._user_preferences is not None:
+            # F5 (rule #29): call every dim function UNCONDITIONALLY, passing
+            # whatever the lookup returns — including None. Each dim function
+            # already returns its documented NEUTRAL half-weight when
+            # enrichment is None (scoring_dimensions.py: seniority_score,
+            # salary_score, visa_score, workplace_score). The old
+            # `if enrichment is not None:` gate skipped that neutral path
+            # entirely and left all four dims at 0 for any job the enrichment
+            # pipeline hadn't reached yet — a fresh job (correctly un-enriched)
+            # scored 30 points lower than an identical enriched one, exactly
+            # the rule #29 "absent input became a per-job zero" violation.
+            # `dims_active` (src/api/routes/jobs.py) still reads the
+            # enrichment lookup directly, so the UI still greys the radar for
+            # these rows — only the SCORE stops being punished.
             enrichment = self._enrichment_lookup(job)
-            if enrichment is not None:
-                # Lazy import to avoid import cycles during first test collection.
-                from src.services.scoring_dimensions import (
-                    resolve_experience_level,
-                    salary_score,
-                    seniority_score,
-                    visa_score,
-                    workplace_score,
-                )
+            # Lazy import to avoid import cycles during first test collection.
+            from src.services.scoring_dimensions import (
+                resolve_experience_level,
+                salary_score,
+                seniority_score,
+                visa_score,
+                workplace_score,
+            )
 
-                prefs = self._user_preferences
-                salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
-                # Typed value wins; CV-inferred value fills a genuine blank only
-                # — see resolve_experience_level's docstring (product rule #29).
-                seniority_pts = seniority_score(enrichment, resolve_experience_level(prefs))
-                visa_pts = visa_score(enrichment, prefs.needs_visa)
-                workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
+            prefs = self._user_preferences
+            salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
+            # Typed value wins; CV-inferred value fills a genuine blank only
+            # — see resolve_experience_level's docstring (product rule #29).
+            seniority_pts = seniority_score(enrichment, resolve_experience_level(prefs))
+            visa_pts = visa_score(enrichment, prefs.needs_visa)
+            workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
 
         # The composite uses the RAW points (incl. a negative seniority penalty)
         # then clamps once to [0,100] — rule #27, unchanged.
