@@ -168,7 +168,12 @@ jobs:
   alarm-wiring:
     name: The harness's alarm paths still work
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5. The wiring drill shells out to `bash -n` once per `run:` block
+    # per check — 144 blocks x 5 checks = ~720 process spawns. MEASURED at ~20
+    # minutes on Windows (Git Bash spawns are ~50-100x more expensive there);
+    # Linux should be seconds. Sized generously rather than guessed, and if it
+    # ever does run long CI says so loudly instead of a drill being dropped.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

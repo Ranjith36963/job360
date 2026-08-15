@@ -135,7 +135,8 @@ def main(wf_dir: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    # `from check_alert_paths import ...` above resolves because Python puts the
+    # script's own directory on sys.path[0]; no path juggling needed.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--from", dest="from_dir", metavar="DIR")
     args = ap.parse_args()

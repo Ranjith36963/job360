@@ -28,15 +28,35 @@ USAGE
 --drill is not decoration. Six guards shipped in this repo in one week that
 could not fire; a checker that has only ever printed PASS is indistinguishable
 from one that always prints PASS. --drill breaks the workflows on purpose, three
-ways, asserts the checker goes red for each, and restores the originals.
+ways, and asserts the checker goes red for each.
+
+THE DRILL MUTATES A COPY, NEVER THE REPO
+----------------------------------------
+The first version of this drill wrote the broken workflows into
+`.github/workflows/` itself and restored them in a Python `finally`. `finally`
+does not run on SIGKILL, on a CI runner timeout, on a power cut, and on Windows
+not reliably on an interrupt either — so an interrupted drill left the repo
+holding the exact defect this checker exists to catch, plus a `.drillbak` file.
+Measured, not assumed: killed mid-window, `git status --porcelain
+.github/workflows/` showed `M uptime.yml` + `?? uptime.yml.drillbak`, and this
+checker then reported a real BASH SYNTAX ERROR in a file nobody had edited.
+A drill that can damage the thing it protects is worse than no drill.
+
+So the workflows are copied into a temp directory and the COPY is broken. There
+is no restore step, because there is nothing to restore: an interrupt at any
+instant leaves the repo byte-identical. `_fingerprint()` re-proves that at the
+end of every drill rather than trusting it, and a leftover `.drillbak` from an
+old interrupted run is detected on startup and refused.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -52,12 +72,16 @@ LOCAL_ACTION_PREFIX = "./.github/actions/"
 SLACK_ACTION = "./.github/actions/slack"
 
 
-def check() -> tuple[list[str], dict]:
-    """Return (failures, stats). Empty failures == wiring is intact."""
+def check(wf_dir: Path = WF) -> tuple[list[str], dict]:
+    """Return (failures, stats). Empty failures == wiring is intact.
+
+    `wf_dir` exists so --drill can point this at a throwaway COPY of the
+    workflows instead of mutating the real ones.
+    """
     failures: list[str] = []
     stats = {"workflows": 0, "bash_blocks": 0, "slack_steps": 0, "channels": {}}
 
-    for path in sorted(WF.glob("*.yml")):
+    for path in sorted(wf_dir.glob("*.yml")):
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
@@ -173,44 +197,88 @@ MUTATIONS = [
 ]
 
 
+def _fingerprint(directory: Path) -> str:
+    """Content hash of a directory. Used to PROVE the real tree was untouched."""
+    h = hashlib.sha256()
+    for p in sorted(directory.rglob("*")):
+        if p.is_file():
+            h.update(p.name.encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def stale_backups() -> list[Path]:
+    """Leftovers from a drill that was interrupted BEFORE this file was fixed."""
+    return sorted(WF.glob("*.drillbak"))
+
+
 def drill() -> int:
+    # A leftover .drillbak means an older drill was killed mid-mutation and the
+    # workflow file next to it may still be broken. Refuse to run on top of that
+    # — a drill starting from a corrupt tree measures nothing.
+    stale = stale_backups()
+    if stale:
+        print("Refusing to drill: leftover backups from an interrupted OLD drill:")
+        for p in stale:
+            print(f"  {p}")
+        print()
+        print("Restore and remove them first, e.g.:")
+        for p in stale:
+            print(f"  git checkout -- {p.with_suffix('').relative_to(REPO)} && rm {p}")
+        return 2
+
     baseline, _ = check()
     if baseline:
         print("Refusing to drill: the workflows are ALREADY failing the check.")
         return report(baseline, _)
 
+    before = _fingerprint(WF)
     worst = 0
-    for label, filename, mutate in MUTATIONS:
-        target = WF / filename
-        backup = target.with_suffix(".yml.drillbak")
-        shutil.copy(target, backup)
-        try:
+    # THE WHOLE POINT: break a COPY. No try/finally, because there is nothing to
+    # undo — an interrupt at any instant leaves .github/workflows byte-identical.
+    with tempfile.TemporaryDirectory(prefix="slack-wiring-drill-") as tmp:
+        sandbox = Path(tmp) / "workflows"
+        shutil.copytree(WF, sandbox)
+        print(f"drilling on a COPY at {sandbox} - the real tree is never written\n")
+        for label, filename, mutate in MUTATIONS:
+            target = sandbox / filename
             original = target.read_text(encoding="utf-8")
             mutated = mutate(original)
+            print(f"=== DRILL: {label} ===")
             if mutated == original:
-                print(f"=== DRILL: {label} ===")
                 print("  ! mutation did not apply - the anchor text moved. FIX THE DRILL.")
                 worst = 2
+                print()
                 continue
             target.write_text(mutated, encoding="utf-8")
-            failures, _stats = check()
-            print(f"=== DRILL: {label} ===")
+            failures, _stats = check(sandbox)
             print(
-                f"  checker result = {'RED (good)' if failures else 'GREEN - THE GUARD IS BLIND'}"
+                f"  checker result = "
+                f"{'RED (good)' if failures else 'GREEN - THE GUARD IS BLIND'}"
             )
             for f in failures:
                 print("    x", f)
             if not failures:
                 worst = 2
-        finally:
-            shutil.copy(backup, target)
-            backup.unlink()
-        print()
+            target.write_text(original, encoding="utf-8")  # reset the COPY only
+            print()
+
+    after = _fingerprint(WF)
+    print("=== real tree untouched ===")
+    print(f"  .github/workflows fingerprint before drill : {before}")
+    print(f"  .github/workflows fingerprint after  drill : {after}")
+    if before != after:
+        print("  x THE DRILL WROTE TO THE REAL TREE. That is the bug it exists to avoid.")
+        worst = 2
+    elif stale_backups():
+        print("  x the drill left a .drillbak behind")
+        worst = 2
+    else:
+        print("  ok - byte-identical, and no .drillbak left behind")
+    print()
 
     failures, stats = check()
-    print("=== restored ===")
-    rc = report(failures, stats)
-    return max(worst, rc)
+    return max(worst, report(failures, stats))
 
 
 if __name__ == "__main__":
@@ -218,7 +286,26 @@ if __name__ == "__main__":
     ap.add_argument(
         "--drill",
         action="store_true",
-        help="break the workflows on purpose and prove this checker goes red",
+        help="break a COPY of the workflows on purpose and prove this checker "
+        "goes red (the real tree is never written)",
     )
     args = ap.parse_args()
-    sys.exit(drill() if args.drill else report(*check()))
+    if args.drill:
+        sys.exit(drill())
+
+    # Even on a plain check: a `.drillbak` next to the workflows is proof that a
+    # drill was interrupted, and the file it backs up may still hold the injected
+    # defect. Deliberately NOT gitignored — it should be loud in `git status` —
+    # and refused here so nobody reads a PASS off a half-broken tree.
+    stale = stale_backups()
+    if stale:
+        print("REFUSING TO RUN - leftover drill backups found:")
+        for p in stale:
+            print(f"  {p}")
+        print()
+        print("An interrupted drill may have left the real workflow broken. Restore:")
+        for p in stale:
+            print(f"  git checkout -- {p.with_suffix('').relative_to(REPO)} && rm {p}")
+        sys.exit(2)
+
+    sys.exit(report(*check()))
