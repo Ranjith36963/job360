@@ -29,7 +29,9 @@ The backlog is a human triage decision; only NEW ones are an event. Alarming on
 the standing backlog every night is how a detector becomes noise, and a noisy
 detector gets muted, which is worse than no detector.
 
-CONTRACT (identical to product_assertions.py so the workflow shape is shared):
+CONTRACT (0/1/2 shared with product_assertions.py so the workflow shape is the
+same; that script additionally uses exit 3 for "a product DECISION is waiting",
+which has no meaning here — everything Sentry reports is a break):
     exit 0  nothing new
     exit 1  new unresolved issues -> raise
     exit 2  the poller itself is broken -> fail LOUD, never silently green

@@ -89,8 +89,15 @@ jobs:
           cat product.md
           cat product.md >> "$GITHUB_STEP_SUMMARY"
           echo "wrong=$code" >> "$GITHUB_OUTPUT"
-          # exit 2 = the checker itself broke -> fail LOUD, never silently pass
-          [ "$code" -le 1 ] || exit "$code"
+          # 0 = healthy, 1 = something is broken, 3 = a product DECISION is
+          # waiting on the owner (nothing is broken - do NOT fail the job for
+          # it, or the decision becomes a red run every day, which is the exact
+          # wallpaper problem the split exists to prevent).
+          # exit 2 = the checker itself broke -> fail LOUD, never silently pass.
+          case "$code" in
+            0|1|3) ;;
+            *) exit "$code" ;;
+          esac
 
       # CANARY: prove the assertions can still go red. A detector nobody has
       # seen fail is not known to work - "all green" might just mean blind.
@@ -169,3 +176,74 @@ jobs:
             gh issue close "$num" \
               --comment "Product assertions all hold again as of run ${{ github.run_id }}. (auto-close)"
           fi
+
+      # ── A DECISION IS NOT A BREAK, AND IT IS RAISED EXACTLY ONCE ──────────
+      #
+      # Two opposite faults produce the same feed lag. `severed` (a search ran
+      # and no feed row came out) is a code break and belongs in the issue
+      # above. `starved` (nobody searched, and NOTHING on a schedule writes
+      # user_feed) is a PRODUCT GAP that only the owner can close.
+      #
+      # Routing `starved` through the alarm above was actively harmful, and it
+      # is measurable: red on ~23% of days in multi-day streaks, and the
+      # auto-close branch above shuts the issue the moment anyone searches (the
+      # lag falls under 48h by itself). Open, spam, self-close, repeat weekly -
+      # for a gap that was never once fixed by the noise. An alarm that repeats
+      # while nothing changes stops being read, and the reader files the whole
+      # detector under wallpaper; the day it fires for a real severed pipe,
+      # nobody looks. That is how every other alarm in this repo died.
+      #
+      # So: post it ONCE to #needs-your-decision, and leave a permanent ledger
+      # issue so it is never posted again. The ledger search includes CLOSED
+      # issues on purpose - closing the record must not re-arm the alarm.
+      - name: Raise the product DECISION exactly once
+        if: always() && steps.check.outputs.wrong == '3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="DECISION: nothing on a schedule puts new jobs in front of a user"
+
+          seen=$(gh issue list --state all --limit 200 --json title \
+                   --jq "[.[] | select(.title==\"$title\")] | length")
+          if [ "$seen" != "0" ]; then
+            echo "decision already raised once - staying quiet by design" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # The script prints the decision message last, after its marker.
+          awk '/<!-- product-decision-start -->/{f=1;next} f' product.md > decision.md
+          if [ ! -s decision.md ]; then
+            echo "::error::exit 3 but no decision block in product.md - the marker moved"
+            exit 1
+          fi
+          echo "" >> decision.md
+          echo "- Run: $RUN_URL" >> decision.md
+
+          if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+            python - <<'PY'
+          import json, os, urllib.request
+          text = open("decision.md", encoding="utf-8").read()
+          body = json.dumps({
+              "channel": "needs-your-decision",
+              "text": "*A product DECISION is waiting - nothing is broken.*\n\n" + text,
+          }).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage", data=body,
+              headers={"Authorization": "Bearer " + os.environ["SLACK_BOT_TOKEN"],
+                       "Content-Type": "application/json; charset=utf-8"})
+          resp = json.load(urllib.request.urlopen(req, timeout=20))
+          if not resp.get("ok"):
+              raise SystemExit(f"slack rejected the decision post: {resp.get('error')}")
+          print("posted to #needs-your-decision")
+          PY
+          else
+            echo "::warning::SLACK_BOT_TOKEN missing - the ledger issue is the only record"
+          fi
+
+          # The ledger. Never auto-closed by this workflow, and never reopened:
+          # its existence alone is what keeps the decision from repeating.
+          gh issue create --title "$title" --body-file decision.md --label harness \
+            >> "$GITHUB_STEP_SUMMARY"

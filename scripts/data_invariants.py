@@ -42,7 +42,10 @@ Only the rendered screen lies. No SQL can ever see that — which is why the
 detector has a second leg in `frontend/tests/synthetic/live-smoke.mjs`. Two
 bugs, two legs; neither leg alone would have caught both.
 
-CONTRACT (matches scripts/product_assertions.py so the workflows stay identical):
+CONTRACT (0/1/2 match scripts/product_assertions.py so the workflows stay the
+same shape; that script additionally uses exit 3 for "a product DECISION is
+waiting on the owner", which has no meaning here — a broken invariant is always
+a break, never a choice):
     exit 0  every invariant holds
     exit 1  at least one NEW violation -> file an issue
     exit 2  the checker itself broke -> a red run means "I am blind", not "clean"

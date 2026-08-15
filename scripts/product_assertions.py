@@ -26,6 +26,9 @@ canary run can force it red and prove the detector still works.
 
 Exit codes:  0 = all healthy   1 = at least one assertion failed
              2 = the checker itself broke (fail LOUD, never silently pass)
+             3 = nothing is BROKEN, but a product DECISION is waiting on the
+                 owner. Deliberately not 1: see DECISION_MARKER below for why
+                 an alarm that repeats a decision turns into wallpaper.
 """
 
 from __future__ import annotations
@@ -69,6 +72,29 @@ FEATURE_FRESHNESS_TABLES: tuple[tuple[str, str, str], ...] = (
     ("job_enrichment", "LLM enrichment", "enriched_at"),
     ("job_embeddings", "semantic embeddings", "embedding_updated_at"),
 )
+# How stale those two tables may get before the feature counts as stopped —
+# and it is an HOURS question, not a fortnight question.
+#
+# THE BUG THIS REPLACES. Restoring the freshness ROW (above) was only half the
+# fix: the row came back still comparing against STALE_FEATURE_DAYS = 14. Read
+# live from prod 2026-08-15, both features had been frozen since 2026-08-08 and
+# BOTH ROWS PRINTED `ok`:
+#     LLM enrichment freshness      newest 7d old   ok
+#     semantic embeddings freshness newest 7d old   ok
+# They could not have gone red before 2026-08-22. A restored row that cannot go
+# red is the same guard-shaped nothing as the one it replaced.
+#
+# WHERE 48 COMES FROM — read from the worker, not chosen by taste
+# (backend/src/workers/settings.py):
+#     enrichment_sweep   minute={10, 40}          -> every 30 MINUTES
+#     refresh_catalog    hour=4, minute=0         -> DAILY, so new candidates
+#                                                    arrive once a day
+# The sweep therefore gets 48 chances to pick up each day's batch. One quiet
+# day is explainable (no new candidates, or one missed refresh); two is not.
+# Same shape as FEED_LAG_MAX_HOURS, and its own knob for the same reason:
+# sharing STALE_FEATURE_DAYS is exactly what disarmed it.
+# Pinned to those crons by backend/tests/test_product_assertions_main.py.
+FEATURE_FRESHNESS_MAX_HOURS = float(os.getenv("PA_FEATURE_FRESHNESS_MAX_HOURS", "48"))
 # A notification threshold is a CLAIM that some jobs will clear it. If under
 # this share of the feed can, the feature is on-but-silent — the worst state,
 # because it looks configured and produces nothing.
@@ -194,6 +220,54 @@ def feed_lag_explanation(cause: str, lag: float, stranded: int) -> str:
     )
 
 
+# Everything after this marker in stdout is the DECISION message, sliced out by
+# product-health.yml and posted to Slack #needs-your-decision. A marker (not a
+# heading) because headings get reworded and a workflow that silently stops
+# finding its own payload is another guard-shaped nothing.
+DECISION_MARKER = "<!-- product-decision-start -->"
+
+# WHY A DECISION IS NOT AN ALARM — the whole point of the split.
+#
+# A STARVED feed is not a fault. Nothing crashed; there is simply no scheduled
+# path from a new job to a user, because refresh_catalog passes user_id=None on
+# purpose for cost safety. No amount of alarming can fix that: only the owner
+# can, by choosing one of the options below.
+#
+# Before this split, the starved case went into `problems` like any break. What
+# that produced, measured: red on ~23% of days in multi-day streaks, and
+# product-health.yml AUTO-CLOSES its own issue the moment anybody searches (the
+# lag drops under 48h on its own). So the alarm opened, spammed comments,
+# closed itself, and came back the following week — for a product gap that was
+# never once fixed by the noise.
+#
+# THAT IS HOW AN ALARM DIES. A signal that repeats without anything changing
+# stops being read; the reader learns "this one is always red" and files the
+# whole detector under wallpaper. Then the day it fires for a REAL severed pipe,
+# nobody looks. A repeated decision does not add urgency — it subtracts
+# credibility from every other row in the table. So: raise it ONCE, to a human,
+# in the channel where humans make calls, and then be quiet.
+DECISION_OPTIONS = """
+The choice, and it is yours — nothing here is a bug to fix:
+
+**OPTION A — build the scheduled fan-out.** After `refresh_catalog` runs at
+04:00, score the new jobs into every active user's feed. New jobs then reach a
+dashboard whether or not anyone clicks Search. Cost: CPU per user per night;
+the paid LLM stages stay structurally off unless their flags are on.
+
+**OPTION B — accept it, and say so in the product.** Keep the feed
+search-triggered by design, delete this alarm, and tell the user plainly that
+their feed updates when they search. Cheapest option; it is only wrong if the
+product promises a feed that refreshes itself.
+
+**OPTION C — the middle.** A cheap keyword-only nightly fan-out for users who
+signed in recently, no LLM stages at all. Most of A's value, a fraction of the
+cost, and it decays to nothing for dormant accounts.
+
+Until you pick one, this stays quiet. It will NOT be raised again — a decision
+alarm that repeats becomes wallpaper, and then the real breaks get ignored too.
+"""
+
+
 def main() -> int:
     dsn = os.getenv("PROD_DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
     if not dsn:
@@ -208,6 +282,7 @@ def main() -> int:
 
     rows: list[tuple[str, str, str]] = []  # (check, value, verdict)
     problems: list[str] = []
+    decisions: list[str] = []  # owner calls, NOT breaks - see DECISION_OPTIONS
 
     def check(name: str, value: str, ok: bool, why: str = "") -> None:
         rows.append((name, value, "ok" if ok else "**BROKEN**"))
@@ -287,13 +362,23 @@ def main() -> int:
                               f"reporting nothing at all, which reads exactly like "
                               f"reporting health.")
                     if newest:
-                        age_days = _age_days(str(newest))
-                        stale = age_days is not None and age_days > STALE_FEATURE_DAYS
-                        check(f"{label} freshness", f"newest {age_days}d old" if age_days is not None else "unparseable",
+                        # HOURS, not whole days. _age_days floors, so it cannot
+                        # even express the gap between a sweep that runs every
+                        # 30 minutes and one that stopped yesterday — and
+                        # against a 14-day knob it printed `ok` through a live
+                        # 6-day freeze. See FEATURE_FRESHNESS_MAX_HOURS.
+                        age_h = _age_hours(str(newest))
+                        stale = age_h is None or age_h > FEATURE_FRESHNESS_MAX_HOURS
+                        # Blindness is not health: an unreadable timestamp goes
+                        # red too, same contract as the feed-lag check.
+                        seen = f"{age_h:.1f}h" if age_h is not None else f"?? ({newest!r})"
+                        check(f"{label} freshness (max {FEATURE_FRESHNESS_MAX_HOURS:.0f}h)",
+                              f"newest {seen} old" if age_h is not None else "unparseable",
                               not stale,
-                              f"{label} has {n} rows but NOTHING new for {age_days} days - "
-                              f"it worked once and has silently stopped. Old rows make a dead "
-                              f"feature look alive in a row count.")
+                              f"{label} has {n} rows but NOTHING new for {seen} - it "
+                              f"worked once and has silently stopped. The sweep runs "
+                              f"every 30 minutes, so this is not a quiet patch. Old "
+                              f"rows make a dead feature look alive in a row count.")
 
             # ---------------------------------------------------------------
             # 2b. A SEARCH THAT STARTED AND NEVER ENDED.
@@ -419,6 +504,12 @@ def main() -> int:
                 # Same asymmetry as above: "never ran" may just mean the flag is
                 # off, but "ran and then stopped" is a fault no matter what the
                 # flags say — and it was previously unalarmable.
+                # NOTE: this one deliberately KEEPS the day-scale knob while
+                # the two above moved to hours. The judge is not on a cron — it
+                # runs inside a search, so its cadence is however often a human
+                # clicks Search. Tightening it to 48h would just re-raise the
+                # STARVED feed under a second name, weekly, forever: the same
+                # wallpaper problem the decision split below exists to stop.
                 if judged > 0:
                     cur.execute("SELECT max(llm_matched_at) FROM user_feed WHERE llm_matched_at IS NOT NULL")
                     newest_j = cur.fetchone()[0]
@@ -572,10 +663,27 @@ def main() -> int:
                         conn.rollback()
                         searches_since = None
                     cause = feed_lag_cause(searches_since)
-                    check(f"feed lag behind catalog (max {FEED_LAG_MAX_HOURS:.0f}h)",
-                          f"{lag:.1f}h, {stranded} jobs stranded, {cause}",
-                          lag <= FEED_LAG_MAX_HOURS,
-                          feed_lag_explanation(cause, lag, stranded))
+                    lag_ok = lag <= FEED_LAG_MAX_HOURS
+                    label = f"feed lag behind catalog (max {FEED_LAG_MAX_HOURS:.0f}h)"
+                    value = f"{lag:.1f}h, {stranded} jobs stranded, {cause}"
+                    why = feed_lag_explanation(cause, lag, stranded)
+                    if lag_ok:
+                        rows.append((label, value, "ok"))
+                    elif cause == "starved":
+                        # NOT a break, so NOT `problems`: nothing crashed, and
+                        # the fix is a product choice only the owner can make.
+                        # Routed once to Slack #needs-your-decision instead of
+                        # into the weekly self-closing issue. See
+                        # DECISION_OPTIONS for why repeating it would be worse
+                        # than never raising it at all.
+                        rows.append((label, value, "**DECISION**"))
+                        decisions.append(why)
+                    else:
+                        # severed (a search ran and produced nothing) or
+                        # unknown (audit_log unreadable). Both are real faults
+                        # in the code, and `unknown` is not permission to stay
+                        # quiet — a lag nobody can explain is still a lag.
+                        check(label, value, False, why)
 
     except Exception as exc:  # noqa: BLE001
         print(f"::error::product assertions could not run: {exc}")
@@ -597,7 +705,20 @@ def main() -> int:
             "they need their own detector: a feature that silently does nothing "
             "looks identical to a feature that was never built."
         )
+        # A real break OUTRANKS a pending decision. Never mask an outage behind
+        # "there is a decision waiting" — and the canary forces a red run and
+        # demands exactly 1, so this ordering keeps the canary honest too.
         return 1
+
+    if decisions:
+        # LAST in the output on purpose: product-health.yml slices from the
+        # marker to EOF and posts that to Slack #needs-your-decision.
+        print(DECISION_MARKER)
+        print("## A DECISION is waiting on you (nothing is broken)\n")
+        for d in decisions:
+            print(f"{d}\n")
+        print(DECISION_OPTIONS.strip())
+        return 3
 
     print("All product assertions hold. The product is doing its job, "
           "not merely failing to crash.")
