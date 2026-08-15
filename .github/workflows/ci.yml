@@ -107,6 +107,35 @@ jobs:
         working-directory: backend
         run: python scripts/mypy_ratchet.py
 
+  # ─── The chain checks itself ───────────────────────────────────────────────
+  chain:
+    name: Chain wires (harness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+
+      # Every NODE in detect -> triage -> repair -> verify -> PR has always been
+      # healthy. The WIRES between them kept breaking silently: two spellings of
+      # one bot name cost 17 dead days, a SIGPIPE killed the repair checker on
+      # any diff over 800 lines, and an output written only on the success path
+      # left the outage unannounced. Nothing watched the wires, because every
+      # individual workflow was green. This job watches the wires.
+      - name: Every wire connects
+        run: python scripts/chain_check.py --no-map
+
+      # And this is the part that matters: a checker nobody has watched fail is
+      # indistinguishable from a checker that cannot fail. The drill breaks three
+      # wires on purpose, by three different mechanisms, and demands the checker
+      # name each one — plus a negative control (a comment-only edit) that must
+      # stay quiet. If chain_check.py ever silently stops detecting, this fails.
+      - name: The checker can still fail
+        run: python scripts/chain_check.py --drill
+
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     name: Frontend (Node 20)
@@ -148,7 +177,7 @@ jobs:
   # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
   notify:
     name: Report failure as an issue
-    needs: [backend, frontend]
+    needs: [backend, frontend, chain]
     if: >-
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
