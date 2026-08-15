@@ -588,15 +588,6 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
         vector_column_available,
     )
 
-    if not semantic_stack_installed():
-        logger.error(
-            "SEMANTIC_ENABLED is on but sentence-transformers is not installed in "
-            "this process — embedding is skipped entirely, so semantic search "
-            "cannot improve. Install the extra for THIS service "
-            "(pip install '.[semantic]'), or turn SEMANTIC_ENABLED off so the "
-            "gap is intentional rather than silent."
-        )
-        return 0
 
     try:
         vix = PgVectorIndex()
@@ -653,6 +644,35 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
             )
             embedded += 1
         except Exception as e:  # noqa: BLE001
+            # ONE missing package must not read as N unrelated job failures.
+            #
+            # This is what the worker has actually been doing. Its image is
+            # built from Dockerfile.worker with a plain `pip install .` (no
+            # `[semantic]` extra) while the API image installs torch +
+            # `.[semantic]` — confirmed in the live Railway build log. Because
+            # sentence_transformers is imported lazily (rule #16), the module
+            # import SUCCEEDS and nothing complains at startup; the failure only
+            # surfaced here, per job, as an identical "job <id> failed" warning
+            # naming neither the cause nor the remedy. Semantic coverage sat at
+            # 687 of 9,977 with every instrument green.
+            #
+            # Detected HERE rather than as an upfront probe on purpose: callers
+            # may inject their own encoder (the backfill tests patch
+            # `encode_job`), and a probe for the real package would wrongly stop
+            # a run that never needed it. Failing first, then escalating, can
+            # only fire when embedding genuinely could not happen.
+            if not semantic_stack_installed():
+                logger.error(
+                    "SEMANTIC_ENABLED is on but sentence-transformers is not "
+                    "installed in this process — abandoning the embed backfill "
+                    "after 0 successes. Semantic search cannot improve while "
+                    "this is true. Install the extra for THIS service "
+                    "(pip install '.[semantic]'), or turn SEMANTIC_ENABLED off "
+                    "so the gap is intentional rather than silent. Underlying "
+                    "error: %s",
+                    e,
+                )
+                break
             logger.warning("embed backfill: job %s failed: %s", r[0], e)
     await db.commit()
     if embedded:

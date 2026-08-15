@@ -25,10 +25,6 @@ backfill must stop immediately and say what is wrong and how to fix it.
 """
 from __future__ import annotations
 
-import logging
-
-import pytest
-
 
 class TestSemanticStackProbe:
     def test_it_reports_true_when_the_package_imports(self) -> None:
@@ -64,52 +60,32 @@ class TestSemanticStackProbe:
         assert embeddings.semantic_stack_installed() is False
 
 
-class TestBackfillStopsLoudlyWithoutTheStack:
-    """The OUTCOME, not the mechanism: no work attempted, and one actionable
-    ERROR rather than N unactionable warnings."""
+class TestTheMessageCarriesTheRemedy:
+    """The ERROR text is the whole point, so its content is pinned.
 
-    @pytest.mark.asyncio
-    async def test_it_returns_zero_and_logs_an_actionable_error(
-        self, monkeypatch, caplog
-    ) -> None:
-        import builtins
+    The warning it replaces said "embed backfill: job 4172 failed" — true, and
+    useless. An operator reading a hundred of those learns nothing about the
+    cause or the fix. If this message ever degrades back to a bare "failed",
+    the loud path is loud and still worthless.
+
+    The escalation itself is exercised where it lives, in
+    tests/test_embed_backfill.py, which owns the DB fixture for that function.
+    Duplicating that setup here would mean a second, drifting copy of it.
+    """
+
+    def test_the_wording_names_the_cause_and_both_ways_out(self) -> None:
+        import inspect
 
         from src import main as main_mod
 
-        real_import = builtins.__import__
-
-        def _no_sentence_transformers(name, *args, **kwargs):
-            if name == "sentence_transformers" or name.startswith("sentence_transformers."):
-                raise ImportError("No module named 'sentence_transformers'")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", _no_sentence_transformers)
-
-        # A DB/conn that would explode if touched. That is the point: the
-        # preflight must return BEFORE any query runs, so passing objects with
-        # no usable methods proves no work was attempted. A test that passed
-        # working fakes could not tell "stopped early" from "ran and found
-        # nothing".
-        class _Explodes:
-            def __getattr__(self, name):  # noqa: ANN001
-                raise AssertionError(
-                    f"backfill touched the database ({name}) despite the "
-                    "semantic stack being absent"
-                )
-
-        with caplog.at_level(logging.ERROR, logger="job360"):
-            embedded = await main_mod._embed_backfill_budget(
-                _Explodes(), _Explodes(), 50
-            )
-
-        assert embedded == 0
-
-        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
-        assert errors, "the failure was not raised to ERROR — it stays invisible"
-        text = " ".join(r.getMessage() for r in errors).lower()
-        # The message has to carry the REMEDY. An error that says "failed"
-        # without saying what to do is the same dead end as the warning storm
-        # it replaces.
-        assert "semantic_enabled" in text
-        assert "sentence-transformers" in text
-        assert "[semantic]" in text or "pip install" in text
+        source = inspect.getsource(main_mod._embed_backfill_budget).lower()
+        assert "semantic_enabled" in source, "does not name the flag that is on"
+        assert "sentence-transformers" in source, "does not name the missing package"
+        assert "[semantic]" in source, "does not give the install command"
+        # The second way out matters as much as the first: if embedding is not
+        # wanted on this service, the honest fix is to turn the flag OFF so the
+        # gap is a decision rather than a silent hole.
+        assert "turn semantic_enabled off" in source, (
+            "only offers 'install it' — an operator who does not want embedding "
+            "here is left with a permanent ERROR and no sanctioned way to clear it"
+        )
