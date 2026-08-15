@@ -64,12 +64,17 @@ function calcCompleteness(profile: ProfileResponse | null): {
   if (summary.skills_count > 0 || prefSkills.length > 0) score += 15;
 
   // Has preferences (at least work arrangement or experience or about_me): 15%
+  //
+  // `prefTitles.length > 0` used to be OR'd in here too, but that is the exact
+  // same signal the "Has job titles" bucket above already pays for -- one
+  // typed title satisfied BOTH buckets, so the meter double-counted a single
+  // answer as 30% of completeness instead of 15%. Each bucket must measure a
+  // DISTINCT thing: this one now looks only at fields no other bucket counts.
   const prefs = preferences as Record<string, unknown>;
   const hasPrefs =
     (prefs?.work_arrangement && prefs.work_arrangement !== "any") ||
     (prefs?.experience_level && prefs.experience_level !== "") ||
-    (typeof prefs?.about_me === "string" && prefs.about_me.length > 0) ||
-    prefTitles.length > 0;
+    (typeof prefs?.about_me === "string" && prefs.about_me.length > 0);
   if (hasPrefs) score += 15;
 
   // Has LinkedIn: 7.5%

@@ -45,6 +45,34 @@ _CHUNK_OVERLAP_WORDS = 50
 _ENCODER: Optional[object] = None
 
 
+def semantic_stack_installed() -> bool:
+    """Is the optional semantic stack actually importable in THIS process?
+
+    WHY THIS EXISTS (measured 2026-08-15). The API image installs
+    ``.[semantic]`` plus torch; the WORKER image installs plain ``.`` —
+    confirmed in the live Railway build log, which shows
+    ``load build definition from backend/Dockerfile.worker`` followed by
+    ``pip install --no-cache-dir .``. So the daily ``refresh_catalog`` cron
+    ingests jobs on a machine that cannot embed them.
+
+    It failed in the worst possible shape: ``sentence_transformers`` is
+    imported lazily (rule #16), so the module import SUCCEEDS and the failure
+    only surfaces per job, inside the loop, where it is caught and logged as
+    ``embed backfill: job <id> failed``. One missing package therefore produced
+    a storm of identical per-job warnings, none of which named the cause or the
+    remedy — and semantic coverage sat at 687 of 9,977 jobs while every
+    instrument stayed green.
+
+    A capability that is switched ON but structurally impossible must say so
+    once, loudly, with the fix — not fail quietly a hundred times.
+    """
+    try:
+        import sentence_transformers  # noqa: F401, PLC0415 — probe only (rule #16)
+    except ImportError:
+        return False
+    return True
+
+
 def _load_encoder() -> object:
     """Lazy-load the sentence-transformers encoder. CLAUDE.md rule #11."""
     global _ENCODER

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 from src.core.settings import (
     CEREBRAS_API_KEY,
     GEMINI_API_KEY,
+    GEMINI_MODEL,
     GROQ_API_KEY,
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -446,7 +447,13 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
     """Call Google Gemini API (free tier: 15 RPM, 1M tokens/day)."""
     import google.generativeai as genai
 
-    _model = "gemini-2.0-flash"
+    # Was hardcoded "gemini-2.0-flash", which Google retired. Prod Sentry
+    # PYTHON-FASTAPI-J: "404 This model models/gemini-2.0-flash is no longer
+    # available", last seen 2026-08-11 — so this entire fallback had been dead,
+    # and the only visible symptom was one line in an error nobody read.
+    # Overridable now (like OPENAI_MODEL) so the next retirement is an env var,
+    # not a deploy.
+    _model = GEMINI_MODEL
     t0 = _time.monotonic()
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -482,7 +489,13 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
     """Call Groq API (free tier: 30 RPM, 14.4K tokens/day on llama3)."""
     from groq import AsyncGroq
 
-    _model = "llama-3.3-70b-versatile"
+    # Overridable like every other provider here (CEREBRAS_MODEL directly
+    # below, OPENAI_MODEL / GEMINI_MODEL in settings). The value is unchanged —
+    # Groq's live failure was an EXPIRED KEY, not a bad model (prod Sentry:
+    # "401 Invalid API Key, code: expired_api_key"). This only removes the
+    # rot risk, which is not hypothetical: the hardcoded Gemini model beside it
+    # was retired by Google and killed that fallback silently.
+    _model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     t0 = _time.monotonic()
     try:
         client = AsyncGroq(api_key=GROQ_API_KEY)
