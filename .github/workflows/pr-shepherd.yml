@@ -47,7 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # A local composite action is just files in the repo — without a checkout
+      # `uses: ./.github/actions/slack` cannot resolve and the step errors.
+      - uses: actions/checkout@v7
+
       - name: Sweep human PRs
+        id: sweep
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -123,5 +128,46 @@ jobs:
               echo "- #$num WAIT ($pending pending) — $title" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "- #$num GREEN (awaiting the author's merge — not the shepherd's call) — $title" >> "$GITHUB_STEP_SUMMARY"
+              # GREEN + no pending checks + not draft + not conflicting = the
+              # exact definition of ready-to-merge. Collected to a FILE because
+              # this while-loop runs in a pipeline subshell, so a shell variable
+              # set in here would be gone by the time the loop ends.
+              printf '%s/%s/pull/%s  #%s %s\n' \
+                "${{ github.server_url }}" "$GH_REPO" "$num" "$num" "$title" >> green.txt
             fi
           done
+
+          # ONE message listing every green PR, not one per PR. A channel that
+          # posts N times for N PRs teaches him to skim it; a single daily list
+          # is a thing he can act on.
+          if [ -s green.txt ]; then
+            d="EOF_${{ github.run_id }}"
+            {
+              echo "green<<$d"
+              cat green.txt
+              echo "$d"
+            } >> "$GITHUB_OUTPUT"
+            echo "greencount=$(wc -l < green.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING: ready-to-merge, and this loop is its ONLY correct producer.
+      # The channel means one specific thing — a PR exists, it is green, and the
+      # only thing left is the owner's click. Merging a PR is an AUTHORIZATION
+      # and this harness reserves authorization for humans (same reason triage
+      # may not apply `agent:fix`), so this message IS the handover. Nothing
+      # that is merely "open" or "probably fine" belongs here; a red or pending
+      # PR gets routed by the branches above and never reaches this step.
+      - name: Slack — green PRs waiting on your click
+        if: steps.sweep.outputs.greencount != ''
+        uses: ./.github/actions/slack
+        with:
+          channel: ready-to-merge
+          severity: info
+          title: "${{ steps.sweep.outputs.greencount }} PR(s) are green and waiting on you"
+          body: |
+            ${{ steps.sweep.outputs.green }}
+
+            All checks passed, no conflicts, not drafts. The shepherd will never
+            merge these — merging is an authorization and stays with you.
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

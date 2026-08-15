@@ -1,0 +1,124 @@
+name: "Tell the owner in Slack"
+description: >-
+  Post a harness message to a Slack channel via chat.postMessage. This is the
+  harness's PRIMARY voice. It fails LOUD when it cannot speak.
+
+# WHY THIS EXISTS, AND WHY IT IS NOT `.github/actions/alert`
+#
+# The old alert action (Resend email) is still in this repo, unused. Its
+# contract is "NEVER fail the caller": every failure path ends in `exit 0`
+# with a ::warning::. That was a deliberate choice and it was WRONG for an
+# alerting path — measured, not argued:
+#
+#   RESEND_API_KEY was never added to GitHub Actions. So every single alert
+#   the harness ever tried to send hit the "blank key" branch, printed a
+#   ::warning:: into a log nobody opens, and exited 0 GREEN. Result: 7 open
+#   `triage:needs-human` issues, 6 of them with ZERO human comments for 3-8
+#   days. The loops diagnosed perfectly and told nobody.
+#
+# THE RULE THIS ACTION IS BUILT ON:
+#   For an alerting path, a silent skip IS the bug. A missing token, a bad
+#   channel, ok=false — any of them means the message did not arrive, and a
+#   message that did not arrive must show up as a RED step with the Slack
+#   error string in the log. Never a warning. Never exit 0.
+#
+# The cost of that stance is honest and small: a Slack outage turns a
+# detector's run red. That is the correct trade. A red run gets looked at; a
+# warning does not. We have three days of evidence that it does not.
+#
+# ── ROUTING (STRICT — do not drift this) ───────────────────────────────────
+# Slack becomes the new unread inbox the moment everything lands in the same
+# place. Five channels are for HUMANS; the log-* channels are muted firehoses.
+# Pick by ONE question: "what does the owner have to DO about this?"
+#
+#   production-incidents  Something is BROKEN FOR A REAL USER RIGHT NOW.
+#                         Site down, signup broken, feed empty, data wrong on
+#                         screen. He should stop what he is doing. Nothing
+#                         else earns this channel — not a red CI run, not a
+#                         failed backup, not an agent that gave up.
+#   needs-your-decision   A loop cannot proceed without a human CHOICE.
+#                         Repair gave up / hit its retry cap, the blind
+#                         checker rejected, a conflict needs a hand-merge, a
+#                         detector is blind (canary failed), a secret is
+#                         missing. He must decide, not just read.
+#   ready-to-merge        A PR EXISTS, is green, and is waiting on his click.
+#                         Only when there is a real PR URL to open.
+#   daily-health-report   The once-a-day roll-up. One message each morning.
+#                         (Another agent builds the roll-up; this action just
+#                         makes the channel reachable.)
+#   log-github-ci         Every workflow conclusion, pass or fail. The
+#                         default home for "a loop ran". MOST CALLS GO HERE.
+#   log-railway           Railway/deploy firehose.
+#   log-posthog           Product-analytics firehose.
+#   log-sentry            Error-tracker firehose.
+#   log-agent-work        What the agents did — repairs pushed, docs synced,
+#                         verdicts posted. Interesting, never urgent.
+#
+# DEFAULT WHEN UNSURE: log-github-ci. Promoting a message out of a log-*
+# channel needs a reason you can say in one sentence. If the sentence is "so
+# he notices it", that is not a reason — that is how the four human channels
+# stop being read.
+#
+# ── HOW TO DRILL THIS (do it before trusting any change here) ──────────────
+# The body lives in post.sh precisely so it can be run WITHOUT a runner. All
+# three take a real token; none of them need GitHub Actions.
+#
+#   # 1. missing token must EXIT 1 (this is the whole inversion)
+#   SLACK_BOT_TOKEN= SLACK_CHANNEL=log-github-ci SLACK_TITLE=x \
+#     bash .github/actions/slack/post.sh; echo "exit=$?"
+#
+#   # 2. bad channel must EXIT 1 with the Slack error string visible
+#   SLACK_BOT_TOKEN=$TOKEN SLACK_CHANNEL=zzz-cannot-exist SLACK_TITLE=x \
+#     bash .github/actions/slack/post.sh; echo "exit=$?"
+#
+#   # 3. happy path must EXIT 0 and actually appear in Slack
+#   SLACK_BOT_TOKEN=$TOKEN SLACK_CHANNEL=log-github-ci SLACK_TITLE="drill" \
+#     bash .github/actions/slack/post.sh; echo "exit=$?"
+#
+# Measured 2026-08-15, in this order: exit 1 ("SLACK_BOT_TOKEN is empty"),
+# exit 1 ("error: channel_not_found"), exit 0 (ts=1786796696.205229).
+#
+# And the WIRING (are the callers still correct?) has its own checker with its
+# own drill entrance — it does not trust itself either:
+#   python scripts/check_workflow_slack_wiring.py
+#   python scripts/check_workflow_slack_wiring.py --drill
+
+inputs:
+  channel:
+    description: >-
+      Target channel NAME (preferred — readable in the diff), e.g.
+      log-github-ci. An ID works too. A leading '#' is tolerated.
+      See the ROUTING block above before you pick one.
+    required: true
+  title:
+    description: "One-line headline. Shown bold. Required — a message with no headline is noise."
+    required: true
+  body:
+    description: "The detail: what happened, where, and the run/PR/issue link."
+    required: false
+    default: ""
+  severity:
+    description: "critical | warn | info. Cosmetic only — it never changes the routing."
+    required: false
+    default: "info"
+  slack_bot_token:
+    description: >-
+      Pass secrets.SLACK_BOT_TOKEN. Blank is a HARD FAILURE, not a skip —
+      that is the entire point of this action (see the note above).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post to Slack
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack_bot_token }}
+        SLACK_CHANNEL: ${{ inputs.channel }}
+        SLACK_TITLE: ${{ inputs.title }}
+        SLACK_BODY: ${{ inputs.body }}
+        SLACK_SEVERITY: ${{ inputs.severity }}
+      # The body is a plain file so both drills can run it from a laptop
+      # against the real workspace. A guard that has only ever been reasoned
+      # about is not a guard.
+      run: bash "$GITHUB_ACTION_PATH/post.sh"

@@ -67,6 +67,7 @@ jobs:
       # regression (issue #238). A config error wearing a quality-regression costume
       # is how a week of eval data gets misread.
       - name: Notify (config failure and accuracy regression are DIFFERENT alarms)
+        id: notify
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -114,6 +115,7 @@ jobs:
               echo "- Instrument: backend/scripts/eval_ranking.py (exit 3 = broken, exit 2 = regressed)"
             } > body.md
             raise "$BROKEN_TITLE" body.md
+            echo "announce=broken" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.audit.outcome }}" = "failure" ] || \
                grep -q "REGRESSED" backend/audit.out; then
             { echo "The weekly ground-truth ranking audit fell below its alarm floors."
@@ -126,7 +128,69 @@ jobs:
               echo "- Instrument: backend/scripts/eval_ranking.py (floors: EVAL_MIN_STRONG_100, EVAL_MAX_GEMS)"
             } > body.md
             raise "$REG_TITLE" body.md
+            echo "announce=regressed" >> "$GITHUB_OUTPUT"
+            echo "scoreboard=$(grep -A 12 'ACCURACY SCOREBOARD' backend/audit.out 2>/dev/null | grep -m1 -E 'strong|precision' | head -c 120 | tr -d '\r')" >> "$GITHUB_OUTPUT"
           else
             close_if_open "$REG_TITLE" "Accuracy back within benchmark as of run $RUN_URL. (auto-close)"
             close_if_open "$BROKEN_TITLE" "The instrument ran and produced judgments again as of run $RUN_URL. (auto-close)"
+            echo "announce=ok" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # TWO alarms, TWO channels, for the same reason they are two issues.
+      #
+      #   CANNOT RUN -> needs-your-decision. We measured NOTHING. The usual cause
+      #     is an unset Actions secret, which renders as an EMPTY string, and the
+      #     fix is a human setting a key — no loop can do it. "A secret is
+      #     missing" is named in the routing table as a decision case.
+      #
+      #   REGRESSED  -> log-github-ci, NOT production-incidents. Ranking quality
+      #     dropped below its floor: results got worse, nothing BROKE. Nobody's
+      #     Tuesday is ruined, an issue is open and triage has it, and the loop
+      #     can proceed. Promoting quality drift into the incident channel is
+      #     exactly how that channel stops being read.
+      - name: Slack — the instrument measured nothing
+        if: always() && steps.notify.outputs.announce == 'broken'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Accuracy audit CANNOT RUN — the instrument is broken, not the ranking"
+          body: |
+            The weekly ranking eval produced NO accuracy number at all. Do not
+            read this as a regression. Usual cause: an unset repo Actions secret
+            renders as an empty string, so the judge chain gets no key.
+
+            Fix: set ONE of OPENAI_API_KEY / GEMINI_API_KEY / GROQ_API_KEY /
+            CEREBRAS_API_KEY, then re-run. No code change is needed.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — ranking accuracy regressed
+        if: always() && steps.notify.outputs.announce == 'regressed'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: warn
+          title: "Accuracy audit REGRESSED — ranking fell below its floor"
+          body: |
+            ${{ steps.notify.outputs.scoreboard }}
+
+            The weekly ground-truth ranking audit fell below its alarm floors.
+            An issue is open and triage has it. Results are worse, not broken.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — accuracy within benchmark
+        if: always() && steps.notify.outputs.announce == 'ok'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "accuracy-audit: ranking is within benchmark"
+          body: |
+            The weekly ranking eval ran and passed its floors.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -56,14 +56,24 @@ jobs:
   notify:
     name: Report failure as an issue
     needs: [live-smoke]
-    if: always() && github.event_name == 'schedule'
+    # workflow_dispatch included so the ALARM PATH itself (issue + Slack) can be
+    # drilled on demand. Schedule-only meant the one way to force a red skipped
+    # the very step you would be drilling — the same trap uptime.yml already
+    # documents, and the reason two loops here were dead on arrival.
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # needed to check out the repo for ./.github/actions/slack
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
+      # A local composite action is just files in the repo — without a checkout
+      # `uses: ./.github/actions/slack` cannot resolve and the step errors.
+      - uses: actions/checkout@v7
+
       - name: Open, update or close the tracking issue
+        id: raise
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -89,6 +99,7 @@ jobs:
               # The alarm rang into an empty room. Note the title deliberately
               # does NOT carry a trusted-origin prefix: this body quotes live
               # page text, so a human still clicks agent:fix.
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
               if gh workflow run triage.yml -f issue="$n"; then
                 echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
               else
@@ -96,8 +107,65 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file notify-body.md
+              echo "issue=$num" >> "$GITHUB_OUTPUT"
             fi
+            # Every failure announces, not just the first. This loop runs 4x a
+            # day, so a repeat is a genuine "still broken this morning", not the
+            # 10-minute spam uptime.yml has to suppress.
+            echo "announce=broken" >> "$GITHUB_OUTPUT"
           elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # This is a real browser walking the REAL deployed site corner by corner.
+      # When it fails, a human doing the same thing fails too — that is the
+      # definition of production-incidents, and one of the few loops that earns
+      # it. (A red CI run on a branch would NOT; it breaks nobody's Tuesday.)
+      - name: Slack — the live site is broken for a real user
+        if: steps.raise.outputs.announce == 'broken'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "Live site smoke test FAILED — a real journey is broken"
+          body: |
+            Playwright walked the deployed app like a user and could not finish.
+            Screenshots + the failure reason are attached to the run artifacts.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. Every branch above keys off an
+      # output the step only writes on success, so a failure inside the issue
+      # step would skip them all and the break would go unannounced.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "synthetic-live: the ALARM step failed — a break may be unreported"
+          body: |
+            The job could not open/close its tracking issue, so the normal
+            notification did not run. Check the smoke result by hand. This means
+            the messenger broke, not that the site is fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — recovered
+        if: steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "synthetic-live: back to green"
+          body: |
+            The live-site walk passes again; issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

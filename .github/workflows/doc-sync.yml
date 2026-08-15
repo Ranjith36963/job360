@@ -209,6 +209,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Ship the edits (deterministic — docs-only enforced by bash)
+        id: ship
         if: steps.token.outputs.have == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -350,14 +351,18 @@ jobs:
             echo "reusing open PR #$pr — refreshing title + body instead of opening a duplicate"
             gh pr edit "$pr" --title "$title" --body-file pr-body.md
           fi
+          echo "pr=${pr:-}" >> "$GITHUB_OUTPUT"
           if [ -n "$destructive" ]; then
             echo "::warning::fixer deleted/renamed doc(s) or edited an agent-instruction file — PR left OPEN for human review: $(echo "$destructive" | tr '\n' ' ')"
             echo "docs PR #${pr:-?} updated but NOT merged (deletes/renames need a human): $(echo "$destructive" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+            echo "announce=destructive" >> "$GITHUB_OUTPUT"
+            echo "files=$(echo "$destructive" | tr '\n' ' ' | head -c 200)" >> "$GITHUB_OUTPUT"
           else
             # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
             # The docs-only + no-destruction asserts above ARE the gate.
             gh pr merge "${pr:-$branch}" --squash --delete-branch
             echo "docs PR #${pr:-?} shipped and merged" >> "$GITHUB_STEP_SUMMARY"
+            echo "announce=merged" >> "$GITHUB_OUTPUT"
           fi
 
           # Close the drift issue NOW, in this run. Previously the issue was
@@ -380,6 +385,48 @@ jobs:
             echo "drift REMAINS after the fix — leaving the issue open" >> "$GITHUB_STEP_SUMMARY"
             cat verify.md >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING: log-agent-work. Docs were auto-synced and auto-merged — the
+      # machine did a chore and nothing needs him. Interesting, never urgent.
+      # This is the DEFAULT shape for a loop that completed successfully; most
+      # loops belong in a log-* channel and this is one of them.
+      - name: Slack — docs auto-synced
+        if: steps.ship.outputs.announce == 'merged'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-agent-work
+          severity: info
+          title: "Docs auto-synced and merged (PR #${{ steps.ship.outputs.pr }})"
+          body: |
+            The doc-sync fixer corrected drift between the docs and the code.
+            Docs-only and non-destructive, so it merged itself — those two
+            asserts in bash ARE the gate, since a GITHUB_TOKEN PR triggers no CI.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # PROMOTED out of log-agent-work on purpose: the fixer wants to DELETE or
+      # RENAME a doc, or it touched an agent-instruction file. That is a
+      # judgement about knowledge, the auto-merge was withheld, and the PR is
+      # sitting open waiting for a human to decide. One sentence, and it is a
+      # real choice — so it clears the bar for needs-your-decision.
+      - name: Slack — the doc fixer wants to delete something
+        if: steps.ship.outputs.announce == 'destructive'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Doc-sync wants to DELETE or RENAME docs — PR #${{ steps.ship.outputs.pr }} left open"
+          body: |
+            The fixer deleted/renamed a doc or edited an agent-instruction file,
+            so the auto-merge was withheld and the PR is waiting for you.
+
+            Touched: ${{ steps.ship.outputs.files }}
+
+            PR:  ${{ github.server_url }}/${{ github.repository }}/pull/${{ steps.ship.outputs.pr }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       - name: Note when fixer is not configured
         if: steps.token.outputs.have != 'true'
@@ -434,6 +481,7 @@ jobs:
           [ "$code" -le 1 ] || exit "$code"
 
       - name: Open, update or close the tracking issue
+        id: clutterissue
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -448,7 +496,26 @@ jobs:
             else
               gh issue comment "$num" --body-file clutter.md
             fi
+            echo "announce=regressed" >> "$GITHUB_OUTPUT"
           elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "Back within budget in run ${{ github.run_id }}. (CURATE auto-close)"
           fi
+
+      # ROUTING: log-agent-work. Report-only by design, monthly, and about doc
+      # HYGIENE rather than truth — nothing is broken and no decision is blocked.
+      # A monthly nag in a human channel is how a channel dies.
+      - name: Slack — the doc estate regressed
+        if: steps.clutterissue.outputs.announce == 'regressed'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-agent-work
+          severity: info
+          title: "Doc estate regressed past its budget (CURATE gear)"
+          body: |
+            The monthly doc-clutter ratchet fired: the estate got WORSE than the
+            committed budget. Report-only — deleting docs is a judgement about
+            knowledge, so no fixer runs here.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

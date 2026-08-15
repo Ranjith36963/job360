@@ -165,10 +165,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # needed to check out the repo for ./.github/actions/slack
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
+      # A local composite action is just files in the repo — without a checkout
+      # `uses: ./.github/actions/slack` cannot resolve and the step errors.
+      - uses: actions/checkout@v7
+
       - name: Open, update or close the tracking issue
+        id: raise
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -194,6 +200,7 @@ jobs:
               # diagnosis; #185 sat unread for days. Seven loops shared this bug.
               new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
               n="${new##*/}"
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
               if gh workflow run triage.yml -f issue="$n"; then
                 echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
               else
@@ -201,8 +208,63 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file notify-body.md
+              echo "issue=$num" >> "$GITHUB_OUTPUT"
             fi
+            echo "announce=failed" >> "$GITHUB_OUTPUT"
           elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING NOTE — this is deliberately NOT production-incidents. A failed
+      # backup breaks nothing a user can see today; the site is fine. What it
+      # does is silently remove the safety net, and the fix is a HUMAN CHOICE
+      # (rotate an R2 key? re-run? accept one missed night?) that no loop may
+      # make. That is exactly what needs-your-decision is for.
+      - name: Slack — the backup did not happen
+        if: steps.raise.outputs.announce == 'failed'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Nightly DB backup FAILED — no new restore point tonight"
+          body: |
+            db-backup.yml did not finish, so last night produced no verified
+            backup. Nothing is broken for users; the safety net is thinner.
+            Usual causes: an expired R2 key, BACKUP_PASSPHRASE, or the dump step.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. Every branch above keys off an
+      # output the step only writes on success.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "db-backup: the ALARM step failed — backup status is unknown"
+          body: |
+            The job could not open/close its tracking issue, so the normal
+            notification did not run. Confirm by hand whether last night's backup
+            exists. This means the messenger broke, not that the backup is fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — backups healthy again
+        if: steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "db-backup: back to green"
+          body: |
+            A backup was taken and restore-verified again; issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

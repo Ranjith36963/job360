@@ -323,6 +323,29 @@ jobs:
         run: |
           set -uo pipefail
           num="${{ steps.issue.outputs.num }}"
+
+          # ── SLACK ROUTING, decided here in dumb bash ────────────────────────
+          # THIS loop is the reason the Slack channel exists. Triage was already
+          # diagnosing correctly and labelling correctly, and then speaking only
+          # on GitHub — which is how 7 `triage:needs-human` issues came to sit
+          # open, 6 of them with ZERO human comments, for 3-8 days.
+          #
+          #   needs-human / no diagnosis -> needs-your-decision. The loop has
+          #     stopped and cannot proceed without a human choice. That is the
+          #     definition of the channel, and this is its main producer.
+          #   auto-fixable / flake       -> log-agent-work. The machine is
+          #     handling it; interesting, never urgent. If every triage verdict
+          #     landed in needs-your-decision, that channel would be as unread
+          #     as the inbox it replaces.
+          label="${{ steps.route.outputs.label }}"
+          case "$label" in
+            triage:auto-fixable|triage:flake) channel="log-agent-work"; sev="info" ;;
+            *)                                channel="needs-your-decision"; sev="warn" ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "sev=$sev" >> "$GITHUB_OUTPUT"
+          echo "label=${label:-TRIAGE FAILED}" >> "$GITHUB_OUTPUT"
+
           d="EOF_${{ github.run_id }}"    # run-scoped delimiter: model output cannot close it
           {
             echo "body<<$d"
@@ -341,7 +364,25 @@ jobs:
             echo "$d"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Email the owner
+      # PRIMARY LAST MILE. `always()` is the whole point: the alert must fire
+      # when triage FAILED just as much as when it succeeded. A harness that
+      # only tells you about problems it understood is useless for the problems
+      # that matter most.
+      - name: Tell the owner in Slack
+        if: always()
+        uses: ./.github/actions/slack
+        with:
+          channel: ${{ steps.compose.outputs.channel }}
+          severity: ${{ steps.compose.outputs.sev }}
+          title: "#${{ steps.issue.outputs.num }} — ${{ steps.compose.outputs.label }}"
+          body: ${{ steps.compose.outputs.body }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # SUPERSEDED — kept wired but inert: RESEND_API_KEY is not set in Actions,
+      # so this step warns and exits 0 (see .github/actions/alert). Slack above
+      # is the path that actually delivers. Left in place because the owner may
+      # want email back; delete it, do not "fix" it, if he decides otherwise.
+      - name: Email the owner (legacy path — Slack is primary)
         if: always()
         uses: ./.github/actions/alert
         with:

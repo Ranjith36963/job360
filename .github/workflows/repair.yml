@@ -474,7 +474,31 @@ jobs:
           # G1: NO `gh pr merge` here, on purpose, ever. The human merge is the gate.
           url=$(gh pr view "$branch" --json url --jq .url)
           gh issue comment "$issue" --body "Repair loop opened a PR for review: ${url}"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "opened $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ready-to-merge, and it is the textbook case for that channel: a PR
+      # EXISTS, the workflow re-ran the suite itself rather than trusting the
+      # agent's claim, and the only thing left is the owner's click. G1 means
+      # nothing here will ever merge it for him — so if this message is not
+      # sent, the PR simply waits forever.
+      - name: Slack — a repair PR is waiting on you
+        if: steps.ship.outcome == 'success'
+        uses: ./.github/actions/slack
+        with:
+          channel: ready-to-merge
+          severity: info
+          title: "Repair loop opened a PR for issue #${{ steps.issue.outputs.num }}"
+          body: |
+            ${{ steps.ship.outputs.url }}
+
+            The workflow re-ran the backend suite itself — the agent's own claim
+            of success was not trusted. Edits are cage-limited to backend/ +
+            frontend/. The blind checker's verdict follows as a PR comment.
+
+            Merging is yours; the loop will never do it.
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
 
       # ── THE BLIND CHECKER (Genesis Wall 2, second half) ─────────────────────
@@ -551,6 +575,7 @@ jobs:
           claude_args: --allowedTools Read,Glob,Grep,Write --max-turns 25
 
       - name: Post the checker verdict
+        id: verdict
         if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome == 'success'
         continue-on-error: true
         env:
@@ -612,8 +637,29 @@ jobs:
             fi
           elif [ "$v" = "reject" ]; then
             gh issue comment "${{ steps.issue.outputs.num }}" --body "**Goal-based loop stopped:** $MAX_ATTEMPTS attempts have now been rejected by the blind checker. The loop will not try again on its own — this one needs you. That cap is deliberate: a loop that retries forever is how an agent burns a repo."
+            echo "capped=yes" >> "$GITHUB_OUTPUT"
             echo "rejected at max attempts - handed to human" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # The retry cap is a HARD STOP by design — the loop has decided it will not
+      # try again. "Repair hit its retry cap" is named in the routing table as a
+      # decision case, and it is: only a human can choose what happens next.
+      - name: Slack — the repair loop has given up (retry cap)
+        if: always() && steps.verdict.outputs.capped == 'yes'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Repair loop STOPPED on issue #${{ steps.issue.outputs.num }} — 3 attempts rejected"
+          body: |
+            The blind checker rejected three attempts, so the loop stopped on
+            purpose. It will not try again on its own — an uncapped self-retrying
+            loop is how the old ralph-loop burned a repo.
+
+            This one needs you.
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.issue.outputs.num }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       - name: Report back when it could not fix it
         if: always() && steps.token.outputs.have == 'true' && (steps.cage.outputs.changed == '' || failure())
@@ -646,3 +692,23 @@ jobs:
             echo "Re-apply the \`agent:fix\` label to try again, or take it manually."
           } > failed.md
           gh issue comment "${{ steps.issue.outputs.num }}" --body-file failed.md
+
+      # The loop ran and shipped NOTHING. Re-running it, rewriting the issue, or
+      # taking it by hand are all human choices — so: needs-your-decision.
+      # Without this the issue just sits there, which is precisely the failure
+      # mode that left 6 issues with zero comments for 3-8 days.
+      - name: Slack — the repair loop could not fix it
+        if: always() && steps.token.outputs.have == 'true' && (steps.cage.outputs.changed == '' || failure())
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Repair loop did NOT open a PR for issue #${{ steps.issue.outputs.num }}"
+          body: |
+            The loop ran and shipped nothing. The issue comment says which gate
+            stopped it (path cage / no edits / independent verification).
+
+            Nothing was changed. Re-apply `agent:fix` to try again, or take it by hand.
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.issue.outputs.num }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

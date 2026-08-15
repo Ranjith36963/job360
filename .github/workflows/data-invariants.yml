@@ -114,6 +114,7 @@ jobs:
       # detector nobody has seen fail is not known to work - "all green" and
       # "completely blind" are indistinguishable without this.
       - name: Canary - prove the invariants can still fail
+        id: canary
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           DI_FORCE_RED: "1"
@@ -130,6 +131,7 @@ jobs:
           echo "canary ok - the invariants still fail when they should" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Raise one issue per firing invariant, and hand each to triage
+        id: raise
         if: always() && steps.check.outputs.wrong != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,10 +156,21 @@ jobs:
                         --json number --jq 'length' 2>/dev/null || echo 0)
           if [ "${open_count:-0}" -ge 10 ]; then
             echo "::error::$open_count INVARIANT issues already open - muting to avoid a storm. Go look."
+            echo "announce=storm" >> "$GITHUB_OUTPUT"
+            echo "count=$open_count" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ "${{ steps.check.outputs.wrong }}" = "1" ] && [ -n "$ids" ]; then
+            # Name the invariants in the Slack headline. "INVARIANT violated" is
+            # unactionable; "apply_url_present, salary_sane" tells him what broke
+            # without opening anything.
+            echo "ids=$(echo $ids | tr ' ' ',')" >> "$GITHUB_OUTPUT"
+            if [ "$DRILL" = "true" ]; then
+              echo "announce=drill" >> "$GITHUB_OUTPUT"
+            else
+              echo "announce=violated" >> "$GITHUB_OUTPUT"
+            fi
             for id in $ids; do
               if [ "$DRILL" = "true" ]; then
                 title="DRILL: data invariant test - not a real problem"
@@ -220,3 +233,85 @@ jobs:
                      --comment "\`$iid\` holds again as of run ${{ github.run_id }}. (auto-close)" ;;
               esac
             done
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # An invariant violation means a value in the live database is WRONG — a
+      # date, an apply URL, a salary. It throws no exception and reaches no error
+      # tracker; it looks identical to a correct value until a person sees it on
+      # their screen. That is user-facing, so: production-incidents.
+      - name: Slack — production data is wrong
+        if: always() && steps.raise.outputs.announce == 'violated'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "INVARIANT violated in production: ${{ steps.raise.outputs.ids }}"
+          body: |
+            One or more data invariants no longer hold against the live database.
+            One issue was opened per firing invariant and each was handed to triage.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — drill (never production-incidents)
+        if: always() && steps.raise.outputs.announce == 'drill'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "DRILL: data-invariants escalation path exercised"
+          body: |
+            An invariant was forced red on purpose. The data is fine.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # The circuit breaker tripped: too many invariants are open at once, which
+      # usually means one bad deploy broke many things. The loop has deliberately
+      # stopped filing more — continuing is a human call.
+      - name: Slack — invariant storm, filing muted
+        if: always() && steps.raise.outputs.announce == 'storm'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "INVARIANT storm — ${{ steps.raise.outputs.count }} open, filing is now MUTED"
+          body: |
+            Ten or more INVARIANT issues are open, so this loop stopped opening
+            more rather than train you to ignore the label. That usually means one
+            bad deploy tripped many invariants at once. Nothing new will be filed
+            until the backlog comes down.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. The branches above key off outputs
+      # the raise step only writes on success.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "data-invariants: the ALARM step failed — a violation may be unreported"
+          body: |
+            The invariants ran but the job could not file/close its issues, so the
+            normal notification did not run. Read the run summary by hand.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # A blind detector is not a green detector.
+      - name: Slack — the detector went BLIND
+        if: always() && steps.canary.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "data-invariants canary FAILED — this detector is blind"
+          body: |
+            The invariants did NOT go red when forced, so the checker is no longer
+            measuring anything. Every "all green" from this loop is worthless
+            until someone looks at it.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -401,6 +401,7 @@ jobs:
             : # merge commit exists but no agent edits — still worth pushing
           elif git diff --cached --quiet; then
             gh pr comment "${{ inputs.pr }}" --body "**PR repair:** the suite already passes here and there was nothing to change. If checks still show red, re-run them — the failure may have been environmental."
+            echo "pushed=no" >> "$GITHUB_OUTPUT"
             echo "nothing to push" >> "$GITHUB_STEP_SUMMARY"; exit 0
           else
             printf 'fix: pr-repair loop - resolve conflicts with main / make checks green\n\nAutomated repair pushed by pr-repair.yml (run %s). The workflow re-ran the\nfull offline suite itself after the edit; the agent claim of success was\nnot trusted. Merge remains the owner'\''s.\n' "${{ github.run_id }}" > /tmp/commit-msg.txt
@@ -417,7 +418,28 @@ jobs:
             gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1               && echo "approved parked run $id" >> "$GITHUB_STEP_SUMMARY"               || echo "::warning::could not approve run $id — approve it in the UI or CI will not report on this PR"
           done
           gh pr comment "${{ inputs.pr }}" --body "**PR repair:** pushed a fix to this branch — the full offline suite passed in the workflow itself (run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})). CI is re-running now; merging stays with you."
+          echo "pushed=yes" >> "$GITHUB_OUTPUT"
           echo "pushed repair to ${{ steps.gate.outputs.branch }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING: log-agent-work, deliberately NOT ready-to-merge. The loop pushed
+      # a commit and CI is only now re-running — the PR is not green yet, so it
+      # is not waiting on his click. ready-to-merge must mean "green and waiting"
+      # or it becomes a list of things to check, which is a todo list, not a
+      # signal. pr-shepherd announces the PR once it is actually green.
+      - name: Slack — a fix was pushed to the PR branch
+        if: steps.ship.outputs.pushed == 'yes'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-agent-work
+          severity: info
+          title: "PR repair pushed a fix to PR #${{ inputs.pr }}"
+          body: |
+            ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr }}
+
+            The offline suite passed inside the workflow before pushing; CI is
+            re-running on the branch now. Merging stays with you.
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
 
       # ── THE BLIND CHECKER (Genesis Wall 2, second half) ─────────────────────
@@ -525,3 +547,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh pr comment "${{ inputs.pr }}" --body "**PR repair ran and could not finish** — see run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). Nothing was pushed. The branch is exactly as you left it."
+
+      # The loop tried and stopped. The PR is still red and still yours — what
+      # happens next is a human choice, so: needs-your-decision.
+      - name: Slack — PR repair could not finish
+        if: always() && steps.token.outputs.have == 'true' && failure()
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "PR repair could not finish on PR #${{ inputs.pr }}"
+          body: |
+            Nothing was pushed — the branch is exactly as you left it, and its
+            checks are still red.
+
+            PR:  ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

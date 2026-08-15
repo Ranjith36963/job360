@@ -1,8 +1,27 @@
 name: "Alert the owner"
 description: >-
-  Send a harness alert to the owner by email via Resend. The last mile of the
-  escalation chain: without it the loops diagnose perfectly and tell nobody.
+  Send a harness alert to the owner by email via Resend. SUPERSEDED — Slack is
+  now the primary voice; see .github/actions/slack. Kept for a future email path.
 
+# ⚠️ SUPERSEDED 2026-08-15 — `.github/actions/slack` IS NOW THE PRIMARY PATH.
+#
+# This action is deliberately KEPT and deliberately UNUSED. The owner may want
+# email back later, so the code stays; nothing new should call it.
+#
+# Why it was replaced, measured rather than argued:
+#   RESEND_API_KEY was never added to GitHub Actions. Rule 1 below ("NEVER fail
+#   the caller") turned that into a ::warning:: and `exit 0` on EVERY send. So
+#   every alert this harness ever tried to make went GREEN and reached nobody:
+#   7 open `triage:needs-human` issues, 6 of them with ZERO human comments for
+#   3-8 days. The action worked exactly as designed and the harness was mute.
+#
+# The lesson, now encoded in the Slack action: rule 1 is right for a COURTESY
+# side-effect and wrong for an ALERTING path. On an alerting path a silent skip
+# IS the bug, because it manufactures confidence — you stop checking, believing
+# you would have been told. `.github/actions/slack` therefore exits 1, loudly,
+# when it cannot deliver. If email is ever revived, invert rule 1 here too.
+#
+# ── original rationale below, unchanged ────────────────────────────────────
 # WHY THIS EXISTS (issue #145)
 #
 # The chain could detect, diagnose, route and even fix — and then it spoke only

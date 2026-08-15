@@ -112,6 +112,7 @@ jobs:
           echo "canary ok - the assertions still fail when they should" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Raise it, and hand it to triage
+        id: raise
         if: always() && steps.check.outputs.wrong != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,6 +148,7 @@ jobs:
             if [ -z "$num" ]; then
               new=$(gh issue create --title "$title" --body-file body.md --label harness)
               n="${new##*/}"
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
               # Hand off EXPLICITLY: an issue opened with GITHUB_TOKEN raises no
               # `issues` run (GitHub blocks that recursion), so relying on the
               # event would leave every product alarm undiagnosed.
@@ -157,8 +159,20 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file body.md
+              echo "issue=$num" >> "$GITHUB_OUTPUT"
               echo "commented on existing #$num" >> "$GITHUB_STEP_SUMMARY"
             fi
+            # A drill must never reach production-incidents — the one channel
+            # whose value is that everything in it is real.
+            if [ "${{ inputs.drill }}" = "true" ]; then
+              echo "announce=drill" >> "$GITHUB_OUTPUT"
+            else
+              echo "announce=wrong" >> "$GITHUB_OUTPUT"
+            fi
+            # The one-line headline for Slack: the first FIRING line of the
+            # report, so the channel says WHAT is wrong, not just "something".
+            first=$(grep -m1 -E '^(## )?FAILED|^## FIRING' product.md 2>/dev/null | sed 's/^#* *//' | head -c 120 || true)
+            echo "headline=${first:-a product assertion is failing}" >> "$GITHUB_OUTPUT"
           # CANARY-GATED: never close an outage issue when the canary FAILED.
           # A failed canary means the detector could not go red on demand —
           # it is BLIND, and 'all clear' from a blind detector is not evidence
@@ -168,4 +182,89 @@ jobs:
           elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "Product assertions all hold again as of run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # These assertions are about whether the product is DOING ITS JOB for real
+      # people — feed rows present, jobs visible, matches scored. When one goes
+      # red, somebody's dashboard is wrong right now even though every HTTP probe
+      # is 200 and no exception was thrown. That is a user-facing break, so it
+      # earns production-incidents. The drill variant never does.
+      - name: Slack — the product is WRONG for real users
+        if: always() && steps.raise.outputs.announce == 'wrong'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "PRODUCT: ${{ steps.raise.outputs.headline }}"
+          body: |
+            A product assertion against the live database failed. This is the
+            class of break that throws no error and fails no test: the site is
+            up, nothing is logged, and the product is quietly not working.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — drill (never production-incidents)
+        if: always() && steps.raise.outputs.announce == 'drill'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "DRILL: product-health escalation path exercised"
+          body: |
+            A fire drill forced an assertion red on purpose. The product is fine.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — product healthy again
+        if: always() && steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "product-health: all assertions hold again"
+          body: |
+            Issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. The branches above key off outputs
+      # the raise step only writes on success, so if the raise step itself dies
+      # a real product break would go unannounced.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "product-health: the ALARM step failed — a product break may be unreported"
+          body: |
+            The assertions ran but the job could not open/close its tracking
+            issue, so the normal notification did not run. Read the run summary
+            by hand. The messenger broke; that says nothing about the product.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # A FAILED CANARY is not a product problem — it means this detector can no
+      # longer go red on demand, so today's green proves nothing. Nobody can
+      # decide what to do about a blind instrument except a human: that is
+      # needs-your-decision, not production-incidents.
+      - name: Slack — the detector went BLIND
+        if: always() && steps.canary.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "product-health canary FAILED — this detector is blind"
+          body: |
+            The assertions did NOT go red against an impossible floor, so the
+            checker is no longer measuring anything. Every "all green" from this
+            loop is now worthless until someone looks at it.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

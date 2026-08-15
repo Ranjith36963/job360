@@ -166,6 +166,12 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file body.md
+              echo "raised=$num" >> "$GITHUB_OUTPUT"
+            fi
+            if [ "${{ inputs.drill }}" = "true" ]; then
+              echo "announce=drill" >> "$GITHUB_OUTPUT"
+            else
+              echo "announce=stopped" >> "$GITHUB_OUTPUT"
             fi
           # CANARY-GATED: never close an outage issue when the canary FAILED.
           # A failed canary means the detector could not go red on demand —
@@ -176,7 +182,91 @@ jobs:
           elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "Restarted — nothing is stopped as of run ${{ github.run_id }}. (auto-close)"
+            echo "raised=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=restarted" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING: production-incidents, and this is the loop that PROVES the
+      # channel is needed. When the catalog refresh stopped in July, every
+      # instrument stayed green — 200s, no errors, uptime fine — while the
+      # 30-day purge drained the shared catalog and most users saw an EMPTY
+      # FEED. Silence was the only signal. A stopped pipeline is a user-facing
+      # break even though nothing is "down".
+      - name: Slack — something in the pipeline has STOPPED
+        if: always() && steps.raise.outputs.announce == 'stopped'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "ABSENCE: something in the pipeline has stopped"
+          body: |
+            A process that should have run did not. Nothing errored — that is
+            exactly why this needs its own detector. Left alone, the 30-day purge
+            drains the catalog and users see an empty feed while every dashboard
+            stays green.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.raised }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — drill (never production-incidents)
+        if: always() && steps.raise.outputs.announce == 'drill'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "DRILL: absence escalation path exercised"
+          body: |
+            The absence check was forced red on purpose. Production is fine.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — pipeline restarted
+        if: always() && steps.raise.outputs.announce == 'restarted'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "absence: the pipeline is running again"
+          body: |
+            Nothing is stopped; issue #${{ steps.raise.outputs.raised }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. The branches above key off outputs
+      # the raise step only writes on success. This is the same shape as the
+      # email fallback below it, which was added for exactly the 403 handoff bug
+      # that stayed invisible because the failing call was the job's last act.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "absence: the ALARM step failed — a stopped pipeline may be unreported"
+          body: |
+            The absence check ran but the job could not open/close its tracking
+            issue, so the normal notification did not run. Read the run summary
+            by hand before assuming the pipeline is healthy.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Blind detector -> a human must decide, not a loop.
+      - name: Slack — the detector went BLIND
+        if: always() && steps.canary.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "absence canary FAILED — this detector is blind"
+          body: |
+            The absence check did NOT go red against an impossible threshold, so
+            it is no longer observing anything. Today's green means nothing.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
   # ── DEAD-MAN'S SWITCH (issue #144) ──────────────────────────────────────────
   # One level up from the job above: that asks "did the PRODUCT stop?", this asks
@@ -254,6 +344,7 @@ jobs:
               new=$(gh issue create --title "$title" --body-file wbody.md --label harness)
               n="${new##*/}"   # same GITHUB_TOKEN recursion block as above
               echo "raised=$n" >> "$GITHUB_OUTPUT"
+              echo "announce=stopped" >> "$GITHUB_OUTPUT"
               if gh workflow run triage.yml -f issue="$n"; then
                 echo "woken=yes" >> "$GITHUB_OUTPUT"
               else
@@ -266,6 +357,8 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file wbody.md
+              echo "raised=$num" >> "$GITHUB_OUTPUT"
+              echo "announce=stopped" >> "$GITHUB_OUTPUT"
             fi
           # CANARY-GATED: never close an outage issue when the canary FAILED.
           # A failed canary means the detector could not go red on demand —
@@ -276,7 +369,60 @@ jobs:
           elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
+            echo "raised=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=restarted" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # ROUTING: needs-your-decision, NOT production-incidents. Nothing is broken
+      # for a user — a WATCHER stopped. The product may be perfectly fine. What
+      # is gone is the ability to know, and re-arming a monitoring layer (GitHub
+      # silently disables schedules after ~60 days of repo inactivity) is a human
+      # call. Putting this in production-incidents would dilute the one channel
+      # that must only ever contain real, current, user-visible breaks.
+      - name: Slack — a watcher has stopped running
+        if: always() && steps.wraise.outputs.announce == 'stopped'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "WATCHDOG: a scheduled workflow has stopped running"
+          body: |
+            One of the monitoring workflows did not report inside its window. A
+            workflow that stops looks EXACTLY like one that passes — no red X, no
+            email — so the whole monitoring layer can switch itself off with every
+            dashboard still green. Someone has to decide whether to re-arm it.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.wraise.outputs.raised }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml.
+      - name: Slack — the watchdog alarm path itself broke
+        if: always() && steps.wraise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "watchdog: the ALARM step failed — a stopped watcher may be unreported"
+          body: |
+            The watchdog ran but could not open/close its tracking issue, so the
+            normal notification did not run. Read the run summary by hand.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — watchers reporting again
+        if: always() && steps.wraise.outputs.announce == 'restarted'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "watchdog: every scheduled workflow is reporting again"
+          body: |
+            Issue #${{ steps.wraise.outputs.raised }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       # FALLBACK last mile: normally triage sends the email, because its alert
       # carries the diagnosis. But if the handoff failed, triage never runs and

@@ -121,6 +121,7 @@ jobs:
           echo "canary ok - the audit still fails when it should" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Raise it, and hand it to triage
+        id: raise
         if: always() && steps.walk.outputs.broken != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -158,6 +159,7 @@ jobs:
             if [ -z "$num" ]; then
               new=$(gh issue create --title "$title" --body-file body.md --label harness)
               n="${new##*/}"
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
               # Explicit handoff: an issue opened with GITHUB_TOKEN raises no
               # `issues` run (GitHub blocks that recursion), so relying on the
               # event would leave every user-journey alarm undiagnosed.
@@ -168,7 +170,13 @@ jobs:
               fi
             else
               gh issue comment "$num" --body-file body.md
+              echo "issue=$num" >> "$GITHUB_OUTPUT"
               echo "commented on existing #$num" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ "${{ inputs.drill }}" = "true" ]; then
+              echo "announce=drill" >> "$GITHUB_OUTPUT"
+            else
+              echo "announce=broken" >> "$GITHUB_OUTPUT"
             fi
           # CANARY-GATED: never close an outage issue when the canary FAILED.
           # A failed canary means the detector could not go red on demand —
@@ -179,4 +187,81 @@ jobs:
           elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
             gh issue close "$num" \
               --comment "Every onboarded user reaches the dashboard again as of run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ──────────────────────────────────────────────────────────────
+      # This audit walks REAL onboarded users end to end. When it fires, at least
+      # one actual person cannot get through the product right now — while the
+      # aggregate dashboards stay green, because averages cannot see one broken
+      # user. Squarely production-incidents.
+      - name: Slack — the pipeline is broken for a real user
+        if: always() && steps.raise.outputs.announce == 'broken'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "The pipeline is broken for at least one real user"
+          body: |
+            The per-user journey audit found someone who cannot get through.
+            Aggregate checks cannot see this: the product can look perfectly
+            healthy on average while being completely useless for one person.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — drill (never production-incidents)
+        if: always() && steps.raise.outputs.announce == 'drill'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "DRILL: user-journey escalation path exercised"
+          body: |
+            A break was forced on purpose. Users are fine.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — every user is getting through again
+        if: always() && steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "user-journey: every onboarded user reaches the dashboard again"
+          body: |
+            Issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE — see uptime.yml. The branches above key off outputs
+      # the raise step only writes on success.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "user-journey: the ALARM step failed — a broken user may be unreported"
+          body: |
+            The audit ran but the job could not open/close its tracking issue, so
+            the normal notification did not run. Read the run summary by hand.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Slack — the detector went BLIND
+        if: always() && steps.canary.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "user-journey canary FAILED — this detector is blind"
+          body: |
+            The audit did NOT go red against an impossible floor. "All users
+            healthy" from this loop now means nothing until someone looks.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
