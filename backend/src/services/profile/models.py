@@ -510,13 +510,41 @@ class UserPreferences:
     about_me: str = ""
     github_username: str = ""
     # Pillar 2 Batch 2.9 — multi-dimensional scoring inputs.
-    # `preferred_workplace` is the enum form of `work_arrangement` so the
-    # dimension scorer can match against `JobEnrichment.workplace_type`
-    # without string juggling. None → user has no preference → neutral score.
     # `needs_visa` gates the visa scorer — when False the dim returns 0
     # (no reward for something the user doesn't need).
-    preferred_workplace: Optional[str] = None  # "remote" | "hybrid" | "onsite" | None
     needs_visa: bool = False
+
+    # Values the workplace scorer can actually match. A CLOSED set, because the
+    # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —
+    # anything outside it can never match anything (rule #30's closed-set test).
+    _WORKPLACE_VALUES = frozenset({"remote", "hybrid", "onsite"})
+
+    @property
+    def preferred_workplace(self) -> Optional[str]:
+        """The enum form of ``work_arrangement``, DERIVED — not stored.
+
+        This was a second stored field holding the same answer, bridged into
+        place by the profile route. The user was answering one question ("do you
+        go in?") and the system kept two boxes for it, which is exactly how they
+        drifted: `cli.py`'s `setup-profile` sets `work_arrangement` and has never
+        set `preferred_workplace`, so that entry point produced a divergent
+        profile from the day it was written. A copy kept in step by discipline
+        eventually is not.
+
+        THE SENTINEL THIS FIXES. The form seeds itself at "any" and offers it as
+        a real option, but "any" is not one of the three values the scorer
+        knows, so `workplace_score` fell through every branch to 0 — while an
+        EMPTY preference returns the neutral 3. Choosing "I don't mind" scored
+        WORSE than saying nothing, on every job in the feed. That is rule #29
+        inverted: a stated "don't care" became a penalty.
+
+        The allowlist below is what makes that unrepresentable. Anything that is
+        not a matchable value — "any", "", whitespace, a future sentinel nobody
+        has invented yet — becomes None, which the scorer already treats as "no
+        preference, score neutral". Empty stays empty; it never guesses.
+        """
+        value = (self.work_arrangement or "").strip().lower()
+        return value if value in self._WORKPLACE_VALUES else None
 
 
 @dataclass

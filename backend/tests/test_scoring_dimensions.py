@@ -262,7 +262,7 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
         salary_min=70000,
         salary_max=90000,
         experience_level="senior",
-        preferred_workplace="remote",
+        work_arrangement="remote",
         needs_visa=True,
     )
     great_enrichment = _enrichment(
@@ -328,7 +328,7 @@ def test_jobscorer_missing_enrichment_gives_neutral_dims_not_zero():
         date_found=today,
     )
     config = SearchConfig(job_titles=["ML Engineer"], primary_skills=["python", "pytorch"])
-    prefs = UserPreferences(preferred_workplace="remote", needs_visa=False)
+    prefs = UserPreferences(work_arrangement="remote", needs_visa=False)
 
     with_prefs = JobScorer(
         config,
@@ -406,7 +406,7 @@ def test_jobscorer_dim_bonus_caps_at_100():
         salary_min=70000,
         salary_max=90000,
         experience_level="senior",
-        preferred_workplace="remote",
+        work_arrangement="remote",
         needs_visa=True,
     )
     perfect = _enrichment(

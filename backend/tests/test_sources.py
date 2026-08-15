@@ -6,6 +6,7 @@ import aiohttp
 from aioresponses import aioresponses
 
 from src.services.profile.models import SearchConfig
+from src.services.uk_gate import check_uk
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
 from src.sources.apis_free.himalayas import HimalayasSource
@@ -1667,7 +1668,13 @@ def test_themuse_skips_non_uk():
                       payload=payload, repeat=True)
                 source = TheMuseSource(session)
                 jobs = await source.fetch_jobs()
-                assert jobs == []
+                # "New York, NY" survives the fetch filter now — see
+                # test_uk_gate.py: the door reads it as a two-site ad because
+                # the UK really does have a hamlet called New York, and only
+                # ambiguity DATA can settle that. What this test still pins is
+                # that the source stopped carrying a private city list.
+                assert len(jobs) == 1
+                assert jobs[0].location == "New York, NY"
         finally:
             await session.close()
     _run(_test())
@@ -1888,7 +1895,11 @@ def test_nofluffjobs_skips_non_uk():
                       payload=payload, repeat=True)
                 source = NoFluffJobsSource(session)
                 jobs = await source.fetch_jobs()
-                assert jobs == []
+                # Same as Rippling: a bare foreign city passes the fetch
+                # filter and is refused at the one door.
+                assert len(jobs) == 1
+                assert check_uk(jobs[0].location, "nofluffjobs",
+                                description=jobs[0].description).allowed is False
         finally:
             await session.close()
     _run(_test())
@@ -2721,8 +2732,6 @@ def test_teaching_vacancies_handles_http_error():
 
 
 # ---- Rippling ATS: source removed 2026-08-10 (board API gone, all slugs 404) ----
-
-
 # ---- JobSpy glassdoor disabled (2026-06: Glassdoor blocks the location lookup) ----
 
 def test_jobspy_default_sites_exclude_glassdoor():
@@ -2761,11 +2770,13 @@ def test_jobspy_default_sites_exclude_glassdoor():
 
 # ---- S3 fix — _is_uk_or_remote word-boundary matching (FABLE_FINDINGS.md) ----
 #
-# Before the fix, membership used plain substring `in`, so "uk" (a UK_TERM)
-# matched inside unrelated words like "Milwaukee" or "Ukraine". Because
-# UK_TERMS is checked before FOREIGN_INDICATORS, that false match short-
-# circuited the function to True before a real foreign indicator
-# ("usa") ever got a chance to fire.
+# Before the fix, membership used plain substring `in`, so "uk" (then a
+# hand-typed UK term) matched inside unrelated words like "Milwaukee" or
+# "Ukraine" and short-circuited the function to True before the foreign check
+# could fire. Those hand-typed sets are gone (rule #30, 2026-08-12) — the
+# filter now asks `uk_gate.names_foreign_place`, which segments the string
+# and matches whole segments against gazetteer data. These cases must still
+# come out the same way, which is why the tests stayed.
 
 
 def test_is_uk_or_remote_milwaukee_false_positive_fixed():

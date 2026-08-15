@@ -1,45 +1,41 @@
 # Runtime data (jobs.db, logs, exports, reports) — never bake into the image.
 # This pattern is ROOT-ANCHORED: it excludes `backend/data/` only. Do NOT widen
-# it to `**/data` — `src/data/uk_gazetteer/` is packaged code-data that the UK
-# gate cannot run without, and shipping without it is issue #260 (four days of
-# foreign jobs in a UK-only catalog, with every instrument green).
+# it to `**/data` — `src/data/` holds packaged code-data (the UK gazetteer and
+# the job-signal vocabularies) that two services cannot run without, and
+# shipping without it is issue #260 (four days of foreign jobs in a UK-only
+# catalog, with every instrument green).
 data/
 
-# ...EXCEPT the data that is not runtime state but SHIPPED REFERENCE DATA.
+# THERE ARE DELIBERATELY NO `!` EXEMPTIONS BELOW, and that is the fix, not an
+# omission.
 #
-# `.gitignore` deliberately un-ignores these same two directories, which is the
-# whole reason they are committed. This file did not mirror that, and the
-# Dockerfile is `COPY . .`, so the build threw away exactly the files someone had
-# gone to the trouble of exempting — and nothing rebuilds them at deploy time.
-# Railway volumes start empty, so no mount could supply them either.
+# Both shipped reference-data directories now live INSIDE the package:
 #
-# What that cost, silently and with no error:
-#   uk_gazetteer/  — the ~52k UK place names rule #30 is built on. Without it
-#                    `uk_gate._read()` returns an empty frozenset (it degrades
-#                    rather than raising), so no job can match a UK place and the
-#                    gate falls through to source-trust and ad-text evidence.
-#   job_signals/   — the seniority / workplace / location term tables behind
-#                    `signal_backed_lookup`, which fills 'unknown' enrichment at
-#                    read time, and `detect_seniority`. `_load_terms` returns {}
-#                    on a missing file, so those detectors quietly answer nothing.
+#   src/data/uk_gazetteer/ — the ~52k UK place names rule #30 is built on.
+#                            Without it `uk_gate._read()` returns an empty
+#                            frozenset (it degrades rather than raising), so no
+#                            job can match a UK place. (Moved by PR #312.)
+#   src/data/job_signals/  — the seniority / workplace / location term tables
+#                            behind `signal_backed_lookup`, which fills
+#                            'unknown' enrichment at read time, and
+#                            `detect_seniority`. `_load_terms` returns {} on a
+#                            missing file, so those detectors quietly answer
+#                            nothing. (Moved 2026-08-12 — same bug, third time.)
 #
-# Both failure modes are invisible: empty data, no exception, no log line.
-# `tests/test_shipped_data.py` now pins the two ignore files together.
-# uk_gazetteer is NOT listed here any more, and its absence is deliberate:
-# the data moved to `src/data/uk_gazetteer/`, and the `data/` rule above is
-# ROOT-ANCHORED, so it never reached inside src/ in the first place. An
-# exemption for a path nothing excludes is noise that reads like protection.
-# What actually carries it into the image is
-# `[tool.setuptools.package-data]` in backend/pyproject.toml plus
-# `pip install .` — the wheel, not this file.
-# NOTHING IS EXEMPTED HERE ANY MORE, and that is the fix, not a regression.
-# job_signals/ MOVED to `src/data/job_signals/` on 2026-08-13, following the
-# gazetteer. The `data/` rule above is ROOT-ANCHORED, so it never reached inside
-# src/ — and, more importantly, an exemption here was never enough on its own:
-# it put the files at /app/data, which only the API process can see (uvicorn
-# inserts "." at sys.path[0]). The ARQ worker imports src from site-packages
-# (arq/cli.py appends cwd) and found nothing. `[tool.setuptools.package-data]`
-# in pyproject.toml is what carries them now — the wheel, not this file.
+# The `data/` rule above is root-anchored, so it never reached inside `src/`
+# and there is nothing here to exempt. An exemption for a path nothing excludes
+# is noise that reads like protection.
+#
+# What actually carries these into the image is `[tool.setuptools.package-data]`
+# in backend/pyproject.toml plus `pip install .` — the WHEEL, not this file.
+# `COPY . .` putting a file in the build context is not enough on its own,
+# because the running code is the site-packages copy.
+#
+# Adding a new shipped data directory? Put it under `src/data/`, declare it in
+# pyproject, and `tests/test_shipped_data.py` will check you did — it derives
+# the rule from `.gitignore` and fails on any committed data directory with no
+# delivery mechanism. Both failure modes here are invisible at runtime: empty
+# data, no exception (though both loaders now log an ERROR naming the path).
 
 # Python caches
 __pycache__/

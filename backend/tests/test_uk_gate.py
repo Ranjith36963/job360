@@ -99,6 +99,46 @@ class TestForeignOverrideSurvivesInversion:
         assert check_uk("London, New York", "greenhouse").allowed
         assert not check_uk("Sydney, Australia", "greenhouse").allowed
 
+    # A plain foreign ADDRESS is not a dual-site posting.
+    #
+    # Measured on the live catalog 2026-08-12: 373 rows were being admitted as
+    # `dual_site_includes_uk`, and the "UK" half of several was a UK hamlet
+    # called California or New York (both are also US states, so they sit in
+    # the gazetteer AND in foreign_admin). "San Jose, California, US" is one
+    # American address, not a job in two countries — the tell is that its only
+    # UK-looking segment IS the foreign one. The scorer's -15 foreign penalty
+    # used to mask this; removing it (rule #30) leaves the door as the only
+    # defence, so the door has to be right.
+    #
+    # Still admitted, on purpose: "London, Ontario", "New York, NY" and
+    # "Remote - New York". A UK city name beside a foreign region is how both
+    # a foreign address and a genuine two-site ad are written, and "London,
+    # New York" is asserted ALLOWED right above. Splitting them needs
+    # ambiguity DATA, not code. The wider rule that would have caught them
+    # also refused three real UK rows in the live dry-run — never false-block
+    # a UK job to catch a foreign one.
+    @pytest.mark.parametrize("loc", [
+        "San Jose, California, US",
+        "Milpitas, California, US",
+        "US, California, Folsom",
+        "Maryland; Virginia; Washington, D.C.",
+    ])
+    def test_foreign_address_is_not_a_dual_site_posting(self, loc: str) -> None:
+        v = check_uk(loc, "greenhouse")
+        assert not v.allowed, f"{loc} → {v.reason}"
+
+    @pytest.mark.parametrize("loc", [
+        "Manchester",                       # UK city that is also a foreign admin name
+        "Southampton",
+        "London / New York",                # the genuine two-site ad the escape exists for
+        "Manchester, England, United Kingdom",
+        "Remote (Canada, UK, EU)",          # explicit UK signal wins
+        "London, UK; Ontario, CAN; Remote-Friendly, United States",
+    ])
+    def test_real_uk_and_genuine_dual_site_rows_survive(self, loc: str) -> None:
+        v = check_uk(loc, "greenhouse")
+        assert v.allowed, f"{loc} → {v.reason}"
+
 
 class TestComputedAmbiguity:
     """Boston/Cambridge/Perth collide with bigger foreign twins. That set is

@@ -9,7 +9,6 @@ from src.services.skill_matcher import (
     TITLE_WEIGHT,
     JobScorer,
     ScoreBreakdown,
-    _foreign_location_penalty,
     _location_score,
     _negative_penalty,
     _recency_score,
@@ -500,43 +499,94 @@ def test_salary_in_range_no_salary():
     assert salary_in_range(job) is False
 
 
-# ---- Foreign location penalty tests ----
+# ---- Rule #30 — a non-UK location is a DOOR, never a scoring penalty ----
+#
+# Job360 refuses foreign jobs at ONE chokepoint (`services/uk_gate.check_uk`,
+# called in `main.py` before storage). The scorer must not run a second, weaker
+# copy of that decision: a job that got through the door is a job we chose to
+# keep, and docking it points only makes the ranking lie about why.
+#
+# Each case pairs a clearly-foreign location with a CONTROL location that earns
+# the SAME positive location points (asserted first, so the comparison can never
+# be accidentally rigged by the +10 location reward). Any remaining gap between
+# the pair is a penalty and nothing else.
+#
+# The last pair is the sharp one: "London, Ontario" and "London" both collect
+# the +10 UK-location reward, so the pair isolates the penalty on its own.
+
+_RULE30_SKILLS = ["Python", "PyTorch", "LLM", "RAG"]
+_RULE30_DESC = "Python PyTorch LLM RAG"
+_RULE30_PAIRS = (
+    ("Bangalore, India", "Springfield"),      # unknown-to-the-scorer control
+    ("New York, US", "Springfield"),
+    ("San Francisco, CA", "Springfield"),
+    ("London, Ontario", "London"),            # both earn the +10 location reward
+)
 
 
-def test_foreign_penalty_us_location():
-    assert _foreign_location_penalty("New York, US") == 15
+@pytest.mark.parametrize("foreign_location,control_location", _RULE30_PAIRS)
+def test_jobscorer_gives_foreign_location_no_penalty(foreign_location, control_location):
+    """JobScorer: a foreign location must not COST points versus its control."""
+    assert _location_score(foreign_location) == _location_score(control_location), (
+        "test rigged: the pair does not earn equal positive location points"
+    )
+
+    scorer = JobScorer(
+        SearchConfig(job_titles=["AI Engineer"], primary_skills=_RULE30_SKILLS)
+    )
+    foreign = scorer.score(
+        _make_job(title="AI Engineer", location=foreign_location, description=_RULE30_DESC)
+    ).match_score
+    control = scorer.score(
+        _make_job(title="AI Engineer", location=control_location, description=_RULE30_DESC)
+    ).match_score
+    assert foreign == control, (
+        f"{foreign_location!r} scored {foreign} vs {control} for {control_location!r} "
+        f"— that {control - foreign}-point gap is a banned penalty"
+    )
 
 
-def test_foreign_penalty_india():
-    assert _foreign_location_penalty("Bangalore, India") == 15
+def test_score_job_gives_foreign_location_no_penalty(monkeypatch):
+    """Module-level `score_job` (the no-profile fallback) must not penalise either."""
+    from src.services import skill_matcher as sm
+
+    monkeypatch.setattr(sm, "JOB_TITLES", ["AI Engineer"])
+    monkeypatch.setattr(sm, "PRIMARY_SKILLS", _RULE30_SKILLS)
+    foreign = score_job(
+        _make_job(title="AI Engineer", location="Bangalore, India", description=_RULE30_DESC)
+    )
+    unknown = score_job(
+        _make_job(title="AI Engineer", location="Springfield", description=_RULE30_DESC)
+    )
+    assert foreign == unknown, f"foreign={foreign}, unknown={unknown}"
 
 
-def test_foreign_penalty_empty_location():
-    """Empty location should get no penalty (might be UK)."""
-    assert _foreign_location_penalty("") == 0
+def test_no_foreign_penalty_symbol_survives():
+    """The penalty helper and its hand-typed city list must be GONE, not unused.
 
+    A dormant list is a list somebody re-wires later. Rule #30 bans the data
+    as well as the call.
+    """
+    from src.services import skill_matcher as sm
 
-def test_foreign_penalty_uk_location():
-    assert _foreign_location_penalty("London, UK") == 0
-
-
-def test_foreign_penalty_remote():
-    assert _foreign_location_penalty("Remote") == 0
-
-
-def test_foreign_penalty_unknown_location():
-    """A location with no known indicators should get no penalty."""
-    assert _foreign_location_penalty("Somewhere nice") == 0
+    assert not hasattr(sm, "_foreign_location_penalty")
+    assert not hasattr(sm, "FOREIGN_INDICATORS")
 
 
 def test_us_ai_job_scores_lower_than_uk():
-    """A US-based AI job should score materially lower than the same UK job.
+    """A UK job outranks the same US job — by the REWARD, not by a penalty.
+
+    The whole gap is the +10 the UK location earns for matching the user's
+    LOCATIONS (rule #30: matching what the user asked for is a reward; being
+    elsewhere is the door's business, never a deduction). Asserting the exact
+    weight, not ">= 15", is what makes a re-introduced penalty fail here.
 
     Batch 2.2 note: uses JobScorer with a matching profile so both jobs clear
-    the gate and the +location / –foreign-penalty delta is observable. Under
-    the gate, empty-default module-level scoring would collapse both jobs to
-    the gate floor of 10 and this test's invariant would no longer hold.
+    the gate; empty-default module-level scoring would collapse both to the
+    gate floor of 10 and the invariant would no longer hold.
     """
+    from src.services.skill_matcher import LOCATION_WEIGHT
+
     config = SearchConfig(
         job_titles=["AI Engineer"],
         primary_skills=["Python", "PyTorch", "LLM", "RAG"],
@@ -546,7 +596,8 @@ def test_us_ai_job_scores_lower_than_uk():
     us_job = _make_job(title="AI Engineer", location="San Francisco, CA", description="Python PyTorch LLM RAG")
     uk_score = scorer.score(uk_job).match_score
     us_score = scorer.score(us_job).match_score
-    assert uk_score - us_score >= 15, f"UK={uk_score}, US={us_score}"
+    assert uk_score > us_score, f"UK={uk_score}, US={us_score}"
+    assert uk_score - us_score == LOCATION_WEIGHT, f"UK={uk_score}, US={us_score}"
 
 
 # ---- Partial title scoring tests ----
@@ -615,18 +666,27 @@ def test_jobscorer_negative_penalty_word_boundary():
     assert scorer._negative_penalty("Sales Engineer") == 30
 
 
-# ---- Foreign location penalty regression tests (F-029, F-036) ----
+# ---- Foreign locations (F-029, F-036) are the DOOR's job, not the scorer's ----
 
 
-def test_london_ontario_foreign_penalty():
-    """'London, Ontario' should be penalised as a foreign location."""
-    assert _foreign_location_penalty("London, Ontario") == 15
+def test_foreign_location_is_refused_at_the_door_not_docked_points():
+    """The job the deleted penalty was doing still has an owner: the gate.
 
+    Deliberately NOT asserted here: "London, Ontario". The door admits it
+    today (`dual_site_includes_uk`) because "london" is a UK gazetteer hit —
+    the escape hatch built for genuine two-site ads like "London / New York".
+    Measured on the live catalog 2026-08-12: 117 of the 379 rows that were
+    paying the old penalty are admitted through that escape, and the UK signal
+    for several of them comes from UK hamlets named "California" and
+    "New York". That is a gap in the DOOR and it needs an owner decision —
+    writing an assertion here that the door does not honour would be a guard
+    that has never been watched firing.
+    """
+    from src.services.uk_gate import check_uk
 
-def test_london_uk_no_penalty():
-    """Plain 'London' and 'London, UK' should NOT be penalised."""
-    assert _foreign_location_penalty("London") == 0
-    assert _foreign_location_penalty("London, UK") == 0
+    assert check_uk("Toronto, Canada", "greenhouse").allowed is False
+    assert check_uk("Bangalore, India", "greenhouse").allowed is False
+    assert check_uk("London, UK", "greenhouse").allowed is True
 
 
 # ---- Pillar 3 Batch 1: 5-column date model recency tests ----
@@ -1084,7 +1144,7 @@ class TestScoreBreakdown:
             salary_max=80000,
             experience_level="senior",
             needs_visa=True,
-            preferred_workplace="remote",
+            work_arrangement="remote",
         )
         scorer = JobScorer(self._config(), user_preferences=prefs)
         breakdown = scorer.score(self._job())
@@ -1117,7 +1177,11 @@ class TestScoreBreakdown:
             salary_max=80000,
             experience_level="senior",
             needs_visa=True,
-            preferred_workplace="remote",
+            # work_arrangement, NOT preferred_workplace: main turned the latter
+            # into a DERIVED property (models.py:523) so it is no longer a
+            # constructor argument. This is why the test passed locally and
+            # failed on CI — CI builds the merge with main, this branch did not.
+            work_arrangement="remote",
         )
         # posted_at + high confidence on purpose. With only date_found, recency
         # is deliberately discounted to 6 of 10 ("discovery is not posting",

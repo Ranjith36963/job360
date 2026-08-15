@@ -46,6 +46,7 @@ from src.services.profile.preferences import (
     deterministic_about_me_fields,
     llm_infer_from_about_me,
     merge_cv_and_preferences,
+    skills_already_held,
 )
 from src.services.profile.seniority import infer_experience_level
 
@@ -116,6 +117,73 @@ def _input_hash(raw: Any) -> str:
         raw = json.dumps(raw, sort_keys=True, default=str)
     payload = f"v{EXTRACTOR_VERSION}\x00{raw}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def stale_extraction_inputs(profile: UserProfile) -> list[str]:
+    """Which of ``profile``'s raw inputs were last read by an OLDER extractor
+    than the one running right now.
+
+    WHY THIS EXISTS. ``run_two_pass_extraction`` has exactly one caller in
+    this codebase — a user-triggered save route (five handlers in
+    ``api/routes/profile.py``). Nothing scheduled ever re-reads an EXISTING
+    profile, so bumping ``EXTRACTOR_VERSION`` for a prompt fix reaches only
+    the users who happen to re-save; everyone else stays frozen on the old
+    extraction forever, silently. This has already been "fixed" four times in
+    production with throwaway, uncommitted scripts that called
+    ``save_profile()`` directly — which stamps a fresh ``updated_at`` while
+    leaving ``llm_input_hashes`` untouched, so the profile then LOOKS freshly
+    updated while its extraction is still stale. None of those four scripts,
+    or the ``source_action`` values they wrote, exist in this repo — a
+    profile that "looks recent" tells you nothing here.
+
+    This is the read-only check a real sweep (``scripts/
+    reextract_stale_profiles.py``) uses to find who ACTUALLY needs a re-run,
+    so it never has to blanket re-extract every profile — each re-extraction
+    is a paid LLM call.
+
+    Mirrors the exact four-input map ``run_two_pass_extraction`` builds
+    (cv / linkedin / github / about_me) and reuses ``_already_read`` — the
+    hashing algorithm is defined ONCE, there, and never reimplemented here.
+    "Stale" is precisely the inverse of "already read". A key with NO raw
+    input is never stale: there is nothing to extract, so an unfilled field
+    must never look like backlog (rule #29 — an empty shelf is not a broken
+    one).
+
+    Takes the whole ``UserProfile`` rather than just ``CVData`` because one
+    of the four raw inputs (``about_me``) lives on ``UserPreferences``, not
+    on ``CVData`` — even though its cache hash is stored on
+    ``cv.llm_input_hashes`` alongside the other three. Splitting it out would
+    either reimplement half of ``run_two_pass_extraction``'s input map or
+    silently drop about_me from the sweep, which is exactly the kind of gap
+    this function exists to catch.
+
+    Returns the stale keys, e.g. ``["cv", "about_me"]``, or ``[]`` when every
+    input the profile actually has is current.
+    """
+    cv = profile.cv_data
+    prefs = profile.preferences
+
+    # Same "does this input actually have content?" gate run_two_pass_extraction
+    # uses before it will even attempt a pass — a dict with all-empty values
+    # (github's shape) must not count as "present" just because the dict
+    # itself is non-empty.
+    _has_github = bool(cv.github_repos_brief or cv.github_bio or cv.github_profile_readme)
+    inputs: dict[str, tuple[bool, Any]] = {
+        "cv": (bool(cv.raw_text), cv.raw_text),
+        "linkedin": (bool(cv.linkedin_raw_text), cv.linkedin_raw_text),
+        "github": (_has_github, {
+            "repos": cv.github_repos_brief,
+            "bio": cv.github_bio,
+            "readme": cv.github_profile_readme,
+        }),
+        "about_me": (bool(prefs.about_me), prefs.about_me),
+    }
+
+    stale: list[str] = []
+    for key, (has_input, raw) in inputs.items():
+        if has_input and not _already_read(cv, key, raw):
+            stale.append(key)
+    return stale
 
 
 def _pass_produced_data(key: str, res: Any) -> bool:
@@ -643,16 +711,20 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
 
     # Adjacent-skill SUGGESTIONS (opt-in, never auto-counted) from the full set of
     # skills the user actually has across all sources.
-    _all_skills = list(
-        dict.fromkeys(
-            (cv.skills or [])
-            + (cv.linkedin_skills or [])
-            + (cv.github_llm_skills or [])
-            + list((cv.github_languages or {}).keys())
-            + (prefs.additional_skills or [])
-        )
+    #
+    # This list USED to be hand-assembled here, and it disagreed with the list
+    # `sanitize_preferences` strips against: it read `github_languages` instead
+    # of `github_skills_inferred` (which is languages PLUS repo topics) and left
+    # out `cv_skills_esco`. So a topic-derived skill could be offered as a
+    # suggestion, accepted by the user, and then stripped from
+    # `additional_skills` on the very next save — the accepted chip just
+    # disappeared, with nothing on screen to explain it.
+    #
+    # Both sides now derive from `skills_already_held`, so the suggester cannot
+    # offer something the sanitizer will immediately take away.
+    cv.suggested_skills = await llm_suggest_adjacent_skills(
+        skills_already_held(cv, prefs)
     )
-    cv.suggested_skills = await llm_suggest_adjacent_skills(_all_skills)
 
     # ── Fold the freshly-extracted CV skills/titles into preferences ──
     # (Was done in the CV upload route; lives here now so the SINGLE extractor
