@@ -492,6 +492,7 @@ export function FilterPanel({
                     ghost_detection.py / src/lib/staleness.ts — the old
                     ACTIVE/STALE/GHOST literals never existed in the DB. */}
                 <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="possibly_stale">Possibly stale</SelectItem>
                 <SelectItem value="likely_stale">May be filled</SelectItem>
                 <SelectItem value="confirmed_expired">Expired</SelectItem>
               </SelectContent>

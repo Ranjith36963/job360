@@ -63,7 +63,13 @@ def _parse_enr_salary(raw: object) -> tuple[Optional[int], Optional[int], Option
     if not isinstance(obj, dict):
         return (None, None, None, None)
 
-    currency = obj.get("currency") or None
+    # Coerce to str before validating. `obj` is LLM-produced JSON, so
+    # `currency` can arrive as a number, a list or a dict; passing that
+    # straight into is_known_currency risks a type error on a request path
+    # that should never 500 over a malformed enrichment blob. A non-string is
+    # simply an unknown currency (caught in review, PR #273).
+    currency_raw = obj.get("currency")
+    currency = currency_raw if isinstance(currency_raw, str) and currency_raw else None
     if not is_known_currency(currency):
         return (None, None, None, currency)
 

@@ -306,8 +306,12 @@ export default function DashboardPage() {
     // L8: cancel any in-flight refetch of these exact queries first.
     // Without this, a response that was already in flight can land right
     // after our optimistic write and silently clobber it with stale data.
+    // effectiveFilters, NOT filters: the empty-window fallback widens the
+    // query, and the list on screen is keyed on the WIDENED filters. Patching
+    // `filters` would write to a cache nobody is rendering, so a click would
+    // appear to do nothing until a refetch (caught in review, PR #273).
     await Promise.all([
-      queryClient.cancelQueries({ queryKey: queryKeys.jobList(filters) }),
+      queryClient.cancelQueries({ queryKey: queryKeys.jobList(effectiveFilters) }),
       queryClient.cancelQueries({ queryKey: queryKeys.jobList(allJobsKey) }),
     ]);
 
@@ -322,7 +326,7 @@ export default function DashboardPage() {
     };
 
     // Optimistic update: patch the cached job list in-place
-    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(filters), patchJob);
+    queryClient.setQueryData<JobListResponse>(queryKeys.jobList(effectiveFilters), patchJob);
     // L8: also patch the unfiltered bucket-counts query so its cached rows
     // don't disagree with the filtered list's action state.
     queryClient.setQueryData<JobListResponse>(queryKeys.jobList(allJobsKey), patchJob);

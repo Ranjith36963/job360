@@ -1503,6 +1503,27 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         )
         new_ids = [row["id"] for row in await cur.fetchall()]
 
+        # A capped fan-out LOSES jobs, it does not defer them: the next tick
+        # computes a fresh `started`, so anything past the LIMIT is never
+        # scored into a feed at all. Measured load is ~280 new jobs/tick
+        # against a cap of 1000, so this should not fire — which is exactly
+        # why it must be loud if it ever does, rather than quietly trimming
+        # a busy day's catalog. Sentry picks this up via the logging handler.
+        if len(new_ids) >= MAX_REFRESH_INGEST_IDS:
+            cur = await db.execute(
+                "SELECT COUNT(*) AS n FROM jobs WHERE date_found >= ?", (started,)
+            )
+            row = await cur.fetchone()
+            total_new = int(row["n"]) if row else len(new_ids)
+            _log.error(
+                "FEED FAN-OUT CAPPED: %s new jobs this tick, only %s ingested — "
+                "%s will never reach any user feed. Raise MAX_REFRESH_INGEST_IDS "
+                "or make the fan-out resumable.",
+                total_new,
+                len(new_ids),
+                max(0, total_new - len(new_ids)),
+            )
+
         if new_ids:
             # Build the enrichment lookup ONCE for the whole tick instead of
             # once per job — see `score_and_ingest`'s `enrichment_lookup_dict`

@@ -107,7 +107,15 @@ class ReedSource(BaseJobSource):
         # exact failure being defended against.
         _deadline = time.monotonic() + (SOURCE_FETCH_TIMEOUT * 0.9)
         _requests_made = 0
+        # BREAK, never `return`, out of the time guard below. Everything
+        # collected here is still UNFILTERED — the `_is_uk_or_remote` pass that
+        # keeps this source UK-only runs AFTER both loops. Returning early
+        # skipped it and leaked non-UK rows into the catalog on exactly the slow
+        # runs the guard exists for (caught in review, PR #273).
+        _out_of_time = False
         for query in queries:
+            if _out_of_time:
+                break
             for page in range(_PAGES_PER_TITLE):
                 if _requests_made and (_deadline - time.monotonic()) < _delay:
                     logger.warning(
@@ -116,7 +124,8 @@ class ReedSource(BaseJobSource):
                         len(jobs),
                         SOURCE_FETCH_TIMEOUT * 0.9 - (_deadline - time.monotonic()),
                     )
-                    return jobs
+                    _out_of_time = True
+                    break
                 params = {
                     "keywords": query,
                     "resultsToTake": _PAGE_SIZE,
