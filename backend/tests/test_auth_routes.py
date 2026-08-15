@@ -171,6 +171,54 @@ def test_login_happy_path_sets_cookie(client):
     assert "job360_session" in r.cookies
 
 
+def test_login_cookie_round_trips_to_me_and_names_the_owner(client):
+    """CONTRACT the live synthetic monitor stands on — do not break silently.
+
+    ``.github/workflows/synthetic-live.yml`` used to run on a ``job360_session``
+    cookie the owner pasted into a repo secret by hand every 30 days
+    (``SESSION_MAX_AGE_DAYS``). It now logs itself in instead, which needs exactly
+    two things to stay true:
+
+      1. ``POST /api/auth/login`` returns the session in a ``Set-Cookie`` header
+         named ``job360_session`` — the monitor reads the raw HEADER, not a
+         client-side cookie jar, so assert on the header.
+      2. Sending that value back on ``GET /api/auth/me`` returns the OWNER'S
+         EMAIL. That is the monitor's safety gate: it refuses to walk production
+         unless the backend itself says the session belongs to a synthetic
+         account. If ``/me`` stopped returning ``email``, the gate would refuse
+         every run — or, worse, a laxer gate would let the robot loose on a real
+         user's profile.
+
+    Value-presence, not schema-presence (rule #21): the email asserted here is
+    the real registered address, so a serializer returning ``""`` fails.
+    """
+    email = "synthetic+roundtrip@example.com"
+    client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
+    client.cookies.clear()
+
+    login = client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
+    assert login.status_code == 200, login.text
+
+    # (1) the raw Set-Cookie header, parsed the way the monitor parses it.
+    set_cookie = login.headers.get("set-cookie", "")
+    assert "job360_session=" in set_cookie, set_cookie
+    cookie_value = set_cookie.split("job360_session=", 1)[1].split(";", 1)[0]
+    assert cookie_value, "login returned an EMPTY session cookie"
+
+    # (2) that value alone identifies the owner — no cookie jar, header only.
+    client.cookies.clear()
+    me = client.get("/api/auth/me", headers={"Cookie": f"job360_session={cookie_value}"})
+    assert me.status_code == 200, me.text
+    assert me.json()["email"] == email
+
+    # And a session that is NOT this one must not resolve — the gate has to be
+    # able to say no, or it is decoration.
+    dead = client.get(
+        "/api/auth/me", headers={"Cookie": "job360_session=deadbeef.an2pww.not-a-signature"}
+    )
+    assert dead.status_code == 401
+
+
 # ----- me / logout -----------------------------------------------------
 
 def test_me_requires_session(client):
