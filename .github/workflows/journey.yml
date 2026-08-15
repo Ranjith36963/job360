@@ -23,6 +23,15 @@ name: Journey probe (walk a real user, grade every step)
 #
 # NOT pointed at production by default. It CREATES accounts and RUNS searches,
 # so it belongs against a staging/ephemeral target. Set JOURNEY_API to opt in.
+#
+# TWO THINGS MUST BE TRUE BEFORE THIS CAN EVER BE GREEN, and neither is optional:
+#   1. vars.JOURNEY_API   — a backend BASE URL. A repo VARIABLE, not a secret;
+#      `gh secret set` writes the wrong namespace, succeeds, and does nothing.
+#   2. a corpus of CVs    — the default `User_info/` is gitignored real-person
+#      PII, so a runner checkout never has it. Set vars.JOURNEY_CORPUS to a
+#      committed synthetic corpus, or this loop is red no matter what #1 says.
+# The preflight below reports BOTH at once, on purpose: a guard that reveals one
+# blocker per night costs a night per blocker.
 
 on:
   schedule:
@@ -69,18 +78,59 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check a target is configured
+      - name: Check a target AND a corpus are configured
         id: target
-        run: echo "have=${{ vars.JOURNEY_API != '' }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "have=${{ vars.JOURNEY_API != '' }}" >> "$GITHUB_OUTPUT"
+          # The corpus is the SECOND blocker, and it stays invisible until the
+          # first is cleared. Measure it here so one run reports the whole truth.
+          if [ -d "${{ vars.JOURNEY_CORPUS || 'User_info' }}/CV" ]; then
+            echo "corpus=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "corpus=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Say so loudly if it cannot run
-        if: steps.target.outputs.have != 'true'
+        if: steps.target.outputs.have != 'true' || steps.target.outputs.corpus != 'true'
         run: |
-          echo "::error::JOURNEY_API is not set, so the journey probe has nothing to walk."
           echo "A silent skip here is the dead-watcher failure this harness exists to kill."
-          echo "Set the JOURNEY_API repo variable to a staging backend URL."
-          echo "Deliberately NOT defaulted to production: this loop creates accounts"
-          echo "and runs real searches."
+          echo "So: exactly what is missing, and the exact command that fixes each one."
+          echo ""
+
+          if [ "${{ steps.target.outputs.have }}" != "true" ]; then
+            echo "::error::JOURNEY_API is not set. It is a repo VARIABLE, not a secret - fix it with 'gh variable set JOURNEY_API', because 'gh secret set JOURNEY_API' writes a different namespace and changes nothing."
+            echo "1. NO TARGET - JOURNEY_API is empty"
+            echo "   This file reads it as vars.JOURNEY_API. That is a repo VARIABLE."
+            echo "   FIX:  gh variable set JOURNEY_API --repo ${{ github.repository }} --body 'https://<backend-base-url>'"
+            echo "   TRAP: gh secret set JOURNEY_API succeeds, prints nothing alarming, and"
+            echo "         has NO effect. secrets.* and vars.* are separate namespaces."
+            echo "   VALUE: a backend base URL, no trailing /api. Nothing private about it,"
+            echo "          which is exactly why it is a variable and not a secret."
+            echo "   DO NOT point it at production. This probe creates accounts, uploads CVs,"
+            echo "   and runs real searches, so a production target writes junk users and junk"
+            echo "   jobs into the live database every single night. It needs a staging backend,"
+            echo "   and if no staging backend exists then standing one up IS the fix - not this"
+            echo "   variable."
+            echo ""
+          fi
+
+          if [ "${{ steps.target.outputs.corpus }}" != "true" ]; then
+            echo "::error::No CV corpus on this runner, so JOURNEY_API alone cannot make this green - set the JOURNEY_CORPUS variable to a committed corpus ('gh variable set JOURNEY_CORPUS')."
+            echo "2. NO CORPUS - nothing to walk"
+            echo "   Looked for: ${{ vars.JOURNEY_CORPUS || 'User_info' }}/CV/*.pdf"
+            echo "   The default User_info/ is gitignored real-person CVs (PII), so a runner"
+            echo "   checkout NEVER contains it and never should. This is not a config gap,"
+            echo "   it is a deliberate privacy rule."
+            echo "   FIX:  commit a synthetic corpus and point the variable at it -"
+            echo "         gh variable set JOURNEY_CORPUS --repo ${{ github.repository }} --body '<path/to/corpus>'"
+            echo "         (that folder needs CV/*.pdf, and optionally Linkedin_pdf/ and github_urls/)"
+            echo "   OR run it by hand where the real corpus lives:"
+            echo "         python scripts/journey_probe.py --api http://127.0.0.1:8000"
+            echo ""
+          fi
+
+          echo "Both must be true before this loop can be green. Until then it fails on"
+          echo "purpose, loudly, rather than reporting success about a walk it never took."
           exit 1
 
       - name: Install deps
