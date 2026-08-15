@@ -283,8 +283,19 @@ def main() -> int:
                     FROM user_feed
                 """)
                 judged, total = cur.fetchone()
+                # "zero" reads as a quality problem and is almost never one.
+                # CHECK THE CREDENTIAL FIRST: with no LLM key set, the judge
+                # cannot make a single call, so this column is NULL everywhere
+                # and every downstream report calls it bad ranking. That
+                # confusion cost a week of eval data (issue #238). This script
+                # reads the PROD DB, not prod's env, so it cannot see the key
+                # itself - external-health.yml's provider probe can, and now
+                # goes red when all four are empty.
                 rows.append(("rows with an LLM verdict", f"{judged}/{total}",
-                             "ok" if judged > 0 else "zero - the judge never ran"))
+                             "ok" if judged > 0
+                             else "zero - CHECK THE LLM KEY FIRST (OPENAI/GEMINI/"
+                                  "GROQ/CEREBRAS_API_KEY): no key = no call = no "
+                                  "verdict, which is config, not quality"))
                 # Same asymmetry as above: "never ran" may just mean the flag is
                 # off, but "ran and then stopped" is a fault no matter what the
                 # flags say — and it was previously unalarmable.

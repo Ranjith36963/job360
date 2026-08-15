@@ -145,7 +145,10 @@ jobs:
           cat providers.md
           cat providers.md >> "$GITHUB_STEP_SUMMARY"
           echo "dead=$code" >> "$GITHUB_OUTPUT"
-          [ "$code" -le 1 ] || exit "$code" # exit 2 = nothing configured, fail LOUD
+          # 0 ok · 1 a key is dead · 3 a whole capability has NO key — 1 and 3
+          # are both reported as issues below, so the step itself stays green.
+          # 2 (the probe is blind) is the one that must fail the job LOUD.
+          case "$code" in 0 | 1 | 3) ;; *) exit "$code" ;; esac
 
       - name: Raise it, and hand it to triage
         if: always() && steps.probe.outputs.dead != ''
@@ -154,14 +157,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          code="${{ steps.probe.outputs.dead }}"
+          # TWO ALARMS, because they have TWO DIFFERENT FIXES (same lesson as
+          # accuracy-audit.yml). "dead" = a key we own stopped working -> rotate
+          # it. "missing" = we never had one -> create one, and three of the four
+          # are free. Blurring them sends the owner to the wrong page.
           if [ "${{ inputs.drill }}" = "true" ]; then
             title="DRILL: provider probe test - not a real problem"
+          elif [ "$code" = "3" ]; then
+            title="KEYS: no LLM provider is configured - the judge cannot run"
           else
             title="KEYS: a provider credential is dead"
           fi
           num=$(gh issue list --state open --json number,title \
                   --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ steps.probe.outputs.dead }}" = "1" ]; then
+          if [ "$code" = "1" ] || [ "$code" = "3" ]; then
             { cat providers.md
               echo
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -174,6 +184,22 @@ jobs:
             else
               gh issue comment "$num" --body-file body.md
             fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" --comment "Every configured credential authenticated as of run ${{ github.run_id }}. (auto-close)"
+          elif [ "$code" = "0" ]; then
+            # ONLY a real green run may close an alarm. This used to be a bare
+            # `elif`, so exit 2 — the probe measured NOTHING and said so — would
+            # auto-close the open alarm: a blind run silently reporting all-clear,
+            # which is the exact failure shape this repo keeps paying for.
+            # Both titles close here: whichever fix the owner applied (rotated a
+            # dead key, or created a first one), a clean probe proves it worked.
+            for t in "KEYS: a provider credential is dead" \
+                     "KEYS: no LLM provider is configured - the judge cannot run"; do
+              n=$(gh issue list --state open --json number,title \
+                    --jq ".[] | select(.title==\"$t\") | .number" | head -1)
+              # `if`, not `[ -n "$n" ] && ...` — under `set -e` a false test as
+              # the last command of a loop body kills the whole step.
+              if [ -n "$n" ]; then
+                gh issue close "$n" \
+                  --comment "Every configured credential authenticated as of run ${{ github.run_id }}. (auto-close)"
+              fi
+            done
           fi
