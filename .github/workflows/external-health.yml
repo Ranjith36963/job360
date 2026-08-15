@@ -110,70 +110,22 @@ jobs:
             gh issue close "$num" --comment "No new unresolved Sentry issues as of run ${{ github.run_id }}. (auto-close)"
           fi
 
-  providers:
-    name: Are our credentials still alive?
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Probe every configured provider
-        id: probe
-        env:
-          # Absent keys are simply not probed — absent is not broken. But if
-          # NONE are set the script exits 2, because a probe with nothing to
-          # probe is blind, not clean.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
-          REED_API_KEY: ${{ secrets.REED_API_KEY }}
-          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
-          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
-          PROBE_FORCE_RED: ${{ inputs.drill && '1' || '' }}
-        run: |
-          set +e
-          python scripts/provider_probe.py > providers.md 2>&1
-          code=$?
-          set -e
-          cat providers.md
-          cat providers.md >> "$GITHUB_STEP_SUMMARY"
-          echo "dead=$code" >> "$GITHUB_OUTPUT"
-          [ "$code" -le 1 ] || exit "$code" # exit 2 = nothing configured, fail LOUD
-
-      - name: Raise it, and hand it to triage
-        if: always() && steps.probe.outputs.dead != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if [ "${{ inputs.drill }}" = "true" ]; then
-            title="DRILL: provider probe test - not a real problem"
-          else
-            title="KEYS: a provider credential is dead"
-          fi
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ steps.probe.outputs.dead }}" = "1" ]; then
-            { cat providers.md
-              echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            } > body.md
-            if [ -z "$num" ]; then
-              new=$(gh issue create --title "$title" --body-file body.md --label harness)
-              n="${new##*/}"
-              gh workflow run triage.yml -f issue="$n" \
-                || echo "::warning::issue #$n raised but triage could not be woken"
-            else
-              gh issue comment "$num" --body-file body.md
-            fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" --comment "Every configured credential authenticated as of run ${{ github.run_id }}. (auto-close)"
-          fi
+  # ── THE `providers` JOB WAS DELETED 2026-08-15 (owner decision) ─────────────
+  # It probed `secrets.*` — the CI copy of every credential — and reported on
+  # those. Production does not read GitHub Actions secrets; it reads Railway
+  # variables. So the two sets can differ in either direction and this job
+  # could not tell:
+  #   * GREEN while prod is dead   — a key rotated in Actions but not Railway.
+  #   * RED while prod is fine     — CI has no LLM keys at all (measured: the
+  #                                  OPENAI / GEMINI / CEREBRAS secrets render
+  #                                  EMPTY in Actions), so the probe was mostly
+  #                                  probing absence.
+  # A detector that measures the wrong instance is worse than no detector: it
+  # spends the owner's attention teaching him to ignore it. The real check
+  # belongs against Railway's own variables, from something that runs there.
+  #
+  # The `sentry` job above is KEPT — it reads a live external service, not a
+  # copy of our config, so it measures the thing it claims to measure.
+  #
+  # scripts/provider_probe.py is now unreferenced; left in place rather than
+  # deleted, since the Railway-side version of this check would reuse it.

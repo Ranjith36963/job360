@@ -443,7 +443,15 @@ jobs:
             gh pr view "${{ inputs.pr }}" --json number,title,body --jq '"#\(.number): \(.title)\n\n\(.body)"' || echo "(goal unavailable)"
             echo
             echo "# THE DIFF under review"
-            git diff origin/main...HEAD -- backend/ frontend/ | head -800
+            # NOT `git diff … | head -800` — see repair.yml for the full
+            # measurement. Short version: head closes the pipe, git exits 141,
+            # `pipefail` + `set -e` abort the block, and the "# INVARIANTS"
+            # section below never gets written. Any PR over 800 diff lines
+            # killed this step silently on Linux. The helper captures to a file
+            # first (no pipe, so no SIGPIPE), still fails loudly on a real git
+            # error, and DECLARES the truncation.
+            # Guard: scripts/harness_selftest.sh, run by ci.yml.
+            bash scripts/harness_capture_diff.sh 800 origin/main...HEAD -- backend/ frontend/
             echo
             echo "# INVARIANTS (the repo hard rules)"
             # Extract the Hard Rules section by STRUCTURE, not by naming the

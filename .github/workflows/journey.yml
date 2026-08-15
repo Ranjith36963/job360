@@ -23,10 +23,21 @@ name: Journey probe (walk a real user, grade every step)
 #
 # NOT pointed at production by default. It CREATES accounts and RUNS searches,
 # so it belongs against a staging/ephemeral target. Set JOURNEY_API to opt in.
+#
+# ── MANUAL-ONLY SINCE 2026-08-15 (owner decision) ────────────────────────────
+# The nightly `schedule:` (05:40 UTC) was REMOVED. The capability is worth
+# keeping; the nightly red was not. With no JOURNEY_API target configured this
+# probe went red every night on its own setup gap rather than on a real product
+# fault, and a light that is always on teaches you to stop looking at it — the
+# same way STATUS-DAILY.md died. An alarm the owner has trained himself to
+# ignore is worse than no alarm, because it still costs attention.
+#
+# So: run it ON PURPOSE, when you want the answer —
+#     gh workflow run journey.yml [-f only=<name-prefix>]
+# Put the schedule back only together with a configured JOURNEY_API target, so
+# that a red night means the PRODUCT broke, not that the probe has nowhere to go.
 
 on:
-  schedule:
-    - cron: "40 5 * * *" # 05:40 UTC daily, before the other detectors
   workflow_dispatch:
     inputs:
       only:

@@ -138,6 +138,25 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  # ─── The harness's own shell logic ─────────────────────────────────────────
+  # Everything in .github/workflows/ is shell that NOTHING can execute outside a
+  # GitHub runner, so a typo in it is invisible until the loop quietly stops.
+  # That is not hypothetical: triage's auto-authorisation compared two different
+  # spellings of the same bot and could never match — dead for 19 days, no
+  # alarm — and the blind checker's `git diff | head -800` takes SIGPIPE on
+  # Linux and killed its own step on any PR over 800 diff lines.
+  #
+  # Both predicates now live in scripts/ as real programs, and this job runs
+  # their tests. Cheap: bash + git only, no Postgres, no npm, no network.
+  harness:
+    name: Harness self-test (the loops' own logic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the harness self-test
+        run: bash scripts/harness_selftest.sh
+
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
   # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
@@ -148,7 +167,7 @@ jobs:
   # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
   notify:
     name: Report failure as an issue
-    needs: [backend, frontend]
+    needs: [backend, frontend, harness]
     if: >-
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))

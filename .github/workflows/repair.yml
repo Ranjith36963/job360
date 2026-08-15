@@ -500,7 +500,19 @@ jobs:
             gh issue view "${{ steps.issue.outputs.num }}" --json number,title,body --jq '"#\(.number): \(.title)\n\n\(.body)"' || echo "(goal unavailable)"
             echo
             echo "# THE DIFF under review"
-            git diff origin/main...HEAD -- backend/ frontend/ | head -800
+            # NOT `git diff … | head -800`. That form killed this step on any
+            # PR over 800 diff lines: head closes the pipe, git takes SIGPIPE
+            # and exits 141, `pipefail` promotes it and `set -e` aborts the
+            # block — so the "# INVARIANTS" section below was never written and
+            # the checker got nothing. Measured 2026-08-15 (alpine/git 2.54.0,
+            # 600 KB diff): rc=141, output stopped at 801 lines. It does NOT
+            # reproduce on Windows git-bash, and a diff under ~64 KB fits the
+            # pipe buffer and survives — which is why it hid. The helper
+            # captures to a file first (no pipe exists, so SIGPIPE cannot
+            # happen), still fails loudly on a real git error, and DECLARES the
+            # truncation so the checker knows it is judging a fragment.
+            # Guard: scripts/harness_selftest.sh, run by ci.yml.
+            bash scripts/harness_capture_diff.sh 800 origin/main...HEAD -- backend/ frontend/
             echo
             echo "# INVARIANTS (the repo hard rules)"
             # Extract the Hard Rules section by STRUCTURE, not by naming the

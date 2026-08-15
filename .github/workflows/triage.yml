@@ -236,25 +236,58 @@ jobs:
           #   2. its title carries a trusted detector prefix, AND
           #   3. triage independently judged it auto-fixable.
           # A human-opened or public issue NEVER auto-authorises, no matter
-          # what it says. The whitelist is a fixed string match here in dumb
-          # bash, so no model — including triage itself — can widen it.
+          # what it says. The whitelist is a fixed string match in dumb bash,
+          # so no model — including triage itself — can widen it.
+          #
+          # ── THE 15-DAY BREAK, fixed 2026-08-15 ─────────────────────────────
+          # This test used to be inline here:
+          #     echo "$issue_author" | grep -qFx "github-actions[bot]"
+          # ...against a value read with `gh issue view --json author`, which
+          # returns "app/github-actions". GitHub spells the SAME bot two ways:
+          # the WEBHOOK payload says "github-actions[bot]" (that is why the
+          # job-level `if:` at line 67 works), the REST/GraphQL API says
+          # "app/github-actions". So the exact match could NEVER succeed and
+          # auto-authorisation was structurally dead. Live proof: issues #220
+          # and #270, both opened by our own detector with an "INVARIANT:"
+          # title and both judged auto-fixable, carry the comment "Not
+          # auto-authorised: this issue did not come from a trusted detector."
+          # `agent:fix` has been applied ONCE ever (#156) — which is why
+          # repair.yml had not run in 19 days.
+          #
+          # The predicate now lives in scripts/triage_trusted_origin.sh and
+          # ACCEPTS EITHER SPELLING (swapping one for the other would just move
+          # the break to line 67). It is a real program, so it has a real test:
+          # scripts/harness_selftest.sh, run by ci.yml on every PR. Inline
+          # shell in a workflow is shell that nothing can execute — that is how
+          # this stayed broken and silent. `scripts/` is outside repair.yml's
+          # path cage (backend/** + frontend/** only), so moving the rule here
+          # did not let the repair agent widen its own authorisation.
           issue_author=$(gh issue view "$num" --json author --jq .author.login)
           issue_title=$(gh issue view "$num" --json title --jq .title)
           auto="no"
-          # -F -x: exact whole-line match. A substring match would accept any
-          # login merely CONTAINING "github-actions".
-          if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -qFx "github-actions[bot]"; then
-            case "$issue_title" in
-              # Auto-authorisation rests on ONE property: the issue body contains
-              # no model-generated and no attacker-supplied text.
-              #   PRODUCT/ABSENCE/WATCHDOG/INVARIANT — bodies are our own SQL
-              #     counts and fixed strings. They qualify.
-              #   "Loop 2 RED:" was REMOVED 2026-08-03 — its body is `tail -40`
-              #     of the LIVE pipeline log, i.e. text influenced by whatever an
-              #     employer posts on a job board we scrape. Auto-authorising it
-              #     would let third-party text start a WRITE-capable agent.
-              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"INVARIANT: "*) auto="yes" ;;
-            esac
+
+          # ── RUN THE COMMITTED COPY, NOT THE WORKING-TREE COPY ──────────────
+          # The Claude step above holds Edit and Write with NO path cage (unlike
+          # repair.yml, it was never given one — it is meant to write a single
+          # file). It runs BEFORE this step, in this same workspace. Reading the
+          # predicate from disk would therefore let a prompt-injected triage
+          # rewrite its OWN authorisation check to `exit 0` and then hand itself
+          # a write-capable agent. The old inline version was accidentally
+          # immune — GitHub reads the workflow file once at run start — so
+          # moving the rule into a file must not lose that property.
+          #
+          # `git show HEAD:` reads the object out of the repository, never the
+          # working tree, so an edit to the file on disk cannot affect it. And
+          # if the file WAS touched, say so loudly: that is an attack in
+          # progress, not a curiosity.
+          git show "HEAD:scripts/triage_trusted_origin.sh" > /tmp/trusted_origin.sh
+          if ! git diff --quiet -- scripts/triage_trusted_origin.sh; then
+            echo "::error::scripts/triage_trusted_origin.sh was MODIFIED during this run — the triage agent tried to edit its own authorisation check. Refusing to auto-authorise."
+            gh issue comment "$num" --body \
+              "The triage agent modified \`scripts/triage_trusted_origin.sh\` during this run — its own authorisation check. Auto-authorisation was refused and this needs a human look. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          elif [ "$label" = "triage:auto-fixable" ] \
+               && bash /tmp/trusted_origin.sh "$issue_author" "$issue_title"; then
+            auto="yes"
           fi
 
           {

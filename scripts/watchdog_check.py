@@ -46,14 +46,18 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # checked it against the directory. That included the two loops that
     # actually look at production data (product-health, user-journey), both
     # loops that manage the PR queue, and the judge-of-the-judge.
-    "journey.yml": (36, "daily 05:40"),
     "external-health.yml": (36, "daily 07:10"),
     "product-health.yml": (36, "daily 08:30"),
     "user-journey.yml": (36, "daily 09:00"),
     "data-invariants.yml": (14, "every 6h"),
     "dependabot-auto.yml": (36, "daily 09:30"),
     "pr-shepherd.yml": (36, "daily 09:45"),
-    "checker-scorecard.yml": (9 * 24, "weekly Mon 10:00"),
+    # checker-scorecard.yml was DELETED 2026-08-15 (owner decision): 3 runs in
+    # its life, the last one FAILED silently on 2026-08-10, and it existed to
+    # grade a blind checker whose own telemetry said judged=0 / coverage=0.0.
+    # journey.yml was made workflow_dispatch-only the same day — it still
+    # exists, but silence is now CORRECT for it, so it belongs in NOT_SCHEDULED
+    # rather than here.
     # The ranking ground-truth eval (2026-08-06): judges the shown top-100 +
     # buried samples against a real profile weekly; opens a harness issue on
     # regression. Born from the audit that found the top-100 at 39% strong.
@@ -67,7 +71,15 @@ EXPECTED: dict[str, tuple[float, str]] = {
 
 # Event-triggered or PR-only workflows: silence is CORRECT for these, so they
 # are excluded from the roster-drift check below rather than watched.
-NOT_SCHEDULED: set[str] = {"ci.yml", "repair.yml", "pr-repair.yml", "triage.yml"}
+NOT_SCHEDULED: set[str] = {
+    "ci.yml",
+    "repair.yml",
+    "pr-repair.yml",
+    "triage.yml",
+    # Manual-only since 2026-08-15 (owner decision): the capability is kept,
+    # the nightly red is not. See the comment at the top of journey.yml.
+    "journey.yml",
+}
 
 
 def roster_drift(workflow_dir: str = ".github/workflows") -> list[str]:
