@@ -94,9 +94,53 @@ def location_ok(profile: FilterProfile, job: Job) -> bool:
             return True
         if pref in loc or loc in pref:
             return True
+
+    # A preference this gate cannot RESOLVE must not be allowed to delete jobs.
+    #
+    # PR #297 fixed the country case, and stopped one level too high. Measured
+    # against the real predicate afterwards:
+    #     "United Kingdom" -> keeps everything   (the #297 fix)
+    #     "Greater London" -> keeps London       (only because one is a
+    #                                             substring of the other)
+    #     "West Midlands"  -> keeps NOTHING      (Birmingham is IN it)
+    #     "Yorkshire"      -> keeps NOTHING      (Leeds is IN it)
+    #     "South East"     -> keeps NOTHING
+    # A county or region is the second most natural thing a UK user types, and
+    # it emptied the entire feed.
+    #
+    # The gazetteer answers this from DATA, not a typed list of regions (rule
+    # #30): it holds ~52k UK SETTLEMENTS and no administrative divisions, so
+    # "is this preference a place I can compare against a job location?" is
+    # simply "is it in the gazetteer?". A settlement ("London", "Birmingham")
+    # filters normally. Anything else — a region, a county, a typo — is a
+    # preference this stage cannot evaluate, so it passes and lets the scorer's
+    # location band do the fine-grained work. That matches this module's stated
+    # philosophy: false positives are cheap here, false negatives are not.
+    if _no_resolvable_place(profile.preferred_locations):
+        return True
+
     # If user has no preferred location list but a non-remote arrangement
     # preference, let it through (arrangement will be checked by the scorer).
     return not profile.preferred_locations
+
+
+def _no_resolvable_place(preferences: list[str]) -> bool:
+    """True when NONE of the stated preferences names a UK place we know.
+
+    Degrades safely: if the gazetteer is unavailable the answer is "cannot
+    resolve", which passes the job rather than deleting it. A missing data file
+    must never silently empty a feed — that failure has already happened once
+    (the image shipped without the gazetteer for weeks).
+    """
+    try:
+        from src.services.uk_gate import _gazetteer, _norm
+
+        places, _foreign, _ambiguous = _gazetteer()
+    except Exception:  # noqa: BLE001 — never let the gate crash a run
+        return True
+    if not places:
+        return True
+    return not any(_norm(p) in places for p in preferences if p and p.strip())
 
 
 def experience_ok(profile: FilterProfile, job: Job) -> bool:

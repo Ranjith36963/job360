@@ -17,9 +17,19 @@ raise) so a provider outage can't break extraction.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger("job360.profile.llm_curate")
+
+# Structural filler only — words that carry no identity for a degree, role or
+# certification. NOT a vocabulary of degrees or skills (rule #28): removing
+# "of"/"the" cannot decide what an entry MEANS, it only stops two unrelated
+# entries scoring as similar because they both contain "the".
+_MERGE_STOPWORDS = frozenset({
+    "and", "the", "for", "with", "from", "our", "your", "their",
+    "certification", "certificate", "certified", "course", "degree",
+})
 
 _MERGE_SYSTEM = (
     "You clean up lists extracted from CVs/LinkedIn. You MERGE entries that are "
@@ -94,7 +104,52 @@ async def llm_merge_duplicates(items: list[str], kind: str) -> list[str]:
     # returned nothing usable, or MORE than we sent, keep the original.
     if not merged or len(merged) > len(cleaned):
         return cleaned
+    # AND it must not silently DELETE. Until 2026-08-12 the two checks above
+    # were the only ones, so any shorter list was accepted — a rate-limited or
+    # lazy model answering with one item collapsed seven certifications to one,
+    # and the caller wrote that to the profile with no comparison against what
+    # was stored. This function runs on ``education``, ``job_titles`` and
+    # ``certifications``: three shelves the matching engines read.
+    #
+    # A merge is legitimate only when every input it removed is still
+    # REPRESENTED by something it kept. So require coverage: each input must
+    # share its normalised token set with some output entry. A genuine
+    # "Master's degree, AI and Robotics - Herts" + "Master of Science - AI and
+    # Robotics, Herts" collapse passes trivially; dropping a BEng that nothing
+    # else mentions does not.
+    if not _merge_covers_input(cleaned, merged):
+        logger.warning(
+            "llm_merge_duplicates(%s): result dropped un-represented entries "
+            "(%d -> %d), keeping original",
+            kind, len(cleaned), len(merged),
+        )
+        return cleaned
     return merged
+
+
+def _merge_tokens(value: str) -> set[str]:
+    """Normalised word set — lower-cased, punctuation stripped, stopwords out."""
+    words = re.findall(r"[a-z0-9]+", (value or "").lower())
+    return {w for w in words if len(w) > 2 and w not in _MERGE_STOPWORDS}
+
+
+def _merge_covers_input(before: list[str], after: list[str]) -> bool:
+    """True when every ``before`` entry is represented by some ``after`` entry.
+
+    "Represented" = at least half of the input entry's meaningful words appear
+    in one output entry. That is deliberately generous: the merge is SUPPOSED
+    to rewrite wording, so an exact-substring test would reject correct merges.
+    What it will not accept is an entry vanishing with nothing resembling it
+    left behind — which is the difference between de-duplication and deletion.
+    """
+    after_tokens = [_merge_tokens(a) for a in after]
+    for item in before:
+        want = _merge_tokens(item)
+        if not want:
+            continue
+        if not any(len(want & got) * 2 >= len(want) for got in after_tokens):
+            return False
+    return True
 
 
 async def llm_suggest_adjacent_skills(skills: list[str], n: int = 12) -> list[str]:

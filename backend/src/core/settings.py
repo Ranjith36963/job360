@@ -60,6 +60,13 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") or os.getenv("openai_api_key", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Env-overridable for the same reason OPENAI_MODEL is. It was HARDCODED as
+# "gemini-2.0-flash" in llm_provider.py, and Google retired that model: prod
+# Sentry PYTHON-FASTAPI-J, "404 This model models/gemini-2.0-flash is no longer
+# available", last seen 2026-08-11. A hardcoded model name is a dependency on
+# someone else's release schedule with no way to respond except a deploy —
+# which is why the fallback chain was dead and nobody noticed.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 

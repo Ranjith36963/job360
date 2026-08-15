@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from src.models import Job
 from src.repositories import pg
 from src.repositories.db_retry import with_write_retry
-from src.services.profile.llm_provider import llm_extract_validated
+from src.services.profile.llm_provider import LLMKeyMissing, llm_extract_validated
 
 logger = logging.getLogger("job360.services.llm_matcher")
 
@@ -247,7 +247,9 @@ def profile_to_matcher_text(profile: Any) -> str:
 
     if prefs is not None:
         pref_bits: list[str] = []
-        for attr in ("experience_level", "work_arrangement", "preferred_workplace"):
+        # work_arrangement only — preferred_workplace is now derived FROM it, so
+        # listing both sent the judge the same answer twice on every job.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if v:
                 pref_bits.append(f"{attr}={v}")
@@ -440,9 +442,37 @@ async def match_batch(
                     )
                 tel.record_verdict(verdict.fit_score)
                 return verdict
+            except LLMKeyMissing:
+                # NEVER swallowed as a per-job failure. It is the SAME config
+                # fault for every job in the batch, and swallowing it per job is
+                # the masquerade that cost a week of eval data: N warnings, zero
+                # verdicts, and a caller counting "judged 0/160" reading a
+                # missing credential as a quality problem. Re-raised and
+                # surfaced by the gather below.
+                raise
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run
                 tel.failed += 1
                 logger.warning("match_batch: judge failed for job %s: %s", job_id, e)
                 return None
 
-    return await asyncio.gather(*[_one(j) for j in jobs])
+    # ``return_exceptions=True`` on purpose. A bare gather propagates the FIRST
+    # exception and abandons its siblings mid-flight — on this ONE shared
+    # psycopg connection that is finding C2's bug again (it surfaced in test as
+    # a WinError 10038 during teardown). Let every judge settle, THEN speak.
+    outcomes = await asyncio.gather(*[_one(j) for j in jobs], return_exceptions=True)
+    for out in outcomes:
+        if isinstance(out, BaseException):
+            # ANYTHING that escapes `_one` is meant to escape: it already
+            # swallows ordinary per-job errors itself, so what is left is the
+            # LLMKeyMissing config fault (raised once, carrying the four key
+            # names and the fix, instead of N lines that look like N bad
+            # judgments) or a BaseException like CancelledError, which must
+            # never be turned into a quiet ``None`` by `return_exceptions=True`.
+            # Both live callers still catch Exception (main.py
+            # _run_matcher_stage, rescore.py gem-rescue), so the run survives;
+            # what changes is that their log line now names the cause.
+            raise out
+    # The loop above raised on every exception, so nothing is filtered out here
+    # — order and length are preserved. Written as a comprehension so the type
+    # narrows without a cast.
+    return [o for o in outcomes if not isinstance(o, BaseException)]

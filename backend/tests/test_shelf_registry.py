@@ -72,10 +72,61 @@ class TestEveryShelfIsRead:
         )
 
     def test_the_allowlist_does_not_rot(self) -> None:
-        """An allowlisted shelf that HAS gained a reader must leave the list, or
-        the list slowly becomes a place where live fields hide."""
-        stale = [name for name in ALLOWED_UNREAD if readers(name)]
+        """An allowlisted shelf can go stale two ways, and both must be caught:
+
+        1. It names a shelf that HAS gained a reader — the exemption is no
+           longer needed and should be deleted, or the list becomes a place
+           where live fields hide.
+        2. It names a shelf that no longer EXISTS on either dataclass — a
+           rename or deletion left a dead entry exempting nothing.
+
+        ALLOWED_UNREAD is empty right now, and that is the healthy state:
+        every shelf currently earns its keep by being read. That also means
+        BOTH checks below pass vacuously against production data today — an
+        empty dict has no stale entries by definition. That is not what makes
+        this test meaningful; see ``test_the_rot_check_can_actually_fail``
+        immediately below, which proves the checking logic against a
+        fabricated entry so the day someone adds a real exemption, this test
+        is already known to bite.
+        """
+        known = frozenset(shelf_names())
+        unknown = [name for name in ALLOWED_UNREAD if name not in known]
+        stale = [name for name in ALLOWED_UNREAD if name in known and readers(name)]
+        assert not unknown, (
+            f"ALLOWED_UNREAD names shelves that no longer exist: {unknown}. "
+            "The field was renamed or removed — delete the exemption."
+        )
         assert not stale, f"ALLOWED_UNREAD is stale — these now have readers: {stale}"
+
+    def test_the_rot_check_can_actually_fail(self) -> None:
+        """Proof the assertions above are not vacuous.
+
+        With ALLOWED_UNREAD empty, ``test_the_allowlist_does_not_rot`` passes
+        no matter what the checking logic does — even a check that always
+        returned ``[]`` would look green forever, which is exactly the shape
+        of bug this whole file exists to catch (see the module docstring).
+        This test runs the SAME two checks against a fabricated allowlist
+        entry and confirms each one actually fires.
+        """
+        known = frozenset(shelf_names())
+        real_shelf_with_a_reader = next(name for name in shelf_names() if readers(name))
+
+        fake_allowlist = {
+            "not_a_real_shelf_name": "made up for this test",
+            real_shelf_with_a_reader: "pretend this used to be unread",
+        }
+
+        unknown = [name for name in fake_allowlist if name not in known]
+        stale = [name for name in fake_allowlist if name in known and readers(name)]
+
+        assert unknown == ["not_a_real_shelf_name"], (
+            "the unknown-shelf check did not fire against a name that isn't "
+            "a real shelf — it cannot protect against a renamed/deleted field"
+        )
+        assert stale == [real_shelf_with_a_reader], (
+            "the has-a-reader check did not fire against a shelf known to "
+            "have a reader — it cannot protect against a stale exemption"
+        )
 
 
 class TestNoPhantomReads:
@@ -170,7 +221,36 @@ class TestMatchingCoverageDoesNotRegress:
     # nine matching modules); raised to 46 by the shelf-completeness batch, which
     # wired the LinkedIn evidence sections, cv_industries, cv_languages,
     # career_domain and linkedin_summary into the judge and the vector.
-    BASELINE = 50
+    #
+    # 50 -> 49 on 2026-08-13, and this is the ONE legitimate reason to lower a
+    # ratchet that is otherwise up-only. No engine lost an input. Two shelf NAMES
+    # collapsed into one: ``preferred_workplace`` was a stored copy of
+    # ``work_arrangement``, written by a bridge in the profile route on every
+    # save. It is now a read-only property, so the pair is one shelf that every
+    # consumer reads, and the audit counts it once instead of twice.
+    #
+    # The proof that nothing went dark is in the READER SET, not the count:
+    # ``work_arrangement`` now lists ``scorer`` among its readers, which it never
+    # did before, because a read of a derived view is folded into its source (see
+    # ``shelf_audit.derived_shelves``). Deduplication should lower this number.
+    # A shelf falling out of matching should not, and still fails the test below.
+    BASELINE = 49
+
+    def test_the_headline_number_is_broken_down_by_reach(self) -> None:
+        """A single "N shelves feed matching" figure counts a shelf the LLM
+        judge reads on a capped window the same as one the keyword engine reads
+        on every row. Those are not the same claim, and the flattering one is
+        the easy one to repeat. This pins the honest breakdown as something the
+        code computes rather than something a summary asserts."""
+        from src.services.profile.shelf_audit import matching_shelves, matching_tiers
+
+        tiers = matching_tiers()
+        assert set(tiers) == {"every_job", "judge_only", "semantic_only"}
+        total = sum(len(v) for v in tiers.values())
+        assert total == len(matching_shelves()), "a shelf fell out of every tier"
+        # The every-job tier is the one worth quoting: it changes the rank of
+        # every job in the feed. If it hits zero the engine is nominal.
+        assert tiers["every_job"], "no shelf reaches the engine that ranks every job"
 
     def test_matching_shelf_count_never_falls(self) -> None:
         current = sum(1 for n in shelf_names() if is_matching_shelf(n))
@@ -179,12 +259,33 @@ class TestMatchingCoverageDoesNotRegress:
             "stopped feeding the engines — find which consumer stopped reading it."
         )
 
-    def test_every_matching_role_is_a_real_role(self) -> None:
-        used = set()
+    def test_every_matching_role_is_actually_used(self) -> None:
+        """This test used to read ``used & MATCHING_ROLES - MATCHING_ROLES``.
+
+        ``&`` and ``-`` bind left to right at equal precedence, so that is
+        ``(used & M) - M`` — the empty set for EVERY possible value of ``used``.
+        It could not fail. It sat inside a regression class and read like
+        coverage, which is worse than no test: it is the exact assertion that
+        should have caught a declared matching role reading zero shelves.
+        """
+        used: set[str] = set()
         for name in shelf_names():
             used |= readers(name)
-        unknown = used & MATCHING_ROLES - MATCHING_ROLES
-        assert not unknown
+
+        # A role we CLAIM is a matching role must earn it by being read by at
+        # least one shelf. A role nobody reads inflates the headline "N shelves
+        # feed matching" with a module that contributes none of them.
+        idle = sorted(MATCHING_ROLES - used)
+        assert not idle, (
+            f"These roles are declared matching but read zero shelves: {idle}. "
+            "Wire them or remove them from MATCHING_ROLES — a role with no "
+            "reader makes the matching count claim more than it delivers."
+        )
+
+        from src.services.profile.shelf_audit import _ROLES
+
+        undefined = sorted(used - set(_ROLES.values()))
+        assert not undefined, f"readers() returned undefined roles: {undefined}"
 
 
 @pytest.mark.parametrize("name", list(shelf_names()))
@@ -193,3 +294,57 @@ def test_every_shelf_has_both_a_writer_and_a_reader(name: str) -> None:
     assert writers(name), f"{name}: nothing can write it"
     if name not in ALLOWED_UNREAD:
         assert readers(name), f"{name}: nothing reads it"
+
+
+class TestDerivedViewsAreFoldedIntoTheirSource:
+    """Rule 5, added 2026-08-13 with the workplace collapse.
+
+    A ``@property`` on a profile dataclass is a VIEW: no storage, no writer, so
+    it is correctly absent from ``shelf_names()`` — rule 1 would fail it, and
+    should. But consumers read it BY NAME, and that read is a real read of the
+    shelf underneath.
+
+    Miss that and the audit lies in the direction that flatters it: the stored
+    shelf looks less used than it is. ``work_arrangement`` would have reported
+    as judge-and-vector-only while in fact it ranks every job in the feed
+    through ``preferred_workplace``.
+    """
+
+    def test_the_mapping_is_parsed_from_the_source_not_hand_listed(self) -> None:
+        """The point of deriving it: a property renamed or repointed tomorrow
+        updates this map for free. A hand-typed dict would be one more copy to
+        drift — the exact bug class this module exists to catch."""
+        from src.services.profile.shelf_audit import derived_shelves
+
+        assert derived_shelves().get("preferred_workplace") == ("work_arrangement",)
+
+    def test_a_derived_view_is_not_itself_a_shelf(self) -> None:
+        """It has no writer and never can have one. Counting it as a shelf would
+        force a permanent exemption in rule 1 — the honest answer is that it is
+        not a shelf at all."""
+        from src.services.profile.shelf_audit import derived_shelves
+
+        for view in derived_shelves():
+            assert view not in shelf_names(), (
+                f"{view} is a property AND a stored field — one of the two is a "
+                "copy that can disagree with the other"
+            )
+
+    def test_reading_the_view_credits_the_source(self) -> None:
+        """The assertion that actually protects the audit's honesty. The keyword
+        scorer reads ``prefs.preferred_workplace``; ``work_arrangement`` is what
+        holds that answer, so ``work_arrangement`` must show the scorer."""
+        assert "scorer" in readers("work_arrangement"), (
+            "work_arrangement lost its every-job reader — either the scorer "
+            "stopped reading the workplace preference, or the derived-view fold "
+            "broke and the audit is now under-reporting this shelf's reach"
+        )
+
+    def test_every_derived_view_points_at_real_shelves(self) -> None:
+        from src.services.profile.shelf_audit import derived_shelves
+
+        names = set(shelf_names())
+        for view, sources in derived_shelves().items():
+            assert sources, f"{view}: derived from nothing"
+            unknown = sorted(set(sources) - names)
+            assert not unknown, f"{view}: derived from non-shelves {unknown}"

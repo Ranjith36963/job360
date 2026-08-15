@@ -78,7 +78,7 @@ UserPreferences(
     work_arrangement="remote",  # she prefers fully remote
     experience_level="senior",
     needs_visa=False,
-    preferred_workplace="remote",
+    work_arrangement="remote",   # preferred_workplace derives from this
 )
 ```
 

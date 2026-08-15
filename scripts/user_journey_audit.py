@@ -269,7 +269,15 @@ def main() -> int:
         if not f.get("has_linkedin") and not f.get("has_github"):
             warnings.append(f"{who} has CV only - no LinkedIn or GitHub signal")
         if f.get("llm_verdicts", 0) == 0:
-            warnings.append(f"{who} has no AI verdicts - the judge never ran for them")
+            # Name the cheap cause first. "The judge never ran" sounds like a
+            # product fault; the usual truth is that no LLM key is set, so the
+            # judge could not make one call. Reading the second as the first is
+            # what cost a week of eval data (issue #238).
+            warnings.append(
+                f"{who} has no AI verdicts - the judge never ran for them. "
+                "CHECK THE CONFIG BEFORE THE PRODUCT: with none of "
+                "OPENAI/GEMINI/GROQ/CEREBRAS_API_KEY set, this is exactly what "
+                "a missing credential looks like from the database")
 
     if warnings:
         print("## Working, but degraded\n")

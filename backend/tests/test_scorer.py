@@ -1133,7 +1133,7 @@ class TestScoreBreakdown:
             salary_max=80000,
             experience_level="senior",
             needs_visa=True,
-            preferred_workplace="remote",
+            work_arrangement="remote",
         )
         scorer = JobScorer(self._config(), user_preferences=prefs)
         breakdown = scorer.score(self._job())

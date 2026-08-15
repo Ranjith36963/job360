@@ -55,7 +55,19 @@ GEM = 70
 # So config failure gets its OWN marker, its OWN exit code (3), and its own
 # alarm in accuracy-audit.yml. Exit 2 stays reserved for "we measured, and the
 # number is bad".
-LLM_KEY_VARS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
+#
+# The four names and the wording of the fix are NOT re-typed here. They come
+# from the one preflight every LLM path shares
+# (``llm_provider.require_llm_key``), so a fifth provider added to the chain
+# cannot be missed by this alarm — and so this script reports the SAME truth
+# the judge acts on: ``settings.py`` also accepts a lowercase ``openai_api_key``,
+# which a raw ``os.environ["OPENAI_API_KEY"]`` check here would have called
+# missing while the judge was happily using it.
+from src.services.profile.llm_provider import (  # noqa: E402
+    NO_LLM_KEY_MESSAGE,
+    configured_llm_keys,
+)
+
 INSTRUMENT_BROKEN = "INSTRUMENT BROKEN"
 RC_BROKEN = 3
 RC_REGRESSED = 2
@@ -63,7 +75,7 @@ RC_REGRESSED = 2
 
 def _missing_llm_key() -> bool:
     """True when NOT ONE provider key is set — the judge cannot make a single call."""
-    return not any(os.environ.get(v) for v in LLM_KEY_VARS)
+    return not configured_llm_keys()
 
 
 async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
@@ -73,11 +85,9 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
     # connection, samples 160 rows and burns a minute to discover the same thing.
     if _missing_llm_key():
         print(
-            f"{INSTRUMENT_BROKEN}: no LLM API key in the environment — "
-            f"{', '.join(LLM_KEY_VARS)} are ALL empty, so the judge cannot make a "
-            "single call. This is a CONFIG failure, NOT an accuracy regression: "
-            "nothing was measured. In GitHub Actions an unset secret renders as an "
-            "empty string, so set one of these as a repo Actions secret and re-run.",
+            f"{INSTRUMENT_BROKEN}: {NO_LLM_KEY_MESSAGE} "
+            "For this instrument that means NOT an accuracy regression — no "
+            "ranking number was produced at all.",
             flush=True,
         )
         return RC_BROKEN

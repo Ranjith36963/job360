@@ -17,10 +17,25 @@ Measured against 2,000 live jobs and the owner's real profile (2026-08-09):
 """
 from __future__ import annotations
 
+import pytest
+
 from src.models import Job
-from src.services.prefilter import passes_prefilter
+from src.services.prefilter import location_ok, passes_prefilter
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.workers.tasks import _filter_profile_for
+
+
+def _job_at(location: str) -> Job:
+    """A job in a specific place - the location stage is what is under test."""
+    return Job(
+        title="Machine Learning Engineer",
+        company="Acme",
+        apply_url="https://example.com/1",
+        source="test",
+        date_found="2026-08-12",
+        location=location,
+        description="We use Rust.",
+    )
 
 
 def _job(title: str = "Machine Learning Engineer", desc: str = "We use Rust.") -> Job:
@@ -147,6 +162,65 @@ class TestACountryLevelPreferenceIsNotAConstraint:
         # London matches the country entry, so it survives — the user asking for
         # "UK or Manchester" wants UK-wide results.
         assert passes_prefilter(fp, _job()) is True
+
+
+class TestAnUnresolvablePlaceNeverDeletesTheFeed:
+    """PR #297 fixed the COUNTRY case and stopped one level too high.
+
+    Measured against the real predicate after #297 shipped:
+
+        "United Kingdom"  keeps everything   (the #297 fix)
+        "Greater London"  keeps London only  (and only because one string is a
+                                              substring of the other)
+        "West Midlands"   keeps NOTHING      (Birmingham is IN it)
+        "Yorkshire"       keeps NOTHING      (Leeds is IN it)
+        "South East"      keeps NOTHING
+
+    A county or region is the second most natural thing a UK user types after a
+    city, and it emptied the whole feed. The gazetteer decides this from DATA,
+    not a typed list of regions: it holds ~52k settlements and no administrative
+    divisions, so "can this gate compare the preference to a job location?" is
+    "is it in the gazetteer?".
+    """
+
+    def _fp(self, monkeypatch, locations):
+        profile = UserProfile(
+            cv_data=CVData(raw_text="x", skills=["python"]),
+            preferences=UserPreferences(preferred_locations=locations),
+        )
+        monkeypatch.setattr(
+            "src.workers.tasks._user_profile_for", lambda _uid: profile
+        )
+        return _filter_profile_for("u1")
+
+    @pytest.mark.parametrize(
+        "region", ["Greater London", "West Midlands", "Yorkshire", "South East"]
+    )
+    def test_a_region_or_county_keeps_the_feed(self, monkeypatch, region) -> None:
+        fp = self._fp(monkeypatch, [region])
+        for city in ("London", "Manchester", "Birmingham", "Leeds"):
+            assert location_ok(fp, _job_at(city)) is True, (
+                f"{region!r} deleted a job in {city!r} — a preference this gate "
+                "cannot resolve must never empty the feed"
+            )
+
+    def test_a_real_city_still_filters(self, monkeypatch) -> None:
+        """The fix must not turn the stage back into a no-op: a settlement the
+        user named is resolvable, so it genuinely constrains."""
+        fp = self._fp(monkeypatch, ["Manchester"])
+        assert location_ok(fp, _job_at("Manchester")) is True
+        assert location_ok(fp, _job_at("London")) is False
+
+    def test_a_missing_gazetteer_fails_open(self, monkeypatch) -> None:
+        """The image shipped without the gazetteer for weeks. If that recurs,
+        an unresolvable preference must pass, never delete."""
+        from src.services import prefilter as pf
+
+        monkeypatch.setattr(
+            pf, "_no_resolvable_place", lambda _prefs: True
+        )
+        fp = self._fp(monkeypatch, ["Manchester"])
+        assert location_ok(fp, _job_at("London")) is True
 
 
 class TestSkillsStayOutUntilMeasured:
