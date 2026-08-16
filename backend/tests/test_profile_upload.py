@@ -845,6 +845,22 @@ def _seed_full_profile(api_client, monkeypatch):
     monkeypatch.setattr(profile_route, "extract_linkedin_text", lambda p: "LinkedIn text")
     monkeypatch.setattr(profile_route, "_looks_like_linkedin", lambda t: True)
 
+    # _stub() above wires a NO-OP run_two_pass_extraction (returns the profile
+    # unchanged) — fine for the CV/GitHub-only tests that share it, but since
+    # Finding 4 the LinkedIn route now computes `merged` from actual extracted
+    # signal (cv.linkedin_skills / cv.linkedin_positions), so a no-op here
+    # would make every LinkedIn upload in this fixture 422. Override with a
+    # fuller stub that also produces LinkedIn signal when linkedin_raw_text is
+    # present, i.e. only on the LinkedIn leg of this seed.
+    async def _fake_extract_full(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        if profile.cv_data.linkedin_raw_text:
+            profile.cv_data.linkedin_skills = ["LinkedIn Skill"]
+        return profile
+
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract_full)
+
     api_client.post(
         "/api/profile/cv",
         files={"cv": ("my_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
@@ -1051,3 +1067,326 @@ class TestClearIsSafeAndReversible:
         s = r.json()["summary"]
         assert s["cv_length"] > 0, "the same CV did not re-extract after a clear"
         assert s["cv_filename"] == "my_cv.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Audit findings 4 + 6 + 13 — the LinkedIn upload must not lie, and a
+# re-upload must not union forever into the fields IT owns.
+# ---------------------------------------------------------------------------
+# Finding 4 (measured against the shipped code): `merged` was computed from
+# `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic (2 of
+# 3 markers) — so a layout the heuristic liked but the real extractor could
+# not parse returned HTTP 200 / merged=True while storing nothing usable.
+# `merged` must instead reflect what actually landed on the profile, the same
+# way `has_linkedin` does: bool(cv.linkedin_skills or cv.linkedin_positions).
+
+
+def _stub_linkedin_read(monkeypatch, text: str = "LinkedIn text") -> None:
+    """Mock only the PDF read + the pre-extraction shape heuristic (offline,
+    rule #4). Does NOT stub run_two_pass_extraction — each test below stubs
+    that itself, because what it returns is exactly what's under test."""
+    import src.api.routes.profile as profile_route
+
+    monkeypatch.setattr(profile_route, "extract_linkedin_text", lambda p: text)
+    monkeypatch.setattr(profile_route, "_looks_like_linkedin", lambda t: True)
+
+
+def _li_pdf():
+    return {"file": ("li.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")}
+
+
+class TestLinkedInMergedReflectsRealExtraction:
+    def test_upload_that_merges_nothing_does_not_report_success(
+        self, api, monkeypatch
+    ) -> None:
+        """A layout the heuristic liked but extraction could not read must
+        not be told 'LinkedIn profile enriched' — it must be a 422 the owner
+        can act on, not a lying 200."""
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+
+        async def _extracts_nothing(profile):
+            # Extraction genuinely RAN (this is the point — the pre-check
+            # heuristic already passed) but produced no LinkedIn signal at
+            # all, same as a real parse of a layout the LLM can't handle.
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _extracts_nothing)
+        _register_and_login(api, "li-empty@example.com")
+
+        r = api.post("/api/profile/linkedin", files=_li_pdf())
+
+        assert r.status_code == 422, (
+            f"a merge that produced nothing must not be a 200: {r.status_code} {r.text}"
+        )
+        assert "linkedin" in r.text.lower() or "pdf" in r.text.lower(), (
+            "the 422 copy must tell the owner what to do differently"
+        )
+        # No receipt for a connection that did not happen (mirrors the CV /
+        # GitHub receipt contract already pinned above).
+        got = api.get("/api/profile").json()["summary"]
+        assert got["linkedin_filename"] == "", "a failed merge left a receipt behind"
+
+    def test_upload_that_actually_merges_still_succeeds(self, api, monkeypatch) -> None:
+        """CONTROL for the test above — a real merge must still be a 200."""
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+
+        async def _extracts_something(profile):
+            profile.cv_data.linkedin_skills = ["Python"]
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _extracts_something)
+        _register_and_login(api, "li-good@example.com")
+
+        r = api.post("/api/profile/linkedin", files=_li_pdf())
+
+        assert r.status_code == 200, r.text
+        assert r.json()["merged"] is True
+        got = api.get("/api/profile").json()["summary"]
+        assert got["linkedin_filename"] == "li.pdf", "a real merge must leave a receipt"
+
+    def test_a_file_that_does_not_look_like_linkedin_at_all_is_a_422(
+        self, api, monkeypatch
+    ) -> None:
+        """The OTHER half of finding 4: today this silently returns 200/merged=False.
+        Nothing was stored — that must not be a success response either."""
+        import src.api.routes.profile as profile_route
+
+        monkeypatch.setattr(profile_route, "extract_linkedin_text", lambda p: "not linkedin at all")
+        monkeypatch.setattr(profile_route, "_looks_like_linkedin", lambda t: False)
+        _register_and_login(api, "li-notlinkedin@example.com")
+
+        r = api.post("/api/profile/linkedin", files=_li_pdf())
+
+        assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
+
+
+class TestLinkedIn415NamesOnlyPdf:
+    def test_wrong_filetype_message_does_not_mention_docx(self, api) -> None:
+        """Finding 13 — this route never accepts DOCX; the message must not claim it does."""
+        _register_and_login(api, "li-415@example.com")
+        r = api.post(
+            "/api/profile/linkedin",
+            files={"file": ("notes.txt", io.BytesIO(b"plain text"), "text/plain")},
+        )
+        assert r.status_code == 415, r.text
+        detail = r.json()["detail"]
+        assert "DOCX" not in detail, detail
+        assert "PDF" in detail, detail
+
+
+class TestLinkedInReuploadDoesNotUnionForever:
+    def test_reupload_resets_linkedin_owned_fields_before_re_extracting(
+        self, api, monkeypatch
+    ) -> None:
+        """Finding 6 — a second export must not UNION onto the first one's
+        linkedin_-owned fields forever.
+
+        CONTROL: the fake extraction below always APPENDS one entry to
+        `linkedin_courses` (simulating what every real linkedin_* merge does
+        when nothing clears the field first). If the route stopped calling
+        `_clear_prefixed(cv, "linkedin_")` before re-extracting, the second
+        upload would see 2 entries instead of 1 — this test would then fail,
+        proving it can actually detect the regression it guards against.
+        """
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+
+        async def _appends_one_course(profile):
+            cv = profile.cv_data
+            cv.linkedin_skills = ["Python"]  # so the upload is a real merge
+            # linkedin_courses is list[dict] (CVData) — a course is a
+            # structured row, not a bare string.
+            cv.linkedin_courses = [
+                *cv.linkedin_courses,
+                {"name": f"Course-{len(cv.linkedin_courses) + 1}"},
+            ]
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _appends_one_course)
+        _register_and_login(api, "li-reupload@example.com")
+
+        for _ in range(2):
+            r = api.post("/api/profile/linkedin", files=_li_pdf())
+            assert r.status_code == 200, r.text
+
+        subs = api.get("/api/profile").json()["linkedin_subsections"]
+        course_names = [c.get("name") for c in subs["courses"]]
+        assert course_names == ["Course-1"], (
+            "a re-upload unioned onto the previous LinkedIn export instead of "
+            f"resetting linkedin_-owned fields first: {course_names}"
+        )
+
+    def test_reupload_does_not_wipe_the_cvs_own_job_titles(
+        self, api, monkeypatch
+    ) -> None:
+        """The scoped reset must NOT touch job_titles/education/certifications
+        — they are JOINTLY owned with the CV (reset_cv_owned_fields' own
+        docstring explains why), and `_clear_prefixed(cv, "linkedin_")` only
+        ever matches fields with that literal prefix, so it structurally
+        cannot reach them. This pins that guarantee."""
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+        monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
+
+        async def _cv_owns_a_title_linkedin_owns_a_skill(profile):
+            cv = profile.cv_data
+            if not cv.linkedin_raw_text:
+                # This run is the CV upload leg.
+                if "Data Engineer" not in cv.job_titles:
+                    cv.job_titles = [*cv.job_titles, "Data Engineer"]
+            else:
+                cv.linkedin_skills = ["Python"]
+            return profile
+
+        monkeypatch.setattr(
+            profile_route, "run_two_pass_extraction", _cv_owns_a_title_linkedin_owns_a_skill
+        )
+        _register_and_login(api, "li-jointfields@example.com")
+
+        api.post(
+            "/api/profile/cv",
+            files={"cv": ("cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+        )
+        r = api.post("/api/profile/linkedin", files=_li_pdf())
+        assert r.status_code == 200, r.text
+
+        summary = api.get("/api/profile").json()["summary"]
+        assert summary["job_titles"] == ["Data Engineer"], (
+            "a LinkedIn re-upload must not touch the CV-contributed job_titles"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Finding 11 — cv_industries is extracted and used for matching, but was
+# absent from the API response entirely (rule #21: assert the VALUE).
+# ---------------------------------------------------------------------------
+
+
+def test_cv_industries_reaches_the_api_response(api, monkeypatch) -> None:
+    import src.api.routes.profile as profile_route
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "cv text")
+
+    async def _fake_extract(profile):
+        profile.cv_data.skills = ["python"]
+        profile.cv_data.job_titles = ["Engineer"]
+        profile.cv_data.cv_industries = ["Fintech", "Healthcare"]
+        return profile
+
+    monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract)
+    _register_and_login(api, "cv-industries@example.com")
+
+    r = api.post(
+        "/api/profile/cv",
+        files={"cv": ("cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")},
+    )
+    assert r.status_code == 200, r.text
+    # VALUE-presence (rule #21) — the real extracted industries, not just the key.
+    assert r.json()["cv_detail"]["cv_industries"] == ["Fintech", "Healthcare"]
+
+
+class TestAFailedLinkedInReuploadKeepsTheOldData:
+    """A rejected re-upload must not cost the user the LinkedIn they already had.
+
+    THE BUG THIS PINS, found by the review pass and reproduced live against
+    Postgres before the fix: ``has_linkedin`` went True -> False and every
+    ``linkedin_*`` field emptied.
+
+    The route clears the linkedin_* fields, writes the new raw text, then calls
+    ``_extract_save_trigger`` -- which calls ``save_profile`` UNCONDITIONALLY as
+    part of its body. Only after that save could ``merged`` be computed. So a
+    second upload that passed the cheap shape heuristic but extracted nothing
+    PERSISTED the wipe and then returned an honest-looking "re-export and try
+    again", with no hint that anything had been lost.
+
+    The three tests in TestLinkedInMergedReflectsRealExtraction cannot catch
+    this: every one of them starts from a profile with no prior LinkedIn, so
+    there is nothing to destroy. This one seeds a good upload FIRST.
+    """
+
+    def test_a_rejected_reupload_leaves_the_previous_linkedin_intact(
+        self, api, monkeypatch
+    ) -> None:
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+        _register_and_login(api, "li-reupload@example.com")
+
+        async def _extracts_something(profile):
+            profile.cv_data.linkedin_skills = ["Kubernetes"]
+            profile.cv_data.linkedin_positions = [
+                {"title": "Staff Engineer", "company": "ACME"}
+            ]
+            return profile
+
+        monkeypatch.setattr(
+            profile_route, "run_two_pass_extraction", _extracts_something
+        )
+        first = api.post("/api/profile/linkedin", files=_li_pdf())
+        assert first.status_code == 200, f"setup failed: {first.text}"
+
+        before = api.get("/api/profile").json()
+        assert before["summary"]["has_linkedin"] is True, "setup failed"
+
+        async def _extracts_nothing(profile):
+            return profile
+
+        monkeypatch.setattr(
+            profile_route, "run_two_pass_extraction", _extracts_nothing
+        )
+        second = api.post("/api/profile/linkedin", files=_li_pdf())
+        assert second.status_code == 422, (
+            f"a merge that produced nothing must still be rejected: {second.text}"
+        )
+
+        after = api.get("/api/profile").json()
+        assert after["summary"]["has_linkedin"] is True, (
+            "THE DATA LOSS: a rejected re-upload deleted the LinkedIn profile "
+            "the user already had. The wipe is saved before `merged` is known, "
+            "so the rollback has to be persisted too."
+        )
+        assert "kept" in second.text.lower(), (
+            "the 422 copy does not tell the user their existing data survived"
+        )
+
+    def test_a_successful_reupload_still_replaces_the_old_data(
+        self, api, monkeypatch
+    ) -> None:
+        """THE CONTROL. A restore-on-failure that also restored on SUCCESS
+        would pass the test above while making re-upload a silent no-op."""
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+        _register_and_login(api, "li-reupload-ok@example.com")
+
+        async def _first(profile):
+            profile.cv_data.linkedin_skills = ["OldSkill"]
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _first)
+        assert api.post("/api/profile/linkedin", files=_li_pdf()).status_code == 200
+
+        async def _second(profile):
+            profile.cv_data.linkedin_skills = ["NewSkill"]
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _second)
+        assert api.post("/api/profile/linkedin", files=_li_pdf()).status_code == 200
+
+        body = api.get("/api/profile").json()
+        assert body["summary"]["has_linkedin"] is True
+        subs = body.get("linkedin_subsections") or {}
+        skills = subs.get("skills")
+        if isinstance(skills, list) and skills:
+            flat = " ".join(str(s) for s in skills)
+            assert "NewSkill" in flat, f"the re-upload did not replace: {skills}"
+            assert "OldSkill" not in flat, (
+                "the restore-on-failure path also fired on success -- re-upload "
+                "has become a no-op"
+            )

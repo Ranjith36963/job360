@@ -1065,6 +1065,13 @@ class TestLLMCVParser:
         # Education and certifications
         assert any("MSc" in e for e in cv.education)
         assert any("AWS" in c for c in cv.certifications)
+        # Finding 7 (Pillar-1 closeout audit) — the fallback adapter must
+        # mirror the live adapter: education sub-bullets (coursework/thesis)
+        # land on their OWN shelf, not mixed into the "degree — institution"
+        # lines (a fix that left them mixed in would fail this — the two
+        # adapters would disagree on what `cv.education` even contains).
+        assert cv.cv_education_details == ["Neural Networks", "Machine Learning"]
+        assert not any("Neural Networks" in e for e in cv.education)
         assert "1.5 years" in cv.summary
         # highlights property merges everything for the CV viewer
         assert "Ranjith Guruprakash" in cv.highlights
