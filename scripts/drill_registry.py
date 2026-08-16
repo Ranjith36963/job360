@@ -472,7 +472,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--drill", action="store_true", help="break this registry on purpose")
     ap.add_argument("--run-drills", action="store_true", help="run every declared guard drill")
     ap.add_argument("--only", help="restrict --run-drills to keys containing this substring")
+    ap.add_argument("--count-owed", action="store_true",
+                    help="print just the number of guards never watched failing, and exit")
     args = ap.parse_args(argv)
+
+    if args.count_owed:
+        # The single place this number comes from. scripts/merge_cage.py used to
+        # re-derive it with a regex over this script's prose and fall back to the
+        # literal 999 when the regex missed -- a sentinel no real value can ever
+        # exceed, so a DELETED guard produced an un-regressable baseline. A
+        # ratchet input either prints a number it measured or exits non-zero.
+        print(sum(1 for g in REGISTRY.values() if g.status == "owed"))
+        return 0
 
     if args.drill:
         return self_drill()

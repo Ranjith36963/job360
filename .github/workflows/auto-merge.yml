@@ -103,18 +103,25 @@ jobs:
           merged=0
           for pr in $prs; do
             echo "::group::PR #$pr"
-            # merge_cage exits 1 for "ask the owner", which is a VERDICT and not
-            # an error, so it must not abort the sweep. Exit 2 means it could not
-            # tell the owner, which IS an error and does abort.
+            # merge_cage's exit codes are a TYPED channel, one meaning each, so
+            # every arm below can be reached by a real input. They used to
+            # overlap: a Python traceback exits 1, the same as "ask the owner",
+            # which made the crash arm unreachable dead code — and argparse's
+            # own exit 2 collided with "could not reach Slack", so a bad flag
+            # aborted the sweep while blaming Slack. Both are fixed in
+            # scripts/merge_cage.py; the drill asserts the four codes differ.
             set +e
             python scripts/merge_cage.py "$pr" --slack $merge_flag
             rc=$?
             set -e
             case "$rc" in
               0) merged=$((merged+1)) ;;
-              1) asked=$((asked+1)) ;;
+              1) asked=$((asked+1)) ;;                # a VERDICT, not an error
               2) echo "::error::could not reach Slack for PR #$pr — stopping."; exit 1 ;;
-              *) echo "::error::merge_cage crashed on PR #$pr (exit $rc)"; exit 1 ;;
+              3) echo "::error::the cage itself broke on PR #$pr — it refused, which is the safe
+                  direction, but it could not judge. Fix merge_cage.py."; exit 1 ;;
+              4) echo "::error::merge_cage was called wrongly (usage error) on PR #$pr."; exit 1 ;;
+              *) echo "::error::merge_cage exited $rc on PR #$pr — an undefined code."; exit 1 ;;
             esac
             echo "::endgroup::"
           done
