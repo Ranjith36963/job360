@@ -136,6 +136,21 @@ jobs:
       - name: The checker can still fail
         run: python scripts/chain_check.py --drill
 
+      # Every guard CI runs must declare how to make itself fail. Ten guards here
+      # shipped unable to fire, across four consecutive rounds — each was
+      # correct-looking code in the wrong position, reporting success about a
+      # different question than the one that mattered. A fifth round would find
+      # guard eleven; this is the mechanism instead. Adding a guard to a workflow
+      # is what triggers the requirement, so one cannot slip in by being forgotten.
+      - name: Every guard declares its drill
+        run: python scripts/drill_registry.py --run-drills
+
+      # The registry is the most dangerous file in the harness: if it stops
+      # detecting, it certifies every other guard. So it is held to its own
+      # standard — five deliberate breaks plus a negative control.
+      - name: The registry can still fail
+        run: python scripts/drill_registry.py --drill
+
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     name: Frontend (Node 20)

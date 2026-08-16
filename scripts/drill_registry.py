@@ -1,0 +1,481 @@
+#!/usr/bin/env python3
+"""The drill registry — every guard must declare how to make itself fail.
+
+WHY THIS EXISTS
+---------------
+Ten guards shipped here unable to fire, across four consecutive rounds of fixing:
+
+    round 1: six guards shipped unable to fire
+    round 2: fixed them -> guards SEVEN and EIGHT were found INSIDE the fixes
+    round 3: fixed those -> guards NINE and TEN were found inside those
+    round 4: ...
+
+Every one was correct-looking code in the wrong position, reporting success about a
+DIFFERENT QUESTION than the one that mattered:
+
+  * a size check that swallowed its own exit code
+  * a sed range whose anchor had been deleted, silently feeding 82 wrong lines
+  * a route test that read a mutable global, so its verdict changed with test ORDER
+  * an LLM alarm sitting below the `return` that fires first
+  * a freshness guard querying a column neither table has
+  * an alert path whose missing key made it exit 0, GREEN, for weeks
+  * DECISION_MARKER printed after main() had already returned — passed every unit
+    test and was unreachable in production
+  * a self-test that grepped for a string, so deleting the only authorisation call
+    left it fully green
+
+Round five would find guard eleven. That is not a strategy.
+
+THE ONE IDEA
+------------
+A guard is not trusted because it EXISTS. It is trusted because someone has WATCHED
+IT GO RED. Until now that depended on a human remembering — which failed ten times.
+
+This makes it structural:
+
+  1. DISCOVER   every script a workflow actually invokes. Adding a guard to CI is
+                what triggers the requirement, so you cannot get one in by forgetting
+                to register it.
+  2. REQUIRE    each discovered guard to be declared here, as either `drilled`
+                (it has a self-drill, and we run it) or `owed` (we know it cannot be
+                fire-tested yet, and WHY). An undeclared guard fails the build.
+  3. RUN        every declared drill, and demand the guard actually goes RED.
+
+WHAT `owed` IS FOR, AND WHAT IT IS NOT
+--------------------------------------
+Most guards here read production — Sentry, the prod database, the GitHub API. Their
+drills need recorded fixtures that do not exist yet. Pretending otherwise would make
+this file the eleventh guard: a green tick asserting something nobody checked.
+
+So `owed` is honest debt, and it is LOUD — every run prints the count and the list.
+What `owed` does NOT do is let a NEW guard in quietly. New guard, no entry, red build.
+That is the whole mechanism: it cannot stop you shipping an undrilled guard, but it
+can stop you doing it by accident.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+WORKFLOWS = ROOT / ".github" / "workflows"
+
+# A workflow line invoking a repo script. Both roots are real: ci.yml runs
+# `python scripts/mypy_ratchet.py` under `working-directory: backend`, while
+# checker-scorecard.yml spells the same shape `python backend/scripts/shelf_xray.py`
+# from the repo root. Discovery must resolve both or it silently under-reports —
+# and a discovery step that under-reports is exactly the failure this file exists
+# to stop.
+_SCRIPT_REF = re.compile(r"(?:^|[\s\"'/=])((?:backend/)?scripts/[a-zA-Z_0-9-]+\.(?:py|sh))")
+
+
+@dataclass
+class Guard:
+    """One entry in the registry."""
+
+    status: str  # "drilled" | "owed"
+    reason: str = ""  # required for owed: why it cannot be drilled YET
+    drill: list[str] = field(default_factory=list)  # argv, run from ROOT
+    since: str = ""  # date the debt was taken on, for owed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE REGISTRY
+#
+# Ordering is alphabetical, not by importance — importance is a judgement that
+# rots, and a sorted list makes an accidental deletion visible in a diff.
+# ─────────────────────────────────────────────────────────────────────────────
+
+REGISTRY: dict[str, Guard] = {
+    # ── drilled: watched going red, on demand, in CI ────────────────────────
+    "scripts/chain_check.py": Guard(
+        status="drilled",
+        # Breaks three wires by three different mechanisms (renamed output,
+        # misspelt dispatch target, literal the producer cannot emit) and
+        # includes a negative control that must stay quiet. 4/4 as of the
+        # commit that added it.
+        drill=[sys.executable, "scripts/chain_check.py", "--drill"],
+    ),
+    "scripts/drill_registry.py": Guard(
+        status="drilled",
+        # This file drills itself. A registry that cannot fail is the eleventh
+        # guard, and it would be the worst one — it would certify the other ten.
+        drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
+    ),
+    # ── owed: real guards, no fire-test yet, and here is exactly why ────────
+    "scripts/absence_check.py": Guard(
+        status="owed",
+        reason="reads the live GitHub API for loops that have stopped running; a drill "
+        "needs a recorded `gh run list` fixture, which does not exist yet",
+        since="2026-08-16",
+    ),
+    "scripts/already_built.py": Guard(
+        status="owed",
+        reason="offline and therefore the cheapest debt here to clear — a drill can "
+        "plant a duplicate-looking file and demand it is named",
+        since="2026-08-16",
+    ),
+    "scripts/checker_scorecard.py": Guard(
+        status="owed",
+        reason="measures whether the other checkers fired; it silently measured 0 and "
+        "then stopped entirely on 2026-08-10, which is precisely the failure a "
+        "drill would have caught — highest-value debt in this list",
+        since="2026-08-16",
+    ),
+    "scripts/data_invariants.py": Guard(
+        status="owed",
+        reason="queries the production database; a drill needs a seeded throwaway "
+        "schema, not prod, and this repo has no staging",
+        since="2026-08-16",
+    ),
+    "scripts/doc_clutter_check.py": Guard(
+        status="owed",
+        reason="offline; a drill can plant a cluttered doc tree in a temp copy",
+        since="2026-08-16",
+    ),
+    "scripts/doc_sync_check.py": Guard(
+        status="owed",
+        reason="offline for the parts that matter; it has already shipped blind twice "
+        "(a file missing from LIVING_DOCS, and a case-sensitive regex), so its "
+        "drill must plant a false count AND a doc it is not watching",
+        since="2026-08-16",
+    ),
+    "scripts/journey_probe.py": Guard(
+        status="owed",
+        reason="drives the live signup journey and MUTATES production (it creates real "
+        "accounts); a drill must not run it, and a safe fixture mode does not exist",
+        since="2026-08-16",
+    ),
+    "scripts/product_assertions.py": Guard(
+        status="owed",
+        reason="reads the production catalogue; guard #9 lived here — its decision path "
+        "was unreachable while every unit test passed, so a drill is owed against "
+        "the real exit path, not the function",
+        since="2026-08-16",
+    ),
+    "scripts/provider_probe.py": Guard(
+        status="owed",
+        reason="calls paid LLM providers; a drill would spend money on every CI run "
+        "unless it stubs the client",
+        since="2026-08-16",
+    ),
+    "scripts/sentry_poll.py": Guard(
+        status="owed",
+        reason="reads the live Sentry API; needs a recorded issue payload",
+        since="2026-08-16",
+    ),
+    "scripts/user_journey_audit.py": Guard(
+        status="owed",
+        reason="reads the production database for per-user funnel state",
+        since="2026-08-16",
+    ),
+    "scripts/watchdog_check.py": Guard(
+        status="owed",
+        reason="watches the other loops via the live GitHub API; same fixture gap as "
+        "absence_check.py, and the two should share one recorded fixture",
+        since="2026-08-16",
+    ),
+    "backend/scripts/eval_ranking.py": Guard(
+        status="owed",
+        reason="scores search quality against a labelled set and needs an LLM key; CI "
+        "has none, which is why it recorded 39%->66%->78% and then went quiet",
+        since="2026-08-16",
+    ),
+    "backend/scripts/mypy_ratchet.py": Guard(
+        status="owed",
+        reason="offline and easy: a drill can add a deliberate type error and demand "
+        "the ratchet refuses it",
+        since="2026-08-16",
+    ),
+    "backend/scripts/shelf_xray.py": Guard(
+        status="owed",
+        reason="counts filled profile fields in production; it has already lied in BOTH "
+        "directions (salary 83% vs 52%, skills 69% vs 95%) by counting shapes "
+        "instead of values, so its drill must assert against a known-value fixture",
+        since="2026-08-16",
+    ),
+}
+
+
+def discover(workflows_dir: Path) -> dict[str, set[str]]:
+    """Every repo script invoked by a workflow -> which workflows invoke it.
+
+    Deliberately a text scan, not a YAML parse: scripts get invoked from inside
+    multi-line `run:` blocks, heredocs and `if` branches, and a structural parse
+    would miss exactly the ones buried deepest.
+    """
+    found: dict[str, set[str]] = {}
+    if not workflows_dir.is_dir():
+        return found
+    for wf in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
+        text = wf.read_text(encoding="utf-8", errors="replace")
+        for m in _SCRIPT_REF.finditer(text):
+            found.setdefault(m.group(1), set()).add(wf.name)
+    return found
+
+
+def _resolve(ref: str, root: Path) -> Path | None:
+    """Where a workflow's script reference actually lands on disk, or None."""
+    for candidate in (root / ref, root / "backend" / ref):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def check(root: Path, registry: dict[str, Guard]) -> list[str]:
+    """Every guard declared, every declaration real. Returns failure lines."""
+    fails: list[str] = []
+    found = discover(root / ".github" / "workflows")
+
+    # Normalise: `scripts/x.py` invoked with working-directory: backend is the
+    # same guard as `backend/scripts/x.py`. Key on where it lives on disk.
+    canonical: dict[str, set[str]] = {}
+    for ref, wfs in found.items():
+        path = _resolve(ref, root)
+        if path is None:
+            fails.append(
+                f"BROKEN REFERENCE: {', '.join(sorted(wfs))} invokes `{ref}`, which does "
+                f"not exist at {ref} or backend/{ref}. The step will die on a missing "
+                f"file, and a workflow that cannot start cannot alarm."
+            )
+            continue
+        key = path.relative_to(root).as_posix()
+        canonical.setdefault(key, set()).update(wfs)
+
+    for key, wfs in sorted(canonical.items()):
+        if key not in registry:
+            fails.append(
+                f"UNDECLARED GUARD: {key} runs in {', '.join(sorted(wfs))} but has no "
+                f"entry in REGISTRY. Add one: `drilled` with a drill command you have "
+                f"WATCHED go red, or `owed` with the reason it cannot be drilled yet. "
+                f"Ten guards here shipped unable to fire; this is the step that was "
+                f"missing each time."
+            )
+
+    for key, guard in sorted(registry.items()):
+        if key not in canonical:
+            fails.append(
+                f"STALE ENTRY: REGISTRY declares {key} but no workflow invokes it. Either "
+                f"the guard was removed and this entry should go, or it was quietly "
+                f"unwired from CI — which is how a guard stops firing without anyone "
+                f"noticing."
+            )
+            continue
+        if guard.status == "drilled" and not guard.drill:
+            fails.append(f"MALFORMED: {key} is marked `drilled` but declares no drill command.")
+        if guard.status == "owed" and not guard.reason:
+            fails.append(
+                f"MALFORMED: {key} is marked `owed` with no reason. Debt without a reason "
+                f"is indistinguishable from an oversight."
+            )
+        if guard.status not in {"drilled", "owed"}:
+            fails.append(f"MALFORMED: {key} has unknown status {guard.status!r}.")
+
+    return fails
+
+
+def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) -> list[str]:
+    """Run every declared drill. A guard that stays green during its own drill is broken."""
+    fails: list[str] = []
+    for key, guard in sorted(registry.items()):
+        if guard.status != "drilled":
+            continue
+        if only and only not in key:
+            continue
+        # A drill is not allowed to invoke itself — that is an infinite regress,
+        # and it would also be the most flattering possible self-report.
+        if Path(key).name == Path(__file__).name and only is None:
+            continue
+        try:
+            proc = subprocess.run(
+                guard.drill, cwd=root, capture_output=True, text=True, timeout=600
+            )
+        except subprocess.TimeoutExpired:
+            fails.append(f"DRILL TIMEOUT: {key} did not finish in 600s.")
+            continue
+        except OSError as exc:
+            fails.append(f"DRILL UNRUNNABLE: {key} -> {exc}")
+            continue
+        if proc.returncode != 0:
+            tail = (proc.stdout + proc.stderr).strip().splitlines()[-6:]
+            fails.append(
+                f"DRILL FAILED: {key} exited {proc.returncode}. Its guard did not go red "
+                f"when deliberately broken, so it cannot be trusted when something breaks "
+                f"for real.\n      " + "\n      ".join(tail)
+            )
+        else:
+            print(f"  [DRILL PASS] {key}")
+    return fails
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# This file's own drill.
+#
+# The registry is the most dangerous file in the harness: if it silently stops
+# detecting, it certifies every other guard. So it is held to the standard it
+# imposes — broken on purpose, by each mechanism it claims to catch, plus a
+# negative control proving it does not simply alarm at any change.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def self_drill() -> int:
+    print("DRILL — breaking the registry on purpose. It must go RED and name the reason.")
+    print("=" * 72)
+
+    baseline = check(ROOT, REGISTRY)
+    if baseline:
+        print(f"  baseline: {len(baseline)} pre-existing failure(s) — a drill counts only NEW")
+        print("            findings, so real problems cannot mask a broken drill.")
+    base = set(baseline)
+    results: list[tuple[str, bool, str]] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "repo"
+        (tmp / ".github" / "workflows").mkdir(parents=True)
+        shutil.copytree(ROOT / ".github" / "workflows", tmp / ".github" / "workflows",
+                        dirs_exist_ok=True)
+        # Only the files the checks actually resolve need to exist.
+        for key in REGISTRY:
+            p = tmp / key
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("# drill stub\n", encoding="utf-8")
+
+        def new_findings(reg: dict[str, Guard]) -> list[str]:
+            return [f for f in check(tmp, reg) if f not in base]
+
+        # 1. THE ENFORCER. A new guard wired into CI with no registry entry.
+        wf = tmp / ".github" / "workflows" / "_drill_new_guard.yml"
+        wf.write_text(
+            "name: drill\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: python scripts/a_brand_new_guard.py\n",
+            encoding="utf-8",
+        )
+        (tmp / "scripts" / "a_brand_new_guard.py").write_text("# stub\n", encoding="utf-8")
+        f = new_findings(REGISTRY)
+        hit = next((x for x in f if "UNDECLARED GUARD" in x and "a_brand_new_guard" in x), "")
+        results.append(("new guard wired into CI with no drill declared", bool(hit), hit))
+        wf.unlink()
+        (tmp / "scripts" / "a_brand_new_guard.py").unlink()
+
+        # 2. A workflow calling a script that is not there. This is how a step dies
+        #    on a missing file, and a workflow that cannot start cannot alarm.
+        wf.write_text(
+            "name: drill\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: python scripts/deleted_yesterday.py\n",
+            encoding="utf-8",
+        )
+        f = new_findings(REGISTRY)
+        hit = next((x for x in f if "BROKEN REFERENCE" in x and "deleted_yesterday" in x), "")
+        results.append(("workflow invokes a script that does not exist", bool(hit), hit))
+        wf.unlink()
+
+        # 3. A guard quietly unwired from CI while its entry stays behind — the
+        #    silent way a guard stops firing with nothing going red.
+        reg = dict(REGISTRY)
+        reg["scripts/never_wired_anywhere.py"] = Guard(status="owed", reason="drill", since="x")
+        f = new_findings(reg)
+        hit = next((x for x in f if "STALE ENTRY" in x and "never_wired" in x), "")
+        results.append(("registry entry for a guard no workflow runs", bool(hit), hit))
+
+        # 4. Debt with no reason — indistinguishable from an oversight.
+        reg = dict(REGISTRY)
+        reg["scripts/chain_check.py"] = Guard(status="owed", reason="")
+        f = new_findings(reg)
+        hit = next((x for x in f if "MALFORMED" in x and "no reason" in x), "")
+        results.append(("owed entry with no reason given", bool(hit), hit))
+
+        # 5. NEGATIVE CONTROL. A harmless workflow that runs no script at all must
+        #    produce nothing. A checker that fires at any change is not a checker.
+        wf.write_text(
+            "name: drill\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo hello\n",
+            encoding="utf-8",
+        )
+        f = new_findings(REGISTRY)
+        results.append(("NEGATIVE CONTROL (workflow that runs no script)", not f,
+                        "" if not f else f"expected silence, got: {f[0][:120]}"))
+        wf.unlink()
+
+    # 6. A drill that does not actually make its guard go red must be caught by
+    #    run_drills. Point an entry at a command that exits 0 doing nothing.
+    fake = {"scripts/chain_check.py": Guard(status="drilled",
+                                            drill=[sys.executable, "-c", "raise SystemExit(0)"])}
+    stayed_green = not run_drills(ROOT, fake, only="chain_check")
+    fake_red = {"scripts/chain_check.py": Guard(status="drilled",
+                                                drill=[sys.executable, "-c", "raise SystemExit(1)"])}
+    caught_red = bool(run_drills(ROOT, fake_red, only="chain_check"))
+    results.append(("a drill whose guard exits non-zero is reported as FAILED",
+                    caught_red and stayed_green,
+                    "" if caught_red else "run_drills did not report a failing drill"))
+
+    print()
+    for name, ok, detail in results:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
+        if ok and detail:
+            print(f"         RED -> {detail.splitlines()[0][:150]}")
+        elif not ok and detail:
+            print(f"         {detail[:200]}")
+
+    passed = sum(1 for _, ok, _ in results if ok)
+    print()
+    print("=" * 72)
+    print(f"DRILL RESULT: {passed}/{len(results)} passed")
+    if passed != len(results):
+        print("The registry did NOT catch something it claims to catch. It is guard eleven.")
+        return 1
+    print("Every deliberate break was caught and named; the harmless change was ignored.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--drill", action="store_true", help="break this registry on purpose")
+    ap.add_argument("--run-drills", action="store_true", help="run every declared guard drill")
+    ap.add_argument("--only", help="restrict --run-drills to keys containing this substring")
+    args = ap.parse_args(argv)
+
+    if args.drill:
+        return self_drill()
+
+    fails = check(ROOT, REGISTRY)
+
+    drilled = sorted(k for k, g in REGISTRY.items() if g.status == "drilled")
+    owed = sorted((k, g) for k, g in REGISTRY.items() if g.status == "owed")
+
+    print(f"drill_registry: {len(REGISTRY)} guards - {len(drilled)} drilled, {len(owed)} owed")
+
+    if args.run_drills:
+        fails += run_drills(ROOT, REGISTRY, only=args.only)
+
+    if owed:
+        # Printed on EVERY run, never folded away. Debt you cannot see is debt
+        # you will not clear, and a quiet `owed` list would make this file a
+        # certificate rather than a check.
+        print()
+        print(f"OWED - {len(owed)} guards have never been watched failing:")
+        for key, guard in owed:
+            print(f"  * {key}")
+            print(f"      {guard.reason}")
+
+    if fails:
+        print()
+        print("REGISTRY FAILURES")
+        print("-" * 72)
+        for f in fails:
+            print(f"  {f}")
+        return 1
+
+    print()
+    print("Every guard CI runs is declared, every declaration points at a real file.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
