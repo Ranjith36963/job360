@@ -111,7 +111,9 @@ jobs:
   chain:
     name: Chain wires (harness)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must exceed DRILL_TIMEOUT_S (240s) in scripts/drill_registry.py, or a hung
+    # drill is cancelled by the job before it can report DRILL TIMEOUT.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -136,6 +138,17 @@ jobs:
       - name: The checker can still fail
         run: python scripts/chain_check.py --drill
 
+      # The registry is the most dangerous file in the harness: if it stops
+      # detecting, it certifies every other guard. So it is held to its own
+      # standard — five deliberate breaks plus a negative control.
+      #
+      # This runs FIRST, deliberately. A failed step skips the ones after it, so
+      # if the guard sweep below went first and failed, we would never learn
+      # whether the registry can still detect at all — which is the one answer
+      # you need when it is red.
+      - name: The registry can still fail
+        run: python scripts/drill_registry.py --drill
+
       # Every guard CI runs must declare how to make itself fail. Ten guards here
       # shipped unable to fire, across four consecutive rounds — each was
       # correct-looking code in the wrong position, reporting success about a
@@ -144,12 +157,6 @@ jobs:
       # is what triggers the requirement, so one cannot slip in by being forgotten.
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
-
-      # The registry is the most dangerous file in the harness: if it stops
-      # detecting, it certifies every other guard. So it is held to its own
-      # standard — five deliberate breaks plus a negative control.
-      - name: The registry can still fail
-        run: python scripts/drill_registry.py --drill
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:

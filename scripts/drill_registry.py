@@ -64,6 +64,12 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# A drill must finish INSIDE the CI job budget. If it does not, the job is
+# cancelled and the DRILL TIMEOUT line below is never printed -- a guard that
+# cannot report its own failure, which is the exact class this file exists to
+# end. Keep this comfortably under `timeout-minutes` on the `chain` job.
+DRILL_TIMEOUT_S = 240
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 
@@ -295,10 +301,10 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
             continue
         try:
             proc = subprocess.run(
-                guard.drill, cwd=root, capture_output=True, text=True, timeout=600
+                guard.drill, cwd=root, capture_output=True, text=True, timeout=DRILL_TIMEOUT_S
             )
         except subprocess.TimeoutExpired:
-            fails.append(f"DRILL TIMEOUT: {key} did not finish in 600s.")
+            fails.append(f"DRILL TIMEOUT: {key} did not finish in {DRILL_TIMEOUT_S}s.")
             continue
         except OSError as exc:
             fails.append(f"DRILL UNRUNNABLE: {key} -> {exc}")
