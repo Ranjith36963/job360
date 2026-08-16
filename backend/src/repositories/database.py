@@ -6,7 +6,12 @@ from typing import Any
 from src.repositories import pg
 
 _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
-_VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
+# BOOLEAN + JSONB added for migration 0031 (Universal Shelf Step 1):
+# salary_is_estimated is a real 3-state nullable bool, and shelf_provenance
+# is the one JSON column stored as a native Postgres JSONB rather than the
+# JSON-in-TEXT convention every other list/dict column in this file uses —
+# see 0031_universal_shelf.up.sql for why.
+_VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
 from src.utils.logger import get_logger  # noqa: E402
@@ -196,6 +201,24 @@ class JobDatabase:
             # after MAX_BACKFILL_ATTEMPTS without faking coverage.py's
             # skill-text signal (see 0029's up.sql for the full incident).
             ("description_backfill_attempts", "INTEGER DEFAULT 0"),
+            # Migration 0031 — Universal Shelf Step 1 (docs/pillars/
+            # UNIVERSAL_SHELF.md §1/§6). Mirrored here so init_db()-only test
+            # DBs (that never run the external migration runner) still get
+            # the full schema — see that migration's up.sql for the full
+            # rationale on each column and why shelf_provenance is JSONB
+            # while every other new column here is TEXT.
+            ("employment_type", "TEXT"),
+            ("workplace_mode", "TEXT"),
+            ("seniority", "TEXT"),
+            ("category", "TEXT"),
+            ("source_tags", "TEXT DEFAULT '[]'"),
+            ("visa_status", "TEXT"),
+            ("salary_currency", "TEXT"),
+            ("salary_period", "TEXT"),
+            ("salary_is_estimated", "BOOLEAN"),
+            ("salary_min_gbp_annual", "REAL"),
+            ("salary_max_gbp_annual", "REAL"),
+            ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
         run_log_migrations = [
             # Step-0 pre-flight — migration 0010 observability columns.
@@ -392,9 +415,13 @@ class JobDatabase:
              date_posted_raw,
              role, skill, seniority_score, experience, credentials,
              location_score, recency, semantic, penalty,
-             deadline, deadline_source)
+             deadline, deadline_source,
+             employment_type, workplace_mode, seniority, category, source_tags,
+             visa_status, salary_currency, salary_period, salary_is_estimated,
+             shelf_provenance)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -427,6 +454,21 @@ class JobDatabase:
                 job.penalty,
                 job.deadline,
                 job.deadline_source,
+                # Universal Shelf Step 1 (migration 0031). salary_min_gbp_annual /
+                # salary_max_gbp_annual are NOT written here — nothing computes
+                # them yet (unit-aware annualisation is step 2's shelf_gate
+                # work); they stay NULL/absent until then, which is the
+                # correct rule #29 state for a value nobody has derived.
+                job.employment_type,
+                job.workplace_mode,
+                job.seniority,
+                job.category,
+                json.dumps(job.source_tags or []),
+                job.visa_status,
+                job.salary_currency,
+                job.salary_period,
+                job.salary_is_estimated,
+                json.dumps(job.shelf_provenance or {}),
             ),
         )
         inserted = cursor.rowcount > 0

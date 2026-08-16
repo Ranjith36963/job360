@@ -1,10 +1,34 @@
 import html
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 # Max chars per normalized-key component — see normalized_key() for the why.
 _KEY_COMPONENT_MAX = 300
+
+# The fixed set of shelves EVERY job carries, whatever its source
+# (docs/pillars/UNIVERSAL_SHELF.md §1). This tuple is the SINGLE SOURCE OF
+# TRUTH: migrations/0031_universal_shelf, services/shelf_gate.py, and
+# tests/test_universal_shelf.py all import it rather than re-typing the list.
+# Add a shelf here without teaching shelf_gate.py to fill it and
+# test_gate_accounts_for_every_shelf fails loudly instead of silently
+# drifting. Names are SHELF names, not always column names — "skills" is the
+# shelf; it is stored in the `source_tags` column (§1 row 12).
+UNIVERSAL_SHELF: tuple[str, ...] = (
+    "title",
+    "company",
+    "location",
+    "description",
+    "posted_at",
+    "deadline",
+    "salary",
+    "visa_status",
+    "employment_type",
+    "seniority",
+    "workplace_mode",
+    "skills",
+    "category",
+)
 
 _COMPANY_SUFFIXES = re.compile(
     r"\s+(ltd|limited|inc|plc|corporation|corp|group|llc|gmbh|ag|sa|co|company|holdings|solutions|technologies|services|systems|pty)\.?\s*$",
@@ -65,6 +89,45 @@ class Job:
     recency: int = 0
     semantic: int = 0
     penalty: int = 0
+    # Universal Shelf, Step 1 (docs/pillars/UNIVERSAL_SHELF.md §1/§6).
+    # RAW-VALUE fields until a source mapper or services/shelf_gate.py
+    # normalises them — sources write whatever upstream calls it ('Full
+    # time', 'FULLTIME', 'permanent'...); normalisation is the GATE's job,
+    # never the source's (§5 point 1: "sources become dumb mappers"). As of
+    # this step no source mapper writes these yet (that is step 2) and
+    # nothing calls fill_shelves() from the pipeline yet (also step 2) — see
+    # services/shelf_gate.py's module docstring.
+    #
+    # `seniority` is deliberately a DIFFERENT field from `experience_level`
+    # above: that one is free-text, filled today only by a title regex; this
+    # one is the closed 7-enum (job_enrichment_schema.SeniorityLevel) the
+    # gate fills and normalises against.
+    employment_type: Optional[str] = None
+    workplace_mode: Optional[str] = None
+    seniority: Optional[str] = None
+    category: Optional[str] = None
+    source_tags: list[str] = field(default_factory=list)
+    # 3-state visa read (rule #31): "sponsors" / "no_sponsorship" / "unknown".
+    # Distinct from the legacy `visa_flag` bool above, which conflates "the
+    # ad says no" with "the ad never mentions it" — see services/visa_signal.py.
+    visa_status: Optional[str] = None
+    # Salary unit metadata. Without these the raw salary_min/salary_max
+    # numbers below are misleading, not just incomplete: landingjobs stores
+    # EUR/BRL figures as if they were GBP, careerjet mixes hourly and annual
+    # numbers in the same field (UNIVERSAL_SHELF.md §2 SALARY). No source
+    # mapper writes these yet (step 2); the gate does not unit-convert or
+    # re-clamp using them yet either (step 2 — see the clamp comment in
+    # __post_init__ below and services/shelf_gate.py::_fill_salary).
+    salary_currency: Optional[str] = None
+    salary_period: Optional[str] = None       # "hourly" | "daily" | "monthly" | "annual"
+    salary_is_estimated: Optional[bool] = None
+    # Every shelf, filled or absent, with HOW it got that way — "no salary
+    # offered" (a fact about the job) vs "nobody looked" (a fact about our
+    # pipeline) are different facts that route different work (§3/§4). Keys
+    # are exactly the UNIVERSAL_SHELF tuple above, no more, no fewer. Stamped
+    # by services/shelf_gate.py::fill_shelves — nothing calls it yet (step 1
+    # ships the gate built and tested in isolation; wiring it in is step 2).
+    shelf_provenance: dict = field(default_factory=dict)
     # Database row id, populated AFTER the row is inserted (None for a Job that
     # has not been persisted yet). Declared last so positional construction is
     # unaffected.
@@ -89,6 +152,18 @@ class Job:
         # Clean broken company names ("nan", "", "None" → "Unknown")
         self.company = self._clean_company(self.company)
         # Salary sanity: <10k likely hourly, >500k likely non-GBP
+        #
+        # UNIT-BLIND ON PURPOSE, FOR NOW (Universal Shelf Step 1,
+        # docs/pillars/UNIVERSAL_SHELF.md §2 SALARY "Gate rule for salary").
+        # This clamp assumes every number is GBP-annual — it is not: it nulls
+        # honest hourly/daily/monthly figures (e.g. an NHS £30.27/h rate,
+        # nofluffjobs' monthly figures) exactly as hard as it catches a real
+        # mislabeled non-GBP number. The fix is unit-aware — annualise +
+        # currency-tag FIRST using the new salary_currency/salary_period
+        # fields above, THEN clamp — and that move belongs in
+        # services/shelf_gate.py (step 2), not here, because it changes live
+        # scores and needs its own test coverage. Left exactly as-is in this
+        # step so merging this batch causes ZERO behaviour change.
         if self.salary_min is not None and self.salary_min < 10000:
             self.salary_min = None
         if self.salary_max is not None and self.salary_max > 500000:
