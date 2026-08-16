@@ -79,7 +79,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 # from the repo root. Discovery must resolve both or it silently under-reports —
 # and a discovery step that under-reports is exactly the failure this file exists
 # to stop.
-_SCRIPT_REF = re.compile(r"(?:^|[\s\"'/=])((?:backend/)?scripts/[a-zA-Z_0-9-]+\.(?:py|sh))")
+_SCRIPT_REF = re.compile(r"(?:^|[\s\"'/=])((?:backend/)?scripts/[a-zA-Z_0-9./-]*[a-zA-Z_0-9-]+\.(?:py|sh))")
 
 
 @dataclass
@@ -108,6 +108,14 @@ REGISTRY: dict[str, Guard] = {
         # includes a negative control that must stay quiet. 4/4 as of the
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
+    ),
+    "scripts/merge_cage.py": Guard(
+        status="drilled",
+        # Decides what reaches real users without the owner. Refuses a scoring
+        # change, an auth change, an infra change, an edit to its own guards, an
+        # unrecognised path, and a ratchet going backwards -- plus a negative
+        # control. Network-free, so it runs in CI like any other check.
+        drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
@@ -210,20 +218,26 @@ REGISTRY: dict[str, Guard] = {
 }
 
 
-def discover(workflows_dir: Path) -> dict[str, set[str]]:
-    """Every repo script invoked by a workflow -> which workflows invoke it.
+def discover(github_dir: Path) -> dict[str, set[str]]:
+    """Every repo script invoked from .github -> which file invokes it.
 
     Deliberately a text scan, not a YAML parse: scripts get invoked from inside
     multi-line `run:` blocks, heredocs and `if` branches, and a structural parse
     would miss exactly the ones buried deepest.
+
+    Scans .github RECURSIVELY, not just workflows/. A composite action under
+    .github/actions/ can run a guard exactly like a workflow can, and scanning
+    only workflows/ would let that guard escape the registry entirely -- an
+    enforcer with a blind spot is worse than none, because it certifies the gap.
     """
     found: dict[str, set[str]] = {}
-    if not workflows_dir.is_dir():
+    if not github_dir.is_dir():
         return found
-    for wf in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
+    files = sorted(github_dir.rglob("*.yml")) + sorted(github_dir.rglob("*.yaml"))
+    for wf in files:
         text = wf.read_text(encoding="utf-8", errors="replace")
         for m in _SCRIPT_REF.finditer(text):
-            found.setdefault(m.group(1), set()).add(wf.name)
+            found.setdefault(m.group(1), set()).add(wf.relative_to(github_dir).as_posix())
     return found
 
 
@@ -238,7 +252,7 @@ def _resolve(ref: str, root: Path) -> Path | None:
 def check(root: Path, registry: dict[str, Guard]) -> list[str]:
     """Every guard declared, every declaration real. Returns failure lines."""
     fails: list[str] = []
-    found = discover(root / ".github" / "workflows")
+    found = discover(root / ".github")
 
     # Normalise: `scripts/x.py` invoked with working-directory: backend is the
     # same guard as `backend/scripts/x.py`. Key on where it lives on disk.
@@ -298,6 +312,10 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
         # A drill is not allowed to invoke itself — that is an infinite regress,
         # and it would also be the most flattering possible self-report.
         if Path(key).name == Path(__file__).name and only is None:
+            # Announced, never silent. A skip nobody is told about is how a
+            # guard stops running while its row still reads as covered.
+            print(f"  [SKIPPED] {key} — a drill cannot invoke itself; it runs as its "
+                  f"own CI step (`--drill`), which must be present in the workflow.")
             continue
         try:
             proc = subprocess.run(
@@ -345,8 +363,7 @@ def self_drill() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "repo"
         (tmp / ".github" / "workflows").mkdir(parents=True)
-        shutil.copytree(ROOT / ".github" / "workflows", tmp / ".github" / "workflows",
-                        dirs_exist_ok=True)
+        shutil.copytree(ROOT / ".github", tmp / ".github", dirs_exist_ok=True)
         # Only the files the checks actually resolve need to exist.
         for key in REGISTRY:
             p = tmp / key
@@ -405,7 +422,7 @@ def self_drill() -> int:
             encoding="utf-8",
         )
         f = new_findings(REGISTRY)
-        results.append(("NEGATIVE CONTROL (workflow that runs no script)", not f,
+        results.append(("NEGATIVE CONTROL (workflow running an already-registered guard)", not f,
                         "" if not f else f"expected silence, got: {f[0][:120]}"))
         wf.unlink()
 

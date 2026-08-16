@@ -155,6 +155,12 @@ jobs:
       # different question than the one that mattered. A fifth round would find
       # guard eleven; this is the mechanism instead. Adding a guard to a workflow
       # is what triggers the requirement, so one cannot slip in by being forgotten.
+      # The merge cage decides what reaches real users without the owner. It is
+      # held to the same standard as everything else it judges: broken on purpose
+      # six ways, plus a negative control. Network-free, so it runs here.
+      - name: The merge cage still refuses
+        run: python scripts/merge_cage.py --drill
+
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 
