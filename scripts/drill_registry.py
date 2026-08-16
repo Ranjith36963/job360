@@ -109,6 +109,16 @@ REGISTRY: dict[str, Guard] = {
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
     ),
+    "scripts/encoding_guard.py": Guard(
+        status="drilled",
+        # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
+        # machine's locale, so an em-dash in a PR title killed the reader thread
+        # and the cage stopped answering instead of refusing. 36 more instances
+        # were live across 18 files. Ratcheted by file+count, never by line
+        # number -- a line-number baseline rots on the next import and gets
+        # switched off.
+        drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
+    ),
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what reaches real users without the owner. Refuses a scoring
@@ -319,7 +329,7 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
             continue
         try:
             proc = subprocess.run(
-                guard.drill, cwd=root, capture_output=True, text=True, timeout=DRILL_TIMEOUT_S
+                guard.drill, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=DRILL_TIMEOUT_S
             )
         except subprocess.TimeoutExpired:
             fails.append(f"DRILL TIMEOUT: {key} did not finish in {DRILL_TIMEOUT_S}s.")

@@ -96,7 +96,7 @@ ROOT_ALLOWED = {"README.md", "CLAUDE.md", "ARCHITECTURE.md", "CONTRIBUTING.md",
 
 
 def sh(*args: str) -> str:
-    return subprocess.run(args, capture_output=True, text=True).stdout
+    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
 
 
 def tracked_docs() -> list[str]:

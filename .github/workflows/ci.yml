@@ -158,6 +158,15 @@ jobs:
       # The merge cage decides what reaches real users without the owner. It is
       # held to the same standard as everything else it judges: broken on purpose
       # six ways, plus a negative control. Network-free, so it runs here.
+      # One bug class, 43 copies, nothing stopping the 44th. Exactly the shape
+      # of the seven log-injection alerts sitting open right now: fixing the
+      # instances without adding the guard is how a class grows.
+      - name: No text decoded with the machine's locale
+        run: python scripts/encoding_guard.py
+
+      - name: That guard can still fail
+        run: python scripts/encoding_guard.py --drill
+
       - name: The merge cage still refuses
         run: python scripts/merge_cage.py --drill
 

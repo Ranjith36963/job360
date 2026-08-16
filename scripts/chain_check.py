@@ -741,7 +741,7 @@ def gh_last_runs(files: list[str]) -> dict[str, dict]:
             proc = subprocess.run(
                 ["gh", "run", "list", "--workflow", wf_file, "--limit", "30",
                  "--json", "conclusion,createdAt,status"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if proc.returncode != 0:
                 info["error"] = (proc.stderr or "gh failed").strip().splitlines()[:1]
@@ -819,7 +819,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         try:
             top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
-                                 text=True, check=True).stdout.strip()
+                                 text=True, encoding="utf-8", errors="replace", check=True).stdout.strip()
             root = Path(top)
         except Exception:
             root = Path.cwd()

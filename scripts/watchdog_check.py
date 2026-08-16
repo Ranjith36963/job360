@@ -115,7 +115,7 @@ def last_run_iso(workflow: str) -> str | None:
     out = subprocess.run(
         ["gh", "run", "list", "--workflow", workflow, "--limit", "1",
          "--json", "createdAt"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if out.returncode != 0:
         err = out.stderr.strip()
