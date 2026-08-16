@@ -1,0 +1,148 @@
+name: Auto-merge (caged)
+
+# Decides, every 30 minutes, whether any open PR may reach production without
+# the owner — and tells him in Slack either way, in plain English.
+#
+# WHY A SCHEDULE AND NOT `pull_request`
+# A PR opened by a workflow using GITHUB_TOKEN gets NO check runs: GitHub
+# refuses to start workflows from workflow-authored events, to stop recursion.
+# A gate that reacted to PR events would therefore judge PRs whose checks had
+# never run — and an empty check list reads as "no failures" to any naive test.
+# Polling on a schedule means every PR it sees has had a real chance to be
+# tested, and scripts/merge_cage.py refuses an empty check list outright.
+#
+# WHY IT IS OFF BY DEFAULT
+# Merging here IS deploying. The owner should watch it DECIDE before letting it
+# ACT. With the `AUTO_MERGE_ENABLED` repo variable unset, this posts its verdict
+# and merges nothing — a dry run that is honest about being one.
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  # The drill entrance. Two loops in this repo were dead on arrival on main and
+  # only firing them on purpose revealed it, so every loop gets a door you can
+  # open by hand.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to judge (blank = every open PR)"
+        required: false
+      dry_run:
+        description: "Decide and announce, but never merge"
+        type: boolean
+        default: true
+
+concurrency:
+  group: auto-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  security-events: read
+
+jobs:
+  judge:
+    name: Judge open PRs against the cage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main # judge against main's cage, never the PR's own copy of it
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The cage runs from main, so a PR cannot widen the rules that judge it.
+      # Proving it still refuses on purpose costs three seconds and is the only
+      # thing standing between "there is a cage" and "the cage works".
+      - name: The cage still refuses
+        run: python scripts/merge_cage.py --drill
+
+      - name: Judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # Unset variable -> empty string -> dry run. The permissive direction
+          # requires a deliberate act; the safe direction is the default.
+          ENABLED: ${{ vars.AUTO_MERGE_ENABLED }}
+          ONLY_PR: ${{ inputs.pr }}
+          FORCE_DRY: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$ONLY_PR" ]; then
+            prs="$ONLY_PR"
+          else
+            # `--json` + `--jq` rather than a pipe into head: under pipefail a
+            # SIGPIPE from a truncating pipe kills the step and looks exactly
+            # like a failed check. That exact bug disabled the repair checker
+            # here on every diff over 800 lines.
+            prs=$(gh pr list --state open --json number --jq '.[].number')
+          fi
+
+          if [ -z "$prs" ]; then
+            echo "no open PRs"
+            exit 0
+          fi
+
+          merge_flag=""
+          if [ "$ENABLED" = "true" ] && [ "$FORCE_DRY" != "true" ]; then
+            merge_flag="--merge"
+            echo "AUTO_MERGE_ENABLED=true — allowed PRs will be merged."
+          else
+            echo "DRY RUN — deciding and announcing only. Set the repo variable"
+            echo "AUTO_MERGE_ENABLED=true once the verdicts look right to you."
+          fi
+
+          asked=0
+          merged=0
+          for pr in $prs; do
+            echo "::group::PR #$pr"
+            # merge_cage exits 1 for "ask the owner", which is a VERDICT and not
+            # an error, so it must not abort the sweep. Exit 2 means it could not
+            # tell the owner, which IS an error and does abort.
+            set +e
+            python scripts/merge_cage.py "$pr" --slack $merge_flag
+            rc=$?
+            set -e
+            case "$rc" in
+              0) merged=$((merged+1)) ;;
+              1) asked=$((asked+1)) ;;
+              2) echo "::error::could not reach Slack for PR #$pr — stopping."; exit 1 ;;
+              *) echo "::error::merge_cage crashed on PR #$pr (exit $rc)"; exit 1 ;;
+            esac
+            echo "::endgroup::"
+          done
+
+          echo "verdicts: $merged allowed, $asked need the owner" >> "$GITHUB_STEP_SUMMARY"
+
+      # If the judging step itself dies, the owner hears nothing and silence
+      # reads as "no PRs qualified". Six of seven alarms in this repo sat unread
+      # for days for exactly this reason, so the failure path speaks too.
+      - name: Say so if the judge itself broke
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_BOT_TOKEN:-}" ]; then
+            echo "::error::no SLACK_BOT_TOKEN — the owner cannot be told the judge broke."
+            exit 1
+          fi
+          text=":rotating_light: *The auto-merge judge itself failed.*
+          No PR was judged this run, so silence from this loop does NOT mean
+          nothing qualified. ${RUN_URL}"
+          resp=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data "$(jq -nc --arg c production-incidents --arg t "$text" '{channel:$c,text:$t}')")
+          # ok:false is a FAILURE. An alert path that exits 0 having sent nothing
+          # kept this harness mute for weeks.
+          echo "$resp" | jq -e '.ok == true' >/dev/null || {
+            echo "::error::Slack refused: $(echo "$resp" | jq -r '.error')"; exit 1; }
