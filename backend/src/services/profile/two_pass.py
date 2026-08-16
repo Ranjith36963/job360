@@ -17,6 +17,7 @@ imported at module top so tests can monkeypatch them by name.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -331,48 +332,42 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     ``github_*`` and ``about_me_inferred_skills``. Wiping those would silently
     delete work, which is the opposite failure.
     """
-    # Scoring-semantic — these reach SearchConfig and change what matches.
-    cv.skills.clear()
-    cv.job_titles.clear()
-    cv.companies.clear()
-    cv.education.clear()
-    cv.certifications.clear()
-    cv.cv_industries.clear()
-    cv.cv_languages.clear()
-    cv.cv_skills_esco.clear()
-    cv.summary = ""
-    cv.experience_text = ""
-
-    # Identity / display — the fields that put the wrong name on a tailored CV.
-    cv.name = ""
-    cv.headline = ""
-    cv.location = ""
-    cv.achievements.clear()
-
-    # Classified FROM the CV, so it belongs to the CV. ``None`` (not "") is the
-    # documented "not classified" sentinel on CVData.
-    cv.career_domain = None
-
-    # EVERY REMAINING CV-OWNED SCALAR, DERIVED — not hand-listed.
+    # EVERY CV-OWNED FIELD, DERIVED FROM THE DATACLASS — scalars AND collections.
     #
-    # This function's own docstring says its field list "must stay in lockstep
-    # with _merge_cv_llm_into". It did not. Three shelves added on 2026-08-10
-    # (cv_experience_level, cv_right_to_work, cv_projects) were merged in but
-    # never cleared here, so uploading a DIFFERENT person's CV left the previous
-    # person's stated seniority and work-authorisation on the profile — the
-    # exact failure this function exists to prevent, and worse than the missing
-    # data because it is confidently wrong.
+    # THIS LIST HAS NOW DRIFTED THREE TIMES, always the same way: a shelf is
+    # added, wired into the merge and into a reader, and nobody adds it here.
+    #   * 2026-08-07  career_domain
+    #   * 2026-08-10  cv_experience_level, cv_right_to_work, cv_projects
+    #   * 2026-08-15  cv_positions  <- found by running the real function
     #
-    # Both halves now read the same source, so the two cannot drift again.
-    for name in _cv_owned_scalars():
-        if getattr(cv, name, None):
-            setattr(cv, name, "")
-    cv.cv_projects.clear()
-
-    # Regenerated wholesale from the merged skill set on every two-pass run, but
-    # cleared so a failed re-extract cannot leave suggestions computed from a
-    # different person's skills.
-    cv.suggested_skills.clear()
+    # The 2026-08-10 round fixed only the SCALAR half by deriving it from
+    # ``dataclasses.fields``; the collections stayed hand-listed, so
+    # ``cv_positions`` (a ``list[dict]``, invisible to a scalar-only loop)
+    # survived every clear and every CV swap. Measured on the shipped code: a
+    # profile cleared through this function kept
+    # ``[{'company': 'ACME Ltd', 'title': 'Senior Engineer', ...}]`` while name,
+    # summary, skills and job_titles were all correctly emptied — and
+    # ``profile_to_matcher_text`` then fed that dated history to the LLM judge
+    # as the candidate's experience.
+    #
+    # Half a derivation is not a derivation. Resetting each field to the value a
+    # FRESH ``CVData()`` has removes the concept of a list entirely: a shelf
+    # added tomorrow is covered the moment it is declared, whatever its type.
+    # Collections are cleared IN PLACE, never rebound. Rebinding is visible
+    # through ``cv`` and looks equivalent, but it orphans any reference taken
+    # before the call — and there is a test pinning that identity
+    # (test_two_pass.py::test_reset_mutates_in_place_so_the_profile_keeps_its_object),
+    # which caught exactly this when the first version of the derivation used a
+    # blanket setattr. Scalars have no identity to preserve, so they are simply
+    # assigned their default.
+    pristine = CVData()
+    for name in _cv_owned_fields():
+        default = getattr(pristine, name)
+        current = getattr(cv, name)
+        if isinstance(current, (list, dict)) and isinstance(default, (list, dict)):
+            current.clear()
+        else:
+            setattr(cv, name, copy.deepcopy(default))
 
     # MUST be cleared with the fields it guards. The hash means "the LLM's
     # reading of this input is already merged into the fields above" — and we
@@ -416,7 +411,12 @@ _SCALAR_ANNOTATIONS = frozenset({"str", "Optional[str]"})
 
 
 def _cv_owned_scalars() -> tuple[str, ...]:
-    """Every plain-string CVData field the CV pass is allowed to fill.
+    """Every plain-string CVData field the CV pass is allowed to FILL.
+
+    Used by ``_merge_cv_llm_into``, which fills empty scalars only — collections
+    are unioned there by their own explicit rules, so this stays scalar-only.
+    For CLEARING, see ``_cv_owned_fields``: a reset must reach every type, and
+    restricting it to scalars is exactly how ``cv_positions`` survived.
 
     Fields belonging to the other passes are excluded by PREFIX rather than by
     name, so a new ``linkedin_*`` or ``github_*`` scalar can never be clobbered
@@ -432,6 +432,42 @@ def _cv_owned_scalars() -> tuple[str, ...]:
             continue
         if str(f.type) in _SCALAR_ANNOTATIONS:
             out.append(f.name)
+    return tuple(out)
+
+
+# Reset needs different handling from "back to the dataclass default", and each
+# entry must say why. Keep this as small as it can possibly be — every name here
+# is a field the derivation cannot protect.
+_RESET_HANDLED_SEPARATELY = frozenset(
+    {
+        # Only the "cv" and "linkedin" keys are dropped, deliberately, further
+        # down. Blanket-clearing it would discard the GitHub and about_me hashes
+        # too, forcing paid re-reads of inputs the user never touched.
+        "llm_input_hashes",
+    }
+)
+
+
+def _cv_owned_fields() -> tuple[str, ...]:
+    """EVERY CVData field the CV owns — scalars, lists and dicts alike.
+
+    The clearing counterpart to ``_cv_owned_scalars``. Same prefix-based
+    exclusions, but NO type filter: a reset that only understands strings leaves
+    every list and dict behind, which is precisely the defect this replaced
+    (``cv_positions`` survived a full profile clear and reached the LLM judge).
+
+    Ownership is decided by PREFIX, so a shelf added tomorrow is covered the day
+    it is declared — the one property that stops this drifting a fourth time.
+    """
+    import dataclasses as _dc
+
+    out: list[str] = []
+    for f in _dc.fields(CVData):
+        if f.name in _NOT_CV_OWNED_SCALARS or f.name in _RESET_HANDLED_SEPARATELY:
+            continue
+        if f.name.startswith(("linkedin_", "github_", "about_me_")):
+            continue
+        out.append(f.name)
     return tuple(out)
 
 
