@@ -841,40 +841,52 @@ def _clear_cv(cv: CVData) -> None:
     cv.llm_input_hashes.pop("cv", None)
 
 
+def _clear_prefixed(cv: CVData, prefix: str) -> None:
+    """Reset every CVData field owned by one input, found BY PREFIX.
+
+    WHY NOT A HAND-WRITTEN LIST. This was 18 named assignments, and it had
+    already fallen two fields behind the dataclass: `linkedin_summary` and
+    `linkedin_headline` were added, wired into the LLM judge and the semantic
+    vector, and never added here. Measured on the shipped code — after
+    "Clear LinkedIn", `linkedin_skills` and `linkedin_positions` were empty
+    while `linkedin_summary` still held the previous person's About paragraph
+    and `linkedin_headline` their tagline, both of which `profile_to_matcher_text`
+    then sent to the judge for every job.
+
+    Same failure as `reset_cv_owned_fields`, same root cause, third occurrence
+    across the file. Ownership is a PREFIX fact, so read it off the dataclass
+    and the list cannot fall behind again.
+
+    Each field goes back to what a fresh `CVData()` has, so the type is handled
+    for free — a `dict` shelf added tomorrow resets to `{}` without anyone
+    remembering it exists.
+    """
+    import copy
+    import dataclasses
+
+    pristine = CVData()
+    for f in dataclasses.fields(CVData):
+        if not f.name.startswith(prefix):
+            continue
+        default = getattr(pristine, f.name)
+        current = getattr(cv, f.name)
+        # In place for collections — same reason as reset_cv_owned_fields: a
+        # rebind orphans any reference taken before the call.
+        if isinstance(current, (list, dict)) and isinstance(default, (list, dict)):
+            current.clear()
+        else:
+            setattr(cv, f.name, copy.deepcopy(default))
+
+
 def _clear_linkedin(cv: CVData) -> None:
-    cv.linkedin_raw_text = ""
-    cv.linkedin_positions = []
-    cv.linkedin_skills = []
-    cv.linkedin_industry = ""
-    cv.linkedin_languages = []
-    cv.linkedin_projects = []
-    cv.linkedin_volunteer = []
-    cv.linkedin_courses = []
-    cv.linkedin_filename = ""
-    cv.linkedin_uploaded_at = ""
-    cv.linkedin_honors = []
-    cv.linkedin_publications = []
-    cv.linkedin_patents = []
-    cv.linkedin_organizations = []
-    cv.linkedin_test_scores = []
-    cv.linkedin_recommendations = []
-    cv.linkedin_interests = []
-    cv.linkedin_contact = {}
+    _clear_prefixed(cv, "linkedin_")
     cv.llm_input_hashes.pop("linkedin", None)
 
 
 def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
-    cv.github_languages = {}
-    cv.github_topics = []
-    cv.github_skills_inferred = []
-    cv.github_frameworks = []
-    cv.github_llm_skills = []
-    cv.github_repos_brief = []
-    cv.github_bio = ""
-    cv.github_profile_readme = ""
-    cv.github_identity = {}
-    cv.github_connected_at = ""
+    _clear_prefixed(cv, "github_")
     cv.llm_input_hashes.pop("github", None)
+    # Lives on UserPreferences, not CVData, so the prefix sweep cannot reach it.
     prefs.github_username = ""  # the handle belongs to this section
 
 
