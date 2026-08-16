@@ -487,7 +487,7 @@ export function PreferencesForm({
           tags={industries}
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
-          description="Target industries for relevance scoring bonus"
+          description="Used only for AI similarity matching today — most jobs are not affected by this at all."
         />
 
         <Separator />

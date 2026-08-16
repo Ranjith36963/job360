@@ -53,6 +53,7 @@ const EMPTY_CV_DETAIL: CVDetail = {
   certifications: [],
   companies: [],
   cv_experience_level: "",
+  cv_industries: [],
   cv_positions: [],
   cv_projects: [],
   cv_right_to_work: "",
