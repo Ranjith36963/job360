@@ -188,7 +188,7 @@ def stale_extraction_inputs(profile: UserProfile) -> list[str]:
 
 
 def _pass_produced_data(key: str, res: Any) -> bool:
-    """Did an LLM pass return anything worth caching?
+    """Did an LLM pass return anything worth CACHING?
 
     A pass that returned an empty result from a NON-empty input is almost always
     a soft failure (a rate-limited provider answering with `{}` instead of
@@ -197,6 +197,13 @@ def _pass_produced_data(key: str, res: Any) -> bool:
 
     Shapes differ per input: the CV pass returns a ``CVData``; the others return
     dicts or lists. This reads the fields that actually matter for each.
+
+    Deliberately answers ONLY "is this worth caching" — NOT "is this worth
+    retrying". Those used to be the same question, and that was the bug: a CV
+    pass returning ``skills`` but ZERO ``cv_positions`` passes this check (skills
+    OR titles is enough), so it was graded a cache-worthy success even though a
+    whole section silently vanished. See ``_cv_pass_is_partial`` for the
+    retry-side question this function must NOT be asked.
     """
     if res is None:
         return False
@@ -209,6 +216,37 @@ def _pass_produced_data(key: str, res: Any) -> bool:
         return bool(d.get("skills") or d.get("positions") or d.get("education"))
     # github / about_me return a list[str] of inferred skills.
     return bool(res)
+
+
+def _cv_pass_is_partial(res: Any) -> bool:
+    """Did the CV pass yield SOME data but silently drop ``cv_positions``?
+
+    THE BUG THIS DETECTS (measured on a real profile, Rohith — see the retry
+    block's comment in ``run_two_pass_extraction``): "0 positions via the
+    concurrent API path, 7 in isolation". ``_pass_produced_data`` grades that
+    result a success — it returned skills — so it was cached and the user's
+    dated career history was gone for good, unrecoverable even by re-uploading
+    the identical CV (the input hash still matches).
+
+    A result with NO skills and NO titles is not "partial", it is EMPTY —
+    ``_pass_produced_data`` already sends that case to retry, and double-
+    counting it here would just fire the same retry logic twice for one cause.
+    Partial means the pass clearly ran and read the document (skills or titles
+    landed) but the one section that can silently go missing under load did.
+
+    CV-ONLY on purpose. LinkedIn's own positions are already inside
+    ``_pass_produced_data``'s OR (skills OR positions OR education), so a
+    LinkedIn result missing positions but present on skills is already not
+    "produced data" territory in the same way — its retry trigger is the
+    existing empty-check. GitHub and about_me each return a flat
+    ``list[str]`` with no named subsection that can go missing independently
+    of the whole list, so there is nothing to decide there.
+    """
+    if res is None:
+        return False
+    if not (getattr(res, "skills", None) or getattr(res, "job_titles", None)):
+        return False  # empty, not partial — the existing check already retries this
+    return not getattr(res, "cv_positions", None)
 
 
 def _already_read(cv: CVData, key: str, raw: Any) -> bool:
@@ -613,16 +651,26 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         if prefs.about_me and not _cached["about_me"] else _none(),
     )
 
-    # RETRY A SOFT-EMPTY PASS ONCE, SEQUENTIALLY.
+    # RETRY A SOFT-EMPTY OR SOFT-PARTIAL PASS ONCE, SEQUENTIALLY.
     #
     # The four passes above run concurrently in one gather. On free-tier keys
     # that means up to four simultaneous LLM calls, and the providers
-    # rate-limit: one call gets a valid but EMPTY answer while the same input
-    # extracts fine when it runs alone (measured on Rohith — 0 positions via the
-    # concurrent API path, 7 in isolation). So any pass that RAN but produced no
-    # usable data is retried here one at a time, with no concurrent contention.
-    # Bounded: at most one extra call per empty input, and only when the input
-    # was non-empty and not cached.
+    # rate-limit: one call gets a valid but EMPTY (or, for CV, PARTIAL) answer
+    # while the same input extracts fine when it runs alone (measured on
+    # Rohith — 0 positions via the concurrent API path, 7 in isolation). So any
+    # pass that RAN but produced no usable data is retried here one at a time,
+    # with no concurrent contention.
+    #
+    # PARTIAL is CV-only and stricter than EMPTY: a CV pass that returned
+    # skills or titles PASSES `_pass_produced_data` (worth caching) even when
+    # `cv_positions` came back empty — that shape used to look like a success
+    # and cache forever with the user's dated career history silently gone.
+    # `_cv_pass_is_partial` names that shape; the swap below only takes the
+    # retry's answer when it actually recovered `cv_positions`, so a partial-
+    # but-richer first result is never traded for a thinner "recovery".
+    #
+    # Bounded: at most one extra call per empty-or-partial input, and only
+    # when the input was non-empty and not cached.
     _retryable = [
         ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
         ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
@@ -634,12 +682,35 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     _results = {"cv": _llm_cv_res, "linkedin": _llm_li_res,
                 "github": _llm_gh_res, "about_me": _llm_pr_res}
     for _k, _raw, _call in _retryable:
-        if _raw and not _cached[_k] and not _pass_produced_data(_k, _results[_k]):
-            retried = await _safe(_call(), f"{_k} (retry)")
-            if _pass_produced_data(_k, retried):
-                logger.info("two_pass: %s pass was empty under load — sequential "
-                            "retry recovered it", _k)
+        if not _raw or _cached[_k]:
+            continue
+        _was_empty = not _pass_produced_data(_k, _results[_k])
+        # CV-only: a result that PASSED the caching check (skills or titles
+        # landed) can still be missing cv_positions — the shape that caused
+        # the Rohith bug (see the block comment above). Only CV has a section
+        # that can go missing independently of the rest of the pass; see
+        # `_cv_pass_is_partial`'s docstring for why the others don't.
+        _was_partial = _k == "cv" and not _was_empty and _cv_pass_is_partial(_results[_k])
+        if not (_was_empty or _was_partial):
+            continue
+        retried = await _safe(_call(), f"{_k} (retry)")
+        if _was_partial:
+            # A blanket replace here could trade a rich first result (more
+            # skills, a fuller summary) for a thinner retry that STILL has no
+            # positions — "repairing" nothing while throwing away what the
+            # first call got right. Only swap in when the retry actually
+            # recovered the missing piece.
+            if retried is not None and getattr(retried, "cv_positions", None):
+                logger.info("two_pass: cv pass had skills but lost cv_positions "
+                            "under load — sequential retry recovered them")
                 _results[_k] = retried
+            else:
+                logger.info("two_pass: cv retry did not recover cv_positions — "
+                            "keeping the original (still-useful) result")
+        elif _pass_produced_data(_k, retried):
+            logger.info("two_pass: %s pass was empty under load — sequential "
+                        "retry recovered it", _k)
+            _results[_k] = retried
     _llm_cv_res, _llm_li_res = _results["cv"], _results["linkedin"]
     _llm_gh_res, _llm_pr_res = _results["github"], _results["about_me"]
 

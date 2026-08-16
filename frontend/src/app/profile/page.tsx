@@ -22,7 +22,7 @@ import {
   type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
-import type { ProfileResponse, PreferencesRequest } from "@/lib/types";
+import type { CVDetail, ProfileResponse, PreferencesRequest } from "@/lib/types";
 
 /** Human names for the clear toasts — "cv" is not what a person calls it. */
 const SECTION_LABEL: Record<ClearSection, string> = {
@@ -32,6 +32,67 @@ const SECTION_LABEL: Record<ClearSection, string> = {
   preferences: "Preferences",
   all: "Profile",
 };
+
+// ── "What we extracted" gate ────────────────────────────────
+//
+// cv_detail is ONLY populated when the CV's raw_text is non-empty
+// (_build_profile_response in backend/src/api/routes/profile.py). LinkedIn
+// and GitHub data arrive on the SAME response independently of the CV, so
+// gating the whole CVViewer on `cv_detail` alone hid real, paid-for,
+// already-fetched LinkedIn/GitHub content whenever a user connected either
+// of those BEFORE uploading a CV — the section just vanished, reading as a
+// failed enrichment. The page calls LinkedIn/GitHub "Optional" (rule #29);
+// the render must not silently require the one input it never demanded.
+//
+// CVViewer's own CV-only sections already stay silent on an empty CVDetail
+// (every one of them checks its own field), so passing this stand-in when
+// there is no CV is safe — it renders nothing extra, it just stops the
+// LinkedIn/GitHub sections from being hidden along with it.
+const EMPTY_CV_DETAIL: CVDetail = {
+  achievements: [],
+  certifications: [],
+  companies: [],
+  cv_experience_level: "",
+  cv_positions: [],
+  cv_projects: [],
+  cv_right_to_work: "",
+  education: [],
+  experience_text: "",
+  extraction_score: {},
+  headline: "",
+  highlights: [],
+  job_titles: [],
+  location: "",
+  name: "",
+  raw_text: "",
+  skills: [],
+  summary_text: "",
+};
+
+function hasLinkedinShelf(
+  sections: ProfileResponse["linkedin_subsections"] | undefined
+): boolean {
+  if (!sections) return false;
+  return Object.values(sections).some(
+    (rows) => Array.isArray(rows) && rows.length > 0
+  );
+}
+
+function hasGithubShelf(
+  temporal: ProfileResponse["github_temporal"] | undefined,
+  detail: ProfileResponse["github_detail"] | undefined
+): boolean {
+  const temporalHasContent = Object.values(temporal ?? {}).some(
+    (bucket) => bucket && typeof bucket === "object" && Object.keys(bucket).length > 0
+  );
+  if (temporalHasContent) return true;
+  return Object.values(detail ?? {}).some((value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "string") return value.length > 0;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return false;
+  });
+}
 
 // ── Completeness calculation ────────────────────────────────
 
@@ -389,14 +450,19 @@ export default function ProfilePage() {
                 The API already returns name/summary/skills/dated work
                 history/education/certs/LinkedIn detail/GitHub detail — this
                 was the only place none of it was ever rendered. Each
-                sub-section inside CVViewer renders only when it has data. */}
-            {profile?.cv_detail && (
+                sub-section inside CVViewer renders only when it has data.
+                Gated on ANY of the three shelves having content, not just
+                cv_detail — a LinkedIn or GitHub upload with no CV yet must
+                still show what it found (see EMPTY_CV_DETAIL above). */}
+            {(profile?.cv_detail ||
+              hasLinkedinShelf(profile?.linkedin_subsections) ||
+              hasGithubShelf(profile?.github_temporal, profile?.github_detail)) && (
               <CVViewer
-                cv={profile.cv_detail}
-                skillProvenance={profile.skill_provenance}
-                linkedinSubsections={profile.linkedin_subsections}
-                githubTemporal={profile.github_temporal}
-                githubDetail={profile.github_detail}
+                cv={profile?.cv_detail ?? EMPTY_CV_DETAIL}
+                skillProvenance={profile?.skill_provenance}
+                linkedinSubsections={profile?.linkedin_subsections}
+                githubTemporal={profile?.github_temporal}
+                githubDetail={profile?.github_detail}
               />
             )}
 
