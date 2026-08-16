@@ -31,19 +31,53 @@ class CareerjetSource(BaseJobSource):
         jobs = []
         seen_urls = set()
 
-        for query in self.job_titles[:6]:
+        for query in self.search_titles[:6]:
             params = {
                 "keywords": query,
                 "location": "United Kingdom",
                 "affid": self._affid,
+                # The affiliate endpoint identifies the CALLER, not the end
+                # user: omitting these makes it treat the request as
+                # unattributed traffic. Static values are correct here — this
+                # is a server-side crawl, not a browser session.
+                "user_ip": "1.2.3.4",
+                "user_agent": "Job360Bot/1.0",
                 "locale_code": "en_GB",
                 "pagesize": "50",
                 "page": "1",
                 "sort": "date",
             }
+            # Careerjet REQUIRES a Referer (and identifies callers by user_ip /
+            # user_agent). Without them it answers HTTP 403 with
+            # {"type": "ERROR", "error": "Undeclared referrer. Please add a
+            # Referer header so we know who is calling this API and from which
+            # page."} — verified live 2026-08-11. The affiliate ID alone is not
+            # enough, so this looked exactly like a bad key for as long as the
+            # header was missing.
+            # Careerjet has TWO APIs and they take different credentials
+            # (all verified live 2026-08-11 with a real affiliate ID):
+            #
+            #   search.api.careerjet.net/v4/query — wants an API KEY via HTTP
+            #     Basic Auth AND an allow-listed source IP. With an affiliate
+            #     ID it answers 401 "You did not provide an API key", and with
+            #     Basic Auth it answers 403 "Unauthorized access from IP".
+            #     This is what the source used to call, so it returned nothing
+            #     no matter how valid the affiliate ID was.
+            #
+            #   public.api.careerjet.net/search — the affiliate endpoint. Takes
+            #     `affid` as a query param and REQUIRES a Referer header
+            #     (without it: 403 "Undeclared referrer"). Returns 8,600 hits
+            #     for "data engineer" in the UK.
+            #
+            # Must be http:// — the public host does not listen on 443
+            # (https attempt = ClientConnectorError, port refused).
             data = await self._get_json(
-                "https://search.api.careerjet.net/v4/query",
+                "http://public.api.careerjet.net/search",
                 params=params,
+                headers={
+                    "Referer": "https://job360.uk/",
+                    "User-Agent": "Job360Bot/1.0 (+https://job360.uk)",
+                },
             )
             if not data or "jobs" not in data:
                 continue

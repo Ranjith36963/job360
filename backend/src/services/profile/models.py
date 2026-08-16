@@ -561,7 +561,26 @@ class UserProfile:
 
 @dataclass
 class SearchConfig:
+    # EVIDENCE list — everything the profile knows about the roles this person
+    # has held or wants. Never filtered, never capped. This is what the SCORER
+    # matches a job title against; it is NOT what we send to a job board.
     job_titles: list[str] = field(default_factory=list)
+    # QUERY list — the cleaned, ranked, capped subset of `job_titles` we are
+    # willing to put in an HTTP request to Reed/Adzuna/LinkedIn/etc.
+    #
+    # WHY THE SPLIT (2026-08-13). `job_titles` was doing both jobs at once, so
+    # raw CV strings leaked straight into query strings: real profiles produced
+    # searches for "AI Solutions Engineer - R&D Department", "Software
+    # Development Engineer in Test (SDET)" and the bare word "Intern" — no
+    # posting on any board carries those as its title, so the requests came
+    # back near-empty and the API budget was spent on nothing. Splitting the
+    # field means query hygiene costs the scorer exactly zero: `job_titles` is
+    # byte-identical to what it was before.
+    #
+    # Built by `keyword_generator._build_search_titles`. Empty on a
+    # default/no-profile config — consumers fall back to `job_titles` via
+    # `BaseJobSource.search_titles`.
+    search_titles: list[str] = field(default_factory=list)
     primary_skills: list[str] = field(default_factory=list)
     secondary_skills: list[str] = field(default_factory=list)
     tertiary_skills: list[str] = field(default_factory=list)
@@ -585,6 +604,7 @@ class SearchConfig:
 
         return cls(
             job_titles=[],
+            search_titles=[],
             primary_skills=[],
             secondary_skills=[],
             tertiary_skills=[],

@@ -318,47 +318,11 @@ def test_cache_reset_metrics():
 
 
 # ---------------------------------------------------------------------------
-# Batch 3.5.3 — nhs_jobs_xml migrated to conditional fetch
+# Batch 3.5.3 — the nhs_jobs_xml pilot test was removed 2026-08-10 with the
+# source itself (feed retired, serves HTML). No production source opts into
+# conditional fetch right now; the _Probe tests above still pin the contract
+# so the next opt-in source inherits working behaviour.
 # ---------------------------------------------------------------------------
-
-
-def test_nhs_jobs_xml_uses_conditional_fetch():
-    """Pilot source proof: nhs_jobs_xml stores ETag in the cache on
-    first fetch, sends If-None-Match on the second."""
-    async def _t():
-        session = aiohttp.ClientSession()
-        try:
-            from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
-            src = NHSJobsXMLSource(session)
-            captured = []
-
-            def _capture(url_, **kwargs):
-                captured.append(kwargs.get("headers") or {})
-
-            with aioresponses() as m:
-                m.get(NHSJobsXMLSource.FEED_URL,
-                      body="<?xml version='1.0'?><vacancies/>",
-                      headers={"ETag": 'W/"nhs1"'},
-                      content_type="application/xml",
-                      callback=_capture)
-                m.get(NHSJobsXMLSource.FEED_URL,
-                      status=304, callback=_capture)
-
-                jobs1 = await src.fetch_jobs()
-                jobs2 = await src.fetch_jobs()
-
-                assert jobs1 == []
-                assert jobs2 == []
-                entry = src._conditional_cache.get(
-                    (NHSJobsXMLSource.FEED_URL, ())
-                )
-                assert entry is not None
-                assert entry.etag == 'W/"nhs1"'
-                # Second request must have sent If-None-Match
-                assert captured[1].get("If-None-Match") == 'W/"nhs1"'
-        finally:
-            await session.close()
-    _run(_t())
 
 
 # ---------------------------------------------------------------------------

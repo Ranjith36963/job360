@@ -2157,6 +2157,11 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Search Titles
+             * @default []
+             */
+            search_titles: string[];
+            /**
              * Skill Esco
              * @default {}
              */

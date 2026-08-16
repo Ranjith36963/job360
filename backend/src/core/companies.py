@@ -45,23 +45,37 @@ LEVER_COMPANIES = [
     "glean", "cresta", "adept",
 ]
 
-# Workable boards: https://apply.workable.com/api/v2/accounts/{slug}/jobs
-# Verified Feb 2026 + expanded Batch 3 (Apr 2026).
-# Pruned 2026-06-12 (loop round 4): every slug probed live; these 7 return
-# HTTP 404 (account gone) and only burned a request per run: labelbox, adept,
-# livinglens, legalandgeneral, vorboss, welcometothejungle, rateit.
-# Empty-but-valid boards (HTTP 200, 0 openings today) are KEPT — they can
-# repopulate. The API itself is healthy (huggingface returned 9 jobs).
+# Workable boards: POST https://apply.workable.com/api/v2/accounts/{slug}/jobs
+# RE-VERIFIED LIVE 2026-08-10 — 38 slugs checked (all 18 configured + 20 new).
+# The old 18-slug list yielded ZERO usable jobs: 17 returned HTTP 200 with
+# total=0 (drained boards) and were dropped; only "huggingface" still had
+# postings (7), and all 7 are US/FR so _is_uk_or_remote drops them — kept
+# anyway because it is a real board that can repopulate.
+# The 20 slugs below were each observed TWICE on separate runs: HTTP 200 AND
+# total >= 1, with page-1 UK-or-remote yield measured through the real
+# _is_uk_or_remote from sources/base.py.
+# TRAP: this endpoint returns HTTP 200 with total=0 for accounts that do NOT
+# exist, so the status code alone never proves a slug is real. Require
+# total >= 1 before adding anything here.
+# KNOWN GAP (not fixed here): workable.py reads only data["results"] and never
+# follows the nextPage cursor, so the API's 10-per-page cap means big boards
+# (abm-careers 168, charity-link 161, indra-uk 53) contribute at most 10 jobs
+# per run. ~600 postings across this list stay unread until that is fixed.
+# CHURN RISK: warden-ai (1 job) and gener8 (3) are most likely to empty next;
+# abm-careers, charity-link, indra-uk and icmp-6 are the durable core.
 WORKABLE_COMPANIES = [
-    # Original verified (8 → 6 after pruning)
-    "benevolentai", "exscientia", "oxa", "cervest",
-    "huggingface", "runway",
-    # Batch 3 additions (17 → 12 after pruning) — UK/EU startups using Workable
-    "typeform", "phrasee", "signal",
-    "gusto",
-    "wunderman", "farfetch", "bumble", "trustpilot",
-    "papa", "upscale",
-    "mindlabs", "flo",
+    # Survivor of the pre-2026-08-10 list (1)
+    "huggingface",
+    # Verified live 2026-08-10 (20) — tech / AI
+    "appvia", "suade", "yapily", "warden-ai",
+    "tomoro-ai", "gener8", "ngeneration", "indra-uk",
+    # facilities / property / construction
+    "abm-careers", "workman-llp", "statom", "london-energy-1",
+    "peopleworth",
+    # retail / marketing / agency
+    "debenhamsgroup", "n2o-1", "soar-with-us",
+    # recruitment / education / medical / charity
+    "lafosse", "icmp-6", "costello-medical", "charity-link",
 ]
 
 # Ashby boards: https://api.ashbyhq.com/posting-api/job-board/{slug}
@@ -90,26 +104,71 @@ SMARTRECRUITERS_COMPANIES = [
 ]
 
 # Pinpoint boards: https://{slug}.pinpointhq.com/postings.json
-# Verified Feb 2026 + expanded Batch 3 (Apr 2026).
+# RE-VERIFIED LIVE 2026-08-10 — 53 slugs checked (all 15 configured + 38 new).
+# 14 of the 15 configured slugs returned HTTP 404 with an identical
+# 11,684-byte error page — the same bytes three nonsense control slugs got, so
+# the tenants genuinely do not exist — and were dropped. Only "arm" survives
+# (HTTP 200, 4 jobs). Each of the 38 below was curled twice: HTTP 200 with
+# >= 1 real posting; 1,391 postings total across them on 2026-08-10.
+#
+# *** DO NOT ADD A PINPOINT SLUG ON "HTTP 200 + >= 1 job" ALONE. ***
+# Pinpoint serves HTTP 200 with FAKE SEED JOBS on trial/sandbox tenants. The
+# signature is this verbatim posting set, byte-identical across unrelated
+# companies: "Head of DEI - Belfast" / "- US" / "- UK", "Marketing Manager"
+# (Paris), "Customer Service Rep" (New York). Such a tenant would ingest
+# cleanly and inject fabricated jobs into the shared catalog. Confirmed
+# poisoned on 2026-08-10, BANNED: grantthornton, nspcc, saga, soenergy,
+# simplyhealth, proximie, schroders, macmillan, rsmuk, mha, scope, esure,
+# azets, admiralgroup, hcone, cazoo, rightmove, travelperk, elder, sonovate,
+# thoughtmachine. Every slug below was checked against that signature.
+#
+# BOUNDS: this is not an enumeration of Pinpoint's customers — CT-log mining
+# is impossible (customer boards sit behind a wildcard *.pinpointhq.com cert),
+# so the list is what search + ~280 guess-and-verify probes could prove.
 PINPOINT_COMPANIES = [
-    # Original verified (8)
-    "moneysupermarket", "bulb", "starling-bank",
-    "octopus-energy", "faculty", "arm", "sky", "tesco-technology",
-    # Batch 3 additions (7)
-    "m-and-s", "john-lewis-partnership", "asda-stores",
-    "british-airways", "specsavers", "morrisons", "boots",
+    # Survivor of the pre-2026-08-10 list (1)
+    "arm",
+    # Verified live 2026-08-10 (38), highest posting count first
+    "priorygroup", "davies", "networkplus", "natcen",
+    "sumer", "cfc", "lush", "ogier",
+    "pxlimited", "djh", "rowdentech", "made-tech",
+    "sandpiperci", "goodenergy", "bluecross", "lvcaregroup",
+    "digitalscience", "stint", "thyssenkrupp", "guernseyelectricity",
+    "whiteswandata", "zencargo", "wearemapp", "nmc",
+    "wfs", "snapanalytics", "collascrill", "gordonmurraygroup",
+    "harpercollins", "jerseywater", "bedellcristin", "fundapps",
+    "ports", "jerseypost", "jtglobal", "wealthwizards",
+    "accenture", "workwithus",
 ]
 
 # Recruitee boards: https://{slug}.recruitee.com/api/offers/
-# Verified Feb 2026 + expanded Batch 3 (Apr 2026).
+# RE-VERIFIED LIVE 2026-08-10 — 50 slugs checked (all 20 configured + 30 new).
+# 19 of the 20 configured slugs returned HTTP 404 with an empty body (board
+# gone) and were dropped; only "wonderkind" still returns HTTP 200 (2 offers),
+# but both offers fail _is_uk_or_remote, so the old list produced literally
+# nothing. wonderkind is kept because the board is real and can repopulate.
+# Each of the 30 below returned HTTP 200 with >= 1 offer AND >= 1 offer passing
+# the source's own _is_uk_or_remote (imported from sources/base.py, not a
+# lookalike heuristic); counts reproduced identically on two probe runs.
+# NOTE: "causalens" (causaLens) is NOT a respelling of the dropped "causaly"
+# (Causaly) — different companies. Causaly's board is gone.
+# BOUNDS: guessing famous UK tech names does not work on Recruitee (29 such
+# guesses all 404'd — they are on Greenhouse/Workday). These came from
+# harvesting live *.recruitee.com career pages, then curl-verifying each.
+# Several are retail/logistics/hospitality rather than tech (dckgroup,
+# itxuklimited, theentouragegroup, kikomilano) — high UK volume, not tech-heavy.
 RECRUITEE_COMPANIES = [
-    # Original verified (8)
-    "peak-ai", "satalia", "speech-graphics",
-    "signal-ai", "eigen-technologies", "causaly", "kheiron-medical", "polyai",
-    # Batch 3 additions (12)
-    "contentstack", "hootsuite", "deezer", "criteo",
-    "klarna", "n26", "backbase", "mollie",
-    "ada", "productboard", "wonderkind", "tresorit",
+    # Survivor of the pre-2026-08-10 list (1)
+    "wonderkind",
+    # Verified live 2026-08-10 (30), highest UK-or-remote yield first
+    "dckgroup", "transperfect", "itxuklimited", "theentouragegroup",
+    "customssupport", "framestore", "bcngroup", "deephealth",
+    "kikomilano", "bitfinex", "gevgroupltd", "theconfigteamcareers",
+    "signode", "sfors", "hybrid", "grid",
+    "natilik", "avenircollective", "junolegal", "talentheroesclientats",
+    "bespokebritannia", "gain", "jeranexbp", "medica",
+    "metyisag", "wmreplyjobs", "fastned", "causalens",
+    "digitickets", "zeotap",
 ]
 
 # Workday boards: POST https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
@@ -184,23 +243,8 @@ COMPANY_NAME_OVERRIDES = {
     "checkout": "Checkout.com",
     "costa-coffee": "Costa Coffee",
     "publicisgroup": "Publicis",
-    # Pinpoint
-    "moneysupermarket": "MoneySuperMarket",
-    "starling-bank": "Starling Bank",
-    "octopus-energy": "Octopus Energy",
-    "m-and-s": "Marks & Spencer",
-    "john-lewis-partnership": "John Lewis Partnership",
-    "asda-stores": "Asda",
-    "british-airways": "British Airways",
-    "tesco-technology": "Tesco Technology",
-    # Recruitee
-    "peak-ai": "Peak AI",
-    "speech-graphics": "Speech Graphics",
-    "signal-ai": "Signal AI",
-    "eigen-technologies": "Eigen Technologies",
-    "kheiron-medical": "Kheiron Medical",
-    "contentstack": "Contentstack",
-    "productboard": "Productboard",
+    # Pinpoint (2026-08-10: the 14 dead slugs' overrides were removed with them)
+    "ports": "Ports of Jersey",
     # Lever
     "mosaic-ml": "MosaicML",
     "fiveai": "Five AI",
@@ -211,21 +255,48 @@ COMPANY_NAME_OVERRIDES = {
     "oxfordnanopore": "Oxford Nanopore Technologies",
     # Ashby (new)
     "11x": "11x",
-    # Workable (new)
-    "legalandgeneral": "Legal & General",
-    "welcometothejungle": "Welcome to the Jungle",
+    # Workable — the "-1"/"-6" tails are Workable's own uniqueness suffixes,
+    # not part of the company name. Slugs whose real trading name I could not
+    # verify are intentionally left to the slug.title() fallback rather than
+    # guessed (2026-08-10).
+    "london-energy-1": "London Energy",
+    "n2o-1": "N2O",
+    # Personio — "AG" is a German legal-form suffix, stripped for display
+    "exnaton-ag": "Exnaton",
+    "astormueller-ag": "Astormueller",
 }
 
 # Personio ATS boards: https://{slug}.jobs.personio.de/xml?language=en
-# UK/EU companies using Personio. Verified Feb 2026 + expanded Batch 3.
+# RE-VERIFIED LIVE 2026-08-10 — 43 slugs checked (all 18 configured + 25 new).
+# 16 of the 18 configured slugs returned HTTP 307 -> https://personio.com (that
+# subdomain no longer exists) and "finn" returned an empty <workzag-jobs/> feed
+# — all 17 dropped. Only "personio" itself still serves a feed (1 position,
+# Berlin/Munich, so it yields no UK jobs); kept as the vendor liveness canary.
+# Each of the 25 below returned HTTP 200 with >= 1 <position>, and was
+# re-parsed through the real _is_uk_or_remote from sources/base.py.
+# NOTE: a 307 is NOT a vendor shutdown — the XML board is alive.
+# {slug}.jobs.personio.com is an alias of the same board, so switching domain
+# does not revive a dead slug.
+# DELIBERATELY EXCLUDED: high-volume DACH-only boards that only "pass" because
+# German city names are absent from FOREIGN_INDICATORS and fall through the
+# unknown-location -> keep branch (skalbach-gmbh 168, matrix42 28,
+# holidaycheck, recup, coinmerce, the-usual, ...). Volume, not UK relevance.
+# COST NOTE: personio.py sleeps 3s between companies, so 26 slugs = ~75s per
+# run before any HTTP time. It also breaks out after 2 consecutive empty
+# responses — with the old all-dead list that fired immediately, which is why
+# this source was silently contributing nothing.
 PERSONIO_COMPANIES = [
-    # Original (10)
-    "celonis", "trade-republic", "sennder", "contentful",
-    "personio", "forto", "taxfix", "wonderkind",
-    "airfocus", "heydata",
-    # Batch 3 additions (8)
-    "getyourguide", "omio", "finn", "choco",
-    "scalable", "raisin", "flink", "lanamedical",
+    # Survivor of the pre-2026-08-10 list (1)
+    "personio",
+    # Verified live 2026-08-10 (25) — genuine UK offices first
+    "flatpay", "stark", "merantix", "intigriti",
+    "herdify", "olio", "exnaton-ag",
+    # remote-first / remote-bearing boards that pass the UK-or-remote filter
+    "war-child-alliance", "moore-tk", "holidu", "index-soft",
+    "gridx", "hahnair", "gnosis", "astormueller-ag",
+    "metycle", "tracify", "maltego", "super-ai",
+    "otonomee", "k15t", "ling", "edgeless-systems",
+    "friendsurance", "helloinside",
 ]
 
 # SAP SuccessFactors career site sitemaps

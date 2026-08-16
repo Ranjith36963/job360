@@ -43,16 +43,23 @@ class RealWorkFromAnywhereSource(BaseJobSource):
             link = (item.findtext("link") or "").strip()
             description = (item.findtext("description") or "").strip()
             pub_date = (item.findtext("pubDate") or "").strip()
+            author = (item.findtext("author") or "").strip()
 
             if not _is_uk_or_remote(f"{title} {description}"):
                 continue
 
-            # Extract company from title
-            company = "Unknown"
-            for sep in [" at ", " - ", " @ "]:
-                if sep in title:
-                    company = title.split(sep, 1)[1].strip()
-                    break
+            # <author> (100% fill live) holds the exact company name.
+            # Splitting the title on " at "/" - "/" @ " is brittle (breaks on
+            # any title containing those substrings) — prefer author, fall
+            # back to the old split only when it's missing.
+            if author:
+                company = author
+            else:
+                company = "Unknown"
+                for sep in [" at ", " - ", " @ "]:
+                    if sep in title:
+                        company = title.split(sep, 1)[1].strip()
+                        break
 
             now_iso = datetime.now(timezone.utc).isoformat()
             posted_at = self._parse_rss_date(pub_date) if pub_date else None

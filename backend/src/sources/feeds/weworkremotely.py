@@ -1,6 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from typing import Optional
 
 # M18: XXE-safe parse of untrusted feed XML. defusedxml ships no type stubs
 # and types-defusedxml is not a project dependency, hence the import ignore.
@@ -44,6 +45,7 @@ class WeWorkRemotelySource(BaseJobSource):
             description = (item.findtext("description") or "").strip()
             pub_date = (item.findtext("pubDate") or "").strip()
             region = (item.findtext("region") or "").strip()
+            expires_at = (item.findtext("expires_at") or "").strip()
 
             # Check region for UK/Europe/EMEA/GMT compatibility
             location = region or "Remote"
@@ -62,6 +64,17 @@ class WeWorkRemotelySource(BaseJobSource):
             # unparseable value used to be stamped "high" purely because the
             # field existed — certifying as trustworthy a date we could not read.
             confidence = "high" if posted_at else "low"
+
+            # expires_at (100% fill live) is the listing's own application
+            # deadline, in the same RSS date format as pubDate. Use the
+            # STRICT parser here — deadline must NEVER be fabricated (see
+            # Job.deadline docstring in models.py), unlike _parse_rss_date's
+            # "now" fallback which is fine for posted_at but would be a lie
+            # for a deadline.
+            deadline_iso = self._parse_rss_date_strict(expires_at)
+            deadline = deadline_iso[:10] if deadline_iso else None
+            deadline_source = "listing" if deadline else None
+
             jobs.append(Job(
                 title=title,
                 company=company,
@@ -73,6 +86,8 @@ class WeWorkRemotelySource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=pub_date or None,
+                deadline=deadline,
+                deadline_source=deadline_source,
             ))
 
         return jobs
@@ -88,3 +103,18 @@ class WeWorkRemotelySource(BaseJobSource):
             except ValueError:
                 continue
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _parse_rss_date_strict(date_str: str) -> Optional[str]:
+        """Same formats as _parse_rss_date, but returns None on failure
+        instead of fabricating "now" — safe for fields (like deadline) that
+        must never be guessed."""
+        if not date_str:
+            return None
+        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z",
+                    "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(date_str.strip(), fmt).isoformat()
+            except ValueError:
+                continue
+        return None

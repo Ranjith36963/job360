@@ -28,7 +28,10 @@ class JobicySource(BaseJobSource):
             return []
         for item in cast(dict[str, Any], data)["jobs"]:
             title = item.get("jobTitle", "")
-            description = item.get("jobExcerpt", "")
+            # `jobDescription` (100% fill) is the full prose posting;
+            # `jobExcerpt` is just a short teaser. Prefer the full text and
+            # fall back to the excerpt only when the description is missing.
+            description = item.get("jobDescription") or item.get("jobExcerpt", "")
             now_iso = datetime.now(timezone.utc).isoformat()
             raw_pub = item.get("pubDate")
             posted_at, confidence = normalize_posted_at(raw_pub)
@@ -37,8 +40,11 @@ class JobicySource(BaseJobSource):
                 title=title,
                 company=item.get("companyName", ""),
                 location=item.get("jobGeo", ""),
-                salary_min=item.get("annualSalaryMin"),
-                salary_max=item.get("annualSalaryMax"),
+                # `annualSalaryMin`/`annualSalaryMax` never appear on the live
+                # API — verified against a real response. The real keys are
+                # `salaryMin`/`salaryMax` (23% fill).
+                salary_min=item.get("salaryMin"),
+                salary_max=item.get("salaryMax"),
                 description=description,
                 apply_url=item.get("url", ""),
                 source=self.name,
@@ -46,6 +52,8 @@ class JobicySource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_pub,
+                # `jobLevel` (100% fill, e.g. "Senior").
+                experience_level=item.get("jobLevel", ""),
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Jobicy: found %s relevant jobs", len(jobs))

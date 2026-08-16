@@ -40,32 +40,34 @@ def test_sources_command():
         assert name in result.output
 
 
-def test_source_registry_has_47_sources():
+def test_source_registry_has_41_sources():
     """SOURCE_REGISTRY: 46 after the 2026-06 M6 rotation (-4 dead), then 47
     after gov_apprenticeships was restored 2026-06-16 against the DfE
-    Display Advert API v2 (keyed).
+    Display Advert API v2 (keyed), then 41 after the 2026-08-10 rotation
+    dropped 6 permanently-dead upstreams (verified live): aijobs,
+    jobs_ac_uk, biospace, rippling, nhs_jobs_xml, workanywhere.
+    NOTE: nhs_jobs (the non-XML source) is alive and stays.
 
     Per CLAUDE.md rule #8: when adding/removing sources, update this
     assertion AND the expected set AND RATE_LIMITS entry AND
     _build_sources() list. All four must agree.
     """
-    assert len(SOURCE_REGISTRY) == 47
+    assert len(SOURCE_REGISTRY) == 41
     expected = {"reed", "adzuna", "jsearch", "arbeitnow", "remoteok",
                 "jobicy", "himalayas", "greenhouse", "lever", "workable",
                 "ashby", "remotive", "jooble", "linkedin",
                 "smartrecruiters", "pinpoint", "recruitee", "indeed", "glassdoor",
                 "workday", "google_jobs", "devitjobs", "landingjobs",
-                "aijobs", "themuse", "hackernews", "careerjet", "findwork",
+                "themuse", "hackernews", "careerjet", "findwork",
                 "nofluffjobs",
                 # Phase 4 new sources (minus Batch 3 drops: yc_companies, nomis, findajob)
-                "hn_jobs", "jobs_ac_uk", "nhs_jobs",
-                "personio", "workanywhere", "weworkremotely", "realworkfromanywhere",
-                "biospace", "climatebase", "eightykhours",
+                "hn_jobs", "nhs_jobs",
+                "personio", "weworkremotely", "realworkfromanywhere",
+                "climatebase", "eightykhours",
                 "bcs_jobs", "uni_jobs", "successfactors",
                 "aijobs_ai",
                 # Batch 3 additions (jobtensor, comeet dropped 2026-06 M6)
-                "teaching_vacancies", "nhs_jobs_xml",
-                "rippling",
+                "teaching_vacancies",
                 # Restored 2026-06-16 on the DfE Display Advert API v2 (keyed)
                 "gov_apprenticeships"}
     assert set(SOURCE_REGISTRY.keys()) == expected

@@ -309,6 +309,23 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
     }
 
+    # The real board queries, made visible. `generate_search_config` is the
+    # SAME call the pipeline makes (src/main.py:760) and the job-detail
+    # re-score makes (api/routes/jobs.py:751), so what the user reads here is
+    # what the boards were actually asked — not a second, drifting
+    # reconstruction of it. Best-effort by design: a generator failure must
+    # cost the user a quiet line, never their whole profile page.
+    search_titles: list[str] = []
+    try:
+        from src.services.profile.keyword_generator import (  # noqa: PLC0415 — lazy (rule #16)
+            generate_search_config,
+        )
+
+        search_titles = list(generate_search_config(profile).search_titles)
+    except Exception:
+        logger.warning("search_titles unavailable for user %s", user_id, exc_info=True)
+        search_titles = []
+
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
     # migration just returns None.
@@ -333,6 +350,7 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         github_temporal=github_temporal,
         github_detail=github_detail,
         current_version_id=current_version_id,
+        search_titles=search_titles,
     )
 
 
