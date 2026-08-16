@@ -7,7 +7,7 @@ false-allow trap found before this shipped.
 
 The governing rule (owner, 2026-08-07): never hand-enumerate an UNBOUNDED set.
 Foreign cities are unbounded, so they are never typed; UK places are finite and
-published, so the gate matches against DATA in `data/uk_gazetteer/`. Countries
+published, so the gate matches against DATA in `src/data/uk_gazetteer/`. Countries
 and admin divisions stay enumerated because those are CLOSED sets — a complete
 closed set is not the same mistake as a sample of an open one.
 """
@@ -98,6 +98,46 @@ class TestForeignOverrideSurvivesInversion:
         ambiguous, so "London, New York" still survives."""
         assert check_uk("London, New York", "greenhouse").allowed
         assert not check_uk("Sydney, Australia", "greenhouse").allowed
+
+    # A plain foreign ADDRESS is not a dual-site posting.
+    #
+    # Measured on the live catalog 2026-08-12: 373 rows were being admitted as
+    # `dual_site_includes_uk`, and the "UK" half of several was a UK hamlet
+    # called California or New York (both are also US states, so they sit in
+    # the gazetteer AND in foreign_admin). "San Jose, California, US" is one
+    # American address, not a job in two countries — the tell is that its only
+    # UK-looking segment IS the foreign one. The scorer's -15 foreign penalty
+    # used to mask this; removing it (rule #30) leaves the door as the only
+    # defence, so the door has to be right.
+    #
+    # Still admitted, on purpose: "London, Ontario", "New York, NY" and
+    # "Remote - New York". A UK city name beside a foreign region is how both
+    # a foreign address and a genuine two-site ad are written, and "London,
+    # New York" is asserted ALLOWED right above. Splitting them needs
+    # ambiguity DATA, not code. The wider rule that would have caught them
+    # also refused three real UK rows in the live dry-run — never false-block
+    # a UK job to catch a foreign one.
+    @pytest.mark.parametrize("loc", [
+        "San Jose, California, US",
+        "Milpitas, California, US",
+        "US, California, Folsom",
+        "Maryland; Virginia; Washington, D.C.",
+    ])
+    def test_foreign_address_is_not_a_dual_site_posting(self, loc: str) -> None:
+        v = check_uk(loc, "greenhouse")
+        assert not v.allowed, f"{loc} → {v.reason}"
+
+    @pytest.mark.parametrize("loc", [
+        "Manchester",                       # UK city that is also a foreign admin name
+        "Southampton",
+        "London / New York",                # the genuine two-site ad the escape exists for
+        "Manchester, England, United Kingdom",
+        "Remote (Canada, UK, EU)",          # explicit UK signal wins
+        "London, UK; Ontario, CAN; Remote-Friendly, United States",
+    ])
+    def test_real_uk_and_genuine_dual_site_rows_survive(self, loc: str) -> None:
+        v = check_uk(loc, "greenhouse")
+        assert v.allowed, f"{loc} → {v.reason}"
 
 
 class TestComputedAmbiguity:
@@ -200,3 +240,131 @@ class TestMessyFreeText:
     def test_town_with_trailing_noise_still_resolves(self) -> None:
         """Longest-first n-gram matching inside a segment."""
         assert check_uk("Newcastle upon Tyne hybrid working", "greenhouse").allowed
+
+
+class TestTheGazetteerActuallyShipsToProduction:
+    """Issue #260. The gate logic was CORRECT and still let foreign jobs in.
+
+    Measured in prod on 2026-08-11 (worker deployment e6c87061, the 04:06 UTC
+    refresh_catalog run over 6,087 fetched jobs): "UK gate blocked 372 job(s)
+    before storage: no_location_on_global_source=46,
+    remote_restricted_to_other_region=1,
+    unverified_location_on_global_source=325". Not ONE `foreign_location` and
+    not ONE `uk_gazetteer` verdict in the whole run — impossible unless both
+    data sets were EMPTY.
+
+    They were. `pip install .` installs only the `src*` packages, so
+    `backend/data/` never reached site-packages, and `_gazetteer()` degrades to
+    empty frozensets when the directory is missing. The same run logged
+    "Permission denied: '/usr/local/lib/python3.12/site-packages/data'" — that
+    is the exact directory `_DATA` resolved to in the container.
+
+    Every test above passes with the files sitting on a dev disk, so the whole
+    suite stayed green while production ran with no gazetteer at all. These
+    three tests are the ones that would have caught it: they assert the RUNTIME
+    path, the packaging that fills it, and that an empty load is LOUD.
+    """
+
+    def test_data_sits_inside_the_installed_package_tree(self) -> None:
+        import src.services.uk_gate as gate
+
+        for name in ("uk_places.txt", "foreign_admin.txt", "ambiguous.txt"):
+            path = gate._DATA / name
+            assert path.exists(), (
+                f"{name} is not under the package tree ({gate._DATA}). Anything "
+                "outside `src/` is not installed by `pip install .`, so the gate "
+                "ships blind — exactly issue #260."
+            )
+            assert path.stat().st_size > 1024, f"{name} is present but empty"
+
+    def test_packaging_config_ships_the_data_with_the_wheel(self) -> None:
+        """Living under `src/` is necessary but not sufficient — setuptools
+        copies non-.py files only when they are declared as package data."""
+        import src.services.uk_gate as gate
+
+        pyproject = (gate._DATA.parent.parent.parent / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+        assert "[tool.setuptools.package-data]" in pyproject
+        assert "data/uk_gazetteer" in pyproject
+
+    def test_a_missing_gazetteer_is_loud(self, tmp_path, caplog) -> None:
+        """Graceful degradation is right — a lost data file must not empty the
+        catalog. SILENT degradation is what cost four days."""
+        import logging
+
+        import src.services.uk_gate as gate
+
+        original = gate._DATA
+        gate._gazetteer.cache_clear()
+        try:
+            gate._DATA = tmp_path / "absent"
+            with caplog.at_level(logging.ERROR):
+                places, foreign, ambiguous = gate._gazetteer()
+            assert not places and not foreign and not ambiguous
+            assert any(
+                "gazetteer" in r.getMessage().lower() for r in caplog.records
+            ), "an empty gazetteer must scream in the logs, not pass silently"
+        finally:
+            gate._DATA = original
+            gate._gazetteer.cache_clear()
+
+
+class TestProdRowsThatReachedTheCatalog:
+    """Real rows found live in `jobs` on 2026-08-11 (ids 65415-65579, plus
+    54746 from 2026-08-08) — every one stored AFTER the gate merged on
+    2026-08-07. They are the acceptance test for the packaging fix."""
+
+    @pytest.mark.parametrize("source,loc", [
+        ("arbeitnow", "Germany (Remote)"),
+        ("greenhouse", "Brazil (Remote)"),
+        ("smartrecruiters", "São Paulo, br"),
+        ("ashby", "India - Remote"),
+        ("greenhouse", "Warsaw"),
+        ("workday", "Cambridge (USA)"),
+    ])
+    def test_row_is_refused(self, source: str, loc: str) -> None:
+        assert not check_uk(loc, source).allowed, loc
+
+
+class TestRemoteGluedToACountryName:
+    """The second hole, still open even with the data present: the country
+    override matched a WHOLE segment, so "US-Remote" (one segment, "us remote"
+    after normalisation) missed it and step 5's remote branch waved it through.
+
+    Dry-run over the 4,647 live ACTIVE rows (2026-08-11, rule #30): stripping
+    the remote words and re-testing the remainder flips 28 rows ALLOW->BLOCK —
+    every one a US-only remote from greenhouse — and 0 UK rows. 11 more rows
+    keep their allow through the dual-site escape.
+    """
+
+    @pytest.mark.parametrize("loc", [
+        "US-Remote", "US Remote", "US remote", "Remote US", "Remote India",
+        "Chicago, US-Remote", "US-Remote, Atlanta, Chicago",
+        "US-Chicago; US-Atlanta; US-Remote; Canada-Toronto; Canada-Remote",
+    ])
+    def test_country_glued_to_remote_is_refused(self, loc: str) -> None:
+        v = check_uk(loc, "greenhouse")
+        assert not v.allowed and v.reason == "foreign_location", loc
+
+    @pytest.mark.parametrize("loc", [
+        "Remote", "REMOTE", "Flexible / Remote", "Anywhere in the World",
+        "Work from home",
+    ])
+    def test_unqualified_remote_is_still_allowed(self, loc: str) -> None:
+        """56 'Anywhere in the World' rows are legitimately reachable from the
+        UK. Tightening must not cost them."""
+        assert check_uk(loc, "weworkremotely").allowed, loc
+
+    @pytest.mark.parametrize("loc", [
+        "London; Remote", "Remote - Edinburgh", "Manchester, Remote",
+        "London, US-Remote",
+    ])
+    def test_uk_place_beside_remote_is_still_allowed(self, loc: str) -> None:
+        assert check_uk(loc, "greenhouse").allowed, loc
+
+    def test_an_ordinary_place_is_decided_exactly_as_before(self) -> None:
+        """The strip only fires on a segment that really contains a remote
+        term, so nothing else changes verdict."""
+        assert check_uk("Shoreham-by-Sea", "reed").allowed
+        assert check_uk("Home Park", "reed").allowed

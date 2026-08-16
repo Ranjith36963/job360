@@ -88,7 +88,9 @@ PYLOCK
   fi
 fi
 
-CHANGED="$(git status --porcelain -- backend frontend | awk '{print $2}')"
+# -uall: without it an untracked DIRECTORY collapses to a single 'dir/' entry,
+# which matches no rule below — brand-new code then ran ZERO tests. (2026-08-11)
+CHANGED="$(git status --porcelain -uall -- backend frontend | awk '{print $2}')"
 BACKEND_CHANGED=$(echo "$CHANGED" | grep -c '^backend/' || true)
 FRONTEND_CHANGED=$(echo "$CHANGED" | grep -c '^frontend/' || true)
 
@@ -190,8 +192,31 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
         (cd backend && python -m py_compile $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
       fi
     else
-      echo "[gate] no changed file maps to a test — running FULL backend suite (conservative fallback)"
-      (cd backend && python -m pytest -q -p no:randomly 2>&1 | tee -a "$GATE_LOG")
+      # Was: run the FULL suite (2,003 tests, ~47 min) whenever nothing mapped.
+      # That fired on docs/.gitignore/config changes and on every route file with
+      # no test_<name>.py — i.e. the common case, not the edge case. CI (ci.yml)
+      # runs the same full pytest + ruff + mypy ratchet on every PR in 5-6 min,
+      # so the local full run bought nothing but delay. Tiered instead:
+      UNMAPPED_PY="$(echo "$CHANGED" | grep '^backend/.*\.py$' || true)"
+      if [ -n "${UNMAPPED_PY// /}" ]; then
+        # Real Python changed but no test maps to it -> broad-but-fast smoke set.
+        SMOKE=""
+        for t in tests/test_pg_translate.py tests/test_models.py tests/test_database.py                  tests/test_migrations.py tests/test_api.py; do
+          [ -f "backend/$t" ] && SMOKE="$SMOKE $t"
+        done
+        # An empty SMOKE would make pytest run with NO args = the whole suite,
+        # silently restoring the thing we just removed. Fail loud instead.
+        if [ -z "${SMOKE// /}" ]; then
+          echo "[gate] FAIL: smoke set empty (candidate test files missing/renamed)." >&2
+          echo "[gate] Run: bash scripts/agent-gate.sh --full" >&2
+          exit 1
+        fi
+        echo "[gate] no test maps to the changed .py — SMOKE set (not the full suite):$SMOKE"
+        echo "[gate] full pytest+ruff+mypy still run in CI on every PR (ci.yml)."
+        (cd backend && python -m pytest -q -p no:randomly $SMOKE 2>&1 | tee -a "$GATE_LOG")
+      else
+        echo "[gate] backend changes are docs/config only — ruff, no pytest"
+      fi
       echo "[gate] ruff (full backend)..."
       (cd backend && python -m ruff check . 2>&1 | tee -a "$GATE_LOG")
     fi

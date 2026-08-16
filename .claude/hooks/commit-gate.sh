@@ -31,12 +31,133 @@ if [ -z "$CMD" ]; then
   esac
 fi
 
-case "$CMD" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
+# Which commands actually CREATE A COMMIT.
+#
+# The old test was a single substring match on "git commit". Probed 2026-08-11,
+# 7 of 8 real commit-creating forms slipped straight through it:
+#     git commit -m x                  BLOCKED
+#     git -C . commit -m x             ALLOWED   <- global flag before the verb
+#     git  commit -m x                 ALLOWED   <- two spaces
+#     git -c user.name=x commit -m x   ALLOWED
+#     git merge --no-ff foo            ALLOWED   <- a merge tree was never tested
+#     git cherry-pick abc              ALLOWED
+#     git revert abc                   ALLOWED
+#     git rebase --continue            ALLOWED   <- conflict resolution, untested
+#
+# Parse instead of pattern-match: find the `git` token, skip any global flags
+# (and their values) that may sit between it and the subcommand, then compare the
+# subcommand against the list. Every one of these produces a tree that no test has
+# seen, which is exactly what the stamp exists to prevent.
+_creates_commit() {
+  local tokens verb i n skip
+  # shellcheck disable=SC2206
+  tokens=($1)
+  n=${#tokens[@]}
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    case "${tokens[$i]}" in
+      git|*/git|git.exe|*/git.exe)
+        i=$((i+1)); skip=0
+        while [ "$i" -lt "$n" ]; do
+          if [ "$skip" -eq 1 ]; then skip=0; i=$((i+1)); continue; fi
+          case "${tokens[$i]}" in
+            # Global flags that take a separate value argument.
+            -C|-c|--git-dir|--work-tree|--namespace|--exec-path)
+              skip=1; i=$((i+1)); continue ;;
+            -*|--*) i=$((i+1)); continue ;;
+            *) break ;;
+          esac
+        done
+        [ "$i" -lt "$n" ] || return 1
+        verb="${tokens[$i]}"
+        case "$verb" in
+          commit|merge|cherry-pick|revert|rebase|am) return 0 ;;
+          *) return 1 ;;
+        esac
+        ;;
+    esac
+    i=$((i+1))
+  done
+  return 1
+}
+
+_creates_commit "$CMD" || exit 0
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# GUARDS ARE NOT EXEMPT FROM BEING CHECKED.
+#
+# The early exit below waves through any commit that touches nothing under
+# backend/ or frontend/ — correct for docs, but it also means the hooks and
+# workflows that ENFORCE everything else commit with zero verification. Three
+# guards shipped broken on 2026-08-11 for exactly this reason: a size check that
+# swallowed its own exit code, a sed range whose anchor had been deleted, and a
+# drift rule blind to the file carrying its bug. All three were syntactically
+# valid, so this catches a narrower class — but a YAML or bash parse error in a
+# guard is silent until the loop next runs, which can be a day later.
+GUARD_FILES="$(git status --porcelain -uall -- .claude/hooks .github/workflows scripts \
+               | awk '{print $NF}')"
+if [ -n "$GUARD_FILES" ]; then
+  for f in $GUARD_FILES; do
+    [ -f "$ROOT/$f" ] || continue
+    case "$f" in
+      *.sh)
+        bash -n "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f is not valid bash:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+      *.yml|*.yaml)
+        python -c "import sys,yaml;yaml.safe_load(open(sys.argv[1],encoding='utf-8'))" \
+          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f is not valid YAML:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+      *.py)
+        python -c "import sys,ast;ast.parse(open(sys.argv[1],encoding='utf-8').read())" \
+          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f does not parse as Python:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+    esac
+  done
+fi
+
+# GUARDS ARE NOT EXEMPT FROM BEING CHECKED.
+#
+# The early exit below waves through any commit that touches nothing under
+# backend/ or frontend/ — correct for docs, but it also means the hooks and
+# workflows that ENFORCE everything else commit with zero verification. Three
+# guards shipped broken on 2026-08-11 for exactly this reason: a size check that
+# swallowed its own exit code, a sed range whose anchor had been deleted, and a
+# drift rule blind to the file carrying its bug. All three were syntactically
+# valid, so this catches a narrower class — but a YAML or bash parse error in a
+# guard is silent until the loop next runs, which can be a day later.
+GUARD_FILES="$(git status --porcelain -uall -- .claude/hooks .github/workflows scripts \
+               | awk '{print $NF}')"
+if [ -n "$GUARD_FILES" ]; then
+  for f in $GUARD_FILES; do
+    [ -f "$ROOT/$f" ] || continue
+    case "$f" in
+      *.sh)
+        bash -n "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f is not valid bash:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+      *.yml|*.yaml)
+        python -c "import sys,yaml;yaml.safe_load(open(sys.argv[1],encoding='utf-8'))" \
+          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f is not valid YAML:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+      *.py)
+        python -c "import sys,ast;ast.parse(open(sys.argv[1],encoding='utf-8').read())" \
+          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
+          echo "[commit-gate] BLOCKED: $f does not parse as Python:" >&2
+          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
+        rm -f /tmp/gate-syn.$$ ;;
+    esac
+  done
+fi
 
 # Docs/scripts/config-only tree: no changes at all under backend/ or frontend/
 # means nothing testable is being committed — allow instantly.

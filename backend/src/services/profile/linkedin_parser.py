@@ -226,6 +226,92 @@ def _extract_header_fields(header_text: str) -> dict[str, str]:
     return {"name": name, "headline": headline, "industry": industry}
 
 
+# NOTE: deliberately NOT named _EMAIL_RE. One already exists further down this
+# module with a CAPTURE GROUP, and being defined later it would shadow this one
+# — `findall` would then return only the group (the local part), silently
+# storing "ada" instead of "ada@example.com". Caught by running the parser over
+# a real export rather than a fixture.
+_CONTACT_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?[\w-]+\.[\w.-]+(?:/[\w./?%&=~-]*)?")
+
+
+def _is_linkedin_host(url: str) -> bool:
+    """True when ``url``'s HOST is linkedin.com (or a subdomain of it).
+
+    Compares the parsed hostname, never a substring. ``"linkedin.com" in url``
+    is wrong in both directions and CodeQL flags it (py/incomplete-url-
+    substring-sanitization, high):
+      * ``linkedin.com.attacker.io``  would be TREATED as LinkedIn, and
+      * ``notlinkedin.com``           would be wrongly dropped from a person's
+        own website list.
+
+    A scheme is added before parsing because these come out of a PDF as bare
+    hosts ("www.linkedin.com/in/ada"), which ``urlparse`` would otherwise read
+    as a path with no host at all.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415 — stdlib, used once here
+
+    candidate = url if "://" in url else f"http://{url}"
+    try:
+        host = (urlparse(candidate).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+def _extract_contact_fields(contact_text: str) -> dict[str, Any]:
+    """Structure the LinkedIn "Contact" block instead of discarding it.
+
+    That section was SPLIT (so it bounded its neighbours) and then read by
+    nobody — the same "parsed and thrown away" shape as GitHub's identity block.
+    It holds the person's email, phone, profile URL and personal sites.
+
+    Deterministic on purpose (rule #28 territory): emails, phone numbers and
+    URLs are PATTERNS, not semantics, so this needs no LLM and cannot
+    hallucinate. Anything ambiguous is simply left out.
+
+    ``websites`` excludes the linkedin.com URL itself — that is already
+    ``linkedin_url``, and repeating it as a "personal site" would be wrong.
+    """
+    text = contact_text or ""
+    if not text.strip():
+        return {}
+
+    emails = _CONTACT_EMAIL_RE.findall(text)
+    li_match = _LINKEDIN_URL_RE.search(text.replace("\n", ""))
+
+    phones: list[str] = []
+    for cand in _PHONE_RE.findall(text):
+        digits = re.sub(r"\D", "", cand)
+        # A real number, not a year or a stray page reference.
+        if 9 <= len(digits) <= 15:
+            phones.append(cand.strip())
+
+    websites: list[str] = []
+    for line in text.splitlines():
+        if _CONTACT_EMAIL_RE.search(line):
+            continue  # an address is not a website
+        for url in _URL_RE.findall(line):
+            u = url.strip().rstrip(".,;)")
+            if "." not in u or _is_linkedin_host(u):
+                continue
+            if u.lower() in {w.lower() for w in websites}:
+                continue
+            websites.append(u)
+
+    out: dict[str, Any] = {}
+    if emails:
+        out["email"] = emails[0]
+    if phones:
+        out["phone"] = phones[0]
+    if li_match:
+        out["linkedin_url"] = li_match.group(0)
+    if websites:
+        out["websites"] = websites
+    return out
+
+
 _TECH_LINE = re.compile(
     r"^\s*(?:technologies|tech stack|tools|skills|continuously learning)\s*:\s*(.*)$",
     re.IGNORECASE,
@@ -440,6 +526,137 @@ _VOLUNTEER_PROMPT = (
     "---"
 )
 
+# ── The seven sections the splitter recognised and nobody read ──────────────
+# ``_SECTION_HEADINGS`` lists 20 headings; only 11 had an extractor. The rest
+# were split purely so they acted as boundaries, then dropped. Each below is
+# real evidence on the profiles that carry it — see CVData for why each earns a
+# shelf. Same shape as the prompts above: one section of text in, typed rows
+# out, empty list when the section is absent.
+
+_HONORS_PROMPT = """Extract every award from the LinkedIn Honors & Awards section text below.
+Return JSON: {{"honors": [{{"title": str, "issuer": str, "date": str, "description": str}}, ...]}}
+
+Rules:
+- "title" = the award name as written.
+- "issuer" = the awarding body if present. Empty if missing.
+- "date" verbatim as written. Empty if missing.
+- "description" = any prose body. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_PUBLICATIONS_PROMPT = """Extract every publication from the LinkedIn Publications section text below.
+Return JSON: {{"publications": [{{"title": str, "publisher": str, "date": str, "url": str, "description": str}}, ...]}}
+
+Rules:
+- "title" = the paper/article title.
+- "publisher" = journal, conference or outlet if present. Empty if missing.
+- "date" verbatim. Empty if missing.
+- "url" = link if present in the text; empty otherwise.
+- "description" = abstract/summary prose. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_PATENTS_PROMPT = """Extract every patent from the LinkedIn Patents section text below.
+Return JSON: {{"patents": [{{"title": str, "number": str, "status": str, "date": str}}, ...]}}
+
+Rules:
+- "title" = the patent title.
+- "number" = patent/application number if present. Empty if missing.
+- "status" = e.g. "Issued", "Pending". Empty if not stated.
+- "date" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_ORGANIZATIONS_PROMPT = """Extract every organisation from the LinkedIn Organizations section text below.
+Return JSON: {{"organizations": [{{"name": str, "role": str, "start": str, "end": str}}, ...]}}
+
+Rules:
+- "name" = the organisation or professional body (e.g. "BCS", "IEEE").
+- "role" = the stated position/membership if present. Empty if missing.
+- "start"/"end" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_TEST_SCORES_PROMPT = """Extract every test score from the LinkedIn Test Scores section text below.
+Return JSON: {{"test_scores": [{{"name": str, "score": str, "date": str}}, ...]}}
+
+Rules:
+- "name" = the test (e.g. "IELTS", "GRE", "TOEFL").
+- "score" = the score exactly as written, including any band/section detail.
+- "date" verbatim. Empty if missing.
+
+TEXT:
+---
+{text}
+---"""
+
+_RECOMMENDATIONS_PROMPT = """Extract every recommendation from the LinkedIn Recommendations section text below.
+Return JSON: {{"recommendations": [{{"author": str, "relationship": str, "text": str}}, ...]}}
+
+Rules:
+- "author" = who wrote it, if named. Empty if missing.
+- "relationship" = how they know this person (e.g. "managed directly"). Empty if missing.
+- "text" = the recommendation prose, verbatim, trimmed to 600 characters.
+- These are OTHER PEOPLE's words about this person — do not paraphrase or
+  summarise them, and never invent one.
+
+TEXT:
+---
+{text}
+---"""
+
+_HEADLINE_PROMPT = """Below is the raw text of a LinkedIn profile PDF export.
+
+Find the person's HEADLINE — the one-line professional tagline LinkedIn shows
+directly under their name. Return it verbatim, joining any lines the PDF wrapped
+mid-phrase back into a single line.
+
+WHY THIS NEEDS YOU AND NOT A PARSER. The export is TWO COLUMNS. The left rail
+(Contact, Top Skills, Certifications) is flattened first, so the name and
+headline do not appear at the top of the text at all — they land in the middle,
+after the last left-column section. A structural reader looking for a header
+block finds nothing, which is why this field was empty on every two-column
+export.
+
+RULES:
+1. The headline is the line or lines immediately AFTER the person's full name
+   and BEFORE their location or the Summary section.
+2. It is a self-description, often with "|" or "•" separators. It is NOT a
+   certification, a job title with an employer, or a section heading.
+3. Return the location line separately if one directly follows the headline.
+4. If you genuinely cannot find a headline, return empty strings. Never invent
+   one and never assemble one from their job titles.
+
+Return ONLY JSON: {{"headline": "<verbatim, unwrapped>", "location": "<or empty>"}}
+
+TEXT:
+{text}
+"""
+
+_INTERESTS_PROMPT = """Extract every followed company, group or influencer from the LinkedIn Interests section text below.
+Return JSON: {{"interests": ["Name One", "Name Two", ...]}}
+
+Rules:
+- One entry per line/name as written. Names only, no commentary.
+- Return [] if the section holds nothing nameable.
+
+TEXT:
+---
+{text}
+---"""
+
 _COURSES_PROMPT = """Extract every course from the LinkedIn Courses section text below.
 Return JSON: {{"courses": [{{"title": str, "institution": str, "date": str}}, ...]}}
 
@@ -648,6 +865,32 @@ def _coerce_volunteer(raw: Any) -> list[dict[str, str]]:
     return out
 
 
+def _coerce_rows(raw: Any, fields: tuple[str, ...]) -> list[dict[str, str]]:
+    """Coerce an LLM row list to typed dicts with exactly ``fields``.
+
+    One shared cleaner for the seven sections added 2026-08-09 (honors,
+    publications, patents, organizations, test scores, recommendations). Their
+    shapes differ only in FIELD NAMES, so a coercer each would be six copies of
+    the same defensive loop — and six places for a future fix to be applied five
+    times.
+
+    A row is kept only when its FIRST field (the identifying one: title / name /
+    author) has content, mirroring the existing per-section coercers: a row with
+    no identity is LLM noise, not an entry.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        row = {f: coerce_str(item.get(f)).strip() for f in fields}
+        if not row[fields[0]]:
+            continue
+        out.append(row)
+    return out
+
+
 def _coerce_courses(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
@@ -680,6 +923,15 @@ def _empty_linkedin_data() -> dict[str, Any]:
         "projects": [],
         "volunteer": [],
         "courses": [],
+        # 2026-08-09 — the seven sections that were split and then discarded.
+        "honors": [],
+        "publications": [],
+        "patents": [],
+        "organizations": [],
+        "test_scores": [],
+        "recommendations": [],
+        "interests": [],
+        "contact": {},
         # Two-pass — raw text kept for offline LLM re-runs (empty here).
         "raw_text": "",
     }
@@ -751,6 +1003,10 @@ def deterministic_linkedin_fields(text: str) -> dict[str, Any]:
         "summary": summary,
         "industry": header.get("industry", ""),
         "headline": header.get("headline", ""),
+        # The Contact block, structured rather than discarded. Deterministic:
+        # emails/phones/URLs are patterns, so this costs no LLM call and
+        # cannot hallucinate.
+        "contact": _extract_contact_fields(sections.get("contact", "")),
         # Keep the extracted text so the passes can re-run on a later profile
         # change without the user re-uploading the PDF.
         "raw_text": text,
@@ -784,6 +1040,16 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     projects_text = sections.get("projects", "")
     volunteer_text = sections.get("volunteer experience", "")
     courses_text = sections.get("courses", "")
+    # 2026-08-09 — the seven sections that were split and then discarded.
+    honors_text = (
+        sections.get("honors & awards", "") or sections.get("honors-awards", "")
+    )
+    publications_text = sections.get("publications", "")
+    patents_text = sections.get("patents", "")
+    organizations_text = sections.get("organizations", "")
+    test_scores_text = sections.get("test scores", "")
+    recommendations_text = sections.get("recommendations", "")
+    interests_text = sections.get("interests", "")
 
     # Seven section LLM calls + the prose-skills pass, in parallel — only the
     # ones with text actually hit a provider (``_maybe`` short-circuits blanks).
@@ -795,6 +1061,8 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     (
         exp_raw, edu_raw, cert_raw,
         lang_raw, proj_raw, vol_raw, course_raw, prose_skills,
+        honors_raw, pubs_raw, patents_raw, orgs_raw,
+        scores_raw, recs_raw, interests_raw, headline_raw,
     ) = await asyncio.gather(
         _maybe(_EXPERIENCE_PROMPT, experience_text, "positions"),
         _maybe(_EDUCATION_PROMPT, education_text, "education"),
@@ -804,6 +1072,19 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         _maybe(_VOLUNTEER_PROMPT, volunteer_text, "volunteer"),
         _maybe(_COURSES_PROMPT, courses_text, "courses"),
         llm_infer_linkedin_skills(text),
+        # ``_maybe`` short-circuits an absent section without touching a
+        # provider, so a profile with none of these costs exactly nothing —
+        # which is why adding seven calls does not add seven calls.
+        _maybe(_HONORS_PROMPT, honors_text, "honors"),
+        _maybe(_PUBLICATIONS_PROMPT, publications_text, "publications"),
+        _maybe(_PATENTS_PROMPT, patents_text, "patents"),
+        _maybe(_ORGANIZATIONS_PROMPT, organizations_text, "organizations"),
+        _maybe(_TEST_SCORES_PROMPT, test_scores_text, "test_scores"),
+        _maybe(_RECOMMENDATIONS_PROMPT, recommendations_text, "recommendations"),
+        _maybe(_INTERESTS_PROMPT, interests_text, "interests"),
+        # Reads the FULL text, not a section: in a 2-column export the
+        # header has no section to read — that is the bug being fixed.
+        _maybe(_HEADLINE_PROMPT, text, "headline"),
     )
 
     def _get(r: Any, key: str) -> Any:
@@ -818,40 +1099,88 @@ async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
         "volunteer": _coerce_volunteer(_get(vol_raw, "volunteer")),
         "courses": _coerce_courses(_get(course_raw, "courses")),
         "skills": list(prose_skills) if isinstance(prose_skills, list) else [],
+        # The seven previously-discarded sections. Coerced through one shared
+        # row cleaner rather than seven near-identical ones — the shapes differ
+        # only in their field names, and a per-section coercer for each would be
+        # six copies of the same defensive loop.
+        "honors": _coerce_rows(
+            _get(honors_raw, "honors"), ("title", "issuer", "date", "description")
+        ),
+        "publications": _coerce_rows(
+            _get(pubs_raw, "publications"),
+            ("title", "publisher", "date", "url", "description"),
+        ),
+        "patents": _coerce_rows(
+            _get(patents_raw, "patents"), ("title", "number", "status", "date")
+        ),
+        "organizations": _coerce_rows(
+            _get(orgs_raw, "organizations"), ("name", "role", "start", "end")
+        ),
+        "test_scores": _coerce_rows(
+            _get(scores_raw, "test_scores"), ("name", "score", "date")
+        ),
+        "recommendations": _coerce_rows(
+            _get(recs_raw, "recommendations"), ("author", "relationship", "text")
+        ),
+        "interests": [
+            s.strip()
+            for s in (_get(interests_raw, "interests") or [])
+            if isinstance(s, str) and s.strip()
+        ],
+        "headline": (_get(headline_raw, "headline") or "").strip()
+        if isinstance(_get(headline_raw, "headline"), str)
+        else "",
     }
 
 
 def merge_linkedin_fields(det: dict[str, Any], llm: dict[str, Any]) -> dict[str, Any]:
     """Merge the two independent LinkedIn passes into ONE canonical dict.
 
-    ``det`` (structure: skills/summary/header) + ``llm`` (LLM: positions/
-    education/…/prose-skills) → one dict ready for ``enrich_cv_from_linkedin``.
-    Skills are unioned (deterministic Top-Skills/inline first, then LLM prose),
-    so neither pass can clobber the other. Used by both ``parse_linkedin_from_text``
-    and the two-pass orchestrator so the merge logic lives in exactly one place.
+    ``det`` (structure: skills/summary/header/contact) + ``llm`` (LLM:
+    positions/education/…/prose-skills) → one dict ready for
+    ``enrich_cv_from_linkedin``. Used by both ``parse_linkedin_from_text`` and
+    the two-pass orchestrator so the merge logic lives in exactly one place.
+
+    BUILT FROM ``_empty_linkedin_data()``, NOT FROM A HAND-LISTED SET OF KEYS.
+    That is the whole point of this shape. This function used to return a
+    literal with twelve keys, which made it a THIRD hand-maintained copy of the
+    LinkedIn schema alongside ``_empty_linkedin_data`` and
+    ``llm_linkedin_fields``. When eight new sections shipped on 2026-08-09 the
+    other two copies were updated and this one was not, so those eight keys were
+    dropped here — and because ``enrich_cv_from_linkedin`` then does
+    ``cv.linkedin_honors = data.get("honors", [])``, the shelves were not merely
+    left unfilled, they were ASSIGNED EMPTY on every extraction.
+
+    Deriving the key set from the schema means a section added tomorrow flows
+    through automatically. There is now one place to add a LinkedIn section, not
+    three that must be kept in step by memory.
+
+    Ownership: the LLM pass owns the section lists (assigned wholesale, empties
+    included, so a genuine re-parse can still clear a section the person
+    deleted); the deterministic pass owns the structural header and contact
+    block and overrides only where it actually parsed something; skills are
+    unioned so neither pass can clobber the other.
     """
     det = det or {}
     llm = llm or {}
+
+    out = _empty_linkedin_data()
+    for key, value in llm.items():
+        if key in out:
+            out[key] = value
+    for key, value in det.items():
+        if key in out and value:
+            out[key] = value
+
     skills = list(det.get("skills", []))
     seen = {s.lower() for s in skills}
     for s in llm.get("skills", []):
         if s.lower() not in seen:
             skills.append(s)
             seen.add(s.lower())
-    return {
-        "positions": llm.get("positions", []),
-        "skills": skills,
-        "education": llm.get("education", []),
-        "certifications": llm.get("certifications", []),
-        "summary": det.get("summary", ""),
-        "industry": det.get("industry", ""),
-        "headline": det.get("headline", ""),
-        "languages": llm.get("languages", []),
-        "projects": llm.get("projects", []),
-        "volunteer": llm.get("volunteer", []),
-        "courses": llm.get("courses", []),
-        "raw_text": det.get("raw_text", "") or llm.get("raw_text", ""),
-    }
+    out["skills"] = skills
+    out["raw_text"] = det.get("raw_text", "") or llm.get("raw_text", "")
+    return out
 
 
 async def parse_linkedin_from_text(text: str) -> dict[str, Any]:
@@ -889,8 +1218,17 @@ def parse_linkedin_pdf(file_path: str) -> dict[str, Any]:
 
 # ── Merge into CVData (UNCHANGED — contract with downstream) ─────
 
-def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData:
-    """Merge LinkedIn data into existing CVData, deduplicating."""
+def enrich_cv_from_linkedin(
+    cv: CVData, linkedin_data: dict[str, Any], *, llm_ran: bool = True
+) -> CVData:
+    """Merge LinkedIn data into existing CVData, deduplicating.
+
+    ``llm_ran`` tells this function whether the LinkedIn LLM pass actually
+    executed for this call. Defaults True so every existing caller keeps
+    its current behaviour; only the two-pass orchestrator, which knows the
+    cost cache skipped the pass, passes False. See the section comment
+    below for why an empty value is ambiguous without it.
+    """
     # Skills
     seen_skills = {s.lower() for s in cv.skills}
     new_linkedin_skills = []
@@ -918,31 +1256,104 @@ def enrich_cv_from_linkedin(cv: CVData, linkedin_data: dict[str, Any]) -> CVData
     # Certifications
     existing_certs = {c.lower() for c in cv.certifications}
     for cert in linkedin_data.get("certifications", []):
-        name = cert.get("name", "")
+        # An LLM returns this section as EITHER a list of objects
+        # ({"name": ...}) or a bare list of strings, depending on how it read
+        # the page — both are reasonable readings of "certifications". The
+        # object-only assumption raised AttributeError and aborted the WHOLE
+        # LinkedIn merge, so one loosely-shaped section could silently cost a
+        # user every LinkedIn field. Accept both shapes.
+        if isinstance(cert, str):
+            name = cert.strip()
+        elif isinstance(cert, dict):
+            name = str(cert.get("name") or cert.get("title") or "").strip()
+        else:
+            continue
         if name and name.lower() not in existing_certs:
             cv.certifications.append(name)
             existing_certs.add(name.lower())
 
-    # Summary — only fill if empty
-    if not cv.summary and linkedin_data.get("summary"):
-        cv.summary = linkedin_data["summary"]
+    # The About section always gets its own shelf. Keeping the fill-if-empty
+    # copy into ``cv.summary`` preserves the old behaviour for profiles with no
+    # CV summary, but the copy is no longer the ONLY home — before this, anyone
+    # whose CV had a summary lost their LinkedIn About completely, and it is the
+    # most self-authored prose either document contains.
+    if linkedin_data.get("summary"):
+        cv.linkedin_summary = linkedin_data["summary"]
+        if not cv.summary:
+            cv.summary = linkedin_data["summary"]
+
+    # Same rule for the headline: LinkedIn's is stored in its own shelf, and
+    # only fills the CV-owned ``headline`` when the CV had none. They are
+    # genuinely different claims — a CV headline is a role label, a LinkedIn
+    # one often states the stack and current availability.
+    if linkedin_data.get("headline"):
+        cv.linkedin_headline = linkedin_data["headline"]
+        if not cv.headline:
+            cv.headline = linkedin_data["headline"]
 
     # Store LinkedIn-specific fields
-    cv.linkedin_positions = linkedin_data.get("positions", [])
-    cv.linkedin_skills = new_linkedin_skills
-    cv.linkedin_industry = linkedin_data.get("industry", "")
+    # These five sections are LLM-ONLY output — the deterministic pass
+    # explicitly leaves them alone. So an empty value here means one of two
+    # very different things, and the caller is the only one who knows which:
+    #   * the LLM ran and this profile genuinely has no such section, or
+    #   * the LLM pass was SKIPPED by the cost cache (unchanged raw text)
+    # Overwriting on the second case destroyed real data. Measured 2026-08-08:
+    # upload LinkedIn (positions/languages/projects/volunteer/courses all
+    # populate), then touch ANYTHING else on the profile — the LLM pass is
+    # correctly skipped, the merge still ran, and all five were wiped to []
+    # permanently. Nothing short of uploading a DIFFERENT PDF restored them.
+    #
+    # `llm_ran` lets the canonical-source intent survive (a real re-parse still
+    # replaces, so removing a section from LinkedIn removes it here) without
+    # the cache-hit path being able to erase anything.
+    if llm_ran:
+        cv.linkedin_positions = linkedin_data.get("positions", [])
+        # linkedin_skills belongs INSIDE this gate too, and sat one line outside
+        # it until 2026-08-12.
+        #
+        # The 2026-08-08 fix above covered the five sections it was written for
+        # and stopped there. Skills have the same shape and the same failure:
+        # they come from BOTH passes (the deterministic "Top Skills" sidebar and
+        # the LLM prose reader), so on a cache-hit run merge_linkedin_fields gets
+        # an empty LLM half and this assignment replaced the full list with the
+        # sidebar-only remnant. On a real profile that is 13 skills collapsing to
+        # 3, silently, on any unrelated profile edit — and unrecoverable by
+        # re-uploading the same PDF, because its text is unchanged so the pass is
+        # skipped again.
+        #
+        # A genuine re-parse still REPLACES, so a skill removed on LinkedIn is
+        # removed here. Only the cache-hit path is now unable to erase.
+        cv.linkedin_skills = new_linkedin_skills
+    cv.linkedin_industry = linkedin_data.get("industry", "") or cv.linkedin_industry
     # Two-pass — keep the raw text (if the parser supplied it) so the LLM
     # pass can re-run offline. Only overwrite when a non-empty value arrives,
     # so a partial re-enrich never wipes a previously-stored transcript.
     if linkedin_data.get("raw_text"):
         cv.linkedin_raw_text = linkedin_data["raw_text"]
 
+    # Contact is deterministic, so it is stored OUTSIDE the ``llm_ran`` gate:
+    # a re-parse that skipped the paid passes must still refresh it. Only
+    # overwrite on a non-empty parse so a failed read never blanks it.
+    if linkedin_data.get("contact"):
+        cv.linkedin_contact = dict(linkedin_data["contact"])
+
     # Batch 1.5 — expanded sections. Overwrite rather than merge: LinkedIn
     # is the canonical source for these, and re-parsing a profile should
     # reflect the new state rather than accumulate stale entries.
-    cv.linkedin_languages = linkedin_data.get("languages", [])
-    cv.linkedin_projects = linkedin_data.get("projects", [])
-    cv.linkedin_volunteer = linkedin_data.get("volunteer", [])
-    cv.linkedin_courses = linkedin_data.get("courses", [])
+    if llm_ran:
+        cv.linkedin_languages = linkedin_data.get("languages", [])
+        cv.linkedin_projects = linkedin_data.get("projects", [])
+        cv.linkedin_volunteer = linkedin_data.get("volunteer", [])
+        cv.linkedin_courses = linkedin_data.get("courses", [])
+        # Same overwrite rule: LinkedIn is canonical for its own sections, so a
+        # re-parse reflects the CURRENT profile instead of accumulating entries
+        # the person has since deleted.
+        cv.linkedin_honors = linkedin_data.get("honors", [])
+        cv.linkedin_publications = linkedin_data.get("publications", [])
+        cv.linkedin_patents = linkedin_data.get("patents", [])
+        cv.linkedin_organizations = linkedin_data.get("organizations", [])
+        cv.linkedin_test_scores = linkedin_data.get("test_scores", [])
+        cv.linkedin_recommendations = linkedin_data.get("recommendations", [])
+        cv.linkedin_interests = linkedin_data.get("interests", [])
 
     return cv

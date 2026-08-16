@@ -262,7 +262,7 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
         salary_min=70000,
         salary_max=90000,
         experience_level="senior",
-        preferred_workplace="remote",
+        work_arrangement="remote",
         needs_visa=True,
     )
     great_enrichment = _enrichment(
@@ -289,9 +289,28 @@ def test_jobscorer_with_enrichment_scores_higher_than_without():
     assert enriched_score <= 100
 
 
-def test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base():
-    """A scorer with user_preferences but an empty enrichment_lookup scores
-    the same as a plain-config scorer (no double counting of dimensions)."""
+def test_jobscorer_missing_enrichment_gives_neutral_dims_not_zero():
+    """BEHAVIOUR DELIBERATELY CHANGED (F5) — this test previously asserted the
+    OPPOSITE, and it was pinning a live rule #29 violation.
+
+    It used to require that a scorer WITH user_preferences but no enrichment row
+    scored IDENTICALLY to a plain-config scorer, under the heading "no double
+    counting of dimensions". Avoiding double counting was the right instinct, but
+    the implementation achieved it by skipping the dim scorers entirely, so an
+    absent enrichment row became a per-job ZERO on all four dims. Rule #29 says
+    an absent input must never become a zero — it must be the neutral constant.
+
+    What that cost, measured on live data: an identical job scored 45 without an
+    enrichment row against 75 with one. A 30-point penalty for pipeline lag, not
+    for fit. Once the daily refresh started fanning fresh jobs into every feed,
+    every NEW job took that penalty and sank below older enriched ones — the
+    exact opposite of what a daily job product should rank first.
+
+    The invariant now: preferences present + enrichment missing lands the four
+    dims on their NEUTRAL halves, so the score is HIGHER than the no-preferences
+    baseline by exactly that neutral sum — and no more. The "no double counting"
+    guarantee is preserved by asserting that exact delta rather than equality.
+    """
     from datetime import datetime, timezone
 
     from src.models import Job
@@ -309,7 +328,7 @@ def test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base():
         date_found=today,
     )
     config = SearchConfig(job_titles=["ML Engineer"], primary_skills=["python", "pytorch"])
-    prefs = UserPreferences(preferred_workplace="remote", needs_visa=False)
+    prefs = UserPreferences(work_arrangement="remote", needs_visa=False)
 
     with_prefs = JobScorer(
         config,
@@ -317,7 +336,30 @@ def test_jobscorer_enrichment_lookup_returning_none_falls_back_to_base():
         enrichment_lookup=lambda j: None,
     )
     without = JobScorer(config)
-    assert with_prefs.score(job) == without.score(job)
+
+    scored_with = with_prefs.score(job)
+    scored_without = without.score(job)
+
+    # The four dims are their NEUTRAL halves, never zero. visa is 0 here because
+    # needs_visa=False makes "no visa needed" a genuine per-user constant, not a
+    # missing-data zero — the two look alike in the number and are not alike.
+    assert scored_with.seniority_score == 4   # SENIORITY_WEIGHT(8) // 2
+    assert scored_with.salary_score == 5      # SALARY_WEIGHT(10) // 2
+    assert scored_with.visa_score == 0        # needs_visa=False -> constant 0
+    assert scored_with.workplace_score == 3   # WORKPLACE_WEIGHT(6) // 2
+
+    # No preferences at all means no dims at all (rule #20: both or neither), so
+    # the baseline keeps zeros here — that is a DIFFERENT case from "preferences
+    # given, enrichment missing" and must not be conflated with it.
+    assert scored_without.seniority_score == 0
+    assert scored_without.salary_score == 0
+    assert scored_without.workplace_score == 0
+
+    # The original "no double counting" guarantee, kept but stated exactly: the
+    # preference-aware score exceeds the baseline by the neutral sum and nothing
+    # more. If a dim ever double-counted, this delta would exceed 12.
+    neutral_sum = 4 + 5 + 0 + 3
+    assert scored_with.match_score == scored_without.match_score + neutral_sum
 
 
 def test_jobscorer_dim_bonus_caps_at_100():
@@ -364,7 +406,7 @@ def test_jobscorer_dim_bonus_caps_at_100():
         salary_min=70000,
         salary_max=90000,
         experience_level="senior",
-        preferred_workplace="remote",
+        work_arrangement="remote",
         needs_visa=True,
     )
     perfect = _enrichment(

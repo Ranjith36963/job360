@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -37,7 +39,8 @@ from src.services.profile.linkedin_parser import (
 from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
-from src.services.profile.models import UserPreferences, UserProfile
+from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.preferences import sanitize_preferences
 from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
@@ -59,6 +62,41 @@ logger = logging.getLogger("job360.api.profile")
 _rescore_bg_tasks: set[Any] = set()
 
 
+def _rescore_finished(task: Any) -> None:
+    """Discard the task reference AND say something when it failed.
+
+    The previous callback was ``_rescore_bg_tasks.discard`` — it dropped the
+    reference and never touched ``task.exception()``. asyncio only reports an
+    unretrieved exception when the task object is garbage-collected, and by then
+    the message is detached from the user it belonged to. The surrounding
+    ``except`` covers SCHEDULING, not execution, so a re-score that started and
+    then died left the feed permanently stale with nothing in the logs.
+
+    Measured in production 2026-08-11: 9,708 user_feed rows carry a
+    profile_version older than their user's current one, and all 9,708 point at
+    jobs still in the catalog (0 orphans) — so every one of them was reachable
+    and simply never got re-scored. One user sits at profile_version 10 while
+    their current version is 15: five profile changes, no completed re-score,
+    no error anywhere.
+
+    This does not FIX that (see the note in _maybe_trigger_rescore); it makes the
+    failure visible, which is the difference between a bug you can find and one
+    you cannot.
+    """
+    _rescore_bg_tasks.discard(task)
+    if task.cancelled():
+        logger.warning("rescore: background re-score was CANCELLED — feed left stale")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "rescore: background re-score FAILED, feed left on a stale "
+            "profile_version: %r",
+            exc,
+            exc_info=exc,
+        )
+
+
 async def _maybe_trigger_rescore(user_id: str) -> None:
     """Fire-and-forget: schedule a background re-score if the profile content changed.
 
@@ -69,6 +107,15 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
     to ``_rescore_bg_tasks`` to prevent GC loss.
     Never lets scheduling errors propagate — the profile save must never 500.
     Lazy imports keep the hot GET/POST paths import-cycle-free (rule #16).
+
+    KNOWN LIMITATION — this is fire-and-forget IN THE WEB PROCESS, and that is
+    why issue #271 exists. There is no queue entry, no retry and no ledger:
+    ``grep -c rescore src/workers/tasks.py`` is 0, so nothing outside this
+    process ever knows a re-score was owed. Any restart kills an in-flight run,
+    and `main` auto-deploys on every merge, so deploys alone can drop them.
+    The durable fix is an ARQ job (the worker and Redis already exist) with a
+    retry and a completion record — a change to how production schedules work,
+    so it is deliberately NOT bundled with the logging fix below.
     """
     try:
         from src.services.profile.storage import (  # noqa: PLC0415
@@ -88,7 +135,7 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
 
         task = asyncio.create_task(rescore_user_feed(user_id))
         _rescore_bg_tasks.add(task)
-        task.add_done_callback(_rescore_bg_tasks.discard)
+        task.add_done_callback(_rescore_finished)
         logger.info("rescore: background re-score scheduled for user %s", user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -98,7 +145,7 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
         )
 
 
-def _build_profile_response(profile: UserProfile) -> ProfileResponse:
+def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileResponse:
     summary = ProfileSummary(
         is_complete=profile.is_complete,
         job_titles=profile.cv_data.job_titles,
@@ -112,6 +159,15 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         has_github=bool(profile.cv_data.github_languages),
         education=profile.cv_data.education,
         experience_level=profile.preferences.experience_level,
+        # Upload receipts (2026-08-08) — getattr so a CVData loaded from a row
+        # saved before these fields existed still renders.
+        cv_filename=getattr(profile.cv_data, "cv_filename", "") or "",
+        cv_uploaded_at=getattr(profile.cv_data, "cv_uploaded_at", "") or "",
+        linkedin_filename=getattr(profile.cv_data, "linkedin_filename", "") or "",
+        linkedin_uploaded_at=getattr(profile.cv_data, "linkedin_uploaded_at", "") or "",
+        github_username=profile.preferences.github_username or "",
+        github_connected_at=getattr(profile.cv_data, "github_connected_at", "") or "",
+        github_repo_count=len(getattr(profile.cv_data, "github_repos_brief", []) or []),
     )
     cv = profile.cv_data
     cv_detail = CVDetail(
@@ -128,6 +184,10 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         headline=getattr(cv, "headline", ""),
         location=getattr(cv, "location", ""),
         achievements=getattr(cv, "achievements", []),
+        cv_positions=getattr(cv, "cv_positions", []) or [],
+        cv_projects=getattr(cv, "cv_projects", []) or [],
+        cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
+        cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 
@@ -138,9 +198,6 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
     skill_tiers: dict[str, list[str]] = {}
     skill_provenance: dict[str, list[str]] = {}
     try:
-        from src.services.profile.skill_entry import (  # noqa: PLC0415 — lazy
-            build_skill_entries_from_profile,
-        )
         from src.services.profile.skill_tiering import (  # noqa: PLC0415 — lazy
             collect_evidence_from_profile,
             tier_skills_by_evidence,
@@ -158,10 +215,6 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         # Skip ESCO normalisation here so the route stays cheap on a hot
         # GET; ProfileResponse.skill_esco already carries the URI map.
         skill_provenance = {ev.name: list(set(ev.sources)) for ev in evidence}
-        # Side benefit — ensure SkillEntry import path stays exercised
-        # so a future refactor that moves the import doesn't silently
-        # break the response shape.
-        _ = build_skill_entries_from_profile
     except Exception:
         skill_tiers = {}
         skill_provenance = {}
@@ -193,22 +246,92 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
 
     # Step-1.5 S3-E — LinkedIn sub-sections + GitHub temporal map.
     linkedin_subsections: dict[str, list[dict[str, Any]]] = {
+        # LinkedIn work history — parsed and stored since Batch 1.5 but never
+        # exposed here, so it drove only the has_linkedin boolean and the user
+        # could never SEE their LinkedIn experience. Same "stored but not shown"
+        # gap as cv_positions, closed 2026-08-08.
+        "positions": list(getattr(cv, "linkedin_positions", []) or []),
         "languages": list(getattr(cv, "linkedin_languages", []) or []),
         "projects": list(getattr(cv, "linkedin_projects", []) or []),
         "volunteer": list(getattr(cv, "linkedin_volunteer", []) or []),
         "courses": list(getattr(cv, "linkedin_courses", []) or []),
+        # 2026-08-09 — seven sections the parser split and nobody read, plus
+        # the Contact block. Same "stored but not shown" gap that hid 92
+        # GitHub signals, closed on the other input.
+        "honors": list(getattr(cv, "linkedin_honors", []) or []),
+        "publications": list(getattr(cv, "linkedin_publications", []) or []),
+        "patents": list(getattr(cv, "linkedin_patents", []) or []),
+        "organizations": list(getattr(cv, "linkedin_organizations", []) or []),
+        "test_scores": list(getattr(cv, "linkedin_test_scores", []) or []),
+        "recommendations": list(getattr(cv, "linkedin_recommendations", []) or []),
+        "interests": [
+            {"name": i} for i in (getattr(cv, "linkedin_interests", []) or [])
+        ],
+        "contact": [getattr(cv, "linkedin_contact", {}) or {}]
+        if getattr(cv, "linkedin_contact", None)
+        else [],
+        # The About section. It reaches the judge and the vector, and would
+        # otherwise be the one thing on this profile that is extracted, stored
+        # and MATCHED ON while being invisible to the person it describes — the
+        # third way a shelf goes dark, after a broken extractor and a dropping
+        # merge. Shown as a single row so it renders like every other section.
+        "summary": [{"text": (getattr(cv, "linkedin_summary", "") or "").strip()}]
+        if (getattr(cv, "linkedin_summary", "") or "").strip()
+        else [],
+        "headline": [{"text": (getattr(cv, "linkedin_headline", "") or "").strip()}]
+        if (getattr(cv, "linkedin_headline", "") or "").strip()
+        else [],
     }
     github_temporal: dict[str, dict[str, Any]] = {
         "languages": dict(getattr(cv, "github_languages", {}) or {}),
         "topics": {t: 1 for t in (getattr(cv, "github_topics", []) or [])},
     }
+    # EVERYTHING ELSE GitHub gave us. Measured on a live profile 2026-08-09:
+    # languages (14) and topics (10) reached the screen, while 49 frameworks,
+    # 13 repos and 30 LLM-read skills sat in the database appearing NOWHERE —
+    # 92 pieces of signal stored and shown to nobody, the same shape as
+    # cv_positions and the upload receipts before them.
+    #
+    # This is the input where it matters most: GitHub evidence outranks a CV
+    # claim. A CV says "FastAPI"; a requirements.txt in shipped code PROVES it,
+    # which is why skill_tiering weights github_dep/github_llm (1.5) above
+    # github_lang (1.0). That evidence was already scoring the user's matches —
+    # they simply could not see it.
+    github_detail: dict[str, Any] = {
+        "username": profile.preferences.github_username or "",
+        "connected_at": getattr(cv, "github_connected_at", "") or "",
+        "repos": list(getattr(cv, "github_repos_brief", []) or []),
+        "frameworks": list(getattr(cv, "github_frameworks", []) or []),
+        "skills_inferred": list(getattr(cv, "github_skills_inferred", []) or []),
+        "llm_skills": list(getattr(cv, "github_llm_skills", []) or []),
+        "identity": dict(getattr(cv, "github_identity", {}) or {}),
+        "bio": getattr(cv, "github_bio", "") or "",
+        "profile_readme": getattr(cv, "github_profile_readme", "") or "",
+    }
+
+    # The real board queries, made visible. `generate_search_config` is the
+    # SAME call the pipeline makes (src/main.py:760) and the job-detail
+    # re-score makes (api/routes/jobs.py:751), so what the user reads here is
+    # what the boards were actually asked — not a second, drifting
+    # reconstruction of it. Best-effort by design: a generator failure must
+    # cost the user a quiet line, never their whole profile page.
+    search_titles: list[str] = []
+    try:
+        from src.services.profile.keyword_generator import (  # noqa: PLC0415 — lazy (rule #16)
+            generate_search_config,
+        )
+
+        search_titles = list(generate_search_config(profile).search_titles)
+    except Exception:
+        logger.warning("search_titles unavailable for user %s", user_id, exc_info=True)
+        search_titles = []
 
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
     # migration just returns None.
     current_version_id: int | None = None
     try:
-        versions = list_profile_versions(_user_id_for(profile), limit=1)
+        versions = list_profile_versions(user_id, limit=1)
         if versions:
             current_version_id = versions[0]["id"]
     except Exception:
@@ -225,20 +348,20 @@ def _build_profile_response(profile: UserProfile) -> ProfileResponse:
         ai_suggestions=ai_suggestions,
         linkedin_subsections=linkedin_subsections,
         github_temporal=github_temporal,
+        github_detail=github_detail,
         current_version_id=current_version_id,
+        search_titles=search_titles,
     )
 
 
-def _user_id_for(profile: UserProfile) -> str:
-    """Pull a user_id off the profile if the caller stamped one; fall back
-    to the default tenant. Used only for current_version_id lookup —
-    the per-route handlers always pass the authenticated user_id directly."""
-    user_id = getattr(profile, "user_id", None)
-    if isinstance(user_id, str) and user_id:
-        return user_id
-    from src.core.tenancy import DEFAULT_TENANT_ID  # noqa: PLC0415
-
-    return DEFAULT_TENANT_ID
+# ``_user_id_for(profile)`` used to live here. It did
+# ``getattr(profile, "user_id", None)`` against a ``UserProfile``, which has no
+# such field and never had one, and nothing in the codebase ever stamped it — so
+# it returned None every time and fell through to DEFAULT_TENANT_ID. Every
+# user's ``current_version_id`` was therefore looked up against the default
+# tenant instead of themselves: a cross-tenant read that could not fail loudly,
+# because getattr-with-a-default cannot. All six callers already had the
+# authenticated ``user.id`` in scope, so the fix was to pass it.
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -252,7 +375,7 @@ async def get_profile(user: CurrentUser = Depends(require_user)) -> ProfileRespo
     profile = load_profile(user.id)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 # ── Shared profile-input helpers — the upload pipeline in ONE place ──
@@ -314,6 +437,13 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # the new one is known to be readable.
         reset_cv_owned_fields(profile.cv_data)
         profile.cv_data.raw_text = raw_text
+        # Upload receipt — WHAT was uploaded and WHEN. Set here, right where the
+        # new CV replaces the old one, so a re-upload always names the CURRENT
+        # file (a stale name would be worse than none: it would confirm the
+        # wrong document). Only the base name is kept — a browser can send a
+        # path-ish value, and the directory part is neither useful nor ours.
+        profile.cv_data.cv_filename = os.path.basename(filename or "")[:255]
+        profile.cv_data.cv_uploaded_at = datetime.now(timezone.utc).isoformat()
     finally:
         try:
             os.unlink(tmp_path)
@@ -321,15 +451,96 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
             pass
 
 
+def _normalize_work_arrangement(value: object) -> str:
+    """Store "I don't mind" as SILENCE, not as the literal string "any".
+
+    The preferences select seeds itself at ``"any"`` and posts that value, so
+    "any" reached the database as though the user had stated a constraint. Two
+    consumers then read it RAW, not through the ``preferred_workplace`` property
+    that maps it to None:
+
+      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
+        every judged job was told ``work_arrangement=any``, spending real tokens
+        to state a preference the user explicitly declined to make;
+      * the semantic vector appended "any" as a candidate token.
+
+    The property protects the keyword scorer, but a property cannot protect a
+    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    point where the sentinel can enter — and it holds for the CLI and any older
+    client too, which a frontend-side fix would not.
+
+    Rule #29: an unstated preference is silence. "Any" IS unstated.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in {"remote", "hybrid", "onsite"} else ""
+
+
+# The closed set this route will accept as a STATED experience level — the
+# exact five options the preferences form's Select offers (PreferencesForm.tsx:
+# entry/mid/senior/lead/executive). Anything outside it is not a real answer a
+# user could have picked through this form.
+#
+# scoring_dimensions._USER_EXPERIENCE_RANK recognises a much wider set
+# ("junior", "graduate", "sr", "head", "vp", ...) — that map exists to score
+# whatever string ends up in this field, including values from older data or
+# the CV-inferred fallback, not to define what THIS route should accept as a
+# freshly typed preference. Widening this set to match would let garbage like
+# "graduate" (not offered anywhere in the current UI) reach the DB looking
+# like a deliberate choice, which is the same failure this function exists to
+# stop.
+_VALID_EXPERIENCE_LEVELS = {"entry", "mid", "senior", "lead", "executive"}
+
+
+def _normalize_experience_level(value: object) -> str:
+    """Store an unrecognised experience level as SILENCE, not as a stated preference.
+
+    Mirrors ``_normalize_work_arrangement`` immediately above — same shape,
+    same seam. ``resolve_experience_level`` (scoring_dimensions.py) says
+    "typed always wins": a value in this field skips the CV-inferred fallback
+    entirely and drives ``seniority_score`` at full weight (up to 8 points,
+    either direction, on EVERY job) — the identical amplifier "any" had for
+    ``work_arrangement``. Before this function existed, ``_apply_preferences``
+    stored whatever the client posted with no check at all, so a typo, a stale
+    client sending a value the UI no longer offers, or a future free-text
+    field would reach the judge prompt and the semantic vector as though the
+    user had stated it.
+
+    NOT a fix for "a brand-new account saves 'mid' it never chose" — that
+    defect is the FRONTEND seeding a real, still-selectable dropdown value
+    (`prefsFromRaw`'s missing-key fallback) as if it were a default, fixed in
+    PreferencesForm.tsx/PreferencesForm.experience.test.tsx. "mid" stays in
+    ``_VALID_EXPERIENCE_LEVELS`` and round-trips normally here: it is a real
+    choice a user can make, so silencing it on the backend would drop that
+    choice for everyone who actually picks "Mid" — trading one data-loss bug
+    for a worse one.
+
+    Rule #29: an unstated preference is silence. An unrecognised string IS
+    unstated — the user cannot have meant something the form never offered.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in _VALID_EXPERIENCE_LEVELS else ""
+
+
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     """Parse the preferences JSON form and set it on the profile.
 
     Fields the form does NOT carry (``github_username`` — set by the separate
-    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
-    EXISTING preferences so a routine preferences save never silently wipes them.
+    GitHub route — plus ``needs_visa``, ``work_arrangement`` and
+    ``experience_level``) fall back to the EXISTING preferences so a routine
+    preferences save never silently wipes them.
     """
     pref_dict = json.loads(preferences_json)
     existing = profile.preferences or UserPreferences()
+
+    # The work_arrangement -> preferred_workplace bridge used to live here.
+    #
+    # It existed because the form wrote one field and the scorer read another,
+    # so the workplace dimension was dead for every user until it was built.
+    # A bridge keeps two boxes holding one answer, and they drift: cli.py's
+    # setup-profile writes work_arrangement and has never written the other, so
+    # that entry point produced a divergent profile from the day it was written.
+    # preferred_workplace is now a derived @property on UserPreferences, so
+    # there is exactly one stored answer and the two cannot disagree.
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -338,14 +549,43 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         industries=pref_dict.get("industries", []),
         salary_min=pref_dict.get("salary_min"),
         salary_max=pref_dict.get("salary_max"),
-        work_arrangement=pref_dict.get("work_arrangement", ""),
-        experience_level=pref_dict.get("experience_level", ""),
+        # An OMITTED key keeps the stored value; an explicit "" still clears it.
+        # The old default of "" meant any partial save wiped the answer, and
+        # the damage was hidden by the preferred_workplace fallback that this
+        # change removes — so without this line the workplace dimension would
+        # go dark again, which is the exact regression the bridge was added for.
+        work_arrangement=_normalize_work_arrangement(
+            pref_dict.get("work_arrangement", existing.work_arrangement)
+        ),
+        # Same partial-save shape as work_arrangement just above: an OMITTED
+        # key keeps the stored value, an explicit "" clears it. The old
+        # default of "" made no such distinction, so saving any OTHER field
+        # on the form (salary, locations, about_me...) silently wiped a
+        # previously-chosen experience level on every routine save.
+        experience_level=_normalize_experience_level(
+            pref_dict.get("experience_level", existing.experience_level)
+        ),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
-        github_username=pref_dict.get("github_username", existing.github_username),
-        preferred_workplace=pref_dict.get("preferred_workplace", existing.preferred_workplace),
+        # normalize_github_username here too, not only in the dedicated GitHub
+        # route: a raw value reaching this fallback path stored "https:" for a
+        # real user (2026-08-08), which silently broke GitHub enrichment. A
+        # value that doesn't reduce to a valid handle normalizes to "" — better
+        # an empty handle than a poisoned one.
+        github_username=normalize_github_username(
+            pref_dict.get("github_username") or existing.github_username or ""
+        ),
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
+    # Scrub extraction pollution before it is stored. The frontend autosaves the
+    # loaded preference chips straight back, so a profile whose additional_skills
+    # / target_job_titles were polluted by an older extraction merge would keep
+    # re-saving that junk on every touch. Running the sanitizer HERE means every
+    # save self-heals — including a stale open tab autosaving the old chips.
+    # Zero-loss by construction: it only drops CV-duplicate content and
+    # structural non-skills (dates, sentences, verb-led clauses), never a real
+    # skill. See sanitize_preferences for the rules.
+    profile.preferences = sanitize_preferences(profile.preferences, profile.cv_data)
 
 
 async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
@@ -404,7 +644,7 @@ async def upload_cv(
     content = await cv.read(10 * 1024 * 1024 + 1)
     await _capture_cv_raw(content, cv.filename, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile/preferences", response_model=ProfileResponse)
@@ -416,7 +656,7 @@ async def upsert_preferences(
     profile = load_profile(user.id) or UserProfile()
     _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile", response_model=ProfileResponse)
@@ -437,7 +677,7 @@ async def upsert_profile(
     if preferences is not None:
         _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile)
+    return _build_profile_response(profile, user.id)
 
 
 @router.post("/profile/linkedin", response_model=LinkedInResponse)
@@ -470,6 +710,11 @@ async def upload_linkedin(
         if merged:
             profile = load_profile(user.id) or UserProfile()
             profile.cv_data.linkedin_raw_text = text
+            # Upload receipt — see the CV path. Recorded only on a MERGED
+            # upload: a PDF we could not read as LinkedIn changes nothing, so
+            # claiming a successful upload would be a lie on screen.
+            profile.cv_data.linkedin_filename = os.path.basename(file.filename or "")[:255]
+            profile.cv_data.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
             await _extract_save_trigger(profile, user.id)
     finally:
         try:
@@ -488,8 +733,49 @@ async def upload_github(
 
     Accepts a full profile URL or @handle, not just a bare username —
     ``normalize_github_username`` reduces it to the handle before lookup.
+
+    FAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``
+    unconditionally, so a handle that reduced to nothing still produced a green
+    "GitHub profile enriched" toast — and, once receipts shipped, a "GitHub
+    connected" row on the profile page — while zero repos were read. Measured on
+    a live profile: ``github_connected_at`` stamped, ``github_username`` empty,
+    0 repos. A receipt that confirms something that did not happen is worse than
+    no receipt at all.
+
+    A handle that does not reduce to a valid GitHub username is a 400 with
+    wording the person can act on. ``normalize_github_username`` accepts a bare
+    handle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL
+    (whose subdomain IS the username — a CV lists that under "Portfolio", so it
+    is exactly what people paste here).
     """
     clean_username = normalize_github_username(username)
+    if not clean_username:
+        # Name the mistake when we can recognise it. A LinkedIn URL in the
+        # GitHub box is the single most likely wrong paste — both boxes live in
+        # the same "Enrich Your Profile" card, and a CV lists both links side by
+        # side. Telling that user "that does not look like a GitHub username" is
+        # true and useless: it does not say where their LinkedIn DOES go, and
+        # LinkedIn cannot be read from a link at all (measured: linkedin.com
+        # answers a server with HTTP 999 and a sign-in wall, no profile data),
+        # which is exactly why the PDF export exists.
+        if re.search(r"linkedin\.com", username or "", re.IGNORECASE):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "That is a LinkedIn URL, and this box is for GitHub. "
+                    "LinkedIn cannot be read from a link — use \"Enrich "
+                    "LinkedIn\" above and upload the PDF (on LinkedIn: your "
+                    "profile -> More -> Save to PDF)."
+                ),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "That does not look like a GitHub username. Enter your handle "
+                "(e.g. octocat), your profile URL (github.com/octocat), or your "
+                "GitHub Pages site (octocat.github.io)."
+            ),
+        )
     github_data = await fetch_github_profile(clean_username)
     profile = load_profile(user.id) or UserProfile()
     # enrich_cv_from_github captures the RAW GitHub signals (repos_brief,
@@ -497,8 +783,149 @@ async def upload_github(
     # the GitHub LLM pass and re-runs the others from stored raw.
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
+    # Did the lookup actually YIELD anything? A handle that is well-formed but
+    # does not exist (or a rate-limited/unreachable GitHub) returns an empty
+    # payload, and enrich_cv_from_github then merges nothing.
+    merged = bool(
+        getattr(profile.cv_data, "github_repos_brief", None)
+        or getattr(profile.cv_data, "github_languages", None)
+        or getattr(profile.cv_data, "github_bio", "")
+    )
+    if merged:
+        # Connection receipt — GitHub has no file, so the handle + when we read
+        # it is the receipt (repo count comes from len(github_repos_brief)).
+        # Stamped ONLY on a lookup that produced data: the receipt must never
+        # confirm a connection that did not happen.
+        profile.cv_data.github_connected_at = datetime.now(timezone.utc).isoformat()
+    else:
+        # Nothing came back — do not leave a handle behind claiming otherwise.
+        profile.preferences.github_username = ""
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"GitHub has no public data for '{clean_username}'. Check the "
+                "spelling, and note that private repositories are not visible."
+            ),
+        )
     await _extract_save_trigger(profile, user.id)
-    return GitHubResponse(ok=True, merged=True)
+    return GitHubResponse(ok=True, merged=merged)
+
+
+# ── Clearing an input ────────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS. You cannot trust a test you cannot reset. Every contamination
+# bug found on this profile (another person's GitHub, then their LinkedIn, then
+# their education/certs/titles merged into the CV fields) was hard to see
+# precisely because stale data lingered and every upload MERGED into it. Without
+# a reset, "upload a CV and check what came out" is never a clean experiment —
+# you are always reading the sum of every previous attempt.
+#
+# Each scope clears the fields that input OWNS, and nothing else, so clearing
+# LinkedIn cannot take the CV with it. Two details matter:
+#   * the matching ``llm_input_hashes`` entry is dropped, or a later re-upload of
+#     the SAME file would be treated as "already read" and skipped; and
+#   * every clear goes through ``save_profile``, which snapshots first — so a
+#     clear is undoable from the History drawer, which is what makes an
+#     irreversible-sounding button safe.
+
+_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
+
+
+def _clear_cv(cv: CVData) -> None:
+    """Everything the CV owns, including its receipt and quality verdict."""
+    reset_cv_owned_fields(cv)  # the canonical "what the CV owns" list
+    cv.raw_text = ""
+    cv.cv_filename = ""
+    cv.cv_uploaded_at = ""
+    cv.extraction_score = {}
+    cv.llm_input_hashes.pop("cv", None)
+
+
+def _clear_linkedin(cv: CVData) -> None:
+    cv.linkedin_raw_text = ""
+    cv.linkedin_positions = []
+    cv.linkedin_skills = []
+    cv.linkedin_industry = ""
+    cv.linkedin_languages = []
+    cv.linkedin_projects = []
+    cv.linkedin_volunteer = []
+    cv.linkedin_courses = []
+    cv.linkedin_filename = ""
+    cv.linkedin_uploaded_at = ""
+    cv.linkedin_honors = []
+    cv.linkedin_publications = []
+    cv.linkedin_patents = []
+    cv.linkedin_organizations = []
+    cv.linkedin_test_scores = []
+    cv.linkedin_recommendations = []
+    cv.linkedin_interests = []
+    cv.linkedin_contact = {}
+    cv.llm_input_hashes.pop("linkedin", None)
+
+
+def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
+    cv.github_languages = {}
+    cv.github_topics = []
+    cv.github_skills_inferred = []
+    cv.github_frameworks = []
+    cv.github_llm_skills = []
+    cv.github_repos_brief = []
+    cv.github_bio = ""
+    cv.github_profile_readme = ""
+    cv.github_identity = {}
+    cv.github_connected_at = ""
+    cv.llm_input_hashes.pop("github", None)
+    prefs.github_username = ""  # the handle belongs to this section
+
+
+@router.post("/profile/clear", response_model=ProfileResponse)
+async def clear_profile_section(
+    section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> ProfileResponse:
+    """Empty ONE input (or the whole profile), so the next upload starts clean.
+
+    ``section``: cv | linkedin | github | preferences | all.
+
+    Deliberately does NOT re-run extraction: there is nothing to extract, and a
+    paid LLM round-trip to rebuild an empty profile would be waste. The stored
+    snapshot taken by ``save_profile`` is what makes this reversible.
+    """
+    if section not in _CLEAR_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
+        )
+    profile = load_profile(user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile to clear")
+
+    cv = profile.cv_data
+    prefs = profile.preferences or UserPreferences()
+
+    if section in ("cv", "all"):
+        _clear_cv(cv)
+    if section in ("linkedin", "all"):
+        _clear_linkedin(cv)
+    if section in ("github", "all"):
+        _clear_github(cv, prefs)
+    if section in ("preferences", "all"):
+        # A fresh preferences object — but the GitHub handle is owned by the
+        # GitHub section, so clearing PREFERENCES alone must not disconnect it.
+        keep_handle = "" if section == "all" else prefs.github_username
+        prefs = UserPreferences(github_username=keep_handle)
+    if section == "all":
+        # about_me-derived skills live on the CV object but are owned by the
+        # preferences the user typed, so a full clear takes them too.
+        cv.about_me_inferred_skills = []
+        cv.llm_input_hashes.pop("about_me", None)
+
+    profile.preferences = prefs
+    save_profile(profile, user.id, f"clear_{section}")
+    logger.info(
+        "profile_cleared", extra={"event": "profile_cleared", "section": section}
+    )
+    return _build_profile_response(profile, user.id)
 
 
 # ── Step-1.5 S3-A,B,C — profile version + JSON Resume endpoints. ──
@@ -541,7 +968,7 @@ async def restore_version(
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    return _build_profile_response(restored)
+    return _build_profile_response(restored, user.id)
 
 
 def _get_profile_version_for_user(version_id: int, user_id: str) -> dict[str, Any] | None:

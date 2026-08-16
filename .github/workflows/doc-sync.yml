@@ -48,6 +48,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # BLOCKING, and deliberately separate from the drift report below.
+      # The drift report is non-blocking on purpose: it is a daily signal the
+      # fixer loop repairs. The size budget is not that kind of thing -- it is a
+      # hard ceiling with one deterministic answer, on a file auto-loaded into
+      # every session, so an over-budget merge taxes every future turn.
+      # It was claimed as "CI enforces this" in CLAUDE.md while the step below
+      # swallowed exit 1 (`[ "$code" -le 1 ]`). This step makes the claim true.
+      # Verified by deliberately breaking it: +30 words -> exit 1.
+      - name: CLAUDE.md size budget (blocking)
+        run: python scripts/doc_sync_check.py --budget-only
+
       - name: Run doc drift check
         id: check
         run: |
@@ -203,6 +214,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # drift.md is the AGENT'S INPUT, not a doc edit. It is untracked and
+          # un-ignored, so `git add -A` committed it into every PR (verified on
+          # #247/#261/#276/#288/#295 — all five list drift.md as a changed file).
+          # Worse, it made the no-edits guard below UNREACHABLE: git status was
+          # never empty, so a fixer that edited nothing would still have shipped a
+          # PR containing only its own scratch file. Delete it before we look.
+          rm -f drift.md
           changed=$(git status --porcelain | awk '{print $2}')
           # Fail LOUD if the fixer made no edits — drift exists, so silence = broken fixer.
           [ -n "$changed" ] || { echo "::error::fixer made NO edits despite drift — check the transcript artifact"; exit 1; }
@@ -213,7 +231,7 @@ jobs:
           # "Markdown only" is NOT a sufficient cage, because the files that
           # CAGE EVERY OTHER LOOP ARE MARKDOWN.
           #
-          # CLAUDE.md holds the 28 Hard Rules, and repair.yml + pr-repair.yml
+          # CLAUDE.md holds the 31 Hard Rules, and repair.yml + pr-repair.yml
           # feed exactly that text to their blind checker as INVARIANTS. Every
           # `.claude/**` file is agent instruction. So under the old rule this
           # loop's model could edit the constraints that every other loop's
@@ -232,10 +250,25 @@ jobs:
             echo "::warning::fixer edited constitution file(s) — PR will be left OPEN for human review: $(echo "$constitution" | tr '\n' ' ')"
             destructive_constitution="$constitution"
           fi
-          branch="docs/sync-auto-${{ github.run_id }}"
+          # ── ONE branch, ONE PR ─────────────────────────────────────────────
+          # The branch used to be "docs/sync-auto-${{ github.run_id }}" — a NEW
+          # head every run, so `gh pr create` opened a NEW PR every run and
+          # nothing ever closed the last one. Measured 2026-08-11: five of the
+          # repo's fourteen open PRs (#247, #261, #276, #288, #295) were this
+          # loop talking to itself, with byte-identical file lists — because the
+          # fixer touches CLAUDE.md every run, CLAUDE.md is a constitution file,
+          # and constitution PRs are (correctly) left open for a human. So the
+          # "left open for review" path is not the rare case here, it is EVERY
+          # run, and a per-run branch turned that into a queue of duplicates.
+          # A stable branch means run N+1 REPLACES run N's proposal instead of
+          # stacking another one beside it, and the single open PR always shows
+          # today's report instead of last week's.
+          branch="docs/sync-auto"
           git config user.name "loop3-doc-sync[bot]"
           git config user.email "loop3@users.noreply.github.com"
-          git checkout -b "$branch"
+          # -B, not -b: rebuild the branch from the CURRENT main every run, so the
+          # PR is always "today's fixes vs main", never a stack of stale commits.
+          git checkout -B "$branch"
           git add -A
           # ── Knowledge-safety cage ──────────────────────────────────────────
           # The docs-only check above proves only MARKDOWN changed. It does NOT
@@ -256,8 +289,39 @@ jobs:
             destructive=$(printf '%s\n%s' "$destructive" "$destructive_constitution" | sed '/^$/d')
           fi
           git commit -m "docs: auto-sync (Loop 3) — drift fixed by CI fixer run ${{ github.run_id }}"
-          git push -u origin "$branch"
+          # Force-push is acceptable HERE and only here: the branch is bot-owned
+          # and is thrown away and rebuilt from main on every run, so there is no
+          # human work to lose. --force-with-lease still refuses if the remote tip
+          # is not what we read a moment ago. The lease needs an explicit expected
+          # sha, because a bare --force-with-lease compares against a
+          # remote-tracking ref this fresh clone may not have.
+          remote_sha=$(git ls-remote --heads origin "$branch" | awk '{print $1}')
+          # THE LEASE ALONE PROTECTS NOTHING. We read remote_sha seconds before the
+          # push, so a human commit already on the branch simply BECOMES the expected
+          # value and is force-pushed away. The lease only covers a sub-second race.
+          # This PR stays open for human review across daily runs, so a reviewer's
+          # "commit suggestion" from the GitHub UI is exactly the thing at risk.
+          # Real guard: refuse when the remote tip is neither ours nor an ancestor.
+          if [ -n "$remote_sha" ] && ! git merge-base --is-ancestor "$remote_sha" HEAD 2>/dev/null; then
+            git fetch --quiet --depth=1 origin "$remote_sha" 2>/dev/null || true
+            last_author=$(git log -1 --format=%ae "$remote_sha" 2>/dev/null || echo unknown)
+            if [ "$last_author" != "loop3@users.noreply.github.com" ]; then
+              echo "::error::$branch tip $remote_sha was authored by '$last_author' (not the bot) and is not in our history — refusing to force-push over human work."
+              exit 1
+            fi
+          fi
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="$branch:$remote_sha" origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
           python scripts/doc_sync_check.py > after.md 2>&1 || true
+          # Every run rewrites title AND body, so a long-lived PR can never show a
+          # week-old report — the header below names the run that produced it.
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "_Rebuilt from scratch by Loop 3 doc-sync [run ${{ github.run_id }}]($run_url) at $(date -u '+%Y-%m-%d %H:%M UTC'). This PR is the loop's SINGLE standing PR: the branch is force-pushed and this body is rewritten every run, so what you see is always the latest report._"
+            echo
+          } > pr-body.md
           if [ -n "$destructive" ]; then
             { echo "> **HUMAN REVIEW REQUIRED — this PR deletes/renames docs or edits an agent-instruction file, so it was NOT auto-merged.**"
               echo ">"
@@ -267,21 +331,52 @@ jobs:
               echo '> ```'
               echo
               cat after.md
-            } > pr-body.md
+            } >> pr-body.md
           else
-            cp after.md pr-body.md
+            cat after.md >> pr-body.md
           fi
-          gh pr create --base main --head "$branch" \
-            --title "docs: auto-sync (Loop 3)" \
-            --body-file pr-body.md
+          # Create ONLY when this head has no open PR; otherwise update the one
+          # that already exists. This is the actual anti-duplicate gate — a stable
+          # branch alone would still make `gh pr create` fail (or, worse, an old
+          # closed PR reopen) rather than refresh the live one.
+          title="docs: auto-sync (Loop 3) — $(date -u '+%Y-%m-%d')"
+          pr=$(gh pr list --state open --head "$branch" --base main \
+                 --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            gh pr create --base main --head "$branch" --title "$title" --body-file pr-body.md
+            pr=$(gh pr list --state open --head "$branch" --base main \
+                   --json number --jq '.[0].number // empty')
+          else
+            echo "reusing open PR #$pr — refreshing title + body instead of opening a duplicate"
+            gh pr edit "$pr" --title "$title" --body-file pr-body.md
+          fi
           if [ -n "$destructive" ]; then
             echo "::warning::fixer deleted/renamed doc(s) or edited an agent-instruction file — PR left OPEN for human review: $(echo "$destructive" | tr '\n' ' ')"
-            echo "docs PR opened but NOT merged (deletes/renames need a human): $(echo "$destructive" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+            echo "docs PR #${pr:-?} updated but NOT merged (deletes/renames need a human): $(echo "$destructive" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
           else
             # GITHUB_TOKEN-created PRs trigger no CI, so --auto would wait forever.
             # The docs-only + no-destruction asserts above ARE the gate.
-            gh pr merge "$branch" --squash --delete-branch
-            echo "docs PR shipped and merged" >> "$GITHUB_STEP_SUMMARY"
+            # --admin is REQUIRED once main has a ruleset. `gh pr merge` refuses
+            # CLIENT-SIDE on mergeStateStatus=BLOCKED and never calls the API, so
+            # the bypass_actors entry never gets a chance to apply (cli/cli#13388).
+            # Without this flag the daily doc-sync self-merge dies the moment the
+            # ruleset goes active, and the standing PR silently piles up forever.
+            # DOES NOT SELF-MERGE ANY MORE, and that is the point.
+            #
+            # GitHub REFUSED an Integration bypass on this ruleset ("Actor GitHub
+            # Actions integration must be part of the ruleset source or owner
+            # organization" — personal repos cannot grant one), and --admin needs
+            # repo-admin rights that GITHUB_TOKEN does not have. So there is no
+            # mechanism left by which this could merge itself past required checks.
+            #
+            # Losing it is an improvement. This PR is LLM-EDITED prose, and it is
+            # opened with GITHUB_TOKEN, which means GitHub Actions never runs on it
+            # (the recursion rule). It was therefore merging model-written changes
+            # into production with ZERO checks, daily — one of the findings of the
+            # 2026-08-11 harness audit. The standing PR now waits for a human, which
+            # is all it ever should have done.
+            echo "docs PR ${pr:-$branch} is ready for review — NOT auto-merged." \n              >> "$GITHUB_STEP_SUMMARY"
+            echo "docs PR #${pr:-?} shipped and merged" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # Close the drift issue NOW, in this run. Previously the issue was

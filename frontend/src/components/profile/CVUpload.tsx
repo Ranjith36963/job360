@@ -18,20 +18,79 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { ClearButton } from "@/components/profile/ClearButton";
 import type { ProfileSummary, CVDetail } from "@/lib/types";
 
 interface CVUploadProps {
   onUpload: (file: File) => Promise<void>;
   onLinkedinUpload?: (file: File) => Promise<void>;
   onGithubEnrich?: (username: string) => Promise<void>;
+  /** Empty ONE input so the next upload starts from nothing. Undoable via History. */
+  onClearSection?: (section: "cv" | "linkedin" | "github") => Promise<void>;
   profile: ProfileSummary | null;
   cvDetail?: CVDetail | null;
   loading: boolean;
 }
 
+// ── Upload receipt ────────────────────────────────────────
+// WHAT we hold and WHEN we got it, per input.
+//
+// Before this, a successful upload showed only a small tick in the card
+// header. The owner's words on a live smoke test: "I get a neon colour tick
+// mark but I didn't catch that". Worse, nothing anywhere named the file — so
+// you could not tell WHICH CV was on file, or whether a re-upload had actually
+// replaced it. GitHub had no confirmation at all.
+//
+// A tick says "something worked". A receipt says "we have Ranjith_CV.pdf, added
+// 8 Aug 2026" — which is the question a user actually asks. Same component for
+// all three inputs; GitHub passes its handle as the name, since it has no file.
+
+function formatReceiptDate(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function UploadReceipt({
+  name,
+  at,
+  meta,
+}: {
+  name: string;
+  at?: string;
+  meta?: string;
+}) {
+  const when = formatReceiptDate(at);
+  const sub = [meta, when && `added ${when}`].filter(Boolean).join(" · ");
+  return (
+    <div
+      data-testid="upload-receipt"
+      className="flex items-center gap-2 rounded-lg border border-score-high/30 bg-score-high/5 px-3 py-2"
+    >
+      <CheckCircle className="h-4 w-4 shrink-0 text-score-high" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-foreground" title={name}>
+          {name}
+        </p>
+        {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Highlight engine ──────────────────────────────────────
 // Marks extracted terms inline within the full CV text using
 // neon-colored backgrounds by category.
+//
+// THIS card is the single home of the full CV text (owner decision
+// 2026-08-08). The duplicate copy inside CVViewer's "Full CV Text" panel was
+// removed — same wall of text twice on one page, and this is the card where a
+// user looks for the CV they just uploaded.
 
 interface HighlightTerm {
   text: string;
@@ -112,6 +171,7 @@ export function CVUpload({
   onUpload,
   onLinkedinUpload,
   onGithubEnrich,
+  onClearSection,
   profile,
   cvDetail,
   loading,
@@ -418,7 +478,17 @@ export function CVUpload({
               )}
             </div>
 
-            {/* Full CV text with inline highlights */}
+            {/* Receipt — the file we actually hold, and when it arrived. */}
+            <UploadReceipt
+              name={profile.cv_filename || "CV on file"}
+              at={profile.cv_uploaded_at}
+            />
+
+            {/* Full CV text with inline highlights.
+                THE single copy on the page (owner decision 2026-08-08): the
+                identical panel inside CVViewer ("Full CV Text") was removed
+                rather than this one, because this is the card a user looks at
+                for the CV they just uploaded. */}
             {cvDetail && cvDetail.raw_text && (
               <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
                 <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
@@ -448,17 +518,28 @@ export function CVUpload({
               </span>
             </div>
 
-            {/* Re-upload button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || loading}
-              className="gap-2"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Re-upload CV
-            </Button>
+            {/* Re-upload + clear, side by side: the two things you do to a CV
+                that is already here. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || loading}
+                className="gap-2"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Re-upload CV
+              </Button>
+              {onClearSection && (
+                <ClearButton
+                  label="Clear CV"
+                  confirmLabel="Click again to clear the CV"
+                  disabled={uploading || loading}
+                  onConfirm={() => onClearSection("cv")}
+                />
+              )}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -518,6 +599,23 @@ export function CVUpload({
               {profile?.has_linkedin ? "Re-enrich" : "Enrich"} LinkedIn
             </Button>
           </div>
+          {profile?.has_linkedin && (
+            <>
+              <UploadReceipt
+                name={profile.linkedin_filename || "LinkedIn profile on file"}
+                at={profile.linkedin_uploaded_at}
+              />
+              {onClearSection && (
+                <ClearButton
+                  label="Clear LinkedIn"
+                  confirmLabel="Click again to clear LinkedIn"
+                  disabled={linkedinLoading}
+                  onConfirm={() => onClearSection("linkedin")}
+                  className="w-full"
+                />
+              )}
+            </>
+          )}
         </div>
 
         <Separator className="my-4" />
@@ -566,6 +664,37 @@ export function CVUpload({
               Enrich GitHub
             </Button>
           </div>
+          {/* GitHub has no file — the handle IS the receipt, with the repo
+              count as proof of what we actually read. This card previously had
+              NO confirmation of any kind after a successful enrich. */}
+          {profile?.has_github && (
+            <>
+              <UploadReceipt
+                name={
+                  profile.github_username
+                    ? `@${profile.github_username}`
+                    : "GitHub connected"
+                }
+                at={profile.github_connected_at}
+                meta={
+                  profile.github_repo_count
+                    ? `${profile.github_repo_count} public ${
+                        profile.github_repo_count === 1 ? "repo" : "repos"
+                      } read`
+                    : undefined
+                }
+              />
+              {onClearSection && (
+                <ClearButton
+                  label="Clear GitHub"
+                  confirmLabel="Click again to clear GitHub"
+                  disabled={githubLoading}
+                  onConfirm={() => onClearSection("github")}
+                  className="w-full"
+                />
+              )}
+            </>
+          )}
         </div>
 
         {/* Hint if neither enrichment */}

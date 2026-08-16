@@ -92,6 +92,19 @@
         "title": "ApplicationTimelineResponse",
         "type": "object"
       },
+      "Body_clear_profile_section_api_profile_clear_post": {
+        "properties": {
+          "section": {
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section"
+        ],
+        "title": "Body_clear_profile_section_api_profile_clear_post",
+        "type": "object"
+      },
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
@@ -187,6 +200,34 @@
             },
             "title": "Companies",
             "type": "array"
+          },
+          "cv_experience_level": {
+            "default": "",
+            "title": "Cv Experience Level",
+            "type": "string"
+          },
+          "cv_positions": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cv Positions",
+            "type": "array"
+          },
+          "cv_projects": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cv Projects",
+            "type": "array"
+          },
+          "cv_right_to_work": {
+            "default": "",
+            "title": "Cv Right To Work",
+            "type": "string"
           },
           "education": {
             "default": [],
@@ -1521,6 +1562,12 @@
               }
             ]
           },
+          "github_detail": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Github Detail",
+            "type": "object"
+          },
           "github_temporal": {
             "additionalProperties": {
               "additionalProperties": true,
@@ -1546,6 +1593,14 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "search_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Search Titles",
+            "type": "array"
           },
           "skill_esco": {
             "additionalProperties": {
@@ -1601,9 +1656,19 @@
       },
       "ProfileSummary": {
         "properties": {
+          "cv_filename": {
+            "default": "",
+            "title": "Cv Filename",
+            "type": "string"
+          },
           "cv_length": {
             "title": "Cv Length",
             "type": "integer"
+          },
+          "cv_uploaded_at": {
+            "default": "",
+            "title": "Cv Uploaded At",
+            "type": "string"
           },
           "education": {
             "items": {
@@ -1614,6 +1679,21 @@
           },
           "experience_level": {
             "title": "Experience Level",
+            "type": "string"
+          },
+          "github_connected_at": {
+            "default": "",
+            "title": "Github Connected At",
+            "type": "string"
+          },
+          "github_repo_count": {
+            "default": 0,
+            "title": "Github Repo Count",
+            "type": "integer"
+          },
+          "github_username": {
+            "default": "",
+            "title": "Github Username",
             "type": "string"
           },
           "has_github": {
@@ -1634,6 +1714,16 @@
             },
             "title": "Job Titles",
             "type": "array"
+          },
+          "linkedin_filename": {
+            "default": "",
+            "title": "Linkedin Filename",
+            "type": "string"
+          },
+          "linkedin_uploaded_at": {
+            "default": "",
+            "title": "Linkedin Uploaded At",
+            "type": "string"
           },
           "skills_count": {
             "title": "Skills Count",
@@ -1673,6 +1763,17 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
           },
           "source_action": {
             "title": "Source Action",
@@ -4569,6 +4670,66 @@
         ]
       }
     },
+    "/api/profile/clear": {
+      "post": {
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing to extract, and a\npaid LLM round-trip to rebuild an empty profile would be waste. The stored\nsnapshot taken by ``save_profile`` is what makes this reversible.",
+        "operationId": "clear_profile_section_api_profile_clear_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_clear_profile_section_api_profile_clear_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Profile Section",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
     "/api/profile/cv": {
       "post": {
         "description": "Set the caller's CV (PDF/DOCX) \u2014 one input, one dedicated route.",
@@ -4631,7 +4792,7 @@
     },
     "/api/profile/github": {
       "post": {
-        "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.",
+        "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.\n\nFAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``\nunconditionally, so a handle that reduced to nothing still produced a green\n\"GitHub profile enriched\" toast \u2014 and, once receipts shipped, a \"GitHub\nconnected\" row on the profile page \u2014 while zero repos were read. Measured on\na live profile: ``github_connected_at`` stamped, ``github_username`` empty,\n0 repos. A receipt that confirms something that did not happen is worse than\nno receipt at all.\n\nA handle that does not reduce to a valid GitHub username is a 400 with\nwording the person can act on. ``normalize_github_username`` accepts a bare\nhandle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL\n(whose subdomain IS the username \u2014 a CV lists that under \"Portfolio\", so it\nis exactly what people paste here).",
         "operationId": "upload_github_api_profile_github_post",
         "parameters": [
           {

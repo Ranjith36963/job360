@@ -2,7 +2,7 @@
 
 > **Audience.** Read this if you want to understand everything Job360 does *for a human end-user* — sign up, upload a CV, see matched jobs, track applications, get notified. This document covers no source-fetching internals and no scoring math; those are Pillars 2 and 3.
 >
-> **Scope.** Covers the code that exists on `main` as of 2026-05-28 (HEAD `a7a2268`). Where a surface is partially wired or carries a known gap, it is called out in the **Status** column.
+> **Scope.** Covers the code that exists on `main` as of 2026-08-14 (HEAD `09727e5`). Where a surface is partially wired or carries a known gap, it is called out in the **Status** column.
 
 ---
 
@@ -221,7 +221,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 1. **Extract text** with `pdfplumber` (with font-size clustering for layout-aware section splitting — see `layout.segment_sections_from_words`) or `python-docx`.
 2. **Call an LLM** via `llm_extract_validated(prompt, CVSchema)` (`backend/src/services/profile/llm_provider.py`). The schema is enforced with Pydantic; on validation failure the prompt is re-sent up to 2× with the validation error appended so the model can self-correct.
 3. **Provider fallback chain**: Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
-4. **ESCO normalisation** (only when `SEMANTIC_ENABLED=true`) maps free-text skills to canonical ESCO URIs.
+4. **ESCO normalisation code exists but has never run in production.** `_maybe_normalise_skills_via_esco()` (`cv_parser.py:804`) is a real no-op today: it needs both `SEMANTIC_ENABLED=true` AND a prebuilt embedding index at `backend/data/esco/`, and that directory has never been committed or generated (verified: `ls backend/data/esco` → does not exist). Root `CLAUDE.md` rule #28 states this as FACT (verified 2026-08-11): "no ontology is consulted... ESCO is inert scaffolding, never built or shipped." Reviving it means shipping the index artefacts, not flipping a flag.
 
 #### LinkedIn PDF — `backend/src/services/profile/linkedin_parser.py`
 
@@ -252,7 +252,9 @@ Free-text and select fields the user fills in on `/profile`:
 - `negative_keywords` (e.g. "intern", "junior")
 - `about_me` (free-form), `github_username`
 - `needs_visa` (boolean)
-- `preferred_workplace` (Pillar 2 addition)
+- `preferred_workplace` — DERIVED, not stored: a read-only property over
+  `work_arrangement` (2026-08-13). It was a stored copy kept in step by a
+  bridge in the profile route; the copy is gone, so the two cannot diverge.
 
 ### 3.3 The data model — `backend/src/services/profile/models.py`
 
@@ -533,7 +535,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | LinkedIn "Save to PDF" import | ✅ | `linkedin_parser.py`, 2-of-3 detection heuristic |
 | GitHub enrichment with temporal weighting | ✅ | `github_enricher.py` — 3× weight for repos pushed in last year |
 | Dependency-file framework inference | ✅ | 7 file types parsed (package.json, requirements.txt, …) |
-| ESCO skill normalisation | 🟡 | only when `SEMANTIC_ENABLED=true`; off by default per CLAUDE.md rule #18 |
+| ESCO skill normalisation | ❌ | code path exists but the embedding index it needs (`backend/data/esco/`) was never built or shipped — inert scaffolding, not a flag flip. Root `CLAUDE.md` rule #28 (FACT, verified 2026-08-11). |
 | Multi-tenant SQLite storage | ✅ | `user_profiles` table (migration `0006`) |
 | Version history + restore (last 10) | ✅ | `user_profile_versions` (`0007`); restore is atomic and preserves history |
 | Legacy `data/user_profile.json` hydration | ✅ | non-destructive, runs on first DB read |
@@ -665,4 +667,9 @@ For completeness — these belong in the other two pillars and you won't find th
 
 ---
 
-*Last updated 2026-05-28. HEAD `a7a2268`. Backend test baseline 600p/0f/3s.*
+*Last updated 2026-08-15. HEAD `09727e5` (origin/main, 2026-08-14). Backend suite: 2,854 tests
+collected, 2 deselected (measured `python -m pytest --collect-only -q`, this session —
+per root `CLAUDE.md`: "never quote a test count from a doc, measure it"). Pass/fail count
+NOT verified this session (no local Postgres reachable — the suite needs `docker-compose.dev.yml`
+up on port 5433); do not carry the old "600p/0f/3s" figure forward, it predates this update by
+~2.5 months and was already off by roughly 5x collected-test count alone.*

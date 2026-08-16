@@ -1,8 +1,9 @@
 @AGENTS.md
 
 # frontend/ — Claude Code pointer
+<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
 
-> **Thin pointer, not the source of truth.** The 28 hard rules, scoring/engine
+> **Thin pointer, not the source of truth.** The 31 hard rules, scoring/engine
 > guidance, DB schema, and phase history live in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
 > read that first. This file adds frontend-local essentials so they're at hand when
 > you work in this directory. Keep it thin; do not duplicate the root.

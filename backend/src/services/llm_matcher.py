@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from src.models import Job
 from src.repositories import pg
 from src.repositories.db_retry import with_write_retry
-from src.services.profile.llm_provider import llm_extract_validated
+from src.services.profile.llm_provider import LLMKeyMissing, llm_extract_validated
 
 logger = logging.getLogger("job360.services.llm_matcher")
 
@@ -141,6 +141,18 @@ def profile_to_matcher_text(profile: Any) -> str:
         summary = (getattr(cv, "summary", "") or "").strip()
         if summary:
             lines.append(f"Summary: {summary}")
+        # The LinkedIn About, in the candidate's own first-person words. A CV
+        # summary is written for recruiters and heavily edited; the About states
+        # motivation and direction a CV omits. It used to be discarded whenever
+        # the CV had a summary, so the judge never saw it.
+        li_summary = (getattr(cv, "linkedin_summary", "") or "").strip()
+        if li_summary and li_summary != summary:
+            lines.append(f"In their own words (LinkedIn): {li_summary}")
+        # The LinkedIn tagline. Often states the stack AND current availability
+        # ("Open to X roles UK"), which appears in no other input.
+        li_headline = (getattr(cv, "linkedin_headline", "") or "").strip()
+        if li_headline:
+            lines.append(f"LinkedIn headline: {li_headline}")
 
         # Skills BY SOURCE — the judge can then weigh evidence strength
         # ("proven in GitHub repos" outranks "listed on a CV").
@@ -183,14 +195,61 @@ def profile_to_matcher_text(profile: Any) -> str:
         for label, field in (
             ("Education", "education"),
             ("Certifications", "certifications"),
+            # Facts that had a shelf but reached no consumer until 2026-08-09.
+            ("Industries worked in", "cv_industries"),
+            ("Languages spoken", "cv_languages"),
+            ("Follows / interested in", "linkedin_interests"),
         ):
             joined = _join(getattr(cv, field, []))
             if joined:
                 lines.append(f"{label}: {joined}")
 
+        domain = (getattr(cv, "career_domain", "") or "").strip()
+        if domain:
+            lines.append(f"Career domain: {domain}")
+        # The rubric asks about seniority fit; without this the judge had to
+        # infer a level from titles it was also being asked to judge.
+        cv_level = (getattr(cv, "cv_experience_level", "") or "").strip()
+        if cv_level:
+            lines.append(f"Seniority (stated on CV): {cv_level}")
+        # Decisive for a UK role and stated by no other input. Silent when
+        # the CV did not say — never inferred (rule #31).
+        rtw = (getattr(cv, "cv_right_to_work", "") or "").strip()
+        if rtw:
+            lines.append(f"Right to work (stated on CV): {rtw}")
+
+        # LinkedIn sections that are real hiring evidence and are stated
+        # NOWHERE else. Rendered as labelled rows because a judge reads
+        # structure; each stays silent when the person has none (rule #29).
+        for label, field, keys in (
+            ("Projects (from the CV)", "cv_projects",
+             ("name", "description", "technologies")),
+            ("Recommendations (written by others)", "linkedin_recommendations",
+             ("author", "relationship", "text")),
+            ("Publications", "linkedin_publications", ("title", "publisher", "date")),
+            ("Patents", "linkedin_patents", ("title", "number", "status")),
+            ("Awards", "linkedin_honors", ("title", "issuer", "date")),
+            ("Professional bodies", "linkedin_organizations", ("name", "role", "start")),
+            # IELTS/TOEFL. Language proficiency and UK-visa relevant, and no
+            # other input states it.
+            ("Test scores", "linkedin_test_scores", ("name", "score", "date")),
+        ):
+            rows: list[str] = []
+            for row in getattr(cv, field, []) or []:
+                if not isinstance(row, dict):
+                    continue
+                bits = [str(row.get(k) or "").strip() for k in keys]
+                text = " · ".join(b for b in bits if b)
+                if text:
+                    rows.append(f"  - {text}")
+            if rows:
+                lines.append(f"{label}:\n" + "\n".join(rows))
+
     if prefs is not None:
         pref_bits: list[str] = []
-        for attr in ("experience_level", "work_arrangement", "preferred_workplace"):
+        # work_arrangement only — preferred_workplace is now derived FROM it, so
+        # listing both sent the judge the same answer twice on every job.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if v:
                 pref_bits.append(f"{attr}={v}")
@@ -383,9 +442,37 @@ async def match_batch(
                     )
                 tel.record_verdict(verdict.fit_score)
                 return verdict
+            except LLMKeyMissing:
+                # NEVER swallowed as a per-job failure. It is the SAME config
+                # fault for every job in the batch, and swallowing it per job is
+                # the masquerade that cost a week of eval data: N warnings, zero
+                # verdicts, and a caller counting "judged 0/160" reading a
+                # missing credential as a quality problem. Re-raised and
+                # surfaced by the gather below.
+                raise
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run
                 tel.failed += 1
                 logger.warning("match_batch: judge failed for job %s: %s", job_id, e)
                 return None
 
-    return await asyncio.gather(*[_one(j) for j in jobs])
+    # ``return_exceptions=True`` on purpose. A bare gather propagates the FIRST
+    # exception and abandons its siblings mid-flight — on this ONE shared
+    # psycopg connection that is finding C2's bug again (it surfaced in test as
+    # a WinError 10038 during teardown). Let every judge settle, THEN speak.
+    outcomes = await asyncio.gather(*[_one(j) for j in jobs], return_exceptions=True)
+    for out in outcomes:
+        if isinstance(out, BaseException):
+            # ANYTHING that escapes `_one` is meant to escape: it already
+            # swallows ordinary per-job errors itself, so what is left is the
+            # LLMKeyMissing config fault (raised once, carrying the four key
+            # names and the fix, instead of N lines that look like N bad
+            # judgments) or a BaseException like CancelledError, which must
+            # never be turned into a quiet ``None`` by `return_exceptions=True`.
+            # Both live callers still catch Exception (main.py
+            # _run_matcher_stage, rescore.py gem-rescue), so the run survives;
+            # what changes is that their log line now names the cause.
+            raise out
+    # The loop above raised on every exception, so nothing is filtered out here
+    # — order and length are preserved. Written as a comprehension so the type
+    # narrows without a cast.
+    return [o for o in outcomes if not isinstance(o, BaseException)]

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 from src.core.settings import (
     CEREBRAS_API_KEY,
     GEMINI_API_KEY,
+    GEMINI_MODEL,
     GROQ_API_KEY,
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -47,6 +48,15 @@ _LLM_RL_MAX_WAIT_S = float(os.getenv("LLM_RATE_LIMIT_MAX_WAIT_S", "8"))
 class LLMError(RuntimeError):
     """Base for LLM provider failures. Subclasses ``RuntimeError`` so existing
     callers that catch ``RuntimeError``/``Exception`` keep working unchanged."""
+
+
+class LLMKeyMissing(LLMError):  # noqa: N818 — reads better than ...Error
+    """NOT ONE provider key is set, so no call was ever made.
+
+    A CONFIG fault, not a result. It is deliberately its own type because every
+    caller downstream has to tell it apart from "we asked and the answer was
+    bad" — and for a week nobody could. See ``require_llm_key``.
+    """
 
 
 class LLMRateLimited(LLMError):  # noqa: N818 — reads better than ...Error
@@ -199,6 +209,80 @@ def reset_dead_providers() -> None:
     _DEAD_PROVIDERS.clear()
 
 
+# ── The shared no-key preflight ─────────────────────────────────────────────
+#
+# A MISSING KEY IS NOT A BAD RESULT. Measured cost of confusing the two: the
+# weekly ranking eval reported "audit produced no judgments — treating as
+# failure" for a WEEK (runs 31107748440 + 31368793516). The ranking was fine.
+# No judge key was set — GitHub renders an unset Actions secret as an EMPTY
+# string — and every one of the 160 calls died instantly. The alarm filed it as
+# an ACCURACY REGRESSION (issue #238), which is the most expensive wrong alarm
+# there is: it sends a one-person team debugging the product instead of the
+# config.
+#
+# The check lives HERE, at the one point every path must pass through, for two
+# reasons: it cannot be bypassed by a caller written next month, and it fires
+# BEFORE any provider is tried (the old version only checked after the loop, so
+# the answer arrived at the bottom of a pile of provider errors).
+#
+# Everything downstream — the judge, the CV parser, the weekly eval, the daily
+# key probe — reads the four names from LLM_KEY_VARS so a fifth provider cannot
+# be added to the chain and forgotten by the alarm.
+LLM_KEY_VARS: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+)
+
+NO_LLM_KEY_MESSAGE = (
+    "No LLM API key configured — this is a CONFIG failure, NOT a bad result. "
+    f"Looked for {', '.join(LLM_KEY_VARS)}: ALL {len(LLM_KEY_VARS)} are empty, so "
+    "not one call was made and NOTHING was measured. Any ONE of them unblocks it "
+    "— GEMINI_API_KEY, GROQ_API_KEY and CEREBRAS_API_KEY have a free tier and all "
+    "four SDKs are already installed (backend/pyproject.toml). Set one in .env, or "
+    "as a repo Actions secret: in GitHub Actions an UNSET secret renders as an "
+    "EMPTY string, which is exactly how this hides."
+)
+
+# One alarm per process, not one per job. 160 identical ERROR events is how a
+# real alarm gets muted. Cleared by ``reset_llm_key_alarm`` (tests, re-probe).
+_KEY_ALARM_LOGGED = False
+
+
+def reset_llm_key_alarm() -> None:
+    """Allow the no-key ERROR to be logged again. For tests and re-probes."""
+    global _KEY_ALARM_LOGGED
+    _KEY_ALARM_LOGGED = False
+
+
+def configured_llm_keys() -> list[str]:
+    """NAMES (never values) of the provider keys that are actually set."""
+    return [name for name in LLM_KEY_VARS if globals().get(name)]
+
+
+def require_llm_key() -> None:
+    """Raise ``LLMKeyMissing`` when not one provider key is set.
+
+    Also logs ERROR once per process. That is the belt to the exception's
+    braces: both live callers of the judge swallow exceptions on purpose so a
+    provider blip cannot kill a run (``main.py`` ``_run_matcher_stage`` and
+    ``rescore.py`` gem-rescue), and Sentry raises an issue from an ERROR log —
+    so the config fault escapes even down a path that eats the raise.
+
+    Reads the MODULE globals, not ``os.environ``, so it tells the same truth the
+    provider chain acts on: ``settings.py`` also accepts a lowercase
+    ``openai_api_key``, and tests patch these names directly.
+    """
+    global _KEY_ALARM_LOGGED
+    if configured_llm_keys():
+        return
+    if not _KEY_ALARM_LOGGED:
+        _KEY_ALARM_LOGGED = True
+        logger.error("%s", NO_LLM_KEY_MESSAGE)
+    raise LLMKeyMissing(NO_LLM_KEY_MESSAGE)
+
+
 def _note_provider_failure(name: str, exc: BaseException) -> None:
     """Log one provider's failure and, if it is permanent, stop using it.
 
@@ -232,11 +316,13 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
     backoff (see ``_attempt``).
 
     Raises:
-        RuntimeError: no provider key configured.
+        LLMKeyMissing: not one provider key is configured (a CONFIG fault —
+            checked FIRST, before any provider is tried).
         LLMRateLimited: all providers failed AND >=1 was rate-limited — retry
             later; callers MUST NOT persist an empty result on this.
         LLMAllProvidersFailed: all providers failed for non-rate-limit reasons.
     """
+    require_llm_key()
     errors: list[str] = []
     rate_limited = False
 
@@ -259,12 +345,8 @@ async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
             rate_limited = rate_limited or _is_rate_limit(e)
             _note_provider_failure(name, e)
 
-    if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
-        raise RuntimeError(
-            "No LLM API key configured. Set OPENAI_API_KEY (recommended), or a free tier "
-            "GEMINI_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY in .env."
-        )
-
+    # No no-key check here: ``require_llm_key`` already ran at the top, so
+    # reaching this point means keys EXIST and the providers themselves failed.
     detail = "; ".join(errors)
     if rate_limited:
         raise LLMRateLimited(f"All LLM providers failed (rate-limited): {detail}")
@@ -280,9 +362,11 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
     taxonomy as ``llm_extract``.
 
     Raises:
-        RuntimeError: no provider key configured.
+        LLMKeyMissing: not one provider key is configured (same shared preflight
+            as ``llm_extract`` — this door must not have a weaker check).
         LLMRateLimited / LLMAllProvidersFailed: as in ``llm_extract``.
     """
+    require_llm_key()
     errors: list[str] = []
     rate_limited = False
 
@@ -305,11 +389,7 @@ async def llm_extract_fast(prompt: str, system: str = "") -> dict[str, Any]:
             rate_limited = rate_limited or _is_rate_limit(e)
             _note_provider_failure(name, e)
 
-    if not (OPENAI_API_KEY or GEMINI_API_KEY or GROQ_API_KEY or CEREBRAS_API_KEY):
-        raise RuntimeError(
-            "No LLM API key configured. Set OPENAI_API_KEY (recommended) or a free tier key in .env."
-        )
-
+    # See ``llm_extract``: the no-key case never reaches here.
     detail = "; ".join(errors)
     if rate_limited:
         raise LLMRateLimited(f"All LLM providers failed (rate-limited): {detail}")
@@ -446,7 +526,13 @@ async def _call_gemini(prompt: str, system: str) -> dict[str, Any]:
     """Call Google Gemini API (free tier: 15 RPM, 1M tokens/day)."""
     import google.generativeai as genai
 
-    _model = "gemini-2.0-flash"
+    # Was hardcoded "gemini-2.0-flash", which Google retired. Prod Sentry
+    # PYTHON-FASTAPI-J: "404 This model models/gemini-2.0-flash is no longer
+    # available", last seen 2026-08-11 — so this entire fallback had been dead,
+    # and the only visible symptom was one line in an error nobody read.
+    # Overridable now (like OPENAI_MODEL) so the next retirement is an env var,
+    # not a deploy.
+    _model = GEMINI_MODEL
     t0 = _time.monotonic()
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -482,7 +568,13 @@ async def _call_groq(prompt: str, system: str) -> dict[str, Any]:
     """Call Groq API (free tier: 30 RPM, 14.4K tokens/day on llama3)."""
     from groq import AsyncGroq
 
-    _model = "llama-3.3-70b-versatile"
+    # Overridable like every other provider here (CEREBRAS_MODEL directly
+    # below, OPENAI_MODEL / GEMINI_MODEL in settings). The value is unchanged —
+    # Groq's live failure was an EXPIRED KEY, not a bad model (prod Sentry:
+    # "401 Invalid API Key, code: expired_api_key"). This only removes the
+    # rot risk, which is not hypothetical: the hardcoded Gemini model beside it
+    # was retired by Google and killed that fallback silently.
+    _model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     t0 = _time.monotonic()
     try:
         client = AsyncGroq(api_key=GROQ_API_KEY)

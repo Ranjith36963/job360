@@ -23,11 +23,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { ClearButton } from "@/components/profile/ClearButton";
 import type { PreferencesRequest } from "@/lib/types";
 
 interface PreferencesFormProps {
   preferences: Record<string, unknown>;
+  /** Adjacent skills the extractor proposed. Shown as one-tap chips beside
+   *  Additional Skills.
+   *
+   *  These live INSIDE this form on purpose. Accepting one only changes local
+   *  state, so the existing debounced auto-save persists it — several taps cost
+   *  ONE save. Handling the tap in the parent instead would mean a save per
+   *  chip (each one triggering a paid re-extraction), and the resulting
+   *  `setProfile` would hand this component a brand-new `preferences` object,
+   *  re-firing the hydration effect and wiping whatever the user was part-way
+   *  through typing in any other field. */
+  suggestions?: string[];
   onSave: (prefs: PreferencesRequest) => Promise<void>;
+  /** Empty every typed preference. Undoable from History. Omitted when there
+   *  is no profile yet — there is nothing to clear. */
+  onClear?: () => Promise<void>;
   loading: boolean;
 }
 
@@ -42,6 +57,10 @@ interface TagInputProps {
   placeholder?: string;
   description?: string;
   variant?: "default" | "destructive";
+  /** One-tap chips shown under the input. Already-added ones are hidden. */
+  suggestions?: string[];
+  suggestionsLabel?: string;
+  suggestionsHint?: string;
 }
 
 function TagInput({
@@ -52,19 +71,36 @@ function TagInput({
   placeholder = "Type and press Enter",
   description,
   variant = "default",
+  suggestions,
+  suggestionsLabel,
+  suggestionsHint,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
+  // Shared by typing and by tapping a suggestion. It used to live inline in
+  // addTag; a suggestion handler that re-implemented the comparison would
+  // eventually disagree with it and let "Python" sit next to "python".
+  const appendTag = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      if (tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) return;
+      onChange([...tags, trimmed]);
+    },
+    [tags, onChange]
+  );
+
   const addTag = useCallback(() => {
-    const trimmed = inputValue.trim();
-    if (!trimmed) return;
-    if (tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
-      setInputValue("");
-      return;
-    }
-    onChange([...tags, trimmed]);
+    appendTag(inputValue);
     setInputValue("");
-  }, [inputValue, tags, onChange]);
+  }, [appendTag, inputValue]);
+
+  // Hide a suggestion once it has been taken, so the row shrinks as the user
+  // works through it and never offers something already on the list.
+  const openSuggestions = (suggestions ?? []).filter(
+    (s) =>
+      s.trim() && !tags.some((t) => t.toLowerCase() === s.trim().toLowerCase())
+  );
 
   const removeTag = useCallback(
     (index: number) => {
@@ -130,6 +166,38 @@ function TagInput({
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
+
+      {openSuggestions.length > 0 && (
+        <div className="pt-1">
+          {suggestionsLabel && (
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
+              {suggestionsLabel}
+            </p>
+          )}
+          {suggestionsHint && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              {suggestionsHint}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {openSuggestions.map((s) => (
+              <button
+                key={`suggest-${s}`}
+                type="button"
+                // Not "add" / "save" in the accessible name: the form's tests
+                // assert there is no button matching /save preferences/i, and
+                // this control must stay clearly distinct from one.
+                aria-label={`Add ${s} to ${label}`}
+                onClick={() => appendTag(s)}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+              >
+                <Plus className="h-3 w-3" />
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -144,6 +212,16 @@ function TagInput({
 const asArr = (val: unknown): string[] =>
   Array.isArray(val) ? val.map(String) : [];
 
+// The Select can't display "nothing chosen" as a real selected option, so it
+// needs its OWN word for that state -- same trick work_arrangement plays with
+// "any" a few fields down. The difference: nothing on the backend translates
+// this back to "" the way `_normalize_work_arrangement` does for
+// work_arrangement -- `_apply_preferences` stores experience_level with a bare
+// `.get(pref_dict, "experience_level", "")`, no normalizer. So BOTH directions
+// of the "" <-> sentinel translation have to happen here, or the sentinel word
+// itself would be posted to the server as though the user had typed it.
+const EXPERIENCE_UNSET = "unspecified";
+
 function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
   return {
     target_job_titles: asArr(raw.target_job_titles),
@@ -153,13 +231,25 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     industries: asArr(raw.industries),
     salary_min: raw.salary_min != null ? Number(raw.salary_min) : null,
     salary_max: raw.salary_max != null ? Number(raw.salary_max) : null,
+    // "any" is this form's WORD for "not set"; the server's word is "". Both
+    // read-points must agree, or the saved baseline ("") would never match the
+    // form state ("any") and the dirty check would report unsaved changes on a
+    // freshly loaded, untouched form.
     work_arrangement:
-      typeof raw.work_arrangement === "string" ? raw.work_arrangement : "any",
+      typeof raw.work_arrangement === "string" && raw.work_arrangement
+        ? raw.work_arrangement
+        : "any",
+    // Rule #29: an unstated level is silence, never a guess. This is the WIRE
+    // value (fed to the auto-save baseline below), so it stays the server's
+    // own word -- "" for "not chosen" -- not the Select's display sentinel.
+    // Substituting "mid" here used to post a seniority the user never chose:
+    // it drives real scoring at SENIORITY_WEIGHT=8, is stated to the LLM
+    // judge, and goes into the semantic vector.
     experience_level:
-      typeof raw.experience_level === "string" ? raw.experience_level : "mid",
+      typeof raw.experience_level === "string" ? raw.experience_level : "",
     negative_keywords: asArr(raw.negative_keywords),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
-    excluded_companies: asArr(raw.excluded_companies),
+    needs_visa: raw.needs_visa === true,
   };
 }
 
@@ -178,7 +268,7 @@ function serializePrefs(p: PreferencesRequest): string {
     p.experience_level,
     p.negative_keywords,
     p.about_me,
-    p.excluded_companies,
+    p.needs_visa,
   ]);
 }
 
@@ -190,7 +280,9 @@ const AUTOSAVE_DELAY_MS = 800;
 
 export function PreferencesForm({
   preferences,
+  suggestions,
   onSave,
+  onClear,
   loading,
 }: PreferencesFormProps) {
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
@@ -201,10 +293,10 @@ export function PreferencesForm({
   const [salaryMin, setSalaryMin] = useState("");
   const [salaryMax, setSalaryMax] = useState("");
   const [workArrangement, setWorkArrangement] = useState("any");
-  const [experienceLevel, setExperienceLevel] = useState("mid");
+  const [experienceLevel, setExperienceLevel] = useState(EXPERIENCE_UNSET);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
-  const [excludedCompanies, setExcludedCompanies] = useState<string[]>([]);
+  const [needsVisa, setNeedsVisa] = useState(false);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
   // green "Changes save automatically" line as a successful one, so once the
@@ -229,11 +321,21 @@ export function PreferencesForm({
     setIndustries(p.industries ?? []);
     setSalaryMin(p.salary_min != null ? String(p.salary_min) : "");
     setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
-    setWorkArrangement(p.work_arrangement ?? "any");
-    setExperienceLevel(p.experience_level ?? "mid");
+    // `||`, not `??`: the server now stores "I don't mind" as "" rather than the
+    // literal "any", because "any" was reaching the LLM judge as a stated
+    // constraint. `??` only falls back on null/undefined, so an empty string
+    // would leave this select showing nothing at all.
+    setWorkArrangement(p.work_arrangement || "any");
+    // See EXPERIENCE_UNSET above: `p.experience_level` is the server's wire
+    // word ("" for "not chosen"). The Select needs an actual item selected,
+    // so an empty value becomes the display sentinel here -- and buildPrefs
+    // mirrors this translation back to "" on the way out. Both read-points
+    // must agree, or the dirty-check reports unsaved changes on a freshly
+    // loaded, untouched form.
+    setExperienceLevel(p.experience_level || EXPERIENCE_UNSET);
+    setNeedsVisa(p.needs_visa === true);
     setNegativeKeywords(p.negative_keywords ?? []);
     setAboutMe(p.about_me ?? "");
-    setExcludedCompanies(p.excluded_companies ?? []);
     baselineRef.current = serializePrefs(p);
   }, [preferences]);
 
@@ -249,10 +351,15 @@ export function PreferencesForm({
       salary_min: salaryMin ? Number(salaryMin) : null,
       salary_max: salaryMax ? Number(salaryMax) : null,
       work_arrangement: workArrangement,
-      experience_level: experienceLevel,
+      // Mirror the EXPERIENCE_UNSET translation back the other way: the
+      // Select's display sentinel is a form-only word and must never reach
+      // the wire, or "unspecified" would be stored as though it were a real
+      // typed answer.
+      experience_level:
+        experienceLevel === EXPERIENCE_UNSET ? "" : experienceLevel,
       negative_keywords: negativeKeywords,
       about_me: aboutMe,
-      excluded_companies: excludedCompanies,
+      needs_visa: needsVisa,
     }),
     [
       targetTitles,
@@ -266,7 +373,7 @@ export function PreferencesForm({
       experienceLevel,
       negativeKeywords,
       aboutMe,
-      excludedCompanies,
+      needsVisa,
     ]
   );
 
@@ -311,18 +418,39 @@ export function PreferencesForm({
             Customize your job search criteria
           </p>
         </div>
+        {/* In the card header, not at the bottom: this form autosaves, so there
+            is no "Save" row to sit beside, and the header is where a
+            card-scoped action belongs. */}
+        {onClear && (
+          <div className="ml-auto">
+            <ClearButton
+              label="Clear"
+              confirmLabel="Click again to clear"
+              disabled={loading}
+              onConfirm={onClear}
+            />
+          </div>
+        )}
       </div>
 
       <div className="space-y-6">
-        {/* ── Target Job Titles ──────────────────── */}
-        <TagInput
-          label="Target Job Titles"
-          icon={<Briefcase className="h-3.5 w-3.5" />}
-          tags={targetTitles}
-          onChange={setTargetTitles}
-          placeholder="e.g. Data Scientist"
-          description="Roles you're targeting"
-        />
+        {/* ── Target Job Titles ────────────────────
+            The `id` is the landing spot for the dashboard's "Searching for: …
+            [change]" line (components/jobs/SearchingFor.tsx). `scroll-mt-24`
+            keeps it clear of the sticky Navbar — Next.js skips fixed/sticky
+            elements when it picks a scroll target, so without the margin the
+            field lands underneath the header (documented in
+            node_modules/next/dist/docs/…/components/link.md). */}
+        <div id="target-job-titles" className="scroll-mt-24">
+          <TagInput
+            label="Target Job Titles"
+            icon={<Briefcase className="h-3.5 w-3.5" />}
+            tags={targetTitles}
+            onChange={setTargetTitles}
+            placeholder="e.g. Data Scientist"
+            description="Roles you're targeting"
+          />
+        </div>
 
         {/* ── Additional Skills ──────────────────── */}
         <TagInput
@@ -331,17 +459,15 @@ export function PreferencesForm({
           onChange={setAdditionalSkills}
           placeholder="e.g. Python, SQL, Terraform"
           description="Skills beyond what your CV contains"
+          suggestions={suggestions}
+          suggestionsLabel="Skills that often go with yours"
+          suggestionsHint="Tap any you actually have. Nothing is added until you tap."
         />
 
-        {/* ── Excluded Skills ────────────────────── */}
-        <TagInput
-          label="Excluded Skills"
-          tags={excludedSkills}
-          onChange={setExcludedSkills}
-          placeholder="e.g. COBOL, Fortran"
-          description="Skills you don't want to work with (penalized in scoring)"
-          variant="destructive"
-        />
+        {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
+            excluded_skills field, scoring penalty, and payload key are kept
+            fully intact; every existing user's value is empty in prod, so
+            hiding the control drops no data and changes no live score. */}
 
         <Separator />
 
@@ -429,6 +555,10 @@ export function PreferencesForm({
                 <SelectValue placeholder="Select..." />
               </SelectTrigger>
               <SelectContent>
+                {/* Form-only word for "not chosen" -- see EXPERIENCE_UNSET.
+                    Listed first since it is the actual starting state for
+                    every account until they pick one. */}
+                <SelectItem value={EXPERIENCE_UNSET}>No preference</SelectItem>
                 <SelectItem value="entry">Entry</SelectItem>
                 <SelectItem value="mid">Mid</SelectItem>
                 <SelectItem value="senior">Senior</SelectItem>
@@ -439,16 +569,36 @@ export function PreferencesForm({
           </div>
         </div>
 
+        {/* ── Visa sponsorship ──────────────────────
+            Gates the backend VISA scoring dimension. Before this control
+            existed the field was always the default False, so sponsors could
+            never be ranked up for the people who need them. Empty/unchecked is
+            a real answer ("I don't need sponsorship"), not a missing one. */}
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-input"
+            checked={needsVisa}
+            onChange={(e) => setNeedsVisa(e.target.checked)}
+          />
+          I need visa sponsorship to work in the UK
+        </label>
+
         <Separator />
 
-        {/* ── Negative Keywords ──────────────────── */}
+        {/* ── Words to avoid in job titles ────────── */}
+        {/* Restored 2026-08-13 with copy that matches what the code does.
+            Verified in skill_matcher.py: the check reads job.title ONLY (never
+            the description), matches whole words (so "sales" does not match
+            "Wholesale"), and subtracts a flat 30 points on the first match —
+            it never hides the job. The old label "Negative Keywords" implied a
+            filter, which is why the copy below says "ranked lower" instead. */}
         <TagInput
-          label="Negative Keywords"
-          icon={<AlertCircle className="h-3.5 w-3.5" />}
+          label="Words to avoid in job titles"
           tags={negativeKeywords}
           onChange={setNegativeKeywords}
-          placeholder="e.g. intern, junior, volunteer"
-          description="Job title keywords to penalize"
+          placeholder="e.g. sales, recruiter"
+          description="A job whose TITLE contains one of these drops 30 points. It still shows up — this pushes it down the list, it doesn't hide it."
           variant="destructive"
         />
 
@@ -466,16 +616,12 @@ export function PreferencesForm({
           />
         </div>
 
-        {/* ── Excluded Companies ──────────────────── */}
-        <TagInput
-          label="Excluded Companies"
-          icon={<Building2 className="h-3.5 w-3.5" />}
-          tags={excludedCompanies}
-          onChange={setExcludedCompanies}
-          placeholder="e.g. Acme Corp"
-          description="Companies to zero-out from results"
-          variant="destructive"
-        />
+        {/* Excluded Companies removed entirely (not just the UI control) —
+            a grep of backend/src turned up ZERO consumers of the
+            `excluded_companies` key anywhere: no scorer, no route, no
+            model field. The prior comment here claimed a "scoring
+            zero-out" that does not exist in the code. Nothing ever read
+            this, so nothing is lost by no longer collecting or sending it. */}
 
         {/* ── Auto-save status ───────────────────────
             No "Save" button — preferences save automatically a moment after

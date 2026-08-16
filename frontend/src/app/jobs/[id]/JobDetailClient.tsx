@@ -25,6 +25,8 @@ import { DedupGroupViewer } from "@/components/jobs/DedupGroupViewer";
 
 import { getJob, setJobAction, removeJobAction } from "@/lib/api";
 import { safeUrl } from "@/lib/utils";
+import { scoreClass } from "@/lib/scoring";
+import { stalenessBadge } from "@/lib/staleness";
 import type { JobResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,14 +40,6 @@ import { TailorSection } from "@/components/tailor/TailorSection";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function scoreBucket(score: number): string {
-  // 70 / 40 bands — kept in lock-step with JobCard's scoreClass and the AI-verdict
-  // pill so the SAME score never shows a different colour on the dashboard vs here.
-  if (score >= 70) return "score-high"; // green  — strong
-  if (score >= 40) return "score-mid"; // amber  — moderate
-  return "score-low"; // red    — weak
-}
 
 function relativeDate(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -228,7 +222,7 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
   // number doesn't change meaning when you click from a card into its detail page.
   const isJudged = job.llm_fit_score != null && job.llm_verdict != null;
   const primaryScore = isJudged ? (job.llm_fit_score as number) : job.match_score;
-  const bucket = scoreBucket(primaryScore);
+  const bucket = scoreClass(primaryScore, isJudged);
 
   // Deadline derived values
   const deadlineDays = job.deadline ? daysUntil(job.deadline) : null;
@@ -250,6 +244,8 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
   // Low-confidence date: dim the posted-at span
   const isLowConfidenceDate =
     job.date_confidence === "low" || job.date_confidence === "fabricated";
+
+  const staleness = stalenessBadge(job.staleness_state);
 
   return (
     <div className="relative">
@@ -296,7 +292,23 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
                 </span>
               </div>
 
-              {/* Structured salary (preferred) or legacy salary string */}
+              {/* Structured salary (preferred) or legacy salary string.
+                  The API only ever fills salary_min_gbp/max_gbp with a real,
+                  annualised GBP figure (F6 — src/api/routes/jobs.py
+                  _parse_enr_salary leaves them unset rather than guess when
+                  the source currency can't be converted), so the "GBP"
+                  check below is defence-in-depth, not the primary guard —
+                  and the value is always annual already, so no period
+                  suffix belongs here. */}
+              {/* NO currency check here, deliberately. salary_currency_original
+                  is the ORIGINAL currency and is still echoed on rows the API
+                  has correctly converted ("USD" on a job now expressed in
+                  annual GBP), so gating on it hid every valid conversion on
+                  this page while JobCard — which has no such check — showed
+                  the same job's salary. One value, two surfaces, two answers.
+                  The real guard is upstream: _parse_enr_salary leaves the
+                  amounts UNSET when it cannot convert, so a present value is
+                  always honest annual GBP. */}
               {(job.salary_min_gbp || job.salary_max_gbp) ? (
                 <p className="text-sm font-medium text-foreground">
                   {job.salary_min_gbp && job.salary_max_gbp
@@ -304,9 +316,6 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
                     : job.salary_min_gbp
                     ? `£${Math.round(job.salary_min_gbp / 1000)}k+`
                     : `up to £${Math.round((job.salary_max_gbp ?? 0) / 1000)}k`}
-                  {job.salary_period && job.salary_period !== "annual" && (
-                    <span className="text-muted-foreground ml-1">/ {job.salary_period}</span>
-                  )}
                 </p>
               ) : job.salary ? (
                 <p className="text-sm font-medium text-foreground">{job.salary}</p>
@@ -398,19 +407,10 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
                     No deadline listed
                   </span>
                 )}
-                {job.staleness_state && job.staleness_state !== "ACTIVE" && (
-                  <Badge
-                    variant="outline"
-                    className={`text-xs gap-1 ${
-                      job.staleness_state === "CONFIRMED_EXPIRED"
-                        ? "border-red-400/30 text-red-400"
-                        : job.staleness_state === "GHOST"
-                        ? "border-orange-400/30 text-orange-400"
-                        : "border-yellow-400/30 text-yellow-400"
-                    }`}
-                  >
+                {staleness && (
+                  <Badge variant="outline" className={`text-xs gap-1 ${staleness.colorClass}`}>
                     <AlertTriangle className="h-3 w-3" />
-                    {job.staleness_state === "CONFIRMED_EXPIRED" ? "Expired" : job.staleness_state}
+                    {staleness.label}
                   </Badge>
                 )}
               </div>

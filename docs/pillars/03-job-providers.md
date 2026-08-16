@@ -226,8 +226,8 @@ This is why individual source files are so short — all the resilience lives he
 `_is_uk_or_remote(location)` is the free UK-relevance gate every source can call:
 
 - Empty location → `True` (unknown; don't pre-filter, let the scorer decide)
-- Matches `FOREIGN_INDICATORS` (e.g. "usa", "new york", ", CA") → `False`
-- Matches `UK_TERMS` or `REMOTE_TERMS` → `True`
+- `uk_gate.names_foreign_place` says the text NAMES a foreign country/admin division → `False`
+- Anything else (UK, remote, unknown) → `True`; the door (`uk_gate.check_uk`) decides at ingestion
 - Default → `True` (conservative: include unknowns, let scoring penalise)
 
 The term lists are imported from `skill_matcher.py` so the filter and the scorer agree.

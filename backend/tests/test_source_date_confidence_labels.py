@@ -49,10 +49,26 @@ def _literal_confidences(source_path: Path) -> list[str]:
 # Signal-less sources — must emit "fabricated" (Batch 2.1 fix)
 # ---------------------------------------------------------------------------
 
+# 2026-08-09 — workable and personio were REMOVED from this list, and
+# nhs_jobs + greenhouse from _WRONG_FIELD below. They are no longer signal-less:
+# a live probe of each upstream found a real date field that our extractor was
+# ignoring, so all four now derive their label dynamically via
+# normalize_posted_at() instead of hardcoding one.
+#
+#   workable    -> `published`       (100% fill)
+#   personio    -> `createdAt`       (ISO-8601)
+#   nhs_jobs    -> `postDate`        (100% fill; the feed comment claiming no
+#                                     posted date was simply out of date)
+#   greenhouse  -> `first_published` (100% fill across 928 live jobs; the code
+#                                     had been reading `updated_at`, a mutation
+#                                     timestamp, and labelling it "low")
+#
+# linkedin and pinpoint stay: their upstreams genuinely expose no date field
+# (pinpoint's 24-key schema was checked in full), so "fabricated" remains the
+# honest label — it makes _recency_points() return 0 rather than letting
+# date_found earn 60% freshness credit for a date nobody published.
 _SIGNAL_LESS = [
     ("linkedin", "src/sources/scrapers/linkedin.py"),
-    ("workable", "src/sources/ats/workable.py"),
-    ("personio", "src/sources/ats/personio.py"),
     ("pinpoint", "src/sources/ats/pinpoint.py"),
 ]
 
@@ -78,10 +94,16 @@ def test_signal_less_source_emits_fabricated(source_name: str, relpath: str) -> 
 # Wrong-field sources — must emit "low" (already correct at 2026-04-20 audit)
 # ---------------------------------------------------------------------------
 
+# nhs_jobs and greenhouse moved off this list on 2026-08-09 — see the note on
+# _SIGNAL_LESS above. Both now read a real upstream date field and derive the
+# label, so there is no literal left to assert.
+#
+# jooble stays, and deliberately so: its only date-shaped field is `updated`,
+# which is a MUTATION timestamp, not a posting date. The source refuses to
+# treat it as one and hardcodes "low" — honest-but-empty. That is the correct
+# behaviour and this test guards it.
 _WRONG_FIELD = [
-    ("nhs_jobs", "src/sources/feeds/nhs_jobs.py"),
     ("jooble", "src/sources/apis_keyed/jooble.py"),
-    ("greenhouse", "src/sources/ats/greenhouse.py"),
 ]
 
 

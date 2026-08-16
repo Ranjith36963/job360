@@ -92,7 +92,7 @@ def test_engine1_off_with_engine2_dims_is_dims_only():
         salary_min=70000,
         salary_max=90000,
         experience_level="senior",
-        preferred_workplace="remote",
+        work_arrangement="remote",
         needs_visa=True,
     )
     scorer = JobScorer(

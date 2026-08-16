@@ -1,12 +1,71 @@
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.remotive")
+
+_HOURLY_RE = re.compile(r"/\s*hour|per\s*hour|/\s*hr\b", re.IGNORECASE)
+_OTE_RE = re.compile(r"\bote\b", re.IGNORECASE)
+_NUM_RE = re.compile(r"(\d[\d,.]*)\s*([kK])?")
+
+
+def _parse_remotive_salary(raw: Any) -> tuple[Optional[float], Optional[float]]:
+    """Parse Remotive's free-text `salary` field into (min, max).
+
+    Live check (2026-08, 14 real values) found the old parser — which only
+    understood "$45,000 - $50,000" — matched 1 of 14. The rest used `k`
+    shorthand ("$20k -$35k", "$31,2k- $52k"), `/hour` rates ("$90 - $150
+    /hour"), and "OTE" prefixes ("OTE $25k - $35k"). Hourly rates are
+    skipped entirely rather than stored as if annual — a $100/hr contract
+    rate stored as a £100 salary would be worse than no salary at all.
+    Never raises: any parse failure falls through to (None, None).
+    """
+    try:
+        if not raw:
+            return None, None
+        text = str(raw).strip()
+        if not text:
+            return None, None
+        if _HOURLY_RE.search(text):
+            return None, None
+        # Strip "OTE" (on-target earnings — still an annual figure once the
+        # word is gone) and currency symbols before hunting for numbers.
+        cleaned = _OTE_RE.sub(" ", text)
+        cleaned = cleaned.replace("$", "").replace("£", "").replace("€", "")
+
+        values: list[float] = []
+        for num_str, k_suffix in _NUM_RE.findall(cleaned):
+            num_str = num_str.strip().strip(".")
+            if not num_str:
+                continue
+            # A comma immediately followed by 1-2 digits then "k" is a
+            # decimal separator ("31,2k" == 31.2k == 31200); anywhere else a
+            # comma is a thousands separator ("31,000") and gets dropped.
+            if k_suffix and re.match(r"^\d+,\d{1,2}$", num_str):
+                num_str = num_str.replace(",", ".")
+            else:
+                num_str = num_str.replace(",", "")
+            try:
+                n = float(num_str)
+            except ValueError:
+                continue
+            if k_suffix:
+                n *= 1000
+            values.append(n)
+
+        if len(values) >= 2:
+            return values[0], values[1]
+        if len(values) == 1:
+            return values[0], values[0]
+        return None, None
+    except (ValueError, TypeError, AttributeError, IndexError):
+        return None, None
+
 
 class RemotiveSource(BaseJobSource):
     name = "remotive"
@@ -27,16 +86,7 @@ class RemotiveSource(BaseJobSource):
             raw_pub = item.get("publication_date")
             posted_at, confidence = normalize_posted_at(raw_pub)
 
-            salary = item.get("salary", "")
-            salary_min = None
-            salary_max = None
-            if salary and "-" in str(salary):
-                parts = str(salary).replace(",", "").replace("$", "").replace("£", "").split("-")
-                try:
-                    salary_min = float(parts[0].strip())
-                    salary_max = float(parts[1].strip())
-                except (ValueError, IndexError):
-                    pass
+            salary_min, salary_max = _parse_remotive_salary(item.get("salary", ""))
             jobs.append(Job(
                 title=title,
                 company=item.get("company_name", ""),

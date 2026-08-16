@@ -51,7 +51,7 @@ _ATS_TO_LISTVAR = {
     "ashby": "ASHBY_COMPANIES",
     "smartrecruiters": "SMARTRECRUITERS_COMPANIES",
     "recruitee": "RECRUITEE_COMPANIES",
-    "rippling": "RIPPLING_COMPANIES",
+    # rippling dropped 2026-08-10 — the source and its board API are gone.
 }
 
 

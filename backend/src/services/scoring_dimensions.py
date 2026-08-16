@@ -7,7 +7,12 @@ plan §4 Batch 2.9 (weights configurable via `core/settings.py`):
   seniority_score   (0-8)  — enriched seniority vs user's target experience
   salary_score      (0-10) — band overlap with UserPreferences.salary_min/max
   visa_score        (0-6)  — only awards when user needs sponsorship AND job offers
-  workplace_score   (0-6)  — Remote/Onsite/Hybrid match with UserPreferences.preferred_workplace
+  workplace_score   (0-6)  — Remote/Onsite/Hybrid match with
+                             UserPreferences.preferred_workplace, a property
+                             derived from the stored `work_arrangement`. It
+                             yields None for anything outside the three enum
+                             values, so the form's "any" default arrives as
+                             the neutral midpoint rather than a 0 (rule #29).
 
 Each scorer gracefully returns a neutral midpoint when its signal is missing
 (enrichment row absent, enum is "unknown", profile preference None).

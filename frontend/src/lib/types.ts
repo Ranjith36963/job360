@@ -130,6 +130,11 @@ export interface PreferencesRequest {
   negative_keywords?: string[];
   about_me?: string;
   excluded_companies?: string[];
+  // Whether the user needs visa sponsorship. Gates the VISA scoring dimension
+  // (weight 6) on the backend. Had no UI control until 2026-08-08, so the
+  // dimension could never fire for anyone — the field the scorer reads was
+  // always the default False because no screen could set it.
+  needs_visa?: boolean;
 }
 
 // ---- Skill tier / provenance — frontend structuring of profile fields ----
