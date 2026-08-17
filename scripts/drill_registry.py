@@ -127,6 +127,22 @@ REGISTRY: dict[str, Guard] = {
         # control. Network-free, so it runs in CI like any other check.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
+    "scripts/review_debt.py": Guard(
+        status="drilled",
+        # Reads unresolved CodeRabbit threads. Two failure modes, both drilled.
+        # (1) It handles untrusted text: 55 of 63 unresolved comment bodies
+        # carry a `Prompt for AI Agents` block — imperative instructions aimed
+        # at an agent, sitting in a pull request. The drill plants an injection
+        # four ways and demands none reach a model.
+        # (2) It must NEVER become a gate. All six merged PRs with findings
+        # merged with them open, so a threads-must-be-resolved condition would
+        # have refused six of six and been switched off in a week. "63 real
+        # findings still exit 0" is drilled as a NEGATIVE CONTROL, held to the
+        # same standard as the deliberate breaks — teeth here are a regression.
+        # 9/9 as of the commit that added it. Network-free: runs off a recorded
+        # GraphQL payload in scripts/fixtures/review_threads/.
+        drill=[sys.executable, "scripts/review_debt.py", "--drill"],
+    ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
         # This file drills itself. A registry that cannot fail is the eleventh
