@@ -127,6 +127,54 @@ REGISTRY: dict[str, Guard] = {
         # control. Network-free, so it runs in CI like any other check.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
+    "scripts/check_alert_paths.py": Guard(
+        status="drilled",
+        # Guards the two properties an alerting path must have: it may not flip
+        # the verdict of the work it describes (a failing mid-job Slack step
+        # makes `failure()` true for every later step), and it may not die with
+        # the step it quotes (a gh 403 means the output never exists, every
+        # branch skips, and the outage goes unannounced). Both were live bugs
+        # here. Brute-forces the gate expressions rather than pattern-matching a
+        # known-bad string, so a NEW way of writing the same bug is still caught.
+        drill=[sys.executable, "scripts/check_alert_paths.py", "--drill"],
+    ),
+    "scripts/check_workflow_slack_wiring.py": Guard(
+        status="owed",
+        # Checks the CALLERS, not the sender: every slack step passes a token, a
+        # non-empty title and a real channel, and every `run:` block still parses
+        # under `bash -n`. The CHECK itself is verified — it runs clean over 24
+        # workflows / 152 bash blocks / 7 slack steps.
+        #
+        # It is `owed` for one honest reason and it is NOT a fixture gap like the
+        # entries below. The drill re-runs the full check once per mutation, and
+        # each check spawns one `bash -n` per run: block — ~900 child processes.
+        # On Linux that is seconds; on the Windows box this was written on a
+        # single pass measured ~150s, so the drill could not be watched to
+        # completion inside DRILL_TIMEOUT_S (240s) and an unwatched drill must
+        # not be declared `drilled`.
+        #
+        # TO CLEAR THIS (cheap, and it should be cleared): run
+        # `python scripts/check_workflow_slack_wiring.py --drill` on a Linux
+        # runner, confirm it prints RED for every mutation and finishes well
+        # inside 240s, then flip this to `drilled` with the drill argv below.
+        #   drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"]
+        reason="its drill re-runs the whole check per mutation (~900 `bash -n` spawns); "
+        "measured ~150s for ONE pass on Windows, so it could not be watched go red "
+        "inside the 240s registry budget. Time it on Linux and promote it — the "
+        "check itself already passes over 24 workflows / 152 bash blocks",
+        since="2026-08-17",
+    ),
+    "scripts/slack_transition.py": Guard(
+        status="drilled",
+        # The volume rule: announce the TRANSITION, not the state. Its drill
+        # breaks the decision table three ways — red->red starts announcing (the
+        # spam bug), red->green goes silent (he never learns it recovered), and
+        # an unreadable previous state gets GUESSED instead of refused — and
+        # each must go red. Plus a negative control (reword a human-readable
+        # reason string) that must stay quiet, because a checker that fires at
+        # any change is not a checker. Offline: no token, no network.
+        drill=[sys.executable, "scripts/slack_transition.py", "--drill"],
+    ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
         # This file drills itself. A registry that cannot fail is the eleventh
