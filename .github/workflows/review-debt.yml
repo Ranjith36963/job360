@@ -1,0 +1,65 @@
+name: Review debt (CodeRabbit is counted, never obeyed)
+
+# CodeRabbit's tick cannot say no at any setting: `fail_commit_status` governs
+# review ERRORS, so flipping it makes the check red when CodeRabbit CRASHES,
+# never when CodeRabbit finds a bug. Measured on PR #336: status success /
+# "Review completed" with 15 threads open. The COMMENTS are the signal.
+#
+# So nothing here waits on it, blocks on it, or merges because of it. This
+# workflow reads the findings and prints ONE number. The number is allowed to be
+# non-zero — 30 of the 46 open findings in this repo sit on PRs that already
+# merged, which is an unread inbox, not a gate failure.
+#
+# THREE THINGS THE METER REFUSES TO DO, each because of a measurement:
+#   * treat OUTDATED as resolved — 3 threads on #336 are outdated AND unresolved;
+#     excluding them would mean a whitespace commit clears every finding.
+#   * treat a thread the bot resolved ITSELF as accepted — 6 of 6 resolutions on
+#     #336 were performed by coderabbitai[bot].
+#   * treat SILENCE as clean — 1 of 8 commits on #336 got no CodeRabbit status at
+#     all. A head SHA with no review past the budget is recorded NOT DELIVERED,
+#     and that absence is itself a finding.
+
+on:
+  schedule:
+    - cron: "10 8 * * 1" # Monday morning, one number
+  workflow_dispatch: {} # drill entrance — every loop must be fireable on demand
+
+concurrency:
+  group: review-debt
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  count:
+    name: Count the review debt
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # A meter that has never been watched miscounting is a meter nobody should
+      # quote. This breaks it five ways — outdated-as-resolved, self-cleared as
+      # accepted, silence as clean, an unrecognised severity silently dropped,
+      # and any way for it to act on a PR — plus two negative controls.
+      - name: The meter can still catch itself flattering
+        run: python scripts/review_debt.py --drill
+
+      - name: Count
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A HARD budget. CodeRabbit's own status page lists the OpenAI and
+          # Anthropic APIs as dependencies, so an upstream outage is a normal
+          # Tuesday. PRs the budget did not reach are reported UNMEASURED, never
+          # as clean — and the job still succeeds, because nothing waits on this.
+          python scripts/review_debt.py --limit 30 --budget-seconds 900 --slack \
+            | tee -a "$GITHUB_STEP_SUMMARY"

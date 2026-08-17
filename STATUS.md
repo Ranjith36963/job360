@@ -52,6 +52,69 @@
 
 ---
 
+## ROLLBACK RUNBOOK — how to get production back
+
+<!-- Added 2026-08-17. Before this, the repo had NO rollback path at all: grepping
+     .github/workflows/ and scripts/ for revert|rollback|redeploy found only an
+     agent's test-edit revert, a migration revert against a temp DB, and psycopg's
+     conn.rollback(). Merge -> live is 2m14s forward and was undefined backward. -->
+
+**Merging `main` ships to real users in about 2 minutes** (measured on PR #337:
+merged 15:16:24 → Railway starts 15:16:26 → users on new code 15:18:38). There
+are two ways back. They are for different moments. Use gear 1 first.
+
+### Gear 1 — production is broken NOW (seconds, no rebuild, dashboard only)
+
+Railway → the broken service → **Deployments** → the last known-good deployment →
+**Rollback**.
+
+- It restores that deployment's **Docker image and its variables**. No rebuild.
+- Do all three services (`backend`, `frontend`, `worker`) if the bad change spanned
+  them, or you ship half a release.
+- **This cannot be scripted.** The Railway CLI has `redeploy`, `restart`, `down` and
+  `deployment list` — there is no rollback verb, and no documented API. That is
+  fine: this gear should stay a human's three clicks.
+- **Deployments older than your plan's retention window are not offered.** If the
+  Rollback button is not there, go straight to gear 2.
+
+### Gear 2 — put `main` back in agreement with production (minutes, opens a PR)
+
+Gear 1 leaves `main` and production **disagreeing**, which will silently bite the
+next merge. Fix that with the reverse gear:
+
+    Actions → "Reverse gear (build the revert — a human merges it)" → Run workflow
+      sha:      blank = the newest merge on main
+      dry_run:  UNTICK to actually open the revert PR
+
+Or locally: `python scripts/revert_gear.py --sha <merge sha> --dry-run`
+
+- It **never pushes `main`** and there is no input that makes it. A workflow push to
+  `main` uses GITHUB_TOKEN, which triggers **no** push-event workflows — so a
+  workflow-pushed revert can land with zero CI, and once Railway's "Wait for CI" is
+  on it may leave the deploy hanging in `WAITING` or `SKIPPED`, exactly when you
+  need it most.
+- It **refuses a non-merge SHA loudly**. `git revert -m 1` on an ordinary commit
+  succeeds and reverts the wrong thing.
+- If it says **"DOES NOT APPLY"**, you do not have that revert: something landed on
+  top of it. Use gear 1 and reconcile by hand.
+
+### The rehearsal, and the number nobody has measured yet
+
+`revert-main.yml` runs a **dry run on the 1st of every month** — it builds the revert
+of the newest merge on `main` in a throwaway clone and asserts it applies, touching
+`main` never. A failed rehearsal is the single most important thing that workflow can
+say: it means there is currently no tested way back, and it pages
+`production-incidents`.
+
+**Not yet measured, and it should be:** how long a real rollback actually takes, from
+pulling the lever to users being on the old code. Nobody here has ever run that
+stopwatch. Until somebody does, "we can roll back" is a claim, not a capability, and
+there is no number for a detection latency to be compared against. Fire gear 1 once,
+on a quiet evening, against a no-op commit, and write the number here as the rollback
+SLA.
+
+---
+
 ## Phase 1: Dynamic User Profile System -- COMPLETE
 
 **Goal:** Replace hard-coded AI/ML keywords with user-provided profile data so Job360 works for any profession (sales, law, engineering, hospitality, etc.).

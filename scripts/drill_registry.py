@@ -119,6 +119,20 @@ REGISTRY: dict[str, Guard] = {
         # switched off.
         drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
     ),
+    "scripts/gate_wiring_check.py": Guard(
+        status="drilled",
+        # Born from the measurement that CI on main finishes FOUR MINUTES after
+        # real users are already on the code (PR #337). Catches a merge wired
+        # where it can no longer stop anything, a judgement made with no
+        # baseline (which is why the cage refused 100% of PRs), a merge gated on
+        # "no red" when nothing ran, and a tree-scoped ratchet measured on the
+        # wrong tree. Its first live run was WRONG — it alarmed on the comments
+        # in doc-sync.yml and repair.yml that say those loops deliberately never
+        # merge — so a comment-only mention is now its own negative control.
+        # 9/9 as of the commit that added it, and each rule can be blinded with
+        # --break-checker to prove the drill itself can fail.
+        drill=[sys.executable, "scripts/gate_wiring_check.py", "--drill"],
+    ),
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what reaches real users without the owner. Refuses a scoring
@@ -126,6 +140,27 @@ REGISTRY: dict[str, Guard] = {
         # unrecognised path, and a ratchet going backwards -- plus a negative
         # control. Network-free, so it runs in CI like any other check.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
+    ),
+    "scripts/review_debt.py": Guard(
+        status="drilled",
+        # Counts CodeRabbit findings; never approves, never blocks, has no merge
+        # or approve surface at all (asserted through its own CLI, not by
+        # grepping its source — the grep version went red against its own
+        # assertion strings). Broken five ways: outdated treated as resolved,
+        # self-cleared folded into human-cleared, silence read as clean, an
+        # unrecognised severity dropped, and any way to act on a PR. Plus two
+        # negative controls. Offline: every case is a recorded API shape.
+        drill=[sys.executable, "scripts/review_debt.py", "--drill"],
+    ),
+    "scripts/revert_gear.py": Guard(
+        status="drilled",
+        # The only reverse gear in the repo. Its drill builds a REAL throwaway
+        # git repository and drives the real functions: a non-merge SHA must be
+        # refused loudly (git revert -m 1 would otherwise do something plausible
+        # and wrong), a conflicting revert must be reported as "you do not have
+        # this revert", and `main` must be untouched after all four runs. 9/9,
+        # and mutating `is_merge_commit` to always return True takes it to 7/9.
+        drill=[sys.executable, "scripts/revert_gear.py", "--drill"],
     ),
     "scripts/drill_registry.py": Guard(
         status="drilled",

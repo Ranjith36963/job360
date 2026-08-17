@@ -360,6 +360,20 @@ PER_PAGE = 100
 
 REQUIRED_CHECKS = ["Backend", "Frontend", "Chain wires", "CodeQL"]
 
+# Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
+# `.github/workflows/codeql.yml` declares `pull_request: branches: ["main"]`, so a
+# stacked PR (base = another feature branch) never gets a `CodeQL` check run at
+# all. Requiring it by name there is an unclearable block — the PR can never
+# satisfy it, no matter what the author does.
+#
+# The fix is NOT to quietly drop it and judge the thinner set as if it were the
+# full one. That would hand out a one-branch bypass of the only check in this
+# repo that reads NEW security alerts from a PR's own diff: base your work off a
+# feature branch and the security question stops being asked, silently. So a
+# non-main base is REFUSED, with the missing check named. Honest and unbypassable.
+MAIN_ONLY_CHECKS = {"CodeQL"}
+MAIN_BRANCH = "main"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -480,15 +494,49 @@ def check_size(n_files: int, n_lines: int, deletions: list[str]) -> Verdict:
                    claim=f"small enough to reason about ({n_files} files, {n_lines} lines)")
 
 
-def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
-    """Pure half of the PROOF cage, so it can be drilled with real shapes."""
+def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BRANCH) -> list[str]:
+    """Pure half of the PROOF cage, so it can be drilled with real shapes.
+
+    `base_ref` is load-bearing, not decoration. Measured 2026-08-17: PRs #343,
+    #344, #345 and #346 all have base `feat/every-guard-declares-its-drill`, and
+    all four are MISSING `Analyze (python)` and `Analyze (javascript-typescript)`
+    on their head SHAs — codeql.yml only fires for main-targeted PRs. The cage
+    judged them against a list containing a check that could not exist, i.e. it
+    refused them for a reason no author could ever clear, while ci.yml and
+    security.yml really did run. Naming the reason is the whole fix.
+    """
     reasons: list[str] = []
+    cannot = ", ".join(sorted(MAIN_ONLY_CHECKS))
+    if not base_ref:
+        # Caught by this file's own drill on the first run: the guard was
+        # `if base_ref and base_ref != MAIN_BRANCH`, so an unreadable base
+        # short-circuited into the branch that judges against the FULL check
+        # list — the permissive guess, in the one place a permissive guess
+        # silently restores a security check that cannot be there.
+        reasons.append(
+            f"I could not read this PR's base branch, so I cannot tell whether it targets "
+            f"`{MAIN_BRANCH}` — and `{cannot}` only runs for main-targeted PRs. An unknown "
+            f"base is not `{MAIN_BRANCH}`; guessing the permissive way is how a check comes "
+            f"back to life on paper. "
+            f"FIX: check `gh pr view <PR> --json baseRefName` returns something, then re-judge.")
+    elif base_ref != MAIN_BRANCH:
+        reasons.append(
+            f"this PR's base is `{base_ref}`, not `{MAIN_BRANCH}`. `{cannot}` only runs for "
+            f"main-targeted PRs (.github/workflows/codeql.yml declares "
+            f"`pull_request: branches: [\"main\"]`), so on this base it cannot exist — and I "
+            f"will not call a thinner check set a pass, because that would make \"branch off "
+            f"a feature branch\" a way to stop the security question being asked. "
+            f"FIX: retarget this PR at `{MAIN_BRANCH}`, or the owner merges the stack by hand.")
     if not runs:
-        return ["NO CHECKS RAN AT ALL. An empty check list is not a pass — it is the "
-                "signature of a PR opened with GITHUB_TOKEN, which GitHub refuses to start "
-                "workflows for. Nothing about this change has been verified. "
-                "FIX: push an empty commit from a human account, or re-run the workflows, "
-                "then re-judge."]
+        # `return reasons + [...]`, never `return [...]`: an early return that drops
+        # a reason already found is how a cage forgets what it knew. The base-ref
+        # finding above must survive to the owner.
+        return reasons + [
+            "NO CHECKS RAN AT ALL. An empty check list is not a pass — it is the "
+            "signature of a PR opened with GITHUB_TOKEN, which GitHub refuses to start "
+            "workflows for. Nothing about this change has been verified. "
+            "FIX: push an empty commit from a human account, or re-run the workflows, "
+            "then re-judge."]
     reasons += page_was_full(len(runs), PER_PAGE, "check-run")
     if total_count and total_count > len(runs):
         reasons.append(f"GitHub reports {total_count} check runs and I received {len(runs)} — "
@@ -497,6 +545,10 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
 
     names = [r.get("name", "") for r in runs]
     for req in REQUIRED_CHECKS:
+        # On a non-main base the reason above already says why this one is absent.
+        # Saying it twice, once in a form the author cannot act on, is noise.
+        if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
+            continue
         if not any(req.lower() in n.lower() for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
@@ -529,7 +581,7 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
     return reasons
 
 
-def check_proof(pr: int) -> Verdict:
+def check_proof(pr: int, base_ref: str = MAIN_BRANCH) -> Verdict:
     """Did the checks really run, and really pass?
 
     The dangerous answer here is not 'red'. It is 'nothing ran' — a PR opened by a
@@ -539,7 +591,7 @@ def check_proof(pr: int) -> Verdict:
     sha = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".head.sha"])
     data = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"]))
     runs = data.get("check_runs", [])
-    reasons = judge_check_runs(runs, int(data.get("total_count") or 0))
+    reasons = judge_check_runs(runs, int(data.get("total_count") or 0), base_ref)
     return Verdict("PROOF", "fail" if reasons else "pass", reasons,
                    claim="every required check really ran and really passed")
 
@@ -738,8 +790,14 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
         deletions = [f["filename"] for f in files_json if f.get("status") == "removed"]
         changed_lines = sum(f.get("additions", 0) + f.get("deletions", 0) for f in files_json)
         pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
+        # A MISSING base ref is not `main`. Defaulting an unknown base to the one
+        # value that unlocks the full check list would be the permissive guess,
+        # and the permissive guess is what this file exists to refuse. An empty
+        # string is not `main`, so judge_check_runs says so and the cage refuses.
+        base_ref = ((pr_json.get("base") or {}).get("ref")) or ""
         meta = {"files": len(files), "lines": changed_lines,
                 "title": pr_json.get("title") or f"PR #{pr}",
+                "base": base_ref,
                 "merge_sha": pr_json.get("merge_commit_sha") or ""}
     except Exception as exc:
         # A cage that cannot see the change must never approve it.
@@ -754,7 +812,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
     verdicts.append(check_size(len(files), changed_lines, deletions))
     verdicts.append(check_paths(files))
 
-    for name, fn in (("PROOF", check_proof), ("REVIEW", check_review)):
+    for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
         try:
             verdicts.append(fn(pr))
         except Exception as exc:
@@ -847,6 +905,64 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# THE ADVISOR. The cage's most valuable output is not the verdict — it is the
+# sentence naming WHICH of the seven files in front of the owner is the one he
+# should actually look at. Measured: median PR here is open 12.9 minutes, and in
+# 25 of the last 25 merges the final check completed BEFORE `mergedAt`. He is not
+# the bottleneck and the merge button is not the leak, so automating the click
+# buys ~13 minutes of wall clock and zero attention. Naming the risky file buys
+# attention, on 100% of PRs instead of the 3% a merge lane could ever cover.
+#
+# ADVICE NEVER MERGES. There is no flag on this file that merges any more — the
+# old `--merge` was removed, and `--merge` now exits with a usage error, drilled
+# below. That is a capability deletion, not a default change: a default can be
+# flipped by a repo variable nobody reviews.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MARKER = "<!-- merge-cage-advice -->"
+LABEL_OWNER = "owner-decision"
+LABEL_SAFE = "agent-safe"
+
+
+def advice_label(allowed: bool) -> str:
+    return LABEL_SAFE if allowed else LABEL_OWNER
+
+
+def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -> str:
+    """The PR comment. Same evidence rule as `plain_english`: a claim may only be
+    printed by the cage that produced it, so a cage that did not run cannot
+    appear as reassurance."""
+    size = f"{meta.get('files', '?')} files, {meta.get('lines', '?')} lines"
+    base = meta.get("base") or "?"
+    head = [MARKER, "### Merge cage — advisory only", "",
+            f"**Size:** {size} · **Base:** `{base}`", ""]
+
+    if allowed:
+        claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
+        head += [
+            f"**`{LABEL_SAFE}`** — nothing in this PR is a decision the cage was told to "
+            "reserve for you.", "",
+            "What was actually checked: " + ("; ".join(claims) if claims
+                                             else "_no cage reported anything_") + ".", "",
+            "This is advice. It merges nothing, and it never will — no flag on "
+            "`scripts/merge_cage.py` can merge.",
+        ]
+    else:
+        blocks = blocks_of(verdicts)
+        head += [f"**`{LABEL_OWNER}`** — {len(blocks)} thing(s) here are yours to decide.", ""]
+        head += [f"- {b}" for b in blocks[:8]]
+        if len(blocks) > 8:
+            head += ["", f"_(+{len(blocks) - 8} more)_"]
+        skipped = [v.name for v in verdicts if v.status == "not_checked"]
+        if skipped:
+            head += ["", f"Cages that did **not** run: {', '.join(skipped)}. "
+                         f"Not checked is not passed."]
+        head += ["", "This is advice, not a block. Merge it yourself whenever you like — "
+                     "the list above is only saying which part is the decision."]
+    return "\n".join(head)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The drill. This file decides what reaches real users, so it is the last place
 # a silent failure is acceptable. Each break below is a way a permissive bug
 # could let something through.
@@ -867,6 +983,10 @@ DECISION_PATH = [
     "check_review", "measure_ratchets", "check_ratchets", "is_worse", "ground_problem",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
+    # The advisory path is now the cage's ONLY output that reaches a human on
+    # every PR, so it is on the decision path even though `decide` does not call
+    # it. An unread verdict is a verdict that did not happen.
+    "advice_markdown", "advice_label",
 ]
 
 
@@ -1178,6 +1298,96 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not vague, f"{len(vague)} reason(s) with no FIX clause, e.g. {vague[:1]}",
        ["check_paths", "check_size", "judge_check_runs", "judge_threads", "check_ratchets"])
 
+    # ── THE CAGE MUST BE ABLE TO SAY YES ─────────────────────────────────────
+    # B18. Forty-four drills proved this cage can say NO. Not one proved it can
+    # say YES, which is exactly why nobody noticed that ALLOW was unreachable in
+    # production for the cage's whole life: auto-merge.yml:114 passed no
+    # `--baseline`, `check_ratchets(None)` returns `not_checked`, and
+    # `not_checked` blocks. Every PR was refused for a reason about the WIRING.
+    # A gate that cannot say yes is the same defect class as a guard that cannot
+    # say no, and it is worse in one way: it gets switched off, and then it
+    # protects nothing.
+    saved_gh = globals()["gh"]
+    saved_r = list(RATCHETS)
+    try:
+        sha_now = head_sha()
+
+        def perfect_gh(a: list[str]) -> str:
+            j = " ".join(a)
+            if "graphql" in j:
+                return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
+                    "pageInfo": {"hasNextPage": False}, "nodes": [thread_done]}}}}})
+            if a[-1] == ".head.sha":
+                return "d" * 40
+            if "check-runs" in j:
+                return json.dumps({"total_count": len(done), "check_runs": done})
+            if "/files" in j:
+                return json.dumps([{"filename": "docs/README.md", "status": "modified",
+                                    "additions": 3, "deletions": 1}])
+            if j.endswith("pulls/1"):
+                return json.dumps({"title": "docs: tidy the readme",
+                                   "merge_commit_sha": sha_now, "base": {"ref": "main"}})
+            raise RuntimeError(f"the drill did not expect: {j}")
+
+        globals()["gh"] = perfect_gh
+        RATCHETS[:] = [{"name": "drill", "cmd": [sys.executable, "-c", "print(3)"],
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        allowed_y, v_y, meta_y = decide(1, {"drill": 3})
+        ok("ALLOW IS REACHABLE (a perfect docs PR with a baseline is allowed end to end)",
+           allowed_y, f"the cage refused a PR with nothing wrong with it: {blocks_of(v_y)}",
+           ["decide", "check_proof", "check_review", "check_ratchets"])
+
+        md_yes = advice_markdown(1, meta_y, allowed_y, v_y)
+        ok("the advice for an allowed PR is labelled agent-safe and merges nothing",
+           LABEL_SAFE in md_yes and MARKER in md_yes and "no cage reported anything" not in md_yes,
+           f"advice text was wrong: {md_yes[:200]}", ["advice_markdown", "advice_label"])
+
+        # The SAME PR, one field changed: base is a feature branch. codeql.yml
+        # only fires for main-targeted PRs, so `CodeQL` cannot exist here.
+        # Measured on PRs #343/#344/#345/#346, all four missing both Analyze jobs.
+        def stacked_gh(a: list[str]) -> str:
+            if " ".join(a).endswith("pulls/1"):
+                return json.dumps({"title": "docs: tidy", "merge_commit_sha": sha_now,
+                                   "base": {"ref": "feat/every-guard-declares-its-drill"}})
+            return perfect_gh(a)
+
+        globals()["gh"] = stacked_gh
+        allowed_s, v_s, _ = decide(1, {"drill": 3})
+        ok("a PR based on a feature branch is refused, naming the check that cannot fire",
+           not allowed_s and any("cannot exist" in r and "CodeQL" in r for r in blocks_of(v_s)),
+           f"allowed={allowed_s} reasons={blocks_of(v_s)[:2]}",
+           ["decide", "judge_check_runs", "check_proof"])
+    finally:
+        globals()["gh"] = saved_gh
+        RATCHETS[:] = saved_r
+
+    # B19 — a missing base ref must not be guessed as `main`. The permissive
+    # guess is the one that unlocks the full check list, and guessing in the
+    # permissive direction is the whole thing this file refuses to do.
+    red("a PR whose base ref could not be read is refused, not assumed to be main",
+        judge_check_runs(done, len(done), ""), "not `main`", ["judge_check_runs"])
+    ok("NEGATIVE CONTROL (a main-based PR with a full check list still passes)",
+       not judge_check_runs(done, len(done), "main"),
+       "base-awareness broke the ordinary main-targeted case", ["judge_check_runs"])
+
+    # B17 — the merge capability is GONE, not defaulted off. A default can be
+    # flipped by a repo variable nobody reviews; a deleted flag cannot. Asserted
+    # end to end through main(), not by grepping for the string — a self-test
+    # that greps stayed fully green here after the only authorisation call was
+    # deleted.
+    # argparse signals a usage error by RAISING (`_Parser.error` -> SystemExit),
+    # so this must catch it. Asserting on a return value alone would have made
+    # this case blow the drill up rather than report — a self-test that crashes
+    # is not a self-test that passed.
+    try:
+        rc_merge = main(["1", "--merge"])
+    except SystemExit as exc:
+        rc_merge = int(exc.code or 0)
+    ok("`--merge` no longer exists: the cage cannot merge anything at all",
+       rc_merge == EXIT_USAGE,
+       f"exit {rc_merge} (expected {EXIT_USAGE}) — merge_cage still accepts a merge flag",
+       ["decide"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -1269,8 +1479,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = _Parser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", nargs="?", type=int, help="PR number to judge")
     ap.add_argument("--drill", action="store_true", help="break the cage on purpose")
-    ap.add_argument("--merge", action="store_true", help="actually merge when allowed")
     ap.add_argument("--slack", action="store_true", help="announce the verdict in Slack")
+    ap.add_argument("--advise", metavar="FILE",
+                    help="write a markdown verdict for a PR comment; NEVER merges")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
     ap.add_argument("--measure", action="store_true", help="print current ratchet values as JSON")
     ap.add_argument("--blockers", action="store_true", help="print the blocker log and exit")
@@ -1349,10 +1560,10 @@ def main(argv: list[str] | None = None) -> int:
                 print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
                 return EXIT_CANNOT_TELL_OWNER
 
-        if args.merge and allowed:
-            subprocess.run(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch"],
-                           check=True, timeout=180)
-            print(f"merged #{args.pr}")
+        if args.advise:
+            Path(args.advise).write_text(advice_markdown(args.pr, meta, allowed, verdicts),
+                                         encoding="utf-8")
+            print(f"advice written to {args.advise} (label: {advice_label(allowed)})")
 
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 

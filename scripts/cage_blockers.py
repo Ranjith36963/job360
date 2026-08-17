@@ -356,6 +356,66 @@ BLOCKERS: list[Blocker] = [
         drill="an exception nobody anticipated becomes a REFUSE, not a traceback",
         severity="too-permissive",
     ),
+    Blocker(
+        id="B18",
+        met="2026-08-17",
+        what="THE CAGE COULD NOT SAY YES, AND 44 DRILLS DID NOT NOTICE. Every drill proved "
+        "a refusal; not one proved an ALLOW was reachable. In production it was not: "
+        "auto-merge.yml:114 ran `merge_cage.py \"$pr\" --slack $merge_flag` with no "
+        "`--baseline`, `check_ratchets(None)` returns `not_checked`, and `not_checked` "
+        "blocks — so 100% of PRs were refused for a reason about the WIRING, identically, "
+        "regardless of the PR. auto-merge.yml:53 also checked out `ref: main`, which "
+        "ground_problem then refuses as the wrong tree for a tree-scoped ratchet, so the "
+        "lane had two independent reasons to never say yes.",
+        repro="python scripts/merge_cage.py 342 ; python scripts/merge_cage.py 343 ; "
+        "python scripts/merge_cage.py 346   # all three: 'no baseline was given, so no "
+        "number was compared to anything'",
+        rule="A GATE THAT CANNOT SAY YES IS THE SAME DEFECT CLASS AS A GUARD THAT CANNOT "
+        "SAY NO, and it is worse in one way: it gets switched off, and then it protects "
+        "nothing. Every cage must carry a drill proving its PASS is reachable end to end, "
+        "not only that its FAIL fires. The wiring itself is now guarded by "
+        "scripts/gate_wiring_check.py rules G1 and G4, so forgetting the baseline is a red "
+        "build rather than a silent constant refusal.",
+        drill="ALLOW IS REACHABLE (a perfect docs PR with a baseline is allowed end to end)",
+        severity="too-strict",
+    ),
+    Blocker(
+        id="B19",
+        met="2026-08-17",
+        what="REQUIRED_CHECKS WAS NOT BASE-AWARE, so every stacked PR was refused for a "
+        "check that structurally cannot fire there. codeql.yml declares "
+        "`pull_request: branches: [\"main\"]`, so a PR based on a feature branch never "
+        "produces a `CodeQL` run at all — measured on #343/#344/#345/#346, all four "
+        "missing it. Then the first fix introduced the mirror-image bug: the guard read "
+        "`if base_ref and base_ref != 'main'`, so an UNREADABLE base short-circuited into "
+        "the branch that judges against the full list. The permissive guess restored, on "
+        "paper, the one check that reads new security alerts from the diff.",
+        repro="decide() with a stubbed `pulls/1` returning base.ref = "
+        "'feat/every-guard-declares-its-drill', then again with base.ref absent",
+        rule="AN UNKNOWN VALUE IS NEVER THE PERMISSIVE VALUE. A check that cannot exist on "
+        "this base is named and refused, never silently dropped — dropping it would make "
+        "'branch off a feature branch' a way to stop the security question being asked.",
+        drill="a PR whose base ref could not be read is refused, not assumed to be main",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B20",
+        met="2026-08-17",
+        what="THE MERGE CAPABILITY WAS A DEFAULT, NOT AN ABSENCE. `--merge` existed and was "
+        "held off by an unset repo variable (`AUTO_MERGE_ENABLED`) — one click, in a "
+        "settings page with no diff and no review, from an agent merging to a branch that "
+        "auto-deploys to real users in 2m14s. Separately measured: replaying the cage's own "
+        "PATH+SIZE rules over merged PRs #250-338 allows 2 of 60 (3%), and both are "
+        "documentation. The lane was never worth the blast radius.",
+        repro="python scripts/merge_cage.py 1 --merge   # used to be accepted",
+        rule="DELETE THE CAPABILITY, DO NOT DEFAULT IT OFF. `--merge` is gone from this "
+        "file; the cage now only advises, and `--advise` writes a PR comment naming which "
+        "file is the decision. Anthropic's own most autonomous shipped mode still ends at a "
+        "pull request, and its auto-mode classifier names 'running production deploys' as a "
+        "blocked action. Merging here IS deploying.",
+        drill="`--merge` no longer exists: the cage cannot merge anything at all",
+        severity="too-permissive",
+    ),
 ]
 
 

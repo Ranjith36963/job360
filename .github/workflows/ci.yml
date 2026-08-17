@@ -170,6 +170,18 @@ jobs:
       - name: The merge cage still refuses
         run: python scripts/merge_cage.py --drill
 
+      # A gate is only a gate where it can still stop something. Measured on
+      # PR #337: merged 15:16:24, users live 15:18:38, CI finished 15:22:17 —
+      # four minutes AFTER the users. Every check in that run was correct and
+      # completely unable to stop anything. This asserts no merge in the repo is
+      # wired somewhere it could only ever be a post-mortem, and that nothing
+      # merges on "no red" when the honest answer is "nothing ran".
+      - name: Every merge is wired where it can still stop something
+        run: python scripts/gate_wiring_check.py
+
+      - name: That guard can still fail too
+        run: python scripts/gate_wiring_check.py --drill
+
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

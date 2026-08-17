@@ -1,0 +1,190 @@
+name: PR advisor (the cage advises, it never merges)
+
+# WHAT THIS REPLACES, AND WHY
+# ---------------------------
+# `auto-merge.yml` used to live here. It could not run at all — scheduled
+# workflows only run from the default branch and it was never on main — its
+# `AUTO_MERGE_ENABLED` variable did not exist, and as written it refused 100% of
+# PRs because it passed no `--baseline` (see the cage's blocker log, entry B18). Three
+# ways off. Nothing about its behaviour had ever been observed.
+#
+# It was also aimed at a problem the owner does not have. Measured over the last
+# 60 merged PRs: median time from opened to merged is 12.9 minutes, 39 of 60
+# merged inside 30 minutes, and in 25 of the last 25 merges the final check run
+# completed BEFORE `mergedAt`. He already waits for green. Automating that click
+# saves ~13 minutes of wall clock on work he is standing next to, and saves zero
+# attention. Meanwhile the cage's own PATH+SIZE rules allow 2 of those 60 PRs
+# (3%), both documentation — because his merge stream IS product code and the
+# cage's allow list is docs and tests, and closing that gap means contradicting
+# the sentence the cage exists to enforce.
+#
+# So this lane keeps the cage and drops the merge. On every PR it posts ONE
+# comment saying which of the files in front of him is the one that is actually a
+# decision, and labels the PR. 100% traffic, zero deploy risk. That is what is
+# worth having at 12.9 minutes per PR: not a robot that clicks merge, but one
+# sentence telling him where to look.
+#
+# WHY `pull_request` AND NOT A SCHEDULE
+# The whole point is that the advice arrives BEFORE the merge, which is the only
+# moment anything can still change. Measured on PR #337: merged 15:16:24, users
+# on the new code 15:18:38, CI finished 15:22:17 — four minutes after the users.
+# Anything that speaks after the merge is a post-mortem, however good it is.
+#
+# HONEST BOUND, STATED ON PURPOSE
+# The cage that judges the PR is the PR'S OWN COPY of scripts/merge_cage.py, not
+# main's. That is deliberate and it is a trade: the RATCHET cage measures the
+# checked-out tree (merge_cage.repo_root ties ROOT to the file's own checkout),
+# so rules-from-main and tree-from-PR cannot both be had without teaching the
+# cage to separate them — a change that is itself a new way to escape it. The
+# trade is only acceptable because THIS LANE MERGES NOTHING. A PR that widens
+# its own cage buys itself a wrong comment. If a merging lane is ever built, this
+# is the first thing that has to be solved, not the last.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # The drill entrance. Two loops in this repo were dead on arrival on main and
+  # only firing them on purpose revealed it, so every loop gets a door you can
+  # open by hand.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to advise on"
+        required: true
+
+concurrency:
+  group: pr-advisor-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  advise:
+    name: Advise (never merges)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Which PR
+        id: pick
+        env:
+          FROM_EVENT: ${{ github.event.pull_request.number }}
+          FROM_INPUT: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          pr="${FROM_EVENT:-$FROM_INPUT}"
+          if [ -z "$pr" ]; then
+            echo "::error::no PR number — this workflow cannot guess one."
+            exit 1
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      # THE TREE UNDER JUDGEMENT. `refs/pull/N/merge` is the PR merged into its
+      # base, which is what would actually ship — not the PR's head, which has
+      # never been combined with anything.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ steps.pick.outputs.pr }}/merge
+          fetch-depth: 0
+
+      # THE BASELINE. Measured on the PR's BASE, from its own checkout, because
+      # a ratchet compared against numbers measured on the same tree compares a
+      # value to itself and prints "no number regressed" having checked nothing.
+      # That was live for the cage's whole life (blocker log entry B18).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref || 'main' }}
+          path: _base
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Proving the cage still refuses on purpose costs three seconds and is the
+      # only thing standing between "there is a cage" and "the cage works".
+      - name: The cage still refuses — and can still allow
+        run: python scripts/merge_cage.py --drill
+
+      - name: The merge wiring is still in a place it could stop something
+        run: python scripts/gate_wiring_check.py
+
+      - name: Measure the baseline on the PR's base
+        id: base
+        run: |
+          set -euo pipefail
+          cd _base
+          echo "json=$(python scripts/merge_cage.py --measure)" >> "$GITHUB_OUTPUT"
+
+      - name: Judge, and write the advice
+        id: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.pick.outputs.pr }}
+          BASE_JSON: ${{ steps.base.outputs.json }}
+        run: |
+          set -euo pipefail
+          set +e
+          python scripts/merge_cage.py "$PR" --baseline "$BASE_JSON" --advise advice.md
+          rc=$?
+          set -e
+          # merge_cage's exit codes are a TYPED channel, one meaning each. 0 and 1
+          # are both VERDICTS here — this lane merges nothing, so "ask the owner"
+          # is a normal, successful outcome and must not fail the job. 3 and 4
+          # mean the cage could not judge, which is a real failure.
+          case "$rc" in
+            0) echo "label=agent-safe"    >> "$GITHUB_OUTPUT" ;;
+            1) echo "label=owner-decision" >> "$GITHUB_OUTPUT" ;;
+            3) echo "::error::the cage itself broke on PR #$PR — fix merge_cage.py."; exit 1 ;;
+            4) echo "::error::merge_cage was called wrongly on PR #$PR."; exit 1 ;;
+            *) echo "::error::merge_cage exited $rc on PR #$PR — an undefined code."; exit 1 ;;
+          esac
+          if [ ! -s advice.md ]; then
+            # An empty advice file would post an empty comment, which reads as
+            # "nothing to say" — the exact shape of a guard reporting success
+            # about a question it never asked.
+            echo "::error::merge_cage produced no advice text; refusing to post silence."
+            exit 1
+          fi
+
+      # ONE comment, updated in place. A new comment per push turns advice into
+      # noise, and noise is what gets muted.
+      - name: Post the advice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          LABEL: ${{ steps.judge.outputs.label }}
+        run: |
+          set -euo pipefail
+          existing=$(gh pr view "$PR" --json comments \
+            --jq '[.comments[] | select(.body | contains("<!-- merge-cage-advice -->"))] | last | .url // ""')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing##*-}" \
+              -f body="$(cat advice.md)" >/dev/null
+            echo "updated the existing advice comment"
+          else
+            gh pr comment "$PR" --body-file advice.md
+            echo "posted a new advice comment"
+          fi
+          gh pr edit "$PR" --remove-label agent-safe --remove-label owner-decision 2>/dev/null || true
+          gh pr edit "$PR" --add-label "$LABEL" 2>/dev/null \
+            || echo "::warning::could not set the label $LABEL (it may not exist yet)"
+          {
+            echo "### PR #$PR -> \`$LABEL\`"
+            echo
+            cat advice.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # If the advisor itself dies the PR simply has no comment, and a missing
+      # comment reads as "nothing to flag". Six of seven alarms in this repo sat
+      # unread for days for exactly that reason, so the failure path speaks.
+      - name: Say so if the advisor itself broke
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body "$(printf '%s\n**The merge cage could not judge this PR.** No advice was produced, so the absence of a verdict here means nothing — it is not a clean bill of health. %s' '<!-- merge-cage-advice -->' "$RUN_URL")"
