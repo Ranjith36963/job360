@@ -12,6 +12,7 @@ from src.core.settings import RATE_LIMITS, SOURCE_FETCH_TIMEOUT
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.linkedin")
 
@@ -26,6 +27,11 @@ _TITLE_RE = re.compile(r'<h3[^>]*class="[^"]*base-search-card__title[^"]*"[^>]*>
 _COMPANY_RE = re.compile(r'<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
 _LOCATION_RE = re.compile(r'<span[^>]*class="[^"]*job-search-card__location[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
 _LINK_RE = re.compile(r'href="(https://[^"]*linkedin\.com/jobs/view/[^"]*)"', re.IGNORECASE)
+# Each result card carries a <time datetime="YYYY-MM-DD"> -- the real posting
+# date, already in this same search response (10/10 present, confirmed live
+# 2026-08-16). Previously thrown away in favour of a hardcoded
+# date_confidence="fabricated" / posted_at=None on every job from this source.
+_TIME_RE = re.compile(r'<time[^>]*datetime="([^"]+)"', re.IGNORECASE)
 
 # S4: structural health check. `base-search-card__title` is the class the
 # title regex keys on — it MUST appear on any non-trivial LinkedIn guest
@@ -148,6 +154,7 @@ class LinkedInSource(BaseJobSource):
                 companies = _COMPANY_RE.findall(html)
                 locations = _LOCATION_RE.findall(html)
                 links = _LINK_RE.findall(html)
+                times = _TIME_RE.findall(html)
                 count = min(len(titles), len(links))
                 for i in range(count):
                     url = links[i].split("?")[0]
@@ -157,6 +164,10 @@ class LinkedInSource(BaseJobSource):
                     title = titles[i].strip()
                     company = companies[i].strip() if i < len(companies) else ""
                     location = locations[i].strip() if i < len(locations) else "UK"
+                    # Real date from the card's own <time datetime="...">,
+                    # not a fabrication -- see _TIME_RE above.
+                    raw_time = times[i] if i < len(times) else None
+                    posted_at, confidence = normalize_posted_at(raw_time)
                     jobs.append(Job(
                         title=title,
                         company=company,
@@ -165,9 +176,9 @@ class LinkedInSource(BaseJobSource):
                         apply_url=url,
                         source=self.name,
                         date_found=datetime.now(timezone.utc).isoformat(),
-                        posted_at=None,
-                        date_confidence="fabricated",
-                        date_posted_raw=None,
+                        posted_at=posted_at,
+                        date_confidence=confidence,
+                        date_posted_raw=raw_time,
                     ))
                     if len(jobs) >= 50:
                         break
@@ -185,8 +196,7 @@ class LinkedInSource(BaseJobSource):
             if not self._can_afford_request(deadline):
                 break
             try:
-                job.description = await self._fetch_description(job.apply_url)
-                if job.description:
+                if await self._fill_detail(job):
                     detailed += 1
             except Exception as e:  # noqa: BLE001 — a detail miss never drops the job
                 logger.debug("LinkedIn: detail fetch failed for %s: %s", job.apply_url, e)
@@ -195,25 +205,49 @@ class LinkedInSource(BaseJobSource):
         )
         return jobs
 
-    async def _fetch_description(self, view_url: str) -> str:
-        """Pull the posting's full description from the job-view page's JSON-LD.
+    async def _fill_detail(self, job: Job) -> bool:
+        """Pull description + validThrough + employmentType from the
+        job-view page's JSON-LD, in the ONE request this source already
+        makes per kept job.
 
         The SEO markup is guest-accessible (verified live 2026-08-06). The
         `description` field arrives as entity-escaped HTML — unescape, strip
-        tags, cap 5,000 chars. Returns "" on any miss: absence of text is a
-        data gap the scorer treats neutrally, never an error.
+        tags, cap 5,000 chars. `validThrough` (deadline, 100% present live
+        2026-08-16) and `employmentType` (also in the same object) used to
+        be parsed and then discarded — this source already pays for the
+        request, they were just never read. Returns True iff at least the
+        description was recovered; a total miss never drops the job.
         """
-        page = await self._get_text(view_url)
+        page = await self._get_text(job.apply_url)
         if not page:
-            return ""
+            return False
         m = _LDJSON_RE.search(page)
         if not m:
-            return ""
+            return False
         try:
             data = json.loads(m.group(1))
         except (ValueError, TypeError):
-            return ""
-        desc = data.get("description") or ""
-        if not isinstance(desc, str) or not desc:
-            return ""
-        return _TAG_RE.sub(" ", _html.unescape(desc))[:5000].strip()
+            return False
+        if not isinstance(data, dict):
+            return False
+
+        found_any = False
+        desc = data.get("description")
+        if isinstance(desc, str) and desc:
+            job.description = _TAG_RE.sub(" ", _html.unescape(desc))[:5000].strip()
+            found_any = True
+
+        valid_through = data.get("validThrough")
+        if isinstance(valid_through, str) and valid_through:
+            deadline_iso, deadline_confidence = normalize_posted_at(valid_through)
+            if deadline_confidence == "high" and deadline_iso:
+                job.deadline = deadline_iso[:10]
+                job.deadline_source = "listing"
+                found_any = True
+
+        employment_type = data.get("employmentType")
+        if isinstance(employment_type, str) and employment_type:
+            job.employment_type = employment_type
+            found_any = True
+
+        return found_any

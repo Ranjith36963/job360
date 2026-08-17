@@ -235,3 +235,313 @@ def test_gate_output_round_trips_through_the_db(db):
         "at": provenance["employment_type"]["at"],  # timestamp — just needs to exist
     }
     assert provenance["salary"]["how"] == "source"
+
+
+# ---------------------------------------------------------------------------
+# 5. Rule #29 at the gate: an ABSENT value never becomes a number.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_never_turns_an_absent_value_into_a_number():
+    """The whole point of the salary hook is conversion, and conversion is
+    exactly where invention creeps in. Nothing the gate does may manufacture a
+    figure, a bound, a unit or a currency that the source never sent."""
+    job = _make_job(
+        description=(
+            "We are hiring a data engineer to join a small team building "
+            "pipelines. You will work with Python and Postgres and own your "
+            "work end to end. The role is based in our London office with "
+            "flexible hours and a generous holiday allowance."
+        ),
+    )
+    fill_shelves(job)
+
+    assert job.salary_min is None
+    assert job.salary_max is None
+    assert job.salary_min_gbp_annual is None
+    assert job.salary_max_gbp_annual is None
+    assert job.salary_period is None
+    assert job.salary_currency is None
+    assert job.shelf_provenance["salary"] == {"how": "absent", "why": "not_stated"}
+    # No deadline keyword anywhere in that ad -> no deadline. Never "30 days
+    # from posting", never today+N.
+    assert job.deadline is None
+    assert job.shelf_provenance["deadline"] == {"how": "absent", "why": "not_stated"}
+
+
+def test_gate_never_mirrors_a_missing_salary_bound():
+    """normalize_salary mirrors a missing bound onto the survivor, which is
+    right for the scorer's overlap maths and WRONG as a stored fact: a job
+    advertising "from 45,000" must not gain a maximum it never stated."""
+    job = _make_job(salary_min=45000, salary_max=None, salary_currency="GBP",
+                    salary_period="year")
+    fill_shelves(job)
+
+    assert job.salary_min == 45000
+    assert job.salary_max is None
+    assert job.salary_min_gbp_annual == 45000
+    assert job.salary_max_gbp_annual is None
+
+
+def test_gate_keeps_a_unit_that_arrived_without_an_amount():
+    """reed sends salaryType 'per day' on contract roles whose amounts are
+    both null. "We know it is a day rate, we have no number" is a real fact —
+    the unit is normalised and kept, and no amount is invented to match it."""
+    job = _make_job(salary_min=None, salary_max=None, salary_period="per day")
+    fill_shelves(job)
+
+    assert job.salary_period == "daily"
+    assert job.salary_min is None and job.salary_max is None
+    assert job.salary_min_gbp_annual is None
+    assert job.shelf_provenance["salary"]["how"] == "absent"
+
+
+def test_gate_refuses_to_price_a_currency_fx_does_not_know():
+    """landingjobs ships BRL. core/fx.to_gbp passes an unknown code through at
+    1:1, which would render a BRL figure wearing a pound sign — a WRONG
+    number, not a rough one. The derived GBP pair stays NULL and the source's
+    own numbers and code are left untouched."""
+    job = _make_job(salary_min=120000, salary_max=150000, salary_currency="BRL",
+                    salary_period="year")
+    fill_shelves(job)
+
+    assert job.salary_min == 120000        # untouched, still BRL
+    assert job.salary_currency == "BRL"    # never relabelled GBP
+    assert job.salary_min_gbp_annual is None
+    assert job.salary_max_gbp_annual is None
+    entry = job.shelf_provenance["salary"]
+    assert entry["how"] == "source"
+    assert entry["gbp_annual"] == "unpriceable_currency"
+
+
+def test_gate_clamps_after_converting_not_before():
+    """A monthly 3,600 (nofluffjobs) annualises to 43,200 and is plausible; the
+    old unit-blind clamp saw "3,600 < 10,000" and destroyed it."""
+    job = _make_job(salary_min=3600, salary_max=4200, salary_period="Month",
+                    salary_currency="GBP")
+    fill_shelves(job)
+
+    assert job.salary_min == 43200
+    assert job.salary_max == 50400
+    assert job.salary_min_gbp_annual == 43200
+    assert job.shelf_provenance["salary"]["how"] == "source"
+    # The pre-conversion figures survive for audit — a converted number whose
+    # original nobody can see is not reviewable.
+    assert job.shelf_provenance["salary"]["raw"]["min"] == 3600
+    assert job.shelf_provenance["salary"]["raw"]["period"] == "Month"
+
+
+def test_a_refused_salary_is_typed_as_refused_not_as_unstated():
+    """"The ad said nothing" and "the ad said something we refuse to believe"
+    are different facts about a job and route different work (the empty-shelf-
+    three-causes rule). A band that survives neither plausibility bound is
+    stored NULL with why='implausible', keeping the original figures."""
+    job = _make_job(salary_min=1, salary_max=900000, salary_currency="GBP",
+                    salary_period="year")
+    fill_shelves(job)
+
+    assert job.salary_min is None and job.salary_max is None
+    entry = job.shelf_provenance["salary"]
+    assert entry == {"how": "absent", "why": "implausible", "raw": entry["raw"]}
+    assert entry["raw"]["max"] == 900000
+
+
+def test_an_unknown_period_token_is_not_silently_called_annual():
+    """A token the closed set does not know leaves the amounts exactly as the
+    source sent them (what every legacy consumer already assumes) and keeps the
+    raw token for a future alias fix — it is never guessed into a unit that
+    would multiply the number by 2,080."""
+    job = _make_job(salary_min=55000, salary_max=65000, salary_period="fortnightly")
+    fill_shelves(job)
+
+    assert job.salary_min == 55000
+    assert job.salary_period == "fortnightly"   # untouched, still the raw token
+    assert job.shelf_provenance["salary"]["raw"]["period"] == "fortnightly"
+
+
+# ---------------------------------------------------------------------------
+# 6. The deadline pass now runs INSIDE the gate (it used to run in main.py,
+#    after scoring).
+# ---------------------------------------------------------------------------
+
+
+def test_deadline_is_extracted_inside_the_gate():
+    job = _make_job(
+        description=(
+            "Senior Data Engineer wanted for a UK-wide programme of work. You "
+            "will build ingestion pipelines in Python. Closing date: 30 June "
+            "2027. Interviews will follow in the same week."
+        ),
+    )
+    assert job.deadline is None
+    fill_shelves(job)
+
+    assert job.deadline == "2027-06-30"
+    assert job.deadline_source == "description"
+    assert job.shelf_provenance["deadline"]["how"] == "derived"
+    assert job.shelf_provenance["deadline"]["by"] == "deadline.extract_deadline@v1"
+
+
+def test_a_structured_deadline_is_never_overwritten_by_the_text_pass():
+    """Trust order (UNIVERSAL_SHELF.md section 2): a structured source field
+    beats a derivation, and a lower layer never overwrites a higher one."""
+    job = _make_job(
+        deadline="2027-01-15",
+        deadline_source="listing",
+        description="Apply by 30 June 2027 at the latest.",
+    )
+    fill_shelves(job)
+
+    assert job.deadline == "2027-01-15"
+    assert job.shelf_provenance["deadline"]["how"] == "source"
+
+
+def test_a_bare_date_in_the_ad_body_is_not_a_deadline():
+    """Rule #29 again: extract_deadline only fires when a deadline KEYWORD is
+    tied to the date, so an ad that merely names a start date keeps a NULL
+    deadline instead of gaining a plausible-looking wrong one."""
+    job = _make_job(
+        description=(
+            "This is a fixed-term contract starting 30 June 2027 and running "
+            "for twelve months. You will join an established platform team "
+            "and work on data ingestion at national scale."
+        ),
+    )
+    fill_shelves(job)
+
+    assert job.deadline is None
+    assert job.shelf_provenance["deadline"]["why"] == "not_stated"
+
+
+# ---------------------------------------------------------------------------
+# 7. THE PIPELINE ROUND TRIP — a fake source through the real run_search, and
+#    out the other side as a stored row. This is the test that proves the gate
+#    is WIRED: everything above would still pass with fill_shelves sitting
+#    unused in a file nobody imports (which is exactly what step 1 shipped).
+# ---------------------------------------------------------------------------
+
+
+_ROUND_TRIP_AD = (
+    "We are looking for an AI Engineer to join our platform team in London. "
+    "You will build and ship services in Python, work with PyTorch and "
+    "LangChain on RAG pipelines, and own your code from design through to "
+    "production on Postgres and AWS. Deep Learning and LLM experience is "
+    "valued, and you will pair with data scientists across the business. "
+    "Closing date: 30 June 2027. Interviews run the following week."
+)
+
+
+def _round_trip_job():
+    from src.models import Job as _Job
+
+    return _Job(
+        title="AI Engineer",
+        company="ShelfCo",
+        apply_url="https://example.com/shelf-round-trip",
+        source="fake_shelf_source",
+        date_found=datetime.now(timezone.utc).isoformat(),
+        location="London, UK",
+        description=_ROUND_TRIP_AD,
+        # RAW upstream values, exactly as a dumb-mapper source hands them over:
+        # an hourly rate in pounds, an un-normalised employment type, the
+        # board's own tag vocabulary.
+        salary_min=30.0,
+        salary_max=45.0,
+        salary_period="per hour",
+        salary_currency="GBP",
+        employment_type="Full time",
+        source_tags=["python", "postgres"],
+    )
+
+
+def test_pipeline_round_trip(migrated_db_path, tmp_path):
+    """Fake source -> run_search -> the stored row carries FULL provenance and
+    a non-default value that really survived (rule #21: value-presence, not
+    schema-presence).
+
+    Four separate things have to be true at once for this to pass, and each one
+    was a real gap before this batch:
+      * the gate runs at all inside the pipeline (provenance is complete);
+      * it normalised a raw upstream token ('Full time' -> 'full_time');
+      * it ANNUALISED an hourly rate instead of the old clamp nulling it;
+      * the deadline pass still runs now that it moved inside the gate.
+    """
+    from unittest.mock import patch
+
+    from src.main import run_search
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.sources.base import BaseJobSource
+
+    class _FakeSource(BaseJobSource):
+        name = "fake_shelf_source"
+        category = "free_json"
+
+        async def fetch_jobs(self):
+            return [_round_trip_job()]
+
+    def _fake_build(session, source_filter=None, **kwargs):
+        return [_FakeSource(session)]
+
+    profile = UserProfile(
+        cv_data=CVData(
+            raw_text=(
+                "AI Engineer with Python, PyTorch, LangChain, RAG, LLM and "
+                "Deep Learning experience."
+            ),
+            skills=["Python", "PyTorch", "LangChain", "RAG", "LLM", "Deep Learning"],
+        ),
+        preferences=UserPreferences(target_job_titles=["AI Engineer"]),
+    )
+
+    async def _go():
+        with (
+            patch("src.main._build_sources", _fake_build),
+            patch("src.main.load_profile", return_value=profile),
+            patch("src.main.EXPORTS_DIR", tmp_path / "exports"),
+            patch("src.main.REPORTS_DIR", tmp_path / "reports"),
+        ):
+            return await run_search(db_path=migrated_db_path, no_notify=True)
+
+    stats = asyncio.run(_go())
+    assert stats["new_jobs"] == 1, stats
+
+    async def _read():
+        database = JobDatabase(migrated_db_path)
+        await database.connect()
+        try:
+            rows = await database.get_recent_jobs(days=9999)
+        finally:
+            await database.close()
+        return rows
+
+    rows = asyncio.run(_read())
+    row = next(r for r in rows if r["company"] == "ShelfCo")
+
+    # 1. Every shelf ACCOUNTED FOR on the stored row — not on an in-memory
+    #    object a test built itself.
+    provenance = row["shelf_provenance"]
+    assert isinstance(provenance, dict)
+    assert set(provenance.keys()) == set(UNIVERSAL_SHELF)
+
+    # 2. A raw upstream token was normalised on the way through.
+    assert row["employment_type"] == "full_time"
+    assert provenance["employment_type"]["raw"] == "Full time"
+
+    # 3. The hourly rate was annualised, not clamped away. Under the OLD
+    #    unit-blind clamp this row stored salary_min=NULL (30 < 10,000) and
+    #    salary_max=45 — a job advertising "45" a year.
+    assert row["salary_min"] == 62400.0       # 30.00/h x 2080 h
+    assert row["salary_max"] == 93600.0       # 45.00/h x 2080 h
+    assert row["salary_min_gbp_annual"] == 62400.0
+    assert row["salary_max_gbp_annual"] == 93600.0
+    assert row["salary_period"] == "annual"
+    assert provenance["salary"]["raw"]["period"] == "per hour"
+
+    # 4. The deadline pass still runs from its new home inside the gate.
+    assert row["deadline"] == "2027-06-30"
+    assert row["deadline_source"] == "description"
+    assert provenance["deadline"]["how"] == "derived"
+
+    # 5. And the shelves a source filled directly still land.
+    assert json.loads(row["source_tags"]) == ["python", "postgres"]
+    assert row["description"] == _ROUND_TRIP_AD

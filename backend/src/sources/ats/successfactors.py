@@ -1,8 +1,10 @@
+import html
+import json
 import logging
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 import aiohttp
 
@@ -17,26 +19,89 @@ from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
 
 logger = logging.getLogger("job360.sources.successfactors")
 
-# Bound on how many child sitemaps a sitemap INDEX may fan out to per company,
-# to avoid runaway fetching if a vendor's index lists dozens of shards.
 _MAX_INDEX_SITEMAPS = 5
-
-# Only URLs carrying a "/job/" segment are real postings. Vendor sitemaps also
-# list navigation/category pages, which would otherwise be ingested as jobs
-# with nonsense titles derived from the path (see _parse_urlset).
 _JOB_URL_RE = re.compile(r"/job/", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_JSONLD_RE = re.compile(r"<script type=.application/ld\+json.>(.*?)</script>", re.DOTALL)
+_GEOLOCATION_RE = re.compile(r"class=.jobGeoLocation.>([^<]*)<")
+_MICRODATA_DESC_MARKER = 'itemprop="description"'
+# Bounded window (not a closing-tag regex): verified live 2026-08-16, the
+# QinetiQ template's description block is the LAST field on the page --
+# no later `joblayouttoken` marker ever follows it, so a regex requiring one
+# as a closing boundary never matches at all (0/0 descriptions extracted).
+# A fixed character window after the opening tag is simple and robust
+# against markup this irregular; downstream tag-stripping + a 5000-char cap
+# makes the exact window size non-critical.
+_MICRODATA_DESC_WINDOW = 8000
+
+# Per-COMPANY budget (not a shared global pool): BAE Systems' sitemap shards
+# are geographically clustered (shard 1 sampled 100% US, verified live
+# 2026-08-16), so a shared budget spent entirely inside BAE's US-heavy shard
+# would starve QinetiQ/Thales of any detail fetches at all. Splitting evenly
+# guarantees every configured company gets a fair shot at surfacing its real
+# UK postings within the same total request budget.
+_MAX_DETAIL_FETCHES_PER_COMPANY = 20
+
+
+def _extract_from_jsonld(page_html):
+    m = _JSONLD_RE.search(page_html)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    loc = data.get("jobLocation")
+    if isinstance(loc, list):
+        loc = loc[0] if loc else None
+    addr = loc.get("address", {}) if isinstance(loc, dict) else {}
+    locality = (addr.get("addressLocality") or "").strip()
+    country = (addr.get("addressCountry") or "").strip()
+    location = ", ".join(p for p in (locality, country) if p)
+
+    desc_raw = data.get("description") or ""
+    description = _HTML_TAG_RE.sub(" ", html.unescape(str(desc_raw)))[:5000].strip()
+
+    emp = data.get("employmentType")
+    if isinstance(emp, list):
+        employment_type = emp[0] if emp else None
+    elif isinstance(emp, str):
+        employment_type = emp
+    else:
+        employment_type = None
+
+    return {"location": location or None, "description": description, "employment_type": employment_type}
+
+
+def _extract_from_microdata(page_html):
+    loc_match = _GEOLOCATION_RE.search(page_html)
+    location = loc_match.group(1).strip() if loc_match else None
+
+    description = ""
+    marker_idx = page_html.find(_MICRODATA_DESC_MARKER)
+    if marker_idx != -1:
+        tag_end = page_html.find(">", marker_idx)
+        if tag_end != -1:
+            chunk = page_html[tag_end + 1: tag_end + 1 + _MICRODATA_DESC_WINDOW]
+            description = _HTML_TAG_RE.sub(" ", html.unescape(chunk))[:5000].strip()
+
+    if location is None and not description:
+        return None
+    return {"location": location, "description": description, "employment_type": None}
 
 
 class SuccessFactorsSource(BaseJobSource):
-    """SAP SuccessFactors career sites — UK defence/enterprise jobs via sitemap."""
     name = "successfactors"
     category = "ats"
 
-    def __init__(self, session: aiohttp.ClientSession, companies: list[dict[str, Any]] | None = None, search_config: Optional[SearchConfig] = None):
+    def __init__(self, session: aiohttp.ClientSession, companies=None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies or SUCCESSFACTORS_COMPANIES
 
-    async def fetch_jobs(self) -> list[Job]:
+    async def fetch_jobs(self) -> list:
         jobs = []
         for company in self._companies:
             sitemap_url = company["sitemap_url"]
@@ -45,36 +110,30 @@ class SuccessFactorsSource(BaseJobSource):
             xml_text = await self._get_text(sitemap_url)
             if not xml_text:
                 continue
-            jobs.extend(await self._parse_sitemap_or_index(xml_text, company_name))
+            detail_budget = [_MAX_DETAIL_FETCHES_PER_COMPANY]
+            jobs.extend(await self._parse_sitemap_or_index(xml_text, company_name, detail_budget))
 
         logger.info("SuccessFactors: found %s relevant jobs", len(jobs))
         return jobs
 
-    async def _parse_sitemap_or_index(self, xml_text: str, company_name: str) -> list[Job]:
-        """Parse a sitemap document that may be either a plain urlset or a
-        sitemap INDEX (a level of indirection some vendors — BAE, Thales —
-        use to shard their sitemap across multiple files).
-        """
+    async def _parse_sitemap_or_index(self, xml_text, company_name, detail_budget):
         root = self._parse_xml(xml_text, company_name)
         if root is None:
             return []
 
         if self._local_name(root.tag) == "sitemapindex":
-            return await self._parse_sitemap_index(root, company_name)
-        return self._parse_urlset(root, company_name)
+            return await self._parse_sitemap_index(root, company_name, detail_budget)
+        return await self._parse_urlset(root, company_name, detail_budget)
 
-    def _parse_xml(self, xml_text: str, company_name: str) -> Optional[ET.Element]:
+    def _parse_xml(self, xml_text, company_name):
         try:
             return cast(ET.Element, _safe_fromstring(_sanitize_xml(xml_text)))
         except ET.ParseError as e:
             logger.warning("SuccessFactors [%s]: XML parse error: %s", company_name, e)
             return None
 
-    async def _parse_sitemap_index(self, root: ET.Element, company_name: str) -> list[Job]:
-        """Fetch and parse each child sitemap referenced by a sitemap index,
-        bounded to ``_MAX_INDEX_SITEMAPS`` to avoid runaway fetching.
-        """
-        jobs: list[Job] = []
+    async def _parse_sitemap_index(self, root, company_name, detail_budget):
+        jobs = []
         child_urls = [
             self._local_findtext(sitemap_elem, "loc")
             for sitemap_elem in self._iter_local(root, "sitemap")
@@ -88,11 +147,11 @@ class SuccessFactorsSource(BaseJobSource):
             child_root = self._parse_xml(xml_text, company_name)
             if child_root is None:
                 continue
-            jobs.extend(self._parse_urlset(child_root, company_name))
+            jobs.extend(await self._parse_urlset(child_root, company_name, detail_budget))
 
         return jobs
 
-    def _parse_urlset(self, root: ET.Element, company_name: str) -> list[Job]:
+    async def _parse_urlset(self, root, company_name, detail_budget):
         jobs = []
         now = datetime.now(timezone.utc).isoformat()
 
@@ -100,18 +159,9 @@ class SuccessFactorsSource(BaseJobSource):
             loc = self._local_findtext(url_elem, "loc")
             if not loc:
                 continue
-
-            # A vendor sitemap lists EVERY page on the careers site, not just
-            # postings. Verified live 2026-08-08: of 4,664 URLs across the
-            # configured companies, only 4,287 were real jobs — the rest were
-            # navigation pages (".../global/en", ".../early-career") which
-            # previously became jobs titled "En" and "Early Career".
-            # Real SuccessFactors postings always carry a "/job/" segment,
-            # e.g. .../job/124704BR/Engineer-Senior-Principal-Optical-Systems
             if not _JOB_URL_RE.search(loc):
                 continue
 
-            # Extract title from URL path
             title = self._title_from_url(loc)
             if not title:
                 continue
@@ -119,59 +169,90 @@ class SuccessFactorsSource(BaseJobSource):
             if not _is_uk_or_remote(title):
                 continue
 
+            if detail_budget[0] <= 0:
+                continue
+            detail_budget[0] -= 1
+
+            page_html = await self._get_text(loc)
+            if not page_html:
+                continue
+
+            extracted = _extract_from_jsonld(page_html) or _extract_from_microdata(page_html)
+            if not extracted or not extracted.get("location"):
+                continue
+
+            real_location = extracted["location"]
+            # Test UK-eligibility on the COUNTRY component alone, not the
+            # combined "City, Country" string. Verified live 2026-08-16: the
+            # combined form trips a known uk_gate dual-site escape (a UK
+            # place name sharing a name with a foreign one, e.g. Westminster
+            # UK vs Westminster, Maryland US) meant for genuinely ambiguous
+            # two-site postings like "London / New York" -- admitting BAE's
+            # US postings as UK. A single bare segment can never hit that
+            # escape (it requires >1 named segment), so this is a source-side
+            # workaround, not a uk_gate.py change (out of scope for this
+            # batch; the underlying gazetteer gap is a separate finding).
+            country_segment = real_location.rsplit(",", 1)[-1].strip()
+            if not _is_uk_or_remote(country_segment):
+                continue
+
             jobs.append(Job(
                 title=title,
                 company=company_name,
-                location="UK",
-                description=title,
+                location=real_location,
+                description=extracted.get("description") or title,
                 apply_url=loc,
                 source=self.name,
                 date_found=now,
                 posted_at=None,
                 date_confidence="low",
                 date_posted_raw=None,
+                employment_type=extracted.get("employment_type"),
             ))
 
         return jobs
 
     @staticmethod
-    def _local_name(tag: str) -> str:
-        """Strip any ``{namespace}`` prefix ElementTree attaches to a tag.
-
-        The live QinetiQ sitemap serves the ``google.com/schemas/sitemap``
-        namespace instead of the ``sitemaps.org`` one this code used to
-        hardcode (verified live: 0/162 <loc> URLs matched under either the
-        namespaced lookup or the old no-namespace fallback). Matching on the
-        local name only makes this tolerant of whichever namespace — or no
-        namespace at all — a given vendor happens to serve.
-        """
+    def _local_name(tag):
         return tag.split("}")[-1]
 
     @classmethod
-    def _iter_local(cls, root: ET.Element, tag_name: str) -> list[ET.Element]:
-        """Descendants (any depth) whose local tag name matches ``tag_name``,
-        regardless of namespace.
-        """
+    def _iter_local(cls, root, tag_name):
         return [elem for elem in root.iter() if cls._local_name(elem.tag) == tag_name]
 
     @classmethod
-    def _local_findtext(cls, elem: ET.Element, tag_name: str) -> str:
-        """Direct child's text, matched by local name regardless of namespace."""
+    def _local_findtext(cls, elem, tag_name):
         for child in elem:
             if cls._local_name(child.tag) == tag_name:
                 return (child.text or "").strip()
         return ""
 
     @staticmethod
-    def _title_from_url(url: str) -> str:
-        """Extract a readable title from a career page URL path."""
-        # Get last path segment
-        path = url.rstrip("/").split("/")[-1]
-        # Remove ID suffixes, query params
-        path = path.split("?")[0]
-        # Replace hyphens/underscores with spaces
+    def _title_from_url(url):
+        """Extract a readable title from a career page URL path.
+
+        QinetiQ (and likely other legacy-template SuccessFactors vendors)
+        appends the numeric job ID as its OWN trailing path segment --
+        `.../job/Canberra-Systems-Engineering-.../1368001233/` -- verified
+        live 2026-08-16: 154/154 QinetiQ sitemap URLs have a digit-only last
+        segment. Taking the last segment alone (the old behaviour) always
+        returned that bare ID, `_title_from_url` returned "", and
+        `_parse_urlset`'s `if not title: continue` silently dropped every
+        QinetiQ posting -- this source has been contributing ZERO QinetiQ
+        jobs since the day it was added, regardless of the location fix
+        above. Walking backward past digit-only segments recovers the real
+        title segment for both templates (BAE's last segment already IS the
+        title, so this is a no-op there).
+        """
+        segments = [s.split("?")[0] for s in url.rstrip("/").split("/") if s]
+        path = ""
+        for seg in reversed(segments):
+            if seg and not seg.isdigit():
+                path = seg
+                break
+        if not path:
+            return ""
         title = re.sub(r"[-_]+", " ", path)
-        # Remove pure numeric segments
         if title.strip().isdigit():
             return ""
         return title.strip().title()

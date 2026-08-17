@@ -1,12 +1,26 @@
 import html as html_lib
+import json
 import logging
 import re
 from datetime import datetime, timezone
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.aijobs_ai")
+
+# Per-job detail page carries the FULL description plus datePosted and
+# validThrough in a schema.org JobPosting ld+json block — the list page only
+# ever gives us the title (description=title, confirmed live 2026-08-16).
+_LDJSON_RE = re.compile(
+    r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL
+)
+# Rate-limited (2s/request, RATE_LIMITS["aijobs_ai"]) and serial: 15 detail
+# fetches costs ~30s on top of the 2 list-page fetches, well inside the 60s
+# SOURCE_FETCH_TIMEOUT ceiling (see linkedin.py for what happens when a
+# source does NOT budget this).
+_MAX_DETAIL_FETCHES = 15
 
 # Match the job-card ANCHOR and capture its whole inner HTML.
 #
@@ -73,8 +87,96 @@ class AIJobsAISource(BaseJobSource):
                     seen_urls.add(job.apply_url)
                     jobs.append(job)
 
-        logger.info("AI Jobs AI: found %s relevant jobs", len(jobs))
+        detailed = 0
+        for job in jobs[:_MAX_DETAIL_FETCHES]:
+            try:
+                if await self._fill_detail(job):
+                    detailed += 1
+            except Exception as e:  # noqa: BLE001 -- a detail miss never drops the job
+                logger.debug("AI Jobs AI: detail fetch failed for %s: %s", job.apply_url, e)
+
+        logger.info(
+            "AI Jobs AI: found %s relevant jobs (%s with detail)", len(jobs), detailed
+        )
         return jobs
+
+    async def _fill_detail(self, job: Job) -> bool:
+        """Pull description/datePosted/validThrough from the job's own
+        schema.org JobPosting ld+json. Returns True iff at least one field
+        was recovered; a total miss never drops the job (title-only
+        description is the safe fallback already on it).
+        """
+        page = await self._get_text(job.apply_url)
+        if not page:
+            return False
+        m = _LDJSON_RE.search(page)
+        if not m:
+            return False
+        fields = self._extract_ldjson_fields(m.group(1))
+        if not fields:
+            return False
+        if fields.get("description"):
+            cleaned = _TAG_RE.sub(" ", html_lib.unescape(fields["description"]))
+            cleaned = cleaned.replace("\n", " ").strip()
+            if cleaned:
+                job.description = cleaned[:5000]
+        if fields.get("datePosted"):
+            posted_at, confidence = normalize_posted_at(fields["datePosted"])
+            if posted_at:
+                job.posted_at = posted_at
+                job.date_confidence = confidence
+                job.date_posted_raw = fields["datePosted"]
+        if fields.get("validThrough"):
+            deadline_iso, deadline_confidence = normalize_posted_at(fields["validThrough"])
+            if deadline_confidence == "high" and deadline_iso:
+                job.deadline = deadline_iso[:10]
+                job.deadline_source = "listing"
+        return True
+
+    @staticmethod
+    def _extract_ldjson_fields(raw: str) -> dict:
+        """Tolerant JobPosting field extractor.
+
+        aijobs.ai's per-job ld+json is frequently NOT valid JSON: description
+        HTML embeds literal unescaped quotes (e.g. `href="..."`) and some
+        jobs are missing a trailing comma between fields (confirmed live
+        2026-08-16, one real posting reproduced the exact break). Try strict
+        json.loads first (works whenever the description has no embedded
+        markup with quotes); fall back to independent per-field regexes that
+        do not require the whole document to be well-formed. A field this
+        cannot find stays absent — never guessed (rule #29).
+        """
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                out = {}
+                for key in ("description", "datePosted", "validThrough"):
+                    val = data.get(key)
+                    if isinstance(val, str) and val:
+                        out[key] = val
+                return out
+        except (ValueError, TypeError):
+            pass
+
+        fields: dict = {}
+        dp = re.search(r'"datePosted"\s*:\s*"([^"]*)"', raw)
+        if dp and dp.group(1):
+            fields["datePosted"] = dp.group(1)
+        vt = re.search(r'"validThrough"\s*:\s*"([^"]*)"', raw)
+        if vt and vt.group(1):
+            fields["validThrough"] = vt.group(1)
+        # description: bounded by the next top-level JobPosting key this site
+        # emits after it — tolerant of the embedded unescaped quotes above,
+        # which strict JSON parsing cannot survive.
+        desc = re.search(
+            r'"description"\s*:\s*"(.*)",\s*'
+            r'"(?:identifier|datePosted|validThrough|jobLocationType|'
+            r'employmentType|hiringOrganization|jobLocation|baseSalary)"',
+            raw, re.DOTALL,
+        )
+        if desc and desc.group(1):
+            fields["description"] = desc.group(1)
+        return fields
 
     @staticmethod
     def _card_texts(inner_html: str) -> list[str]:
@@ -111,12 +213,9 @@ class AIJobsAISource(BaseJobSource):
 
                 # Company: the card-title span, else the surrounding block
                 # (how the older markup exposed it). Deliberately NO
-                # "last text run" fallback — sponsored cards omit the
-                # card-title span and their last run is the LOCATION, which
-                # produced company="United States" on two live listings. A
-                # wrong company is worse than a missing one: `company` feeds
-                # `normalized_key()` dedup (hard rule #1), so a bogus value
-                # silently splits or merges the wrong postings.
+                # "last text run" fallback for the NO-span case — sponsored
+                # cards omit the card-title span and (see below) their last
+                # text run is the LOCATION, not a company.
                 card_title = _CARD_TITLE_RE.search(inner)
                 if card_title:
                     company = html_lib.unescape(card_title.group(1).strip())
@@ -125,13 +224,30 @@ class AIJobsAISource(BaseJobSource):
                         block, r'(?:company|employer|org)[^"]*"[^>]*>\s*([^<]+)'
                     )
 
-                # Cards carry NO location (verified against the live page), so
-                # this stays empty for them — and `_is_uk_or_remote("")` is
-                # True ("unknown, don't filter", base.py), which is what we
-                # want: never drop a job for a field the site stopped showing.
-                location = self._extract_nearby(
-                    block, r'(?:location|city)[^"]*"[^>]*>\s*([^<]+)'
-                )
+                # Location: no <location>/<city> HTML attribute exists on
+                # this markup — the site puts it as a plain text run inside
+                # the card instead. Confirmed live 2026-08-16 across both
+                # card layouts:
+                #   - "featured" cards (no card-title span): exactly 3 texts
+                #     [title, employment_type, location] — texts[2] IS the
+                #     location ('India', 'United States' seen live).
+                #   - "grid" cards (card-title span present): a location,
+                #     when the card states one, is the LAST text run and it
+                #     sits strictly after the company text, e.g.
+                #     [..., 'Forma.ai', 'Canada']; cards with no stated
+                #     location simply end at the company, e.g.
+                #     [..., 'Pinterest'].
+                # This used to be thrown away entirely (comment above used
+                # to claim "cards carry NO location, verified against the
+                # live page" — true only for the layout that existed then).
+                # Discarding it meant `_is_uk_or_remote("")` always reads
+                # "unknown, don't filter" and a non-UK card sails through —
+                # confirmed live: a 'United States' card slipped this filter
+                # (harvest 2026-08-16, UNIVERSAL_SHELF.md §1 row 3).
+                if card_title:
+                    location = texts[-1] if texts and texts[-1] != company else ""
+                else:
+                    location = texts[2] if len(texts) >= 3 else ""
 
                 if not _is_uk_or_remote(location):
                     continue

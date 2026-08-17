@@ -56,13 +56,29 @@ class HimalayasSource(BaseJobSource):
             else:
                 experience_level = ""
 
+            # `description` (100% fill, median 6,139 chars live) is the real
+            # prose posting. `excerpt` (100% fill too, ~150-300 chars) is a
+            # short teaser sitting in the SAME parsed response -- the old code
+            # stored the teaser, silently starving the skill scorer and the
+            # stub-description check (shelf_gate.is_stub_description) of real
+            # text every excerpt was too short to pass anyway.
+            description = item.get("description") or item.get("excerpt", "")
+
+            # `employmentType`/`currency`/`salaryPeriod`/`categories` all sit
+            # on the same parsed item, unread until now -- raw values only,
+            # the gate normalises. `categories` (100% fill live) is the job's
+            # own tag list, same contract as arbeitnow/remotive's `tags`.
+            source_tags = [str(c) for c in (item.get("categories") or []) if c]
+
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("companyName", ""),
                 location=location,
                 salary_min=item.get("minSalary"),
                 salary_max=item.get("maxSalary"),
-                description=item.get("excerpt", ""),
+                salary_currency=item.get("currency"),
+                salary_period=item.get("salaryPeriod"),
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
@@ -72,6 +88,8 @@ class HimalayasSource(BaseJobSource):
                 deadline=deadline,
                 deadline_source=deadline_source,
                 experience_level=experience_level,
+                employment_type=item.get("employmentType"),
+                source_tags=source_tags,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Himalayas: found %s relevant jobs", len(jobs))

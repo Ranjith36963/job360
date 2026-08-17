@@ -1,42 +1,49 @@
 """The ONE chokepoint that fills + accounts for every UNIVERSAL SHELF on
 every job (docs/pillars/UNIVERSAL_SHELF.md §5).
 
-STEP 1 ("the frame") ONLY — see UNIVERSAL_SHELF.md §6 for the three-step
-dependency order. This module is built and unit-tested in ISOLATION here;
-nothing in the pipeline calls it yet. `src/main.py::_score_dedup_and_filter`
-(`main.py:681`) still runs its own visa_flag / experience_level / deadline
-logic exactly as it did before this file existed. Wiring `fill_shelves()`
-into that function — and absorbing the deadline-extraction loop
-(`main.py:708-716`) and the unit-aware salary clamp move
-(`models.py:__post_init__`) into it — is STEP 2, a deliberate, separately
-reviewed change to LIVE SCORING. Merging this file changes zero live
-behaviour: nothing calls it.
+WIRED IN (step 2). `src/main.py::_score_dedup_and_filter` calls
+`fill_shelves(job)` for every raw job BEFORE it is scored, deduped or
+stored, so the scorer reads normalised shelves and no source can bypass the
+gate (sources never call it — the orchestrator does, downstream of all of
+them). Two things that used to live outside this file now live here:
+
+  * the deadline-extraction pass that used to sit in `main.py` after
+    scoring (`extract_deadline(description)`) — now `_fill_deadline`;
+  * the salary clamp that used to sit in `models.Job.__post_init__` —
+    now `_fill_salary`, and unit-aware: the band is annualised and
+    converted to GBP FIRST and only then judged for plausibility, so an
+    honest hourly rate survives instead of being nulled by a threshold
+    that assumed GBP-annual.
 
 `fill_shelves(job)` is synchronous and does NO I/O: no DB, no HTTP, no LLM
 call. It only reads and normalises fields already sitting on the `Job`
 object (rule #29's ABSENT contract; rule #30's closed-set enumeration for the
-employment/workplace/seniority enums, which are bounded sets, unlike UK
-gate's foreign-city problem).
+employment/workplace/seniority/period enums, which are bounded sets, unlike
+the UK gate's unbounded foreign-city problem).
 
 Two entry points are named in the design (§5 point 4): this file ships
 `fill_shelves(job)` for the ingest path. `apply_enrichment(job_row,
 enrichment)` — the sweep write-back that lets `how:"llm"` rows share this
 same normalisation without ever overwriting a `source`/`derived` fill — is
-NOT built in this step; it depends on JOB SOURCE ENRICHMENT running at scale
-(step 3) and has no caller yet either.
+NOT built yet; it depends on JOB SOURCE ENRICHMENT running at scale
+(step 3) and has no caller yet.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from src.core.fx import is_known_currency
 from src.models import UNIVERSAL_SHELF, Job
+from src.services.deadline import extract_deadline
 from src.services.job_enrichment_schema import (
     EmploymentType,
     JobCategory,
     SeniorityLevel,
     WorkplaceType,
 )
+from src.services.salary import normalize_salary
 from src.services.visa_signal import VisaStatus, detect_visa_status
 
 # A description this short (or byte-identical to the title) cannot be a real
@@ -46,6 +53,55 @@ from src.services.visa_signal import VisaStatus, detect_visa_status
 # wrong answer extracted here is PERMANENT until someone force-re-runs.
 # UNIVERSAL_SHELF.md §2 DESCRIPTION row + §6's fabrication proof.
 _STUB_DESCRIPTION_MIN_CHARS = 200
+
+# Salary plausibility band, applied to the ANNUALISED GBP figure only (see
+# _fill_salary). Same two thresholds the old unit-blind clamp in
+# models.Job.__post_init__ used, so a GBP-annual job behaves EXACTLY as it
+# did before this moved; what changes is that an hourly/monthly/foreign-
+# currency job is now converted first and therefore judged as a comparable
+# number instead of being nulled (or waved through) on its raw face value.
+_SALARY_MIN_PLAUSIBLE_GBP_ANNUAL = 10_000
+_SALARY_MAX_PLAUSIBLE_GBP_ANNUAL = 500_000
+
+# Upstream pay-period tokens -> the closed set services/salary.py can
+# annualise ("hourly"/"daily"/"weekly"/"monthly"/"annual"). Keys are the raw
+# token with every non-letter stripped and lower-cased, so 'per day',
+# 'PER_DAY' and 'Per-Day' all arrive as 'perday'. Enumerating this set is
+# legal under rule #30: pay periods are a CLOSED, finite set (unlike foreign
+# cities). Every token below was seen in a real live payload by the four
+# source-recovery batches (reed 'per day', careerjet 'Y'/'H'/'M', indeed
+# 'yearly', linkedin JSON-LD 'YEAR', nofluffjobs 'Month', jobicy/himalayas
+# 'salaryPeriod'). An UNKNOWN token normalises to None: the shelf keeps the
+# source's own numbers untouched and provenance records the raw token, which
+# is honest — never a guessed unit (rule #29).
+_PERIOD_ALIASES: dict[str, str] = {
+    "h": "hourly", "hr": "hourly", "hour": "hourly", "hourly": "hourly",
+    "perhour": "hourly", "perhr": "hourly", "hourlyrate": "hourly",
+    "d": "daily", "day": "daily", "daily": "daily", "perday": "daily",
+    "diem": "daily", "perdiem": "daily", "dayrate": "daily",
+    "w": "weekly", "week": "weekly", "weekly": "weekly", "perweek": "weekly",
+    "m": "monthly", "month": "monthly", "monthly": "monthly",
+    "permonth": "monthly", "monthlyrate": "monthly",
+    "y": "annual", "yr": "annual", "year": "annual", "yearly": "annual",
+    "peryear": "annual", "annual": "annual", "annually": "annual",
+    "annum": "annual", "perannum": "annual", "pa": "annual",
+}
+
+
+def _normalize_period(raw: Any) -> Optional[str]:
+    """Raw upstream pay-period token -> closed-set period, or None.
+
+    None means "this source did not tell us the unit" — NOT "annual". The
+    difference matters: an unknown unit leaves the amounts exactly as the
+    source sent them (every legacy consumer already reads them as GBP-annual),
+    whereas a known unit triggers a real conversion.
+    """
+    if raw is None:
+        return None
+    key = re.sub(r"[^a-z]", "", str(raw).lower())
+    if not key:
+        return None
+    return _PERIOD_ALIASES.get(key)
 
 
 def is_stub_description(description: Optional[str], title: Optional[str]) -> bool:
@@ -73,7 +129,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _source_entry(field_name: str, *, raw: Optional[str] = None) -> dict[str, Any]:
+def _source_entry(field_name: str, *, raw: Any = None) -> dict[str, Any]:
     entry: dict[str, Any] = {"how": "source", "field": field_name, "at": _now()}
     if raw is not None:
         entry["raw"] = raw
@@ -84,7 +140,7 @@ def _derived_entry(by: str) -> dict[str, Any]:
     return {"how": "derived", "by": by, "at": _now()}
 
 
-def _absent_entry(why: str, *, raw: Optional[str] = None) -> dict[str, Any]:
+def _absent_entry(why: str, *, raw: Any = None) -> dict[str, Any]:
     entry: dict[str, Any] = {"how": "absent", "why": why}
     if raw is not None:
         entry["raw"] = raw
@@ -172,37 +228,155 @@ def _fill_posted_at(job: Job) -> dict[str, Any]:
 
 
 def _fill_deadline(job: Job) -> dict[str, Any]:
-    # STEP 2 HOOK: `main.py:708-716`'s `deadline.extract_deadline(description)`
-    # regex pass absorbs into this function, so it runs INSIDE the gate
-    # instead of after it (UNIVERSAL_SHELF.md §5 point 2: "the existing
-    # deadline loop moves into the gate"). For now this function only
-    # ACCOUNTS for whatever `job.deadline` / `job.deadline_source` the
-    # caller already set — it does not call `extract_deadline` itself, so
-    # merging step 1 changes zero live behaviour.
+    """Structured source deadline first, then the free text derivation.
+
+    STEP 2: the `extract_deadline(description)` pass that used to run in
+    `main.py` AFTER scoring now runs HERE, inside the gate, before scoring —
+    same function, same regex, same `deadline_source='description'` stamp,
+    just moved to the one door every job passes through
+    (UNIVERSAL_SHELF.md §5 point 2). Two things this buys: a source that
+    forgets to map a deadline still gets the text pass, and the reason a
+    deadline is missing is now recorded instead of inferred.
+
+    Rule #29: `extract_deadline` returns None unless a deadline KEYWORD is
+    tied to an unambiguous future date, so an ad with no deadline keeps
+    NULL. The gate NEVER invents one — no "30 days from posting" default.
+    """
+    if job.deadline is None and job.description:
+        result = extract_deadline(job.description)
+        if result is not None:
+            job.deadline, job.deadline_source = result
     if job.deadline:
         source = job.deadline_source or "listing"
         if source == "listing":
             return _source_entry("deadline")
         return _derived_entry("deadline.extract_deadline@v1")
-    # Most boards have no deadline concept at all — models.py:44 already
+    # Most boards have no deadline concept at all — models.py already
     # documents "None means no deadline listed. NEVER fabricated."
     return _absent_entry("not_stated")
 
 
+def _annualise_one(
+    amount: Optional[float], currency: Optional[str], period: Optional[str]
+) -> Optional[int]:
+    """One bound -> annual GBP, via services/salary.normalize_salary.
+
+    Deliberately ONE BOUND AT A TIME. `normalize_salary` mirrors a missing
+    bound onto the survivor (a band of one point), which is right for the
+    scorer's overlap maths but would be a FABRICATION here: a job that
+    advertises "from £45,000" must not end up with a stored maximum of
+    £45,000 it never stated (rule #29). Passing one bound and reading back
+    only that bound keeps the missing side missing.
+    """
+    if amount is None:
+        return None
+    band = normalize_salary(
+        {
+            "min": amount,
+            "max": None,
+            "currency": currency or "GBP",
+            "frequency": period or "annual",
+        }
+    )
+    return None if band is None else band[0]
+
+
 def _fill_salary(job: Job) -> dict[str, Any]:
-    # STEP 2 HOOK: unit-aware annualisation + currency tagging
-    # (services/salary.normalize_salary + core/fx.to_gbp) and the clamp-move
-    # OUT of models.py:__post_init__ both land HERE, before this provenance
-    # stamp — see UNIVERSAL_SHELF.md §2 SALARY "Gate rule for salary": clamp
-    # AFTER annualising, not before, or an honest hourly rate (NHS £30.27/h)
-    # gets nulled by a clamp that assumes GBP-annual. Doing that move now
-    # would shift live scores with no test guarding it, so step 1 only
-    # accounts for whether models.py already let a number through.
-    if job.salary_min is not None or job.salary_max is not None:
-        return _source_entry("salary")
-    # ~70% of the UK corpus omits pay entirely — this is usually a fact
-    # about the job, not a gap in our pipeline.
-    return _absent_entry("not_stated")
+    """Unit-aware salary: annualise + currency-convert FIRST, clamp SECOND.
+
+    STEP 2 (UNIVERSAL_SHELF.md §2 "Gate rule for salary"). The old clamp
+    lived in `models.Job.__post_init__` and was unit-blind — it assumed every
+    number was GBP-annual, so it nulled an honest £30.27/hour NHS rate and
+    stored a €60,000 salary as if it were sterling. Here the band is turned
+    into annual GBP using the source's OWN unit sidecars (`salary_period`,
+    `salary_currency`, mapped raw by the sources in step 2's recovery work)
+    and only then judged for plausibility.
+
+    What lands on the Job afterwards:
+      * `salary_min` / `salary_max` — the comparable annual-GBP figure when
+        the gate could convert (every existing consumer, from the CSV export
+        to the email report, already reads these as GBP-annual), otherwise
+        the source's own untouched numbers;
+      * `salary_min_gbp_annual` / `salary_max_gbp_annual` — the derived pair,
+        set ONLY when the conversion was real;
+      * `salary_period` / `salary_currency` — rewritten to "annual"/"GBP"
+        when a conversion happened, so the stored unit describes the stored
+        number; the pre-conversion values survive in provenance.
+
+    Rule #29 is the hard edge: no amount at all stays NULL with
+    `absent:not_stated`, and NOTHING here ever invents a number, a unit or a
+    currency. An unknown period is not silently called "annual" — the
+    amounts are simply left as the source sent them.
+    """
+    raw_min, raw_max = job.salary_min, job.salary_max
+    raw_period, raw_currency = job.salary_period, job.salary_currency
+    period = _normalize_period(raw_period)
+    currency = (raw_currency or "").strip().upper() or None
+    raw_record: dict[str, Any] = {
+        "min": raw_min,
+        "max": raw_max,
+        "period": raw_period,
+        "currency": raw_currency,
+        "is_estimated": job.salary_is_estimated,
+    }
+    # Keep the NORMALISED unit even when no amount came with it — reed sends
+    # `salaryType: 'per day'` on contract roles whose amounts are both null,
+    # and "we know it is a day rate, we just have no number" is a real fact.
+    if period is not None:
+        job.salary_period = period
+
+    if raw_min is None and raw_max is None:
+        job.salary_min_gbp_annual = None
+        job.salary_max_gbp_annual = None
+        # ~70% of the UK corpus omits pay entirely — usually a fact about the
+        # job, not a gap in our pipeline.
+        return _absent_entry("not_stated")
+
+    if currency is not None and not is_known_currency(currency):
+        # core/fx has no rate for this code, and `to_gbp` would pass it
+        # through at 1:1 — a BRL figure wearing a £ sign is a WRONG number,
+        # not a rough one. Leave the source's own numbers + code alone and
+        # leave the derived GBP pair NULL rather than fabricate a conversion.
+        job.salary_min_gbp_annual = None
+        job.salary_max_gbp_annual = None
+        entry = _source_entry("salary_min/salary_max", raw=raw_record)
+        entry["gbp_annual"] = "unpriceable_currency"
+        return entry
+
+    min_annual = _annualise_one(raw_min, currency, period)
+    max_annual = _annualise_one(raw_max, currency, period)
+
+    # THE CLAMP, moved here from models.py and now applied to a comparable
+    # number. Same thresholds and same one-sided directions as before, so a
+    # GBP-annual job's outcome is byte-identical to the old behaviour.
+    if min_annual is not None and min_annual < _SALARY_MIN_PLAUSIBLE_GBP_ANNUAL:
+        min_annual = None
+    if max_annual is not None and max_annual > _SALARY_MAX_PLAUSIBLE_GBP_ANNUAL:
+        max_annual = None
+
+    job.salary_min = float(min_annual) if min_annual is not None else None
+    job.salary_max = float(max_annual) if max_annual is not None else None
+    job.salary_min_gbp_annual = job.salary_min
+    job.salary_max_gbp_annual = job.salary_max
+    if min_annual is not None or max_annual is not None:
+        # The stored numbers ARE annual GBP now, so the stored unit must say
+        # so — but ONLY where the source actually stated that unit. Stamping
+        # "GBP" on a job whose ad never named a currency would be inventing a
+        # fact (rule #29); an unstated currency stays NULL and the number
+        # stays exactly what the source sent, which is what every legacy
+        # consumer has always assumed.
+        if period is not None:
+            job.salary_period = "annual"
+        if currency is not None:
+            job.salary_currency = "GBP"
+
+    if job.salary_min is None and job.salary_max is None:
+        # Numbers arrived but nothing survived the plausibility band. That is
+        # neither "the ad said nothing" nor "nobody looked": it is a value we
+        # refused. Recorded as its own reason, with the original figures kept
+        # so the refusal is auditable instead of invisible.
+        return _absent_entry("implausible", raw=raw_record)
+    return _source_entry("salary_min/salary_max", raw=raw_record)
 
 
 def _fill_visa_status(job: Job) -> dict[str, Any]:
@@ -248,12 +422,14 @@ _SHELF_FILLERS: dict[str, Callable[[Job], dict[str, Any]]] = {
 
 def fill_shelves(job: Job) -> Job:
     """The chokepoint (UNIVERSAL_SHELF.md §5). Every job that reaches storage
-    is meant to pass through here exactly once — WIRING THAT IS STEP 2; see
-    the module docstring. Nothing calls this function from the pipeline yet.
+    passes through here exactly once, called by
+    `main.py::_score_dedup_and_filter` BEFORE scoring — see the module
+    docstring.
 
     Synchronous, no I/O. Normalises the four closed-enum shelves against the
-    schemas in `job_enrichment_schema.py`, runs the free visa-text detector,
-    and stamps `job.shelf_provenance[shelf]` for EVERY shelf in
+    schemas in `job_enrichment_schema.py`, annualises + converts the salary
+    band to GBP and then clamps it, derives a deadline from the ad text, runs
+    the free visa-text detector, and stamps `job.shelf_provenance[shelf]` for EVERY shelf in
     `UNIVERSAL_SHELF` — filled or absent. The invariant is not "every shelf
     filled" (impossible — most jobs genuinely lack a deadline or a salary);
     it is "every shelf ACCOUNTED FOR": `set(job.shelf_provenance) ==

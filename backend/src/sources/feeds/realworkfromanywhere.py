@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
@@ -8,8 +10,19 @@ from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignor
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.realworkfromanywhere")
+
+# The feed carries ~144 items/run; the per-job JSON-LD (validThrough,
+# baseSalary) sits on the detail page, a second request
+# (RATE_LIMITS["realworkfromanywhere"]: 2.0s/request). Fetching all 144
+# would take ~290s, well past SOURCE_FETCH_TIMEOUT -- cap the detail pass
+# the same way linkedin.py / uni_jobs.py do.
+_MAX_DETAIL_FETCHES = 20
+_LDJSON_RE = re.compile(
+    r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL
+)
 
 
 class RealWorkFromAnywhereSource(BaseJobSource):
@@ -23,8 +36,72 @@ class RealWorkFromAnywhereSource(BaseJobSource):
             return []
 
         jobs = self._parse_feed(xml_text)
-        logger.info("RealWorkFromAnywhere: found %s relevant jobs", len(jobs))
+
+        detailed = 0
+        for job in jobs[:_MAX_DETAIL_FETCHES]:
+            try:
+                if await self._fill_detail(job):
+                    detailed += 1
+            except Exception as e:  # noqa: BLE001 -- a detail miss never drops the job
+                logger.debug(
+                    "RealWorkFromAnywhere: detail fetch failed for %s: %s", job.apply_url, e
+                )
+
+        logger.info(
+            "RealWorkFromAnywhere: found %s relevant jobs (%s with deadline/salary)",
+            len(jobs), detailed,
+        )
         return jobs
+
+    async def _fill_detail(self, job: Job) -> bool:
+        """Pull validThrough (deadline) + baseSalary from the job's own
+        schema.org JobPosting ld+json (confirmed live 2026-08-16: validThrough
+        12/12, baseSalary 6/12 on a live sample). applicantLocationRequirements
+        also exists but is deliberately NOT mapped here -- every job in the
+        live sample carried the SAME ~184-country boilerplate list (the
+        site's "open to remote worldwide" default), so it is not real
+        per-job signal to replace the hardcoded "Remote" with.
+        """
+        page = await self._get_text(job.apply_url)
+        if not page:
+            return False
+        m = _LDJSON_RE.search(page)
+        if not m:
+            return False
+        try:
+            data = json.loads(m.group(1))
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(data, dict) or data.get("@type") != "JobPosting":
+            return False
+
+        found_any = False
+
+        valid_through = data.get("validThrough")
+        if isinstance(valid_through, str) and valid_through:
+            deadline_iso, deadline_confidence = normalize_posted_at(valid_through)
+            if deadline_confidence == "high" and deadline_iso:
+                job.deadline = deadline_iso[:10]
+                job.deadline_source = "listing"
+                found_any = True
+
+        base_salary = data.get("baseSalary")
+        if isinstance(base_salary, dict):
+            value = base_salary.get("value")
+            if isinstance(value, dict):
+                min_v, max_v = value.get("minValue"), value.get("maxValue")
+                if isinstance(min_v, (int, float)) or isinstance(max_v, (int, float)):
+                    job.salary_min = float(min_v) if isinstance(min_v, (int, float)) else None
+                    job.salary_max = float(max_v) if isinstance(max_v, (int, float)) else None
+                    found_any = True
+                unit_text = value.get("unitText")
+                if isinstance(unit_text, str) and unit_text:
+                    job.salary_period = unit_text
+            currency = base_salary.get("currency")
+            if isinstance(currency, str) and currency:
+                job.salary_currency = currency
+
+        return found_any
 
     def _parse_feed(self, xml_text: str) -> list[Job]:
         jobs = []

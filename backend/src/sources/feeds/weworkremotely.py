@@ -46,6 +46,11 @@ class WeWorkRemotelySource(BaseJobSource):
             pub_date = (item.findtext("pubDate") or "").strip()
             region = (item.findtext("region") or "").strip()
             expires_at = (item.findtext("expires_at") or "").strip()
+            # <type> (100% fill live 2026-08-16, e.g. "Full-Time"/"Contract")
+            # and <skills> (34% fill, comma-shaped) both ride the same
+            # already-parsed item and used to be thrown away entirely.
+            raw_type = (item.findtext("type") or "").strip()
+            raw_skills = (item.findtext("skills") or "").strip()
 
             # Check region for UK/Europe/EMEA/GMT compatibility
             location = region or "Remote"
@@ -88,6 +93,8 @@ class WeWorkRemotelySource(BaseJobSource):
                 date_posted_raw=pub_date or None,
                 deadline=deadline,
                 deadline_source=deadline_source,
+                employment_type=raw_type or None,
+                source_tags=[t.strip() for t in raw_skills.split(",") if t.strip()],
             ))
 
         return jobs

@@ -89,8 +89,30 @@ class EightyKHoursSource(BaseJobSource):
                 description = hit.get("description_short", "") or hit.get("description", "") or title
 
                 now_iso = datetime.now(timezone.utc).isoformat()
-                raw_published = hit.get("date_published", "")
+                # BUG FIX (confirmed live 2026-08-16): the payload has no
+                # "date_published" key at all -- 0/20 filled in a live sample.
+                # The real posting date is "posted_at" (Algolia epoch
+                # seconds), 20/20 filled. The old key name meant every
+                # eightykhours job stored posted_at=None, date_confidence="low"
+                # regardless of what the source actually knows.
+                raw_published = hit.get("posted_at")
                 posted_at, confidence = normalize_posted_at(raw_published)
+
+                # closes_at (Algolia epoch seconds, ~45% filled live) is the
+                # posting's own application deadline -- distinct from
+                # posted_at, goes on the deadline shelf only.
+                raw_closes = hit.get("closes_at")
+                deadline_iso, deadline_confidence = normalize_posted_at(raw_closes)
+                deadline = deadline_iso[:10] if deadline_confidence == "high" and deadline_iso else None
+                deadline_source = "listing" if deadline else None
+
+                # tags_exp_required (100% filled live, e.g. "Mid (5-9 years
+                # experience)") is seniority-shaped free text the gate can
+                # normalise later -- take the raw first value, no mapping here.
+                tags_exp = hit.get("tags_exp_required")
+                seniority = (
+                    tags_exp[0] if isinstance(tags_exp, list) and tags_exp else None
+                )
 
                 jobs.append(Job(
                     title=title,
@@ -102,7 +124,10 @@ class EightyKHoursSource(BaseJobSource):
                     date_found=now_iso,
                     posted_at=posted_at,
                     date_confidence=confidence,
-                    date_posted_raw=raw_published or None,
+                    date_posted_raw=str(raw_published) if raw_published else None,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
+                    seniority=seniority,
                 ))
 
         logger.info("80,000 Hours: found %s relevant jobs", len(jobs))

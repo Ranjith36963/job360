@@ -18,6 +18,7 @@ developer.apprenticeships.education.gov.uk (2026-06).
 Rate limit: 150 requests per 5-minute rolling window.
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -26,10 +27,42 @@ import aiohttp
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.gov_apprenticeships")
 
 API_URL = "https://api.apprenticeships.education.gov.uk/vacancies/vacancy"
+
+# Pillar 3 batch — REAL BUG FIX. The old code read `wage.wageAmount`, a key
+# that DOES NOT EXIST in the live payload (confirmed absent on 200/200
+# vacancies sampled live 2026-08-16), so salary was null for every job
+# unconditionally. The real number lives as free text in
+# `wage.wageAdditionalInformation` ("£15,600 a year", "£16,640 to £26,436.80
+# a year") — 198 of 200 (99%) live samples matched this exact shape; the 2
+# misses were "Competitive", which this regex correctly refuses rather than
+# guessing (rule #29). Anchored (^...$) on purpose: a looser match risks
+# parsing a fragment of a longer, ambiguous sentence.
+_ANNUAL_WAGE_RE = re.compile(
+    r"^£\s*([\d,]+(?:\.\d+)?)(?:\s*(?:to|-)\s*£\s*([\d,]+(?:\.\d+)?))?\s*a\s*year$",
+    re.IGNORECASE,
+)
+
+
+def _parse_annual_wage_text(text: str) -> tuple[Optional[float], Optional[float]]:
+    """Parse gov_apprenticeships' free-text wage ONLY when it is unambiguous
+    ("£X a year" / "£X to £Y a year"). Anything else — "Competitive",
+    "National Minimum Wage", a typo, a currency symbol we don't recognise —
+    returns (None, None) rather than guessing; JOB SOURCE ENRICHMENT reads
+    it later instead (rule #29)."""
+    m = _ANNUAL_WAGE_RE.match(text.strip())
+    if not m:
+        return None, None
+    try:
+        low = float(m.group(1).replace(",", ""))
+        high = float(m.group(2).replace(",", "")) if m.group(2) else low
+    except ValueError:
+        return None, None
+    return low, high
 
 
 class GovApprenticeshipsSource(BaseJobSource):
@@ -108,14 +141,31 @@ class GovApprenticeshipsSource(BaseJobSource):
             first = addresses[0] or {}
             location = first.get("addressLine1") or first.get("postcode") or "UK"
 
-        # Only treat an annual wage as salary — apprentice pay is often hourly,
-        # and Job.__post_init__ would null small values anyway.
-        salary: Optional[float] = None
+        # Only treat an annual wage as salary — apprentice pay is often
+        # hourly, and Job.__post_init__ would null small values anyway.
+        # `wage.wageAmount` does NOT exist in the live payload (see the
+        # module-level comment) — the real number is free text in
+        # `wageAdditionalInformation`, parsed only when unambiguous.
+        salary_min: Optional[float] = None
+        salary_max: Optional[float] = None
+        salary_period: Optional[str] = None
         wage = item.get("wage")
-        if isinstance(wage, dict) and str(wage.get("wageUnit", "")).lower() == "annually":
-            amount = wage.get("wageAmount")
-            if isinstance(amount, (int, float)) and amount > 0:
-                salary = float(amount)
+        if isinstance(wage, dict):
+            wage_unit = wage.get("wageUnit")
+            salary_period = str(wage_unit) if wage_unit else None
+            if isinstance(wage_unit, str) and wage_unit.lower() == "annually":
+                info = wage.get("wageAdditionalInformation")
+                if isinstance(info, str) and info.strip():
+                    salary_min, salary_max = _parse_annual_wage_text(info)
+
+        # `closingDate` is a REAL deadline sitting in the response we already
+        # fetch — confirmed populated on 50/50 live samples 2026-08-16,
+        # unread until now. Same strict, never-fabricate parser as reed's
+        # expirationDate (himalayas/weworkremotely precedent).
+        raw_closing = item.get("closingDate")
+        closing_iso, closing_confidence = normalize_posted_at(raw_closing)
+        deadline = closing_iso[:10] if closing_confidence == "high" and closing_iso else None
+        deadline_source = "listing" if deadline else None
 
         raw_posted = item.get("postedDate")
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -124,8 +174,9 @@ class GovApprenticeshipsSource(BaseJobSource):
             title=item.get("title", ""),
             company=item.get("employerName", "") or "Unknown",
             location=str(location),
-            salary_min=salary,
-            salary_max=salary,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            salary_period=salary_period,
             description=item.get("description", "") or "",
             apply_url=apply_url,
             source=self.name,
@@ -133,4 +184,13 @@ class GovApprenticeshipsSource(BaseJobSource):
             posted_at=raw_posted if raw_posted else None,
             date_confidence="high" if raw_posted else "low",
             date_posted_raw=raw_posted,
+            deadline=deadline,
+            deadline_source=deadline_source,
+            # `apprenticeshipLevel` ("Intermediate"/"Advanced"/"Higher", all
+            # three seen live 2026-08-16) is a real seniority-shaped signal
+            # sitting on this same item, unread until now. `course.level`
+            # (a bare int) is also available but not mapped here — one raw
+            # signal per field, and this one is the more directly
+            # seniority-shaped of the two.
+            seniority=item.get("apprenticeshipLevel"),
         )

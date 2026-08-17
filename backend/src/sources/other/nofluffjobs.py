@@ -1,4 +1,6 @@
+import html
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,6 +11,13 @@ from src.utils.dates import normalize_posted_at
 logger = logging.getLogger("job360.sources.nofluffjobs")
 
 _MAX_RESULTS = 200
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Detail-fetch budget per RUN, same reasoning as smartrecruiters/workday/
+# devitjobs (see those files): an uncapped detail pass over every UK-relevant
+# posting risks blowing the fetch time ceiling. Jobs past the budget keep no
+# description rather than a wrong one -- see the description comment below.
+_MAX_DETAIL_FETCHES = 40
 
 # NoFluffJobs API endpoints to try (the public API is unofficial and may change)
 _API_URLS = [
@@ -18,8 +27,8 @@ _API_URLS = [
 
 
 def _plausible_gbp(val: Any) -> bool:
-    """A loose sanity bound for a GBP annual salary figure — used only when
-    `salary.currency` is absent, to decide whether a bare number is safe to
+    """A loose sanity bound for a GBP annual salary figure -- used only when
+    salary.currency is absent, to decide whether a bare number is safe to
     trust as GBP. Same 10k-500k bound as nhs_jobs._parse_salary."""
     try:
         return 10000 <= float(val) <= 500000
@@ -48,11 +57,12 @@ class NoFluffJobsSource(BaseJobSource):
             return []
 
         jobs = []
+        detail_budget = _MAX_DETAIL_FETCHES
         for item in postings:
             title = item.get("title", "")
-            # NOTE (live probe 2026-08-08): this used to fall back to `name`
+            # NOTE (live probe 2026-08-08): this used to fall back to name
             # with the comment "some responses use name instead of title".
-            # That is WRONG — `name` is the EMPLOYER, not an alias for the
+            # That is WRONG -- name is the EMPLOYER, not an alias for the
             # title (verified across 20,631 live postings: title="Remote Sales
             # Development Representative", name="LevelUp Leads"). The old
             # fallback would have silently titled a job with its company name.
@@ -76,7 +86,7 @@ class NoFluffJobsSource(BaseJobSource):
             if remote:
                 location = f"{location}, Remote".strip(", ") if location else "Remote"
 
-            # Skip bare "Remote" or empty location — NoFluffJobs is Polish-focused
+            # Skip bare "Remote" or empty location -- NoFluffJobs is Polish-focused
             if not location or location.strip().lower() == "remote":
                 continue
 
@@ -94,13 +104,13 @@ class NoFluffJobsSource(BaseJobSource):
             posted_at, confidence = normalize_posted_at(raw_posted)
 
             # Salary. CURRENCY CORRECTNESS RISK (verified live 2026-08-08):
-            # NoFluffJobs is Polish-focused — 19,229 of 20,631 postings are
-            # priced in PLN, and `salary.currency` is 100% filled. Job has no
+            # NoFluffJobs is Polish-focused -- 19,229 of 20,631 postings are
+            # priced in PLN, and salary.currency is 100% filled. Job has no
             # currency field, so a bare PLN number stored into
             # salary_min/salary_max would silently be compared as GBP
             # downstream (a multi-x overstatement). Only trust the value when
-            # it's GBP, or when currency is entirely absent AND the value is
-            # a plausible GBP figure — never convert here (no FX in this
+            # it is GBP, or when currency is entirely absent AND the value is
+            # a plausible GBP figure -- never convert here (no FX in this
             # source). A missing salary is far better than a wrong one.
             salary_obj = item.get("salary", {})
             salary_min = None
@@ -127,7 +137,7 @@ class NoFluffJobsSource(BaseJobSource):
                         except (ValueError, TypeError):
                             salary_max = None
 
-            # seniority[] (100% fill live, e.g. ["Senior"]) — take the first
+            # seniority[] (100% fill live, e.g. ["Senior"]) -- take the first
             # element. Zero extra HTTP cost, this list is already fetched.
             seniority = item.get("seniority")
             if isinstance(seniority, list) and seniority:
@@ -135,17 +145,44 @@ class NoFluffJobsSource(BaseJobSource):
             else:
                 experience_level = ""
 
-            # Live probe 2026-08-08: the `company` key does NOT exist in the
-            # posting payload (0 of 20,631 items had it) — the employer name is
-            # carried in `name`. Reading `company` meant every NoFluffJobs job
-            # was stored with an empty company. Prefer `name`, keep `company`
-            # as a fallback in case the upstream schema changes back.
+            # Live probe 2026-08-08: the company key does NOT exist in the
+            # posting payload (0 of 20,631 items had it) -- the employer name
+            # is carried in name. Reading company meant every NoFluffJobs job
+            # was stored with an empty company. Prefer name, keep company as
+            # a fallback in case the upstream schema changes back.
             company_name = item.get("name") or item.get("company", "")
+
+            # tiles.values[] (100% fill, verified live 2026-08-16 across
+            # 21,739 postings) carries category + skill/requirement tags on
+            # every posting, e.g. [{"value": "HubSpot", "type": "requirement"}].
+            # Raw values only, straight onto source_tags -- the job own
+            # vocabulary, no guessing.
+            tiles = item.get("tiles") or {}
+            tile_values = tiles.get("values") if isinstance(tiles, dict) else None
+            source_tags = [
+                str(v.get("value")) for v in (tile_values or [])
+                if isinstance(v, dict) and v.get("value")
+            ]
+
+            # Job-understanding fix (2026-08-16): the list endpoint above has
+            # NO description field at all -- description was never passed to
+            # Job() here, which silently disabled visa and deadline
+            # extraction downstream (both read job.description). The real
+            # prose sits on a per-posting detail endpoint
+            # (/api/posting/{id} -> requirements.description, 100% hit in a
+            # spot-check) -- budgeted the same way as smartrecruiters/
+            # devitjobs so an uncapped pass cannot blow the fetch ceiling.
+            description = ""
+            if detail_budget > 0 and posting_id:
+                detail_budget -= 1
+                detail = await self._fetch_posting_detail(str(posting_id))
+                description = self._extract_detail_description(detail)
 
             jobs.append(Job(
                 title=title,
                 company=company_name,
                 location=location,
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
@@ -155,6 +192,7 @@ class NoFluffJobsSource(BaseJobSource):
                 salary_min=salary_min,
                 salary_max=salary_max,
                 experience_level=experience_level,
+                source_tags=source_tags,
             ))
 
             if len(jobs) >= _MAX_RESULTS:
@@ -163,3 +201,20 @@ class NoFluffJobsSource(BaseJobSource):
 
         logger.info("NoFluffJobs: found %s relevant jobs", len(jobs))
         return jobs
+
+    async def _fetch_posting_detail(self, posting_id: str) -> dict:
+        """Fetch one posting raw detail JSON. Returns {} on any failure --
+        callers treat a missing detail as an absent description, never an
+        error."""
+        detail = await self._get_json(f"https://nofluffjobs.com/api/posting/{posting_id}")
+        return detail if isinstance(detail, dict) else {}
+
+    @staticmethod
+    def _extract_detail_description(detail: dict) -> str:
+        """The detail endpoint prose lives at requirements.description
+        (HTML) -- verified live 2026-08-16, 15/15 sampled postings hit."""
+        requirements = detail.get("requirements")
+        text = requirements.get("description") if isinstance(requirements, dict) else None
+        if not text:
+            return ""
+        return _HTML_TAG_RE.sub(" ", html.unescape(str(text)))[:5000].strip()

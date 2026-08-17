@@ -22,7 +22,13 @@ _DESC_TAG_RE = re.compile(r"<[^>]+>")
 # nightly union refresh and zeroed the source (537 jobs before). Past-cap jobs
 # keep empty descriptions; the description-backfill-on-refetch (PR #232) fills
 # them across later runs.
-_MAX_DETAIL_FETCHES = 40
+# Raised 40 -> 60 (2026-08-16): measured live, full 20-company run, AI/ML
+# SearchConfig (`fetch_jobs()` timed end to end, real HTTP, no mocks). Old
+# cap (40): 161s wall, 40/176 jobs described. New cap (60): 198s wall,
+# 60/176 jobs described -- ~42s of margin under the 240s ATS ceiling. 70
+# was tried and measured at 218s (~22s margin) -- too thin against real
+# network jitter, so 60 is the shipped value.
+_MAX_DETAIL_FETCHES = 60
 
 
 def _parse_posted_on(text: str) -> str:

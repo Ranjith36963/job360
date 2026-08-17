@@ -90,6 +90,18 @@ class TeachingVacanciesSource(BaseJobSource):
             deadline = deadline_iso[:10] if deadline_confidence == "high" and deadline_iso else None
             deadline_source = "listing" if deadline else None
 
+            # employmentType (schema.org JobPosting field, 100% fill live
+            # 2026-08-16) can be multi-valued (e.g. ["FULL_TIME",
+            # "TEMPORARY"]) -- take the raw first value, no enum-mapping
+            # here (the gate owns that); the full list stays recoverable
+            # from raw_employment_type if a future gate pass wants it.
+            raw_employment_type = item.get("employmentType")
+            employment_type = (
+                raw_employment_type[0]
+                if isinstance(raw_employment_type, list) and raw_employment_type
+                else (raw_employment_type if isinstance(raw_employment_type, str) else None)
+            )
+
             results.append(Job(
                 title=title or "Teaching Vacancy",
                 company=company,
@@ -103,6 +115,7 @@ class TeachingVacanciesSource(BaseJobSource):
                 date_posted_raw=raw_posted,
                 deadline=deadline,
                 deadline_source=deadline_source,
+                employment_type=employment_type,
             ))
 
         logger.info("TeachingVacancies: found %s relevant jobs", len(results))

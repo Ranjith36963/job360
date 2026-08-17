@@ -36,6 +36,14 @@ class JobicySource(BaseJobSource):
             raw_pub = item.get("pubDate")
             posted_at, confidence = normalize_posted_at(raw_pub)
 
+            # `jobType` (100% fill live, e.g. ["Full-Time"]) arrives as a
+            # list of one. `salaryCurrency`/`salaryPeriod` sit on the same
+            # item as salaryMin/Max (measured live: filled together, ~20% of
+            # rows, same rows that carry a salary at all) and were unread —
+            # raw values only, the gate converts units.
+            job_type_list = item.get("jobType")
+            employment_type = job_type_list[0] if isinstance(job_type_list, list) and job_type_list else job_type_list
+
             jobs.append(Job(
                 title=title,
                 company=item.get("companyName", ""),
@@ -45,6 +53,8 @@ class JobicySource(BaseJobSource):
                 # `salaryMin`/`salaryMax` (23% fill).
                 salary_min=item.get("salaryMin"),
                 salary_max=item.get("salaryMax"),
+                salary_currency=item.get("salaryCurrency"),
+                salary_period=item.get("salaryPeriod"),
                 description=description,
                 apply_url=item.get("url", ""),
                 source=self.name,
@@ -54,6 +64,7 @@ class JobicySource(BaseJobSource):
                 date_posted_raw=raw_pub,
                 # `jobLevel` (100% fill, e.g. "Senior").
                 experience_level=item.get("jobLevel", ""),
+                employment_type=employment_type,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Jobicy: found %s relevant jobs", len(jobs))

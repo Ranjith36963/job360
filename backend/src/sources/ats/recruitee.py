@@ -54,6 +54,14 @@ class RecruiteeSource(BaseJobSource):
             for item in cast(dict[str, Any], data)["offers"]:
                 title = item.get("title", "")
                 desc = item.get("description", "")
+                # `requirements` is skills/experience prose, a SEPARATE field
+                # from `description` on the live API (verified 2026-08-16:
+                # 926 of 1,194 UK/remote rows carry it, avg ~350 chars, no
+                # overlap with description). Concatenating recovers real
+                # skills text that was silently dropped.
+                requirements = item.get("requirements", "")
+                if requirements:
+                    desc = f"{desc}\n\nRequirements: {requirements}" if desc else requirements
                 location = item.get("location", "")
                 if not _is_uk_or_remote(location):
                     continue
@@ -100,6 +108,11 @@ class RecruiteeSource(BaseJobSource):
                     salary_max=salary_max,
                     deadline=deadline,
                     deadline_source=deadline_source,
+                    # `experience_code` (entry_level/mid_level/experienced) is
+                    # 100% filled on the live API (verified 2026-08-16, 176/176
+                    # UK/remote rows) and was never read — raw value, the gate
+                    # owns normalising it against the closed seniority enum.
+                    seniority=item.get("experience_code"),
                 ))
         logger.info("Recruitee: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

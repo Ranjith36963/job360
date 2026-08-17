@@ -198,6 +198,7 @@ Rule #29 for the catalog side: an empty shelf must never become a guess, a zero,
 | `source_lacks_field` | We looked — this source's schema structurally has no such field (e.g. findwork salary, arbeitnow deadline: confirmed absent in full key dumps 2026-08-16) | only a richer fetch (detail call) or the LLM reading the ad |
 | `text_too_thin` | LLM pass was BLOCKED: description is a stub/<200 chars — answering would be fabrication | description recovery, then re-queue |
 | `not_stated` | A real description was read (by detector or LLM) and the ad genuinely does not say | nothing — this is a final fact about the job |
+| `implausible` | A value ARRIVED and the gate refused it — today only salary, when the annualised GBP band falls outside £10k–£500k. The original figures are kept in `raw`, so the refusal is auditable | a better unit/currency mapping upstream, or a change to the plausibility band |
 
 **What consumers MUST do with absent** (the catalog-side mirror of rule #29):
 
@@ -226,9 +227,9 @@ Today ~42 hand-written `Job(...)` constructions each fill whatever they happen t
 3. **Stamp provenance for EVERY shelf, always** — filled or absent. The invariant is not "every shelf filled" (impossible); it is "every shelf ACCOUNTED FOR."
 4. Two entry points, same core: `fill_shelves(job)` at ingest; `apply_enrichment(job_row, enrichment)` in the sweep write-back — so `how:"llm"` rows get identical normalisation and never overwrite `source`/`derived` fills.
 
-### Where it sits
+### Where it sits — WIRED 2026-08-16 (step 2)
 
-Inside `_score_dedup_and_filter()` (`src/main.py:681`) — the single synchronous stage every run already passes through (score → deadline-extract → dedup → store, threaded off the loop since PR #123). The gate runs FIRST in that function, before scoring, so the scorer reads normalised shelves; the existing deadline loop (`main.py:708-716`) moves into the gate. No source can bypass it because sources don't call it — the orchestrator does, downstream of all of them. Source #41 forgetting a shelf now produces a counted `absent:not_mapped`, not a silent hole.
+Inside `_score_dedup_and_filter()` (`src/main.py:681`) — the single synchronous stage every run already passes through (score → deadline-extract → dedup → store, threaded off the loop since PR #123). The gate runs FIRST in that function, before scoring, so the scorer reads normalised shelves; the existing deadline loop (`main.py:708-716`) moves into the gate. No source can bypass it because sources don't call it — the orchestrator does, downstream of all of them. **Done:** `main.py` now calls `fill_shelves(job)` for every raw job before scoring; the deadline loop is gone from `main.py` and lives in `shelf_gate._fill_deadline`; the unit-blind clamp is gone from `models.Job.__post_init__` and lives in `shelf_gate._fill_salary`, which annualises + converts to GBP FIRST (`salary.normalize_salary` / `core.fx`) and writes the derived `salary_min_gbp_annual` / `salary_max_gbp_annual` pair. `SCORER_VERSION` 7 → 8 so the freeze in `services/feed.py` does not make it inert on existing rows. Source #41 forgetting a shelf now produces a counted `absent:not_mapped`, not a silent hole.
 
 ### Enforcement — `tests/test_universal_shelf.py`
 

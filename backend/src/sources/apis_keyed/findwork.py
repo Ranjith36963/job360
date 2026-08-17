@@ -90,6 +90,14 @@ class FindworkSource(BaseJobSource):
 
             apply_url = item.get("url") or ""
 
+            # `remote` (real bool, True/False both seen live 2026-08-16) and
+            # `employment_type` (a real raw string, e.g. "full time",
+            # confirmed populated live) both sit on this same item, unread
+            # until now. Same True-only bridge as jsearch's job_is_remote —
+            # False just means "not exclusively remote" and would be a
+            # guess if it became "onsite" (rule #29).
+            workplace_mode = "remote" if item.get("remote") else None
+
             jobs.append(Job(
                 title=title,
                 company=item.get("company_name") or "",
@@ -101,6 +109,8 @@ class FindworkSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_posted,
+                employment_type=item.get("employment_type"),
+                workplace_mode=workplace_mode,
             ))
 
         logger.info("Findwork: found %s relevant jobs", len(jobs))

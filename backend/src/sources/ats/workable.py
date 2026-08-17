@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
@@ -12,6 +13,8 @@ from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.workable")
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
 
 class WorkableSource(BaseJobSource):
     name = "workable"
@@ -24,37 +27,49 @@ class WorkableSource(BaseJobSource):
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
         for slug in self._companies:
-            url = f"https://apply.workable.com/api/v2/accounts/{slug}/jobs"
-            data = await self._post_json(url, body={"query": "", "location": [], "department": [], "worktype": []})
-            if not data or "results" not in data:
+            # Job-understanding fix (2026-08-16): the POST /api/v2/.../jobs
+            # endpoint (old code) returns `description` empty on every row
+            # (verified live, 2026-08-08) AND caps at 10 results per page with
+            # no cursor this source ever followed — abm-careers alone has 178
+            # postings, so at most 10 were ever read.
+            # The public widget endpoint `GET /api/v1/widget/accounts/{slug}`
+            # (no auth, verified live 2026-08-16) returns EVERY posting in one
+            # call — abm-careers: 178/178 — each carrying a real HTML
+            # `description` (huggingface sample: 1,800+ chars), plus
+            # `employment_type` and `experience` (seniority-ish free text)
+            # neither of which the old endpoint exposed at all.
+            url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}"
+            data = await self._get_json(url, params={"details": "true"})
+            if not data or "jobs" not in data:
                 continue
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
-            for item in cast(dict[str, Any], data)["results"]:
+            for item in cast(dict[str, Any], data)["jobs"]:
                 title = item.get("title", "")
-                # shortDescription genuinely does not exist on this endpoint
-                # (verified live, 2026-08-08) — leave description empty rather
-                # than invent a source for it.
-                desc = item.get("shortDescription", "")
-                loc = item.get("location", {})
-                if isinstance(loc, dict):
-                    location = f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", ")
-                else:
-                    location = str(loc)
-                shortcode = item.get("shortcode", "")
-                apply_url = f"https://apply.workable.com/{slug}/j/{shortcode}/"
-                raw_published = item.get("published")
+                desc = _HTML_TAG_RE.sub(" ", item.get("description") or "").strip()
+                city = item.get("city", "")
+                country = item.get("country", "")
+                location = ", ".join(p for p in (city, country) if p)
+                apply_url = (
+                    item.get("application_url")
+                    or item.get("shortlink")
+                    or item.get("url", "")
+                )
+                raw_published = item.get("published_on") or item.get("created_at")
                 posted_at, confidence = normalize_posted_at(raw_published)
                 jobs.append(Job(
                     title=title,
                     company=company_name,
                     location=location,
-                    description=desc,
+                    description=desc[:5000],
                     apply_url=apply_url,
                     source=self.name,
                     date_found=datetime.now(timezone.utc).isoformat(),
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=raw_published,
+                    # Raw upstream values — services/shelf_gate.py normalises.
+                    employment_type=item.get("employment_type"),
+                    seniority=item.get("experience"),
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Workable: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

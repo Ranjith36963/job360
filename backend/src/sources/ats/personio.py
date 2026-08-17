@@ -21,6 +21,47 @@ logger = logging.getLogger("job360.sources.personio")
 # Delay between companies to avoid 429 rate limiting on jobs.personio.de
 _INTER_COMPANY_DELAY = 3.0
 
+# Personio's own <type> spelling -> the four period spellings models.py:122
+# documents as this field's contract ("hourly"|"daily"|"monthly"|"annual").
+# Verified live 2026-08-16 (flatpay/herdify/holidu feeds): <salaryInformation>
+# <type> only ever reads "yearly"/"monthly" — a literal word-for-word
+# translation of one closed field, not a unit conversion or a guess.
+_SALARY_TYPE_MAP = {
+    "yearly": "annual",
+    "monthly": "monthly",
+    "weekly": "daily",
+    "hourly": "hourly",
+    "daily": "daily",
+}
+
+
+def _parse_salary(position: ET.Element) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+    """<salaryInformation><min>/<max>/<currencyCode>/<type></salaryInformation>.
+
+    Verified live 2026-08-16: present and populated on a real minority of
+    boards (flatpay, herdify, holidu had it; stark/merantix/intigriti/olio/
+    gridx/maltego did not) — the field is genuinely optional per company, so
+    absence here is a real "not stated", not a parse miss.
+    """
+    salary_elem = position.find("salaryInformation")
+    if salary_elem is None:
+        return None, None, None, None
+
+    def _to_float(text: Optional[str]) -> Optional[float]:
+        if not text:
+            return None
+        try:
+            return float(text.strip())
+        except ValueError:
+            return None
+
+    salary_min = _to_float(salary_elem.findtext("min"))
+    salary_max = _to_float(salary_elem.findtext("max"))
+    currency = (salary_elem.findtext("currencyCode") or "").strip() or None
+    raw_type = (salary_elem.findtext("type") or "").strip().lower()
+    salary_period = _SALARY_TYPE_MAP.get(raw_type)
+    return salary_min, salary_max, currency, salary_period
+
 
 class PersonioSource(BaseJobSource):
     """Personio ATS XML feed - multi-sector company job boards."""
@@ -65,6 +106,7 @@ class PersonioSource(BaseJobSource):
             office = (position.findtext("office") or "").strip()
             pos_id = (position.findtext("id") or "").strip()
             seniority = (position.findtext("seniority") or "").strip()
+            employment_type = (position.findtext("employmentType") or "").strip()
             created_at_raw = (position.findtext("createdAt") or "").strip() or None
 
             # Get job descriptions
@@ -89,6 +131,8 @@ class PersonioSource(BaseJobSource):
             # other source with a missing date field.
             posted_at, date_confidence = normalize_posted_at(created_at_raw)
 
+            salary_min, salary_max, salary_currency, salary_period = _parse_salary(position)
+
             jobs.append(Job(
                 title=title,
                 company=company_name,
@@ -101,6 +145,16 @@ class PersonioSource(BaseJobSource):
                 date_confidence=date_confidence,
                 date_posted_raw=created_at_raw,
                 experience_level=seniority,
+                # Raw upstream values (<seniority> "entry-level"/"experienced"/
+                # ..., <employmentType> "permanent"/"internship"/...) —
+                # services/shelf_gate.py owns normalising them against the
+                # closed enums.
+                seniority=seniority or None,
+                employment_type=employment_type or None,
+                salary_min=salary_min,
+                salary_max=salary_max,
+                salary_currency=salary_currency,
+                salary_period=salary_period,
             ))
 
         return jobs

@@ -14,12 +14,6 @@ from src.utils.dates import normalize_posted_at
 logger = logging.getLogger("job360.sources.smartrecruiters")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-# Detail-fetch budget per RUN (2026-08-06). The 2026-08-05 detail pass had NO
-# cap: the nightly union refresh detail-fetched every UK posting across every
-# company, blew the 240s ATS fetch timeout, and the whole source was recorded
-# as errored with ZERO jobs stored (it produced 150 before). Jobs past the cap
-# keep an empty description — the description-backfill-on-refetch (PR #232)
-# fills them across later runs.
 _MAX_DETAIL_FETCHES = 60
 
 class SmartRecruitersSource(BaseJobSource):
@@ -48,36 +42,31 @@ class SmartRecruitersSource(BaseJobSource):
                     location = f"{city}, {country}".strip(", ")
                 else:
                     location = str(loc)
-                ref = item.get("ref", "")
-                apply_url = (
-                    ref if ref.startswith("http")
-                    else f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
-                )
+                # `ref` on the LIST item is the postings API URL itself
+                # (verified live 2026-08-16), NOT a page a human can open.
+                # The real human-facing link only exists on the DETAIL
+                # response (postingUrl/applyUrl), fetched below for
+                # UK/remote-relevant postings -- apply_url is overwritten
+                # there. This is only the fallback for postings that never
+                # get a detail fetch.
+                apply_url = f"https://jobs.smartrecruiters.com/{slug}/{item.get('id', '')}"
                 now_iso = datetime.now(timezone.utc).isoformat()
                 raw_released = item.get("releasedDate")
                 posted_at, confidence = normalize_posted_at(raw_released)
 
-                # List response carries experienceLevel {id, label} at 100%
-                # fill in the sample (verified live, 2026-08-08) — free win,
-                # no extra HTTP call.
                 exp_level_obj = item.get("experienceLevel")
                 experience_level = ""
                 if isinstance(exp_level_obj, dict):
                     experience_level = exp_level_obj.get("label") or ""
 
+                employment_obj = item.get("typeOfEmployment")
+                employment_type = None
+                if isinstance(employment_obj, dict):
+                    employment_type = employment_obj.get("label")
+
                 description = ""
                 salary_min: Optional[float] = None
                 salary_max: Optional[float] = None
-                # Job-understanding fix (2026-08-05): the list endpoint has no
-                # posting text (150 prod jobs, 100% empty descriptions). The
-                # public detail endpoint carries the full jobAd sections
-                # (verified live: 6,445 chars for a wise posting) AND a
-                # compensation block ({min, max, currency, period}, 100% fill
-                # in the sample, verified live 2026-08-08) — both come out of
-                # the SAME fetch, no extra HTTP call. Only UK/remote-relevant
-                # jobs are detail-fetched, so the extra request count matches
-                # what we actually keep. A failed detail fetch degrades to the
-                # empty description / no salary, never drops the job.
                 if _is_uk_or_remote(location) and detail_budget > 0:
                     detail_budget -= 1
                     detail = await self._fetch_posting_detail(
@@ -88,6 +77,9 @@ class SmartRecruitersSource(BaseJobSource):
                     if isinstance(comp, dict):
                         salary_min = comp.get("min")
                         salary_max = comp.get("max")
+                    detail_apply_url = detail.get("postingUrl") or detail.get("applyUrl")
+                    if detail_apply_url:
+                        apply_url = detail_apply_url
 
                 job = Job(
                     title=title,
@@ -101,6 +93,7 @@ class SmartRecruitersSource(BaseJobSource):
                     date_confidence=confidence,
                     date_posted_raw=raw_released,
                     experience_level=experience_level,
+                    employment_type=employment_type,
                     salary_min=salary_min,
                     salary_max=salary_max,
                 )
@@ -110,11 +103,6 @@ class SmartRecruitersSource(BaseJobSource):
         return jobs
 
     async def _fetch_posting_detail(self, slug: str, posting_id: str) -> dict[str, Any]:
-        """Fetch one posting's raw detail JSON from the public detail endpoint.
-
-        Returns ``{}`` on any failure — callers treat a missing detail as an
-        absent description/compensation, never an error.
-        """
         if not posting_id:
             return {}
         detail = await self._get_json(
@@ -124,9 +112,6 @@ class SmartRecruitersSource(BaseJobSource):
 
     @staticmethod
     def _extract_description_text(detail: dict[str, Any]) -> str:
-        """Concatenate ``jobAd.sections`` texts (companyDescription,
-        jobDescription, qualifications, additionalInformation), tag-stripped.
-        """
         sections = (detail.get("jobAd") or {}).get("sections") or {}
         parts: list[str] = []
         for key in ("jobDescription", "qualifications", "additionalInformation", "companyDescription"):
@@ -137,14 +122,5 @@ class SmartRecruitersSource(BaseJobSource):
         return " ".join(parts)[:5000].strip()
 
     async def _fetch_posting_text(self, slug: str, posting_id: str) -> str:
-        """Fetch one posting's full text from the public detail endpoint.
-
-        Kept as its own method (rather than inlined) because
-        ``src/services/description_backfill.py`` calls this directly by name
-        to re-fetch a thin stored description outside the normal ingestion
-        pass — changing this signature/return type would break that caller.
-        Returns ``""`` on any failure — absence of text is a data gap, not an
-        error (the scorer's unknown-handling treats it neutrally).
-        """
         detail = await self._fetch_posting_detail(slug, posting_id)
         return self._extract_description_text(detail)

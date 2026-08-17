@@ -22,6 +22,10 @@ class ArbeitnowSource(BaseJobSource):
             raw_created = item.get("created_at")
             posted_at, confidence = normalize_posted_at(raw_created)
 
+            # `tags` (~93% fill live) is the job's OWN vocabulary --
+            # arbeitnow-assigned keyword tags, not a guess we are making.
+            # Raw list straight onto source_tags; the gate/scorer read it,
+            # no normalising here.
             jobs.append(Job(
                 title=item.get("title", ""),
                 company=item.get("company_name", ""),
@@ -33,6 +37,7 @@ class ArbeitnowSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_created,
+                source_tags=item.get("tags") or [],
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Arbeitnow: found %s relevant jobs", len(jobs))

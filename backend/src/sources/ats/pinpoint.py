@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,6 +11,50 @@ from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.pinpoint")
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Pinpoint's own frequency vocabulary -> the four period spellings
+# models.py:122 documents as this field's contract ("hourly" | "daily" |
+# "monthly" | "annual"). This is a literal word-for-word translation of one
+# closed, known field (compensation_frequency only ever says "hour"/"year" on
+# the live boards checked 2026-08-16) — not a unit conversion and not a guess
+# across ambiguous inputs, so it stays a source-side dumb map rather than
+# gate policy. Unmapped/absent values are left None, never guessed.
+_FREQUENCY_MAP = {
+    "hour": "hourly",
+    "day": "daily",
+    "month": "monthly",
+    "year": "annual",
+}
+
+
+def _strip_html(raw: Optional[str]) -> str:
+    return _HTML_TAG_RE.sub(" ", raw or "").strip()
+
+
+def _build_description(item: dict) -> str:
+    """Concatenate every text section Pinpoint gives us for a posting.
+
+    Verified live 2026-08-16 (priorygroup board): `description` alone is
+    ~1,173 chars. `key_responsibilities` (~1,454 chars), `skills_knowledge_
+    expertise` (~1,044 chars) and `benefits` (~1,136 chars) are separate
+    HTML fields on the SAME postings.json response already fetched — no
+    extra HTTP call, and none of them duplicate `description`.
+    """
+    sections = [
+        ("", item.get("description")),
+        ("Key Responsibilities", item.get("key_responsibilities")),
+        ("Skills & Experience", item.get("skills_knowledge_expertise")),
+        ("Benefits", item.get("benefits")),
+    ]
+    parts = []
+    for heading, raw in sections:
+        text = _strip_html(raw)
+        if not text:
+            continue
+        parts.append(f"{heading}: {text}" if heading else text)
+    return "\n\n".join(parts)
 
 
 class PinpointSource(BaseJobSource):
@@ -33,7 +78,7 @@ class PinpointSource(BaseJobSource):
                 continue
             for item in postings:
                 title = item.get("title", "")
-                desc = item.get("description", "")
+                desc = _build_description(item)
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
                     location = loc.get("name", str(loc))
@@ -43,10 +88,17 @@ class PinpointSource(BaseJobSource):
                 # is a plain string (e.g. "Competitive"), never the numeric
                 # object the old code guarded for — that branch never fired.
                 # The real numeric fields are compensation_minimum /
-                # compensation_maximum (compensation_currency / _frequency
-                # also exist but aren't stored on Job yet).
+                # compensation_maximum. compensation_currency / _frequency are
+                # real too (verified live 2026-08-16, 100% fill alongside the
+                # numbers) — mapped onto the Universal Shelf salary metadata
+                # below so the gate can annualise hourly rows instead of the
+                # models.py clamp silently discarding them (anything <£10k
+                # reads as "obviously wrong" there).
                 salary_min = item.get("compensation_minimum")
                 salary_max = item.get("compensation_maximum")
+                salary_currency = item.get("compensation_currency")
+                raw_frequency = (item.get("compensation_frequency") or "").strip().lower()
+                salary_period = _FREQUENCY_MAP.get(raw_frequency)
 
                 # deadline_at exists on this endpoint — guard for null, never
                 # crash or fabricate.
@@ -85,8 +137,16 @@ class PinpointSource(BaseJobSource):
                     date_posted_raw=None,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    salary_currency=salary_currency,
+                    salary_period=salary_period,
                     deadline=deadline,
                     deadline_source=deadline_source,
+                    # `employment_type_text` is the human label ("Full time",
+                    # "Part time", "Permanent"...); `employment_type` is a
+                    # short code. Text reads more reliably against the closed
+                    # enum the gate normalises against, so prefer it and fall
+                    # back to the code.
+                    employment_type=item.get("employment_type_text") or item.get("employment_type"),
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Pinpoint: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

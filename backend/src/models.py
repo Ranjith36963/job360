@@ -115,12 +115,18 @@ class Job:
     # numbers below are misleading, not just incomplete: landingjobs stores
     # EUR/BRL figures as if they were GBP, careerjet mixes hourly and annual
     # numbers in the same field (UNIVERSAL_SHELF.md §2 SALARY). No source
-    # mapper writes these yet (step 2); the gate does not unit-convert or
-    # re-clamp using them yet either (step 2 — see the clamp comment in
-    # __post_init__ below and services/shelf_gate.py::_fill_salary).
+    # mapper writes the RAW upstream token ('per day', 'Y', 'YEAR'); the GATE
+    # (services/shelf_gate.py::_fill_salary) normalises the unit, annualises
+    # + converts the amounts to GBP, and only THEN clamps.
     salary_currency: Optional[str] = None
     salary_period: Optional[str] = None       # "hourly" | "daily" | "monthly" | "annual"
     salary_is_estimated: Optional[bool] = None
+    # DERIVED by the gate (UNIVERSAL_SHELF.md section 1 row 7): the same band
+    # expressed as annual GBP, so 39 sources' hourly/monthly/EUR/USD figures
+    # become comparable. NULL whenever the gate could not honestly convert
+    # (no amount at all, or a currency core/fx cannot price) - never a guess.
+    salary_min_gbp_annual: Optional[float] = None
+    salary_max_gbp_annual: Optional[float] = None
     # Every shelf, filled or absent, with HOW it got that way — "no salary
     # offered" (a fact about the job) vs "nobody looked" (a fact about our
     # pipeline) are different facts that route different work (§3/§4). Keys
@@ -151,23 +157,18 @@ class Job:
         self.company = html.unescape(self.company)
         # Clean broken company names ("nan", "", "None" → "Unknown")
         self.company = self._clean_company(self.company)
-        # Salary sanity: <10k likely hourly, >500k likely non-GBP
-        #
-        # UNIT-BLIND ON PURPOSE, FOR NOW (Universal Shelf Step 1,
-        # docs/pillars/UNIVERSAL_SHELF.md §2 SALARY "Gate rule for salary").
-        # This clamp assumes every number is GBP-annual — it is not: it nulls
-        # honest hourly/daily/monthly figures (e.g. an NHS £30.27/h rate,
-        # nofluffjobs' monthly figures) exactly as hard as it catches a real
-        # mislabeled non-GBP number. The fix is unit-aware — annualise +
-        # currency-tag FIRST using the new salary_currency/salary_period
-        # fields above, THEN clamp — and that move belongs in
-        # services/shelf_gate.py (step 2), not here, because it changes live
-        # scores and needs its own test coverage. Left exactly as-is in this
-        # step so merging this batch causes ZERO behaviour change.
-        if self.salary_min is not None and self.salary_min < 10000:
-            self.salary_min = None
-        if self.salary_max is not None and self.salary_max > 500000:
-            self.salary_max = None
+        # NO SALARY CLAMP HERE ANY MORE (Universal Shelf step 2,
+        # docs/pillars/UNIVERSAL_SHELF.md section 2 "Gate rule for salary").
+        # This used to null salary_min < 10k and salary_max > 500k, blind to
+        # the unit: it destroyed every honest hourly/daily/monthly figure (an
+        # NHS 30.27/h rate, nofluffjobs' 3,600/Month) exactly as hard as it
+        # caught a mislabeled non-GBP number, and it let a 45/hour maximum
+        # through untouched because 45 is not > 500,000. The clamp now lives
+        # in services/shelf_gate.py::_fill_salary, where it runs AFTER
+        # annualising + converting to GBP, so it judges a comparable number.
+        # A Job constructed outside the pipeline therefore keeps whatever the
+        # source said - which is the honest raw value, and exactly what a
+        # "dumb mapper" source is supposed to hand over.
 
     @staticmethod
     def _clean_company(name: str) -> str:

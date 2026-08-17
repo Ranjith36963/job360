@@ -87,6 +87,8 @@ class RemotiveSource(BaseJobSource):
             posted_at, confidence = normalize_posted_at(raw_pub)
 
             salary_min, salary_max = _parse_remotive_salary(item.get("salary", ""))
+            # `tags` (100% fill live, 14/14 sampled) is Remotive's own
+            # skill/tech tag list -- the job's own vocabulary, no guessing.
             jobs.append(Job(
                 title=title,
                 company=item.get("company_name", ""),
@@ -100,6 +102,7 @@ class RemotiveSource(BaseJobSource):
                 date_posted_raw=raw_pub,
                 salary_min=salary_min,
                 salary_max=salary_max,
+                source_tags=item.get("tags") or [],
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Remotive: found %s relevant jobs", len(jobs))
