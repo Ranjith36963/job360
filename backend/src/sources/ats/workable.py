@@ -70,6 +70,22 @@ class WorkableSource(BaseJobSource):
                     # Raw upstream values — services/shelf_gate.py normalises.
                     employment_type=item.get("employment_type"),
                     seniority=item.get("experience"),
+                    # `telecommuting` is a bool ALWAYS present on this API
+                    # (verified live 2026-08-17, 4 boards: 100% key
+                    # presence). True is an unambiguous "remote" translation
+                    # of the source's own field; False just means "not
+                    # remote-only" (could be hybrid or onsite), so it is left
+                    # unset rather than guessed as either (rule #29).
+                    workplace_mode="remote" if item.get("telecommuting") else None,
+                    # `function` ("Sales"/"Marketing"/"Product Management"/
+                    # "Engineering"/...) is Workable's own job-function field,
+                    # verified live 2026-08-17 across 5 boards. Passed
+                    # through raw: shelf_gate.py's closed JobCategory enum
+                    # only matches the unambiguous ones (sales, marketing,
+                    # product_management) — "Engineering" deliberately stays
+                    # unmatched, since Workable spans every industry and
+                    # "Engineering" is not always software.
+                    category=item.get("function") or None,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Workable: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

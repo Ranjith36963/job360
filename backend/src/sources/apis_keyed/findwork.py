@@ -98,6 +98,14 @@ class FindworkSource(BaseJobSource):
             # guess if it became "onsite" (rule #29).
             workplace_mode = "remote" if item.get("remote") else None
 
+            # `keywords` (a real list of skill tags — "nlp", "python", "ml",
+            # "typescript", "pytorch", "pandas", "embedded", "sql", all seen
+            # live 2026-08-17) sits on this same item, unread until now. Raw
+            # list straight onto source_tags, same pattern as
+            # arbeitnow/remoteok/landingjobs; the gate/scorer read it.
+            raw_keywords = item.get("keywords")
+            source_tags = [str(k) for k in raw_keywords if k] if isinstance(raw_keywords, list) else []
+
             jobs.append(Job(
                 title=title,
                 company=item.get("company_name") or "",
@@ -111,6 +119,7 @@ class FindworkSource(BaseJobSource):
                 date_posted_raw=raw_posted,
                 employment_type=item.get("employment_type"),
                 workplace_mode=workplace_mode,
+                source_tags=source_tags,
             ))
 
         logger.info("Findwork: found %s relevant jobs", len(jobs))

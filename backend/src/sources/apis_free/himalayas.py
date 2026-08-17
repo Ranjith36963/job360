@@ -48,13 +48,19 @@ class HimalayasSource(BaseJobSource):
             deadline_source = "listing" if deadline else None
 
             # `seniority` (100% fill) arrives as a list, e.g. ["Senior"].
-            seniority = item.get("seniority")
-            if isinstance(seniority, list) and seniority:
-                experience_level = str(seniority[0])
-            elif isinstance(seniority, str):
-                experience_level = seniority
+            # Feeds the legacy free-text `experience_level` (unchanged) AND
+            # -- new -- the closed-enum `seniority` shelf, same raw string
+            # unwrapped from its one-element list, no interpretation added.
+            seniority_raw = item.get("seniority")
+            if isinstance(seniority_raw, list) and seniority_raw:
+                experience_level = str(seniority_raw[0])
+                seniority_scalar = str(seniority_raw[0])
+            elif isinstance(seniority_raw, str):
+                experience_level = seniority_raw
+                seniority_scalar = seniority_raw
             else:
                 experience_level = ""
+                seniority_scalar = None
 
             # `description` (100% fill, median 6,139 chars live) is the real
             # prose posting. `excerpt` (100% fill too, ~150-300 chars) is a
@@ -88,6 +94,7 @@ class HimalayasSource(BaseJobSource):
                 deadline=deadline,
                 deadline_source=deadline_source,
                 experience_level=experience_level,
+                seniority=seniority_scalar,
                 employment_type=item.get("employmentType"),
                 source_tags=source_tags,
             ))

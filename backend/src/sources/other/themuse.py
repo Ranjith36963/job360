@@ -91,6 +91,14 @@ class TheMuseSource(BaseJobSource):
                     date_posted_raw=raw_pub,
                     experience_level=experience_level,
                     source_tags=cat_names + tag_names,
+                    # `categories[0].name` (52% fill live, e.g. "Software
+                    # Engineering", "Sales", "Data and Analytics") is
+                    # TheMuse's own professional-domain taxonomy -- the same
+                    # concept as the 16-way JobCategory shelf, not just a
+                    # keyword tag. Raw first value only; the gate matches it
+                    # against the closed set (exact hits confirmed live:
+                    # "Sales", "Software Engineering").
+                    category=cat_names[0] if cat_names else None,
                 ))
 
         logger.info("TheMuse: found %s relevant jobs", len(jobs))

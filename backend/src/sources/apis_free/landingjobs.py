@@ -127,6 +127,13 @@ class LandingJobsSource(BaseJobSource):
                 # against the closed EmploymentType enum.
                 employment_type = item.get("type")
 
+                # `remote` (100% fill live, already used above to build the
+                # location string) was never handed to workplace_mode. Only
+                # the TRUE case is mapped -- False just means "not tagged
+                # remote", not "definitely onsite/hybrid" (rule #29: never
+                # invent the untold half of a fact).
+                workplace_mode = "Remote" if is_remote else None
+
                 jobs.append(Job(
                     title=title,
                     company=company,
@@ -144,6 +151,7 @@ class LandingJobsSource(BaseJobSource):
                     salary_max=salary_max,
                     salary_currency=salary_currency,
                     employment_type=employment_type,
+                    workplace_mode=workplace_mode,
                     source_tags=item.get("tags") or [],
                 ))
 

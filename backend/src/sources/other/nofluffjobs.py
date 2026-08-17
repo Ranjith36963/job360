@@ -139,11 +139,33 @@ class NoFluffJobsSource(BaseJobSource):
 
             # seniority[] (100% fill live, e.g. ["Senior"]) -- take the first
             # element. Zero extra HTTP cost, this list is already fetched.
-            seniority = item.get("seniority")
-            if isinstance(seniority, list) and seniority:
-                experience_level = str(seniority[0])
+            # Feeds the legacy free-text `experience_level` (unchanged) AND
+            # -- new -- the closed-enum `seniority` shelf: same raw string,
+            # no interpretation. Verified live 2026-08-17 (1,000-posting
+            # sample): Senior/Mid/Junior match SeniorityLevel exactly
+            # (93.1% of the sample); "Expert" does not map to a single tier
+            # and is deliberately left unmatched by the gate rather than
+            # guessed here.
+            seniority_raw = item.get("seniority")
+            if isinstance(seniority_raw, list) and seniority_raw:
+                experience_level = str(seniority_raw[0])
+                seniority_scalar = str(seniority_raw[0])
             else:
                 experience_level = ""
+                seniority_scalar = None
+
+            # `fullyRemote` (100% fill live) is NoFluffJobs' own boolean.
+            # Only the TRUE case is mapped -- False just means "not tagged
+            # fully remote", not "definitely onsite/hybrid" (rule #29).
+            workplace_mode = "Remote" if item.get("fullyRemote") else None
+
+            # `category` (100% fill live, e.g. "sales", "finance", "backend")
+            # is NoFluffJobs' own function/domain tag -- closest thing to the
+            # JobCategory shelf this listing endpoint exposes. Raw value
+            # only; the gate matches the (small) subset that is an exact
+            # synonym ("sales", "finance") and leaves the rest honestly
+            # unmapped rather than guessing "backend" -> software_engineering.
+            category_raw = item.get("category")
 
             # Live probe 2026-08-08: the company key does NOT exist in the
             # posting payload (0 of 20,631 items had it) -- the employer name
@@ -173,10 +195,23 @@ class NoFluffJobsSource(BaseJobSource):
             # spot-check) -- budgeted the same way as smartrecruiters/
             # devitjobs so an uncapped pass cannot blow the fetch ceiling.
             description = ""
+            deadline = None
+            deadline_source = None
             if detail_budget > 0 and posting_id:
                 detail_budget -= 1
                 detail = await self._fetch_posting_detail(str(posting_id))
                 description = self._extract_detail_description(detail)
+                # `expiresAt` (100% hit in spot-checks, ISO format
+                # "2026-08-19T23:59:59") rides the SAME detail response
+                # already being fetched for description -- zero extra HTTP
+                # cost. Only covers the detail_budget subset (40/run), not
+                # every posting; the rest stay honestly absent rather than
+                # spending a second detail-fetch budget on it.
+                raw_expires = detail.get("expiresAt") if isinstance(detail, dict) else None
+                expires_iso, expires_confidence = normalize_posted_at(raw_expires)
+                if expires_confidence == "high" and expires_iso:
+                    deadline = expires_iso[:10]
+                    deadline_source = "listing"
 
             jobs.append(Job(
                 title=title,
@@ -189,9 +224,14 @@ class NoFluffJobsSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_posted,
+                deadline=deadline,
+                deadline_source=deadline_source,
                 salary_min=salary_min,
                 salary_max=salary_max,
                 experience_level=experience_level,
+                seniority=seniority_scalar,
+                workplace_mode=workplace_mode,
+                category=category_raw,
                 source_tags=source_tags,
             ))
 

@@ -147,11 +147,339 @@ def _absent_entry(why: str, *, raw: Any = None) -> dict[str, Any]:
     return entry
 
 
-def _normalize_closed_enum(raw: Any, enum_cls: Any) -> tuple[Optional[str], Optional[str]]:
+# Pillar 3 batch (this worker) — google_jobs (SerpApi) sends `schedule_type`
+# as "Full–time" with a TYPOGRAPHIC EN DASH (U+2013), not an ASCII hyphen —
+# confirmed live 2026-08-17 (38/39 sampled rows). `.replace("-", "_")` alone
+# never touches it, so a value that WAS correctly read landed as
+# absent/not_mapped on every single row. jsearch's own source comment
+# documents the identical "Full–time"/"Contractor" shape from a different
+# upstream, so this is a normalisation gap, not a one-source quirk. Widening
+# the translate table (not a second `.replace`) keeps this a single pass.
+_DASH_VARIANTS = str.maketrans(
+    {"‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-"}
+)
+
+# Pillar 3 ATS batch — Ashby sends `employmentType`/`workplaceType` in bare
+# PascalCase with NO space or dash at all ("FullTime", "OnSite" — confirmed
+# live 2026-08-17, cohere board: 144/144 employmentType, 137 "OnSite" across
+# the 5-board sample). `.replace(" ", "_").replace("-", "_")` has nothing to
+# act on there, so "FullTime".lower() == "fulltime" never matched
+# EmploymentType.FULL_TIME's "full_time" — every Ashby employment_type row
+# landed as absent/not_mapped despite the raw value being 100% present.
+# Inserting an underscore at each lower->UPPER boundary before lowering
+# fixes the multi-word case ("FullTime" -> "full_time"); comparing a SECOND,
+# underscore-stripped form catches the opposite direction, where the enum
+# member itself has no internal separator ("OnSite" -> "on_site" still
+# would not equal "onsite" without this).
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+# Pillar 3 vocabulary batch — a TRAILING PARENTHESISED QUALIFIER is an
+# annotation on the value, never the value itself. 80,000 Hours writes its
+# three experience buckets as "Junior (1-4 years experience)" /
+# "Mid (5-9 years experience)" / "Senior (10+ years experience)" (confirmed
+# live 2026-08-17: 36+34+2 of 82 rows) — three spellings of three words the
+# gate already knows. Stripping the bracket is a SEPARATOR rule, not a
+# per-value alias: whatever survives still has to match a real enum member or
+# a real alias, so "Multiple experience levels" (no bracket, no honest target)
+# is unaffected and stays absent.
+_TRAILING_PARENTHETICAL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _with_squashed(aliases: dict[str, str]) -> dict[str, str]:
+    """The alias table plus a separator-free copy of every key.
+
+    Same trick the enum-member comparison already uses. Upstream separators
+    are unpredictable in BOTH directions: WeWorkRemotely's "DevOps and
+    Sysadmin" gains an underscore from the camelCase-boundary pass
+    ("dev_ops_and_sysadmin") while NoFluffJobs' own code for the same thing
+    is the bare word "devops". Matching the squashed form too means one
+    written alias key covers every separator spelling of that key, instead of
+    a new table row per punctuation accident.
+    """
+    out = dict(aliases)
+    for key, target in aliases.items():
+        out.setdefault(key.replace("_", ""), target)
+    return out
+
+# Small, EVIDENCE-BACKED synonym tables for the closed-enum shelves — never a
+# guess dressed as a fact (rule #29): every key below is a raw string
+# actually observed live, and every value is a synonym relationship a human
+# would sign off on, not a best-effort classification. Ambiguous raw values
+# (e.g. Adzuna's "IT Jobs", "Engineering Jobs" — could be
+# software_engineering, devops_infrastructure, data_science or other) are
+# deliberately left OUT: mapping them would silently misclassify jobs for
+# the sake of a higher fill%, which is exactly what rule #29 forbids.
+_EMPLOYMENT_TYPE_ALIASES: dict[str, str] = _with_squashed({
+    # google_jobs schedule_type, confirmed live 2026-08-17.
+    "contractor": "contract",
+    # Pillar 3 ATS batch (greenhouse/lever/workable/ashby/smartrecruiters/
+    # pinpoint/recruitee/workday/personio/successfactors worker) — confirmed
+    # live 2026-08-17. "Permanent" (Lever `categories.commitment` 91/102 on
+    # spotify; Personio `<employmentType>`) has no hours signal of its own,
+    # so it maps to the closest single member, full_time — the common-case
+    # reading, and a source-specific override (see personio.py's <schedule>
+    # combine) takes priority when a real hours field exists.
+    "permanent": "full_time",
+    # "Fixed-Term"/"fixed_term" (Lever, Personio, Recruitee `experience`-
+    # adjacent employment codes) is a CONTRACT by definition — a contract
+    # with an end date, not an ongoing role.
+    "fixed_term": "contract",
+    # Personio `<employmentType>` "intern" is a one-word synonym for
+    # EmploymentType.INTERNSHIP, not a guess.
+    "intern": "internship",
+    # Lever "Short Term" (spotify board) — closest single member.
+    "short_term": "temporary",
+    # Recruitee's OWN compound `employment_type_code` vocabulary (confirmed
+    # live 2026-08-17 across dckgroup/transperfect/theentouragegroup: values
+    # are literally "fulltime_permanent" / "fulltime_fixed_term" /
+    # "parttime_permanent" / "parttime_fixed_term") — a closed, structured
+    # field Recruitee itself defines, not free text. The fixed-term pair
+    # maps to contract (more decision-relevant than hours, matching the
+    # internship/contract precedence used elsewhere); the permanent pair
+    # maps by hours since "permanent" alone carries no hours signal.
+    "fulltime_permanent": "full_time",
+    "fulltime_fixed_term": "contract",
+    "parttime_permanent": "part_time",
+    "parttime_fixed_term": "contract",
+    # ---- Pillar 3 vocabulary batch (harvested 2026-08-17 from the 2,772-job
+    # baseline run + live re-probes of the sources whose mapping landed after
+    # it). Every key below is a string a real source really sent.
+    #
+    # Pinpoint writes a COMPOUND "<contract nature> - <hours>" label
+    # (`Permanent - Full Time` 156, `Permanent` 121, `Permanent - Part Time`
+    # 14, `Fixed Term - Full Time` 9, `Fixed Term Contract` 6,
+    # `Fixed Term - Part Time` 2, `Seasonal - Full Time` 2 of 371 rows). The
+    # compound halves are read exactly as the single tokens above already
+    # are: "permanent" carries no hours signal so the HOURS half decides,
+    # and "fixed term" IS a contract by definition so the DURATION half wins
+    # (identical precedence to Recruitee's fulltime_fixed_term above).
+    "permanent_full_time": "full_time",
+    "permanent_part_time": "part_time",
+    "fixed_term_full_time": "contract",
+    "fixed_term_part_time": "contract",
+    "fixed_term_contract": "contract",
+    # "Seasonal" is time-limited BY DEFINITION (a season ends) — the duration
+    # half wins here too, exactly as fixed-term does.
+    "seasonal_full_time": "temporary",
+    # Pinpoint "Apprentice" — a one-word synonym for
+    # EmploymentType.APPRENTICESHIP, the same shape as "intern" above.
+    "apprentice": "apprenticeship",
+    # Climatebase writes "Full time role" (22/22 rows) — the same two words
+    # every other board sends, with a noun stuck on the end.
+    "full_time_role": "full_time",
+})
+
+# Seniority synonym table — same evidence bar as employment type above.
+# Personio's `<seniority>` and Recruitee's `experience_code` are BOTH their
+# own closed, structured vocabularies (confirmed live 2026-08-17, stable
+# across every company checked), not free text: Personio only ever emits
+# {student, entry-level, experienced, executive}; Recruitee only ever emits
+# {student_school, student_college, entry_level, mid_level, experienced,
+# manager, senior_manager, executive, senior_executive}. "experienced" is
+# deliberately LEFT OUT: it sits ambiguously between mid and senior in both
+# vocabularies and picking one would be a guess (rule #29). Recruitee's
+# management tiers (manager/senior_manager/senior_executive) are also left
+# out — that is a corporate-management ladder, not the IC ladder this enum
+# encodes (intern..director), and forcing a translation would misclassify.
+_SENIORITY_ALIASES: dict[str, str] = _with_squashed({
+    "student": "intern",
+    "student_school": "intern",
+    "student_college": "intern",
+    "entry_level": "junior",
+    "mid_level": "mid",
+    # Workable `experience` (LinkedIn-style taxonomy, confirmed live on
+    # suade/yapily boards) "Associate" is the closest single member.
+    "associate": "junior",
+    # Top tier in both closed vocabularies above.
+    "executive": "director",
+    # devitjobs `expLevel` — its OWN closed, structured field (confirmed
+    # live 2026-08-17: {Senior: 1276, Regular: 871, Lead: 335, Junior: 133}
+    # across 2,615 postings). "Regular" is devitjobs' own word for
+    # "ordinary/standard level" — an unambiguous synonym for `mid`, the
+    # same single-tier reading as `mid_level` above. "Lead" is deliberately
+    # LEFT OUT: it sits ambiguously between staff/principal/director
+    # (tech-lead vs people-lead is not decidable from the word alone),
+    # the same ambiguity that keeps "experienced" out above.
+    "regular": "mid",
+    # ---- Pillar 3 vocabulary batch. NoFluffJobs' `seniority` is its own
+    # closed 5-way field (confirmed live 2026-08-17 over 21,796 postings:
+    # Senior 13,106 / Mid 7,261 / Expert 706 / Junior 692 / Trainee 31).
+    # Senior/Mid/Junior already hit the enum exactly. "Trainee" is a
+    # position held WHILE LEARNING the job — the same thing
+    # SeniorityLevel.INTERN encodes, and the tier below Junior in
+    # NoFluffJobs' own ordering. "Expert" is deliberately LEFT OUT: it sits
+    # across senior/staff/principal and picking one would be a guess.
+    "trainee": "intern",
+    # jobicy `jobLevel` — "Midweight" (seen live 2026-08-17 alongside
+    # Senior/Director) is the industry's own word for mid-level, one tier
+    # spelled without the hyphen; no ambiguity about which tier it names.
+    "midweight": "mid",
+})
+
+# Seniority-shaped raw values seen live that are deliberately NOT mapped, and
+# why — kept as a comment because the honest answer is "no target", not a
+# missing row:
+#   * gov_apprenticeships `apprenticeshipLevel` — "Intermediate" (49),
+#     "Advanced" (92), "Higher" (13), "Degree" (2). These are the DfE's
+#     COURSE levels (level 2/3/4-5/6-7), not a professional ladder: an
+#     "Advanced" apprenticeship is still a first job. Aliasing them globally
+#     would also poison every OTHER source that ever sends the word
+#     "Advanced" meaning senior.
+#   * workable `experience` "Mid-Senior level" (42/191 rows) — LinkedIn's
+#     taxonomy fuses two of our tiers into one bucket; either choice is a
+#     coin flip.
+#   * eightykhours "Multiple experience levels" (7) — the ad itself says the
+#     level is not one value.
+#   * personio/recruitee "experienced" (110 combined) — documented above.
+
+# Workplace-mode synonym table — same evidence bar as employment type above.
+_WORKPLACE_TYPE_ALIASES: dict[str, str] = _with_squashed({
+    # devitjobs `workplace` — its OWN closed, structured field (confirmed
+    # live 2026-08-17: {office: 2248, hybrid: 207, remote: 160} across 2,615
+    # postings, 100% fill). "office" is devitjobs' own word for on-site
+    # attendance — an unambiguous synonym for `onsite`, not a guess: the
+    # field is a 3-way closed enum on devitjobs' own site, this is its only
+    # non-remote, non-hybrid member.
+    "office": "onsite",
+    # ---- Pillar 3 vocabulary batch. Climatebase writes "In-person" (16/22
+    # rows with a workplace value, confirmed live 2026-08-17) — plain English
+    # for "you attend the workplace", i.e. WorkplaceType.ONSITE. The other 6
+    # Climatebase rows already say "Remote" and match exactly.
+    "in_person": "onsite",
+})
+
+# Adzuna's own category taxonomy (confirmed live 2026-08-17: "IT Jobs",
+# "Engineering Jobs", "Trade & Construction Jobs") and DfE's 15 published
+# "apprenticeship standard routes" (gov_apprenticeships `course.route`,
+# confirmed live 2026-08-17: "Digital", "Education and early years") are
+# BOTH closed, published vocabularies (rule #30) — but neither is the SAME
+# vocabulary as JobCategory's 16-way professional-domain taxonomy, so only
+# the unambiguous 1:1 synonyms are mapped here. "IT Jobs" and "Digital" are
+# left OUT on purpose: both span software_engineering, devops_infrastructure
+# and data_science in real postings, and picking one would be a guess.
+_CATEGORY_ALIASES: dict[str, str] = _with_squashed({
+    # Adzuna. NOTE: "&" is normalised to "and" before lookup (see
+    # `_normalize_closed_enum`), so these keys are written in the "and" form
+    # even though Adzuna ships an ampersand.
+    "sales_jobs": "sales",
+    "marketing_and_pr_jobs": "marketing",
+    "pr,_advertising_and_marketing_jobs": "marketing",
+    "accounting_and_finance_jobs": "finance",
+    "legal_jobs": "legal",
+    "hr_and_recruitment_jobs": "hr_people",
+    "healthcare_and_nursing_jobs": "healthcare",
+    "teaching_jobs": "education",
+    "creative_and_design_jobs": "design",
+    # DfE apprenticeship standard routes
+    "education_and_early_years": "education",
+    "education_and_childcare": "education",
+    "care_services": "healthcare",
+    "health_and_science": "healthcare",
+    "creative_and_design": "design",
+    # Recruitee `category_code` — its own closed field (confirmed live
+    # 2026-08-17, transperfect board): "legal_services" and
+    # "recruitment_hr" are unambiguous 1:1 synonyms; every other Recruitee
+    # code (e.g. "engineering", "information_technology") is left out
+    # because Recruitee spans every industry on its platform, not just
+    # tech, so "engineering" there means anything from software to
+    # mechanical — mapping it to software_engineering would misclassify.
+    "legal_services": "legal",
+    "recruitment_hr": "hr_people",
+    # Personio `<occupationCategory>` — its OWN closed vocabulary,
+    # confirmed live 2026-08-17 across 8 boards (personio/flatpay/stark/
+    # merantix/intigriti/olio/gridx/maltego): "it_software" is Personio's
+    # umbrella for all software roles, an unambiguous match. The other
+    # Personio buckets that could plausibly split across two JobCategory
+    # members (e.g. "marketing_and_product", "business_and_strategic_
+    # development", "engineering") are deliberately left out for the same
+    # reason as "IT Jobs" above.
+    "it_software": "software_engineering",
+    "human_resources": "hr_people",
+    "sales_and_business_development": "sales",
+    "accounting_and_finance": "finance",
+    "production_and_operations": "operations",
+    "logistics_and_transportation": "operations",
+    # ---- Pillar 3 vocabulary batch. The category shelf read 0.0% on ALL 39
+    # sources, and only ONE source (adzuna) was even sending a value the gate
+    # could see. Every key below is a real value from a real payload,
+    # harvested 2026-08-17, and only the 1:1 synonyms are here.
+    #
+    # TheMuse `categories[0].name` (its own professional-domain taxonomy).
+    "data_and_analytics": "data_science",
+    "human_resources_and_recruitment": "hr_people",
+    "business_operations": "operations",
+    "design_and_ux": "design",
+    # WeWorkRemotely RSS `<category>` (10 fixed board sections, 10 rows each
+    # in a single live feed read). The three programming sections are all
+    # software engineering; "All Other Remote" is WWR's OWN explicit
+    # catch-all, which is exactly what JobCategory.OTHER means, so that one
+    # is a synonym and not a shrug. "Sales and Marketing" and "Management
+    # and Finance" are deliberately OUT — each fuses two of our members.
+    "full_stack_programming": "software_engineering",
+    "front_end_programming": "software_engineering",
+    "back_end_programming": "software_engineering",
+    "dev_ops_and_sysadmin": "devops_infrastructure",
+    "product": "product_management",
+    "all_other_remote": "other",
+    # NoFluffJobs `category` (its own 36-value closed IT taxonomy, confirmed
+    # live over 21,796 postings). Its software specialisms all collapse onto
+    # software_engineering; "artificialIntelligence" is the ML domain.
+    # LEFT OUT on purpose: "testing", "architecture", "security",
+    # "businessAnalyst", "projectManager", "erp", "businessIntelligence",
+    # "consulting", "agile", "automation", "embedded"-adjacent hardware
+    # buckets (mechanics/electronics/electricalEng/telecommunication),
+    # "customerService"/"support", "officeAdministration" — each is either a
+    # discipline this 16-way taxonomy has no member for, or a word that means
+    # something different on a non-IT board (a global alias table is shared
+    # by every source, so "architecture" must not mean software here and
+    # buildings there).
+    "backend": "software_engineering",
+    "frontend": "software_engineering",
+    "fullstack": "software_engineering",
+    "mobile": "software_engineering",
+    "game_dev": "software_engineering",
+    "artificial_intelligence": "machine_learning",
+    "devops": "devops_infrastructure",
+    "sys_administrator": "devops_infrastructure",
+    "data": "data_science",
+    "ux": "design",
+    "hr": "hr_people",
+    "law": "legal",
+    "logistics": "operations",
+    # Recruitee `category_code` (28 values seen live across 4 boards).
+    "marketing_pr": "marketing",
+    "accountancy": "finance",
+    # Remotive `category` — its own closed list. "All others" is Remotive's
+    # explicit catch-all (same reading as WWR's above); "Information
+    # Technology" is left out for the identical reason as Adzuna's "IT Jobs".
+    "software_development": "software_engineering",
+    "all_others": "other",
+    "medical": "healthcare",
+    # Jobicy `jobIndustry` — its own closed list (the live feed ships HTML
+    # entities, "Data Science &amp; Analytics"; jobicy.py unescapes before
+    # handing the raw value over). "Marketing & Sales", "Product &
+    # Operations", "Customer Support & Success" and "Project & Program
+    # Management" each fuse two members and are left out.
+    "data_science_and_analytics": "data_science",
+    "devops_and_infrastructure": "devops_infrastructure",
+    "finance_and_accounting": "finance",
+    "healthcare_and_medical": "healthcare",
+})
+
+
+def _normalize_closed_enum(
+    raw: Any, enum_cls: Any, aliases: Optional[dict[str, str]] = None
+) -> tuple[Optional[str], Optional[str]]:
     """Normalise `raw` against a CLOSED enum set (rule #30 — employment type,
     workplace mode and seniority are bounded, closed sets, so enumerating
     THEM is legal, unlike the unbounded foreign-city problem the UK gate
     solves with data instead).
+
+    `aliases` is an OPTIONAL synonym table (see `_EMPLOYMENT_TYPE_ALIASES` /
+    `_CATEGORY_ALIASES` above) checked AFTER an exact match fails — a source
+    vocabulary synonym, never a guess: every entry is a real raw string a
+    real source sends, mapped to a real enum member a human confirmed means
+    the same thing.
 
     Returns `(normalized_value_or_None, raw_str_or_None)`. The enum's own
     `UNKNOWN` member (a JOB SOURCE ENRICHMENT / LLM-contract sentinel,
@@ -165,16 +493,38 @@ def _normalize_closed_enum(raw: Any, enum_cls: Any) -> tuple[Optional[str], Opti
     raw_str = str(raw).strip()
     if not raw_str:
         return None, None
-    key = raw_str.lower().replace(" ", "_").replace("-", "_")
+    spaced = _CAMEL_BOUNDARY_RE.sub("_", raw_str)
+    key = spaced.lower().translate(_DASH_VARIANTS)
+    # A trailing "(...)" is a qualifier ON the value, not the value —
+    # "Junior (1-4 years experience)" is the word "junior". Never let the
+    # strip empty the key ("(remote)" must stay findable as itself).
+    stripped = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
+    if stripped:
+        key = stripped
+    # "&" and "and" are the same word in every vocabulary observed
+    # ("Data Science & Analytics" vs "Education and early years"), so they
+    # must not be two different table rows.
+    key = key.replace("&", " and ")
+    key = key.replace(" ", "_").replace("-", "_")
+    key = re.sub(r"_+", "_", key).strip("_")
+    squashed = key.replace("_", "")
     for member in enum_cls:
         if member.value == "unknown":
             continue
-        if member.value == key:
+        if member.value == key or member.value.replace("_", "") == squashed:
             return member.value, raw_str
+    if aliases:
+        target = aliases.get(key) or aliases.get(squashed)
+        if target is not None:
+            for member in enum_cls:
+                if member.value == target:
+                    return member.value, raw_str
     return None, raw_str
 
 
-def _fill_closed_enum_shelf(job: Job, attr: str, enum_cls: Any) -> dict[str, Any]:
+def _fill_closed_enum_shelf(
+    job: Job, attr: str, enum_cls: Any, aliases: Optional[dict[str, str]] = None
+) -> dict[str, Any]:
     """Shared filler for employment_type / seniority / workplace_mode /
     category — all four are closed-set enum shelves normalised the same way
     (UNIVERSAL_SHELF.md §5 point 2). `attr` is both the Job attribute name
@@ -182,7 +532,7 @@ def _fill_closed_enum_shelf(job: Job, attr: str, enum_cls: Any) -> dict[str, Any
     the shelf name for the `source_tags` attribute).
     """
     raw = getattr(job, attr, None)
-    normalized, raw_str = _normalize_closed_enum(raw, enum_cls)
+    normalized, raw_str = _normalize_closed_enum(raw, enum_cls, aliases)
     setattr(job, attr, normalized)
     if normalized is not None:
         return _source_entry(attr, raw=raw_str if raw_str != normalized else None)
@@ -380,16 +730,27 @@ def _fill_salary(job: Job) -> dict[str, Any]:
 
 
 def _fill_visa_status(job: Job) -> dict[str, Any]:
-    # No structured source field feeds this yet (that is step 2 — e.g.
-    # devitjobs' real `hasVisaSponsorship` bool) and no LLM verdict exists
-    # yet (step 3), so this is always the free-derivation regex detector.
-    status = detect_visa_status(job.description, job.title)
+    # STEP 2 (was TODO): a structured source field DOES feed this now —
+    # devitjobs.py sets `job.visa_status` to the raw upstream
+    # `hasVisaSponsorship` string ("Yes"/"No") before this gate runs.
+    # `detect_visa_status`'s `enrichment_value` param already existed for
+    # exactly this (an authoritative verdict beats free-text detection) but
+    # nothing ever passed it — the raw signal was being silently overwritten
+    # by the regex detector on every job, including the ones with a real
+    # structured answer. Capture the pre-gate value BEFORE detect_visa_status
+    # overwrites `job.visa_status` with its own normalised output below; a
+    # source that does not set this leaves it None, so the call degrades
+    # exactly to the old free-text-only behaviour.
+    raw_status = job.visa_status
+    status = detect_visa_status(job.description, job.title, enrichment_value=raw_status)
     job.visa_status = status.value
     if status is VisaStatus.UNKNOWN:
         # Rule #31: unknown IS the third state, stored as the literal value
         # "unknown" above — but the WHY here is still "the ad never said",
         # not "nobody looked" (the detector DID look).
         return _absent_entry("not_stated")
+    if raw_status and str(raw_status).strip().lower() in ("yes", "no", "sponsors", "true", "false", "none"):
+        return _source_entry("visa_status", raw=raw_status)
     return _derived_entry("visa_signal.detect_visa_status@v1")
 
 
@@ -412,11 +773,17 @@ _SHELF_FILLERS: dict[str, Callable[[Job], dict[str, Any]]] = {
     "deadline": _fill_deadline,
     "salary": _fill_salary,
     "visa_status": _fill_visa_status,
-    "employment_type": lambda job: _fill_closed_enum_shelf(job, "employment_type", EmploymentType),
-    "seniority": lambda job: _fill_closed_enum_shelf(job, "seniority", SeniorityLevel),
-    "workplace_mode": lambda job: _fill_closed_enum_shelf(job, "workplace_mode", WorkplaceType),
+    "employment_type": lambda job: _fill_closed_enum_shelf(
+        job, "employment_type", EmploymentType, _EMPLOYMENT_TYPE_ALIASES
+    ),
+    "seniority": lambda job: _fill_closed_enum_shelf(
+        job, "seniority", SeniorityLevel, _SENIORITY_ALIASES
+    ),
+    "workplace_mode": lambda job: _fill_closed_enum_shelf(
+        job, "workplace_mode", WorkplaceType, _WORKPLACE_TYPE_ALIASES
+    ),
     "skills": _fill_skills,
-    "category": lambda job: _fill_closed_enum_shelf(job, "category", JobCategory),
+    "category": lambda job: _fill_closed_enum_shelf(job, "category", JobCategory, _CATEGORY_ALIASES),
 }
 
 

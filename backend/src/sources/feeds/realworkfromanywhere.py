@@ -54,10 +54,13 @@ class RealWorkFromAnywhereSource(BaseJobSource):
         return jobs
 
     async def _fill_detail(self, job: Job) -> bool:
-        """Pull validThrough (deadline) + baseSalary from the job's own
-        schema.org JobPosting ld+json (confirmed live 2026-08-16: validThrough
-        12/12, baseSalary 6/12 on a live sample). applicantLocationRequirements
-        also exists but is deliberately NOT mapped here -- every job in the
+        """Pull validThrough (deadline) + baseSalary + employmentType +
+        jobLocationType from the job's own schema.org JobPosting ld+json
+        (confirmed live 2026-08-16: validThrough 12/12, baseSalary 6/12 on a
+        live sample; confirmed live 2026-08-17: employmentType 8/8,
+        jobLocationType 8/8 on the SAME already-fetched object -- previously
+        parsed and simply never read). applicantLocationRequirements also
+        exists but is deliberately NOT mapped here -- every job in the
         live sample carried the SAME ~184-country boilerplate list (the
         site's "open to remote worldwide" default), so it is not real
         per-job signal to replace the hardcoded "Remote" with.
@@ -100,6 +103,16 @@ class RealWorkFromAnywhereSource(BaseJobSource):
             currency = base_salary.get("currency")
             if isinstance(currency, str) and currency:
                 job.salary_currency = currency
+
+        employment_type = data.get("employmentType")
+        if isinstance(employment_type, str) and employment_type:
+            job.employment_type = employment_type
+            found_any = True
+
+        job_location_type = data.get("jobLocationType")
+        if isinstance(job_location_type, str) and job_location_type:
+            job.workplace_mode = job_location_type
+            found_any = True
 
         return found_any
 

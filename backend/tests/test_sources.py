@@ -463,6 +463,9 @@ GOV_APPR_PAYLOAD = {
                 "wageAdditionalInformation": "£18,000 a year",
             },
             "apprenticeshipLevel": "Advanced",
+            # `course.route` — one of DfE's 15 published, closed
+            # "apprenticeship standard routes" (confirmed live 2026-08-17).
+            "course": {"larsCode": 828, "title": "Software developer (level 4)", "level": 4, "route": "Digital"},
             "addresses": [
                 {"addressLine1": "1 Tech Street", "postcode": "EC2A 4BT",
                  "latitude": 51.5224, "longitude": -0.0806},
@@ -506,6 +509,34 @@ def test_gov_apprenticeships_parses_response():
                 assert jobs[0].deadline_source == "listing"
                 # apprenticeshipLevel -> seniority (raw).
                 assert jobs[0].seniority == "Advanced"
+                # course.route -> category (raw); the gate's alias table
+                # (shelf_gate.py) does the closed-set mapping downstream.
+                assert jobs[0].category == "Digital"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_gov_apprenticeships_maps_a_known_route_to_category_via_the_gate():
+    """End-to-end: course.route "Education and early years" (confirmed live
+    2026-08-17) is one of the safe, unambiguous DfE-route aliases in
+    shelf_gate.py — the gate should turn it into JobCategory.EDUCATION."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            item = dict(GOV_APPR_PAYLOAD["vacancies"][0])
+            item["course"] = {"larsCode": 550, "title": "Early years practitioner (level 2)", "level": 2, "route": "Education and early years"}
+            payload = {"vacancies": [item], "totalPages": 1}
+            with aioresponses() as m:
+                m.get(_GOV_APPR_URL, payload=payload, repeat=True)
+                source = GovApprenticeshipsSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].category == "Education and early years"
+                from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
+                fill_shelves(jobs[0])
+                assert jobs[0].category == "education"
+                assert jobs[0].shelf_provenance["category"]["how"] == "source"
         finally:
             await session.close()
     _run(_test())
@@ -866,6 +897,11 @@ def test_arbeitnow_parses_response():
                     "description": "AI and ML role with Python and PyTorch",
                     "url": "https://arbeitnow.com/jobs/ai-eng-1",
                     "tags": ["ai", "python"],
+                    # job_types (58% fill live, verified 2026-08-17) is a
+                    # list mixing employment-type + seniority words; only
+                    # the first element is used, dumb list-unwrap.
+                    "job_types": ["Full Time", "Experienced"],
+                    "remote": True,
                 }]})
                 source = ArbeitnowSource(session)
                 jobs = await source.fetch_jobs()
@@ -874,6 +910,34 @@ def test_arbeitnow_parses_response():
                 # tags are the job own vocabulary (~93% fill live) -- raw
                 # onto source_tags, no guessing.
                 assert jobs[0].source_tags == ["ai", "python"]
+                # job_types[0] onto employment_type (raw, list-unwrapped).
+                assert jobs[0].employment_type == "Full Time"
+                # remote:true onto workplace_mode; remote:false must stay
+                # unset (rule #29 -- never invent the untold half).
+                assert jobs[0].workplace_mode == "Remote"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_arbeitnow_remote_false_never_invents_workplace_mode():
+    """remote:false means 'not tagged remote', not 'onsite' -- rule #29:
+    never invent the untold half of a fact."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://www\.arbeitnow\.com/api/job-board-api.*"), payload={"data": [{
+                    "slug": "ai-eng-2", "title": "AI Engineer",
+                    "company_name": "TechCo", "location": "London",
+                    "description": "AI role",
+                    "url": "https://arbeitnow.com/jobs/ai-eng-2",
+                    "remote": False,
+                }]})
+                source = ArbeitnowSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].workplace_mode is None
         finally:
             await session.close()
     _run(_test())
@@ -920,16 +984,28 @@ def test_jobicy_parses_response():
                     "jobType": ["Full-Time"],
                     "salaryCurrency": "USD",
                     "salaryPeriod": "year",
+                    "jobLevel": "Senior",
+                    "jobIndustry": ["Data Science &amp; Analytics"],
                 }]})
                 source = JobicySource(session)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) >= 1
                 assert jobs[0].source == "jobicy"
+                # jobIndustry (100% fill live 2026-08-17) is Jobicy's own
+                # closed industry list — a category, unread until now. It
+                # arrives as a one-item list AND HTML-escaped; unescaping is
+                # transport decoding, not normalisation (the gate maps the
+                # vocabulary). Dumb raw pass-through otherwise.
+                assert jobs[0].category == "Data Science & Analytics"
                 # jobType (100% fill live) arrives as a one-item list; raw
                 # first element onto employment_type.
                 assert jobs[0].employment_type == "Full-Time"
                 assert jobs[0].salary_currency == "USD"
                 assert jobs[0].salary_period == "year"
+                # jobLevel (100% fill live) feeds BOTH the legacy free-text
+                # experience_level AND the closed-enum seniority shelf.
+                assert jobs[0].experience_level == "Senior"
+                assert jobs[0].seniority == "Senior"
         finally:
             await session.close()
     _run(_test())
@@ -984,6 +1060,7 @@ def test_himalayas_parses_response():
                     "salaryPeriod": "annual",
                     "employmentType": "Full Time",
                     "categories": ["AI", "Machine Learning"],
+                    "seniority": ["Senior"],
                 }]})
                 source = HimalayasSource(session)
                 jobs = await source.fetch_jobs()
@@ -996,6 +1073,10 @@ def test_himalayas_parses_response():
                 assert jobs[0].salary_period == "annual"
                 assert jobs[0].employment_type == "Full Time"
                 assert jobs[0].source_tags == ["AI", "Machine Learning"]
+                # seniority[] feeds BOTH experience_level (legacy) AND the
+                # closed-enum seniority shelf (new), same raw string.
+                assert jobs[0].experience_level == "Senior"
+                assert jobs[0].seniority == "Senior"
         finally:
             await session.close()
     _run(_test())
@@ -1183,6 +1264,62 @@ def test_workable_parses_response():
     _run(_test())
 
 
+def test_workable_maps_telecommuting_and_function_to_universal_shelf():
+    """Pillar 3 fix (2026-08-17): `telecommuting` is a bool ALWAYS present
+    (verified live, 4 boards: 100% key presence) and was never read; `true`
+    is an unambiguous "remote" translation. `function` ("Sales"/"Marketing"/
+    "Product Management") is Workable's own job-function field -- the
+    unambiguous members map onto JobCategory, "Engineering" deliberately
+    does not (Workable spans every industry)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/accounts/.*"), payload={
+                    "name": "DeepMind", "jobs": [{
+                        "shortcode": "DEF456", "title": "Sales Director",
+                        "city": "London", "country": "United Kingdom",
+                        "application_url": "https://apply.workable.com/j/DEF456/apply",
+                        "description": "Sales leadership role",
+                        "telecommuting": True,
+                        "function": "Sales",
+                    }],
+                })
+                source = WorkableSource(session, companies=["deepmind"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].workplace_mode == "remote"
+                assert jobs[0].category == "Sales"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workable_telecommuting_false_leaves_workplace_mode_unset():
+    """False just means "not remote-only" (could be hybrid or onsite) --
+    guessing either would violate rule #29, so it stays unset."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/accounts/.*"), payload={
+                    "name": "DeepMind", "jobs": [{
+                        "shortcode": "GHI789", "title": "Office Manager",
+                        "city": "London", "country": "United Kingdom",
+                        "application_url": "https://apply.workable.com/j/GHI789/apply",
+                        "description": "Office role",
+                        "telecommuting": False,
+                    }],
+                })
+                source = WorkableSource(session, companies=["deepmind"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].workplace_mode is None
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_ashby_parses_response():
     async def _test():
         session = aiohttp.ClientSession()
@@ -1248,6 +1385,30 @@ def test_ashby_requests_compensation_and_maps_universal_shelf_fields():
     _run(_test())
 
 
+def test_ashby_maps_workplace_type_to_universal_shelf():
+    """Pillar 3 fix (2026-08-17): `workplaceType` ("Remote"/"Hybrid"/
+    "OnSite") was fetched in every response already but never read onto
+    Job.workplace_mode -- verified live, cohere board: 139/144 filled."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://api\.ashbyhq\.com/.*"), payload={"jobs": [{
+                    "id": "603", "title": "Platform Engineer",
+                    "location": "London",
+                    "applyUrl": "https://ashby.com/cohere/603",
+                    "descriptionPlain": "Platform role",
+                    "workplaceType": "OnSite",
+                }]})
+                source = AshbySource(session, companies=["cohere"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].workplace_mode == "OnSite"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_ashby_checks_secondary_locations_for_uk():
     """Job-understanding fix (2026-08-16): some postings list a non-UK city
     as the primary `location` but carry "London"/"Remote - United Kingdom"
@@ -1285,6 +1446,8 @@ def test_remotive_parses_response():
                     "tags": ["ai", "python"],
                     "publication_date": "2024-01-15",
                     "salary": "70000-90000",
+                    "job_type": "full_time",
+                    "category": "Software Development",
                 }]})
                 source = RemotiveSource(session)
                 jobs = await source.fetch_jobs()
@@ -1294,6 +1457,13 @@ def test_remotive_parses_response():
                 # tags are the job own vocabulary (100% fill live) -- raw
                 # onto source_tags, no guessing.
                 assert jobs[0].source_tags == ["ai", "python"]
+                # job_type (100% fill live) is already the closed vocabulary
+                # -- raw pass-through, the gate matches it.
+                assert jobs[0].employment_type == "full_time"
+                # `category` (100% fill live 2026-08-17) is Remotive's own
+                # closed professional-domain list, unread until now. Raw
+                # value only -- the gate decides what it can map honestly.
+                assert jobs[0].category == "Software Development"
         finally:
             await session.close()
     _run(_test())
@@ -1742,6 +1912,79 @@ def test_smartrecruiters_apply_url_uses_detail_posting_url_not_raw_api_ref():
     _run(_test())
 
 
+def test_smartrecruiters_maps_salary_currency_period_seniority_and_workplace_mode():
+    """Pillar 3 fix (2026-08-17): the detail endpoint's `compensation` block
+    carries currency/period in the SAME response as min/max (verified live,
+    wise board) but only min/max were ever read -- dropping them made the
+    gate default every figure to GBP-annual, silently WRONG for a non-GBP or
+    non-annual posting, not just incomplete. `experienceLevel.id` was read
+    into `experience_level` (a non-shelf field) instead of `seniority`.
+    `location.remote`/`location.hybrid` are real booleans, never read."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://api\.smartrecruiters\.com/v1/companies/wise/postings\?.*"),
+                    payload={"content": [{
+                        "id": "sr-103", "name": "Senior Finance Manager",
+                        "location": {"city": "London", "country": "GB", "remote": False, "hybrid": True},
+                        "ref": "https://jobs.smartrecruiters.com/wise/sr-103",
+                        "releasedDate": "2024-01-15",
+                        "experienceLevel": {"id": "mid_senior_level", "label": "Mid-Senior Level"},
+                    }]},
+                )
+                m.get(
+                    "https://api.smartrecruiters.com/v1/companies/wise/postings/sr-103",
+                    payload={
+                        "jobAd": {"sections": {}},
+                        "compensation": {"min": 87500, "max": 111000, "currency": "GBP", "period": "YEARLY"},
+                        "postingUrl": "https://jobs.smartrecruiters.com/Wise/sr-103",
+                        "applyUrl": "https://jobs.smartrecruiters.com/Wise/sr-103?oga=true",
+                    },
+                )
+                source = SmartRecruitersSource(session, companies=["wise"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                job = jobs[0]
+                assert job.salary_min == 87500
+                assert job.salary_max == 111000
+                assert job.salary_currency == "GBP"
+                assert job.salary_period == "YEARLY"
+                assert job.seniority == "mid_senior_level"
+                assert job.workplace_mode == "hybrid"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_smartrecruiters_workplace_mode_onsite_when_both_booleans_false():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(
+                    re.compile(r"https://api\.smartrecruiters\.com/v1/companies/wise/postings\?.*"),
+                    payload={"content": [{
+                        "id": "sr-104", "name": "Office Coordinator",
+                        "location": {"city": "London", "country": "GB", "remote": False, "hybrid": False},
+                        "ref": "https://jobs.smartrecruiters.com/wise/sr-104",
+                        "releasedDate": "2024-01-15",
+                    }]},
+                )
+                m.get(
+                    "https://api.smartrecruiters.com/v1/companies/wise/postings/sr-104",
+                    payload={"jobAd": {"sections": {}}},
+                )
+                source = SmartRecruitersSource(session, companies=["wise"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].workplace_mode == "onsite"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_workday_fetches_job_description_from_detail():
     """Same fix for Workday (537 prod jobs, 100% empty): the CXS detail
     endpoint's jobPostingInfo.jobDescription (verified live: 12,746 chars)
@@ -1777,6 +2020,43 @@ def test_workday_fetches_job_description_from_detail():
                 desc = jobs[0].description
                 assert "Build ML pipelines" in desc
                 assert "<" not in desc, "detail HTML must be tag-stripped"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workday_maps_timetype_to_employment_type():
+    """Pillar 3 fix (2026-08-17): `timeType` ("Full time") is on every
+    SEARCH-result item already (verified live, astrazeneca board: 20/20)
+    and costs no extra request, but was never read onto Job.employment_type."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(
+                    re.compile(r"https://acme\.wd1\.myworkdayjobs\.com/wday/cxs/acme/ext/jobs"),
+                    payload={"jobPostings": [{
+                        "title": "Data Engineer",
+                        "locationsText": "London, United Kingdom",
+                        "externalPath": "/job/London/Data-Engineer_R124",
+                        "postedOn": "Posted Today",
+                        "timeType": "Full time",
+                    }]},
+                    repeat=True,
+                )
+                m.get(
+                    "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/ext/job/London/Data-Engineer_R124",
+                    payload={"jobPostingInfo": {"jobDescription": "Build data pipelines."}},
+                    repeat=True,
+                )
+                source = WorkdaySource(
+                    session,
+                    companies=[{"tenant": "acme", "wd": "wd1", "site": "ext", "name": "Acme"}],
+                    search_config=_sc_ai_defaults(),
+                )
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].employment_type == "Full time"
         finally:
             await session.close()
     _run(_test())
@@ -1849,6 +2129,61 @@ def test_pinpoint_recovers_all_text_sections_and_hourly_salary_period():
                 assert jobs[0].salary_currency == "GBP"
                 assert jobs[0].salary_period == "hourly"
                 assert jobs[0].employment_type == "Bank"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_pinpoint_maps_workplace_mode_and_translates_compound_employment_type():
+    """Pillar 3 fix (2026-08-17): `workplace_type_text` ("Onsite"/"Remote"/
+    "Hybrid") was fetched already but never read (verified live, 5 boards:
+    100% key presence). `employment_type_text` is a compound "<contract
+    nature> - <hours>" string on most boards (confirmed live: "Permanent -
+    Full Time" on priorygroup/davies/networkplus) -- the gate's separator
+    collapse turns that into "permanent___full_time", which matches nothing,
+    so it is translated locally first (same precedent as _FREQUENCY_MAP)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.pinpointhq\.com/postings\.json.*"), payload=[{
+                    "id": "pp-203", "title": "Care Assistant",
+                    "description": "Care role",
+                    "url": "https://test.pinpointhq.com/postings/pp-203",
+                    "location": {"name": "London, UK"},
+                    "employment_type_text": "Permanent - Full Time",
+                    "workplace_type_text": "Onsite",
+                }])
+                source = PinpointSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].employment_type == "full_time"
+                assert jobs[0].workplace_mode == "Onsite"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_pinpoint_leaves_genuine_uk_contract_types_untranslated():
+    """"Zero Hours"/"Bank" (confirmed live, priorygroup board) are real UK
+    contract types with no EmploymentType equivalent -- left as the raw
+    string so the gate records them honestly absent/not_mapped, never forced
+    onto the nearest guess (rule #29)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.pinpointhq\.com/postings\.json.*"), payload=[{
+                    "id": "pp-204", "title": "Weekend Support Worker",
+                    "description": "Weekend cover",
+                    "url": "https://test.pinpointhq.com/postings/pp-204",
+                    "location": {"name": "London, UK"},
+                    "employment_type_text": "Zero Hours",
+                }])
+                source = PinpointSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].employment_type == "Zero Hours"
         finally:
             await session.close()
     _run(_test())
@@ -1956,6 +2291,41 @@ def test_recruitee_recovers_requirements_and_seniority():
                 assert len(jobs) == 1
                 assert "5+ years B2B marketing" in jobs[0].description
                 assert jobs[0].seniority == "mid_level"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_recruitee_maps_employment_type_category_and_workplace_mode():
+    """Pillar 3 fix (2026-08-17): `employment_type_code` was never mapped at
+    all (a pure gap, not a normalisation miss). `category_code` is
+    Recruitee's own industry taxonomy (verified live, transperfect board: 30
+    distinct codes across 591 offers) and was never mapped either.
+    `remote`/`hybrid`/`on_site` are real booleans forming a closed 3-state
+    field (verified live: 81/109/436 out of 591), also never read."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.recruitee\.com/api/offers/.*"), payload={"offers": [{
+                    "id": "rc-305", "title": "Legal Counsel",
+                    "description": "Legal role",
+                    "location": "London, UK",
+                    "careers_url": "https://test.recruitee.com/o/legal-counsel",
+                    "published_at": "2026-08-01",
+                    "employment_type_code": "fulltime_permanent",
+                    "category_code": "legal_services",
+                    "remote": False,
+                    "hybrid": True,
+                    "on_site": False,
+                }]})
+                source = RecruiteeSource(session, companies=["test"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                job = jobs[0]
+                assert job.employment_type == "fulltime_permanent"
+                assert job.category == "legal_services"
+                assert job.workplace_mode == "hybrid"
         finally:
             await session.close()
     _run(_test())
@@ -2241,6 +2611,38 @@ def test_google_jobs_maps_schedule_type_and_forces_english():
     _run(_test())
 
 
+def test_google_jobs_real_en_dash_schedule_type_reaches_full_time_via_the_gate():
+    """REAL BUG, confirmed live 2026-08-17: SerpApi's actual `schedule_type`
+    is "Full–time" with a TYPOGRAPHIC EN DASH (U+2013), not the ASCII hyphen
+    the other test above uses — 38/39 sampled google_jobs rows carried this
+    exact shape, and every one landed as absent/not_mapped before the
+    shelf_gate.py dash-normalisation fix, even though the source read the
+    value correctly. This test uses the REAL character and drives it through
+    both the source AND the gate, end to end."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = {"jobs_results": [dict(
+                GOOGLE_JOBS_PAYLOAD["jobs_results"][0],
+                detected_extensions={"posted_at": "7 hours ago", "schedule_type": "Full–time"},
+            )]}
+            with aioresponses() as m:
+                m.get(re.compile(r"https://serpapi\.com/search.*"),
+                      payload=payload, repeat=True)
+                source = GoogleJobsSource(session, api_key="test-key", search_config=_sc_ai_defaults())
+                jobs = await source.fetch_jobs()
+                assert jobs, "no jobs returned"
+                assert jobs[0].employment_type == "Full–time"
+
+                from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
+                fill_shelves(jobs[0])
+                assert jobs[0].employment_type == "full_time"
+                assert jobs[0].shelf_provenance["employment_type"]["how"] == "source"
+        finally:
+            await session.close()
+    _run(_test())
+
+
 def test_devitjobs_parses_response():
     async def _test():
         session = aiohttp.ClientSession()
@@ -2275,6 +2677,45 @@ def test_devitjobs_parses_response():
                 assert jobs[0].visa_status == "Yes"
                 assert jobs[0].employment_type == "Full-time"
                 assert jobs[0].workplace_mode == "Hybrid"
+                # expLevel (100% fill) feeds BOTH experience_level (legacy)
+                # AND the closed-enum seniority shelf (new).
+                assert jobs[0].seniority == "Senior"
+                # technologies + filterTags (99%/99.7% fill live) were only
+                # ever folded into the composed description prose -- now
+                # ALSO reach source_tags (the skills shelf) as structured
+                # data, deduped, order preserved.
+                assert jobs[0].source_tags == [
+                    "Python", "PyTorch", "AWS", "machine-learning", "mlops",
+                ]
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_devitjobs_visa_status_uses_structured_signal_not_free_text():
+    """devitjobs' own `hasVisaSponsorship` ("Yes"/"No") is a real structured
+    verdict -- the gate must prefer it over the free-text detector. SomeCo
+    (index 1) has hasVisaSponsorship="No" and no visa phrase anywhere in its
+    (short, fallback-composed) description -- the free-text detector alone
+    would call this "unknown", not "refuses". End-to-end: source -> gate."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://devitjobs\.uk/api/jobsLight.*"),
+                      payload=DEVITJOBS_PAYLOAD)
+                source = DevITJobsSource(session)
+                jobs = await source.fetch_jobs()
+                by_company = {j.company: j for j in jobs}
+                revolut, someco = by_company["Revolut"], by_company["SomeCo"]
+
+                from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
+                fill_shelves(revolut)
+                fill_shelves(someco)
+                assert revolut.visa_status == "sponsors"
+                assert revolut.shelf_provenance["visa_status"]["how"] == "source"
+                assert someco.visa_status == "no_sponsorship"
+                assert someco.shelf_provenance["visa_status"]["how"] == "source"
         finally:
             await session.close()
     _run(_test())
@@ -2370,6 +2811,26 @@ def test_landingjobs_parses_response():
                 assert jobs[0].source_tags == ["python", "nlp", "transformers"]
                 assert "5+ years Python" in jobs[0].description
                 assert "Kafka" in jobs[0].description
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_landingjobs_remote_true_maps_workplace_mode():
+    """`remote` (100% fill live) was already used to build the location
+    string but never reached workplace_mode. Only the TRUE case is mapped --
+    False just means "not tagged remote", not "onsite" (rule #29)."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = [dict(LANDINGJOBS_PAYLOAD[0], remote=True, locations=[])]
+            with aioresponses() as m:
+                m.get(re.compile(r"https://landing\.jobs/api/v1/jobs\.json.*"),
+                      payload=payload)
+                source = LandingJobsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) >= 1
+                assert jobs[0].workplace_mode == "Remote"
         finally:
             await session.close()
     _run(_test())
@@ -2538,6 +2999,15 @@ def test_themuse_parses_response():
                 # categories (52% fill live) is the closest thing to a
                 # skill/tag list TheMuse exposes -- raw onto source_tags.
                 assert jobs[0].source_tags == ["Data Science"]
+                # categories[0].name ALSO feeds the category shelf raw --
+                # "Data Science" matches JobCategory.DATA_SCIENCE exactly
+                # once the gate normalises it.
+                assert jobs[0].category == "Data Science"
+
+                from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
+                fill_shelves(jobs[0])
+                assert jobs[0].category == "data_science"
+                assert jobs[0].shelf_provenance["category"]["how"] == "source"
         finally:
             await session.close()
     _run(_test())
@@ -2618,6 +3088,49 @@ def test_hackernews_parses_response():
                 assert jobs[0].apply_url == "https://deepmind.com/careers"
                 # title fix: the real role, not the fabricated "Company - Hiring".
                 assert jobs[0].title == "Machine Learning Engineer"
+                # The 4th pipe field ("Remote") is handed to BOTH
+                # employment_type and workplace_mode raw -- each field's own
+                # closed-enum matcher decides which (if either) it means.
+                assert jobs[0].employment_type == "Remote"
+                assert jobs[0].workplace_mode == "Remote"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_hackernews_fourth_field_lands_on_the_matching_shelf_only():
+    """"Full-time" (a real, common 4th-field value, verified live 2026-08-16:
+    25/242 comments) must land as employment_type via the gate and stay
+    absent for workplace_mode -- proving the dual-assign is harmless, not a
+    misclassification, end to end through the gate."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = {"children": [{
+                "text": (
+                    "Snout <a href=\"https:&#x2F;&#x2F;snout.com&#x2F;\">"
+                    "https:&#x2F;&#x2F;snout.com&#x2F;</a> | Backend Engineer | "
+                    "London, UK | Full-time<p>Join our team."
+                ),
+                "created_at": "2024-01-01T12:00:00Z",
+            }]}
+            with aioresponses() as m:
+                m.get(re.compile(r"https://hn\.algolia\.com/api/v1/search_by_date.*"),
+                      payload=HN_SEARCH_PAYLOAD)
+                m.get(re.compile(r"https://hn\.algolia\.com/api/v1/items/.*"),
+                      payload=payload)
+                source = HackerNewsSource(session)
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].employment_type == "Full-time"
+                assert jobs[0].workplace_mode == "Full-time"
+
+                from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
+                fill_shelves(jobs[0])
+                assert jobs[0].employment_type == "full_time"
+                assert jobs[0].shelf_provenance["employment_type"]["how"] == "source"
+                assert jobs[0].workplace_mode is None
+                assert jobs[0].shelf_provenance["workplace_mode"]["how"] == "absent"
         finally:
             await session.close()
     _run(_test())
@@ -2791,6 +3304,46 @@ def test_findwork_workplace_mode_unset_when_not_remote():
     _run(_test())
 
 
+def test_findwork_maps_keywords_to_source_tags():
+    """`keywords` (a real skill-tag list — "nlp"; "python","ml","typescript",
+    "pytorch","pandas","embedded","sql" — both shapes seen live 2026-08-17)
+    sits on the same item as `remote`/`employment_type`, previously unread.
+    Zero extra cost — same response, straight onto source_tags (skills
+    shelf), same pattern as arbeitnow/remoteok/landingjobs."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            payload = {"results": [dict(FINDWORK_PAYLOAD["results"][0], keywords=["python", "ml", "sql"])]}
+            with aioresponses() as m:
+                m.get(re.compile(r"https://findwork\.dev/api/jobs/.*"),
+                      payload=payload)
+                source = FindworkSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert jobs, "no jobs returned"
+                assert jobs[0].source_tags == ["python", "ml", "sql"]
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_findwork_source_tags_empty_when_keywords_absent():
+    """No `keywords` key at all (a real shape too) must not crash and must
+    leave source_tags empty, never a guess."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://findwork\.dev/api/jobs/.*"),
+                      payload=FINDWORK_PAYLOAD)
+                source = FindworkSource(session, api_key="test-key")
+                jobs = await source.fetch_jobs()
+                assert jobs, "no jobs returned"
+                assert jobs[0].source_tags == []
+        finally:
+            await session.close()
+    _run(_test())
+
+
 # ---- NoFluffJobs ----
 
 NOFLUFFJOBS_PAYLOAD = [
@@ -2810,6 +3363,10 @@ NOFLUFFJOBS_PAYLOAD = [
             {"value": "Python", "type": "requirement"},
             {"value": "AI", "type": "category"},
         ]},
+        # seniority[] (100% fill live) and fullyRemote (100% fill live) --
+        # verified 2026-08-17, 1,000-posting sample.
+        "seniority": ["Senior"],
+        "fullyRemote": True,
     },
     {
         "id": "marketing-xyz",
@@ -2841,6 +3398,15 @@ def test_nofluffjobs_parses_response():
                 assert "Remote" in jobs[0].location
                 # tiles.values raw onto source_tags -- the job own vocabulary.
                 assert jobs[0].source_tags == ["Python", "AI"]
+                # seniority[0] feeds BOTH experience_level (legacy) AND the
+                # closed-enum seniority shelf (new).
+                assert jobs[0].experience_level == "Senior"
+                assert jobs[0].seniority == "Senior"
+                # fullyRemote:true onto workplace_mode; category raw onto
+                # the category shelf ("AI" itself won't match the closed
+                # enum -- the gate leaves it honestly unmapped).
+                assert jobs[0].workplace_mode == "Remote"
+                assert jobs[0].category == "AI"
         finally:
             await session.close()
     _run(_test())
@@ -2860,14 +3426,22 @@ def test_nofluffjobs_fetches_description_from_detail_endpoint():
                       payload=[NOFLUFFJOBS_PAYLOAD[0]])
                 m.get(
                     re.compile(r"https://nofluffjobs\.com/api/posting/ml-engineer-abc$"),
-                    payload={"requirements": {
-                        "description": "<div><p>Build ML pipelines with Python.</p></div>",
-                    }},
+                    payload={
+                        "requirements": {
+                            "description": "<div><p>Build ML pipelines with Python.</p></div>",
+                        },
+                        # expiresAt (ISO, verified live 2026-08-17) rides the
+                        # SAME already-fetched detail response -- zero extra
+                        # HTTP cost.
+                        "expiresAt": "2026-09-19T23:59:59",
+                    },
                 )
                 source = NoFluffJobsSource(session)
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1
                 assert "Build ML pipelines with Python." in jobs[0].description
+                assert jobs[0].deadline == "2026-09-19"
+                assert jobs[0].deadline_source == "listing"
         finally:
             await session.close()
     _run(_test())
@@ -3168,6 +3742,76 @@ def test_personio_parses_salary_information_and_universal_shelf_fields():
                 assert job.salary_period == "annual"
                 assert job.employment_type == "permanent"
                 assert job.seniority == "entry-level"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_personio_maps_keywords_and_occupation_category():
+    """Pillar 3 fix (2026-08-17): `<keywords>` is a comma-separated skills
+    list (confirmed live, flatpay board: 79/122 filled) and
+    `<occupationCategory>` is Personio's own closed job-function taxonomy
+    (confirmed live across 8 boards) -- neither was ever read."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            xml = """<?xml version="1.0"?>
+            <workzag-jobs>
+              <position>
+                <id>203</id>
+                <name>People Operations Specialist</name>
+                <office>Berlin</office>
+                <employmentType>permanent</employmentType>
+                <keywords>People,Operations,Human Resources,Fintech,HR</keywords>
+                <occupationCategory>it_software</occupationCategory>
+                <jobDescriptions>
+                  <jobDescription><name>About</name><value>Ops role</value></jobDescription>
+                </jobDescriptions>
+              </position>
+            </workzag-jobs>"""
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
+                      body=xml, content_type="application/xml", repeat=True)
+                source = PersonioSource(session, companies=["testco"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                job = jobs[0]
+                assert job.source_tags == ["People", "Operations", "Human Resources", "Fintech", "HR"]
+                assert job.category == "it_software"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_personio_prefers_schedule_over_permanent_for_part_time_roles():
+    """`<schedule>` ("full-time"/"part-time") is a SEPARATE field from
+    `<employmentType>` ("permanent"/...) -- the latter carries no hours
+    signal on its own, so the gate's "permanent"->full_time alias would
+    misclassify a permanent PART-TIME role. When employmentType is exactly
+    "permanent" and a real schedule value exists, schedule wins."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            xml = """<?xml version="1.0"?>
+            <workzag-jobs>
+              <position>
+                <id>204</id>
+                <name>Part-Time Recruiter</name>
+                <office>Berlin</office>
+                <employmentType>permanent</employmentType>
+                <schedule>part-time</schedule>
+                <jobDescriptions>
+                  <jobDescription><name>About</name><value>Recruiting role</value></jobDescription>
+                </jobDescriptions>
+              </position>
+            </workzag-jobs>"""
+            with aioresponses() as m:
+                m.get(re.compile(r"https://.*\.jobs\.personio\.de/xml.*"),
+                      body=xml, content_type="application/xml", repeat=True)
+                source = PersonioSource(session, companies=["testco"])
+                jobs = await source.fetch_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].employment_type == "part-time"
         finally:
             await session.close()
     _run(_test())
@@ -3789,6 +4433,53 @@ def test_successfactors_admits_real_uk_job_via_jsonld_and_fixes_location_lie():
             assert "Real engineering work in London" in job.description
             assert job.description != job.title, "must not store the title as the description"
             assert job.employment_type == "FULL_TIME"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_successfactors_maps_jsonld_date_posted_and_base_salary():
+    """Pillar 3 fix (2026-08-17): `datePosted` is a standard schema.org
+    JobPosting field present on every BAE-template page (confirmed live,
+    6/8 sampled) but posted_at was hardcoded to None for this whole source.
+    `baseSalary` is extracted defensively too -- confirmed always null on
+    BAE (0/8 sampled), but the read is generic across any tenant that does
+    populate it."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            sitemap = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                '<url><loc>https://jobs.example.com/global/en/job/128608BR/Senior-Engineer-London</loc></url>'
+                '</urlset>'
+            )
+            detail_html = (
+                '<html><body><script type="application/ld+json">'
+                '{"@type":"JobPosting","employmentType":["FULL_TIME"],'
+                '"datePosted":"2026-08-16",'
+                '"jobLocation":{"@type":"Place","address":{"@type":"PostalAddress",'
+                '"addressLocality":"London","addressCountry":"United Kingdom"}},'
+                '"baseSalary":{"@type":"MonetaryAmount","currency":"GBP",'
+                '"value":{"@type":"QuantitativeValue","minValue":60000,"maxValue":80000}},'
+                '"description":"Senior engineering role."}'
+                '</script></body></html>'
+            )
+            companies = [{"name": "Example Co", "sitemap_url": "https://jobs.example.com/sitemap.xml"}]
+            with aioresponses() as m:
+                m.get("https://jobs.example.com/sitemap.xml", body=sitemap, content_type="application/xml")
+                m.get("https://jobs.example.com/global/en/job/128608BR/Senior-Engineer-London",
+                      body=detail_html, content_type="text/html")
+                source = SuccessFactorsSource(session, companies=companies)
+                jobs = await source.fetch_jobs()
+            assert len(jobs) == 1
+            job = jobs[0]
+            assert job.posted_at is not None
+            assert job.posted_at.startswith("2026-08-16")
+            assert job.date_confidence != "low", "a real structured date must not stay low-confidence"
+            assert job.salary_min == 60000
+            assert job.salary_max == 80000
+            assert job.salary_currency == "GBP"
         finally:
             await session.close()
     _run(_test())

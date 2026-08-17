@@ -116,6 +116,514 @@ def test_absent_employment_type_keeps_the_raw_value_for_audit():
     assert entry["raw"] == "some upstream string nobody taught the gate"
 
 
+def test_typographic_en_dash_normalises_the_same_as_ascii_hyphen():
+    """google_jobs (SerpApi) sends `schedule_type` as "Full–time" with a
+    typographic EN DASH (U+2013), confirmed live 2026-08-17 on 38/39 sampled
+    rows — every single one landed as absent/not_mapped before this fix,
+    even though the value WAS correctly read off the payload.
+    """
+    job = _make_job(employment_type="Full–time")
+    fill_shelves(job)
+
+    assert job.employment_type == "full_time"
+    assert job.shelf_provenance["employment_type"]["how"] == "source"
+
+
+def test_employment_type_alias_maps_a_known_synonym():
+    """"Contractor" (google_jobs schedule_type, confirmed live) is a real
+    synonym for EmploymentType.CONTRACT, not a guess — the alias table maps
+    it; an UNRELATED string still falls through to absent/not_mapped."""
+    job = _make_job(employment_type="Contractor")
+    fill_shelves(job)
+    assert job.employment_type == "contract"
+
+
+def test_ambiguous_category_is_left_unmapped_not_guessed():
+    """Adzuna's "IT Jobs" spans software_engineering, devops_infrastructure
+    and data_science in real postings — deliberately NOT in the alias table
+    (rule #29: never guess to make a fill% look better)."""
+    job = _make_job(category="IT Jobs")
+    fill_shelves(job)
+    assert job.category is None
+    entry = job.shelf_provenance["category"]
+    assert entry["how"] == "absent"
+    assert entry["raw"] == "IT Jobs"
+
+
+def test_category_alias_maps_an_unambiguous_adzuna_label():
+    """Adzuna's "Healthcare & Nursing Jobs" (confirmed live) maps 1:1 onto
+    JobCategory.HEALTHCARE — an honest synonym, not a classification guess.
+    """
+    job = _make_job(category="Healthcare & Nursing Jobs")
+    fill_shelves(job)
+    assert job.category == "healthcare"
+    assert job.shelf_provenance["category"]["how"] == "source"
+
+
+def test_category_alias_maps_a_dfe_apprenticeship_route():
+    """gov_apprenticeships' `course.route` "Education and early years" (one
+    of DfE's 15 published, closed routes, confirmed live) maps 1:1 onto
+    JobCategory.EDUCATION."""
+    job = _make_job(category="Education and early years")
+    fill_shelves(job)
+    assert job.category == "education"
+
+
+# ---------------------------------------------------------------------------
+# 2b. Pillar 3 ATS batch (greenhouse/lever/workable/ashby/smartrecruiters/
+# pinpoint/recruitee/workday/personio/successfactors) — PascalCase and
+# compound-token normalisation + the new employment_type/seniority/category
+# synonym entries, every one confirmed against a real live payload.
+# ---------------------------------------------------------------------------
+
+
+def test_bare_camelcase_employment_type_normalises_without_an_alias():
+    """Ashby sends `employmentType` in bare PascalCase with NO space or dash
+    ("FullTime" — confirmed live 2026-08-17, cohere board: 144/144 filled).
+    `.replace(" ", "_").replace("-", "_")` has nothing to act on, so
+    "FullTime".lower() == "fulltime" never matched "full_time" before the
+    camelCase-boundary fix — every Ashby employment_type row landed as
+    absent/not_mapped despite the raw value being 100% present. This is a
+    real value the gate's OWN normaliser now reaches; it needs no alias.
+    """
+    job = _make_job(employment_type="FullTime")
+    fill_shelves(job)
+    assert job.employment_type == "full_time"
+    assert job.shelf_provenance["employment_type"]["how"] == "source"
+
+
+def test_bare_pascalcase_workplace_mode_normalises_the_opposite_direction():
+    """Ashby's `workplaceType` "OnSite" (confirmed live 2026-08-17, cohere
+    board) needs the OPPOSITE fix from "FullTime": inserting an underscore
+    at the case boundary produces "on_site", which still would not equal
+    WorkplaceType.ONSITE's "onsite" (no internal separator at all) without
+    also comparing the underscore-STRIPPED forms.
+    """
+    job = _make_job(workplace_mode="OnSite")
+    fill_shelves(job)
+    assert job.workplace_mode == "onsite"
+
+
+def test_bare_compound_word_employment_type_normalises_via_squash():
+    """Recruitee's `employment_type_code` also emits bare, already-lowercase
+    compound words with no separator at all ("fulltime"/"parttime",
+    confirmed live 2026-08-17, theentouragegroup board) — the squash-compare
+    catches this case too, with no alias needed."""
+    job = _make_job(employment_type="fulltime")
+    fill_shelves(job)
+    assert job.employment_type == "full_time"
+
+
+def test_employment_type_alias_maps_recruitees_compound_code():
+    """Recruitee's OWN closed `employment_type_code` vocabulary combines
+    hours and contract nature into one token ("fulltime_permanent",
+    "parttime_fixed_term", confirmed live 2026-08-17 across 3 boards,
+    939 combined rows) — a structured field, not free text, so the
+    translation is a synonym lookup, not a guess."""
+    job = _make_job(employment_type="fulltime_permanent")
+    fill_shelves(job)
+    assert job.employment_type == "full_time"
+
+    job2 = _make_job(employment_type="parttime_fixed_term")
+    fill_shelves(job2)
+    assert job2.employment_type == "contract"
+
+
+def test_employment_type_alias_maps_permanent_and_fixed_term():
+    """"Permanent" (Lever `categories.commitment`, 91/102 spotify rows) and
+    "Fixed-Term" (Lever "Fixed-Term", Personio `fixed_term`) are both real,
+    unambiguous synonyms in the closed-set sense rule #30 allows."""
+    job = _make_job(employment_type="Permanent")
+    fill_shelves(job)
+    assert job.employment_type == "full_time"
+
+    job2 = _make_job(employment_type="Fixed-Term")
+    fill_shelves(job2)
+    assert job2.employment_type == "contract"
+
+
+def test_seniority_alias_maps_personios_closed_vocabulary():
+    """Personio's `<seniority>` is its OWN closed, structured vocabulary
+    (confirmed live 2026-08-17, stable across 8 boards):
+    {student, entry-level, experienced, executive}. "experienced" is
+    deliberately NOT aliased — it sits ambiguously between mid and senior
+    (rule #29)."""
+    job = _make_job(seniority="entry-level")
+    fill_shelves(job)
+    assert job.seniority == "junior"
+
+    job2 = _make_job(seniority="executive")
+    fill_shelves(job2)
+    assert job2.seniority == "director"
+
+    job3 = _make_job(seniority="experienced")
+    fill_shelves(job3)
+    assert job3.seniority is None
+    assert job3.shelf_provenance["seniority"]["raw"] == "experienced"
+
+
+def test_seniority_alias_leaves_recruitees_management_ladder_unmapped():
+    """Recruitee's `experience_code` also carries a corporate-management
+    ladder (manager/senior_manager/senior_executive, confirmed live
+    2026-08-17, transperfect board: 21+4=25/591 rows) that does not fit the
+    IC ladder SeniorityLevel encodes (intern..director) — forcing a
+    translation would misclassify a manager as a "director"-level IC, so
+    these stay honestly unmapped."""
+    job = _make_job(seniority="senior_manager")
+    fill_shelves(job)
+    assert job.seniority is None
+
+
+def test_seniority_alias_maps_devitjobs_regular_but_leaves_lead_unmapped():
+    """devitjobs' `expLevel` is its OWN closed, structured field (confirmed
+    live 2026-08-17: {Senior: 1276, Regular: 871, Lead: 335, Junior: 133}
+    across 2,615 postings). "Regular" is devitjobs' word for "ordinary/
+    standard level" — an unambiguous synonym for `mid`. "Lead" is
+    deliberately NOT aliased — tech-lead vs people-lead is not decidable
+    from the word alone (same ambiguity as "experienced" above)."""
+    job = _make_job(seniority="Regular")
+    fill_shelves(job)
+    assert job.seniority == "mid"
+
+    job2 = _make_job(seniority="Lead")
+    fill_shelves(job2)
+    assert job2.seniority is None
+    assert job2.shelf_provenance["seniority"]["raw"] == "Lead"
+
+
+def test_workplace_mode_alias_maps_devitjobs_office_to_onsite():
+    """devitjobs' `workplace` is its OWN closed, structured 3-way field
+    (confirmed live 2026-08-17: {office: 2248, hybrid: 207, remote: 160}
+    across 2,615 postings, 100% fill). "office" is devitjobs' own word for
+    on-site attendance — the field's only non-remote, non-hybrid member, so
+    the synonym is unambiguous, not a guess."""
+    job = _make_job(workplace_mode="office")
+    fill_shelves(job)
+    assert job.workplace_mode == "onsite"
+
+
+def test_category_alias_maps_personios_it_software_bucket():
+    """Personio's `<occupationCategory>` "it_software" is its own closed
+    umbrella for every software role (confirmed live 2026-08-17 across 8
+    boards — the single most common bucket on 6 of them)."""
+    job = _make_job(category="it_software")
+    fill_shelves(job)
+    assert job.category == "software_engineering"
+
+
+def test_category_alias_maps_recruitees_legal_services_and_hr():
+    """Recruitee's `category_code` "legal_services"/"recruitment_hr"
+    (confirmed live 2026-08-17, transperfect board) are unambiguous 1:1
+    synonyms; "engineering"/"information_technology" from the SAME field
+    are deliberately left unmapped — Recruitee spans every industry, so
+    "engineering" there is not always software (rule #29)."""
+    job = _make_job(category="legal_services")
+    fill_shelves(job)
+    assert job.category == "legal"
+
+    job2 = _make_job(category="engineering")
+    fill_shelves(job2)
+    assert job2.category is None
+
+
+# ---------------------------------------------------------------------------
+# 2c. Pillar 3 VOCABULARY batch — the seniority and category shelves read
+# 0.0% on ALL 39 sources in the 2,772-job baseline run (2026-08-17), and
+# workplace_mode/visa_status were near-zero. The cause was NOT missing data:
+# the values arrived and the gate honestly recorded absent/not_mapped with
+# the raw string kept. These tables are that harvest, verbatim — every
+# string below was read off a real payload (the baseline DB's provenance,
+# plus live re-probes of themuse / weworkremotely / workable / nofluffjobs /
+# recruitee / remotive / jobicy, whose source-side mapping landed after the
+# baseline run).
+#
+# Each table is (raw_value, expected_enum_or_None, where_it_came_from).
+# `None` means "deliberately unmapped": rule #29 — a wrong enum is worse
+# than an empty shelf, because JOB SOURCE ENRICHMENT caches it and it
+# mis-ranks jobs forever. The raw value must survive in provenance either
+# way, which is what made THIS gap findable and must keep the next one
+# findable.
+# ---------------------------------------------------------------------------
+
+_EMPLOYMENT_TYPE_HARVEST = [
+    # (raw, expected, source it was observed on)
+    ("Permanent - Full Time", "full_time", "pinpoint (156 rows)"),
+    ("Permanent - Part Time", "part_time", "pinpoint (14 rows)"),
+    ("Permanent", "full_time", "pinpoint (121) / lever (30) / nhs_jobs (4)"),
+    ("Fixed Term - Full Time", "contract", "pinpoint (9 rows)"),
+    ("Fixed Term - Part Time", "contract", "pinpoint (2 rows)"),
+    ("Fixed Term Contract", "contract", "pinpoint (6 rows)"),
+    ("Seasonal - Full Time", "temporary", "pinpoint (2 rows)"),
+    ("Apprentice", "apprenticeship", "pinpoint (1 row)"),
+    ("Full time role", "full_time", "climatebase (22 rows)"),
+    ("Full–time", "full_time", "google_jobs EN DASH (32 rows)"),
+    ("Contractor", "contract", "google_jobs (3 rows)"),
+    ("FullTime", "full_time", "ashby (37 rows)"),
+    ("fulltime", "full_time", "indeed (104) / recruitee"),
+    ("parttime", "part_time", "indeed (1 row)"),
+    ("fulltime_permanent", "full_time", "recruitee (482 rows)"),
+    ("parttime_fixed_term", "contract", "recruitee (23 rows)"),
+    ("freelance", "freelance", "recruitee (91 rows)"),
+    ("Full-Time", "full_time", "weworkremotely (95 rows)"),
+    ("Contract", "contract", "weworkremotely (5 rows)"),
+    ("Full-time", "full_time", "workable (35 rows)"),
+    ("permanent", "full_time", "adzuna (41) / personio (30)"),
+    ("fixed_term", "contract", "personio (1 row)"),
+    # --- deliberately NOT mapped ---
+    # A multi-value list cannot land in a single-valued shelf honestly.
+    ("Full–time and Contractor", None, "google_jobs (3 rows)"),
+    ("parttime, fulltime", None, "indeed (1 row)"),
+    ("temporary, parttime, fulltime, volunteer, internship", None, "indeed (1)"),
+    ("Full Time Contractor", None, "lever (1 row)"),
+    # NHS/care "Bank" is a staffing-pool concept, not an hours or duration
+    # statement — bank contracts can run for years.
+    ("Bank", None, "nhs_jobs (3) / pinpoint (10)"),
+    # Zero-hours says nothing about full/part time OR duration.
+    ("Zero Hours", None, "pinpoint (3 rows)"),
+    # Volunteering is unpaid — none of the seven paid types fit.
+    ("Volunteer", None, "pinpoint (1 row)"),
+    # "Other" is the source saying it does not know.
+    ("Other", None, "workable (3 rows)"),
+]
+
+_SENIORITY_HARVEST = [
+    ("Junior (1-4 years experience)", "junior", "eightykhours (36 rows)"),
+    ("Mid (5-9 years experience)", "mid", "eightykhours (34 rows)"),
+    ("Senior (10+ years experience)", "senior", "eightykhours (2 rows)"),
+    ("Entry-level", "junior", "eightykhours (3) / personio (6)"),
+    ("Entry level", "junior", "workable (10 rows)"),
+    ("Associate", "junior", "workable (12 rows)"),
+    ("Director", "director", "workable (1 row)"),
+    ("entry_level", "junior", "recruitee (435 rows)"),
+    ("mid_level", "mid", "recruitee (221 rows)"),
+    ("student_school", "intern", "recruitee (24 rows)"),
+    ("executive", "director", "recruitee (2) / personio (2)"),
+    ("Senior", "senior", "nofluffjobs (13,106 rows)"),
+    ("Mid", "mid", "nofluffjobs (7,261 rows)"),
+    ("Junior", "junior", "nofluffjobs (692 rows)"),
+    ("Trainee", "intern", "nofluffjobs (31 rows)"),
+    ("Midweight", "mid", "jobicy jobLevel (live 2026-08-17)"),
+    # --- deliberately NOT mapped ---
+    # DfE apprenticeship COURSE levels, not a professional ladder: an
+    # "Advanced" apprenticeship is still someone's first job, and a global
+    # alias would poison every other source that means senior by "Advanced".
+    ("Intermediate", None, "gov_apprenticeships (49 rows)"),
+    ("Advanced", None, "gov_apprenticeships (92 rows)"),
+    ("Higher", None, "gov_apprenticeships (13 rows)"),
+    ("Degree", None, "gov_apprenticeships (2 rows)"),
+    # Fuses two of our tiers into one bucket — either choice is a coin flip.
+    ("Mid-Senior level", None, "workable (42 rows)"),
+    ("experienced", None, "recruitee (164) / personio (28)"),
+    ("Expert", None, "nofluffjobs (706 rows)"),
+    # A corporate-management ladder, not the IC ladder this enum encodes.
+    ("manager", None, "recruitee (2 rows)"),
+    ("senior_manager", None, "recruitee (11 rows)"),
+    ("senior_executive", None, "recruitee (3 rows)"),
+    # The ad itself says the level is not one value.
+    ("Multiple experience levels", None, "eightykhours (7 rows)"),
+]
+
+_WORKPLACE_MODE_HARVEST = [
+    ("In-person", "onsite", "climatebase (16 rows)"),
+    ("Remote", "remote", "climatebase (6 rows)"),
+    ("OnSite", "onsite", "ashby"),
+    ("office", "onsite", "devitjobs (2,248 rows)"),
+    ("hybrid", "hybrid", "devitjobs (207 rows)"),
+]
+
+_CATEGORY_HARVEST = [
+    # TheMuse `categories[0].name`
+    ("Software Engineering", "software_engineering", "themuse"),
+    ("Data and Analytics", "data_science", "themuse"),
+    ("Human Resources and Recruitment", "hr_people", "themuse"),
+    ("Business Operations", "operations", "themuse"),
+    ("Design and UX", "design", "themuse"),
+    ("Legal Services", "legal", "themuse / recruitee"),
+    ("Sales", "sales", "themuse (9 rows) / jobicy (19 rows)"),
+    # WeWorkRemotely RSS <category> (10 fixed board sections)
+    ("Full-Stack Programming", "software_engineering", "weworkremotely"),
+    ("Front-End Programming", "software_engineering", "weworkremotely"),
+    ("Back-End Programming", "software_engineering", "weworkremotely"),
+    ("DevOps and Sysadmin", "devops_infrastructure", "weworkremotely"),
+    ("Product", "product_management", "weworkremotely"),
+    ("Design", "design", "weworkremotely"),
+    ("All Other Remote", "other", "weworkremotely — its own catch-all"),
+    # NoFluffJobs `category` (own 36-value closed IT taxonomy)
+    ("backend", "software_engineering", "nofluffjobs (3,453 rows)"),
+    ("frontend", "software_engineering", "nofluffjobs (486 rows)"),
+    ("fullstack", "software_engineering", "nofluffjobs (1,312 rows)"),
+    ("mobile", "software_engineering", "nofluffjobs (465 rows)"),
+    ("gameDev", "software_engineering", "nofluffjobs (17 rows)"),
+    ("artificialIntelligence", "machine_learning", "nofluffjobs (1,168 rows)"),
+    ("devops", "devops_infrastructure", "nofluffjobs (1,435 rows)"),
+    ("sysAdministrator", "devops_infrastructure", "nofluffjobs (308 rows)"),
+    ("data", "data_science", "nofluffjobs (2,805 rows)"),
+    ("productManagement", "product_management", "nofluffjobs (537 rows)"),
+    ("ux", "design", "nofluffjobs (331 rows)"),
+    ("hr", "hr_people", "nofluffjobs (187 rows)"),
+    ("law", "legal", "nofluffjobs (3 rows)"),
+    ("logistics", "operations", "nofluffjobs (71) / recruitee (1)"),
+    ("other", "other", "nofluffjobs (550 rows) — exact enum member"),
+    # Recruitee `category_code`
+    ("marketing_pr", "marketing", "recruitee (32 rows)"),
+    ("accountancy", "finance", "recruitee (4 rows)"),
+    ("recruitment_hr", "hr_people", "recruitee (16 rows)"),
+    ("education", "education", "recruitee (11 rows)"),
+    ("healthcare", "healthcare", "recruitee (1 row)"),
+    # Remotive `category`
+    ("Software Development", "software_engineering", "remotive"),
+    ("All others", "other", "remotive — its own catch-all"),
+    ("Medical", "healthcare", "remotive"),
+    # Jobicy `jobIndustry` (unescaped by the source — the feed sends &amp;)
+    ("Data Science & Analytics", "data_science", "jobicy (2 rows)"),
+    ("DevOps & Infrastructure", "devops_infrastructure", "jobicy (1 row)"),
+    ("Finance & Accounting", "finance", "jobicy (2 rows)"),
+    ("Healthcare & Medical", "healthcare", "jobicy (2 rows)"),
+    # Adzuna — the ampersand spellings still work after the "&"->"and" pass
+    ("Healthcare & Nursing Jobs", "healthcare", "adzuna"),
+    ("Marketing & PR Jobs", "marketing", "adzuna"),
+    ("Accounting & Finance Jobs", "finance", "adzuna"),
+    ("HR & Recruitment Jobs", "hr_people", "adzuna"),
+    ("Creative & Design Jobs", "design", "adzuna"),
+    # --- deliberately NOT mapped ---
+    # Spans software_engineering / devops_infrastructure / data_science.
+    ("IT Jobs", None, "adzuna (102 rows)"),
+    ("Information Technology", None, "remotive / recruitee"),
+    ("Digital", None, "gov_apprenticeships route"),
+    # "Engineering" on a general board is anything from software to
+    # mechanical; a shared alias table cannot mean both.
+    ("Engineering Jobs", None, "adzuna (10 rows)"),
+    ("Engineering", None, "workable function (18 rows)"),
+    ("Science and Engineering", None, "themuse (4 rows)"),
+    # Each of these fuses two of our members into one bucket.
+    ("Sales and Marketing", None, "weworkremotely"),
+    ("Management and Finance", None, "weworkremotely"),
+    ("Marketing & Sales", None, "jobicy (3 rows)"),
+    ("Product & Operations", None, "jobicy (2 rows)"),
+    ("Project & Program Management", None, "jobicy (1 row)"),
+    # Real disciplines this 16-way taxonomy simply has no member for.
+    ("Trade & Construction Jobs", None, "adzuna (1 row)"),
+    ("Construction", None, "themuse (2 rows)"),
+    ("Real Estate", None, "themuse (1 row)"),
+    ("Customer Support", None, "weworkremotely"),
+    ("Customer Service", None, "remotive"),
+    ("Writing", None, "remotive (2 rows)"),
+    ("Cybersecurity", None, "jobicy (3 rows)"),
+    ("security", None, "nofluffjobs (881 rows)"),
+    ("testing", None, "nofluffjobs (1,282 rows)"),
+    ("businessIntelligence", None, "nofluffjobs (112 rows)"),
+    ("retail", None, "recruitee (174 rows)"),
+    # Project management is NOT product management.
+    ("Project Management", None, "themuse (1 row)"),
+    # Spans sales and operations depending on the company.
+    ("Account Management", None, "themuse (2 rows, live 2026-08-17)"),
+    ("projectManager", None, "nofluffjobs (892 rows)"),
+    # On an IT board "architecture" means software; on a general board it
+    # means buildings. One shared table cannot honestly mean both.
+    ("architecture", None, "nofluffjobs (887 rows)"),
+]
+
+
+@pytest.mark.parametrize(
+    "shelf,table",
+    [
+        ("employment_type", _EMPLOYMENT_TYPE_HARVEST),
+        ("seniority", _SENIORITY_HARVEST),
+        ("workplace_mode", _WORKPLACE_MODE_HARVEST),
+        ("category", _CATEGORY_HARVEST),
+    ],
+)
+def test_harvested_vocabulary_normalises_to_the_right_enum(shelf, table):
+    """Every raw string a real source really sent lands on the enum member a
+    human signed off on — or stays honestly UNSET.
+
+    Failures are printed with the source they came from, because that is the
+    thing you need to re-probe when an upstream changes its vocabulary.
+    """
+    wrong = []
+    for raw, expected, origin in table:
+        job = _make_job(**{shelf: raw})
+        fill_shelves(job)
+        actual = getattr(job, shelf)
+        if actual != expected:
+            wrong.append(f"{shelf}={raw!r} ({origin}): expected {expected!r}, got {actual!r}")
+    assert not wrong, "\n".join(wrong)
+
+
+@pytest.mark.parametrize(
+    "shelf,table",
+    [
+        ("employment_type", _EMPLOYMENT_TYPE_HARVEST),
+        ("seniority", _SENIORITY_HARVEST),
+        ("workplace_mode", _WORKPLACE_MODE_HARVEST),
+        ("category", _CATEGORY_HARVEST),
+    ],
+)
+def test_harvested_vocabulary_always_keeps_the_raw_value(shelf, table):
+    """MAPPED OR NOT, the raw string survives in provenance.
+
+    That is the whole reason this batch was findable: the 0.0% shelves were
+    not silent, they were recorded as absent/not_mapped WITH the exact string
+    that failed. A mapped value keeps its raw too whenever the raw differs
+    from the normalised value.
+    """
+    missing = []
+    for raw, expected, origin in table:
+        job = _make_job(**{shelf: raw})
+        fill_shelves(job)
+        entry = job.shelf_provenance[shelf]
+        if expected is None:
+            if entry.get("how") != "absent" or entry.get("why") != "not_mapped":
+                missing.append(f"{shelf}={raw!r} ({origin}): not typed absent/not_mapped: {entry}")
+            elif entry.get("raw") != raw:
+                missing.append(f"{shelf}={raw!r} ({origin}): raw lost: {entry}")
+        else:
+            if entry.get("how") != "source":
+                missing.append(f"{shelf}={raw!r} ({origin}): not typed source: {entry}")
+            elif raw != expected and entry.get("raw") != raw:
+                missing.append(f"{shelf}={raw!r} ({origin}): raw lost: {entry}")
+    assert not missing, "\n".join(missing)
+
+
+def test_an_unknown_value_lands_absent_with_its_raw_not_coerced():
+    """The contract for a vocabulary NOBODY has taught the gate: never
+    coerced into the nearest enum, never the literal "unknown", never
+    dropped. Absent, with the raw string kept for the next harvest."""
+    for shelf in ("employment_type", "seniority", "workplace_mode", "category"):
+        job = _make_job(**{shelf: "Gluten Free Wizardry (Tier 9)"})
+        fill_shelves(job)
+        assert getattr(job, shelf) is None, shelf
+        entry = job.shelf_provenance[shelf]
+        assert entry["how"] == "absent", shelf
+        assert entry["why"] == "not_mapped", shelf
+        assert entry["raw"] == "Gluten Free Wizardry (Tier 9)", shelf
+
+
+def test_a_trailing_parenthetical_is_a_qualifier_not_the_value():
+    """80,000 Hours writes three spellings of three words the gate already
+    knows ("Junior (1-4 years experience)"). Stripping the bracket is a
+    SEPARATOR rule, so whatever is left must STILL match a real member —
+    a bracketed value with no honest target is untouched by it."""
+    job = _make_job(seniority="Mid (5-9 years experience)")
+    fill_shelves(job)
+    assert job.seniority == "mid"
+    assert job.shelf_provenance["seniority"]["raw"] == "Mid (5-9 years experience)"
+
+    job2 = _make_job(seniority="Wizard (all levels)")
+    fill_shelves(job2)
+    assert job2.seniority is None
+
+
+def test_ampersand_and_and_are_not_two_different_table_rows():
+    """"Data Science & Analytics" (jobicy) and "Data and Analytics"
+    (themuse) are the same words with different punctuation — one alias row
+    covers both because "&" is normalised to "and" before lookup."""
+    for raw in ("Data Science & Analytics", "Data Science and Analytics"):
+        job = _make_job(category=raw)
+        fill_shelves(job)
+        assert job.category == "data_science", raw
+
+
 def test_visa_unknown_is_a_real_absent_value_not_a_missing_one():
     """Rule #31: `unknown` IS the third visa state, stored as a literal
     value — but its provenance `how` is still "absent" (the ad never said),
@@ -126,6 +634,39 @@ def test_visa_unknown_is_a_real_absent_value_not_a_missing_one():
 
     assert job.visa_status == "unknown"
     assert job.shelf_provenance["visa_status"] == {"how": "absent", "why": "not_stated"}
+
+
+def test_visa_status_prefers_a_structured_source_signal_over_free_text():
+    """A source that sets `job.visa_status` to a raw structured verdict
+    (devitjobs.py's `hasVisaSponsorship`, "Yes"/"No") BEFORE the gate runs
+    must win over the free-text detector, not be silently clobbered by it —
+    `detect_visa_status`'s `enrichment_value` param existed for exactly this
+    and was never wired until now. Description text says nothing either way,
+    so a text-only detector would call this "unknown"."""
+    job = _make_job(
+        description="We are hiring a great engineer to join our team.",
+        visa_status="Yes",
+    )
+    fill_shelves(job)
+    assert job.visa_status == "sponsors"
+    assert job.shelf_provenance["visa_status"]["how"] == "source"
+
+    job2 = _make_job(
+        description="We are hiring a great engineer to join our team.",
+        visa_status="No",
+    )
+    fill_shelves(job2)
+    assert job2.visa_status == "no_sponsorship"
+    assert job2.shelf_provenance["visa_status"]["how"] == "source"
+
+
+def test_visa_status_with_no_structured_signal_falls_back_to_free_text():
+    """A source that never sets `job.visa_status` (the vast majority today)
+    must degrade to EXACTLY the old free-text-only behaviour."""
+    job = _make_job(description="Visa sponsorship is available for this role.")
+    fill_shelves(job)
+    assert job.visa_status == "sponsors"
+    assert job.shelf_provenance["visa_status"]["how"] == "derived"
 
 
 # ---------------------------------------------------------------------------

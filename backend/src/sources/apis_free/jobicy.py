@@ -1,3 +1,4 @@
+import html
 import logging
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -44,6 +45,21 @@ class JobicySource(BaseJobSource):
             job_type_list = item.get("jobType")
             employment_type = job_type_list[0] if isinstance(job_type_list, list) and job_type_list else job_type_list
 
+            # `jobIndustry` (100% fill live 2026-08-17, e.g. "Software
+            # Engineering", "Data Science &amp; Analytics", "Sales") is
+            # Jobicy's OWN closed industry list -- the same concept as the
+            # JobCategory shelf, unread until now. Two transport details, not
+            # normalisation: it arrives as a list of one (same shape as
+            # `jobType` above), and the feed HTML-escapes the ampersand, so
+            # the raw value has to be unescaped before it is a real string.
+            industry_list = item.get("jobIndustry")
+            industry = (
+                industry_list[0]
+                if isinstance(industry_list, list) and industry_list
+                else industry_list
+            )
+            category = html.unescape(str(industry)) if industry else None
+
             jobs.append(Job(
                 title=title,
                 company=item.get("companyName", ""),
@@ -62,9 +78,15 @@ class JobicySource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_pub,
-                # `jobLevel` (100% fill, e.g. "Senior").
+                # `jobLevel` (100% fill live, e.g. "Senior") feeds BOTH the
+                # legacy free-text `experience_level` (unchanged) AND the
+                # closed-enum `seniority` shelf (new) -- same raw string, two
+                # different Job fields, dumb pass-through either way; the
+                # gate's closed-set matcher decides whether the token lands.
                 experience_level=item.get("jobLevel", ""),
+                seniority=item.get("jobLevel"),
                 employment_type=employment_type,
+                category=category,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Jobicy: found %s relevant jobs", len(jobs))

@@ -121,6 +121,11 @@ class AshbySource(BaseJobSource):
                     # Raw upstream value ("FullTime"/"PartTime"/"Contract"/...)
                     # — services/shelf_gate.py owns normalising it.
                     employment_type=item.get("employmentType"),
+                    # `workplaceType` ("Remote"/"Hybrid"/"OnSite") was fetched
+                    # in every response already but never read onto the Job
+                    # (verified live 2026-08-17, cohere board: 139/144 filled,
+                    # 5 None) — shelf_gate.py owns normalising the PascalCase.
+                    workplace_mode=item.get("workplaceType"),
                     salary_min=salary_min,
                     salary_max=salary_max,
                     salary_currency=salary_currency,

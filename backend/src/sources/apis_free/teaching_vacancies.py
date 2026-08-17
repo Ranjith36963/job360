@@ -5,14 +5,46 @@ Licence: Open Government Licence v3.0. No auth required.
 No documented rate limit — be polite (polled on the 15-min RSS tier).
 """
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.teaching_vacancies")
+
+# baseSalary.value.value is FREE-TEXT prose (confirmed live 2026-08-17), e.g.
+# "Salary: Support Staff Pay Scale F: £25,120 to £27,249 pro-rata per annum
+# (Actual) (£28,598 - £31,022 full time/full year equivalent)" -- a naive
+# "grab the first two numbers" parser would read the PRO-RATA figure as the
+# full-time one, or vice versa. That is a WRONG number, worse than none
+# (rule #29). These two patterns only match a string that is JUST the number
+# (or range) and nothing else -- any surrounding words (Actual, FTE, pro
+# rata, pay-award caveats) fail the full-string match and the shelf stays
+# UNSET rather than guessed. Measured live: 13/100 sampled jobs are this
+# clean (a real, if modest, gain from an always-0% baseline).
+_SALARY_RANGE_RE = re.compile(
+    r"^£([\d,]+(?:\.\d+)?)\s*(?:-|–|to)\s*£([\d,]+(?:\.\d+)?)$", re.IGNORECASE
+)
+_SALARY_HOURLY_RE = re.compile(r"^£([\d.]+)\s*per hour$", re.IGNORECASE)
+
+
+def _parse_clean_salary_text(text: str) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Returns (min, max, period) for an UNAMBIGUOUS salary string, else
+    (None, None, None). Never guesses at anything with extra prose."""
+    text = text.strip()
+    m = _SALARY_RANGE_RE.match(text)
+    if m:
+        lo = float(m.group(1).replace(",", ""))
+        hi = float(m.group(2).replace(",", ""))
+        return min(lo, hi), max(lo, hi), None
+    m = _SALARY_HOURLY_RE.match(text)
+    if m:
+        val = float(m.group(1))
+        return val, None, "hourly"
+    return None, None, None
 
 # Hard cap on pages fetched per run. Live catalog is ~3,900 jobs across ~39
 # pages of 100 (meta.count / meta.totalPages, verified live 2026-08-08); the
@@ -81,10 +113,25 @@ class TeachingVacanciesSource(BaseJobSource):
 
             # validThrough (schema.org JobPosting deadline field, 100% fill
             # live) is the listing's own application deadline — distinct
-            # from datePosted. baseSalary also exists (89% fill) but its
-            # value is free-text prose, not a clean number, so it is
-            # deliberately NOT parsed here — a fragile prose parser is worse
-            # than no salary.
+            # from datePosted. baseSalary's value is USUALLY free-text prose
+            # (see _parse_clean_salary_text above) -- only the unambiguous
+            # subset gets parsed; everything else stays UNSET rather than
+            # risk a wrong number.
+            raw_base_salary = item.get("baseSalary") or {}
+            raw_salary_value = (
+                raw_base_salary.get("value") if isinstance(raw_base_salary, dict) else None
+            )
+            raw_salary_text = (
+                raw_salary_value.get("value")
+                if isinstance(raw_salary_value, dict)
+                else (raw_salary_value if isinstance(raw_salary_value, str) else None)
+            )
+            salary_min = salary_max = None
+            salary_period = None
+            if raw_salary_text:
+                salary_min, salary_max, salary_period = _parse_clean_salary_text(raw_salary_text)
+            salary_currency = "GBP" if salary_min is not None or salary_max is not None else None
+
             raw_valid_through = item.get("validThrough")
             deadline_iso, deadline_confidence = normalize_posted_at(raw_valid_through)
             deadline = deadline_iso[:10] if deadline_confidence == "high" and deadline_iso else None
@@ -116,6 +163,10 @@ class TeachingVacanciesSource(BaseJobSource):
                 deadline=deadline,
                 deadline_source=deadline_source,
                 employment_type=employment_type,
+                salary_min=salary_min,
+                salary_max=salary_max,
+                salary_period=salary_period,
+                salary_currency=salary_currency,
             ))
 
         logger.info("TeachingVacancies: found %s relevant jobs", len(results))

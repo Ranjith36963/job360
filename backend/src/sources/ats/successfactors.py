@@ -16,6 +16,7 @@ from src.core.companies import SUCCESSFACTORS_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.successfactors")
 
@@ -73,7 +74,34 @@ def _extract_from_jsonld(page_html):
     else:
         employment_type = None
 
-    return {"location": location or None, "description": description, "employment_type": employment_type}
+    # `datePosted` is a standard schema.org JobPosting field present on
+    # every BAE-template page (confirmed live 2026-08-17, 6/8 sampled pages
+    # — 2 pages had no JSON-LD at all, a different template) and was never
+    # read; `posted_at` was hardcoded to None for this whole source.
+    date_posted = data.get("datePosted") or None
+    # `baseSalary` is the standard schema.org field for this too — verified
+    # live as always null on BAE (0/8 sampled), so this stays absent for
+    # that vendor, but the extraction is generic across any JSON-LD-emitting
+    # SuccessFactors tenant that DOES populate it.
+    base_salary = data.get("baseSalary")
+    salary_min = salary_max = salary_currency = None
+    if isinstance(base_salary, dict):
+        value = base_salary.get("value")
+        currency = base_salary.get("currency")
+        if isinstance(value, dict):
+            salary_min = value.get("minValue")
+            salary_max = value.get("maxValue")
+        salary_currency = currency
+
+    return {
+        "location": location or None,
+        "description": description,
+        "employment_type": employment_type,
+        "date_posted": date_posted,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "salary_currency": salary_currency,
+    }
 
 
 def _extract_from_microdata(page_html):
@@ -196,6 +224,11 @@ class SuccessFactorsSource(BaseJobSource):
             if not _is_uk_or_remote(country_segment):
                 continue
 
+            raw_date_posted = extracted.get("date_posted")
+            posted_at, date_confidence = (None, "low")
+            if raw_date_posted:
+                posted_at, date_confidence = normalize_posted_at(raw_date_posted)
+
             jobs.append(Job(
                 title=title,
                 company=company_name,
@@ -204,10 +237,13 @@ class SuccessFactorsSource(BaseJobSource):
                 apply_url=loc,
                 source=self.name,
                 date_found=now,
-                posted_at=None,
-                date_confidence="low",
-                date_posted_raw=None,
+                posted_at=posted_at,
+                date_confidence=date_confidence,
+                date_posted_raw=raw_date_posted,
                 employment_type=extracted.get("employment_type"),
+                salary_min=extracted.get("salary_min"),
+                salary_max=extracted.get("salary_max"),
+                salary_currency=extracted.get("salary_currency"),
             ))
 
         return jobs

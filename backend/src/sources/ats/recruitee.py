@@ -35,6 +35,22 @@ def _coerce_salary(value: Any) -> Optional[float]:
         return None
 
 
+def _workplace_mode_from_offer(item: dict) -> Optional[str]:
+    """Recruitee's own `remote`/`hybrid`/`on_site` booleans (confirmed live
+    2026-08-17, transperfect board: 81 remote / 109 hybrid / 436 on_site out
+    of 591) form a genuine closed 3-state field the source itself defines —
+    translating it to our single workplace_mode shelf is a literal read of
+    the source's own classification, not a guess.
+    """
+    if item.get("remote") is True:
+        return "remote"
+    if item.get("hybrid") is True:
+        return "hybrid"
+    if item.get("on_site") is True:
+        return "onsite"
+    return None
+
+
 class RecruiteeSource(BaseJobSource):
     name = "recruitee"
     category = "ats"
@@ -113,6 +129,18 @@ class RecruiteeSource(BaseJobSource):
                     # UK/remote rows) and was never read — raw value, the gate
                     # owns normalising it against the closed seniority enum.
                     seniority=item.get("experience_code"),
+                    # `employment_type_code` (fulltime_permanent/parttime_
+                    # fixed_term/contract/freelance/internship/...) is
+                    # Recruitee's OWN compound closed vocabulary, verified
+                    # live 2026-08-17 across 5 boards, and was never read at
+                    # all — this was a pure gap, not a normalisation miss.
+                    employment_type=item.get("employment_type_code"),
+                    # `category_code` (sales/design/healthcare/legal_
+                    # services/...) is Recruitee's own industry taxonomy,
+                    # verified live 2026-08-17 (transperfect: 30 distinct
+                    # codes across 591 offers) and was never read.
+                    category=item.get("category_code"),
+                    workplace_mode=_workplace_mode_from_offer(item),
                 ))
         logger.info("Recruitee: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

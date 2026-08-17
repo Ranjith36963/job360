@@ -163,6 +163,11 @@ class WorkdaySource(BaseJobSource):
                         date_posted_raw=posted_on or None,
                         deadline=deadline,
                         deadline_source=deadline_source,
+                        # `timeType` ("Full time") is on every SEARCH-result
+                        # item already — verified live 2026-08-17
+                        # (astrazeneca board: 20/20) — no extra request.
+                        # Raw value; shelf_gate.py owns normalising it.
+                        employment_type=item.get("timeType"),
                     ))
 
         logger.info("Workday: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

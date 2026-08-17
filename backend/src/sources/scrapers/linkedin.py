@@ -24,7 +24,19 @@ _JOB_CARD_RE = re.compile(
     re.DOTALL,
 )
 _TITLE_RE = re.compile(r'<h3[^>]*class="[^"]*base-search-card__title[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
-_COMPANY_RE = re.compile(r'<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
+# The company name sits inside a NESTED <a class="hidden-nested-link">...</a>
+# inside the <h4> (confirmed live 2026-08-17: `<h4 class="...subtitle">\n  \n
+# <a ... href="...linkedin.com/company/...">Accenture UK & Ireland</a>`). The
+# old pattern captured straight after the <h4> tag's own '>', so `[^<]+`
+# matched only the whitespace before the nested <a> and every job on this
+# source stored company="Unknown" (Job._clean_company's empty-string
+# sentinel) -- confirmed live: 10/10 cards, 0 real names. The optional
+# `(?:<a[^>]*>)?` skips past that nested anchor when present and still
+# matches the older flat-text markup when it is not.
+_COMPANY_RE = re.compile(
+    r'<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[^>]*>\s*(?:<a[^>]*>)?\s*([^<]+)',
+    re.IGNORECASE,
+)
 _LOCATION_RE = re.compile(r'<span[^>]*class="[^"]*job-search-card__location[^"]*"[^>]*>\s*([^<]+)', re.IGNORECASE)
 _LINK_RE = re.compile(r'href="(https://[^"]*linkedin\.com/jobs/view/[^"]*)"', re.IGNORECASE)
 # Each result card carries a <time datetime="YYYY-MM-DD"> -- the real posting

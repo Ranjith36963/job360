@@ -98,6 +98,18 @@ class DevITJobsSource(BaseJobSource):
             techs = [str(t) for t in (item.get("technologies") or []) if t]
             if techs:
                 desc_bits.append("Technologies: " + ", ".join(techs))
+            # `technologies` (99% fill) + `filterTags` (99.7% fill) were only
+            # ever folded into the composed description string above -- the
+            # job's own vocabulary was thrown away as prose instead of
+            # reaching source_tags (the skills shelf) as structured data.
+            # Deduped, order-preserving union; raw strings only, no guessing.
+            source_tags: list[str] = []
+            _seen_tags: set[str] = set()
+            for t in techs + [str(x) for x in (item.get("filterTags") or []) if x]:
+                key = t.lower()
+                if t and key not in _seen_tags:
+                    source_tags.append(t)
+                    _seen_tags.add(key)
             tags = [str(t).replace("-", " ") for t in (item.get("filterTags") or []) if t]
             if tags:
                 desc_bits.append("Tags: " + ", ".join(tags))
@@ -147,6 +159,11 @@ class DevITJobsSource(BaseJobSource):
                 visa_status=has_visa_sponsorship_raw,
                 employment_type=item.get("jobType"),
                 workplace_mode=item.get("workplace"),
+                # `expLevel` (100% fill) already fed the legacy free-text
+                # `experience_level` above; also feeds the closed-enum
+                # `seniority` shelf, same raw string, no interpretation.
+                seniority=exp_level or None,
+                source_tags=source_tags,
             ))
 
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]

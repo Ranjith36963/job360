@@ -108,6 +108,30 @@ class PersonioSource(BaseJobSource):
             seniority = (position.findtext("seniority") or "").strip()
             employment_type = (position.findtext("employmentType") or "").strip()
             created_at_raw = (position.findtext("createdAt") or "").strip() or None
+            # `<schedule>` ("full-time"/"part-time") is a SEPARATE field from
+            # `<employmentType>` ("permanent"/"temporary"/"fixed_term"/
+            # "intern"/"working_student") — the former is hours, the latter
+            # is contract nature (verified live 2026-08-17, flatpay feed).
+            # `<employmentType>` "permanent" carries no hours signal of its
+            # own, so when that is the value, prefer the direct full-time/
+            # part-time read instead of the gate's "permanent"->full_time
+            # approximation — a permanent PART-TIME role must not be
+            # reported full_time. Any other employmentType value (intern,
+            # fixed_term, temporary, working_student) is more informative
+            # than hours and is left as-is for the gate to translate.
+            schedule = (position.findtext("schedule") or "").strip()
+            if employment_type.lower() == "permanent" and schedule:
+                employment_type = schedule
+            # `<keywords>` is a comma-separated skills list, confirmed live
+            # 2026-08-17 (flatpay: 79/122 filled, e.g. "People,Operations,
+            # Human Resources,Fintech,HR") and never read before.
+            keywords_raw = (position.findtext("keywords") or "").strip()
+            source_tags = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+            # `<occupationCategory>` ("it_software"/"human_resources"/...) is
+            # Personio's own closed job-function taxonomy, confirmed live
+            # 2026-08-17 across 8 boards, and never read before —
+            # shelf_gate.py's alias table maps the unambiguous members.
+            occupation_category = (position.findtext("occupationCategory") or "").strip() or None
 
             # Get job descriptions
             desc_elem = position.find("jobDescriptions")
@@ -155,6 +179,8 @@ class PersonioSource(BaseJobSource):
                 salary_max=salary_max,
                 salary_currency=salary_currency,
                 salary_period=salary_period,
+                source_tags=source_tags,
+                category=occupation_category,
             ))
 
         return jobs

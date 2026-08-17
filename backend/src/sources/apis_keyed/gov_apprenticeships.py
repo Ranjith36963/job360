@@ -170,6 +170,14 @@ class GovApprenticeshipsSource(BaseJobSource):
         raw_posted = item.get("postedDate")
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # `course.route` (one of DfE's 15 published "apprenticeship standard
+        # routes" — "Digital", "Education and childcare", "Construction"...,
+        # a genuinely CLOSED set) sits on this same item, unread until now.
+        # Raw text only; shelf_gate.py's category alias table (rule #30 —
+        # closed sets may be enumerated) maps the ones it can do honestly.
+        course = item.get("course")
+        route = course.get("route") if isinstance(course, dict) else None
+
         return Job(
             title=item.get("title", ""),
             company=item.get("employerName", "") or "Unknown",
@@ -191,6 +199,15 @@ class GovApprenticeshipsSource(BaseJobSource):
             # sitting on this same item, unread until now. `course.level`
             # (a bare int) is also available but not mapped here — one raw
             # signal per field, and this one is the more directly
-            # seniority-shaped of the two.
+            # seniority-shaped of the two. NOTE (Pillar 3 batch, this
+            # worker): confirmed live 2026-08-17 that none of the 4 values
+            # ("Intermediate"/"Advanced"/"Higher"/"Degree") ever match
+            # SeniorityLevel's junior/mid/senior/staff/... ladder — an
+            # apprenticeship LEVEL is a course-complexity axis, not a
+            # professional-seniority axis, and guessing "Advanced" ==
+            # "senior" would be a fabrication (rule #29). Left as-is: the
+            # raw value still lands in provenance as an honest
+            # absent/not_mapped, which is correct, not a bug.
             seniority=item.get("apprenticeshipLevel"),
+            category=str(route) if route else None,
         )

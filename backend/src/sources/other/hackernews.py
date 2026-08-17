@@ -13,6 +13,8 @@ logger = logging.getLogger("job360.sources.hackernews")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _HREF_RE = re.compile(r'href="([^"]+)"')
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
+# Where a HN comment's header line ends and its prose begins.
+_PARA_BREAK_RE = re.compile(r"<p>|<br\s*/?>", re.IGNORECASE)
 
 def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     """Parse a HN 'Who is Hiring' comment into job fields.
@@ -86,12 +88,41 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     else:
         title = f"{company} - Hiring" if company else "Unknown - Hiring"
 
+    # The 4th pipe-delimited field (Company | Role(s) | Location | Type) is
+    # a poster's own short descriptor -- measured live 2026-08-16: 195/242
+    # comments (81%) carry one, e.g. "Full-time", "ONSITE", "HYBRID",
+    # "Remote". It was parsed into location/title/company and then dropped.
+    # It conflates employment-type words ("Full-time") and workplace-mode
+    # words ("ONSITE"/"HYBRID"/"REMOTE") the same way arbeitnow's job_types
+    # does -- handed to BOTH job.employment_type and job.workplace_mode
+    # below; each field's own closed-enum matcher only accepts its own
+    # vocabulary, so a word that means the other concept just lands as an
+    # honest "not_mapped", never a wrong classification. A short-length
+    # guard (60 chars) keeps out the small share of posts where the 4th
+    # field is actually a prose fragment ("Full Time Join us at Snout...")
+    # rather than a short descriptor.
+    #
+    # It must be read off the HEADER LINE ONLY. A HN comment is
+    # "Company | Role | Location | Type<p>then the prose", and the tag-strip
+    # above turns that <p> into a SPACE, so `parts[3]` is the type word plus
+    # the whole first sentence of the ad ("Remote We are looking for a
+    # machine learning engineer..."). That silently broke the field two ways:
+    # long posts blew the 60-char guard and lost a value they really had, and
+    # short ones ("Full-time Join our team.") kept a value the gate can never
+    # match. Cut at the paragraph break first, then split on pipes.
+    header = _PARA_BREAK_RE.split(unescaped, maxsplit=1)[0]
+    header_clean = _URL_RE.sub(" ", _HTML_TAG_RE.sub(" ", header))
+    header_parts = [p.strip() for p in header_clean.split("|")]
+    type_field = header_parts[3].strip() if len(header_parts) > 3 else ""
+    type_field = type_field if type_field and len(type_field) <= 60 else None
+
     return {
         "company": company,
         "location": location,
         "apply_url": apply_url,
         "description": description,
         "title": title,
+        "type_field": type_field,
     }
 
 class HackerNewsSource(BaseJobSource):
@@ -168,6 +199,8 @@ class HackerNewsSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_created,
+                employment_type=parsed["type_field"],
+                workplace_mode=parsed["type_field"],
             ))
 
         logger.info("HackerNews: found %s relevant jobs", len(jobs))

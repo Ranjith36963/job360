@@ -34,6 +34,16 @@ _SALARY_RE = re.compile(
 _CLOSING_DATE_RE = re.compile(
     r"<h6>\s*Closing date\s*</h6>\s*<p>\s*([^<]+?)\s*</p>", re.IGNORECASE
 )
+# "<h6>Category</h6><p><a href="/job/?category=1">Academic</a></p>" --
+# Cambridge's own job-function taxonomy (confirmed live 2026-08-17: 10/10 on
+# a live sample -- "Academic", "Academic-related", "Assistant staff"...).
+# Unlike Salary/Closing date, the value sits inside a nested <a>, so the
+# optional (?:<a[^>]*>)? / (?:</a>)? skip past it; raw value only, no
+# enum-mapping here.
+_CATEGORY_RE = re.compile(
+    r"<h6>\s*Category\s*</h6>\s*<p>\s*(?:<a[^>]*>)?\s*([^<]+?)\s*(?:</a>)?\s*</p>",
+    re.IGNORECASE,
+)
 # Cambridge renders the closing date as "24 August 2026" -- day, full month
 # name, year. Deliberately its own parser: normalize_posted_at does not
 # recognise month names, and (per models.py / rule #29) a deadline must
@@ -106,6 +116,13 @@ class UniJobsSource(BaseJobSource):
             if closing_dt is not None:
                 job.deadline = closing_dt.date().isoformat()
                 job.deadline_source = "listing"
+                found_any = True
+
+        category_match = _CATEGORY_RE.search(page)
+        if category_match:
+            category_text = category_match.group(1).strip()
+            if category_text:
+                job.category = category_text
                 found_any = True
 
         return found_any

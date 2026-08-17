@@ -28,6 +28,42 @@ _FREQUENCY_MAP = {
     "year": "annual",
 }
 
+# Pinpoint's OWN `employment_type_text` vocabulary is a compound
+# "<contract nature> - <hours>" string (confirmed live 2026-08-17 across 5
+# boards — arm/priorygroup/davies/networkplus/natcen: "Permanent - Full
+# Time", "Fixed Term - Part Time", "Contract / Temp", "Bank", "Zero Hours",
+# "Term Time"). shelf_gate.py's normaliser turns spaces/dashes into a single
+# underscore, so "Permanent - Full Time" collapses to
+# "permanent___full_time" and never matches any EmploymentType member —
+# every non-bare "Full Time"/"Part Time"/"Contract" row was landing as
+# absent/not_mapped despite carrying real data (measured baseline: 12.4%
+# fill on 371 live rows, all from the few boards whose text happened to be
+# bare "Full Time"). This is Pinpoint's own closed-ish vocabulary (same
+# precedent as _FREQUENCY_MAP above), so it is translated here rather than
+# widening the shared gate's separator-collapsing for one source's
+# multi-segment format. "Bank" / "Zero Hours" / "Term Time" are genuine UK
+# contract types with no EmploymentType equivalent — left OUT on purpose
+# (rule #29), not silently forced onto the nearest guess.
+_EMPLOYMENT_TYPE_MAP = {
+    "permanent - full time": "full_time",
+    "permanent - part time": "part_time",
+    "fixed term - full time": "contract",
+    "fixed term - part time": "contract",
+    "fixed term contract": "contract",
+    "full time": "full_time",
+    "part time": "part_time",
+    "contract": "contract",
+    "contract / temp": "contract",
+    "permanent": "full_time",
+}
+
+
+def _normalize_employment_type_text(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return raw
+    key = raw.strip().lower()
+    return _EMPLOYMENT_TYPE_MAP.get(key, raw)
+
 
 def _strip_html(raw: Optional[str]) -> str:
     return _HTML_TAG_RE.sub(" ", raw or "").strip()
@@ -145,8 +181,17 @@ class PinpointSource(BaseJobSource):
                     # "Part time", "Permanent"...); `employment_type` is a
                     # short code. Text reads more reliably against the closed
                     # enum the gate normalises against, so prefer it and fall
-                    # back to the code.
-                    employment_type=item.get("employment_type_text") or item.get("employment_type"),
+                    # back to the code. Pinpoint's own compound phrasing
+                    # ("Permanent - Full Time") is translated locally first —
+                    # see _EMPLOYMENT_TYPE_MAP above.
+                    employment_type=_normalize_employment_type_text(
+                        item.get("employment_type_text")
+                    ) or item.get("employment_type"),
+                    # `workplace_type_text` ("Onsite"/"Remote"/"Hybrid") was
+                    # fetched on every response already but never read onto
+                    # the Job (verified live 2026-08-17, 5 boards: 100% key
+                    # presence) — shelf_gate.py owns normalising it.
+                    workplace_mode=item.get("workplace_type_text") or item.get("workplace_type"),
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Pinpoint: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

@@ -101,10 +101,13 @@ class AIJobsAISource(BaseJobSource):
         return jobs
 
     async def _fill_detail(self, job: Job) -> bool:
-        """Pull description/datePosted/validThrough from the job's own
-        schema.org JobPosting ld+json. Returns True iff at least one field
-        was recovered; a total miss never drops the job (title-only
-        description is the safe fallback already on it).
+        """Pull description/datePosted/validThrough/employmentType/
+        jobLocationType from the job's own schema.org JobPosting ld+json.
+        The last two (confirmed live 2026-08-17: "FULL_TIME" /
+        "TELECOMMUTE") were sitting in the SAME object this source already
+        parses for description/dates and were simply never read. Returns
+        True iff at least one field was recovered; a total miss never drops
+        the job (title-only description is the safe fallback already on it).
         """
         page = await self._get_text(job.apply_url)
         if not page:
@@ -131,6 +134,10 @@ class AIJobsAISource(BaseJobSource):
             if deadline_confidence == "high" and deadline_iso:
                 job.deadline = deadline_iso[:10]
                 job.deadline_source = "listing"
+        if fields.get("employmentType"):
+            job.employment_type = fields["employmentType"]
+        if fields.get("jobLocationType"):
+            job.workplace_mode = fields["jobLocationType"]
         return True
 
     @staticmethod
@@ -150,7 +157,7 @@ class AIJobsAISource(BaseJobSource):
             data = json.loads(raw)
             if isinstance(data, dict):
                 out = {}
-                for key in ("description", "datePosted", "validThrough"):
+                for key in ("description", "datePosted", "validThrough", "employmentType", "jobLocationType"):
                     val = data.get(key)
                     if isinstance(val, str) and val:
                         out[key] = val
@@ -165,6 +172,12 @@ class AIJobsAISource(BaseJobSource):
         vt = re.search(r'"validThrough"\s*:\s*"([^"]*)"', raw)
         if vt and vt.group(1):
             fields["validThrough"] = vt.group(1)
+        et = re.search(r'"employmentType"\s*:\s*"([^"]*)"', raw)
+        if et and et.group(1):
+            fields["employmentType"] = et.group(1)
+        jlt = re.search(r'"jobLocationType"\s*:\s*"([^"]*)"', raw)
+        if jlt and jlt.group(1):
+            fields["jobLocationType"] = jlt.group(1)
         # description: bounded by the next top-level JobPosting key this site
         # emits after it — tolerant of the embedded unescaped quotes above,
         # which strict JSON parsing cannot survive.
