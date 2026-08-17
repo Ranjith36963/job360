@@ -331,6 +331,11 @@ RATCHETS: list[dict] = [
     {
         "name": "mypy errors",
         "cmd": [sys.executable, "backend/scripts/mypy_ratchet.py", "--count"],
+        # The file AND the flag. `--count` was added by this very branch; on
+        # `main` the script exists and answers `usage: mypy_ratchet.py [-h]
+        # [--update]`. Probing only the file read that as a BROKEN instrument
+        # and refused the PR, when the truth is a MISSING one.
+        "needs": {"file": "backend/scripts/mypy_ratchet.py", "supports": "--count"},
         "direction": "down",
         "scope": "tree",
         "why": "type errors were driven 803 -> 0; nothing may add them back",
@@ -338,11 +343,52 @@ RATCHETS: list[dict] = [
     {
         "name": "guards never watched failing",
         "cmd": [sys.executable, "scripts/drill_registry.py", "--count-owed"],
+        "needs": {"file": "scripts/drill_registry.py", "supports": "--count-owed"},
         "direction": "down",
         "scope": "tree",
         "why": "guards that have never been watched failing are debt; it may only shrink",
     },
 ]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY A RATCHET NEEDS THREE ANSWERS, NOT TWO
+#
+# `measure_ratchets` used to answer "a number, or None". None meant BOTH "the
+# command exists and blew up" and "the command is not in this tree at all", and
+# the second one is not a fault — it is a fact about history. Measured
+# 2026-08-17: `git ls-tree origin/main scripts/drill_registry.py` is EMPTY. The
+# `guards never watched failing` ratchet does not exist on main. So every
+# main-based PR produced `could not be measured` on both sides of the
+# comparison, and an unmeasurable ratchet refuses. That is the same defect shape
+# as the missing --baseline: a refusal about the WIRING wearing the clothes of a
+# refusal about the PR.
+#
+# So three statuses, and the asymmetry is where the safety lives:
+#
+#   ok       a number was measured.
+#   absent   that tree's instrument cannot answer this question at all — the
+#            script is not there, or it is there and does not carry the flag.
+#            Not a fault. Found the hard way on round 2 of the live run:
+#            `backend/scripts/mypy_ratchet.py` IS on main, but `--count` was
+#            added by this branch, so main answers `usage: mypy_ratchet.py [-h]
+#            [--update]`. A file-existence probe read that as a BROKEN
+#            instrument and refused 16 of 16 merged PRs for it. The capability,
+#            not the file, is what has to be probed.
+#   error    the instrument claims to support this and failed anyway. Always a
+#            refusal — this is the real-breakage case, and treating it as
+#            `absent` would be the permissive guess.
+#
+# The capability probe is STATIC (does the file contain the flag?) and never
+# executes anything to decide. Both ways of being wrong fail safe: a flag spelled
+# differently reads as `absent` (and zero comparisons refuses), and a flag that
+# appears only in a comment reads as present, runs, fails, and refuses.
+#
+# base=ok + head=absent REFUSES: that is a PR deleting a ratchet, the one
+# direction that must never be waved through. base=absent + head=absent is NOT
+# APPLICABLE and is NAMED in the verdict, never silently folded into a pass.
+# ─────────────────────────────────────────────────────────────────────────────
+
+R_OK, R_ABSENT, R_ERROR = "ok", "absent", "error"
 
 # The "open security alerts" ratchet was REMOVED, not silently kept. Its command
 # was `gh api repos/<repo>/code-scanning/alerts?state=open` with no `ref`, which
@@ -694,42 +740,115 @@ def ground_problem(expected_sha: str, actual_sha: str) -> str | None:
     return None
 
 
-def head_sha() -> str:
+def measured_tree() -> Path:
+    """The tree whose NUMBERS are read. Distinct from ROOT, which is where the
+    RULES come from — see `--tree` in main()."""
+    return MEASURE_TREE or ROOT
+
+
+def head_sha(tree: Path | None = None) -> str:
+    t = tree or measured_tree()
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=30, cwd=str(ROOT))
+                             encoding="utf-8", errors="replace", timeout=30, cwd=str(t))
         return out.stdout.strip() if out.returncode == 0 else ""
     except Exception:
         return ""
 
 
-def measure_ratchets() -> dict[str, int | None]:
-    """Current value of every ratchet. `None` means COULD NOT MEASURE.
+def capability_gap(tree: Path, needs: object) -> str:
+    """Why this tree's instrument cannot answer, or "" if it can.
 
-    It used to skip unmeasurable ratchets silently, so a baseline could be
-    missing a number entirely and nothing said so. Unknown is never a value.
+    STATIC ON PURPOSE. Asking the tree's script "do you support --count?" by
+    running it means reading an argparse usage message and guessing, and a guess
+    in this position decides whether a PR is refused. Reading the file is
+    deterministic and both errors fail safe.
     """
-    vals: dict[str, int | None] = {}
+    if not needs:
+        return ""
+    if isinstance(needs, str):
+        needs = {"file": needs}
+    if not isinstance(needs, dict):
+        return f"the ratchet's `needs` is malformed ({needs!r})"
+    rel = str(needs.get("file") or "")
+    target = tree / rel
+    if not target.exists():
+        return f"{rel} is not in this tree"
+    flag = needs.get("supports")
+    if flag:
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return f"{rel} could not be read ({exc})"
+        if str(flag) not in text:
+            return f"{rel} in this tree has no `{flag}` — it cannot answer this question"
+    return ""
+
+
+def measure_ratchets(tree: Path | None = None) -> dict[str, dict]:
+    """Current value of every ratchet, as {name: {status, value, detail}}.
+
+    Three answers, never two — see the comment above `R_OK`. `absent` is a fact
+    about the tree's history; `error` is a fault and always refuses.
+    """
+    t = tree or measured_tree()
+    vals: dict[str, dict] = {}
     for r in RATCHETS:
+        gap = capability_gap(t, r.get("needs"))
+        if gap:
+            vals[r["name"]] = {"status": R_ABSENT, "value": None, "detail": gap}
+            continue
         try:
             out = subprocess.run(r["cmd"], capture_output=True, text=True, encoding="utf-8",
-                                 errors="replace", timeout=180, cwd=str(ROOT))
-            vals[r["name"]] = int(out.stdout.strip().splitlines()[-1]) if out.returncode == 0 else None
-        except Exception:
-            vals[r["name"]] = None
+                                 errors="replace", timeout=300, cwd=str(t))
+            if out.returncode != 0:
+                vals[r["name"]] = {"status": R_ERROR, "value": None,
+                                   "detail": (out.stderr or out.stdout).strip()[-200:]}
+                continue
+            vals[r["name"]] = {"status": R_OK,
+                               "value": int(out.stdout.strip().splitlines()[-1]), "detail": ""}
+        except Exception as exc:
+            vals[r["name"]] = {"status": R_ERROR, "value": None,
+                               "detail": f"{type(exc).__name__}: {exc}"}
     return vals
 
 
-def check_ratchets(base_values: dict[str, int] | None, expected_sha: str = "") -> Verdict:
+def as_reading(raw: object) -> dict:
+    """Normalise one baseline entry into {status, value}.
+
+    Accepts the flat legacy form (`5`, `null`) as well as the current object
+    form, because a baseline is passed in as text on a command line and a
+    half-upgraded caller must not be read as something it did not say. A flat
+    `null` is `error`, NOT `absent`: the old format could not express "the
+    script was not there", so assuming the harmless meaning would be exactly
+    the permissive guess this file exists to refuse.
+    """
+    if isinstance(raw, dict):
+        st = raw.get("status")
+        if st in (R_OK, R_ABSENT, R_ERROR):
+            return {"status": st, "value": raw.get("value")}
+        return {"status": R_ERROR, "value": None}
+    if isinstance(raw, bool):  # bool is an int in Python; a bool is not a reading
+        return {"status": R_ERROR, "value": None}
+    if isinstance(raw, int):
+        return {"status": R_OK, "value": raw}
+    return {"status": R_ERROR, "value": None}
+
+
+def check_ratchets(base_values: dict | None, expected_sha: str = "",
+                   tree: Path | None = None) -> Verdict:
     """Numbers may hold or improve. Never regress."""
     reasons: list[str] = []
-    now_values = measure_ratchets()
+    notes: list[str] = []
+    now_values = measure_ratchets(tree)
     for r in RATCHETS:
-        if now_values.get(r["name"]) is None:
+        now = now_values.get(r["name"], {"status": R_ERROR, "detail": "not measured at all"})
+        if now["status"] == R_ERROR:
             reasons.append(
-                f"ratchet `{r['name']}` could not be measured — an unmeasurable ratchet is not "
-                f"a passing one. FIX: run `{' '.join(str(c) for c in r['cmd'][1:])}` from the "
-                f"repo root and make it print a number.")
+                f"ratchet `{r['name']}` could not be measured ({now.get('detail') or 'no detail'})"
+                f" — an unmeasurable ratchet is not a passing one. FIX: run "
+                f"`{' '.join(str(c) for c in r['cmd'][1:])}` from the repo root and make it "
+                f"print a number.")
     if reasons:
         return Verdict("RATCHET", "fail", reasons, claim="no quality number went backwards")
 
@@ -747,25 +866,72 @@ def check_ratchets(base_values: dict[str, int] | None, expected_sha: str = "") -
             claim="no quality number went backwards")
 
     if any(r.get("scope") == "tree" for r in RATCHETS):
-        problem = ground_problem(expected_sha, head_sha())
+        problem = ground_problem(expected_sha, head_sha(tree))
         if problem:
             return Verdict("RATCHET", "fail", [f"ratchet comparison refused: {problem}"],
                            claim="no quality number went backwards")
 
+    compared = 0
     for r in RATCHETS:
-        was = base_values.get(r["name"])
+        was = as_reading(base_values.get(r["name"]))
         now = now_values[r["name"]]
-        if was is None:
-            reasons.append(f"ratchet `{r['name']}` is missing from the baseline, so there is "
-                           f"nothing to compare. FIX: regenerate the baseline with "
-                           f"`python scripts/merge_cage.py --measure`.")
+
+        if was["status"] == R_ERROR:
+            reasons.append(
+                f"ratchet `{r['name']}` has no readable value in the baseline, so there is "
+                f"nothing to compare — and I will not call an uncompared number a pass. "
+                f"FIX: regenerate the baseline with `python scripts/merge_cage.py --measure` "
+                f"on a checkout of the PR's BASE.")
             continue
-        assert now is not None  # checked above
-        if is_worse(r["direction"], was, now):
-            reasons.append(f"ratchet `{r['name']}` got worse: {was} -> {now} ({r['why']}). "
-                           f"FIX: bring it back to {was} or better in this PR.")
-    return Verdict("RATCHET", "fail" if reasons else "pass", reasons,
-                   claim="no quality number went backwards")
+
+        # THE DANGEROUS DIRECTION, AND THE ONLY ONE THAT IS A REFUSAL HERE: the
+        # base could measure this number and the PR's tree cannot. That is a PR
+        # deleting a ratchet, which is how a ratchet stops ratcheting forever.
+        if was["status"] == R_OK and now["status"] == R_ABSENT:
+            reasons.append(
+                f"ratchet `{r['name']}` was measurable on the base ({was['value']}) and is NOT "
+                f"measurable in this PR's tree — {now.get('detail')}. A PR that removes a "
+                f"ratchet removes every future comparison, so this is a refusal, not a note. "
+                f"FIX: put `{r.get('needs')}` back, or the owner merges it by hand.")
+            continue
+
+        if was["status"] == R_ABSENT and now["status"] == R_ABSENT:
+            # NOT APPLICABLE. Neither tree has the ratchet, so nothing regressed
+            # and nothing was checked. Named out loud, never folded into a pass.
+            notes.append(f"`{r['name']}` does not exist in this lineage ({now.get('detail')}), "
+                         f"so it was NOT compared")
+            continue
+
+        if was["status"] == R_ABSENT and now["status"] == R_OK:
+            notes.append(f"`{r['name']}` is new in this PR ({now['value']}) — there is no "
+                         f"earlier value to compare it to")
+            continue
+
+        assert was["value"] is not None and now["value"] is not None
+        compared += 1
+        if is_worse(r["direction"], was["value"], now["value"]):
+            reasons.append(f"ratchet `{r['name']}` got worse: {was['value']} -> {now['value']} "
+                           f"({r['why']}). FIX: bring it back to {was['value']} or better "
+                           f"in this PR.")
+
+    # ZERO COMPARISONS IS NOT A PASS. Without this the n/a arm above becomes a
+    # way for the whole cage to evaporate: a lineage with no ratchet in it would
+    # print "no quality number went backwards" having compared nothing, which is
+    # the precise sentence this file was rewritten to make impossible.
+    if not reasons and compared == 0:
+        reasons.append(
+            "not one ratchet could be compared against the base"
+            + (" — " + "; ".join(notes) if notes else "")
+            + ". A cage that measured nothing did not pass; it did not run. "
+              "FIX: land at least one ratchet on the base branch, or the owner merges by hand.")
+
+    # THE CLAIM MUST NAME WHAT IT ACTUALLY COVERED. "no quality number went
+    # backwards" over zero compared numbers is the same sentence that was
+    # printed for the cage's whole life while nothing had been compared at all.
+    claim = f"{compared} quality number(s) compared against the base, none went backwards"
+    if notes:
+        claim += " (" + "; ".join(notes) + ")"
+    return Verdict("RATCHET", "fail" if reasons else "pass", reasons, claim=claim)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -822,7 +988,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
                 f"is reachable."]))
 
     try:
-        verdicts.append(check_ratchets(base_values, meta.get("merge_sha", "")))
+        verdicts.append(check_ratchets(base_values, meta.get("merge_sha", ""), measured_tree()))
     except Exception as exc:
         verdicts.append(Verdict("RATCHET", "fail", [
             f"the RATCHET cage could not run ({type(exc).__name__}: {exc}) — refusing. "
@@ -981,6 +1147,7 @@ def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict])
 DECISION_PATH = [
     "check_size", "check_paths", "judge_check_runs", "check_proof", "judge_threads",
     "check_review", "measure_ratchets", "check_ratchets", "is_worse", "ground_problem",
+    "as_reading", "measured_tree", "capability_gap",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
     # The advisory path is now the cage's ONLY output that reaches a human on
@@ -1149,8 +1316,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     consumer = subprocess.run([sys.executable, "backend/scripts/mypy_ratchet.py", "--count"],
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace", cwd=str(ROOT), timeout=120)
-    cage_val = measure_ratchets().get("mypy errors")
-    same = consumer.returncode == 0 and cage_val is not None \
+    cage_reading = measure_ratchets().get("mypy errors") or {}
+    cage_val = cage_reading.get("value")
+    same = consumer.returncode == 0 and cage_reading.get("status") == R_OK \
         and int(consumer.stdout.strip().splitlines()[-1]) == cage_val
     ok("the cage's mypy number equals the number its consumer reports",
        same, f"cage={cage_val} consumer={consumer.stdout.strip()!r} rc={consumer.returncode}",
@@ -1172,6 +1340,78 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         v_ok = check_ratchets({"drill": 9}, expected_sha=head_sha())
         ok("NEGATIVE CONTROL (an improving ratchet passes)", v_ok.status == "pass",
            f"improving ratchet was refused: {v_ok.reasons}", ["check_ratchets"])
+
+        # B21 — THE THREE ANSWERS. `absent` and `error` were one value (None) and
+        # the difference decides whether a main-based PR can ever be judged:
+        # `scripts/drill_registry.py` is NOT on origin/main (measured 2026-08-17,
+        # `git ls-tree origin/main` is empty for it), so that ratchet is absent on
+        # BOTH sides of every main-based PR. Folding absent into error refused
+        # 100% of them for a fact about history, not about the PR.
+        RATCHETS[:] = [
+            {"name": "present", "cmd": [sys.executable, "-c", "print(1)"],
+             "direction": "down", "scope": "tree", "why": "drill"},
+            {"name": "gone", "cmd": [sys.executable, "-c", "print(1)"],
+             "needs": "no/such/file/anywhere.py",
+             "direction": "down", "scope": "tree", "why": "drill"},
+        ]
+        vals = measure_ratchets()
+        ok("a ratchet whose own script is missing reads ABSENT, not ERROR and not a number",
+           vals["gone"]["status"] == R_ABSENT and vals["present"]["status"] == R_OK
+           and vals["gone"]["value"] is None,
+           f"got {vals}", ["measure_ratchets", "capability_gap"])
+
+        # B24 — the live one. The FILE was there and the FLAG was not, so a
+        # file-existence probe called a missing instrument a broken one and
+        # refused 16 of 16 merged PRs with `usage: mypy_ratchet.py [-h]
+        # [--update]` as the explanation.
+        ok("a script that exists but does not carry the flag reads ABSENT, not ERROR",
+           capability_gap(ROOT, {"file": "backend/scripts/mypy_ratchet.py",
+                                 "supports": "--no-such-flag-anywhere"}).endswith(
+               "it cannot answer this question")
+           and capability_gap(ROOT, {"file": "backend/scripts/mypy_ratchet.py",
+                                     "supports": "--count"}) == ""
+           and capability_gap(ROOT, {"file": "nope/nope.py"}) != "",
+           "the capability probe cannot tell a missing flag from a working one",
+           ["capability_gap"])
+
+        # base absent + head absent -> NOT APPLICABLE, named, does not block.
+        v_na = check_ratchets({"present": 1, "gone": {"status": R_ABSENT, "value": None}},
+                              expected_sha=head_sha())
+        ok("a ratchet absent from BOTH base and PR is named as not-compared, and does not block",
+           v_na.status == "pass" and "does not exist in this lineage" in v_na.claim
+           and "1 quality number(s) compared" in v_na.claim,
+           f"status={v_na.status} claim={v_na.claim!r} reasons={v_na.reasons}",
+           ["check_ratchets", "as_reading"])
+
+        # THE DANGEROUS DIRECTION: base could measure it, the PR cannot.
+        red("a PR that makes a measurable ratchet unmeasurable is refused",
+            check_ratchets({"present": 1, "gone": 4}, expected_sha=head_sha()),
+            "removes a ratchet removes every future comparison", ["check_ratchets"])
+
+        # ZERO COMPARISONS IS NOT A PASS — otherwise the n/a arm above is a way
+        # for the whole RATCHET cage to evaporate on a tree with no ratchets.
+        RATCHETS[:] = [{"name": "gone", "cmd": [sys.executable, "-c", "print(1)"],
+                        "needs": "no/such/file/anywhere.py",
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        red("a PR where NOTHING could be compared is refused, not passed",
+            check_ratchets({"gone": {"status": R_ABSENT, "value": None}},
+                           expected_sha=head_sha()),
+            "not one ratchet could be compared", ["check_ratchets"])
+
+        # A flat `null` in a baseline is an ERROR, never `absent`. The old format
+        # could not say "the script was not there", so reading the harmless
+        # meaning into it would be the permissive guess.
+        RATCHETS[:] = [{"name": "drill", "cmd": [sys.executable, "-c", "print(1)"],
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        red("a baseline entry of `null` refuses instead of being read as 'not applicable'",
+            check_ratchets({"drill": None}, expected_sha=head_sha()),
+            "no readable value in the baseline", ["check_ratchets", "as_reading"])
+        ok("as_reading never turns a non-number into a number",
+           as_reading(3)["status"] == R_OK and as_reading(None)["status"] == R_ERROR
+           and as_reading(True)["status"] == R_ERROR and as_reading("0")["status"] == R_ERROR
+           and as_reading({"status": R_ABSENT, "value": None})["status"] == R_ABSENT
+           and as_reading({"status": "nonsense"})["status"] == R_ERROR,
+           "a baseline value was coerced into something it did not say", ["as_reading"])
     finally:
         RATCHETS[:] = saved
 
@@ -1233,6 +1473,48 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
     ok("crash, refuse, slack-failure and usage have four different exit codes",
        len(set(codes)) == len(codes), f"collision in {codes}", [])
+
+    # B22 — --tree separates the tree MEASURED from the tree the RULES come from.
+    #       Without it the only way to measure a PR's own numbers was to run the
+    #       PR's own copy of this file, i.e. to let the thing being judged supply
+    #       the judge. Both halves are drilled: a junk --tree must BREAK the cage
+    #       (exit 3, never a quiet fallback to "here"), and with no --tree the
+    #       measured tree must still be exactly ROOT.
+    def run_main(argv: list[str]) -> int:
+        """main() end to end, including the argparse exits it deliberately raises."""
+        try:
+            return main(argv)
+        except SystemExit as e:
+            return int(e.code or 0)
+
+    rc_tree = run_main(["1", "--tree", str(ROOT / "no-such-directory-anywhere")])
+    ok("a --tree that is not a directory is a usage error, not a silent fallback to here",
+       rc_tree == EXIT_USAGE, f"exit {rc_tree} (expected {EXIT_USAGE})", ["measured_tree"])
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        rc_nogit = run_main(["1", "--tree", _td])
+        ok("a --tree that is not a git checkout breaks the cage instead of being measured",
+           rc_nogit == EXIT_CAGE_BROKE, f"exit {rc_nogit} (expected {EXIT_CAGE_BROKE})",
+           ["measured_tree"])
+    globals()["MEASURE_TREE"] = None
+    ok("with no --tree, the measured tree is exactly the tree the rules came from",
+       measured_tree() == ROOT, f"{measured_tree()} != {ROOT}", ["measured_tree"])
+
+    # B25 — argparse abbreviates unique prefixes by default. `--dri` silently
+    #       meaning `--drill` is a cage whose MODE can be changed by a typo, and
+    #       cage_replay.py's own drill caught the live version of this
+    #       (`--merge` was accepted as `--merged`).
+    rc_abbrev = run_main(["--dril"])
+    ok("an abbreviated flag is rejected, not silently expanded into a different mode",
+       rc_abbrev == EXIT_USAGE, f"exit {rc_abbrev} (expected {EXIT_USAGE}) — `--dril` was "
+                                f"accepted as `--drill`", [])
+
+    # B23 — --replay used to print an agreement rate that was 0/N by
+    #       construction (no baseline -> not_checked -> blocks). A convincing
+    #       wrong number is worse than no number, so it must not answer at all.
+    rc_replay = run_main(["--replay", "5"])
+    ok("--replay refuses to answer instead of printing an agreement rate it cannot compute",
+       rc_replay == EXIT_USAGE, f"exit {rc_replay} (expected {EXIT_USAGE})", [])
 
     # B01/B02 — garbage on any input surface must produce a REFUSAL, not a stack
     #           trace. Fed end to end through main(), not asserted on internals.
@@ -1438,31 +1720,27 @@ def _shadow_probe() -> list[str]:
 
 
 def replay(limit: int) -> int:
-    """MEASUREMENT ONLY: how often would the cage have agreed with the owner?
+    """DELETED AS AN ANSWER, KEPT AS A SIGNPOST.
 
-    The owner merges by hand. Every merged PR is therefore a ground-truth "yes",
-    and a cage that refuses all of them is a cage that will be switched off.
+    This function used to loop `decide(pr)` with NO baseline. `check_ratchets(None)`
+    returns `not_checked` and `not_checked` blocks, so it returned 0/N by
+    construction — for every N, on every repo, forever. It could not have produced
+    the "13 of 245 (5.3%)" figure that has been quoted from it, and any decision
+    resting on that number is resting on nothing.
 
-    Deliberately NOT a ratchet, and deliberately without a target. A ratchet on
-    the allow rate would create standing automated pressure to widen the ALLOW
-    list until the number is met — a mechanism built to stop decay, manufacturing
-    it instead. Print the number; let the owner decide what it means.
+    A real replay needs a checkout per PR (the base, to measure the baseline, and
+    `refs/pull/<N>/merge`, to measure the PR's own tree). That is worktree
+    management, so it lives in a runner: scripts/cage_replay.py. Leaving a
+    convincing-looking wrapper here would just be a second place for the same lie
+    to come from.
     """
-    raw = gh(["pr", "list", "--state", "merged", "--limit", str(limit),
-              "--json", "number,title"])
-    prs = json.loads(raw)
-    agree = 0
-    print(f"REPLAY — judging the last {len(prs)} merged PRs. Each was shipped by the owner, "
-          f"so ALLOW = agreement.")
-    for p in prs:
-        allowed, verdicts, _ = decide(int(p["number"]))
-        agree += 1 if allowed else 0
-        top = (blocks_of(verdicts) or ["-"])[0]
-        print(f"  #{p['number']:>4} {'ALLOW ' if allowed else 'REFUSE'}  {top[:100]}")
-    pct = (100 * agree / len(prs)) if prs else 0.0
-    print(f"\nagreement with the owner: {agree}/{len(prs)} ({pct:.0f}%)")
-    print("This is a measurement, not a target. Do not widen ALLOW to raise it.")
-    return 0
+    print("merge_cage --replay no longer answers, because the answer it used to give was "
+          "0/N by construction.", file=sys.stderr)
+    print(f"  It called decide(pr) with no --baseline, so RATCHET returned `not_checked` and "
+          f"`not_checked` blocks. Every PR refused, whatever the PR was.\n"
+          f"  FIX: `python scripts/cage_replay.py --merged {limit}` — it does the two "
+          f"checkouts per PR that a tree-scoped ratchet actually requires.", file=sys.stderr)
+    return EXIT_USAGE
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1476,14 +1754,28 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = _Parser(description=__doc__.splitlines()[0])
+    # allow_abbrev=False. argparse abbreviates unique prefixes by default, so a
+    # flag that does not exist can still be ACCEPTED as a shortening of one that
+    # does — cage_replay.py's own drill caught exactly that (`--merge` silently
+    # became `--merged`). On a repo where merging is deploying, a flag that means
+    # something other than what it says is a trapdoor, not a convenience.
+    ap = _Parser(description=__doc__.splitlines()[0], allow_abbrev=False)
     ap.add_argument("pr", nargs="?", type=int, help="PR number to judge")
     ap.add_argument("--drill", action="store_true", help="break the cage on purpose")
     ap.add_argument("--slack", action="store_true", help="announce the verdict in Slack")
     ap.add_argument("--advise", metavar="FILE",
                     help="write a markdown verdict for a PR comment; NEVER merges")
+    ap.add_argument("--verdict-json", metavar="FILE",
+                    help="write the per-cage verdicts as JSON. Added because the only way to "
+                         "ask 'which cage refused, and would it still refuse tomorrow?' was to "
+                         "grep the English reasons — and a reader that greps prose is the same "
+                         "instrument-shaped mistake as a self-test that greps its own source.")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
     ap.add_argument("--measure", action="store_true", help="print current ratchet values as JSON")
+    ap.add_argument("--tree", metavar="DIR",
+                    help="the checkout whose NUMBERS are measured (default: this file's own). "
+                         "The RULES always come from this file's checkout — that separation is "
+                         "the point: a PR must not be judged by its own copy of the cage.")
     ap.add_argument("--blockers", action="store_true", help="print the blocker log and exit")
     ap.add_argument("--replay", type=int, metavar="N",
                     help="judge the last N merged PRs and print the agreement rate")
@@ -1510,6 +1802,26 @@ def main(argv: list[str] | None = None) -> int:
         if contradictions:
             raise CageBroke("the cage's own rules contradict each other, so it cannot judge:\n  "
                             + "\n  ".join(contradictions))
+
+        # THE TREE UNDER MEASUREMENT. Set before anything reads a number.
+        global MEASURE_TREE
+        if args.tree:
+            t = Path(args.tree).resolve()
+            if not t.is_dir():
+                ap.error(f"--tree {args.tree} is not a directory")
+            probe = subprocess.run(["git", "-C", str(t), "rev-parse", "HEAD"],
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", timeout=30)
+            if probe.returncode != 0:
+                # A tree whose HEAD cannot be read cannot be ground-checked, and a
+                # ratchet compared without a ground check is a number about an
+                # unknown tree. Refuse where it is parsed, not six frames later.
+                raise CageBroke(
+                    f"--tree {t} is not a git checkout I can read a commit from "
+                    f"({probe.stderr.strip()[:120]}), so I could not prove which tree the "
+                    f"numbers belong to. FIX: point --tree at a `git worktree add` of "
+                    f"`refs/pull/<N>/merge`.")
+            MEASURE_TREE = t
 
         if args.drill:
             return self_drill()
@@ -1565,6 +1877,18 @@ def main(argv: list[str] | None = None) -> int:
                                          encoding="utf-8")
             print(f"advice written to {args.advise} (label: {advice_label(allowed)})")
 
+        if args.verdict_json:
+            Path(args.verdict_json).write_text(json.dumps({
+                "pr": args.pr, "allowed": allowed, "meta": meta,
+                "cages": [{"name": v.name, "status": v.status, "reasons": v.reasons,
+                           # The claim is emitted ONLY for a cage that passed —
+                           # the same rule the printed output obeys. A machine
+                           # reader must not be able to see a sentence a human
+                           # reader is forbidden.
+                           "claim": v.claim if v.status == "pass" else ""}
+                          for v in verdicts],
+            }, indent=1), encoding="utf-8")
+
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 
     except SystemExit:
@@ -1593,6 +1917,10 @@ try:
 except CageBroke as _exc:
     ROOT = Path(__file__).resolve().parent.parent
     _GROUND_ERROR = str(_exc)
+
+# The tree whose NUMBERS are read, when it is not ROOT. `None` until --tree says
+# otherwise, so the default behaviour is byte-for-byte what it was.
+MEASURE_TREE: Path | None = None
 
 if __name__ == "__main__":
     raise SystemExit(main())

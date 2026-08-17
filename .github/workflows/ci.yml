@@ -170,6 +170,15 @@ jobs:
       - name: The merge cage still refuses
         run: python scripts/merge_cage.py --drill
 
+      # The replay runner is how the cage is measured against REAL pull requests
+      # — two checkouts per PR, rules from this checkout and never from the PR.
+      # Only its DRILL runs here: it is offline, builds a throwaway repository,
+      # and asserts the runner has no merge or push surface and leaves this
+      # checkout's HEAD where it found it. The replay itself talks to the GitHub
+      # API and is run on demand.
+      - name: The replay runner cannot merge, and measures the tree it is pointed at
+        run: python scripts/cage_replay.py --drill
+
       # A gate is only a gate where it can still stop something. Measured on
       # PR #337: merged 15:16:24, users live 15:18:38, CI finished 15:22:17 —
       # four minutes AFTER the users. Every check in that run was correct and

@@ -141,6 +141,19 @@ REGISTRY: dict[str, Guard] = {
         # control. Network-free, so it runs in CI like any other check.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
+    "scripts/cage_replay.py": Guard(
+        status="drilled",
+        # Runs the cage against REAL pull requests: two checkouts per PR (the
+        # base for the baseline, refs/pull/N/merge for the tree that would
+        # ship), with the RULES coming from this checkout and never from the PR.
+        # It exists because `merge_cage --replay` looped decide() with no
+        # baseline and therefore returned 0/N by construction, for every N.
+        # Its own drill caught a live defect on its FIRST run: argparse
+        # abbreviation meant `--merge` was accepted as `--merged`, so the
+        # assertion "this runner has no merge surface" was false. Builds a real
+        # throwaway repository, and asserts this checkout's HEAD is unmoved.
+        drill=[sys.executable, "scripts/cage_replay.py", "--drill"],
+    ),
     "scripts/review_debt.py": Guard(
         status="drilled",
         # Counts CodeRabbit findings; never approves, never blocks, has no merge

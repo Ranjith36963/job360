@@ -115,6 +115,49 @@ SLA.
 
 ---
 
+## The merge cage, run against real pull requests (2026-08-17)
+
+Not a simulation. `scripts/cage_replay.py` judged **29 real PRs** — every open one
+plus 18 merged ones — with two checkouts each: the PR's base for the baseline, and
+`refs/pull/<N>/merge` for the tree that would actually ship. The rules come from
+this checkout, never from the PR.
+
+**Result: 0 ALLOW out of 29. Agreement with the owner on merged PRs: 0/18.**
+
+That number is not the cage being strict. Read it cage by cage:
+
+| cage | passed | what its failures actually are |
+|---|---|---|
+| SIZE | 23/29 | 6 PRs over the 1200-line cap. A real judgement call. |
+| PATH | 3/29 | 16 of 18 merged PRs touch a path the OWNER reserved (`.github/**`, `scripts/**`, `CLAUDE.md`, `routes/profile.py`) or one no rule covers. His merge stream **is** product and harness code. |
+| PROOF | 5/29 | 15 hits are `Chain wires`, a check that did not exist when those PRs merged. **2 are real: #265 and #274 were merged with `npm audit (frontend deps)` RED — it concluded 5m28s and 5m48s before `mergedAt`.** 1 more is #327's `CodeQL` reporting a new alert while concluding SUCCESS. |
+| REVIEW | 19/29 | 7 merged PRs had unresolved CodeRabbit threads at merge. |
+| RATCHET | 3/29 | **18 of 18 merged PRs fail on a bootstrap, not on the PR** — see below. |
+
+**THE BOOTSTRAP, AND IT IS THE THING THAT MATTERS.** Neither ratchet instrument
+exists on `main`: `git ls-tree origin/main scripts/drill_registry.py` is empty, and
+main's `backend/scripts/mypy_ratchet.py` has only `--update`, not `--count`. So on
+every main-based PR there is nothing to compare and the cage refuses. **Until this
+branch lands, the cage cannot say ALLOW to anything based on main — not because of
+any PR, but because of itself.**
+
+The cage is not broken, and this is the evidence: on the four PRs whose base already
+carries both instruments (#343–#346), RATCHET compared two real numbers. It passed on
+#343 and #346, and on **#344 it caught a genuine regression** — that PR registers
+`scripts/check_workflow_slack_wiring.py` with `status="owed"`, taking
+`guards never watched failing` from 15 to 16. First time in this cage's life it has
+objected to a real number on a real PR.
+
+**Reproduce any of this:**
+
+```bash
+python scripts/cage_replay.py --open              # every open PR
+python scripts/cage_replay.py --merged 18         # ground truth
+python scripts/cage_replay.py 344 --json out.json # the ratchet catch
+```
+
+---
+
 ## Phase 1: Dynamic User Profile System -- COMPLETE
 
 **Goal:** Replace hard-coded AI/ML keywords with user-provided profile data so Job360 works for any profession (sales, law, engineering, hospitality, etc.).

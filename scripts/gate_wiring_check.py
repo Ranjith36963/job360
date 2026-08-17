@@ -49,6 +49,19 @@ G3  A MERGE ON "NO FAILURES" ALONE.
     hand the decision to merge_cage.py, which refuses an empty check list
     outright.
 
+G5  THE JUDGE SUPPLIED BY THE THING BEING JUDGED.
+    `pr-advisor.yml` checked out `refs/pull/<N>/merge` at the WORKSPACE ROOT and
+    then ran `python scripts/merge_cage.py` — i.e. the PR's own copy of the
+    cage. Its header said so and called it acceptable because the lane merges
+    nothing. It is still the wrong shape, and it hid a second defect that was
+    not acceptable at all: the next step ran
+    `cd _base && python scripts/merge_cage.py --measure` inside a checkout of
+    `main`, where THAT FILE DOES NOT EXIST (measured 2026-08-17:
+    `git ls-tree origin/main scripts/merge_cage.py` is empty). So the lane could
+    only ever fail on a main-based PR, and nobody would have found out until it
+    ran. The cure is `--tree`: rules from a ref the PR cannot edit, numbers from
+    the PR's tree.
+
 G4  A TREE-SCOPED RATCHET MEASURED ON THE WRONG TREE.
     auto-merge.yml checks out `ref: main` — correct, so a PR cannot widen the
     rules that judge it — and then the ratchets measured there are MAIN's
@@ -86,7 +99,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 ROOT = Path(__file__).resolve().parent.parent
-RULES = ("G1", "G2", "G3", "G4")
+RULES = ("G1", "G2", "G3", "G4", "G5")
 
 # Anything that actually performs a merge. `gh pr merge` is the direct form;
 # `merge_cage.py --merge` is this repo's caged form. Both count.
@@ -193,6 +206,38 @@ def judging_cage_calls(text: str) -> list[str]:
     return out
 
 
+_CHECKOUT = re.compile(r"uses:\s*actions/checkout")
+_PR_REF = re.compile(r"refs/pull/|pull_request\.head|github\.head_ref")
+
+
+def root_checkout_is_the_pr(job_text: str) -> bool:
+    """Does this job put the PR's own tree at the WORKSPACE ROOT?
+
+    A checkout with no `path:` lands at the root, which is where
+    `python scripts/merge_cage.py` resolves from. If that checkout is a PR ref,
+    the PR supplies the code that judges it.
+
+    Blocks are read line by line from each `uses: actions/checkout` to the next
+    step at the same indentation, because that is where `ref:` and `path:` live.
+    """
+    lines = job_text.splitlines()
+    for i, line in enumerate(lines):
+        if not _CHECKOUT.search(line):
+            continue
+        indent = len(line) - len(line.lstrip())
+        ref, path = "", ""
+        for nxt in lines[i + 1:]:
+            if nxt.strip().startswith("- ") and (len(nxt) - len(nxt.lstrip())) <= indent:
+                break
+            if re.match(r"\s*ref:\s*", nxt):
+                ref = nxt
+            elif re.match(r"\s*path:\s*", nxt):
+                path = nxt
+        if _PR_REF.search(ref) and not path.strip():
+            return True
+    return False
+
+
 def _merges(text: str) -> bool:
     return bool(_GH_MERGE.search(text)) or (
         bool(_CAGE_CALL.search(text)) and bool(_CAGE_MERGE.search(text))
@@ -280,6 +325,18 @@ def check_workflows(workflows_dir: Path, disabled: frozenset[str] = frozenset())
                     f"a lane refuse 100% of PRs for a month. "
                     f"FIX: add a second checkout at `refs/pull/${{PR}}/merge` and measure "
                     f"the baseline from the BASE checkout."))
+
+            if "G5" not in disabled and judging and root_checkout_is_the_pr(job_text):
+                out.append(Finding(
+                    "G5", name,
+                    f"job `{job_name}` judges a PR with merge_cage.py, but the checkout at the "
+                    f"WORKSPACE ROOT is the PR's own tree — so `scripts/merge_cage.py` is the "
+                    f"PR's copy of the cage. The thing being judged is supplying the judge. "
+                    f"It also hides a second failure: any step that then runs the cage from a "
+                    f"checkout of `main` breaks outright while the cage is not yet on main. "
+                    f"FIX: check out the rules at the root from a ref the PR cannot edit "
+                    f"(the default branch), put the PR's tree in a `path:` of its own, and "
+                    f"point the cage at it with `--tree`."))
     return out
 
 
@@ -380,6 +437,36 @@ def self_drill(disabled: frozenset[str] = frozenset()) -> int:
              "          ref: main\n"
              "      - run: python scripts/merge_cage.py \"$pr\" --baseline \"$BASE\"\n",
              "belong to whatever tree")
+
+        # G5 — the judge supplied by the thing being judged. This is the exact
+        # shape pr-advisor.yml shipped with, and running this checker against
+        # the real file for the first time turned it red on that file.
+        case("judging a PR with the PR's own checkout of the cage is caught", "G5",
+             "      - uses: actions/checkout@v7\n"
+             "        with:\n"
+             "          ref: refs/pull/1/merge\n"
+             "      - run: python scripts/merge_cage.py \"$pr\" --baseline \"$B\"\n",
+             "supplying the judge")
+
+        # G5 NEGATIVE CONTROL — the CORRECT three-checkout shape must be silent,
+        # or the only way to satisfy the rule is to stop judging PRs at all. The
+        # PR's tree is present here; it is just not the one at the root.
+        probe.write_text(
+            _JOB_HEAD +
+            "      - uses: actions/checkout@v7\n"
+            "        with:\n"
+            "          ref: main\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with:\n"
+            "          ref: refs/pull/1/merge\n"
+            "          path: _pr\n"
+            "      - run: python scripts/merge_cage.py \"$pr\" --baseline \"$B\" --tree _pr\n",
+            encoding="utf-8")
+        f = new_findings()
+        results.append(("NEGATIVE CONTROL (rules at the root, the PR's tree in its own path)",
+                        not f, "" if not f else
+                        f"the correct wiring was flagged: {f[0].rule} — {f[0].message[:110]}"))
+        probe.unlink()
 
         # NEGATIVE CONTROL 0 — a merge that exists only in a COMMENT.
         # Not hypothetical: the first run of this checker reported G3 against

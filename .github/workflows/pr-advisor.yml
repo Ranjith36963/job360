@@ -5,40 +5,52 @@ name: PR advisor (the cage advises, it never merges)
 # `auto-merge.yml` used to live here. It could not run at all — scheduled
 # workflows only run from the default branch and it was never on main — its
 # `AUTO_MERGE_ENABLED` variable did not exist, and as written it refused 100% of
-# PRs because it passed no `--baseline` (see the cage's blocker log, entry B18). Three
-# ways off. Nothing about its behaviour had ever been observed.
+# PRs because it passed no `--baseline` (blocker log entry B18). Three ways off.
+# Nothing about its behaviour had ever been observed.
 #
 # It was also aimed at a problem the owner does not have. Measured over the last
 # 60 merged PRs: median time from opened to merged is 12.9 minutes, 39 of 60
 # merged inside 30 minutes, and in 25 of the last 25 merges the final check run
 # completed BEFORE `mergedAt`. He already waits for green. Automating that click
 # saves ~13 minutes of wall clock on work he is standing next to, and saves zero
-# attention. Meanwhile the cage's own PATH+SIZE rules allow 2 of those 60 PRs
-# (3%), both documentation — because his merge stream IS product code and the
-# cage's allow list is docs and tests, and closing that gap means contradicting
-# the sentence the cage exists to enforce.
+# attention. Meanwhile the cage's PATH cage allows 2 of those 60 PRs (3%) — I
+# re-ran that here on 2026-08-17 and got the same two, #265 and #274 — because
+# his merge stream IS product code and the cage's allow list is docs and tests.
 #
 # So this lane keeps the cage and drops the merge. On every PR it posts ONE
 # comment saying which of the files in front of him is the one that is actually a
-# decision, and labels the PR. 100% traffic, zero deploy risk. That is what is
-# worth having at 12.9 minutes per PR: not a robot that clicks merge, but one
-# sentence telling him where to look.
+# decision, and labels the PR. 100% traffic, zero deploy risk.
 #
 # WHY `pull_request` AND NOT A SCHEDULE
 # The whole point is that the advice arrives BEFORE the merge, which is the only
 # moment anything can still change. Measured on PR #337: merged 15:16:24, users
 # on the new code 15:18:38, CI finished 15:22:17 — four minutes after the users.
-# Anything that speaks after the merge is a post-mortem, however good it is.
+#
+# THE THREE CHECKOUTS, AND WHY EACH ONE IS A DIFFERENT TREE
+# --------------------------------------------------------
+# This is the part the first version got wrong, and gate_wiring_check rule G5
+# now catches it at lint time:
+#
+#   ROOT   the DEFAULT BRANCH -> the RULES. A PR must not supply the code that
+#          judges it. The old version checked out `refs/pull/N/merge` at the
+#          root and ran that copy of merge_cage.py, and its own header called
+#          that an acceptable trade because the lane merges nothing. It is still
+#          the wrong shape, and it hid a worse defect: the next step ran
+#          `cd _base && python scripts/merge_cage.py --measure` inside a
+#          checkout of `main`, WHERE THAT FILE DOES NOT EXIST. Measured
+#          2026-08-17: `git ls-tree origin/main scripts/merge_cage.py` is empty.
+#          The lane could only ever fail on a main-based PR.
+#   _pr    `refs/pull/N/merge` -> the tree that would actually ship. Its numbers
+#          are read via `--tree`, never its code.
+#   _base  the PR's base ref -> the numbers to compare against. A ratchet
+#          measured on the same tree twice compares a value to itself.
 #
 # HONEST BOUND, STATED ON PURPOSE
-# The cage that judges the PR is the PR'S OWN COPY of scripts/merge_cage.py, not
-# main's. That is deliberate and it is a trade: the RATCHET cage measures the
-# checked-out tree (merge_cage.repo_root ties ROOT to the file's own checkout),
-# so rules-from-main and tree-from-PR cannot both be had without teaching the
-# cage to separate them — a change that is itself a new way to escape it. The
-# trade is only acceptable because THIS LANE MERGES NOTHING. A PR that widens
-# its own cage buys itself a wrong comment. If a merging lane is ever built, this
-# is the first thing that has to be solved, not the last.
+# Measuring a tree means RUNNING that tree's ratchet scripts, so a PR that edits
+# `scripts/` or `backend/scripts/` gets its own code executed here. That is the
+# same trust model as any CI that runs a PR's tests, and it is contained twice:
+# this lane merges nothing, and the PATH cage refuses `scripts/**` outright, so
+# such a PR is refused whatever its numbers say.
 
 on:
   pull_request:
@@ -64,7 +76,7 @@ jobs:
   advise:
     name: Advise (never merges)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Which PR
         id: pick
@@ -80,29 +92,43 @@ jobs:
           fi
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
-      # THE TREE UNDER JUDGEMENT. `refs/pull/N/merge` is the PR merged into its
-      # base, which is what would actually ship — not the PR's head, which has
-      # never been combined with anything.
+      # THE RULES. From the default branch, which the PR cannot edit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # THE TREE UNDER JUDGEMENT — the PR merged into its base, which is what
+      # would actually ship, not the PR's head, which has never been combined
+      # with anything.
       - uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ steps.pick.outputs.pr }}/merge
-          fetch-depth: 0
+          path: _pr
 
-      # THE BASELINE. Measured on the PR's BASE, from its own checkout, because
-      # a ratchet compared against numbers measured on the same tree compares a
-      # value to itself and prints "no number regressed" having checked nothing.
-      # That was live for the cage's whole life (blocker log entry B18).
+      # THE BASELINE TREE.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.ref || 'main' }}
+          ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
           path: _base
 
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      # Proving the cage still refuses on purpose costs three seconds and is the
-      # only thing standing between "there is a cage" and "the cage works".
+      # BOOTSTRAP, SAID OUT LOUD. Until the cage is on the default branch there
+      # is no trustworthy source of rules, and the honest answer is to refuse to
+      # judge rather than fall back to the PR's own copy — falling back is the
+      # exact thing rule G5 exists to forbid.
+      - name: The rules must come from a tree the PR cannot edit
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/merge_cage.py ]; then
+            echo "::error::scripts/merge_cage.py is not on ${{ github.event.repository.default_branch }} yet, so there is no source of rules this PR cannot edit. This lane cannot judge until the cage lands. Nothing was checked."
+            exit 1
+          fi
+
+      # Proving the cage still refuses on purpose costs seconds and is the only
+      # thing standing between "there is a cage" and "the cage works".
       - name: The cage still refuses — and can still allow
         run: python scripts/merge_cage.py --drill
 
@@ -113,8 +139,7 @@ jobs:
         id: base
         run: |
           set -euo pipefail
-          cd _base
-          echo "json=$(python scripts/merge_cage.py --measure)" >> "$GITHUB_OUTPUT"
+          echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
 
       - name: Judge, and write the advice
         id: judge
@@ -126,7 +151,11 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          python scripts/merge_cage.py "$PR" --baseline "$BASE_JSON" --advise advice.md
+          python scripts/merge_cage.py "$PR" \
+            --baseline "$BASE_JSON" \
+            --tree _pr \
+            --advise advice.md \
+            --verdict-json verdict.json
           rc=$?
           set -e
           # merge_cage's exit codes are a TYPED channel, one meaning each. 0 and 1
@@ -149,7 +178,9 @@ jobs:
           fi
 
       # ONE comment, updated in place. A new comment per push turns advice into
-      # noise, and noise is what gets muted.
+      # noise, and noise is what gets muted. The comment id is taken from the
+      # API's own `id` field rather than sliced off the end of a URL string —
+      # the URL shape is GitHub's to change and was the least-tested line here.
       - name: Post the advice
         env:
           GH_TOKEN: ${{ github.token }}
@@ -157,12 +188,12 @@ jobs:
           LABEL: ${{ steps.judge.outputs.label }}
         run: |
           set -euo pipefail
-          existing=$(gh pr view "$PR" --json comments \
-            --jq '[.comments[] | select(.body | contains("<!-- merge-cage-advice -->"))] | last | .url // ""')
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- merge-cage-advice -->")) | .id] | last // ""')
           if [ -n "$existing" ]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing##*-}" \
-              -f body="$(cat advice.md)" >/dev/null
-            echo "updated the existing advice comment"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              -F body=@advice.md >/dev/null
+            echo "updated advice comment $existing"
           else
             gh pr comment "$PR" --body-file advice.md
             echo "posted a new advice comment"
