@@ -149,6 +149,31 @@ jobs:
       - name: The registry can still fail
         run: python scripts/drill_registry.py --drill
 
+      # The repository ruleset `main-production-gate` names 11 required status
+      # checks and sits at enforcement=disabled. A required check is matched by
+      # CONTEXT NAME: name one that no job reports and it can never go green, so
+      # nothing can ever merge — on a repo with one admin and an auto-deploying
+      # default branch. That is a guard in the wrong position, org-level.
+      #
+      # This drill is offline and deterministic: it breaks the checker on purpose
+      # eight ways and demands it name each one, plus six negative controls that
+      # must stay silent (a check absent from a non-PR main commit; a merely RED
+      # PR; a renamed ruleset; an always-skipped job; a flickering job; a healthy
+      # world). It runs FIRST because if the checker cannot detect, its verdict
+      # below means nothing.
+      - name: The ruleset checker can still fail
+        run: python scripts/ruleset_gate.py --drill
+
+      # ...and the verdict itself, against RECORDED evidence so the PR gate needs
+      # no token and no network. `--scope ruleset` fails this build only for
+      # things a commit here can actually cause — a dead context, a context
+      # pinned to the wrong app, one that skips some PR heads, or evidence gone
+      # stale. Live PR-queue findings are PRINTED but do not fail a contributor's
+      # build, because they cannot fix them and an alarm aimed at the wrong
+      # person is an alarm that gets switched off.
+      - name: Would the ruleset wedge the repo?
+        run: python scripts/ruleset_gate.py --check --scope ruleset
+
       # Every guard CI runs must declare how to make itself fail. Ten guards here
       # shipped unable to fire, across four consecutive rounds — each was
       # correct-looking code in the wrong position, reporting success about a

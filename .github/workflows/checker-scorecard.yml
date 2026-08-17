@@ -93,12 +93,37 @@ jobs:
           PY
           cat docs/maintenance/CHECKER-SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
 
+      # The ruleset judge. `main-production-gate` names 11 required checks and
+      # enforces nothing; the question that matters is not "is it on" (one
+      # boolean, passes forever once flipped) but "would every required context
+      # actually be REPORTED, by the app the rule pins, on the commits it will
+      # judge". This re-reads GitHub and REWRITES the recorded snapshot that the
+      # per-PR gate reads offline.
+      #
+      # That makes the refresh itself an absence detector: if this weekly job
+      # stops, the snapshot ages out and `ruleset_gate.py --check` in ci.yml goes
+      # RED on staleness. A stopped loop cannot stay silent.
+      - name: Would the ruleset wedge the repo?
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          {
+            echo ""
+            echo "## Ruleset gate ($(date -u +%F))"
+            echo '```'
+            python scripts/ruleset_gate.py --live 2>&1
+            echo '```'
+          } >> docs/maintenance/CHECKER-SCORECARD.md
+
       - name: Commit the scorecard
         run: |
           set -euo pipefail
           git config user.name "checker-scorecard"
           git config user.email "actions@github.com"
           git add docs/maintenance/CHECKER-SCORECARD.md docs/maintenance/TELEMETRY.jsonl
+          git add .github/rulesets/main-gate-snapshot.json
           if git diff --cached --quiet; then
             echo "no change in the scorecard" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -106,3 +131,16 @@ jobs:
           printf 'chore(harness): weekly blind-checker scorecard\n\nMeasured, not asserted: coverage, verdict mix, and agreement with the human\nmerge decision. Deliberately does NOT publish a catch rate - that needs\nplanted bugs with known answers, and a made-up number is worse than none.\n' > /tmp/sc-msg.txt
           git commit -F /tmp/sc-msg.txt
           git push origin HEAD:${{ github.ref_name }}
+
+      # Deliberately AFTER the commit, and deliberately able to fail. The step
+      # above appends the report inside a `{ ... } >> file` block whose exit
+      # status is the final `echo`, so a wedge finding there is swallowed — the
+      # report would be written and the job would stay green, which is this
+      # repo's signature failure. This step re-reads the freshly written snapshot
+      # (offline, no network) and turns the wedge into a RED build.
+      #
+      # Scope is `all` here, unlike the per-PR gate: this run is FOR the owner,
+      # and the live PR queue is exactly what he can act on.
+      - name: A wedge finding must turn this job RED
+        if: ${{ !cancelled() }}
+        run: python scripts/ruleset_gate.py --check --scope all

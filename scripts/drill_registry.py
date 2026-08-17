@@ -127,6 +127,26 @@ REGISTRY: dict[str, Guard] = {
         # control. Network-free, so it runs in CI like any other check.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
+    "scripts/ruleset_gate.py": Guard(
+        status="drilled",
+        # The org-level version of this repo's signature bug. Ruleset
+        # `main-production-gate` names 11 required status checks and sits at
+        # enforcement=disabled, so it stops nothing -- and a required check is
+        # matched by CONTEXT NAME, so flipping it on with one name that no job
+        # reports means nothing can ever merge, silently, forever.
+        #
+        # The drill breaks the checker eight ways (dead context, right name but
+        # wrong app, a context missing from one PR head, an open PR with no
+        # checks at all, stale evidence, a new check mistaken for a flaky one, a
+        # gap swallowed instead of named, a scope that mutes too much) and
+        # demands it name each. Six negative controls must stay silent -- the
+        # important one being a context absent from a NON-PR main commit, which
+        # is legitimate: only the tip of a push gets a run, so 7 of 30 recent
+        # main commits have no CI and no ruleset will ever judge them. Confusing
+        # that with a dead context is how this guard would cry wolf until it was
+        # switched off. Offline and network-free; it reads a recorded snapshot.
+        drill=[sys.executable, "scripts/ruleset_gate.py", "--drill"],
+    ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
         # This file drills itself. A registry that cannot fail is the eleventh
