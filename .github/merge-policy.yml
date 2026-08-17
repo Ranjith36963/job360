@@ -38,6 +38,24 @@ version: 1
 #             (scripts/drill_registry.py — a guard that cannot go red is decoration)
 #   ratchets  no quality number went backwards (see RATCHETS below)
 #
+# HOW TO COUNT A CHECK, AND THE TRAP UNDERNEATH IT
+# A check run has more states than pass/fail, and the two that matter are easy
+# to confuse:
+#
+#   SUCCESS   it ran and passed
+#   SKIPPED   it correctly did not need to run (a path filter, an `if:` guard)
+#   PENDING   it has not finished — the only one that means WAIT
+#
+# Caught while dry-running this policy over the open PRs: a sweep script that
+# recognised only SUCCESS as green reported 3-6 "pending" checks on every single
+# PR. All of them were SKIPPED — `auto-fix`, `Doc clutter (CURATE gear)`,
+# `Report failure as an issue` — jobs that are supposed to skip. GitHub agreed
+# they were fine and reported `mergeStateStatus: CLEAN`.
+#
+# An auto-merge lane counting the way that script did would wait forever on
+# every PR and look exactly like a bug in the merge queue. The instrument must
+# count the way its consumer counts: SKIPPED is not PENDING.
+#
 # `verify` is the one that fixes the old cage's blind spot. The old cage judged
 # a change by its FILENAME, which cannot tell a logging fix from a deleted
 # `Depends(require_user)`. `verify` does not guess: it starts the app, drives a
@@ -146,6 +164,34 @@ lanes:
       - "docs/product_design_rules.md"   # the canonical text of rules #29-31
       - "docs/plans/batch-2-decisions.md"
 
+# ── Data exemptions ────────────────────────────────────────────────────────
+# An owner-lane file that holds BOTH a list and a law. Editing the list is the
+# intended everyday workflow; editing the law is a cage change.
+#
+# Found by dry-running the lane split over all 12 open PRs: 8 landed in `owner`
+# and FIVE of them for one reason — `scripts/drill_registry.py`. Registering a
+# new guard REQUIRES editing that file, so the rule fired on essentially 100% of
+# harness traffic. A rule that fires on all of its traffic is not a safety rule.
+#
+# `scripts/data_only.py` compares the syntax tree either side of the change,
+# ignoring the named data node. Only the list moved -> harness. One line of law
+# moved -> owner, immediately. Comments and formatting are invisible to an AST,
+# which is right: neither can change what the law does.
+#
+# HONEST STATUS 2026-08-17: this exemption currently changes NOTHING. Measured
+# against all six PRs that touch drill_registry.py, every one is ADDING the file
+# (it is not on `main` yet), and adding a file is not a data edit. The exemption
+# starts paying the first time a PR registers a guard in a file that already
+# exists. Recorded here rather than quietly claimed as a win.
+data_exemptions:
+  "scripts/drill_registry.py":
+    data_name: REGISTRY
+    lane_when_data_only: harness
+    why: >-
+      REGISTRY is the list of guards and their drills — appending to it is how a
+      guard gets registered, which is the workflow this repo wants to be fast.
+      Everything else in that file is the enforcement law and stays owner-lane.
+
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
 # or machine) is actually reading it, they are skimming. Big changes are fine;
@@ -167,6 +213,13 @@ ratchets:
   - name: ruff findings
     direction: down
   - name: open security alerts
+    direction: down
+  # THE PLUG FOR THE HOLE THE DATA EXEMPTION OPENS. If declarations merge
+  # freely, a PR could register a new guard as `owed` (known-undrilled) instead
+  # of `drilled` and slide an unfireable guard through the fast lane. Data is
+  # free; DEBT is not. The count of undrilled guards may hold or fall and may
+  # never rise, so adding an `owed` entry fails the ratchet and the PR stops.
+  - name: owed drills
     direction: down
 
 # ── The live watch ─────────────────────────────────────────────────────────

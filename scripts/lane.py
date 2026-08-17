@@ -95,6 +95,51 @@ def lane_of_file(path: str, policy: dict[str, Any]) -> str:
     return "unknown"
 
 
+def apply_data_exemptions(
+    files: list[str],
+    policy: dict[str, Any],
+    base: str | None,
+    head: str | None,
+    repo: str = ".",
+) -> tuple[list[str], list[str]]:
+    """Drop files whose change was DATA ONLY, and say which were dropped.
+
+    Only runs when a base and head are supplied — without two revisions there is
+    nothing to compare, and an unverifiable exemption must never be granted. The
+    default with no revisions is therefore the STRICT answer, which is the safe
+    direction for a rule that can only ever loosen a lane.
+
+    Anything that cannot be measured (unparseable file, missing revision) keeps
+    the file, so a broken instrument reads as "still owner", never as "fine".
+    """
+    exemptions = policy.get("data_exemptions") or {}
+    if not exemptions or not base or not head:
+        return files, []
+
+    from data_only import NotParseableError, git_show, is_data_only
+
+    kept: list[str] = []
+    exempted: list[str] = []
+    for f in files:
+        rule = exemptions.get(f)
+        if not rule:
+            kept.append(f)
+            continue
+        before = git_show(base, f, Path(repo))
+        after = git_show(head, f, Path(repo))
+        if not before or not after:
+            kept.append(f)  # added or deleted outright -- not a data edit
+            continue
+        try:
+            if is_data_only(before, after, str(rule.get("data_name", ""))):
+                exempted.append(f)
+                continue
+        except NotParseableError:
+            pass  # unmeasurable -> keep it, stay strict
+        kept.append(f)
+    return kept, exempted
+
+
 def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
     """Classify a whole changeset.
 
@@ -229,6 +274,58 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         missing_raised = True
     check("a missing policy raises, does not default open", missing_raised, True)
 
+    # 9. DATA EXEMPTIONS. A new power needs its own drill, and the case that
+    #    matters is not "does it loosen" but "does it refuse to loosen when it
+    #    cannot prove the change was data". Built on a real throwaway git repo
+    #    so `git show` is genuinely exercised, not stubbed.
+    import subprocess
+    import tempfile
+
+    law = "def check(root):\n    return []\n"
+    reg_a = 'REGISTRY = {"a": 1}\n'
+    reg_b = 'REGISTRY = {"a": 1, "b": 2}\n'
+    target = "scripts/drill_registry.py"
+
+    def _mini_repo(after: str) -> tuple[str, str, str]:
+        """A repo with the file before -> after. Returns (repo, base_sha, head_sha)."""
+        tmp = tempfile.mkdtemp(prefix="lane-drill-")
+        run = lambda *a: subprocess.run(  # noqa: E731
+            a, cwd=tmp, capture_output=True, text=True, check=True
+        )
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "drill@local")
+        run("git", "config", "user.name", "drill")
+        (Path(tmp) / "scripts").mkdir()
+        (Path(tmp) / target).write_text(reg_a + law, encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "before")
+        base = run("git", "rev-parse", "HEAD").stdout.strip()
+        (Path(tmp) / target).write_text(after, encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "after")
+        head = run("git", "rev-parse", "HEAD").stdout.strip()
+        return tmp, base, head
+
+    repo, base, head = _mini_repo(reg_b + law)  # data changed, law untouched
+    kept, exempted = apply_data_exemptions([target], policy, base, head, repo)
+    check("exemption: a registry-only edit stops pinning the PR", (kept, exempted), ([], [target]))
+    check("exemption: and the PR then leaves the owner lane",
+          classify(kept or ["docs/x.md"], policy)["lane"], "harness")
+
+    repo, base, head = _mini_repo(reg_b + "def check(root):\n    return ['x']\n")
+    kept, exempted = apply_data_exemptions([target], policy, base, head, repo)
+    check("exemption: a law edit is NOT exempted", (kept, exempted), ([target], []))
+    check("exemption: so the PR stays owner", classify(kept, policy)["lane"], "owner")
+
+    # The direction that matters most: with nothing to compare, do not loosen.
+    kept, exempted = apply_data_exemptions([target], policy, None, None, ".")
+    check("exemption: no revisions -> nothing exempted (strict default)",
+          (kept, exempted), ([target], []))
+
+    # A file the policy never exempted must be untouched by any of this.
+    kept, _ = apply_data_exemptions(["backend/migrations/9.sql"], policy, base, head, repo)
+    check("exemption: a non-exempt file is never dropped", kept, ["backend/migrations/9.sql"])
+
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")
     return 0 if passed == len(cases) else 1
@@ -239,12 +336,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("files", nargs="*", help="changed file paths")
     ap.add_argument("--json", metavar="FILE", help="write the verdict as JSON")
     ap.add_argument("--drill", action="store_true", help="break the classifier on purpose")
+    ap.add_argument("--base", help="revision before the change (enables data exemptions)")
+    ap.add_argument("--head", help="revision after the change (enables data exemptions)")
+    ap.add_argument("--repo", default=".", help="repository root")
     args = ap.parse_args(argv)
 
     if args.drill:
         return _drill()
 
-    verdict = classify(args.files, load_policy())
+    policy = load_policy()
+    files, exempted = apply_data_exemptions(
+        args.files, policy, args.base, args.head, args.repo
+    )
+    verdict = classify(files, policy)
+    if exempted:
+        verdict["data_exempted"] = exempted
+        verdict["why"].append(
+            f"{len(exempted)} owner-lane file(s) changed only their declared DATA, "
+            f"not their law, so they did not pin this PR: {', '.join(exempted)}"
+        )
     text = json.dumps(verdict, indent=2, sort_keys=True)
     if args.json:
         Path(args.json).write_text(text, encoding="utf-8")
