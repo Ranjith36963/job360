@@ -239,6 +239,14 @@ Inside `_score_dedup_and_filter()` (`src/main.py:681`) — the single synchronou
 | `test_pipeline_round_trip` | Fake source → `run_search` → stored row: full provenance present AND one non-default value round-trips (value-presence, not schema-presence — rule #21, pattern `test_database.py::test_dim_columns_round_trip`) |
 | `test_absent_is_typed` | A job with no salary stores NULL + `{"how":"absent"}` — never 0, never a guess |
 | `test_llm_blocked_on_stub` | A stub-description job is never handed to `enrich_job` |
+| `test_a_stub_description_is_never_sent_to_the_llm` | Step 3, end to end: the sweep's mocked LLM records every PROMPT, and the stub job's text appears in none of them — proof it was never SENT, not merely that its answer was discarded |
+| `test_an_llm_value_never_overwrites_a_source_filled_shelf` | Trust order §2 holds under a real write: source values survive, and the empty shelf beside them still gets filled |
+| `test_provenance_says_llm_only_for_shelves_the_llm_filled` | A shelf the model left `unknown` keeps `absent` — `how:"llm"` is never stamped on a shelf the LLM did not fill |
+| `test_the_budget_cap_stops_the_sweep_and_says_so_loudly` / `test_the_spend_cap_bites_before_the_job_cap_when_it_is_tighter` | Both ceilings are hard stops on CALLS, and hitting one logs at ERROR |
+| `test_the_spend_is_written_to_run_log` | One `run_log` row per sweep with the real spend — "what did last night cost?" is answerable |
+| `test_pass1_fills_shelves_without_spending_anything` / `test_pass1_never_removes_a_value` | The free pass really is free (zero LLM calls, $0) and only ever ADDS |
+| `test_re_running_the_gate_does_not_relabel_an_llm_fill_as_source` | Provenance cannot be laundered by a second sweep |
+| `test_with_the_flags_off_the_nightly_path_never_sweeps` | Rule #18 — with `ENGINE2_ENABLED` and `ENRICHMENT_ENABLED` both off the sweep is not called at all |
 
 Plus a per-shelf × per-source fill-rate export in `services/metrics_exporter.py` split by `why` — the CI canary that counts like the consumer counts. New guard declares its drill in `scripts/drill_registry.py` (project law).
 
@@ -253,7 +261,18 @@ The owner wants shelves and catalog built in parallel. Most of it can be; two ed
 | 1 | **The frame**: migration 0031 + `UNIVERSAL_SHELF` tuple + `shelf_gate.py` + provenance + tests | nothing | FIRST, alone. Small (days). Building recoveries before the frame just re-creates 42 scattered conventions with more fields. |
 | 2a | **Free source-field recoveries** (Appendix A) — per-source mapper edits riding through the gate | 1 | yes — parallelisable per source batch |
 | 2b | **Text recovery** — stub/teaser/empty descriptions: same-response fields + detail-call budget pattern + the existing `_backfill_thin_descriptions` sweep | 1 | yes — parallel with 2a |
-| 3 | **JOB SOURCE ENRICHMENT at scale** (LLM pass) | 1 + per-job 2b | LAST per job. Global work can overlap: a job whose text is already real can be enriched while another still awaits recovery. The ordering is per-job, enforced by the gate's `text_too_thin` block — not a calendar phase. |
+| 3 | **JOB SOURCE ENRICHMENT at scale** (LLM pass) — **BUILT 2026-08-17**, `src/services/shelf_enrichment.py` | 1 + per-job 2b | LAST per job. Global work can overlap: a job whose text is already real can be enriched while another still awaits recovery. The ordering is per-job, enforced by the gate's `text_too_thin` block — not a calendar phase. |
+
+**Step 3 as shipped — the two-pass sweep** (`services/shelf_enrichment.py`, wired into `workers/tasks.refresh_catalog` after the nightly fetch, behind `ENGINE2_ENABLED OR ENRICHMENT_ENABLED`):
+
+| Pass | Cost | What it does |
+|---|---|---|
+| **1** | **$0** | Re-runs `shelf_gate.fill_shelves` over rows ALREADY stored (visa text detector, deadline extractor, enum normaliser, annualise-then-clamp salary) — every row written before the gate existed never saw it. Also writes back `job_enrichment` rows already paid for whose facts never reached the `jobs` columns (§3 "Where LLM values land"). **Only ever ADDS**: a re-derivation that yields NULL never deletes a stored value. |
+| **2** | LLM | Only on rows that survive three filters: description is not a stub (`is_stub_description` — the fabrication block, §6), ≥ `SHELF_ENRICHMENT_MIN_ABSENT_SHELVES` consumer shelves honestly absent, no existing `job_enrichment` row (unless `force`). Writes through `shelf_gate.apply_enrichment`, which fills ONLY honestly-absent shelves and stamps `how:"llm"` for exactly what it filled. |
+
+Two rules the code enforces that this doc previously only asserted: re-running the gate on a stored row **cannot relaunder** a `how:"llm"` fill into `how:"source"`, and an LLM `category` of `other` is **refused** — `JobCategory` is the one contract enum with no `unknown` member, so a model that cannot classify is forced into `other` and that value carries no information (rule #29).
+
+**Measured, and the answer is a warning: pass 1 fills NOTHING on a post-step-2 catalog.** Simulated read-only over the 2,915-job `shelf_after_verify` snapshot (2026-08-17): **0 jobs improved, 0 shelves filled**, every per-shelf fill rate identical before and after. That is not a bug — it is the gate working. Every row in that snapshot already went through `fill_shelves` at ingest (step 2), `job_enrichment` holds 0 rows, and 0 rows have empty provenance, so the free pass has nothing left to recover. **Pass 1 earns its keep on exactly two populations, neither of which exists in that snapshot:** rows stored BEFORE the gate was wired, and rows whose already-paid-for `job_enrichment` facts never reached the `jobs` columns (prod holds thousands of the latter). The consequence to state plainly: on a freshly-gated catalog, the flat `visa_status` 1.6% / `seniority` 7.5% / `category` 7.5% numbers can only be moved by **pass 2** — the free pass cannot reach them, because the free detectors have already had their turn.
 
 **Text recovery MUST precede LLM shelf-filling, per job. Two independent proofs:**
 
@@ -279,6 +298,12 @@ The owner wants shelves and catalog built in parallel. Most of it can be; two ed
 **Recommendation: two-pass, batched.** Not mainly for the ~$1.40/run saved — pass 1 IS the fabrication guard (§6) and the provenance stays honest (`source` beats `llm` in the trust order). Numbers are estimates on stated assumptions; re-measure after the first real sweep.
 
 **Budget reality check:** today's default enriches at most **20 jobs per run** (`ENRICHMENT_MAX_JOBS=20`, `settings.py:151`) with `ENRICHMENT_ENABLED` defaulting off (`job_enrichment.py:33`, rule #18). Filling 6,000/run is a deliberate budget raise and belongs in the worker's enrichment sweep cron — never the search hot path (the event loop has been frozen by catalog-scale work before; PR #123).
+
+**Shipped budget (2026-08-17).** The step-3 sweep has TWO hard ceilings, both from settings, both checked BEFORE each call, and it stops at whichever bites first: `SHELF_ENRICHMENT_MAX_JOBS` (default 500) and `SHELF_ENRICHMENT_MAX_SPEND_USD` (default $1.00). A job cap alone cannot bound cost — the same 500 jobs cost several times more when the ads are long — so the spend cap is the real rail. Hitting either logs at ERROR with how many eligible jobs went unread; a cap that trims silently is a cap nobody can act on (same lesson as `MAX_REFRESH_INGEST_IDS`). Prices are `LLM_INPUT_USD_PER_1M` / `LLM_OUTPUT_USD_PER_1M`, env-overridable for the same reason `OPENAI_MODEL` is — a stale hardcoded price is a silent lie. Input tokens are measured from the real prompt at ~4 chars/token (≈15% conservative against the tiktoken dry run, i.e. the cap trips early not late); output is the fixed ~200-token JSON shape, which cannot be measured without making the call.
+
+**And it is now ANSWERABLE.** Migration `0032` adds `run_log.enrichment_stats`; every sweep writes one row (`run_uuid LIKE 'shelf-enrichment-%'`) carrying jobs read, tokens in/out, estimated USD and whether a cap bit. Before this, nothing in the system could answer *"what did last night cost?"*.
+
+**Measured eligibility, live catalog 2026-08-17 (2,915 jobs):** 2,826 eligible (96.9%), 89 blocked as stubs (3.1%), 0 already enriched, 0 with all six shelves filled. Absence is CORRELATED — 99.6% of eligible jobs are missing 2+ shelves, 78% are missing 4+ — so raising `SHELF_ENRICHMENT_MIN_ABSENT_SHELVES` from 1 to 4 saves only ~17% of spend while dropping 15% of the jobs. The stub block, not the shelf threshold, is where the money-losing mistake was.
 
 ---
 

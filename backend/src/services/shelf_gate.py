@@ -21,12 +21,17 @@ object (rule #29's ABSENT contract; rule #30's closed-set enumeration for the
 employment/workplace/seniority/period enums, which are bounded sets, unlike
 the UK gate's unbounded foreign-city problem).
 
-Two entry points are named in the design (§5 point 4): this file ships
-`fill_shelves(job)` for the ingest path. `apply_enrichment(job_row,
-enrichment)` — the sweep write-back that lets `how:"llm"` rows share this
-same normalisation without ever overwriting a `source`/`derived` fill — is
-NOT built yet; it depends on JOB SOURCE ENRICHMENT running at scale
-(step 3) and has no caller yet.
+Two entry points are named in the design (§5 point 4) and BOTH now exist:
+
+  * `fill_shelves(job)` — the ingest path;
+  * `apply_enrichment(job, enrichment)` — STEP 3's sweep write-back, which
+    lets `how:"llm"` rows share this exact normalisation while never
+    overwriting a `source` or `derived` fill. Its caller is
+    `services/shelf_enrichment.py` (the two-pass JOB SOURCE ENRICHMENT sweep).
+
+JOB SOURCE ENRICHMENT = an LLM READING a job ad to extract facts about the
+JOB. Those facts are identical for every user, so they belong to the shared
+CATALOG (rule #10 — no `user_id` anywhere near them).
 """
 from __future__ import annotations
 
@@ -52,7 +57,23 @@ from src.services.visa_signal import VisaStatus, detect_visa_status
 # idempotent per `job_id` (second call is a no-op unless `force=True`), so a
 # wrong answer extracted here is PERMANENT until someone force-re-runs.
 # UNIVERSAL_SHELF.md §2 DESCRIPTION row + §6's fabrication proof.
-_STUB_DESCRIPTION_MIN_CHARS = 200
+#
+# RAISED 200 -> 600 on 2026-08-17, from evidence rather than taste. 200 was
+# chosen as the p10 length floor several sources sit at, which answers "is
+# there any text?" — the wrong question. The right one is "is there enough
+# text to answer the questions we are about to ask?", and a real 452-char Reed
+# teaser proved 200 too low: it says nothing whatsoever about working
+# arrangements and the model still returned workplace_mode="onsite". Confident,
+# unfounded, and — because enrich_job is idempotent and nothing ever re-reads a
+# non-unknown answer — permanent.
+#
+# 600 covers the measured teaser band (200-599 chars: 640 rows locally, adzuna
+# 245 and reed 207) where APIs truncate a real ad into marketing copy. This
+# deliberately refuses to read some jobs that do have usable text; that is the
+# right trade. A refused job stays honestly absent and can be enriched the
+# moment text recovery reaches it. A fabricated one is wrong forever and looks
+# exactly like a fact.
+_STUB_DESCRIPTION_MIN_CHARS = 600
 
 # Salary plausibility band, applied to the ANNUALISED GBP figure only (see
 # _fill_salary). Same two thresholds the old unit-blind clamp in
@@ -787,6 +808,237 @@ _SHELF_FILLERS: dict[str, Callable[[Job], dict[str, Any]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# STEP 3 — the LLM write-back half (UNIVERSAL_SHELF.md §2 fill chains, §6).
+# ---------------------------------------------------------------------------
+
+# The SIX shelves an LLM reading the ad may fill. Deliberately not all 13:
+#   * `deadline` is EXCLUDED on purpose — §2's DEADLINE row: `JobEnrichment`
+#     has no deadline field and must not get one. The regex already covers
+#     prose dates and an LLM-guessed date is exactly the fabrication rule #29
+#     bans.
+#   * `description` is what the LLM READS; it is never a write target.
+#   * `title` / `company` / `location` / `posted_at` come from the source and
+#     an LLM rewriting them would be inventing identity, not extracting fact.
+#   * `skills` stays in `job_enrichment.required_skills/preferred_skills`;
+#     `jobs.source_tags` is the JOB'S OWN declared vocabulary (§1 row 12).
+LLM_FILLABLE_SHELVES: tuple[str, ...] = (
+    "employment_type",
+    "seniority",
+    "workplace_mode",
+    "category",
+    "salary",
+    "visa_status",
+)
+
+# A shelf carrying one of these in provenance has been filled by a layer the
+# LLM sits BELOW in the trust order (§2: source -> derived -> llm -> absent).
+# The LLM may never overwrite one of them.
+_FILLED_HOWS = frozenset({"source", "derived", "llm"})
+
+
+def _shelf_snapshot(job: Job, shelf: str) -> Any:
+    """The current VALUE of a shelf, as one comparable object.
+
+    Used only to answer "did re-running the gate change this shelf?" — see
+    `fill_shelves`'s note on not rewriting an `llm` provenance entry.
+    """
+    if shelf == "salary":
+        return (job.salary_min, job.salary_max)
+    return getattr(job, shelf, None)
+
+
+def shelf_has_value(job: Job, shelf: str) -> bool:
+    """True if this shelf currently carries a real value on `job`.
+
+    Covers ALL of `UNIVERSAL_SHELF`, not just the LLM-fillable six, because two
+    different callers need it:
+
+      * `absent_shelves` — belt-and-braces beside its provenance check: a
+        legacy row stored BEFORE the gate existed has a real value and NO
+        provenance at all, and that value is still a source fill the LLM must
+        not overwrite.
+      * the sweep's "how many shelves did the FREE pass fill?" counter, which
+        would under-report if it only looked at the six the LLM can write —
+        `deadline` is the clearest case: pass 1 fills it from the ad text, and
+        the LLM is deliberately forbidden from ever touching it (§2).
+
+    Shelf names are not always attribute names, and three shelves have their
+    own idea of "empty" (§1): `skills` lives in `source_tags`, a `description`
+    that is a stub is absent, and `company` uses "Unknown" as its sentinel.
+    """
+    if shelf == "salary":
+        return job.salary_min is not None or job.salary_max is not None
+    if shelf == "visa_status":
+        # "unknown" is a real stored value (rule #31, §1 row 8) but it is the
+        # ABSENCE of an answer — the LLM reading the whole ad may improve on it.
+        return bool(job.visa_status) and job.visa_status != "unknown"
+    if shelf == "skills":
+        return bool(job.source_tags)
+    if shelf == "description":
+        return not is_stub_description(job.description, job.title)
+    if shelf == "company":
+        return bool(job.company) and job.company != "Unknown"
+    value = getattr(job, shelf, None)
+    return value is not None and value != ""
+
+
+# Kept as the private spelling the trust-order code reads. One function, two
+# names, so a future edit cannot teach one of them a rule the other misses.
+_shelf_has_value = shelf_has_value
+
+
+def absent_shelves(job: Job) -> tuple[str, ...]:
+    """Which LLM-fillable shelves are HONESTLY absent on this job.
+
+    "Honestly absent" = provenance does not record a `source`/`derived`/`llm`
+    fill AND no value is sitting in the column. Both halves matter: the first
+    is the trust order (§2), the second catches pre-gate rows that have a
+    value but no provenance to describe it.
+
+    This is what the sweep counts to decide whether reading the ad is worth
+    the money, and what `apply_enrichment` uses to decide what it may write.
+    """
+    provenance = job.shelf_provenance or {}
+    out: list[str] = []
+    for shelf in LLM_FILLABLE_SHELVES:
+        entry = provenance.get(shelf)
+        if isinstance(entry, dict) and entry.get("how") in _FILLED_HOWS:
+            continue
+        if _shelf_has_value(job, shelf):
+            continue
+        out.append(shelf)
+    return tuple(out)
+
+
+def _llm_entry(by: str, at: str, *, raw: Any = None) -> dict[str, Any]:
+    entry: dict[str, Any] = {"how": "llm", "by": by, "at": at}
+    if raw is not None:
+        entry["raw"] = raw
+    return entry
+
+
+def _enum_str(value: Any) -> Optional[str]:
+    """An enum member's value, or None when it is the `unknown` sentinel.
+
+    `unknown` is the LLM CONTRACT's word for "I could not tell" — the prompt
+    demands it instead of a guess. In the CATALOG that means the shelf stays
+    NULL and absent (§1 "Absent everywhere = column NULL"), never the literal
+    string "unknown". Only `visa_status` stores "unknown" as a real value.
+    """
+    if value is None:
+        return None
+    text = getattr(value, "value", value)
+    text = str(text).strip()
+    if not text or text == "unknown":
+        return None
+    return text
+
+
+_VISA_FROM_LLM = {"yes": VisaStatus.SPONSORS.value, "no": VisaStatus.NO_SPONSORSHIP.value}
+
+
+def apply_enrichment(job: Job, enrichment: Any, *, by: str = "llm") -> tuple[Job, tuple[str, ...]]:
+    """Write LLM-extracted facts into the ONLY shelves that are honestly absent.
+
+    The second gate entry point named in §5 point 4. Everything the ingest
+    path normalises, this path normalises identically — the salary band goes
+    through the SAME `_fill_salary` (annualise + currency-convert, THEN clamp),
+    so an LLM-read "£30 per hour" lands as the same annual-GBP number a source
+    field would have.
+
+    Three hard rules, each guarded by a test in tests/test_universal_shelf.py:
+
+      1. **Never overwrite.** Only shelves `absent_shelves(job)` returns are
+         touched. Source beats derived beats llm (§2) — an LLM value can only
+         ever land in a hole.
+      2. **`how:"llm"` only for what the LLM ACTUALLY filled.** Shelves it left
+         `unknown`, and shelves that were already filled, keep the provenance
+         they had. Provenance is the record of how a value got here; stamping
+         it on a shelf the LLM did not fill would make the audit trail a lie.
+      3. **`unknown` is not a value.** The prompt mandates the explicit
+         `unknown` enum over invention (§4's consumer table); that maps to
+         "leave the shelf absent", never to a stored string.
+
+    Args:
+        job: the catalog row, already carrying its stored `shelf_provenance`.
+        enrichment: a `JobEnrichment` (its enums are Pydantic-validated, so
+            the values are already the canonical strings the gate's own
+            closed-enum normaliser produces).
+        by: what to record in provenance as the filler — the MODEL name in
+            production, so a future re-read can tell which model said what.
+
+    Returns:
+        `(job, filled_shelves)` — the same mutated job, and the tuple of shelf
+        names this call actually filled. An empty tuple means the LLM read the
+        ad and honestly had nothing to add, which is a real outcome, not a
+        failure.
+    """
+    targets = set(absent_shelves(job))
+    provenance: dict[str, Any] = dict(job.shelf_provenance or {})
+    at = _now()
+    filled: list[str] = []
+
+    def _set(shelf: str, value: str, *, raw: Any = None) -> None:
+        setattr(job, shelf, value)
+        provenance[shelf] = _llm_entry(by, at, raw=raw)
+        filled.append(shelf)
+
+    for shelf, attr in (
+        ("employment_type", "employment_type"),
+        ("seniority", "seniority"),
+        ("workplace_mode", "workplace_type"),
+        ("category", "category"),
+    ):
+        if shelf not in targets:
+            continue
+        value = _enum_str(getattr(enrichment, attr, None))
+        if value is None:
+            continue
+        if shelf == "category" and value == JobCategory.OTHER.value:
+            # `JobCategory` is the one closed enum in the contract with NO
+            # `unknown` member (job_enrichment_schema.py) — Pydantic rejects
+            # anything outside the 16, so a model that cannot tell has only one
+            # escape hatch and it always takes it. An "other" it was FORCED
+            # into carries no information, and storing it would convert "we
+            # could not classify this" into "this job is genuinely
+            # miscellaneous" — a guess dressed as a fact (rule #29). The shelf
+            # stays absent so a real classifier (services/domain_classifier.py,
+            # or a source's own taxonomy via _CATEGORY_ALIASES, where an
+            # explicit "All Other Remote" IS a real answer) can still fill it.
+            continue
+        _set(shelf, value)
+
+    if "visa_status" in targets:
+        raw_visa = _enum_str(getattr(enrichment, "visa_sponsorship", None))
+        mapped = _VISA_FROM_LLM.get((raw_visa or "").lower())
+        if mapped is not None:
+            _set("visa_status", mapped, raw=raw_visa)
+
+    if "salary" in targets:
+        band = getattr(enrichment, "salary", None)
+        band_min = getattr(band, "min", None)
+        band_max = getattr(band, "max", None)
+        if band_min is not None or band_max is not None:
+            job.salary_min = band_min
+            job.salary_max = band_max
+            job.salary_currency = getattr(band, "currency", None) or None
+            job.salary_period = _enum_str(getattr(band, "frequency", None))
+            # Same policy as ingest, deliberately: annualise + convert, then
+            # clamp. If the gate REFUSES the band (implausible / unpriceable
+            # currency) that refusal is recorded as-is — an LLM number gets no
+            # special treatment just because it cost money.
+            entry = _fill_salary(job)
+            if entry.get("how") == "source":
+                provenance["salary"] = _llm_entry(by, at, raw=entry.get("raw"))
+                filled.append("salary")
+            else:
+                provenance["salary"] = entry
+
+    job.shelf_provenance = provenance
+    return job, tuple(filled)
+
+
 def fill_shelves(job: Job) -> Job:
     """The chokepoint (UNIVERSAL_SHELF.md §5). Every job that reaches storage
     passes through here exactly once, called by
@@ -806,10 +1058,33 @@ def fill_shelves(job: Job) -> Job:
 
     Mutates and returns `job` (matches the design doc's signature); callers
     that need the pre-gate object should copy first.
+
+    RE-RUNNING THE GATE on a row already in the catalog (what pass 1 of the
+    JOB SOURCE ENRICHMENT sweep does) is safe and is the whole point of the
+    sweep's free half — but it must not REWRITE HISTORY. A shelf an LLM filled
+    is loaded back off the row as a plain value, and the gate, seeing a value,
+    would happily re-stamp it `how:"source"` — turning "a model decided this"
+    into "the board told us this". So: a prior `how:"llm"` entry is KEPT
+    whenever the shelf's value comes out of this pass unchanged. On the ingest
+    path there is no prior provenance at all, so this is a no-op there and the
+    behaviour is byte-identical to before.
     """
-    provenance: dict[str, Any] = dict(job.shelf_provenance) if job.shelf_provenance else {}
+    prior: dict[str, Any] = dict(job.shelf_provenance) if job.shelf_provenance else {}
+    before = {shelf: _shelf_snapshot(job, shelf) for shelf in LLM_FILLABLE_SHELVES} if prior else {}
+
+    provenance: dict[str, Any] = dict(prior)
     for shelf in UNIVERSAL_SHELF:
         filler = _SHELF_FILLERS[shelf]
         provenance[shelf] = filler(job)
+
+    for shelf, snapshot in before.items():
+        entry = prior.get(shelf)
+        if (
+            isinstance(entry, dict)
+            and entry.get("how") == "llm"
+            and _shelf_snapshot(job, shelf) == snapshot
+        ):
+            provenance[shelf] = entry
+
     job.shelf_provenance = provenance
     return job

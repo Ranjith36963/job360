@@ -25,8 +25,19 @@ from src.models import Job
 from src.repositories import pg
 from src.services.job_enrichment_schema import JobEnrichment
 from src.services.profile.llm_provider import llm_extract_validated
+from src.services.shelf_gate import is_stub_description
 
 logger = logging.getLogger("job360.services.job_enrichment")
+
+
+class StubDescriptionError(ValueError):
+    """Raised when an ad is too thin for JOB SOURCE ENRICHMENT to read honestly.
+
+    Deliberately its own type rather than a bare ValueError: callers must be
+    able to tell "we refused to read this" (expected, cheap, skip it) apart
+    from "the model failed" (retry-worthy). Conflating them would either
+    retry a refusal forever or silently swallow a real provider outage.
+    """
 
 # Feature flag — plan Appendix B. Default-off behaviour must exactly match
 # pre-Batch-2.5 (no enrichment calls, no DB writes).
@@ -107,11 +118,32 @@ async def enrich_job(
             :func:`llm_extract_validated`.
 
     Raises:
+        StubDescriptionError: if the ad is too thin to read honestly (see below).
         RuntimeError: if all LLM providers fail or the response can't be
         validated into the `JobEnrichment` schema after the default retry
         budget. Callers should catch and log; they should NOT use a partial
         enrichment — the row stays absent rather than polluted.
+
+    THE STUB BLOCK LIVES HERE, at the chokepoint, not in the callers.
+
+    JOB SOURCE ENRICHMENT is CACHED: this function is idempotent per job_id and
+    nothing re-reads a job that already has a row, so a fact invented from a
+    teaser is permanent. Measured live 2026-08-17: a real 452-char Reed teaser
+    that says NOTHING about working arrangements produced
+    workplace_mode="onsite" — a confident fabrication that would have been
+    stored as how:"llm" and never revisited.
+
+    The new sweep checked this before calling; the OLD enrichment_sweep cron did
+    not, so the same cache had two doors and only one was guarded. Putting the
+    predicate here closes both, and any future caller inherits it — the same
+    "one door, every job" reasoning the shelf gate is built on.
     """
+    if is_stub_description(job.description, job.title):
+        raise StubDescriptionError(
+            f"description too thin to read honestly "
+            f"({len((job.description or '').strip())} chars) — "
+            f"recover the real text before enriching"
+        )
     fn = llm_extract_validated_fn or llm_extract_validated
     prompt = _build_prompt(job)
     enrichment = await fn(prompt, JobEnrichment, _SYSTEM_PROMPT)

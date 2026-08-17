@@ -239,6 +239,66 @@ EMBED_BACKFILL_PER_RUN = int(os.getenv("EMBED_BACKFILL_PER_RUN", "300"))
 # entirely (no SELECT, no fetch, no-op).
 DESCRIPTION_BACKFILL_PER_TICK = int(os.getenv("DESCRIPTION_BACKFILL_PER_TICK", "50"))
 
+# ---------------------------------------------------------------------------
+# JOB SOURCE ENRICHMENT sweep — the two-pass catalog pass
+# (docs/pillars/UNIVERSAL_SHELF.md §6 step 3, §7 cost).
+#
+# JOB SOURCE ENRICHMENT = an LLM READING a job ad to extract facts about the
+# JOB (salary, seniority, workplace, visa, employment type, category). Facts
+# about the JOB, identical for every user, so the cost is CATALOG cost: it is
+# paid once per job and shared by everyone. It does NOT scale with user count.
+#
+# Two budgets, both hard, both loud when they bite (services/shelf_enrichment.py):
+#   * a JOB cap  — how many ads one sweep may read;
+#   * a SPEND cap — estimated USD one sweep may spend, checked BEFORE each
+#     call, so the sweep stops on the cheaper of the two.
+# The owner is pre-revenue: a sweep must never be able to surprise him.
+SHELF_ENRICHMENT_MAX_JOBS = int(os.getenv("SHELF_ENRICHMENT_MAX_JOBS", "500"))
+SHELF_ENRICHMENT_MAX_SPEND_USD = float(os.getenv("SHELF_ENRICHMENT_MAX_SPEND_USD", "1.00"))
+
+# WALL-CLOCK ceiling for pass 2, in seconds. The third cap, and the only one
+# grounded in how long things actually take rather than how many of them there
+# are.
+#
+# Sized from measurement, not taste: `refresh_catalog` runs under ARQ's
+# job_timeout=600s (workers/settings.py:175) and the source fan-out alone took
+# ~430s on a real 40-source run (2026-08-17). That leaves ~170s, so 150 is the
+# honest budget with a little headroom for pass 1 and the final ledger write.
+#
+# Why a TIME cap when max_jobs already exists: a healthy LLM call measured 2-4s,
+# but with a dead provider key the retry cascade took ~120s PER JOB — so 500
+# jobs is anywhere from 25 minutes to 16 hours. A job count cannot bound that;
+# a clock can. And overrunning is not a soft failure here: ARQ has retry_jobs
+# on with max_tries=5, so being killed re-runs the WHOLE task — re-fetching
+# every source and re-spending — up to five times.
+SHELF_ENRICHMENT_MAX_SECONDS = float(os.getenv("SHELF_ENRICHMENT_MAX_SECONDS", "150"))
+
+# PASS 1 is FREE (no LLM): it re-runs the gate's own detectors over rows
+# ALREADY in the catalog, so existing jobs gain visa / deadline / normalised
+# enum / annualised-salary shelves without paying for a single token. Its only
+# cost is DB writes, so its budget is much larger than the LLM pass's.
+SHELF_ENRICHMENT_PASS1_MAX_JOBS = int(os.getenv("SHELF_ENRICHMENT_PASS1_MAX_JOBS", "2000"))
+
+# How many still-absent consumer shelves a job must have before it is worth
+# reading its ad. Measured on the live catalog 2026-08-17 (2,826 eligible
+# jobs): absence is CORRELATED — 99.6% of eligible jobs are missing 2+ shelves
+# and 78% are missing 4+ — so raising this from 1 to 4 saves only ~17% of the
+# spend while dropping 15% of the jobs. 1 is the honest default; the knob
+# exists so the cost/coverage trade stays a setting, not a code change.
+SHELF_ENRICHMENT_MIN_ABSENT_SHELVES = int(os.getenv("SHELF_ENRICHMENT_MIN_ABSENT_SHELVES", "1"))
+
+# gpt-4o-mini list price, web-verified 2026-08-17. There is no other price
+# constant in this repo — before this, NOTHING could answer "what did last
+# night cost". Env-overridable for exactly the same reason OPENAI_MODEL is:
+# the model can be swapped, and a stale hardcoded price is a silent lie.
+# Batch API is -50% on both numbers if the sweep ever moves to it.
+LLM_INPUT_USD_PER_1M = float(os.getenv("LLM_INPUT_USD_PER_1M", "0.150"))
+LLM_OUTPUT_USD_PER_1M = float(os.getenv("LLM_OUTPUT_USD_PER_1M", "0.600"))
+# Output cannot be measured without making the call, so it is ESTIMATED per
+# job: the enrichment contract is a fixed ~16-field JSON object, measured at
+# ~200 tokens. Input IS measured, from the real prompt text.
+LLM_OUTPUT_TOKENS_PER_JOB = int(os.getenv("LLM_OUTPUT_TOKENS_PER_JOB", "200"))
+
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""

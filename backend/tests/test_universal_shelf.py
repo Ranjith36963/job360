@@ -687,15 +687,11 @@ def test_llm_blocked_on_stub():
     answer here would be PERMANENT until someone force-re-runs).
     """
     stub_job = _make_job(title="Backend Engineer", description="Short teaser.")
-    real_job = _make_job(
-        title="Backend Engineer",
-        description=(
-            "We are looking for a Backend Engineer to join our platform team. "
-            "You will design and build services in Python, work closely with "
-            "product and design, and own your code from design through to "
-            "production. Experience with Postgres and distributed systems is a plus."
-        ),
-    )
+    # Uses the shared real-LENGTH ad rather than a short paragraph. A few
+    # hundred characters "reads like" an ad but sits inside the measured
+    # teaser band (200-599) that the threshold now refuses — the point of this
+    # assertion is that a GENUINE ad passes, so it has to be a genuine length.
+    real_job = _make_job(title="Backend Engineer", description=_REAL_AD)
     # Byte-identical to the title, but long enough to clear the length floor
     # on its own — proves the "==title" signal fires independently.
     identical_job = _make_job(
@@ -1086,3 +1082,528 @@ def test_pipeline_round_trip(migrated_db_path, tmp_path):
     # 5. And the shelves a source filled directly still land.
     assert json.loads(row["source_tags"]) == ["python", "postgres"]
     assert row["description"] == _ROUND_TRIP_AD
+
+
+# ---------------------------------------------------------------------------
+# 6. STEP 3 — the two-pass JOB SOURCE ENRICHMENT sweep
+#    (services/shelf_enrichment.py; UNIVERSAL_SHELF.md §2 fill chains,
+#    §6 dependency order, §7 cost).
+#
+#    JOB SOURCE ENRICHMENT = an LLM READING a job ad to extract facts about
+#    the JOB. Catalog work: the same facts serve every user, so the bill
+#    scales with how many JOBS we hold, never with how many PEOPLE we have.
+#
+#    Every test below runs OFFLINE against a mocked LLM (rule #4 — the suite
+#    must never make a live call, and CI has no LLM keys at all).
+# ---------------------------------------------------------------------------
+
+
+# A real-LENGTH ad, not just a realistic-SOUNDING one. This was ~340 chars,
+# which is SHORTER than the 452-char Reed teaser measured inventing
+# workplace_mode="onsite" — so once the stub threshold rose to 600 the fixture
+# was correctly refused. Live descriptions run ~4,000 chars (median ~997 input
+# tokens, dry run 2026-08-17), so a few hundred characters was never
+# representative of what the LLM actually reads.
+_REAL_AD = (
+    "We are hiring a Platform Engineer to join our infrastructure team in "
+    "Manchester. You will run our Kubernetes clusters, own the CI pipeline "
+    "end to end, and work with product engineers to ship safely. We are "
+    "looking for someone comfortable with Terraform, Go and Postgres, who "
+    "enjoys making other engineers faster. This is a permanent position. "
+    "\n\nWhat you will do: own the reliability of a multi-tenant platform "
+    "serving several million requests a day; lead the migration of our "
+    "remaining virtual machines onto Kubernetes; build the deployment "
+    "tooling other teams use every day; take part in a light-touch on-call "
+    "rota with the rest of the platform group. "
+    "\n\nWhat we are looking for: solid production experience with a cloud "
+    "provider, comfort reading and writing Go, hands-on Terraform, and the "
+    "judgement to know when infrastructure work is worth doing and when it "
+    "is not. You do not need to have done all of this before — we care more "
+    "about how you reason than which tools you have used. "
+    "\n\nWhat we offer: a competitive salary reviewed every year, hybrid "
+    "working with two days a week in the Manchester office, private medical "
+    "cover, a training budget, and a genuinely quiet on-call rota."
+)
+
+
+@pytest.fixture(scope="module")
+def _sweep_schema(tmp_path_factory):
+    """ONE migrated DB shared by every sweep test in this section.
+
+    Measured on this repo's Windows dev box, the per-test `sweep_db`
+    fixture costs ~79s (init_db 9s + 32 migrations 39s + drop_schema 32s).
+    Ten sweep tests would have put ~13 minutes onto the canonical pre-commit
+    run for no extra coverage — a correctness fix with an operational cost is
+    still a regression. Bootstrapping once and wiping between tests keeps every
+    assertion and pays the cost once.
+
+    Deliberately NOT imported from conftest: importing a fixture across modules
+    double-registers it and breaks the per-test Postgres schema isolation
+    (a bug that once surfaced as "invalid credentials" in unrelated tests).
+    """
+    from migrations import runner
+    from src.repositories import pg
+
+    db_path = str(tmp_path_factory.mktemp("sweep") / "sweep.db")
+
+    async def _boot():
+        database = JobDatabase(db_path)
+        await database.init_db()
+        await database.close()
+        await runner.up(db_path)
+
+    asyncio.run(_boot())
+    yield db_path
+    asyncio.run(pg.drop_schema(db_path))
+
+
+@pytest.fixture
+def sweep_db(_sweep_schema):
+    """The shared sweep DB, emptied so each test starts from nothing.
+
+    The `current_schema()` assertion is the load-bearing line. `search_path`
+    silently falls back to `public` when the per-test schema is missing, so a
+    bare `DELETE FROM jobs` in a half-built fixture would delete real rows from
+    the shared dev database instead of erroring. Checking WHERE we are before
+    deleting anything is the difference between a test and an incident.
+    """
+    from src.repositories import pg
+
+    async def _wipe():
+        async with pg.connect(_sweep_schema) as conn:
+            cur = await conn.execute("SELECT current_schema()")
+            schema = (await cur.fetchone())[0]
+            assert schema and schema.startswith("t_"), (
+                f"refusing to wipe: connected to schema {schema!r}, not this test's own"
+            )
+            for table in ("user_feed", "job_enrichment", "jobs", "run_log"):
+                await conn.execute(f"DELETE FROM {table}")  # noqa: S608 — fixed literal list
+            await conn.commit()
+
+    asyncio.run(_wipe())
+    return _sweep_schema
+
+
+def _enrichment(**overrides):
+    """A `JobEnrichment` with everything `unknown` unless a test says otherwise.
+
+    Mirrors the real contract: the prompt DEMANDS the explicit `unknown` enum
+    instead of a guess, so `unknown` is what the model honestly returns most of
+    the time, and the sweep has to read it as "leave that shelf absent".
+    """
+    from src.services.job_enrichment_schema import JobEnrichment
+
+    payload = dict(
+        title_canonical="Platform Engineer",
+        category="other",
+        employment_type="unknown",
+        workplace_type="unknown",
+        seniority="unknown",
+        experience_level="unknown",
+        visa_sponsorship="unknown",
+        salary={"min": None, "max": None, "currency": None, "frequency": "unknown"},
+    )
+    payload.update(overrides)
+    return JobEnrichment(**payload)
+
+
+def _fake_llm(enrichment, calls):
+    """Stand-in for `llm_extract_validated` that records every prompt it is
+    handed. Recording the PROMPT (not just the count) is what lets the stub
+    test prove a teaser was never SENT, rather than merely that its answer was
+    thrown away afterwards."""
+
+    async def _fn(prompt, schema, system):
+        calls.append(prompt)
+        return enrichment
+
+    return _fn
+
+
+async def _insert(db_path, job):
+    """Store a job WITHOUT running the gate — the exact shape of every row
+    written before the gate existed, which is what pass 1 is for.
+
+    The explicit `commit()` is belt-and-braces, not magic: `insert_job` does
+    not commit (its callers batch a whole run), and today `pg.py` connections
+    are autocommit so `commit()` is a no-op — but the test would silently stop
+    seeing its own rows the day that changes, and that failure would look like
+    a bug in the sweep.
+    """
+    database = JobDatabase(db_path)
+    await database.connect()
+    try:
+        await database.insert_job(job)
+        await database.commit()
+    finally:
+        await database.close()
+
+
+async def _rows(db_path):
+    from src.repositories import pg
+
+    async with pg.connect(db_path) as conn:
+        conn.row_factory = pg.Row
+        cur = await conn.execute("SELECT * FROM jobs ORDER BY id")
+        return {r["title"]: dict(r) for r in await cur.fetchall()}
+
+
+def _provenance(row):
+    value = row["shelf_provenance"]
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def _budget(**overrides):
+    from src.services.shelf_enrichment import SweepBudget
+
+    defaults = dict(
+        max_jobs=100,
+        max_spend_usd=10.0,
+        min_absent_shelves=1,
+        pass1_max_jobs=1000,
+        input_usd_per_1m=0.150,
+        output_usd_per_1m=0.600,
+        output_tokens_per_job=200,
+    )
+    defaults.update(overrides)
+    return SweepBudget(**defaults)
+
+
+async def _sweep(db_path, *, budget=None, enrichment=None, calls=None, force=False):
+    from src.repositories import pg
+    from src.services.shelf_enrichment import run_shelf_enrichment_sweep
+
+    calls = [] if calls is None else calls
+    async with pg.connect(db_path) as conn:
+        stats = await run_shelf_enrichment_sweep(
+            conn,
+            budget=budget or _budget(),
+            force=force,
+            llm_extract_validated_fn=_fake_llm(enrichment or _enrichment(), calls),
+        )
+    return stats, calls
+
+
+async def test_a_stub_description_is_never_sent_to_the_llm(sweep_db):
+    """THE hard block (§6). `enrich_job` is idempotent per `job_id`, so an
+    answer read off a teaser is CACHED PERMANENTLY — not a bad guess we can
+    fix later, a bad guess we PAID for and then stored.
+
+    Proven by what reaches the LLM, not by what comes back.
+    """
+    await _insert(sweep_db, _make_job(title="Stub Job", description="Short teaser."))
+    await _insert(sweep_db, _make_job(title="Real Job", description=_REAL_AD))
+
+    stats, calls = await _sweep(sweep_db)
+
+    assert stats["pass2_blocked_stub"] == 1
+    assert stats["pass2_enriched"] == 1
+    assert len(calls) == 1
+    assert "Real Job" in calls[0]
+    assert "Stub Job" not in calls[0]
+
+    rows = await _rows(sweep_db)
+    assert _provenance(rows["Stub Job"])["description"] == {"how": "absent", "why": "stub"}
+
+
+async def test_an_llm_value_never_overwrites_a_source_filled_shelf(sweep_db):
+    """Trust order, §2: source beats derived beats llm. A shelf the board
+    itself filled is a FACT; the model's reading of prose is an inference. An
+    inference must never quietly replace a fact.
+    """
+    job = _make_job(
+        title="Source Wins",
+        description=_REAL_AD,
+        employment_type="Full time",   # raw upstream value — the gate normalises it
+        salary_min=50000,
+        salary_max=70000,
+        salary_currency="GBP",
+        salary_period="annual",
+    )
+    fill_shelves(job)                  # exactly as the ingest path would
+    await _insert(sweep_db, job)
+
+    stats, calls = await _sweep(
+        sweep_db,
+        enrichment=_enrichment(
+            employment_type="contract",
+            salary={"min": 10.0, "max": 12.0, "currency": "GBP", "frequency": "hourly"},
+            seniority="senior",
+        ),
+    )
+    assert len(calls) == 1, "the ad is still read — the refusal is per-SHELF, not per-job"
+
+    row = (await _rows(sweep_db))["Source Wins"]
+    provenance = _provenance(row)
+
+    # The source's own values survived untouched, with their provenance.
+    assert row["employment_type"] == "full_time"
+    assert provenance["employment_type"]["how"] == "source"
+    assert row["salary_min"] == 50000
+    assert row["salary_max"] == 70000
+    assert provenance["salary"]["how"] == "source"
+
+    # And the shelf that really WAS empty did get filled — proving the above is
+    # a refusal to overwrite, not the sweep failing to write anything at all.
+    assert row["seniority"] == "senior"
+    assert provenance["seniority"]["how"] == "llm"
+
+
+async def test_provenance_says_llm_only_for_shelves_the_llm_filled(sweep_db):
+    """`how:"llm"` is a claim about how a value got here. Stamping it on a
+    shelf the model left `unknown` makes the audit trail a lie — and
+    provenance exists precisely so "nobody looked" and "the ad does not say"
+    stay different facts (§3/§4).
+    """
+    await _insert(sweep_db, _make_job(title="Partial Fill", description=_REAL_AD))
+
+    await _sweep(
+        sweep_db,
+        enrichment=_enrichment(employment_type="full_time", workplace_type="hybrid"),
+    )
+
+    row = (await _rows(sweep_db))["Partial Fill"]
+    provenance = _provenance(row)
+
+    llm_shelves = {s for s, e in provenance.items() if e.get("how") == "llm"}
+    assert llm_shelves == {"employment_type", "workplace_mode"}
+
+    # What the model declined to answer stays ABSENT — never the literal string
+    # "unknown" in a catalog column, never a zero, never a guess (rule #29).
+    assert row["seniority"] is None
+    assert provenance["seniority"]["how"] == "absent"
+    assert row["salary_min"] is None and row["salary_max"] is None
+    assert provenance["salary"]["how"] == "absent"
+
+
+async def test_the_budget_cap_stops_the_sweep_and_says_so_loudly(sweep_db, caplog):
+    """A cap that trims silently is a cap nobody can act on. The owner is
+    pre-revenue: the run must stop at the ceiling AND leave a record of how
+    much went unread.
+    """
+    import logging
+
+    for i in range(4):
+        await _insert(sweep_db, _make_job(title=f"Capped {i}", description=_REAL_AD))
+
+    with caplog.at_level(logging.ERROR, logger="job360.services.shelf_enrichment"):
+        stats, calls = await _sweep(sweep_db, budget=_budget(max_jobs=2))
+
+    assert len(calls) == 2, "the cap is a hard stop on CALLS, not a filter on results"
+    assert stats["pass2_enriched"] == 2
+    assert stats["capped"] is True
+    assert stats["cap_reason"] == "max_jobs"
+    assert any("JOB SOURCE ENRICHMENT CAPPED" in r.getMessage() for r in caplog.records)
+
+
+async def test_the_spend_cap_bites_before_the_job_cap_when_it_is_tighter(sweep_db):
+    """Two independent ceilings; the sweep stops at whichever comes first. A
+    job cap alone cannot bound cost — a batch of very long ads costs several
+    times what a batch of short ones does at the same job count.
+    """
+    for i in range(4):
+        await _insert(sweep_db, _make_job(title=f"Spendy {i}", description=_REAL_AD))
+
+    stats, calls = await _sweep(
+        sweep_db, budget=_budget(max_jobs=100, max_spend_usd=0.0004)
+    )
+    assert stats["capped"] is True
+    assert stats["cap_reason"] == "max_spend_usd"
+    assert 0 < len(calls) < 4
+    assert stats["spend_usd"] <= 0.0004
+
+
+async def test_the_spend_is_written_to_run_log(sweep_db):
+    """Before this, NOTHING could answer "what did last night cost?" —
+    enrichment spend left no trace anywhere. One run_log row per sweep, with
+    the fetch counters honestly zero (this run fetched nothing).
+    """
+    from src.repositories import pg
+
+    await _insert(sweep_db, _make_job(title="Costed", description=_REAL_AD))
+    stats, _ = await _sweep(sweep_db, enrichment=_enrichment(seniority="mid"))
+
+    async with pg.connect(sweep_db) as conn:
+        conn.row_factory = pg.Row
+        cur = await conn.execute(
+            "SELECT run_uuid, total_found, new_jobs, enrichment_stats FROM run_log"
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+
+    assert len(rows) == 1
+    assert rows[0]["run_uuid"].startswith("shelf-enrichment-")
+    assert rows[0]["total_found"] == 0 and rows[0]["new_jobs"] == 0
+
+    logged = json.loads(rows[0]["enrichment_stats"])
+    assert logged["pass2_enriched"] == 1
+    assert logged["input_tokens"] > 0
+    assert logged["spend_usd"] > 0
+    assert logged["spend_usd"] == stats["spend_usd"]
+
+
+async def test_pass1_fills_shelves_without_spending_anything(sweep_db):
+    """PASS 1 is FREE. Rows stored before the gate existed never saw the visa
+    detector, the deadline extractor or the enum normaliser, and nothing else
+    was ever going back for them. Filling those shelves costs zero tokens — so
+    it happens BEFORE any ad is read, never instead of it.
+    """
+    ad = _REAL_AD + " Visa sponsorship is available. Closing date: 30 June 2027."
+    job = _make_job(title="Free Fill", description=ad, employment_type="Full time")
+    # Deliberately NOT gated: shelf_provenance is the empty default, exactly
+    # like every pre-gate row in the live catalog.
+    assert not job.shelf_provenance
+    await _insert(sweep_db, job)
+
+    # min_absent_shelves impossibly high, so pass 2 cannot run at all —
+    # anything filled below was filled for free.
+    stats, calls = await _sweep(sweep_db, budget=_budget(min_absent_shelves=99))
+
+    assert calls == [], "pass 1 must never call an LLM"
+    assert stats["spend_usd"] == 0
+    assert stats["pass1_jobs_updated"] == 1
+    # Named, not just counted. `deadline` is the shelf that proves the counter
+    # spans ALL 13 universal shelves: pass 1 fills it from the ad text and the
+    # LLM is forbidden to touch it, so a counter that only watched the six
+    # LLM-fillable shelves would report this free pass as half its real value.
+    assert stats["pass1_shelves_by_name"] == {"visa_status": 1, "deadline": 1}
+    assert stats["pass1_shelves_filled"] == 2
+
+    row = (await _rows(sweep_db))["Free Fill"]
+    provenance = _provenance(row)
+    assert row["visa_status"] == "sponsors"
+    assert provenance["visa_status"]["how"] == "derived"
+    assert row["employment_type"] == "full_time"
+    assert row["deadline"] == "2027-06-30"
+    assert set(provenance.keys()) == set(UNIVERSAL_SHELF)
+
+
+async def test_pass1_never_removes_a_value(sweep_db):
+    """Re-deriving can produce NULL where a value is stored — here a band that
+    the plausibility clamp refuses at BOTH ends. Deleting a value the catalog
+    already had is not a maintenance run, it is data loss wearing one. Pass 1
+    only ever ADDS.
+
+    And keeping the value means keeping its provenance with it: a restored
+    number sitting under a fresh `absent` stamp would be the one state
+    provenance exists to make impossible.
+    """
+    from src.repositories import pg
+
+    await _insert(sweep_db, _make_job(title="Keep Mine", description=_REAL_AD))
+
+    # 5,000 is below the £10k floor and 900,000 above the £500k ceiling, so a
+    # re-derivation nulls BOTH ends and the gate stamps `absent:implausible`.
+    async with pg.connect(sweep_db) as conn:
+        await conn.execute(
+            "UPDATE jobs SET salary_min = ?, salary_max = ?, salary_currency = ? WHERE title = ?",
+            (5000.0, 900000.0, "GBP", "Keep Mine"),
+        )
+        await conn.commit()
+
+    await _sweep(sweep_db, budget=_budget(min_absent_shelves=99))
+
+    row = (await _rows(sweep_db))["Keep Mine"]
+    assert row["salary_min"] == 5000.0
+    assert row["salary_max"] == 900000.0
+    assert _provenance(row)["salary"]["how"] != "absent"
+
+
+async def test_an_already_paid_for_enrichment_is_written_back_for_free(sweep_db):
+    """`job_enrichment` is the LLM layer's own store; until its facts reach the
+    `jobs` columns no filter, serializer or scorer can see them (§3 "Where LLM
+    values land"). Prod holds thousands of such rows — re-reading those ads
+    would be paying twice for an answer we already own.
+    """
+    from src.repositories import pg
+    from src.services.job_enrichment import save_enrichment
+
+    await _insert(sweep_db, _make_job(title="Already Paid", description=_REAL_AD))
+    job_id = (await _rows(sweep_db))["Already Paid"]["id"]
+
+    async with pg.connect(sweep_db) as conn:
+        await save_enrichment(
+            conn, job_id, _enrichment(seniority="staff", workplace_type="remote")
+        )
+
+    stats, calls = await _sweep(sweep_db)
+
+    assert calls == [], "a job that already has an enrichment row is never re-read"
+    assert stats["spend_usd"] == 0
+
+    row = (await _rows(sweep_db))["Already Paid"]
+    provenance = _provenance(row)
+    assert row["seniority"] == "staff"
+    assert row["workplace_mode"] == "remote"
+    assert provenance["seniority"]["how"] == "llm"
+
+
+async def test_re_running_the_gate_does_not_relabel_an_llm_fill_as_source(sweep_db):
+    """Pass 1 re-runs the gate over stored rows. A shelf the LLM filled comes
+    back off the row as a plain value, and a naive re-run would stamp it
+    `how:"source"` — silently upgrading "a model decided this" into "the board
+    told us this". Provenance is only worth having if it cannot be laundered.
+    """
+    await _insert(sweep_db, _make_job(title="Laundering", description=_REAL_AD))
+
+    await _sweep(sweep_db, enrichment=_enrichment(employment_type="contract"))
+    first = _provenance((await _rows(sweep_db))["Laundering"])
+    assert first["employment_type"]["how"] == "llm"
+
+    # Second sweep: pass 1 meets the row again, now carrying the LLM value.
+    await _sweep(sweep_db)
+    second = _provenance((await _rows(sweep_db))["Laundering"])
+    assert second["employment_type"]["how"] == "llm"
+    assert second["employment_type"]["at"] == first["employment_type"]["at"]
+
+
+async def test_with_the_flags_off_the_nightly_path_never_sweeps(sweep_db, monkeypatch):
+    """Rule #18 — the gate is `ENGINE2_ENABLED OR ENRICHMENT_ENABLED`, so BOTH
+    names must be off. Merging this must not start spending money: with the
+    flags off the sweep is not merely a no-op, it is never CALLED, and
+    `refresh_catalog` behaves byte-identically to before it existed.
+    """
+    from unittest.mock import patch
+
+    import src.core.settings as settings_mod
+    import src.services.shelf_enrichment as sweep_mod
+    import src.workers.tasks as tasks_mod
+    from src.repositories import pg
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+    await _insert(sweep_db, _make_job(title="Untouched", description=_REAL_AD))
+
+    called = []
+
+    async def _tripwire(*args, **kwargs):
+        called.append(kwargs)
+        return {}
+
+    async def _fake_run_search(*args, **kwargs):
+        return {"sources_queried": 0, "total_found": 0, "new_jobs": 0}
+
+    profile = UserProfile(
+        cv_data=CVData(raw_text="Platform engineer, Kubernetes and Go."),
+        preferences=UserPreferences(target_job_titles=["Platform Engineer"]),
+    )
+
+    monkeypatch.setattr(sweep_mod, "run_shelf_enrichment_sweep", _tripwire)
+
+    async def _run():
+        async with pg.connect(sweep_db) as conn:
+            return await tasks_mod.refresh_catalog({"db": conn})
+
+    with (
+        patch("src.main.run_search", _fake_run_search),
+        patch("src.services.profile.storage.list_profile_user_ids", return_value=["u1"]),
+        patch("src.services.profile.storage.load_profile", return_value=profile),
+    ):
+        for engine2, legacy, expect_called in ((False, False, False), (True, False, True)):
+            called.clear()
+            monkeypatch.setattr(settings_mod, "ENGINE2_ENABLED", engine2, raising=False)
+            monkeypatch.setattr(tasks_mod, "ENRICHMENT_ENABLED", legacy, raising=False)
+            await _run()
+            assert bool(called) is expect_called, (engine2, legacy)
+
+    # And with the flags off nothing was written to the catalog.
+    row = (await _rows(sweep_db))["Untouched"]
+    assert row["seniority"] is None

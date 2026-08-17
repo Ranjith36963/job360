@@ -230,6 +230,11 @@ class JobDatabase:
             ("total_duration", "REAL"),
             ("user_id", "TEXT"),
             ("matcher_stats", "TEXT DEFAULT '{}'"),  # backlog #9 — LLM judge telemetry
+            # Migration 0032 — JOB SOURCE ENRICHMENT spend counter. Same shape
+            # as matcher_stats: a whole-blob JSON payload written by
+            # services/shelf_enrichment.py so "what did last night cost?" has
+            # an answer at all (docs/pillars/UNIVERSAL_SHELF.md §7).
+            ("enrichment_stats", "TEXT DEFAULT '{}'"),
         ]
 
         applications_migrations = [

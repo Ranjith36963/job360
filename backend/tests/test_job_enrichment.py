@@ -37,7 +37,29 @@ from src.workers.tasks import enrich_job_task
 # ---------------------------------------------------------------------------
 
 
-def _sample_job(title="ML Engineer", description="Python PyTorch role.") -> Job:
+# A REAL-LENGTH job ad. The old default was "Python PyTorch role." — 20 chars,
+# which no job board has ever published. That was fine while enrich_job read
+# anything it was handed, but the stub block now lives inside enrich_job (a
+# 452-char Reed teaser was measured inventing workplace_mode="onsite"), so a
+# 20-char fixture is correctly refused. Making the fixture realistic is the fix;
+# lowering the guard to accommodate an unrealistic fixture would delete the
+# protection and let fabrications back into a cache that never re-reads itself.
+_REALISTIC_AD = (
+    "We are looking for a Machine Learning Engineer to join our London team. "
+    "You will design, build and ship production ML systems end to end, working "
+    "closely with product and platform engineers. Day to day you will train and "
+    "evaluate models in PyTorch, move them into production behind well-tested "
+    "Python services, and own their monitoring once live. "
+    "Requirements: strong Python, hands-on PyTorch, solid SQL, and experience "
+    "taking a model from notebook to production. Familiarity with Docker and "
+    "cloud infrastructure is helpful but not essential. "
+    "We offer hybrid working (two days in the office), a competitive salary "
+    "reviewed annually, private healthcare, and a generous learning budget. "
+    "We are happy to sponsor visas for exceptional candidates."
+)
+
+
+def _sample_job(title="ML Engineer", description=_REALISTIC_AD) -> Job:
     return Job(
         title=title,
         company="Acme AI",
@@ -365,7 +387,10 @@ async def test_enrich_job_task_happy_path(db_with_schema):
     async with pg.connect(db_with_schema) as conn:
         cur = await conn.execute(
             "INSERT INTO jobs(title, company, location, description) VALUES (?,?,?,?)",
-            ("ML Engineer", "Acme", "London, UK", "Python PyTorch"),
+            # Real-length ad: enrich_job now refuses anything under the stub
+            # threshold, so a two-word description would be blocked before the
+            # task under test ever runs.
+            ("ML Engineer", "Acme", "London, UK", _REALISTIC_AD),
         )
         await conn.commit()
         job_id = cur.lastrowid
@@ -380,7 +405,10 @@ async def test_enrich_job_task_happy_path(db_with_schema):
 @pytest.mark.asyncio
 async def test_enrich_job_task_is_idempotent(db_with_schema):
     async with pg.connect(db_with_schema) as conn:
-        cur = await conn.execute("INSERT INTO jobs(title, description) VALUES (?,?)", ("Dev", "desc"))
+        # Real-length ad — see the note on the happy-path test above.
+        cur = await conn.execute(
+            "INSERT INTO jobs(title, description) VALUES (?,?)", ("Dev", _REALISTIC_AD)
+        )
         await conn.commit()
         job_id = cur.lastrowid
 

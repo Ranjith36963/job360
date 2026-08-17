@@ -1551,10 +1551,41 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             ingested_rows,
         )
 
+    # ---- JOB SOURCE ENRICHMENT — the two-pass catalog sweep ----------------
+    #
+    # An LLM reading the ads we just fetched to fill the shelves no source
+    # states as a field (visa 1.6% filled, seniority 7.5%, category 7.5% —
+    # measured 2026-08-17). It belongs HERE and not in a user search: these
+    # are facts about the JOB, identical for every user, so the cost is paid
+    # once per job by the shared catalog and never scales with user count
+    # (rule #10). It runs AFTER the fan-out so jobs fetched this very tick are
+    # eligible in the same run.
+    #
+    # Gated exactly like every other Engine-2 call site: ENGINE2_ENABLED OR the
+    # legacy ENRICHMENT_ENABLED (rule #18 — BOTH names). Both off ⇒ this block
+    # is never entered, and this cron behaves byte-identically to before it
+    # existed. That is deliberate: merging this must not start spending money.
+    # Its own hard caps (SHELF_ENRICHMENT_MAX_JOBS / _MAX_SPEND_USD) are the
+    # second line, and it writes what it spent into run_log.
+    enrichment_sweep_stats: dict[str, Any] = {}
+    if db is not None:
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
+            from src.services.shelf_enrichment import (  # noqa: PLC0415
+                run_shelf_enrichment_sweep,
+            )
+
+            enrichment_sweep_stats = await run_shelf_enrichment_sweep(
+                db,
+                llm_extract_validated_fn=ctx.get("llm_extract_validated"),
+            )
+
     return {
         "sources_queried": stats.get("sources_queried", 0),
         "total_found": stats.get("total_found", 0),
         "new_jobs": stats.get("new_jobs", 0),
         "scored_jobs": scored_jobs,
         "ingested_rows": ingested_rows,
+        "shelf_enrichment": enrichment_sweep_stats,
     }
