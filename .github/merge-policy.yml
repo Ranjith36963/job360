@@ -78,15 +78,46 @@ lanes:
       - ".github/workflows/**"
       - "scripts/**"
       - ".claude/**"
-      - "docs/**"
-      - "*.md"
+      # WAVE 1 OF THE SPLIT (2026-08-18): `docs/**` used to sit here wholesale,
+      # which meant the canonical text of the owner's product rules was harness.
+      # 109 files moved so the lane is a fact about WHERE a file lives, not a
+      # fact someone has to remember to write down.
+      - "docs/harness/**"
+      - "harness/**"
       - "backend/scripts/**"
+      # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
+      # `*.md` sat here and looked harmless. It is not: this repo's glob matcher
+      # lets `*` cross `/` (deliberately -- `*.env*` and `*docker-compose*` in
+      # the owner lane depend on it), so `*.md` matched markdown at ANY depth.
+      # Any document not explicitly classified therefore landed in the FAST lane
+      # and auto-merged. Caught by classifying `docs/product_design_rules.md`
+      # after the move: lane `harness`, auto_merge TRUE -- the canonical text of
+      # the owner's own product rules, mergeable by a machine.
+      #
+      # The safe failure direction is the point. A new root-level document now
+      # matches nothing, so it escalates to product_owner and asks to be filed.
+      # Forgetting costs one classification, never a silent auto-merge.
+      - "README.md"
+      - "ARCHITECTURE.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "STATUS.md"
+      - "ENGINES_KANBAN.md"
+      - "LAUNCH_PLAN.md"
+      - "2030.md"
+      - "PLAN-?-*.md"
+      - "anthropic-patterns-upgrade.md"
+      - "fable-harness-plan.md"
+      - "scrapingdesccion.md"
       # Repo plumbing. Measured over the last 60 merges, these three alone
       # pushed PRs into the owner lane purely because nobody had ever named
       # them. Ignore-files and linter config cannot reach a user.
       - ".gitignore"
       - ".gitattributes"
-      - "*.dockerignore"
+      # NOT `*.dockerignore` -- same depth-crossing trap as `*.md` below.
+      - ".dockerignore"
+      - "backend/.dockerignore"
+      - "frontend/.dockerignore"
       - ".coderabbit.yaml"
       - "pyrightconfig.json"
       - ".vscode/**"
@@ -123,17 +154,9 @@ lanes:
     watch_minutes: 15       # how long the post-merge watcher stares at prod
     rollback: railway       # `deploymentRollback` — seconds, no rebuild
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # OWNER — no machine decides these. Ever.
-  #
-  # DENY BEATS ALLOW. A PR touching one owner-lane file is an owner-lane PR,
-  # no matter what else is in it. This is not a risk score; it is a door.
-  #
-  # Two kinds live here, and the second is the load-bearing one:
-  #   1. Irreversible against live data, or holds secrets.
-  #   2. THE CAGE ITSELF. A machine may not widen the rule that decides what a
-  #      machine may merge. That is the only recursion that actually matters.
-  # ─────────────────────────────────────────────────────────────────────────
+  # DENY BEATS ALLOW. A PR touching one owner-lane file is an owner-lane PR, no
+  # matter what else is in it. Not a risk score — a door. A score can be diluted
+  # by adding safe files; a door cannot.
   # ─────────────────────────────────────────────────────────────────────────
   # PRODUCT_OWNER — you decide, AND a user is exposed.
   #
@@ -165,8 +188,8 @@ lanes:
       - "pyproject.toml"
       - "requirements*.txt"
       # the owner's product rules — changing the text changes the product
-      - "docs/product_design_rules.md"   # the canonical text of rules #29-31
-      - "docs/plans/batch-2-decisions.md"
+      - "docs/product/product_design_rules.md"   # the canonical text of rules #29-31
+      - "docs/product/plans/batch-2-decisions.md"
     requires: [ci, review, security, verify, ratchets]
     auto_merge: false          # your hand, always
     watch_minutes: 15          # ...but the watcher still runs after you merge

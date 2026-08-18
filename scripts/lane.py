@@ -239,7 +239,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("precedence: 40 docs + 1 migration is an OWNER pr",
           classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
     check("precedence: product + harness is PRODUCT",
-          classify(["docs/a.md", "backend/src/main.py"], policy)["lane"], "product")
+          classify(["docs/harness/a.md", "backend/src/main.py"], policy)["lane"], "product")
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -322,7 +322,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     kept, exempted = apply_data_exemptions([target], policy, base, head, repo)
     check("exemption: a registry-only edit stops pinning the PR", (kept, exempted), ([], [target]))
     check("exemption: and the PR then leaves the owner lane",
-          classify(kept or ["docs/x.md"], policy)["lane"], "harness")
+          classify(kept or ["docs/harness/x.md"], policy)["lane"], "harness")
 
     repo, base, head = _mini_repo(reg_b + "def check(root):\n    return ['x']\n")
     kept, exempted = apply_data_exemptions([target], policy, base, head, repo)
@@ -351,6 +351,23 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("product_owner can be rolled back on Railway", mig.get("rollback"), "railway")
     check("neither owner lane ever auto-merges",
           (mig["auto_merge"], cage["auto_merge"]), (False, False))
+
+    # 11. THE LEAKY-GLOB TRAP. This repo's matcher lets `*` cross `/` -- the
+    #     owner lane's `*.env*` and `*docker-compose*` depend on that. So a
+    #     pattern like `*.md` in a FAST lane silently matches every markdown at
+    #     every depth, and any unclassified document auto-merges. That is exactly
+    #     what happened: `docs/product_design_rules.md` classified as `harness`,
+    #     auto_merge True -- the canonical text of the owner's product rules,
+    #     mergeable by a machine. No fast lane may carry a bare `*.ext` pattern.
+    for fast in ("harness", "product"):
+        for pattern in policy["lanes"][fast].get("paths") or []:
+            check(f"fast lane `{fast}` has no depth-crossing glob: {pattern}",
+                  pattern.startswith("*.") and "/" not in pattern, False)
+    check("an unclassified nested doc escalates, never auto-merges",
+          classify(["docs/somewhere/new.md"], policy)["auto_merge"], False)
+    check("a root doc that IS classified still takes the fast lane",
+          classify(["README.md"], policy)["lane"], "harness")
+
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")

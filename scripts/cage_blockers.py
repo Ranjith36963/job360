@@ -265,11 +265,11 @@ BLOCKERS: list[Blocker] = [
         id="B12",
         met="2026-08-16",
         what="`docs/*` and `*.md` were allowed wholesale, so "
-        "docs/product_design_rules.md — the canonical text of owner rules #29/#30/#31, "
+        "docs/product/product_design_rules.md — the canonical text of owner rules #29/#30/#31, "
         "which CLAUDE.md names as the authority — could ship unsupervised, while "
         "CLAUDE.md itself was correctly denied. The rule delegated; the delegation was "
         "not protected.",
-        repro="check_paths(['docs/product_design_rules.md'])   -> [] (allowed)",
+        repro="check_paths(['docs/product/product_design_rules.md'])   -> [] (allowed)",
         rule="IF A DENIED FILE DELEGATES ITS AUTHORITY TO ANOTHER FILE, THAT FILE "
         "INHERITS THE DENIAL. The documents that ARE decisions are denied by name.",
         drill="a document that is itself a product decision is refused",

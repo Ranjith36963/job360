@@ -60,7 +60,7 @@ malformed JSON, fewer than two deployments, nothing capable before the current
 one — refuses LOUDLY and exits non-zero. None of them print a capability
 JSON that could be misread as "yes, this is safe." A watcher that silently
 treats "I couldn't check" as "all clear" is the exact failure this repo has
-already paid for in other loops (see docs/IMPLEMENTATION_LOG.md, watchdog_check.py).
+already paid for in other loops (see docs/harness/IMPLEMENTATION_LOG.md, watchdog_check.py).
 
 USAGE
 -----

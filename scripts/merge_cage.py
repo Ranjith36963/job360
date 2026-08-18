@@ -272,10 +272,10 @@ DENY: list[tuple[str, str]] = [
     # owner's product rules could ship unsupervised while CLAUDE.md, which merely
     # points AT it, was denied. If a denied file delegates its authority to
     # another file, that file inherits the denial.
-    ("docs/product_design_rules.md",
+    ("docs/product/product_design_rules.md",
      f"the canonical text of owner rules #29/#30/#31 — changing it changes the "
      f"product. {_OWNER_MERGES}"),
-    ("docs/plans/batch-2-decisions.md",
+    ("docs/product/plans/batch-2-decisions.md",
      f"a record of irreversible choices. {_OWNER_MERGES}"),
     # ── the harness must not quietly edit its own cage ───────────────────────
     (".github/**", "part of the harness that judges this very PR — an agent editing its "
@@ -1200,7 +1200,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         check_paths(["frontend/package.json"]), "dependabot-auto", P)
     # B12 — a document that IS a decision inherits the denial it delegates from.
     red("a document that is itself a product decision is refused",
-        check_paths(["docs/product_design_rules.md"]), "product", P)
+        check_paths(["docs/product/product_design_rules.md"]), "product", P)
     # B13 — `**` really crosses directories now, and `*` really stops at one.
     #        If the rewrite from `x/*` to `x/**` had been botched, this goes red.
     #        Each nested path must be refused BY ITS DENY REASON. Counting

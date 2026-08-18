@@ -5,7 +5,7 @@ name: Repair loop (agent:fix)
 # The original Loop 1 (ralph-loop worker/integrator) was disabled 2026-06-21: it
 # ran unsupervised, wrote straight to `main`, and wiped worktrees/branches/the
 # test DB. Root cause, one line: a WRITING+MERGING agent with no cage and no
-# human gate. docs/maintenance/loop1_safe_reenable.md is the checklist; this
+# human gate. docs/harness/maintenance/loop1_safe_reenable.md is the checklist; this
 # workflow implements it.
 #
 #   G1  Never touches `main`. It commits to its own branch and opens a PR.
