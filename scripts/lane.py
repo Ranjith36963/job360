@@ -10,27 +10,34 @@ gate, it is an off switch.
 
 The mistake was treating all change as one kind of risk. It is not:
 
-    HARNESS   .github/, scripts/, docs/   -> if it breaks, the OWNER is annoyed
-    PRODUCT   backend/src/, frontend/src/ -> if it breaks, a REAL PERSON is hurt
-    OWNER     migrations, secrets, cage   -> irreversible, or decides the rules
+Two questions, not one -- WHO GETS HURT, and WHO DECIDES. Crossing them gives a
+2x2, and the first version of this file collapsed it into a list of three:
 
-Three blast radii, three gates. That is the whole idea.
+                      a machine may merge      only the owner merges
+    HARNESS       |   harness                |  harness_owner        |  hurts YOU
+    PRODUCT       |   product                |  product_owner        |  hurts a USER
+
+The collapse was not cosmetic. It is what happens AFTER the merge: a hand-merged
+migration still reaches live users, so it still needs the 15-minute watcher and a
+confirmed rollback -- and under one `owner` bucket it got neither. Measured over
+the last 60 merges that bucket held 7 product decisions, 6 harness decisions and
+5 that were both.
 
 THE PRECEDENCE RULE, AND WHY IT IS NOT A SCORE
 ----------------------------------------------
 A PR is classified by its MOST RESTRICTIVE file, never by a majority or an
 average:
 
-    owner  >  product  >  harness
+    product_owner  >  harness_owner  >  product  >  harness
 
-One migration file in a 40-file docs PR makes the whole thing an OWNER PR. This
+One migration file in a 40-file docs PR makes the whole thing a product_owner PR. This
 is deliberate and it is the opposite of a risk score. A score can be diluted --
 add enough safe files and the dangerous one stops mattering. A door cannot.
 
 THE OTHER RULE: AN UNKNOWN PATH IS NOT A SAFE PATH
 --------------------------------------------------
 A file matching no lane does not fall through to the fast lane. It escalates to
-`owner`, and the reason names the file. This repo has shipped ten guards that
+`product_owner` -- the strictest of the four -- and the reason names the file. This repo has shipped ten guards that
 could not fire, every one of them a check that reported success about a question
 it was not actually asking. `else: allow` is that bug in one word.
 """
@@ -54,7 +61,12 @@ from merge_cage import path_matches  # noqa: E402
 POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
 
 # Most restrictive first. Order IS the precedence rule.
-PRECEDENCE: tuple[str, ...] = ("owner", "product", "harness")
+#
+# TWO owner lanes, not one. "Who decides" and "who gets hurt" are separate
+# questions; a single `owner` bucket collapsed them and quietly left hand-merged
+# migrations with no post-merge watcher at all. product_owner outranks
+# harness_owner because a user is downstream of it.
+PRECEDENCE: tuple[str, ...] = ("product_owner", "harness_owner", "product", "harness")
 
 
 class PolicyError(RuntimeError):
@@ -149,8 +161,8 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
     """
     if not files:
         return {
-            "lane": "owner",
-            "requires": policy["lanes"]["owner"].get("requires") or [],
+            "lane": "product_owner",
+            "requires": policy["lanes"]["product_owner"].get("requires") or [],
             "auto_merge": False,
             "why": ["no files in the changeset -- refusing to guess"],
             "by_lane": {},
@@ -160,12 +172,12 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
     for f in files:
         by_lane.setdefault(lane_of_file(f, policy), []).append(f)
 
-    # An unknown path is an owner path, and it says which file made it so.
+    # An unknown path takes the STRICTEST lane, and says which file made it so.
     if by_lane.get("unknown"):
         unknown = sorted(by_lane["unknown"])
         return {
-            "lane": "owner",
-            "requires": policy["lanes"]["owner"].get("requires") or [],
+            "lane": "product_owner",
+            "requires": policy["lanes"]["product_owner"].get("requires") or [],
             "auto_merge": False,
             "why": [
                 f"{len(unknown)} file(s) match no lane in .github/merge-policy.yml, "
@@ -225,34 +237,34 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #    the case a risk SCORE gets wrong and a DOOR gets right.
     many_docs = [f"docs/note{i}.md" for i in range(40)]
     check("precedence: 40 docs + 1 migration is an OWNER pr",
-          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "owner")
+          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
     check("precedence: product + harness is PRODUCT",
           classify(["docs/a.md", "backend/src/main.py"], policy)["lane"], "product")
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
-          classify([".github/merge-policy.yml"], policy)["lane"], "owner")
+          classify([".github/merge-policy.yml"], policy)["lane"], "harness_owner")
     check("recursion: editing merge_cage.py is owner-only",
-          classify(["scripts/merge_cage.py"], policy)["lane"], "owner")
+          classify(["scripts/merge_cage.py"], policy)["lane"], "harness_owner")
     check("recursion: editing the verifier is owner-only",
-          classify([".github/workflows/verify-live.yml"], policy)["lane"], "owner")
+          classify([".github/workflows/verify-live.yml"], policy)["lane"], "harness_owner")
 
     # 5. An UNKNOWN path must escalate, never fall through to fast.
     unknown = classify(["some/brand/new/place.py"], policy)
-    check("unknown path escalates to owner", unknown["lane"], "owner")
+    check("unknown path escalates to the strictest lane", unknown["lane"], "product_owner")
     check("unknown path never auto-merges", unknown["auto_merge"], False)
     check("unknown path names the file",
           "some/brand/new/place.py" in " ".join(unknown["why"]), True)
 
     # 6. An empty changeset is refused, not waved through.
-    check("empty changeset is owner", classify([], policy)["lane"], "owner")
+    check("empty changeset is product_owner", classify([], policy)["lane"], "product_owner")
     check("empty changeset never auto-merges", classify([], policy)["auto_merge"], False)
 
     # 7. Every lane demands at least one tag. A lane with `requires: []` would
     #    merge on nothing at all, which is the failure this whole file prevents.
     for lane in PRECEDENCE:
         req = policy["lanes"][lane].get("requires") or []
-        check(f"lane `{lane}` demands at least one tag", len(req) >= 1 or lane == "owner", True)
+        check(f"lane `{lane}` demands at least one tag", len(req) >= 1, True)
 
     # 8. A broken policy file must raise, never default to permissive.
     broken = Path(__file__).resolve().parent / "_drill_broken_policy.yml"
@@ -315,7 +327,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     repo, base, head = _mini_repo(reg_b + "def check(root):\n    return ['x']\n")
     kept, exempted = apply_data_exemptions([target], policy, base, head, repo)
     check("exemption: a law edit is NOT exempted", (kept, exempted), ([target], []))
-    check("exemption: so the PR stays owner", classify(kept, policy)["lane"], "owner")
+    check("exemption: so the PR stays harness_owner", classify(kept, policy)["lane"], "harness_owner")
 
     # The direction that matters most: with nothing to compare, do not loosen.
     kept, exempted = apply_data_exemptions([target], policy, None, None, ".")
@@ -325,6 +337,20 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # A file the policy never exempted must be untouched by any of this.
     kept, _ = apply_data_exemptions(["backend/migrations/9.sql"], policy, base, head, repo)
     check("exemption: a non-exempt file is never dropped", kept, ["backend/migrations/9.sql"])
+
+    # 10. THE WHOLE POINT OF SPLITTING owner IN TWO. If both owner lanes get
+    #     identical treatment the split is decoration, so pin the difference:
+    #     a hand-merged migration still reaches users and must still be watched;
+    #     a hand-merged cage edit has nobody downstream and must not be.
+    mig = classify(["backend/migrations/007_x.sql"], policy)
+    cage = classify(["scripts/merge_cage.py"], policy)
+    check("product_owner is WATCHED even though you merge it by hand",
+          bool(mig.get("watch_minutes")), True)
+    check("harness_owner is NOT watched -- nothing live is downstream",
+          bool(cage.get("watch_minutes")), False)
+    check("product_owner can be rolled back on Railway", mig.get("rollback"), "railway")
+    check("neither owner lane ever auto-merges",
+          (mig["auto_merge"], cage["auto_merge"]), (False, False))
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")

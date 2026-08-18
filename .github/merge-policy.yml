@@ -134,8 +134,20 @@ lanes:
   #   2. THE CAGE ITSELF. A machine may not widen the rule that decides what a
   #      machine may merge. That is the only recursion that actually matters.
   # ─────────────────────────────────────────────────────────────────────────
-  owner:
-    description: "Irreversible, secret, or the cage itself. Always by hand."
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_OWNER — you decide, AND a user is exposed.
+  #
+  # There is not one owner lane, there are two. "Who decides" and "who gets
+  # hurt" are separate questions, and a single `owner` bucket collapsed them:
+  # measured over the last 60 merges it held 7 product decisions, 6 harness
+  # decisions and 5 that were both.
+  #
+  # The difference is not cosmetic — it is what happens AFTER the merge. A
+  # hand-merged migration still reaches live users, so it still needs the
+  # watcher and a confirmed rollback. Under one bucket it got neither.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_owner:
+    description: "You decide — and it reaches a user. Watched anyway."
     paths:
       # irreversible against live data
       - "backend/migrations/**"
@@ -152,17 +164,39 @@ lanes:
       - "package-lock.json"
       - "pyproject.toml"
       - "requirements*.txt"
-      # ── the cage may not edit the cage ──────────────────────────────────
+      # the owner's product rules — changing the text changes the product
+      - "docs/product_design_rules.md"   # the canonical text of rules #29-31
+      - "docs/plans/batch-2-decisions.md"
+    requires: [ci, review, security, verify, ratchets]
+    auto_merge: false          # your hand, always
+    watch_minutes: 15          # ...but the watcher still runs after you merge
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # HARNESS_OWNER — you decide, and only you are exposed.
+  #
+  # The cage, and the words agents read. No user is downstream of these, so no
+  # watcher and no rollback rehearsal: merge it and walk away. What they share
+  # with product_owner is only that a machine may not decide them.
+  # ─────────────────────────────────────────────────────────────────────────
+  harness_owner:
+    description: "You decide — and only your own tooling is exposed."
+    paths:
+      # the cage may not edit the cage
       - ".github/merge-policy.yml"       # this file
       - "scripts/merge_cage.py"
+      - "scripts/lane.py"
+      - "scripts/data_only.py"
       - "scripts/drill_registry.py"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       - ".github/workflows/post-merge-watch.yml"
-      # ── the owner's own words ───────────────────────────────────────────
+      # the owner's own words
       - "CLAUDE.md"
-      - "docs/product_design_rules.md"   # the canonical text of rules #29-31
-      - "docs/plans/batch-2-decisions.md"
+    requires: [ci, review, drill]
+    auto_merge: false          # your hand, always
+    watch: false               # nothing live is downstream
+    rollback: git-revert
 
 # ── Data exemptions ────────────────────────────────────────────────────────
 # An owner-lane file that holds BOTH a list and a law. Editing the list is the
