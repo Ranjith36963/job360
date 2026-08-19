@@ -90,7 +90,7 @@ lanes:
       # lets `*` cross `/` (deliberately -- `*.env*` and `*docker-compose*` in
       # the owner lane depend on it), so `*.md` matched markdown at ANY depth.
       # Any document not explicitly classified therefore landed in the FAST lane
-      # and auto-merged. Caught by classifying `docs/product_design_rules.md`
+      # and auto-merged. Caught by classifying `docs/product/product_design_rules.md`
       # after the move: lane `harness`, auto_merge TRUE -- the canonical text of
       # the owner's own product rules, mergeable by a machine.
       #

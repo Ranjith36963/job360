@@ -356,7 +356,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     owner lane's `*.env*` and `*docker-compose*` depend on that. So a
     #     pattern like `*.md` in a FAST lane silently matches every markdown at
     #     every depth, and any unclassified document auto-merges. That is exactly
-    #     what happened: `docs/product_design_rules.md` classified as `harness`,
+    #     what happened: `docs/product/product_design_rules.md` classified as `harness`,
     #     auto_merge True -- the canonical text of the owner's product rules,
     #     mergeable by a machine. No fast lane may carry a bare `*.ext` pattern.
     for fast in ("harness", "product"):

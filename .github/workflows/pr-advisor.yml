@@ -219,3 +219,245 @@ jobs:
         run: |
           set -euo pipefail
           gh pr comment "$PR" --body "$(printf '%s\n**The merge cage could not judge this PR.** No advice was produced, so the absence of a verdict here means nothing — it is not a clean bill of health. %s' '<!-- merge-cage-advice -->' "$RUN_URL")"
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # THE LANE — the first consumer the separation has ever had.
+  #
+  # Wave 1 moved 109 files so that a file's DIRECTORY would carry its lane.
+  # Then nothing read it. Measured on this branch before this job existed:
+  #
+  #     git grep -n "lane\.py"         -> 2 hits, both self-referential
+  #         .github/merge-policy.yml:211   listing it as an owner-lane path
+  #         scripts/lane.py:223            printing its own name in its drill
+  #     git grep -n "stale_path_check" -> 1 hit, its own drill banner
+  #
+  # No workflow invoked either one. Four lanes, a precedence rule, an
+  # escalation rule and the data exemptions were all PROSE — a map nobody
+  # navigated by. This job is the consumer. It decides nothing and it merges
+  # nothing; on every PR it says which lane the owner is actually standing in.
+  #
+  # WHY A SEPARATE JOB AND NOT TWO MORE STEPS IN `advise`
+  # ----------------------------------------------------
+  # `advise` refuses to judge until the cage is on the default branch, and it
+  # is right to: its bootstrap step exits 1 when `scripts/merge_cage.py` is
+  # missing there. Measured 2026-08-19 — `git ls-tree origin/main
+  # scripts/merge_cage.py` is EMPTY — so that step fails on every PR today and
+  # every step after it is dead. Appending the lane verdict there would have
+  # shipped it stillborn, which is the exact failure this repo keeps
+  # re-learning: an artifact with no notifier dies.
+  #
+  # The lane verdict needs none of that machinery — just `lane.py`, the policy
+  # file, and a list of filenames. So it gets its own job, and it starts
+  # working the moment those two files reach the default branch.
+  # ═════════════════════════════════════════════════════════════════════════
+  lane:
+    name: Which lane (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Which PR
+        id: pick
+        env:
+          FROM_EVENT: ${{ github.event.pull_request.number }}
+          FROM_INPUT: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          pr="${FROM_EVENT:-$FROM_INPUT}"
+          if [ -z "$pr" ]; then
+            echo "::error::no PR number — this workflow cannot guess one."
+            exit 1
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      # THE RULES. From the default branch, which the PR cannot edit. Same
+      # discipline as `advise`, for the same reason: a PR must never supply the
+      # code that classifies it, or the classification is its own author's
+      # opinion wearing a CI badge.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # THE TREE UNDER JUDGEMENT — the PR merged into its base. Full history,
+      # because the rename detection below diffs base against merged and a
+      # shallow clone cannot answer that question at all.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ steps.pick.outputs.pr }}/merge
+          fetch-depth: 0
+          path: _pr
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # `lane.py` imports PyYAML; `merge_cage.py` does not, so the `advise` job
+      # above never needed it. Left implicit, its absence would have surfaced
+      # here on the first real PR as a traceback nobody was watching for.
+      - name: The classifier's one dependency
+        run: python -m pip install --quiet pyyaml
+
+      # BOOTSTRAP, SAID OUT LOUD — and the reason this job still runs today.
+      # Until `lane.py` and the policy are on the default branch there is no
+      # trustworthy source of lanes. The honest answer is to SAY SO in the
+      # comment: not to fall back to the PR's own copy (rule G5 forbids it),
+      # and not to stay quiet (silence reads as "nothing to flag", which is how
+      # six of seven alarms in this repo went unread for days).
+      - name: Can the lane map be trusted yet?
+        id: rules
+        run: |
+          set -euo pipefail
+          if [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the lane map is not on the default branch yet — no lane verdict is possible, and its absence is not a clean bill of health."
+          fi
+
+      # The changed-file list comes from GitHub's own record, not from either
+      # checkout, so neither tree can shade it.
+      - name: Which files changed
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
+            --jq '.[].path' > changed.txt
+          echo "--- changed files ---"
+          cat changed.txt
+
+      # ADVISORY ON PURPOSE, AND ONLY FOR NOW. A brand-new guard that hard-fails
+      # every PR on day one is how guards get switched off permanently, so the
+      # first landing cannot block. The verdict is posted either way; what
+      # `continue-on-error` buys is that a bug in ME never stops the owner.
+      - name: Which lane is this PR in
+        id: classify
+        if: steps.rules.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # No --base/--head deliberately: without two revisions `lane.py` skips
+          # the data exemptions, which is its own documented STRICT default. An
+          # exemption can only ever LOOSEN a lane, so the safe direction when
+          # this job cannot verify one is to withhold it.
+          python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
+
+      # RUN THE RULES' COPY OF THE SCRIPT, AGAINST THE PR'S TREE. Both halves
+      # matter. Pointing `--repo` at the default-branch checkout instead would
+      # compare that branch to itself, find zero renames, print "no stale
+      # references" and mean nothing — a guard reporting success about a
+      # question it never asked, which is the defect this repo has shipped ten
+      # times over.
+      - name: Did anything keep pointing at a path this PR moved
+        id: stale
+        if: steps.rules.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          base_sha=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.sha')
+          set +e
+          python scripts/stale_path_check.py --repo _pr --base "$base_sha" --head HEAD > stale.txt 2>&1
+          rc=$?
+          set -e
+          cat stale.txt
+          # 0 clean · 1 real stale references · 2 could not measure. 2 is NOT a
+          # pass and must never be rendered as one.
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      # ONE comment, updated in place, under its own marker so this job and the
+      # cage's advisor never overwrite each other. `always()` because the case
+      # most worth reporting is the one where a step above fell over.
+      - name: Post the lane verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          READY: ${{ steps.rules.outputs.ready }}
+          STALE_RC: ${{ steps.stale.outputs.rc }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          out = ["<!-- lane-advice -->", "### Which lane is this PR in", ""]
+          ready = os.environ.get("READY") == "true"
+          branch = os.environ.get("DEFAULT_BRANCH") or "the default branch"
+
+          if not ready:
+              out += [
+                  f"**No verdict — the lane map is not on `{branch}` yet.**",
+                  "",
+                  "`scripts/lane.py` and `.github/merge-policy.yml` are the only trustworthy",
+                  "source of lanes, and a PR may not supply the code that judges it. Until they",
+                  "land, this section is blank because it *could not look* — not because there",
+                  "was nothing to see.",
+              ]
+          else:
+              verdict = pathlib.Path("verdict.json")
+              if not verdict.is_file():
+                  out += [
+                      "**The classifier did not produce a verdict.**",
+                      "",
+                      "That is a failure of this job, not a clean bill of health.",
+                      f"[Run log]({os.environ.get('RUN_URL', '')})",
+                  ]
+              else:
+                  data = json.loads(verdict.read_text(encoding="utf-8"))
+                  lane = data.get("lane", "?")
+                  auto = "yes" if data.get("auto_merge") else "no"
+                  out += [
+                      f"**lane: `{lane}`** · a machine may merge it: **{auto}**",
+                      "",
+                      "Why:",
+                  ]
+                  out += [f"- {w}" for w in data.get("why") or []]
+                  requires = data.get("requires") or []
+                  if requires:
+                      out += ["", "Green before this may merge: "
+                              + ", ".join(f"`{r}`" for r in requires)]
+                  if data.get("watch_minutes"):
+                      out.append(
+                          f"After the merge this lane is WATCHED for "
+                          f"{data['watch_minutes']} minutes; the undo is "
+                          f"`{data.get('rollback')}`."
+                      )
+
+              rc = os.environ.get("STALE_RC") or ""
+              report = pathlib.Path("stale.txt")
+              body = report.read_text(encoding="utf-8").strip() if report.is_file() else ""
+              out += ["", "### Did anything keep pointing at a path this PR moved"]
+              if rc == "0":
+                  out.append("No stale references. The move is finished.")
+              elif rc == "1":
+                  out += ["**Something still names a path this PR renamed.**",
+                          "", "```", body, "```"]
+              elif rc == "2":
+                  out += ["**Could not measure.** Not a pass — the checker could not look.",
+                          "", "```", body, "```"]
+              else:
+                  out.append(f"The checker reached no verdict (rc={rc or 'none'}). Not a pass.")
+
+          out += ["", "_Advisory only. This lane comments; it never merges._"]
+          pathlib.Path("lane-advice.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+          print("\n".join(out))
+          PY
+
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- lane-advice -->")) | .id] | last // ""')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              -F body=@lane-advice.md >/dev/null
+            echo "updated lane comment $existing"
+          else
+            gh pr comment "$PR" --body-file lane-advice.md
+            echo "posted a new lane comment"
+          fi
+          cat lane-advice.md >> "$GITHUB_STEP_SUMMARY"
