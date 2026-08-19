@@ -3454,6 +3454,7 @@ salinas
 salta
 salto department
 salyan district
+salzburg
 samana
 samangan
 samara oblast
@@ -3814,8 +3815,6 @@ st.-petersburg
 stara zagora
 staro nagorichane
 state of berlin
-state of salzburg
-state of vienna
 stavropol kray
 stefan-voda
 stockholm
@@ -4268,6 +4267,7 @@ vianden
 vichada department
 victoria
 vidin
+vienna
 vientiane
 vientiane prefecture
 vieques

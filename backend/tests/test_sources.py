@@ -1668,13 +1668,22 @@ def test_themuse_skips_non_uk():
                       payload=payload, repeat=True)
                 source = TheMuseSource(session)
                 jobs = await source.fetch_jobs()
-                # "New York, NY" survives the fetch filter now — see
-                # test_uk_gate.py: the door reads it as a two-site ad because
-                # the UK really does have a hamlet called New York, and only
-                # ambiguity DATA can settle that. What this test still pins is
-                # that the source stopped carrying a private city list.
-                assert len(jobs) == 1
-                assert jobs[0].location == "New York, NY"
+                # This assertion went the other way for a while. "New York, NY"
+                # used to SURVIVE the fetch filter, and the comment here said
+                # so: the door read it as a two-site ad because the UK really
+                # does have a hamlet called New York, "and only ambiguity DATA
+                # can settle that".
+                #
+                # Issue #330 supplied that data. `new york` is now computed as
+                # ambiguous (it is a US admin1 division as well as a pop-0 UK
+                # hamlet), so `names_foreign_place` refuses it and the row is
+                # dropped at fetch — which is what this test was named for in
+                # the first place. Six themuse rows reading "Flexible / Remote,
+                # New York, NY" were live in prod when this flipped back.
+                #
+                # The original point still holds too: the source carries no
+                # private city list — the refusal comes from the gate's data.
+                assert jobs == [], "a New York job must not reach a UK catalog"
         finally:
             await session.close()
     _run(_test())
@@ -2882,6 +2891,181 @@ def test_workday_detail_fetches_are_budgeted(monkeypatch):
                 jobs = await source.fetch_jobs()
             assert len(jobs) == 3, "past-budget jobs must still be KEPT"
             assert len(detail_calls) == 1, f"budget must cap details, got {len(detail_calls)}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+# =============================================================================
+# Issue #334 — descriptions that were never fetched at all
+#
+# `catalog_has_descriptions` fired with 139 new violations. Measured in prod
+# 2026-08-19, the last 7 days were workable 115/115 empty, nofluffjobs 11/11
+# empty. Both were mechanism (a), "never fetched" — insert_job writes the
+# column fine (database.py:388,404) and there is exactly one `description`
+# column on `jobs`.
+#
+# Rule #21 applies hard here: asserting the field EXISTS proves nothing,
+# because it existed and was "" for every one of those rows. These assert a
+# real value, past the 200-char floor the scorer and coverage.py actually use.
+# =============================================================================
+
+_WORKABLE_DETAIL_HTML = (
+    "<p>Suade is a market-leading regtech SaaS company automating regulatory "
+    "reporting, compliance and financial risk solutions for banks.</p>"
+)
+_WORKABLE_REQS_HTML = (
+    "<ul><li>Strong Python and SQL</li><li>Experience with Kubernetes, "
+    "Terraform and AWS</li><li>Comfortable owning services end to end</li></ul>"
+)
+
+
+def test_workable_fetches_description_from_the_detail_endpoint():
+    """The LIST endpoint has neither `shortDescription` nor `description` —
+    verified live against 5 company slugs on 2026-08-19. The adapter used to
+    read `shortDescription` off it anyway and store "". The mock reproduces
+    that exactly: list WITHOUT any text, detail WITH it.
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
+                       payload={"results": [{
+                           "shortcode": "5B62764A74", "title": "Platform Engineer",
+                           "location": {"city": "London", "country": "UK"},
+                           "published": "2026-08-18",
+                       }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/5B62764A74"),
+                      payload={"description": _WORKABLE_DETAIL_HTML,
+                               "requirements": _WORKABLE_REQS_HTML,
+                               "benefits": "<p>Pension and 25 days holiday.</p>"})
+                source = WorkableSource(session, companies=["suade"])
+                jobs = await source.fetch_jobs()
+
+            assert len(jobs) == 1
+            desc = jobs[0].description
+            assert len(desc) > 200, f"empty/thin description is the bug: {len(desc)} chars"
+            assert "regtech" in desc, "the detail endpoint's prose must reach the Job"
+            assert "Kubernetes" in desc, "requirements carry the skills the scorer needs"
+            assert "<p>" not in desc and "<li>" not in desc, "HTML must be stripped"
+            assert jobs[0].apply_url == "https://apply.workable.com/suade/j/5B62764A74/"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workable_detail_failure_degrades_to_empty_never_drops_the_job():
+    """A correctness fix must not turn a thin row into a lost row."""
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
+                       payload={"results": [{
+                           "shortcode": "ZZZ", "title": "Platform Engineer",
+                           "location": {"city": "London", "country": "UK"},
+                       }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/ZZZ"),
+                      status=404, repeat=True)
+                source = WorkableSource(session, companies=["suade"])
+                jobs = await source.fetch_jobs()
+            assert len(jobs) == 1 and jobs[0].description == ""
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_workable_detail_budget_caps_the_extra_requests(monkeypatch):
+    """Budget in the same shape as workday/smartrecruiters, so one run cannot
+    blow SOURCE_FETCH_TIMEOUT_ATS (240s). Past-budget jobs are still KEPT."""
+    async def _test():
+        import src.sources.ats.workable as workable_mod
+        monkeypatch.setattr(workable_mod, "_MAX_DETAIL_FETCHES", 1)
+        session = aiohttp.ClientSession()
+        try:
+            results = [{"shortcode": f"SC{i}", "title": "ML Engineer",
+                        "location": {"city": "London", "country": "UK"}} for i in range(4)]
+            detail_calls = []
+            with aioresponses() as m:
+                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
+                       payload={"results": results}, repeat=True)
+
+                def _cb(url, **kw):
+                    from aioresponses import CallbackResult
+                    detail_calls.append(str(url))
+                    return CallbackResult(payload={"description": _WORKABLE_DETAIL_HTML})
+
+                m.get(re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/SC\d+"),
+                      callback=_cb, repeat=True)
+                jobs = await WorkableSource(session, companies=["suade"]).fetch_jobs()
+            assert len(jobs) == 4, "past-budget jobs must still be KEPT"
+            assert len(detail_calls) == 1, f"budget must cap details, got {len(detail_calls)}"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+_NFJ_BODY_HTML = (
+    "<div><p>We are looking for a senior backend engineer to own our payments "
+    "platform. You will design services, mentor engineers and work directly "
+    "with product on the roadmap for the next two years.</p></div>"
+)
+
+
+def test_nofluffjobs_fetches_description_from_the_detail_endpoint():
+    """The LIST payload carries NO body text at all — probed live over 1,000
+    postings on 2026-08-19, the longest string on any list item was the
+    138-char `id`. So the fix could not be "read another key off the list";
+    the prose is at `requirements.description` on the per-posting endpoint.
+    """
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://nofluffjobs\.com/api/posting$"), payload={"postings": [{
+                    "id": "senior-backend-engineer-acme-London",
+                    "title": "Senior Backend Engineer",
+                    "name": "Acme",
+                    "location": {"places": [{"city": "London"}]},
+                    "posted": 1784534208972,
+                    "seniority": ["Senior"],
+                }]})
+                m.get(re.compile(
+                    r"https://nofluffjobs\.com/api/posting/senior-backend-engineer-acme-London$"),
+                    payload={"requirements": {
+                        "description": _NFJ_BODY_HTML,
+                        "musts": [{"value": "Python"}, {"value": "PostgreSQL"}],
+                        "nices": [{"value": "Kubernetes"}],
+                    }})
+                jobs = await NoFluffJobsSource(session).fetch_jobs()
+
+            assert len(jobs) == 1
+            desc = jobs[0].description
+            assert len(desc) > 200, f"empty description is the bug: {len(desc)} chars"
+            assert "payments platform" in desc
+            assert "Must have: Python, PostgreSQL" in desc, "the asked-for skills must land"
+            assert "Nice to have: Kubernetes" in desc
+            assert "<div>" not in desc and "<p>" not in desc, "HTML must be stripped"
+        finally:
+            await session.close()
+    _run(_test())
+
+
+def test_nofluffjobs_detail_failure_degrades_to_empty_never_drops_the_job():
+    async def _test():
+        session = aiohttp.ClientSession()
+        try:
+            with aioresponses() as m:
+                m.get(re.compile(r"https://nofluffjobs\.com/api/posting$"), payload={"postings": [{
+                    "id": "senior-backend-engineer-acme-London",
+                    "title": "Senior Backend Engineer", "name": "Acme",
+                    "location": {"places": [{"city": "London"}]},
+                }]})
+                m.get(re.compile(r"https://nofluffjobs\.com/api/posting/senior.*"),
+                      status=404, repeat=True)
+                jobs = await NoFluffJobsSource(session).fetch_jobs()
+            assert len(jobs) == 1 and jobs[0].description == ""
         finally:
             await session.close()
     _run(_test())
