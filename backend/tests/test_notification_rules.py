@@ -141,13 +141,55 @@ async def _insert_job(db_path: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_get_rule_null_when_none(authenticated_async_context):
-    """1. GET returns 200 with null body for a new user (no rule yet).
+async def test_get_rule_seeded_at_signup(authenticated_async_context):
+    """#318 — a newly-registered user now HAS a rulebook.
+
+    This is the regression guard for the whole issue. Job360 shipped as a job
+    ALERT product where signup wrote exactly one row (into ``users``) and
+    nothing ever created a ``notification_rules`` row, so every delivery path
+    short-circuited on an empty table and nobody was ever alerted. Registering
+    must now produce an enabled rule in a BUNDLING mode.
+    """
+    from src.services.notifications.defaults import (
+        DEFAULT_NOTIFY_MODE,
+        DEFAULT_SCORE_THRESHOLD,
+    )
+
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/settings/notification-rule")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None, "signup left the user with no rulebook — issue #318"
+    # Rule #21 — assert real values, not just that the keys exist.
+    assert body["enabled"] is True
+    assert body["notify_mode"] == DEFAULT_NOTIFY_MODE
+    assert body["score_threshold"] == DEFAULT_SCORE_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_get_rule_null_when_none(authenticated_async_context, fixture_user_id):
+    """1. GET returns 200 with null body when the user genuinely has no rule.
 
     Settings is a per-user singleton, so "not set" is a normal empty-state the
     client reads as "use defaults" — not a 404 (which the browser logs as a
     console error even though the client handles it).
+
+    Since #318 seeds a rulebook at signup, this contract is now only reachable
+    for a user whose row is absent — a pre-#318 account, or one created with
+    ``NOTIFY_SEED_DEFAULTS=0``. Deleting the seeded row reproduces exactly that
+    state, so the route's empty-state behaviour stays pinned.
     """
+    from src.core import settings as _s
+
+    async def _drop_rule():
+        async with pg.connect(str(_s.DB_PATH)) as db:
+            await db.execute(
+                "DELETE FROM notification_rules WHERE user_id = ?", (fixture_user_id,)
+            )
+            await db.commit()
+
+    await _drop_rule()
+
     async with authenticated_async_context() as client:
         resp = await client.get("/api/settings/notification-rule")
     assert resp.status_code == 200

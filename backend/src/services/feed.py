@@ -148,15 +148,43 @@ class FeedService:
     # ----- writes ---------------------------------------------------------
 
     async def mark_notified(self, feed_ids: list[int]) -> None:
+        """Stamp ``notified_at`` on these ``user_feed`` PRIMARY KEYS."""
         if not feed_ids:
             return
         placeholders = ",".join("?" for _ in feed_ids)
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
-            f"UPDATE user_feed SET notified_at = ? WHERE id IN ({placeholders})",
+            f"UPDATE user_feed SET notified_at = ? WHERE id IN ({placeholders})",  # noqa: S608 — placeholders only
             [now, *feed_ids],
         )
         await self._db.commit()
+
+    async def mark_notified_for_jobs(self, user_id: str, job_ids: list[int]) -> int:
+        """Stamp ``notified_at`` for one user's feed rows, keyed by JOB id.
+
+        #318 — the delivery tasks know ``(user_id, job_id)``, never the
+        ``user_feed`` primary key, which is why ``mark_notified`` above had
+        zero production callers and ``notified_at`` was NULL on all 24,597
+        live feed rows. Marking by job id closes that gap in one statement
+        instead of a SELECT-then-UPDATE per job.
+
+        Returns the number of rows stamped.
+
+        :param user_id: owner of the feed rows (rule #10 — feed state is
+            per-user, so this MUST stay scoped).
+        :param job_ids: catalog job ids that were just delivered.
+        """
+        if not job_ids:
+            return 0
+        placeholders = ",".join("?" for _ in job_ids)
+        now = datetime.now(timezone.utc).isoformat()
+        cur = await self._db.execute(
+            f"UPDATE user_feed SET notified_at = ? "  # noqa: S608 — placeholders only
+            f"WHERE user_id = ? AND job_id IN ({placeholders})",
+            [now, user_id, *job_ids],
+        )
+        await self._db.commit()
+        return int(cur.rowcount or 0)
 
     async def update_status(
         self, user_id: str, job_id: int, status: str
