@@ -98,11 +98,38 @@ def lane_of_file(path: str, policy: dict[str, Any]) -> str:
 
     Checked most-restrictive-first, so a file listed in two lanes gets the
     stricter one without the caller having to think about it.
+
+    THE BASENAME FALLBACK IS OFF WHERE IT COULD LET SOMETHING THROUGH.
+    `merge_cage.path_matches` re-matches any slash-free pattern against the
+    BASENAME at every depth. Which way that cuts depends entirely on which side
+    of the decision the caller is on:
+
+      * in an OWNER lane it is load-bearing and safe -- `*.env*` must reach
+        `backend/.env.production`, `CLAUDE.md` must reach `frontend/CLAUDE.md`,
+        and a lane that matches more files can only ever escalate MORE.
+      * in an AUTO-MERGING lane it is a hole. Plain `README.md` reached
+        `docs/product/pillars/README.md` and classified it `harness`,
+        `auto_merge: true` -- a document nobody had filed, handed the fast lane
+        by its filename.
+
+    Read from `auto_merge` rather than from a hardcoded list of lane names, so a
+    lane added to the policy later cannot be fast and leaky by omission. A lane
+    with no `auto_merge` key is not a fast lane, so it KEEPS the fallback: the
+    unknown case has to fail towards matching more, never towards matching less.
+
+    Args:
+        path: a repo-relative, `/`-separated path.
+        policy: the parsed `.github/merge-policy.yml`.
+
+    Returns:
+        The lane name, or `"unknown"` when no lane claims the path.
     """
     lanes = policy["lanes"]
     for lane in PRECEDENCE:
-        for pattern in lanes[lane].get("paths") or []:
-            if path_matches(path, pattern):
+        cfg = lanes[lane]
+        fallback = not bool(cfg.get("auto_merge", False))
+        for pattern in cfg.get("paths") or []:
+            if path_matches(path, pattern, basename_fallback=fallback):
                 return lane
     return "unknown"
 
@@ -352,21 +379,139 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("neither owner lane ever auto-merges",
           (mig["auto_merge"], cage["auto_merge"]), (False, False))
 
-    # 11. THE LEAKY-GLOB TRAP. This repo's matcher lets `*` cross `/` -- the
-    #     owner lane's `*.env*` and `*docker-compose*` depend on that. So a
-    #     pattern like `*.md` in a FAST lane silently matches every markdown at
-    #     every depth, and any unclassified document auto-merges. That is exactly
-    #     what happened: `docs/product_design_rules.md` classified as `harness`,
-    #     auto_merge True -- the canonical text of the owner's product rules,
-    #     mergeable by a machine. No fast lane may carry a bare `*.ext` pattern.
-    for fast in ("harness", "product"):
+    # 11. THE LEAKY-BASENAME TRAP, TESTED FOR REAL THIS TIME.
+    #
+    #     The old version of this case asked `pattern.startswith("*.")` and
+    #     printed "fast lane `harness` has no depth-crossing glob: README.md"
+    #     as a PASS. Every word of that sentence was false: `README.md` does not
+    #     start with `*.`, so nothing was tested, and `README.md` WAS reaching
+    #     every depth. The mechanism was never `*` crossing `/` -- it does not,
+    #     `_glob_to_re` compiles it to `[^/]*` -- it is path_matches re-matching
+    #     any slash-free pattern against the BASENAME at any depth.
+    #
+    #     So ask the question behind the sentence instead: take each slash-free
+    #     pattern in an auto-merging lane, build a filename it matches, and check
+    #     that the SAME filename one directory down does NOT inherit the lane.
+    #     If the fallback is ever switched back on, this goes red by construction
+    #     rather than by somebody noticing.
+    def _probe(pattern: str) -> str:
+        """A concrete filename that `pattern` matches (slash-free patterns only)."""
+        return pattern.replace("**", "x").replace("*", "x").replace("?", "x")
+
+    for fast in (ln for ln in PRECEDENCE if policy["lanes"][ln].get("auto_merge")):
         for pattern in policy["lanes"][fast].get("paths") or []:
-            check(f"fast lane `{fast}` has no depth-crossing glob: {pattern}",
-                  pattern.startswith("*.") and "/" not in pattern, False)
+            if "/" in pattern:
+                continue  # an anchored pattern was never the leak
+            probe = _probe(pattern)
+            check(f"fast lane `{fast}`: `{pattern}` still claims its own file",
+                  lane_of_file(probe, policy), fast)
+            check(f"fast lane `{fast}`: `{pattern}` does not reach nested/deep/{probe}",
+                  lane_of_file(f"nested/deep/{probe}", policy) == fast, False)
+
+    # The owner lanes must KEEP the fallback. There, matching at every depth is
+    # the point and can only ever escalate -- turning it off everywhere would
+    # have quietly un-protected `frontend/CLAUDE.md` and `backend/.env.production`.
+    check("owner lane still reaches a nested env file",
+          classify(["backend/.env.production"], policy)["lane"], "product_owner")
+    check("owner lane still reaches a nested compose file",
+          classify(["infra/docker-compose.prod.yml"], policy)["lane"], "product_owner")
+    check("owner lane still reaches a nested CLAUDE.md",
+          classify(["frontend/CLAUDE.md"], policy)["lane"], "harness_owner")
+
     check("an unclassified nested doc escalates, never auto-merges",
           classify(["docs/somewhere/new.md"], policy)["auto_merge"], False)
     check("a root doc that IS classified still takes the fast lane",
           classify(["README.md"], policy)["lane"], "harness")
+    # The leak case itself, asserted on the quantity that actually moved. The
+    # first draft of this check asked `auto_merge` and went red for the right
+    # file and the wrong reason: this README is now `product`, which DOES
+    # auto-merge -- behind verify + security + ratchets and a 15-minute live
+    # watch, instead of the harness lane's ci + review + drill and no watch.
+    # What changed is the LANE, so that is what gets pinned.
+    check("the leak case itself: a nested README stops inheriting the root one's lane",
+          classify(["docs/product/pillars/README.md"], policy)["lane"], "product")
+    check("...and one under no lane at all escalates instead of going fast",
+          classify(["some/where/README.md"], policy)["lane"], "product_owner")
+
+    # 12. THE UNDO MAY NOT BE MERGED BY THE THING IT UNDOES.
+    #
+    #     `scripts/**` is in the harness FAST lane, so the reverse gear the
+    #     product lane's auto-merge is explicitly borrowed against was itself
+    #     machine-mergeable on ci+review+drill. Each of these must now stop and
+    #     wait for a hand -- and the negative control below matters just as much,
+    #     because walling off all of `scripts/**` would have been the lazy fix
+    #     and would have killed the fast lane it was meant to protect.
+    for gear in ("scripts/rollback_gear.py", "scripts/revert_gear.py",
+                 "scripts/cage_blockers.py", "scripts/cage_replay.py",
+                 "scripts/gate_wiring_check.py", "scripts/agent-gate.sh"):
+        v = classify([gear], policy)
+        check(f"undo gear is owner-only: {gear}", v["lane"], "harness_owner")
+        check(f"undo gear never auto-merges: {gear}", v["auto_merge"], False)
+    check("NEGATIVE CONTROL: an ordinary script still takes the fast lane",
+          classify(["scripts/sentry_poll.py"], policy)["lane"], "harness")
+
+    # 13. THE PRODUCT HALF OF WAVE 1. The split's promise was that the DIRECTORY
+    #     carries the lane. It held for docs/harness/** and did not for
+    #     docs/product/**, where 42 of the 45 moved files matched no rule at all.
+    check("a product document takes the product lane",
+          classify(["docs/product/PRD.md"], policy)["lane"], "product")
+    check("...at any depth", classify(["docs/product/research/pillar_1_report.md"],
+                                      policy)["lane"], "product")
+    check("the canonical rules doc still outranks the new glob",
+          classify(["docs/product/product_design_rules.md"], policy)["lane"], "product_owner")
+    check("...and so does batch-2-decisions",
+          classify(["docs/product/plans/batch-2-decisions.md"], policy)["lane"], "product_owner")
+
+    # 14. A PATH RULE WITH NO FILE UNDER IT IS DECORATION, NOT PROTECTION.
+    #
+    #     `backend/data/**` sat in the product lane under a paragraph about the
+    #     gazetteer deciding which jobs enter the catalogue (rule #30) and
+    #     matched ZERO tracked files -- the gazetteer has always been one level
+    #     deeper, at `backend/src/data/`. Nothing could ever have told you: the
+    #     rule cost nothing, refused nothing, and read as protection.
+    #
+    #     The first draft of this case asked whether backend/src/data files
+    #     classify as `product`. They do -- via `backend/src/**` -- so it stayed
+    #     green with the dead rule put back. It was a check that reported success
+    #     about a question it was not asking, which is the exact bug this repo
+    #     keeps finding. Measured, not assumed: mutating the policy back to
+    #     `backend/data/**` left it 90/90.
+    #
+    #     So ask the question that actually catches it, in the direction that
+    #     cannot rot: which patterns match NOTHING in the tree today? A pattern
+    #     coming alive is good news and stays green. A NEW dead pattern is decay,
+    #     goes red, and names itself. No list to maintain either way -- the
+    #     comparison set below is a written record of five known-empty patterns,
+    #     each with the reason it is empty.
+    #     (`subprocess` is imported by case 9 above, in this same function.)
+    known_dead = {
+        # this repo declares its Python deps in backend/pyproject.toml; the
+        # pattern stays for the day a requirements file appears
+        "requirements*.txt",
+        # arrives with the drill-registry branch (PR #336), not on this one
+        "scripts/drill_registry.py",
+        # the auto-merge workflow is not written yet -- until it is, every lane
+        # in this policy is advice rather than a gate
+        ".github/workflows/auto-merge.yml",
+        # only backend/ and frontend/ have one; there is no root .dockerignore
+        ".dockerignore",
+        # not tracked in this repo
+        ".vscode/**",
+    }
+    repo_root = Path(__file__).resolve().parent.parent
+    tracked = [f for f in subprocess.run(
+        ["git", "ls-files"], cwd=repo_root, capture_output=True, text=True,
+        encoding="utf-8", errors="replace").stdout.splitlines() if f]
+    check("the tree is readable, so this case can actually measure", len(tracked) > 0, True)
+    dead_now = set()
+    for lane_name in PRECEDENCE:
+        cfg = policy["lanes"][lane_name]
+        fb = not bool(cfg.get("auto_merge", False))
+        for pattern in cfg.get("paths") or []:
+            if not any(path_matches(f, pattern, basename_fallback=fb) for f in tracked):
+                dead_now.add(pattern)
+    check("no policy path rule has gone dead (matches no file in the tree)",
+          sorted(dead_now - known_dead), [])
 
 
     passed = sum(1 for _, ok in cases if ok)

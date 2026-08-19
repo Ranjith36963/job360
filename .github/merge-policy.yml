@@ -83,18 +83,32 @@ lanes:
       # 109 files moved so the lane is a fact about WHERE a file lives, not a
       # fact someone has to remember to write down.
       - "docs/harness/**"
+      # The docs index itself, and the only tracked file directly under docs/.
+      # It used to reach this lane only through the matcher's basename fallback
+      # on `README.md` below -- the same leak that put
+      # docs/product/pillars/README.md in the fast lane. That fallback is now
+      # off for auto-merging lanes, so the index is NAMED, like every other
+      # harness document.
+      - "docs/README.md"
       - "harness/**"
       - "backend/scripts/**"
       # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
-      # `*.md` sat here and looked harmless. It is not: this repo's glob matcher
-      # lets `*` cross `/` (deliberately -- `*.env*` and `*docker-compose*` in
-      # the owner lane depend on it), so `*.md` matched markdown at ANY depth.
-      # Any document not explicitly classified therefore landed in the FAST lane
-      # and auto-merged. Caught by classifying `docs/product_design_rules.md`
-      # after the move: lane `harness`, auto_merge TRUE -- the canonical text of
-      # the owner's own product rules, mergeable by a machine.
+      # `*.md` sat here and looked harmless. It is not -- but the reason written
+      # here was the WRONG reason, and a guard misnamed is a guard nobody can
+      # aim. `*` does NOT cross `/`: merge_cage._glob_to_re compiles it to
+      # `[^/]*`. The leak is one line lower down, in path_matches: a pattern
+      # with NO `/` in it is re-matched against the BASENAME at every depth, so
+      # `*.md` -- and plain `README.md` -- reached markdown at any depth and any
+      # unclassified document auto-merged. Caught by classifying the owner's
+      # product-rules document (now docs/product/product_design_rules.md) after
+      # the move: lane `harness`, auto_merge TRUE.
       #
-      # The safe failure direction is the point. A new root-level document now
+      # FIXED at the matcher, 2026-08-19: path_matches takes basename_fallback,
+      # and lane.py turns it OFF for any lane with auto_merge: true. The owner
+      # lanes keep it, because there `*.env*` and `*docker-compose*` reaching
+      # every depth is the whole point and matching MORE only ever escalates.
+      #
+      # The safe failure direction is still the point. A new root-level document
       # matches nothing, so it escalates to product_owner and asks to be filed.
       # Forgetting costs one classification, never a silent auto-merge.
       - "README.md"
@@ -118,6 +132,21 @@ lanes:
       - ".dockerignore"
       - "backend/.dockerignore"
       - "frontend/.dockerignore"
+      # ── THE FILES THE MATCHER FIX DISPLACED, NAMED THE SAME WAY ───────────
+      # Measured, not guessed. With the basename fallback off for fast lanes,
+      # exactly FIVE tracked files stopped reaching this lane on their filename
+      # alone. The three below belong to the two deployables and are named here,
+      # exactly as `backend/.dockerignore` is named above.
+      #
+      # The other two are left to escalate ON PURPOSE, because each already has
+      # a sibling that escalates: `docs/archive/README.md` sits beside
+      # `docs/_archive/**`, which wave 1 deliberately left unclassified, and
+      # `test-artifacts/README.md` sits beside `test-artifacts/sample_cv.pdf`,
+      # which no lane has ever named. Filing those two is the owner's one-line
+      # call, not a matcher fix's business.
+      - "frontend/.gitignore"
+      - "backend/README.md"
+      - "frontend/README.md"
       - ".coderabbit.yaml"
       - "pyrightconfig.json"
       - ".vscode/**"
@@ -139,6 +168,17 @@ lanes:
       - "frontend/src/**"
       - "backend/tests/**"
       - "frontend/tests/**"
+      # THE OTHER HALF OF WAVE 1. The split's stated goal was "the lane is a
+      # fact about WHERE a file lives". That became true for `docs/harness/**`
+      # above and stayed FALSE here: 45 files were moved into docs/product/ and
+      # no lane named any of them, so 42 of the 45 matched nothing at all and
+      # reached the owner only through the unknown-path escalation -- an
+      # accident doing the job of a rule. These are the words the product is
+      # built from (PRD, pillars, runbooks, pricing decisions); changing them is
+      # a product change even when no code moves. The two canonical rule
+      # documents are named individually in `product_owner` below and keep
+      # beating this glob, because lane order is most-restrictive-first.
+      - "docs/product/**"
       # The generated API contract. It moved in 12 of the last 60 merges and was
       # unclassified in every one of them, which alone sent those PRs to the
       # owner lane. It is PRODUCT, not plumbing: `check:types-drift` failing here
@@ -148,7 +188,21 @@ lanes:
       # (rule #30) and the job-signal term files feed scoring. A change here is
       # a change to what a user is shown, even though no code moved -- which is
       # exactly the kind of edit a "only code is risky" instinct waves through.
-      - "backend/data/**"
+      #
+      # THE PATH WAS DEAD. `backend/data/**` matched ZERO tracked files
+      # (`git ls-files backend/data` -> 0); the gazetteer and the job-signal
+      # term files have always lived one level deeper, at `backend/src/data/`
+      # (7 tracked files). A rule carrying a long comment about rule #30 with no
+      # file underneath it reads as protection and is decoration.
+      #
+      # Said plainly, because the correction is smaller than it looks: this
+      # entry is now SHADOWED by `backend/src/**` two rules up, which already
+      # puts all 7 files in this lane. It stays because it is the only place the
+      # policy says WHY that data is product; it changes no verdict. What it
+      # buys is that it is no longer a lie -- and lane.py's drill now fails on
+      # any lane rule that matches nothing in the tree, so the next dead path
+      # says so instead of sitting there looking like a guard.
+      - "backend/src/data/**"
     requires: [ci, review, security, verify, ratchets]
     auto_merge: true
     watch_minutes: 15       # how long the post-merge watcher stares at prod
@@ -211,6 +265,25 @@ lanes:
       - "scripts/lane.py"
       - "scripts/data_only.py"
       - "scripts/drill_registry.py"
+      # ── THE UNDO THE FAST LANES ARE BORROWED AGAINST ──────────────────────
+      # `scripts/**` sits in the harness FAST lane above with auto_merge: true,
+      # and these six were inside it. So an agent could merge a change to the
+      # reverse gear itself on ci+review+drill, with no human anywhere in the
+      # loop. That is the one hole in this policy with a USER at the end of it:
+      # this file's own law is "speed comes from being able to UNDO, not from
+      # being sure", and rollback_gear.py's first line calls itself "the undo
+      # the product lane's speed is borrowed against". Weaken the undo quietly
+      # and nothing looks different until the next bad product auto-merge --
+      # which is exactly the moment the undo is all there is.
+      #
+      # Lane order is most-restrictive-first, so each of these overrides the
+      # blanket `scripts/**` for its own file and for nothing else.
+      - "scripts/rollback_gear.py"      # the Railway deploymentRollback undo
+      - "scripts/revert_gear.py"        # the git reverse gear
+      - "scripts/cage_blockers.py"      # the lesson behind every cage rule
+      - "scripts/cage_replay.py"        # proves the cage against real PRs
+      - "scripts/gate_wiring_check.py"  # proves a gate can still STOP something
+      - "scripts/agent-gate.sh"         # the only way an agent earns a commit
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       - ".github/workflows/post-merge-watch.yml"

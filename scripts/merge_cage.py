@@ -187,12 +187,32 @@ def _glob_to_re(pattern: str) -> re.Pattern[str]:
     return re.compile("".join(out) + r"\Z")
 
 
-def path_matches(path: str, pattern: str) -> bool:
-    """Does this repo-relative path match this pattern?"""
+def path_matches(path: str, pattern: str, *, basename_fallback: bool = True) -> bool:
+    """Does this repo-relative path match this pattern?
+
+    Args:
+        path: a repo-relative, `/`-separated path.
+        pattern: a glob in this module's dialect, described above.
+        basename_fallback: when True (the default), a pattern containing no `/`
+            ALSO matches the basename at any depth, so `*.env*` reaches
+            `backend/.env.production` and `CLAUDE.md` reaches
+            `frontend/CLAUDE.md`. That is load-bearing on the DENY side, where
+            matching more files can only ever refuse more.
+
+            Pass False on the PERMISSIVE side of a decision. There the identical
+            behaviour is a hole: a bare `README.md` in an auto-merging lane
+            silently reached `docs/product/pillars/README.md`, and the fast lane
+            was granted to a file nobody had classified. `scripts/lane.py` turns
+            it off for exactly the lanes whose answer is "a machine may merge
+            this".
+
+    Returns:
+        True if the path matches the pattern.
+    """
     rx = _glob_to_re(pattern)
     if rx.match(path):
         return True
-    if "/" not in pattern:  # a bare name is a basename rule, at any depth
+    if basename_fallback and "/" not in pattern:  # a bare name, at any depth
         return bool(rx.match(path.rsplit("/", 1)[-1]))
     return False
 
@@ -1222,6 +1242,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        path_matches("a/b.py", "a/*") and not path_matches("a/b/c.py", "a/*")
        and path_matches("a/b/c.py", "a/**") and path_matches("x/y/README.md", "*.md"),
        "the matcher does not mean what it looks like", ["path_matches"])
+    # The basename fallback is what let a bare `README.md` in an auto-merging
+    # lane reach `docs/product/pillars/README.md`. A permissive caller can now
+    # switch it off; this watches that switch actually bite, in both directions,
+    # because a knob that quietly does nothing is the same bug wearing a fix.
+    ok("the basename fallback can be switched off by a permissive caller",
+       path_matches("x/y/README.md", "README.md")
+       and not path_matches("x/y/README.md", "README.md", basename_fallback=False)
+       and path_matches("README.md", "README.md", basename_fallback=False)
+       and path_matches("backend/.env.production", "*.env*"),
+       "basename_fallback=False did not narrow the match, or narrowed the wrong one",
+       ["path_matches"])
 
     # 7. NEGATIVE CONTROL. The safe changes must pass cleanly, or the cage is
     #    just a wall. B10: a co-located frontend unit test is the safest change
