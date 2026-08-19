@@ -352,17 +352,54 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("neither owner lane ever auto-merges",
           (mig["auto_merge"], cage["auto_merge"]), (False, False))
 
-    # 11. THE LEAKY-GLOB TRAP. This repo's matcher lets `*` cross `/` -- the
-    #     owner lane's `*.env*` and `*docker-compose*` depend on that. So a
-    #     pattern like `*.md` in a FAST lane silently matches every markdown at
-    #     every depth, and any unclassified document auto-merges. That is exactly
-    #     what happened: `docs/product_design_rules.md` classified as `harness`,
-    #     auto_merge True -- the canonical text of the owner's product rules,
-    #     mergeable by a machine. No fast lane may carry a bare `*.ext` pattern.
+    # 11. THE BASENAME-FALLBACK TRAP -- and the thing this drill itself got wrong.
+    #
+    #     The old note here said "this repo's matcher lets `*` cross `/`". It
+    #     does not, and that was never measured. `_glob_to_re` compiles `*` to
+    #     `[^/]*`, so `*.md` becomes `[^/]*\.md\Z` and does NOT match
+    #     `docs/a.md`. The owner lane's `*.env*` / `*docker-compose*` do not
+    #     depend on depth-crossing either -- they are slash-free, so they get
+    #     reach from the SAME fallback described next.
+    #
+    #     The real mechanism is `merge_cage.path_matches` (scripts/merge_cage.py
+    #     :195-196): after the full-path match fails, ANY pattern containing no
+    #     `/` is re-matched against the BASENAME, at every depth. The leak needs
+    #     no star at all. Plain `README.md` in the fast lane therefore reaches
+    #     `docs/product/pillars/README.md`.
+    #
+    #     So the old condition -- `pattern.startswith("*.") and "/" not in
+    #     pattern` -- described the single example somebody happened to find
+    #     (`*.md`), not the class the bug belongs to. `README.md` does not start
+    #     with `*.`, so this drill printed
+    #         ok   fast lane `harness` has no depth-crossing glob: README.md
+    #     and passed 64/64 while that exact pattern was leaking. A guard
+    #     reporting success about a question it is not asking is this repo's
+    #     signature failure, and it had reached the guard meant to catch it.
+    #
+    #     The condition below is the CLASS: slash-free, star or no star. Until
+    #     `path_matches` stops re-matching on the basename, every one of these
+    #     is a live hole, so RED here is the instrument working.
+    print("  (a red line below = a fast-lane pattern with no `/`, which path_matches")
+    print("   re-matches against the basename at EVERY depth -- merge_cage.py:195)")
     for fast in ("harness", "product"):
         for pattern in policy["lanes"][fast].get("paths") or []:
-            check(f"fast lane `{fast}` has no depth-crossing glob: {pattern}",
-                  pattern.startswith("*.") and "/" not in pattern, False)
+            check(f"fast lane `{fast}` is path-anchored, not basename-matched at any depth: {pattern}",
+                  "/" not in pattern, False)
+
+    #     And the consequence, asserted on real behaviour rather than on the
+    #     shape of a string (rule #21 -- value-presence beats schema-presence).
+    #     Two documents in the SAME directory must not get opposite verdicts
+    #     because of what they happen to be called. Measured on this policy:
+    #     `docs/product/PRD.md` -> product_owner, auto_merge False, while its
+    #     sibling `docs/product/pillars/README.md` -> harness, auto_merge TRUE.
+    #     Comparing the pair rather than hardcoding a lane keeps this honest if
+    #     `docs/product/**` is later given a lane of its own.
+    nested_doc = classify(["docs/product/pillars/README.md"], policy)
+    sibling_doc = classify(["docs/product/PRD.md"], policy)
+    check("a nested doc is not pulled into another lane by its basename",
+          nested_doc["lane"], sibling_doc["lane"])
+    check("...so a product document never auto-merges", nested_doc["auto_merge"], False)
+
     check("an unclassified nested doc escalates, never auto-merges",
           classify(["docs/somewhere/new.md"], policy)["auto_merge"], False)
     check("a root doc that IS classified still takes the fast lane",
