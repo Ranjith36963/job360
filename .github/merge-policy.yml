@@ -85,14 +85,45 @@ lanes:
       - "docs/harness/**"
       - "harness/**"
       - "backend/scripts/**"
+      # FROZEN HISTORY. Rewriting an archive would falsify it, so edits here are
+      # housekeeping, never a decision. Both spellings are real and this is not a
+      # typo to be collapsed -- `stale_path_check.py:53` already carries both.
+      - "docs/_archive/**"
+      - "docs/archive/**"
+      # Test OUTPUT, not product. Regenerated, never read by a user.
+      - "test-artifacts/**"
+      # ── READMEs, NAMED. NOT `README.md`, AND NOT `**/README.md`. ───────────
+      # These six reached the fast lane only through the basename fallback that
+      # this commit deletes. They are genuinely harness, so they are written down
+      # rather than left to escalate -- but written down ONE BY ONE.
+      #
+      # `**/README.md` would be the tempting one-liner and it is the bug itself:
+      # it is exactly what carried `docs/product/pillars/README.md` into the fast
+      # lane with auto_merge TRUE. A README under `docs/product/` is part of the
+      # owner's product thinking; a README under `frontend/` is build notes. The
+      # difference is WHERE it lives, which is the whole premise of wave 1, and a
+      # depth-crossing pattern is precisely what throws that difference away.
+      - "docs/README.md"
+      - "backend/README.md"
+      - "frontend/README.md"
       # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
-      # `*.md` sat here and looked harmless. It is not: this repo's glob matcher
-      # lets `*` cross `/` (deliberately -- `*.env*` and `*docker-compose*` in
-      # the owner lane depend on it), so `*.md` matched markdown at ANY depth.
-      # Any document not explicitly classified therefore landed in the FAST lane
-      # and auto-merged. Caught by classifying `docs/product_design_rules.md`
-      # after the move: lane `harness`, auto_merge TRUE -- the canonical text of
-      # the owner's own product rules, mergeable by a machine.
+      # `*.md` sat here and looked harmless. It was not -- but the reason
+      # written down here was WRONG, and being wrong about the mechanism is why
+      # the drill built to catch it passed.
+      #
+      # The old note blamed "`*` crosses `/`". It does not: `*` compiles to
+      # `[^/]*` (merge_cage.py `_glob_to_re`) and stops dead at a slash. The
+      # real rule was a fifth, unwritten one -- any SLASH-FREE pattern was
+      # re-matched against the BASENAME at any depth. That is what carried
+      # `*.md` into every directory, and it is what made the bare `README.md`
+      # below reach `docs/product/pillars/README.md`: lane `harness`,
+      # auto_merge TRUE, measured.
+      #
+      # 2026-08-20: that fallback is deleted. A pattern now means what it says.
+      # Anything that WANTS depth asks with `**/` (which matches zero or more
+      # directories, so it still covers the root) -- see the owner lanes below.
+      # Every name in this list is therefore ROOT-ONLY, which is what it always
+      # meant to be.
       #
       # The safe failure direction is the point. A new root-level document now
       # matches nothing, so it escalates to product_owner and asks to be filed.
@@ -114,6 +145,12 @@ lanes:
       # them. Ignore-files and linter config cannot reach a user.
       - ".gitignore"
       - ".gitattributes"
+      # ROOT ONLY, and `frontend/.gitignore` is DELIBERATELY left to escalate.
+      # A nested ignore-file is not plumbing: PR #354 exists because
+      # `backend/src/data/` was being silently swallowed by an ignore rule, and
+      # that directory holds the gazetteer that decides which jobs enter the
+      # catalogue. An ignore rule under a product directory can drop product data
+      # with no diff to show for it, so it is worth one human glance.
       # NOT `*.dockerignore` -- same depth-crossing trap as `*.md` below.
       - ".dockerignore"
       - "backend/.dockerignore"
@@ -176,17 +213,17 @@ lanes:
       - "backend/migrations/**"
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
       # secrets and infrastructure
-      - "*.env*"
-      - "railway.json"
-      - "*docker-compose*"
-      - "*Dockerfile*"
+      - "**/*.env*"
+      - "**/railway.json"
+      - "**/*docker-compose*"
+      - "**/*Dockerfile*"
       - "backend/src/core/settings.py"   # flags change prod behaviour globally
       # dependency manifests run postinstall scripts on the build host;
       # dependabot-auto.yml already owns the safe subset of this decision
-      - "package.json"
-      - "package-lock.json"
-      - "pyproject.toml"
-      - "requirements*.txt"
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pyproject.toml"
+      - "**/requirements*.txt"
       # the owner's product rules — changing the text changes the product
       - "docs/product/product_design_rules.md"   # the canonical text of rules #29-31
       - "docs/product/plans/batch-2-decisions.md"
@@ -211,11 +248,35 @@ lanes:
       - "scripts/lane.py"
       - "scripts/data_only.py"
       - "scripts/drill_registry.py"
+      # ADDED 2026-08-20. The rule above was already being broken, because the
+      # cage is bigger than the four files someone happened to list. `scripts/**`
+      # sits in the FAST lane, so everything not named here was machine-mergeable.
+      #
+      # THE UNDO. This is the load-bearing one. The whole justification for
+      # letting the PRODUCT lane auto-merge into a repo whose `main` deploys
+      # straight to job360.uk is written at the top of this file: "Speed comes
+      # from being able to UNDO, not from being sure." These two files ARE that
+      # undo -- `post-merge-watch.yml` executes rollback_gear.py to take back a
+      # bad product merge, and `revert-main.yml` executes revert_gear.py. A
+      # machine merging a change to them can quietly repossess the thing the
+      # product lane's speed is borrowed against.
+      - "scripts/rollback_gear.py"
+      - "scripts/revert_gear.py"
+      # THE CAGE'S OWN PARTS. cage_blockers is not merely cage-adjacent: it is
+      # imported at RUN TIME by merge_cage.py (`from cage_blockers import
+      # BLOCKERS, undrilled`), so an edit to it changes what the cage refuses
+      # while merge_cage.py itself sits owner-locked. That is the "cage may not
+      # edit the cage" rule being broken through an import rather than a filename.
+      - "scripts/cage_blockers.py"
+      - "scripts/cage_replay.py"
+      - "scripts/gate_wiring_check.py"
+      # The gate agents are made to run before they may commit.
+      - "scripts/agent-gate.sh"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       - ".github/workflows/post-merge-watch.yml"
       # the owner's own words
-      - "CLAUDE.md"
+      - "**/CLAUDE.md"
     requires: [ci, review, drill]
     auto_merge: false          # your hand, always
     watch: false               # nothing live is downstream

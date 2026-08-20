@@ -156,12 +156,42 @@ def repo_root() -> Path:
 #
 #     *            any run of characters, stopping at `/`
 #     **           any run of characters, crossing `/`
-#     **/          zero or more whole directories
-#     no `/` at all   matches the BASENAME at any depth (so `*.md` still works)
+#     **/          zero or more whole directories, INCLUDING none — so a
+#                  `**/`-prefixed pattern matches at the root as well as at depth
 #
 # `*` no longer crossing `/` would have LOOSENED every deny, so every recursive
 # deny was rewritten to `**` in the same commit. The drill checks nested paths
 # under each one.
+#
+# ── THE BASENAME FALLBACK IS GONE (2026-08-20) ───────────────────────────────
+# There used to be a fifth rule: "no `/` at all -> match the BASENAME at any
+# depth". It was written so `*.md` would keep working, and it is why
+# `docs/product/pillars/README.md` classified as lane `harness`, auto_merge TRUE
+# — `README.md` is listed in the fast lane for the ROOT readme, and the fallback
+# quietly extended it to every README in the tree.
+#
+# Note what the old comment two lanes up blamed: "`*` crosses `/`". It does not.
+# `*` compiles to `[^/]*` and stops dead at a slash (see below). The wrong
+# mechanism was written down, so the drill was written to catch the wrong thing
+# and passed. Both are corrected here.
+#
+# WHY DELETING IT IS SAFE, AND WHY IT COULD NOT BE DONE ALONE. `**/` already
+# compiles to `(?:[^/]+/)*` — zero or more whole directories, and *zero* means it
+# still matches at the root. So every pattern that genuinely wanted depth says so
+# now: `**/*.env*`, `**/package.json`, `**/CLAUDE.md`. The fallback expressed
+# nothing that `**/` cannot.
+#
+# The DIRECTIONS ARE NOT SYMMETRIC, which is the whole reason this is one commit:
+#   on ALLOW, an over-wide pattern is fail-OPEN  — it auto-merges something.
+#   on DENY,  an over-wide pattern is fail-CLOSED — it merely asks for a human.
+# So deleting the fallback TIGHTENS allow (good, immediately) and LOOSENS every
+# deny (bad, immediately). Every slash-free DENY entry was rewritten with `**/`
+# in this same commit, and the drill pins a NESTED witness for each one. This is
+# the same hazard, and the same remedy, as the `*`->`**` migration recorded above.
+#
+# The new failure direction is the safe one: a bare name now matches the root
+# only, so a pattern someone forgets to prefix under-matches, the file matches no
+# lane, and it escalates to `product_owner`. Forgetting costs one refusal.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -188,13 +218,17 @@ def _glob_to_re(pattern: str) -> re.Pattern[str]:
 
 
 def path_matches(path: str, pattern: str) -> bool:
-    """Does this repo-relative path match this pattern?"""
-    rx = _glob_to_re(pattern)
-    if rx.match(path):
-        return True
-    if "/" not in pattern:  # a bare name is a basename rule, at any depth
-        return bool(rx.match(path.rsplit("/", 1)[-1]))
-    return False
+    """Does this repo-relative path match this pattern?
+
+    One matcher, one answer. `scripts/lane.py` imports this rather than writing a
+    second one, so a change here changes both classifiers at once.
+
+    A pattern means exactly what it says: it is anchored at the repo root and the
+    only way to reach depth is to ask for it with `**/` or `**`. There is no
+    implicit basename rule — see the note above for why it was removed and what
+    had to move in the same commit.
+    """
+    return bool(_glob_to_re(pattern).match(path))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,10 +279,10 @@ DENY: list[tuple[str, str]] = [
      f"from a removed `Depends(require_user)`. {_OWNER_MERGES}"),
     # ── infrastructure ───────────────────────────────────────────────────────
     ("backend/migrations/**", f"schema change — irreversible against live data. {_OWNER_MERGES}"),
-    ("*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
+    ("**/*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
     ("backend/src/core/settings.py",
      f"flags here change production behaviour globally. {_OWNER_MERGES}"),
     # ── dependency manifests ─────────────────────────────────────────────────
@@ -257,15 +291,15 @@ DENY: list[tuple[str, str]] = [
     # have waved through PR #291 (motion 12.42.2 -> 13.0.0) which
     # dependabot-auto.yml already routes to a human. Manifests also carry
     # postinstall scripts: allowing one is allowing arbitrary code on the build host.
-    ("package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
+    ("**/package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
                      "owns this decision and sends MAJOR bumps to a human; a manifest also "
                      "runs postinstall scripts on the build host. "
                      "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("package-lock.json", "a dependency change — see package.json. "
+    ("**/package-lock.json", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("pyproject.toml", "a dependency change — see package.json. "
+    ("**/pyproject.toml", "a dependency change — see package.json. "
                        "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("requirements*.txt", "a dependency change — see package.json. "
+    ("**/requirements*.txt", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
     # ── documents that ARE decisions ─────────────────────────────────────────
     # `docs/**` and `*.md` are allowed, which meant the canonical text of the
@@ -284,7 +318,7 @@ DENY: list[tuple[str, str]] = [
                    f"own guards is how a cage is escaped. {_OWNER_MERGES}"),
     (".claude/**", "the instructions agents read — editing them unsupervised is circular. "
                    + _OWNER_MERGES),
-    ("CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
+    ("**/CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
                   + _OWNER_MERGES),
 ]
 
@@ -1218,9 +1252,25 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
               if not any(needle in r for r in check_paths([f]).reasons)]
     ok("a nested file under a recursive deny is still refused, and for the right reason",
        not missed, f"fell through to a generic refusal: {missed}", P)
-    ok("glob semantics are real (`*` stops at `/`, `**` does not)",
-       path_matches("a/b.py", "a/*") and not path_matches("a/b/c.py", "a/*")
-       and path_matches("a/b/c.py", "a/**") and path_matches("x/y/README.md", "*.md"),
+    # B13b — the four properties the pattern language now rests on. The last
+    #        clause of this case used to assert the OPPOSITE of the fourth:
+    #        `path_matches("x/y/README.md", "*.md")` was True, because any
+    #        slash-free pattern was re-matched against the basename at any depth.
+    #        That is what put `docs/product/pillars/README.md` in the fast lane
+    #        with auto_merge TRUE. The fallback is deleted; a bare name is root-only.
+    #
+    #        The third and fourth clauses together are what made deleting it safe:
+    #        `**/` means "zero or more whole directories", and ZERO is why a
+    #        `**/`-prefixed pattern still catches the root file. Without that,
+    #        rewriting every slash-free DENY to `**/` would have quietly stopped
+    #        denying the root copies while appearing to fix the depth ones.
+    ok("glob semantics are real (`*` stops at `/`, `**` does not, bare = root only)",
+       path_matches("a/b.py", "a/*")
+       and not path_matches("a/b/c.py", "a/*")
+       and path_matches("a/b/c.py", "a/**")
+       and not path_matches("x/y/README.md", "*.md")      # fallback is GONE
+       and path_matches("x/y/README.md", "**/*.md")       # depth, asked for
+       and path_matches("README.md", "**/*.md"),          # ...and still the root
        "the matcher does not mean what it looks like", ["path_matches"])
 
     # 7. NEGATIVE CONTROL. The safe changes must pass cleanly, or the cage is
