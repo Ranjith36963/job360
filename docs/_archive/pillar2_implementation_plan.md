@@ -2,7 +2,7 @@
 
 **Target:** Upgrade Job360's scoring/matching layer from a 4-dimension regex scorer to a semantic matching engine with gate-pass thresholds, LLM-enriched structured fields, and hybrid retrieval.
 
-**Anchored to:** `docs/research/pillar_2_report.md` (18-item ranked backlog).
+**Anchored to:** `docs/product/research/pillar_2_report.md` (18-item ranked backlog).
 **Baseline commit:** `main @ 1730bf6` (Pillar 1 closure). 600p/0f/3s on clean baseline.
 **Plan author:** session dated 2026-04-20.
 
@@ -414,7 +414,7 @@ Explicitly deferred:
 Pillar 2 is **done** when:
 
 - Test suite ≥ 700 passing, 0 failing (baseline today: 600p/0f/3s). Each batch adds 10-30 tests.
-- `docs/IMPLEMENTATION_LOG.md` has entries for every batch 2.1-2.10 with scope + test delta.
+- `docs/harness/IMPLEMENTATION_LOG.md` has entries for every batch 2.1-2.10 with scope + test delta.
 - `MEMORY.md` updated with links to `project_pillar2_batch_*_done.md` files.
 - Scorer changelog: title-only or skills-only matches no longer clear `MIN_MATCH_SCORE=30` (gate-pass verified).
 - Enrichment coverage: ≥90% of jobs older than 1 day have a `job_enrichment` row.
@@ -511,7 +511,7 @@ Starting slot `0008` is correct per exploration (existing migrations 0000-0007).
 
 ## Appendix E — Report coverage matrix (audit trail)
 
-Every item from `docs/research/pillar_2_report.md` mapped to a plan batch or explicit deferral. Built 2026-04-20 to close the gap audit; update when the plan is revised.
+Every item from `docs/product/research/pillar_2_report.md` mapped to a plan batch or explicit deferral. Built 2026-04-20 to close the gap audit; update when the plan is revised.
 
 ### The 18-item ranked backlog (from research report §"Ranked improvements")
 
@@ -576,7 +576,7 @@ Every item from `docs/research/pillar_2_report.md` mapped to a plan batch or exp
 | ⏸️ Deferred with explicit rationale | 8 (items 15, 17, 18; career-ops archetype; Meilisearch; pg_trgm; Torre 2×; auto-disable) |
 | 🔴 Unaddressed | **0** |
 
-**Audit conclusion:** Every concrete recommendation in `docs/research/pillar_2_report.md` is either (a) landing in a Pillar 2 batch, (b) already shipped in a prior pillar, or (c) explicitly deferred with a stated reason. Nothing in the report is silently dropped.
+**Audit conclusion:** Every concrete recommendation in `docs/product/research/pillar_2_report.md` is either (a) landing in a Pillar 2 batch, (b) already shipped in a prior pillar, or (c) explicitly deferred with a stated reason. Nothing in the report is silently dropped.
 
 ---
 

@@ -19,7 +19,7 @@ parametrization makes any cheap def-count tolerance flaky — a false-alarming
 check trains people to ignore the loop).
 
 Read-only on purpose: this loop REPORTS drift, it never edits docs
-(see docs/maintenance/loop1_safe_reenable.md — "verify=read is safe").
+(see docs/harness/maintenance/loop1_safe_reenable.md — "verify=read is safe").
 Run: python scripts/doc_sync_check.py   (from the repo root)
 """
 

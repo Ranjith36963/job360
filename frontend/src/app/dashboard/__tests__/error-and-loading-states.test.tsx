@@ -42,6 +42,10 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   getJobs: (...args: unknown[]) => getJobsMock(...args),
   setJobAction: (...args: unknown[]) => setJobActionMock(...args),
   removeJobAction: (...args: unknown[]) => removeJobActionMock(...args),
+  // Additive stub (2026-08-13): the dashboard now also reads GET /api/profile
+  // for the "Searching for: …" line. Without a stub the spread `importOriginal`
+  // would let the REAL client fire a fetch at jsdom's origin on every test.
+  getProfile: vi.fn().mockResolvedValue({ search_titles: [] }),
   getStatus: vi.fn().mockResolvedValue({
     jobs_total: 0,
     last_run: null,

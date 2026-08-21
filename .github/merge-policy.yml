@@ -1,0 +1,312 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# THE MERGE POLICY — the one file the owner turns.
+#
+# Everything else in this harness reads this file. `scripts/merge_cage.py` is
+# 1,900 lines of machinery; this is the dial. If you want the machine to merge
+# more, you widen a list HERE — you never edit the Python.
+#
+# THE IDEA IN ONE LINE
+#   Not every change is the same kind of risk, so not every change gets the
+#   same gate. Three lanes, by who gets hurt if it is wrong.
+#
+#   HARNESS  — Ranjith code. Your weapon. If it breaks, YOU are inconvenienced.
+#              No user ever sees it. Fast lane.
+#   PRODUCT  — Job360. If it breaks, a real person on job360.uk is hurt.
+#              Slow lane: it must be WATCHED alive before it is trusted.
+#   OWNER    — the things a machine must never decide. It stops and waits.
+#
+# THE RULE THAT MAKES IT SAFE
+#   Speed comes from being able to UNDO, not from being sure. The product lane
+#   is fast because `deploymentRollback` puts users back in seconds. The harness
+#   lane is fast because nothing live is at stake. The owner lane has neither,
+#   so it has a human.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: 1
+
+# ── The four tags ──────────────────────────────────────────────────────────
+# A lane lists which of these must be GREEN before anything merges. Each one is
+# produced by a real job — none of them is an opinion, and none of them is text
+# a model wrote. If a required tag is MISSING, that is not a pass; the cage
+# waits. Silence is never consent.
+#
+#   ci        every required check on the PR is green         (GitHub check runs)
+#   review    CodeRabbit left no unresolved blocking thread   (GitHub review API)
+#   security  gitleaks + pip-audit + npm audit + CodeQL green (security.yml)
+#   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (verify-live.yml)
+#   drill     every guard in the harness was proven able to fail
+#             (scripts/drill_registry.py — a guard that cannot go red is decoration)
+#   ratchets  no quality number went backwards (see RATCHETS below)
+#
+# HOW TO COUNT A CHECK, AND THE TRAP UNDERNEATH IT
+# A check run has more states than pass/fail, and the two that matter are easy
+# to confuse:
+#
+#   SUCCESS   it ran and passed
+#   SKIPPED   it correctly did not need to run (a path filter, an `if:` guard)
+#   PENDING   it has not finished — the only one that means WAIT
+#
+# Caught while dry-running this policy over the open PRs: a sweep script that
+# recognised only SUCCESS as green reported 3-6 "pending" checks on every single
+# PR. All of them were SKIPPED — `auto-fix`, `Doc clutter (CURATE gear)`,
+# `Report failure as an issue` — jobs that are supposed to skip. GitHub agreed
+# they were fine and reported `mergeStateStatus: CLEAN`.
+#
+# An auto-merge lane counting the way that script did would wait forever on
+# every PR and look exactly like a bug in the merge queue. The instrument must
+# count the way its consumer counts: SKIPPED is not PENDING.
+#
+# `verify` is the one that fixes the old cage's blind spot. The old cage judged
+# a change by its FILENAME, which cannot tell a logging fix from a deleted
+# `Depends(require_user)`. `verify` does not guess: it starts the app, drives a
+# real browser, calls the real routes, and reports what happened.
+
+lanes:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # HARNESS — "Ranjith code". The weapon you are building for yourself.
+  #
+  # Nothing under these paths runs on job360.uk. The blast radius is your own
+  # workflow. Historically this was DENIED outright on the theory that "an agent
+  # editing its own guards is how a cage is escaped" — true, but the answer to
+  # that is the `drill` tag, not a blanket refusal. A guard that has been
+  # watched go red cannot be quietly neutered without the drill going red too.
+  # ─────────────────────────────────────────────────────────────────────────
+  harness:
+    description: "Your tooling. Breaks you, never a user."
+    paths:
+      - ".github/workflows/**"
+      - "scripts/**"
+      - ".claude/**"
+      # WAVE 1 OF THE SPLIT (2026-08-18): `docs/**` used to sit here wholesale,
+      # which meant the canonical text of the owner's product rules was harness.
+      # 109 files moved so the lane is a fact about WHERE a file lives, not a
+      # fact someone has to remember to write down.
+      - "docs/harness/**"
+      - "harness/**"
+      - "backend/scripts/**"
+      # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
+      # `*.md` sat here and looked harmless. It is not: this repo's glob matcher
+      # lets `*` cross `/` (deliberately -- `*.env*` and `*docker-compose*` in
+      # the owner lane depend on it), so `*.md` matched markdown at ANY depth.
+      # Any document not explicitly classified therefore landed in the FAST lane
+      # and auto-merged. Caught by classifying `docs/product_design_rules.md`
+      # after the move: lane `harness`, auto_merge TRUE -- the canonical text of
+      # the owner's own product rules, mergeable by a machine.
+      #
+      # The safe failure direction is the point. A new root-level document now
+      # matches nothing, so it escalates to product_owner and asks to be filed.
+      # Forgetting costs one classification, never a silent auto-merge.
+      - "README.md"
+      - "ARCHITECTURE.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "STATUS.md"
+      - "ENGINES_KANBAN.md"
+      - "LAUNCH_PLAN.md"
+      - "2030.md"
+      - "PLAN-?-*.md"
+      - "anthropic-patterns-upgrade.md"
+      - "fable-harness-plan.md"
+      - "scrapingdesccion.md"
+      # Repo plumbing. Measured over the last 60 merges, these three alone
+      # pushed PRs into the owner lane purely because nobody had ever named
+      # them. Ignore-files and linter config cannot reach a user.
+      - ".gitignore"
+      - ".gitattributes"
+      # NOT `*.dockerignore` -- same depth-crossing trap as `*.md` below.
+      - ".dockerignore"
+      - "backend/.dockerignore"
+      - "frontend/.dockerignore"
+      - ".coderabbit.yaml"
+      - "pyrightconfig.json"
+      - ".vscode/**"
+    requires: [ci, review, drill]
+    auto_merge: true
+    watch: false            # nothing live to watch
+    rollback: git-revert    # a normal revert commit is enough
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT — Job360 itself. Real people, real jobs, real inboxes.
+  #
+  # This lane may merge automatically, but it is never TRUSTED at merge time.
+  # It is trusted 15 minutes later, by a watcher, or it is taken back.
+  # ─────────────────────────────────────────────────────────────────────────
+  product:
+    description: "What a user on job360.uk sees and touches."
+    paths:
+      - "backend/src/**"
+      - "frontend/src/**"
+      - "backend/tests/**"
+      - "frontend/tests/**"
+      # The generated API contract. It moved in 12 of the last 60 merges and was
+      # unclassified in every one of them, which alone sent those PRs to the
+      # owner lane. It is PRODUCT, not plumbing: `check:types-drift` failing here
+      # means the frontend and backend disagree about a real route.
+      - "frontend/openapi.json"
+      # DATA IS PRODUCT. The gazetteer decides which jobs enter the catalogue
+      # (rule #30) and the job-signal term files feed scoring. A change here is
+      # a change to what a user is shown, even though no code moved -- which is
+      # exactly the kind of edit a "only code is risky" instinct waves through.
+      - "backend/data/**"
+    requires: [ci, review, security, verify, ratchets]
+    auto_merge: true
+    watch_minutes: 15       # how long the post-merge watcher stares at prod
+    rollback: railway       # `deploymentRollback` — seconds, no rebuild
+
+  # DENY BEATS ALLOW. A PR touching one owner-lane file is an owner-lane PR, no
+  # matter what else is in it. Not a risk score — a door. A score can be diluted
+  # by adding safe files; a door cannot.
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_OWNER — you decide, AND a user is exposed.
+  #
+  # There is not one owner lane, there are two. "Who decides" and "who gets
+  # hurt" are separate questions, and a single `owner` bucket collapsed them:
+  # measured over the last 60 merges it held 7 product decisions, 6 harness
+  # decisions and 5 that were both.
+  #
+  # The difference is not cosmetic — it is what happens AFTER the merge. A
+  # hand-merged migration still reaches live users, so it still needs the
+  # watcher and a confirmed rollback. Under one bucket it got neither.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_owner:
+    description: "You decide — and it reaches a user. Watched anyway."
+    paths:
+      # irreversible against live data
+      - "backend/migrations/**"
+      - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
+      # secrets and infrastructure
+      - "*.env*"
+      - "railway.json"
+      - "*docker-compose*"
+      - "*Dockerfile*"
+      - "backend/src/core/settings.py"   # flags change prod behaviour globally
+      # dependency manifests run postinstall scripts on the build host;
+      # dependabot-auto.yml already owns the safe subset of this decision
+      - "package.json"
+      - "package-lock.json"
+      - "pyproject.toml"
+      - "requirements*.txt"
+      # the owner's product rules — changing the text changes the product
+      - "docs/product/product_design_rules.md"   # the canonical text of rules #29-31
+      - "docs/product/plans/batch-2-decisions.md"
+    requires: [ci, review, security, verify, ratchets]
+    auto_merge: false          # your hand, always
+    watch_minutes: 15          # ...but the watcher still runs after you merge
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # HARNESS_OWNER — you decide, and only you are exposed.
+  #
+  # The cage, and the words agents read. No user is downstream of these, so no
+  # watcher and no rollback rehearsal: merge it and walk away. What they share
+  # with product_owner is only that a machine may not decide them.
+  # ─────────────────────────────────────────────────────────────────────────
+  harness_owner:
+    description: "You decide — and only your own tooling is exposed."
+    paths:
+      # the cage may not edit the cage
+      - ".github/merge-policy.yml"       # this file
+      - "scripts/merge_cage.py"
+      - "scripts/lane.py"
+      - "scripts/data_only.py"
+      - "scripts/drill_registry.py"
+      - ".github/workflows/auto-merge.yml"
+      - ".github/workflows/verify-live.yml"
+      - ".github/workflows/post-merge-watch.yml"
+      # the owner's own words
+      - "CLAUDE.md"
+    requires: [ci, review, drill]
+    auto_merge: false          # your hand, always
+    watch: false               # nothing live is downstream
+    rollback: git-revert
+
+# ── Data exemptions ────────────────────────────────────────────────────────
+# An owner-lane file that holds BOTH a list and a law. Editing the list is the
+# intended everyday workflow; editing the law is a cage change.
+#
+# Found by dry-running the lane split over all 12 open PRs: 8 landed in `owner`
+# and FIVE of them for one reason — `scripts/drill_registry.py`. Registering a
+# new guard REQUIRES editing that file, so the rule fired on essentially 100% of
+# harness traffic. A rule that fires on all of its traffic is not a safety rule.
+#
+# `scripts/data_only.py` compares the syntax tree either side of the change,
+# ignoring the named data node. Only the list moved -> harness. One line of law
+# moved -> owner, immediately. Comments and formatting are invisible to an AST,
+# which is right: neither can change what the law does.
+#
+# HONEST STATUS 2026-08-17: this exemption currently changes NOTHING. Measured
+# against all six PRs that touch drill_registry.py, every one is ADDING the file
+# (it is not on `main` yet), and adding a file is not a data edit. The exemption
+# starts paying the first time a PR registers a guard in a file that already
+# exists. Recorded here rather than quietly claimed as a win.
+data_exemptions:
+  "scripts/drill_registry.py":
+    data_name: REGISTRY
+    lane_when_data_only: harness
+    why: >-
+      REGISTRY is the list of guards and their drills — appending to it is how a
+      guard gets registered, which is the workflow this repo wants to be fast.
+      Everything else in that file is the enforcement law and stays owner-lane.
+
+# ── Size ceiling ───────────────────────────────────────────────────────────
+# Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
+# or machine) is actually reading it, they are skimming. Big changes are fine;
+# they just go to a human.
+size:
+  max_files: 40
+  max_lines: 1500
+
+# ── Ratchets ───────────────────────────────────────────────────────────────
+# A ratchet is a number that may HOLD or IMPROVE and may never get worse.
+# It is the only gate that can see SLOW DECAY — the failure mode where no
+# single PR looks bad and six months later the numbers are gone.
+#
+# Measured by the same script CI runs. Never re-implemented here: an inline
+# reimplementation once counted comment lines and reported 4 against a true 0.
+ratchets:
+  - name: mypy errors
+    direction: down
+  - name: ruff findings
+    direction: down
+  - name: open security alerts
+    direction: down
+  # THE PLUG FOR THE HOLE THE DATA EXEMPTION OPENS. If declarations merge
+  # freely, a PR could register a new guard as `owed` (known-undrilled) instead
+  # of `drilled` and slide an unfireable guard through the fast lane. Data is
+  # free; DEBT is not. The count of undrilled guards may hold or fall and may
+  # never rise, so adding an `owed` entry fails the ratchet and the PR stops.
+  - name: owed drills
+    direction: down
+
+# ── The live watch ─────────────────────────────────────────────────────────
+# What "prod is bad" MEANS, as numbers, decided before the outage rather than
+# during it. Any one of these trips the rollback.
+watch:
+  readyz_url: "https://backend-production-80e8e.up.railway.app/api/readyz"
+  frontend_url: "https://frontend-production-c608f.up.railway.app/"
+  poll_seconds: 60
+  trip_when:
+    readyz_non_200: 2          # two consecutive failed readiness probes
+    frontend_non_200: 2
+    sentry_new_issues: 1       # any NEW unresolved issue first seen after merge
+    sentry_error_rate_multiple: 3.0   # 3x the pre-merge hourly error rate
+
+# ── The undo ───────────────────────────────────────────────────────────────
+# Verified 2026-08-17 against docs.railway.com: `deploymentRollback(id)` is in
+# Railway's PUBLIC GraphQL API and reachable from CI via `railway api`. It
+# restores the previous deployment's IMAGE AND ITS VARIABLES with no rebuild,
+# which is why it is seconds and not minutes.
+#
+# Constraint the docs are explicit about: it only works where the target
+# deployment reports `canRollback: true`. The watcher CHECKS that flag before
+# it merges anything into this lane — an undo you have not confirmed you
+# possess is not an undo.
+rollback:
+  provider: railway
+  services: [backend, frontend]
+  confirm_capability_before_merge: true
+  on_rollback:
+    reopen_pr: true
+    open_issue: true
+    notify_slack: true

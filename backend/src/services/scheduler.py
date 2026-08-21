@@ -3,8 +3,8 @@
 Per pillar_3_batch_3.md §"Optimised tiered polling":
 
     ATS          : 60 seconds  (Greenhouse, Lever, Ashby, SmartRecruiters,
-                                Workable, Recruitee, Pinpoint, Personio,
-                                Rippling, Comeet — unmetered boards)
+                                Workable, Recruitee, Pinpoint, Personio
+                                — unmetered boards)
     Reed         : 5 minutes   (2000 req/hr budget)
     Workday      : 15 minutes  (anti-scraper, conservative)
     RSS feeds    : 15 minutes

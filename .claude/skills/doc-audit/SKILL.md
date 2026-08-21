@@ -3,14 +3,14 @@
 Triggered by: `/doc-audit` (optionally `/doc-audit <area>`)
 
 You are running the full document-lifecycle audit defined in
-`docs/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
+`docs/harness/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
 contract. The code is the only truth.
 
 **TWO-PHASE CONTRACT — AMENDED 2026-07-27.** The old contract made *every*
 action wait on the user. He never ran Phase B, so nothing was ever archived:
 `docs/archive/` stayed empty, zero docs carried an IMPLEMENTED stamp, and 75% of
 plan docs describing shipped work piled up. The gate is now **per-lane**, per
-[`docs/maintenance/DELETION-POLICY.md`](../../../docs/maintenance/DELETION-POLICY.md):
+[`docs/harness/maintenance/DELETION-POLICY.md`](../../../docs/harness/maintenance/DELETION-POLICY.md):
 
 - **Phase A — REPORT.** Run Steps 1–4 without changing ANY file. Present the
   findings, classifying every item into Lane A (auto-delete), Lane B
@@ -34,7 +34,7 @@ plan docs describing shipped work piled up. The gate is now **per-lane**, per
   PR — never commit to main. Rebase on freshly-fetched `origin/main` right
   before pushing. **Only one doc-writing session (sync or audit) at a time** —
   check for an open `docs:` PR first; if one exists, stop and say so.
-  If `docs/archive/` or `docs/maintenance/PARKED.md` are missing, create them
+  If `docs/archive/` or `docs/harness/maintenance/PARKED.md` are missing, create them
   first (with a one-line header explaining their purpose).
 
 **AHEAD docs are untouchable (user's rule):** a doc describing something not
@@ -73,7 +73,7 @@ history (not the doc's own claims):
 - **SUPERSEDED** (replaced by a newer plan/design) → banner + pointer, leave in
   place or archive, content frozen.
 - **ACTIVE / not yet built** → leave untouched. If a LIVING doc contradicts it
-  because the code is behind, record the gap in `docs/maintenance/PARKED.md`
+  because the code is behind, record the gap in `docs/harness/maintenance/PARKED.md`
   (doc, claim, evidence the code lacks it, date). Never delete the intention.
 
 ## Step 4: Coverage pass (undocumented code)
@@ -111,7 +111,7 @@ it goes to PARKED.md or a GitHub issue — not into this PR.
 a blanket ban. That ban is why 75% of plan docs describing already-shipped work
 piled up: destruction was centralised on one human who never ran Phase B, so
 every agent correctly obeyed and the pile grew. Deletion is now governed solely
-by [`docs/maintenance/DELETION-POLICY.md`](../../../docs/maintenance/DELETION-POLICY.md):
+by [`docs/harness/maintenance/DELETION-POLICY.md`](../../../docs/harness/maintenance/DELETION-POLICY.md):
 
 - **Lane A / Lane B** (completed work, generated junk, merged-branch artifacts) —
   act by predicate, no approval needed.

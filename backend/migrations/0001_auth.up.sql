@@ -1,4 +1,4 @@
--- 0001_auth: users + sessions tables. See docs/plans/batch-2-plan.md Phase 1.
+-- 0001_auth: users + sessions tables. See docs/product/plans/batch-2-plan.md Phase 1.
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,

@@ -16,14 +16,12 @@ from defusedxml.common import EntitiesForbidden
 _XML_SOURCE_MODULES = [
     "src.sources.ats.personio",
     "src.sources.ats.successfactors",
-    "src.sources.feeds.biospace",
-    "src.sources.feeds.jobs_ac_uk",
     "src.sources.feeds.nhs_jobs",
-    "src.sources.feeds.nhs_jobs_xml",
     "src.sources.feeds.realworkfromanywhere",
     "src.sources.feeds.uni_jobs",
     "src.sources.feeds.weworkremotely",
-    "src.sources.feeds.workanywhere",
+    # biospace / jobs_ac_uk / nhs_jobs_xml / workanywhere were removed
+    # 2026-08-10 with their dead upstreams.
 ]
 
 # A DOCTYPE that declares an entity — the simplest XXE / billion-laughs vector.

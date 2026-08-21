@@ -1,0 +1,467 @@
+name: Post-merge watch (the eyes after the merge)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHY THIS EXISTS
+#
+# `.github/merge-policy.yml` lets the `product` lane auto-merge with NO human
+# in that loop, and justifies it in its own words:
+#
+#   "Speed comes from being able to UNDO, not from being sure. The product
+#    lane is fast because `deploymentRollback` puts users back in seconds."
+#
+# That sentence is only true if something actually watches after the merge
+# and actually pulls the undo. Before this file, nothing did — the cage
+# could merge to `product` and then nobody was looking. `scripts/rollback_gear.py`
+# is the undo; this workflow is the eyes and the hand that pulls it.
+#
+# EVERY NUMBER BELOW IS READ FROM `.github/merge-policy.yml` AT RUN TIME, NOT
+# HARDCODED HERE. The `policy` job parses it once and every other job reads
+# its outputs — the same discipline `ratchets` already uses ("measured by the
+# same script CI runs, never re-implemented here"). A number typed twice is a
+# number that will one day disagree with itself.
+#
+# THE HONESTY RULE (used throughout this repo, see uptime.yml / external-health.yml):
+# every run writes what it watched, what it could NOT watch, and the verdict
+# to $GITHUB_STEP_SUMMARY. Sentry is the sharpest example: if SENTRY_AUTH_TOKEN
+# is missing, this workflow does NOT quietly skip that dimension and report
+# green — it says so loudly, because a watcher that goes silently blind is
+# how a 7-day production outage (the PYTHON-FASTAPI-8 incident referenced in
+# external-health.yml) sits unnoticed for a week.
+#
+# THE DRILL ENTRANCE: `workflow_dispatch` with `dry_run` (default true) lets
+# anyone fire this by hand and watch the whole wait -> watch -> Sentry ->
+# decide chain run for real against live prod (all read-only), while the
+# ACTING half — the real `deploymentRollback` mutation, a real GitHub issue,
+# a real Slack ping — stays a rehearsal. `push` to `main` always runs LIVE:
+# that is the actual post-merge trigger this workflow exists for.
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Rehearse the full watch -> decide -> rollback -> issue -> Slack chain
+          without calling Railway's rollback mutation or raising a real alarm.
+        type: boolean
+        default: true
+
+concurrency:
+  group: post-merge-watch-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege (CodeQL actions/missing-workflow-permissions): this workflow
+# only reads the repo, polls public URLs, calls Railway/Sentry with secrets it
+# never prints, and — only on a real trip — opens/comments an issue and wakes
+# triage.yml.
+permissions:
+  contents: read
+  issues: write
+  actions: write # to wake triage.yml on a real trip, same handoff every loop here uses
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # THE DIAL. Everything downstream reads its outputs; nothing downstream
+  # re-parses the policy file or repeats a number from it.
+  # ───────────────────────────────────────────────────────────────────────
+  policy:
+    name: Read the dial (merge-policy.yml)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      readyz_url: ${{ steps.parse.outputs.readyz_url }}
+      frontend_url: ${{ steps.parse.outputs.frontend_url }}
+      poll_seconds: ${{ steps.parse.outputs.poll_seconds }}
+      watch_minutes: ${{ steps.parse.outputs.watch_minutes }}
+      readyz_non_200: ${{ steps.parse.outputs.readyz_non_200 }}
+      frontend_non_200: ${{ steps.parse.outputs.frontend_non_200 }}
+      sentry_new_issues: ${{ steps.parse.outputs.sentry_new_issues }}
+      sentry_error_rate_multiple: ${{ steps.parse.outputs.sentry_error_rate_multiple }}
+      services: ${{ steps.parse.outputs.services }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pyyaml
+        run: pip install pyyaml
+
+      - name: Parse .github/merge-policy.yml — the ONLY place these numbers are read
+        id: parse
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import yaml
+
+          with open(".github/merge-policy.yml", encoding="utf-8") as f:
+              policy = yaml.safe_load(f)
+
+          watch = policy["watch"]
+          trip = watch["trip_when"]
+          product = policy["lanes"]["product"]
+          rollback = policy["rollback"]
+
+          print(f"readyz_url={watch['readyz_url']}")
+          print(f"frontend_url={watch['frontend_url']}")
+          print(f"poll_seconds={watch['poll_seconds']}")
+          print(f"watch_minutes={product['watch_minutes']}")
+          print(f"readyz_non_200={trip['readyz_non_200']}")
+          print(f"frontend_non_200={trip['frontend_non_200']}")
+          print(f"sentry_new_issues={trip['sentry_new_issues']}")
+          print(f"sentry_error_rate_multiple={trip['sentry_error_rate_multiple']}")
+          print(f"services={','.join(rollback['services'])}")
+          PY
+
+      - name: Show what was read (eyeball it — never trust a parse blind)
+        run: |
+          {
+            echo "### Thresholds read from \`.github/merge-policy.yml\` — nothing below is hardcoded"
+            echo
+            echo "| key | value |"
+            echo "|---|---|"
+            echo "| readyz_url | ${{ steps.parse.outputs.readyz_url }} |"
+            echo "| frontend_url | ${{ steps.parse.outputs.frontend_url }} |"
+            echo "| poll_seconds | ${{ steps.parse.outputs.poll_seconds }} |"
+            echo "| watch_minutes (product lane) | ${{ steps.parse.outputs.watch_minutes }} |"
+            echo "| readyz_non_200 trip | ${{ steps.parse.outputs.readyz_non_200 }} |"
+            echo "| frontend_non_200 trip | ${{ steps.parse.outputs.frontend_non_200 }} |"
+            echo "| sentry_new_issues trip | ${{ steps.parse.outputs.sentry_new_issues }} |"
+            echo "| sentry_error_rate_multiple trip | ${{ steps.parse.outputs.sentry_error_rate_multiple }} |"
+            echo "| rollback.services (fallback target) | ${{ steps.parse.outputs.services }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # THE EYES, AND — ONLY ON A REAL TRIP — THE HAND.
+  # ───────────────────────────────────────────────────────────────────────
+  watch:
+    name: Watch prod after the merge
+    needs: policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Decide LIVE vs rehearsal
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # This IS the post-merge trigger. There is no rehearsal on main.
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── STEP 1 — wait for the deploy to go live ──────────────────────────
+      # A merge is not "live" the instant it lands on main; Railway still has
+      # to build and roll the image out. Watching readyz too early would trip
+      # on the deploy simply not being finished yet, not on it being broken.
+      - name: "Step 1 — wait for readyz to answer 200 (timeout ~6 min)"
+        id: wait
+        run: |
+          set +e
+          url="${{ needs.policy.outputs.readyz_url }}"
+          poll="${{ needs.policy.outputs.poll_seconds }}"
+          deadline=$((SECONDS + 360))
+          live="false"
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url")
+            echo "[$SECONDS s] GET $url -> $code"
+            if [ "$code" = "200" ]; then
+              live="true"
+              break
+            fi
+            sleep "$poll"
+          done
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          if [ "$live" = "false" ]; then
+            echo "::error::readyz never returned 200 within ~6 minutes of the merge landing."
+          fi
+
+      # ── STEP 2 — watch for watch_minutes, every poll_seconds ─────────────
+      # A single non-200 can be a blip (a redeploy mid-request, a cold LB).
+      # `readyz_non_200`/`frontend_non_200` — both from the policy file — are
+      # CONSECUTIVE-failure counts for exactly that reason: one bad poll is
+      # noise, N in a row is a trend.
+      - name: "Step 2 — watch readyz + frontend for the policy's watch window"
+        id: probe
+        run: |
+          set +e
+          readyz="${{ needs.policy.outputs.readyz_url }}"
+          frontend="${{ needs.policy.outputs.frontend_url }}"
+          poll="${{ needs.policy.outputs.poll_seconds }}"
+          watch_minutes="${{ needs.policy.outputs.watch_minutes }}"
+          readyz_trip="${{ needs.policy.outputs.readyz_non_200 }}"
+          frontend_trip="${{ needs.policy.outputs.frontend_non_200 }}"
+
+          tripped="false"
+          reason=""
+          if [ "${{ steps.wait.outputs.live }}" != "true" ]; then
+            tripped="true"
+            reason="readyz never went live within ~6 minutes of the merge"
+          fi
+
+          readyz_fails=0
+          frontend_fails=0
+          deadline=$((SECONDS + watch_minutes * 60))
+          while [ "$tripped" = "false" ] && [ "$SECONDS" -lt "$deadline" ]; do
+            rc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$readyz")
+            fc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$frontend")
+            echo "[$SECONDS s] readyz=$rc (fails=$readyz_fails) frontend=$fc (fails=$frontend_fails)"
+            if [ "$rc" = "200" ]; then readyz_fails=0; else readyz_fails=$((readyz_fails + 1)); fi
+            if [ "$fc" = "200" ]; then frontend_fails=0; else frontend_fails=$((frontend_fails + 1)); fi
+
+            if [ "$readyz_fails" -ge "$readyz_trip" ]; then
+              tripped="true"
+              reason="readyz: $readyz_fails consecutive non-200 (trip limit $readyz_trip)"
+            elif [ "$frontend_fails" -ge "$frontend_trip" ]; then
+              tripped="true"
+              reason="frontend: $frontend_fails consecutive non-200 (trip limit $frontend_trip)"
+            else
+              sleep "$poll"
+            fi
+          done
+
+          echo "tripped=$tripped" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      # ── STEP 3 — Sentry, honestly ─────────────────────────────────────────
+      # Reuses scripts/sentry_poll.py rather than re-deriving the Sentry query
+      # here — same reasoning as `ratchets`: a detector re-implemented in a
+      # second place is how "4 vs 0" bugs happen (see cage_blockers.py). Its
+      # contract (0 clean / 1 new issues / 2 blind) is exactly the shape this
+      # step forwards. `SENTRY_WINDOW_HOURS=1` rounds the policy's 15-minute
+      # watch window up to the tool's smallest unit — wider, never narrower,
+      # so this can only OVER-report, never miss something inside the window.
+      - name: "Step 3 — Sentry: any NEW unresolved issue since the merge?"
+        id: sentry
+        env:
+          SENTRY_API_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_WINDOW_HOURS: "1"
+        run: |
+          set +e
+          if [ -z "$SENTRY_API_TOKEN" ]; then
+            echo "watched=false" >> "$GITHUB_OUTPUT"
+            echo "tripped=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SENTRY_AUTH_TOKEN is not set. Sentry is an UNWATCHED dimension of this run — a new production error would NOT trip a rollback. Add the secret to close this gap."
+            exit 0
+          fi
+          python scripts/sentry_poll.py > sentry.md
+          code=$?
+          cat sentry.md
+          if [ "$code" -eq 1 ]; then
+            echo "watched=true" >> "$GITHUB_OUTPUT"
+            echo "tripped=true" >> "$GITHUB_OUTPUT"
+            echo "reason=new unresolved Sentry issue(s) first seen since the merge" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -eq 0 ]; then
+            echo "watched=true" >> "$GITHUB_OUTPUT"
+            echo "tripped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "watched=false" >> "$GITHUB_OUTPUT"
+            echo "tripped=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::sentry_poll.py itself failed (exit $code) — Sentry is UNWATCHED for this run, not clear."
+          fi
+
+      # ── DECIDE ─────────────────────────────────────────────────────────
+      - name: Decide the verdict
+        id: decide
+        run: |
+          tripped="false"
+          reasons=()
+          services=()
+
+          if [ "${{ steps.probe.outputs.tripped }}" = "true" ]; then
+            tripped="true"
+            r="${{ steps.probe.outputs.reason }}"
+            reasons+=("$r")
+            case "$r" in *frontend*) services+=("frontend") ;; esac
+            case "$r" in *readyz*) services+=("backend") ;; esac
+          fi
+
+          if [ "${{ steps.sentry.outputs.tripped }}" = "true" ]; then
+            tripped="true"
+            reasons+=("${{ steps.sentry.outputs.reason }}")
+            # Sentry is initialised in the backend + ARQ worker only
+            # (backend/src/core/observability.py) — never the frontend.
+            services+=("backend")
+          fi
+
+          if [ "$tripped" = "true" ] && [ "${#services[@]}" -eq 0 ]; then
+            # Should not happen given the branches above, but this must never
+            # print a sentinel "nothing to roll back" while claiming tripped.
+            services=($(echo "${{ needs.policy.outputs.services }}" | tr ',' ' '))
+          fi
+
+          services_uniq=$(printf '%s\n' "${services[@]}" | sort -u | paste -sd, -)
+          reason_joined=$(IFS='; '; echo "${reasons[*]}")
+
+          echo "tripped=$tripped" >> "$GITHUB_OUTPUT"
+          echo "trip_reason=$reason_joined" >> "$GITHUB_OUTPUT"
+          echo "services=$services_uniq" >> "$GITHUB_OUTPUT"
+
+      # ── STEP 4 — pull the undo, only for the service(s) that are failing ──
+      # `rollback_gear.py` re-confirms `canRollback` itself before it ever
+      # calls the mutation — this step does not shortcut that. RAILWAY_TOKEN
+      # missing is a REFUSAL (exit continues so the alarm below still fires),
+      # never a silent no-op.
+      - name: "Step 4 — roll back the tripped service(s)"
+        id: rollback
+        if: steps.decide.outputs.tripped == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set +e
+          services="${{ steps.decide.outputs.services }}"
+          echo "verdict: TRIPPED — rolling back: $services"
+
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set — cannot attempt the rollback. This is a REFUSAL, not a skip."
+            {
+              echo "summary<<GEAR_EOF"
+              echo "RAILWAY_TOKEN missing — no rollback was attempted for: $services"
+              echo "GEAR_EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0 # let the workflow continue on to raise the alarm below
+          fi
+
+          # ubuntu-latest ships Node.js; this needs no separate setup-node step.
+          npm i -g @railway/cli --silent 2>&1 | tail -5
+
+          flag=""
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then
+            flag="--dry-run"
+          fi
+
+          overall_ok="true"
+          lines=""
+          IFS=',' read -ra svc_list <<< "$services"
+          for svc in "${svc_list[@]}"; do
+            [ -z "$svc" ] && continue
+            echo "::group::rollback_gear.py --rollback --service $svc $flag"
+            out=$(python scripts/rollback_gear.py --rollback --service "$svc" $flag 2>&1)
+            rc=$?
+            echo "$out"
+            echo "::endgroup::"
+            lines="$lines- \`$svc\`: exit $rc — $(echo "$out" | tail -1)"$'\n'
+            [ "$rc" -eq 0 ] || overall_ok="false"
+          done
+
+          echo "ok=$overall_ok" >> "$GITHUB_OUTPUT"
+          {
+            echo "summary<<GEAR_EOF"
+            printf '%s' "$lines"
+            echo "GEAR_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── ONE deduped issue, titled with the reverted commit ────────────────
+      - name: "Step 5 — open (or reuse) ONE issue for this trip"
+        if: always() && steps.decide.outputs.tripped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.sha }}"
+          short="${sha:0:12}"
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then
+            title="DRILL: post-merge watch rehearsal on $short — not a real rollback"
+          else
+            title="PROD ROLLBACK: $short reverted after post-merge watch tripped"
+          fi
+
+          # Dedup by exact title, same pattern every loop in this repo uses —
+          # a retry or a re-run of this workflow for the same commit must not
+          # spam a second issue.
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+
+          {
+            echo "\`post-merge-watch.yml\` tripped on commit \`$sha\`."
+            echo
+            echo "**Why:** ${{ steps.decide.outputs.trip_reason }}"
+            echo
+            echo "**Services targeted:** ${{ steps.decide.outputs.services }}"
+            echo "${{ steps.rollback.outputs.summary }}"
+            echo
+            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > body.md
+
+          if [ -z "$num" ]; then
+            new=$(gh issue create --title "$title" --body-file body.md --label harness)
+            n="${new##*/}"
+            if [ "${{ steps.mode.outputs.dry_run }}" != "true" ]; then
+              # Same handoff every loop here uses (uptime.yml, synthetic-live.yml,
+              # external-health.yml): an issue opened with GITHUB_TOKEN raises no
+              # `issues: opened` event, so nothing diagnoses it unless woken by hand.
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n raised but triage could not be woken — diagnose by hand"
+            fi
+            echo "raised #$n" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue comment "$num" --body-file body.md
+            echo "issue #$num already open for this trip — commented instead of duplicating" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: "Step 6 — notify Slack, if configured"
+        if: always() && steps.decide.outputs.tripped == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "::warning::SLACK_WEBHOOK_URL is not set — no Slack ping for this trip. The GitHub issue above is the only alarm."
+            exit 0
+          fi
+          prefix=""
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then prefix="[DRILL] "; fi
+          text="${prefix}Post-merge watch tripped on ${{ github.sha }}: ${{ steps.decide.outputs.trip_reason }} (services: ${{ steps.decide.outputs.services }})"
+          body=$(python -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$text")
+          curl -sf -X POST -H 'Content-type: application/json' --data "$body" "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed to send"
+
+      # ── THE HONESTY RULE — always, win or lose ────────────────────────────
+      - name: "HONESTY — what this run watched, what it could NOT, and the verdict"
+        if: always()
+        run: |
+          {
+            echo "## Post-merge watch — run summary"
+            echo
+            echo "Commit: \`${{ github.sha }}\`"
+            echo "Mode: **${{ steps.mode.outputs.dry_run == 'true' && 'DRY RUN — rehearsal only, no real rollback, no real alarm' || 'LIVE' }}**"
+            echo
+            echo "### Watched"
+            echo "- \`readyz\` (${{ needs.policy.outputs.readyz_url }}) — every ${{ needs.policy.outputs.poll_seconds }}s for ${{ needs.policy.outputs.watch_minutes }} min; trips at ${{ needs.policy.outputs.readyz_non_200 }} consecutive non-200"
+            echo "- \`frontend\` (${{ needs.policy.outputs.frontend_url }}) — same cadence; trips at ${{ needs.policy.outputs.frontend_non_200 }} consecutive non-200"
+            if [ "${{ steps.sentry.outputs.watched }}" = "true" ]; then
+              echo "- Sentry — new unresolved issues since the merge (trip threshold: ${{ needs.policy.outputs.sentry_new_issues }})"
+            fi
+            echo
+            echo "### NOT watched — say it loud, never a silent skip"
+            if [ "${{ steps.sentry.outputs.watched }}" != "true" ]; then
+              echo "- **Sentry is UNWATCHED this run.** SENTRY_AUTH_TOKEN is missing or the poller itself failed. A new production error right now would NOT trip a rollback."
+            fi
+            echo "- **\`sentry_error_rate_multiple\` (${{ needs.policy.outputs.sentry_error_rate_multiple }}x)** is read from the policy but this workflow does not yet compute a live hourly error-rate baseline to compare against — only the new-unresolved-issue signal is wired to a trip. Treat this threshold as DECLARED in the policy, not YET ENFORCED here."
+            echo
+            echo "### Verdict"
+            if [ "${{ steps.decide.outputs.tripped }}" = "true" ]; then
+              echo "**TRIPPED** — ${{ steps.decide.outputs.trip_reason }}"
+              echo
+              echo "Rollback attempted for: \`${{ steps.decide.outputs.services }}\`"
+            else
+              echo "**Clean** — nothing watched crossed its trip threshold."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Show red in the Actions tab too, not just inside the summary text —
+      # a green checkmark next to a rolled-back prod is exactly the kind of
+      # thing that gets missed. Placed LAST so it never blocks the alarm
+      # steps above (all of which are `if: always()` or unconditional).
+      - name: Fail the run if the watch tripped
+        if: steps.decide.outputs.tripped == 'true'
+        run: |
+          echo "::error::post-merge-watch TRIPPED — ${{ steps.decide.outputs.trip_reason }}"
+          exit 1

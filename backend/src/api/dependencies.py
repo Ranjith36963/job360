@@ -20,7 +20,7 @@ async def init_db() -> JobDatabase:
         await _db.init_db()
         # Batch 2: apply additive migrations (users, sessions, user_feed,
         # notification_ledger, user_channels). Idempotent — safe to call on
-        # every boot. See docs/plans/batch-2-plan.md Phase 0.
+        # every boot. See docs/product/plans/batch-2-plan.md Phase 0.
         #
         # H6 — migrations run INSIDE the request-serving process at boot. The
         # finding's fix is to move them to an explicit pre-deploy/release step.

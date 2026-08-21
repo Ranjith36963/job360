@@ -30,7 +30,7 @@ class JoobleSource(BaseJobSource):
             return []
         jobs = []
         seen_ids = set()
-        queries = self.job_titles[:8]
+        queries = self.search_titles[:8]
         for query in queries:
             body = {
                 "keywords": query,

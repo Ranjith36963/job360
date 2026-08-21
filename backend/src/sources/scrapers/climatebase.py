@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Optional
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -17,6 +18,24 @@ _NEXT_DATA_RE = re.compile(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>'
 # all, Climatebase changed its rendering (or the whole page layout), not
 # just its job count.
 _MIN_STRUCTURAL_HTML_LEN = 500
+
+
+def _to_number(value: object) -> Optional[float]:
+    """Coerce an upstream salary value to a float, or None.
+
+    Climatebase sends these as strings; Job.__post_init__ compares salary to
+    ints, so an uncoerced string raises TypeError and (via the broad except in
+    fetch_jobs) silently zeroes the whole source.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        cleaned = str(value).replace(",", "").replace("£", "").replace("$", "").strip()
+        return float(cleaned) if cleaned else None
+    except (TypeError, ValueError):
+        return None
 
 
 class ClimatebaseSource(BaseJobSource):
@@ -92,8 +111,15 @@ class ClimatebaseSource(BaseJobSource):
                 job_id = item.get("id", "")
                 apply_url = f"https://climatebase.org/jobs/{job_id}" if job_id else ""
 
-                salary_min = item.get("salary_from")
-                salary_max = item.get("salary_to")
+                # Climatebase returns salary as a STRING (e.g. "80000"), but
+                # Job.__post_init__ range-checks salary against ints. Passing
+                # the raw value raised TypeError ("'<' not supported between
+                # instances of 'str' and 'int'"), which the broad `except`
+                # below swallowed — so this source silently returned ZERO jobs
+                # (confirmed live 2026-08-08). Coerce, and drop anything that
+                # isn't a real number rather than guessing.
+                salary_min = _to_number(item.get("salary_from"))
+                salary_max = _to_number(item.get("salary_to"))
 
                 jobs.append(Job(
                     title=title,
