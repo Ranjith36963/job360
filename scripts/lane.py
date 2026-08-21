@@ -422,6 +422,21 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      changes what the cage refuses, while merge_cage.py sat owner-locked.
     cage_src = (Path(__file__).resolve().parent / "merge_cage.py").read_text(encoding="utf-8")
     siblings = {f.stem for f in Path(__file__).resolve().parent.glob("*.py")}
+
+    # A SECOND WAY IN, AND THE FIRST VERSION OF THIS CHECK MISSED IT.
+    # Deriving cage membership from IMPORTS alone finds `cage_blockers` and stops.
+    # But merge_cage also reaches code by EXECUTING it: every RATCHET is a
+    # subprocess whose printed number the cage then trusts. `merge_cage.py:367`
+    # runs `backend/scripts/mypy_ratchet.py --count` and `:379` runs
+    # `drill_registry.py --count-owed` -- so a machine able to merge either file
+    # can make a ratchet report a false number while merge_cage.py itself sits
+    # owner-locked. Same escape as the import route, through a different door.
+    #
+    # Found by running the cage over a real PR: `backend/scripts/mypy_ratchet.py`
+    # came back "no rule covers this path" while merge-policy.yml's `backend/
+    # scripts/**` put it in the FAST lane -- two systems, two answers, and this
+    # drill agreeing with neither because it never looked.
+    executed = set(re.findall(r'"cmd":\s*\[sys\.executable,\s*"([^"]+\.py)"', cage_src))
     imported = {
         name for name in siblings
         if re.search(rf"^[ \t]*(?:from {name} import|import {name})\b", cage_src, re.M)
@@ -432,10 +447,13 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      its own body, the exact failure it exists to catch. An empty
     #      derivation is now a red.
     check("the cage-membership derivation actually found something",
-          len(imported) > 0, True)
+          len(imported) > 0 and len(executed) > 0, True)
     for name in sorted(imported):
         check(f"the cage may not edit the cage -- merge_cage imports {name}",
               classify([f"scripts/{name}.py"], policy)["lane"], "harness_owner")
+    for path in sorted(executed):
+        check(f"the cage may not edit the cage -- merge_cage executes {path}",
+              classify([path], policy)["auto_merge"], False)
 
     # 11e. THE UNDO. The product lane's speed is explicitly borrowed against
     #      being able to roll back, so the rollback must not be machine-mergeable.

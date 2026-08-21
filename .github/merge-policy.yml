@@ -272,6 +272,19 @@ lanes:
       - "scripts/gate_wiring_check.py"
       # The gate agents are made to run before they may commit.
       - "scripts/agent-gate.sh"
+      # A RATCHET INPUT IS CAGE MACHINERY TOO. merge_cage.py does not import this
+      # one -- it EXECUTES it (`merge_cage.py:367`, `mypy_ratchet.py --count`) and
+      # then trusts the number it prints. So a machine able to merge it can make a
+      # ratchet report whatever it likes while merge_cage.py itself stays
+      # owner-locked: the same cage escape as the import route, through a
+      # different door. `backend/scripts/**` sits in the harness FAST lane, which
+      # is right for the rest of that directory and wrong for this file.
+      #
+      # Found by the derivation drill below, not by argument: running the cage
+      # over a real PR reported "no rule covers this path" for it while the lane
+      # map said fast-lane -- two systems, two answers, and the drill agreeing
+      # with neither because it only derived membership from imports.
+      - "backend/scripts/mypy_ratchet.py"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       - ".github/workflows/post-merge-watch.yml"
