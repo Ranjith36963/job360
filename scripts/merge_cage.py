@@ -299,8 +299,32 @@ ALLOW: list[str] = [
     "frontend/src/**/*.spec.ts",
     "frontend/src/**/*.spec.tsx",
     "frontend/tests/**",
-    "docs/**",
-    "*.md",
+    # ── DOCUMENTS, BY LANE — NOT `docs/**`, AND NEVER `*.md` ─────────────────
+    # Wave 1 moved 109 files so the DIRECTORY carries the lane, and updated the
+    # DENY entries above to the new `docs/product/` paths. It did not touch this
+    # list, so the two classifiers disagreed about the same file: `scripts/lane.py`
+    # escalated `docs/product/PRD.md` to `product_owner` while THIS file — the only
+    # one CI runs, via `pr-advisor.yml` — passed it. Measured on this tree before
+    # the change: of the 45 documents wave 1 moved specifically to protect,
+    # `docs/**` auto-allowed 43. The two the move did protect were protected by
+    # their own DENY lines, not by anything here.
+    #
+    # `*.md` was worse than redundant. `path_matches` treats any SLASH-FREE
+    # pattern as a BASENAME rule at every depth, so `*.md` reached markdown
+    # anywhere in the repo — it is what made those 43 allowable in the first
+    # place, and removing `docs/**` alone would have left them allowed.
+    #
+    # So the lanes are named, and nothing is allowed by being a document:
+    "docs/harness/**",       # the harness's own record. Breaks Ranjith, never a user.
+    # TWO archive spellings, and this is NOT a typo to be collapsed:
+    # `stale_path_check.py:53` already carries both in ARCHIVE_PREFIXES.
+    "docs/_archive/**",
+    "docs/archive/**",
+    "docs/README.md",        # the index over both lanes; `harness` in merge-policy.yml
+    # DELIBERATELY NOT LISTED: `docs/product/**`. Those are the owner's product
+    # decisions, and a document that IS a decision goes to a human. A new document
+    # filed nowhere now matches nothing and escalates, which is the safe direction:
+    # forgetting to classify costs one refusal, never a silent auto-merge.
     "backend/src/api/routes/client_log.py",  # deliberately public: no user scoping
 ]
 
@@ -1201,6 +1225,45 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # B12 — a document that IS a decision inherits the denial it delegates from.
     red("a document that is itself a product decision is refused",
         check_paths(["docs/product/product_design_rules.md"]), "product", P)
+
+    # B12b — THE WHOLE PRODUCT LANE IS REFUSED, not just the two files that
+    #        happen to carry their own DENY line. Wave 1 moved 45 documents into
+    #        `docs/product/` to protect them and updated DENY, but left `docs/**`
+    #        and `*.md` on ALLOW — so the file that actually decides auto-allowed
+    #        43 of those 45. Measured on this tree before the fix, and the reason
+    #        this case exists: a green drill said nothing about it.
+    #
+    #        These paths are deliberately NOT the two denied ones. If someone
+    #        restores `docs/**` or `*.md` to ALLOW, every line here goes red,
+    #        which is the only thing stopping this from rotting back.
+    leaked = [f for f in ("docs/product/PRD.md",
+                          "docs/product/plans/uk-first-eligibility.md",
+                          "docs/product/pillars/README.md",
+                          "docs/product/research/anything.md")
+              if check_paths([f]).status == "pass"]
+    ok("no document under docs/product/ can be merged by a machine",
+       not leaked, f"the product lane is auto-allowed again: {leaked}", P)
+
+    # B12c — and the refusal must not be bought by refusing ALL documents. The
+    #        harness lane is Ranjith's own record; breaking it cannot reach a
+    #        user, so it stays fast. A cage that refuses everything is an off
+    #        switch, which is the failure this whole file was rewritten to end.
+    doc_safe = ["docs/harness/IMPLEMENTATION_LOG.md", "docs/harness/reviews/x.md",
+                "docs/_archive/CurrentStatus.md", "docs/archive/README.md",
+                "docs/README.md"]
+    v_docs = check_paths(doc_safe)
+    ok("NEGATIVE CONTROL (harness + archived documents still pass the path cage)",
+       v_docs.status == "pass", f"the cage refused a harness doc: {v_docs.reasons}", P)
+
+    # B12d — `docs/README.md` is listed WITH ITS SLASH on purpose. A bare
+    #        `README.md` is a basename rule at every depth (see path_matches),
+    #        so it would have re-opened `docs/product/pillars/README.md` — the
+    #        exact leak this change closes, wearing the clothes of a root file.
+    ok("the docs index is allowed by its path, not by its basename at any depth",
+       check_paths(["docs/README.md"]).status == "pass"
+       and check_paths(["docs/product/pillars/README.md"]).status == "fail",
+       "a bare basename rule crept back into ALLOW", P)
+
     # B13 — `**` really crosses directories now, and `*` really stops at one.
     #        If the rewrite from `x/*` to `x/**` had been botched, this goes red.
     #        Each nested path must be refused BY ITS DENY REASON. Counting
