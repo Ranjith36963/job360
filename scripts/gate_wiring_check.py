@@ -109,6 +109,26 @@ _CAGE_CALL = re.compile(r"merge_cage\.py")
 _BASELINE = re.compile(r"--baseline\b")
 # merge_cage modes that judge NO PR and therefore need no baseline.
 _CAGE_NON_JUDGING = ("--drill", "--measure", "--blockers", "--replay")
+# ...AND NAMING THE FILE IS NOT RUNNING IT. A shell test for the file's
+# existence -- `[ -f scripts/merge_cage.py ]` -- mentions the cage without
+# invoking it, so G1 reported a bootstrap gate as "a job that judges a PR
+# without a baseline". Found 2026-08-21 by this guard firing on a change that
+# added exactly such a gate to pr-advisor.yml.
+#
+# Fixing the GUARD rather than renaming the variable in the workflow: making the
+# test unrecognisable to its own guard would be gaming it, and the next real
+# invocation written the same way would then also slip past.
+_CAGE_EXISTENCE_TEST = re.compile(r"\[\s*!?\s*-[a-z]\s+[^]]*merge_cage\.py")
+# ...AND PRINTING THE NAME IS NOT RUNNING IT EITHER. A line that only ECHOES
+# text mentioning the cage -- a run-summary note, an error message, a comment
+# printed for a human -- invokes nothing. Same class as the file test above,
+# found the same way: this guard fired on a step whose only mention of the
+# cage was inside the sentence explaining why it had stood down.
+#
+# Deliberately narrow: the line must BEGIN with echo and must not pipe or
+# chain into an interpreter, so `echo x | python scripts/merge_cage.py` is
+# still caught. Widening it further would start hiding real invocations.
+_CAGE_ECHOED = re.compile(r"^\s*echo\b(?!.*[|&]\s*\S*python)")
 _PULL_MERGE_REF = re.compile(r"refs/pull/")
 # `green=$(... conclusion=="SUCCESS" ...)` — the only shape that can tell
 # "everything passed" apart from "nothing ran".
@@ -198,6 +218,9 @@ def judging_cage_calls(text: str) -> list[str]:
     out: list[str] = []
     for line in text.splitlines():
         if not _CAGE_CALL.search(line):
+            continue
+        # A file test names the cage without running it -- see _CAGE_EXISTENCE_TEST.
+        if _CAGE_EXISTENCE_TEST.search(line) or _CAGE_ECHOED.search(line):
             continue
         cmd = line[line.index("merge_cage.py"):]
         if any(flag in cmd for flag in _CAGE_NON_JUDGING):
