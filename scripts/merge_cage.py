@@ -156,12 +156,42 @@ def repo_root() -> Path:
 #
 #     *            any run of characters, stopping at `/`
 #     **           any run of characters, crossing `/`
-#     **/          zero or more whole directories
-#     no `/` at all   matches the BASENAME at any depth (so `*.md` still works)
+#     **/          zero or more whole directories, INCLUDING none — so a
+#                  `**/`-prefixed pattern matches at the root as well as at depth
 #
 # `*` no longer crossing `/` would have LOOSENED every deny, so every recursive
 # deny was rewritten to `**` in the same commit. The drill checks nested paths
 # under each one.
+#
+# ── THE BASENAME FALLBACK IS GONE (2026-08-20) ───────────────────────────────
+# There used to be a fifth rule: "no `/` at all -> match the BASENAME at any
+# depth". It was written so `*.md` would keep working, and it is why
+# `docs/product/pillars/README.md` classified as lane `harness`, auto_merge TRUE
+# — `README.md` is listed in the fast lane for the ROOT readme, and the fallback
+# quietly extended it to every README in the tree.
+#
+# Note what the old comment two lanes up blamed: "`*` crosses `/`". It does not.
+# `*` compiles to `[^/]*` and stops dead at a slash (see below). The wrong
+# mechanism was written down, so the drill was written to catch the wrong thing
+# and passed. Both are corrected here.
+#
+# WHY DELETING IT IS SAFE, AND WHY IT COULD NOT BE DONE ALONE. `**/` already
+# compiles to `(?:[^/]+/)*` — zero or more whole directories, and *zero* means it
+# still matches at the root. So every pattern that genuinely wanted depth says so
+# now: `**/*.env*`, `**/package.json`, `**/CLAUDE.md`. The fallback expressed
+# nothing that `**/` cannot.
+#
+# The DIRECTIONS ARE NOT SYMMETRIC, which is the whole reason this is one commit:
+#   on ALLOW, an over-wide pattern is fail-OPEN  — it auto-merges something.
+#   on DENY,  an over-wide pattern is fail-CLOSED — it merely asks for a human.
+# So deleting the fallback TIGHTENS allow (good, immediately) and LOOSENS every
+# deny (bad, immediately). Every slash-free DENY entry was rewritten with `**/`
+# in this same commit, and the drill pins a NESTED witness for each one. This is
+# the same hazard, and the same remedy, as the `*`->`**` migration recorded above.
+#
+# The new failure direction is the safe one: a bare name now matches the root
+# only, so a pattern someone forgets to prefix under-matches, the file matches no
+# lane, and it escalates to `product_owner`. Forgetting costs one refusal.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -188,13 +218,17 @@ def _glob_to_re(pattern: str) -> re.Pattern[str]:
 
 
 def path_matches(path: str, pattern: str) -> bool:
-    """Does this repo-relative path match this pattern?"""
-    rx = _glob_to_re(pattern)
-    if rx.match(path):
-        return True
-    if "/" not in pattern:  # a bare name is a basename rule, at any depth
-        return bool(rx.match(path.rsplit("/", 1)[-1]))
-    return False
+    """Does this repo-relative path match this pattern?
+
+    One matcher, one answer. `scripts/lane.py` imports this rather than writing a
+    second one, so a change here changes both classifiers at once.
+
+    A pattern means exactly what it says: it is anchored at the repo root and the
+    only way to reach depth is to ask for it with `**/` or `**`. There is no
+    implicit basename rule — see the note above for why it was removed and what
+    had to move in the same commit.
+    """
+    return bool(_glob_to_re(pattern).match(path))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,10 +279,10 @@ DENY: list[tuple[str, str]] = [
      f"from a removed `Depends(require_user)`. {_OWNER_MERGES}"),
     # ── infrastructure ───────────────────────────────────────────────────────
     ("backend/migrations/**", f"schema change — irreversible against live data. {_OWNER_MERGES}"),
-    ("*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
+    ("**/*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
     ("backend/src/core/settings.py",
      f"flags here change production behaviour globally. {_OWNER_MERGES}"),
     # ── dependency manifests ─────────────────────────────────────────────────
@@ -257,15 +291,15 @@ DENY: list[tuple[str, str]] = [
     # have waved through PR #291 (motion 12.42.2 -> 13.0.0) which
     # dependabot-auto.yml already routes to a human. Manifests also carry
     # postinstall scripts: allowing one is allowing arbitrary code on the build host.
-    ("package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
+    ("**/package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
                      "owns this decision and sends MAJOR bumps to a human; a manifest also "
                      "runs postinstall scripts on the build host. "
                      "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("package-lock.json", "a dependency change — see package.json. "
+    ("**/package-lock.json", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("pyproject.toml", "a dependency change — see package.json. "
+    ("**/pyproject.toml", "a dependency change — see package.json. "
                        "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("requirements*.txt", "a dependency change — see package.json. "
+    ("**/requirements*.txt", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
     # ── documents that ARE decisions ─────────────────────────────────────────
     # `docs/**` and `*.md` are allowed, which meant the canonical text of the
@@ -284,7 +318,7 @@ DENY: list[tuple[str, str]] = [
                    f"own guards is how a cage is escaped. {_OWNER_MERGES}"),
     (".claude/**", "the instructions agents read — editing them unsupervised is circular. "
                    + _OWNER_MERGES),
-    ("CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
+    ("**/CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
                   + _OWNER_MERGES),
 ]
 
@@ -428,7 +462,22 @@ MAX_CHANGED_FILES = 40
 MAX_CHANGED_LINES = 1200
 PER_PAGE = 100
 
-REQUIRED_CHECKS = ["Backend", "Frontend", "Chain wires", "CodeQL"]
+# EXACT check-run names, matched by EQUALITY. These were substrings, and a
+# substring cuts both ways -- `Frontend` is inside `frontend-e2e`, so:
+#   * a SKIPPED optional `frontend-e2e` was refused as a skipped REQUIRED check;
+#   * a SUCCESSFUL optional `frontend-e2e` satisfied the presence loop below,
+#     so an ABSENT required `Frontend (Node 20)` would have looked present.
+# The second is the dangerous direction and it survived this morning's fix,
+# which only addressed the first. (CodeRabbit, PR #357.)
+#
+# Exact names mean a renamed job reads as ABSENT -- which the presence loop
+# already refuses, loudly, with the real fix. That is the safe way to be wrong.
+REQUIRED_CHECKS = [
+    "Backend (Python 3.12)",
+    "Frontend (Node 20)",
+    "Chain wires (harness)",
+    "CodeQL",
+]
 
 # Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
 # `.github/workflows/codeql.yml` declares `pull_request: branches: ["main"]`, so a
@@ -619,7 +668,7 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
         # Saying it twice, once in a form the author cannot act on, is noise.
         if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
             continue
-        if not any(req.lower() in n.lower() for n in names):
+        if not any(req == n for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
                 f"almost always a stale base: the PR was branched before that check existed. "
@@ -628,11 +677,56 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     for r in runs:
         name = r.get("name")
         concl = r.get("conclusion")
+        # SKIPPED IS NOT PENDING, BUT FOR A REQUIRED CHECK IT IS NOT A PASS EITHER.
+        # Two true things pulling opposite ways, and this line honoured only one:
+        #   * counting only `success` as green reported 3-6 "pending" checks on
+        #     every PR; all were SKIPPED by a path filter or an `if:` guard, and
+        #     GitHub itself said mergeStateStatus CLEAN. A cage that waits on
+        #     those waits forever and looks exactly like a broken merge queue.
+        #   * a check in REQUIRED_CHECKS that skipped proved NOTHING. The loop
+        #     above already refuses a required check that is ABSENT, on the
+        #     grounds that it "cannot pass by being absent" -- a required check
+        #     that ran and skipped is that same claim wearing a tick.
+        # So the rule is SCOPED, not global: optional checks may skip, required
+        # checks must actually succeed.
+        # (CodeRabbit on PR #336; ported here because this lineage did not have
+        # it and #336's copy of merge_cage.py is being dropped rather than merged.)
+        required = (name or "") in REQUIRED_CHECKS
+
+        # NEVER ANSWERED is a different fact from FAILED, and it is checked FIRST
+        # because it is the more specific one -- and because the required/optional
+        # split below would otherwise swallow it. (`Frontend` substring-matches
+        # `frontend-e2e`, so a cancelled e2e job was being told "make it green".)
+        #
+        # `skipped` and `neutral` are deliberately NOT in this set: they have their
+        # own, different, correct handling below -- skipped is a legitimate pass
+        # for an optional check and a refusal for a required one.
+        no_verdict = concl in ("cancelled", "timed_out", "stale")
+
         if r.get("status") != "completed":
             reasons.append(f"`{name}` has not finished ({r.get('status')}). "
                            f"FIX: wait for it, then re-judge.")
+        elif no_verdict:
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"`{name}` -> {concl}: it never produced a verdict, so this is not a failing "
+                f"test -- it is a MISSING ANSWER, and it still blocks. The usual cause here is "
+                f"a job hitting its `timeout-minutes` or being superseded by a newer push. "
+                f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
+                f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
+                f"not raise the timeout to hide it — {url}".rstrip(" -"))
+        elif required and concl != "success":
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"required check `{name}` -> {concl}, and only `success` counts for a required "
+                f"check -- `{concl}` means it did not prove it ran and passed. FIX: make it "
+                f"actually run and go green, or take it out of REQUIRED_CHECKS "
+                f"(that removal is the owner's decision, not an agent's) -- {url}".rstrip(" -"))
         elif concl not in ("success", "skipped", "neutral"):
             url = r.get("html_url") or ""
+            # See the `no_verdict` note above: everything reaching this line DID
+            # produce a verdict, and that verdict is "failed". "Make it green" is
+            # the right instruction here and the wrong one there.
             reasons.append(f"`{name}` -> {concl}. FIX: make it green — {url}".rstrip(" -"))
 
         # A check that saw the problem, printed it, and went green anyway. On PR
@@ -1079,7 +1173,20 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
     if allowed:
         claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
         checked = "; ".join(claims) if claims else "no cage reported anything"
-        return (f":shipit: *Merged to production — PR #{pr}*\n"
+        # THIS CAGE CANNOT MERGE, SO IT MAY NOT SAY IT DID.
+        # There is no `--merge` flag on this lineage at all -- it advises and
+        # stops (see `--advise`; the merging is a separate, human act). This line
+        # said "Merged to production" for every allowed PR anyway, so on this
+        # branch the message was false 100% of the time, not merely on dry runs.
+        #
+        # CodeRabbit raised the dry-run half of this on PR #336. It is ported here
+        # rather than merged, because #336's copy of merge_cage.py is being dropped
+        # -- and the defect is strictly worse in this copy.
+        #
+        # An announcement that outruns the act is the same failure as a guard that
+        # cannot go red: the owner reads a green sentence describing something that
+        # did not happen, and has no way to tell from the message itself.
+        return (f":white_check_mark: *Approved — PR #{pr}* (nothing has been merged)\n"
                 f"*What it does:* {plain}\n"
                 f"*Size:* {size}\n"
                 f"*What was actually checked:* {checked}.\n"
@@ -1281,9 +1388,25 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
               if not any(needle in r for r in check_paths([f]).reasons)]
     ok("a nested file under a recursive deny is still refused, and for the right reason",
        not missed, f"fell through to a generic refusal: {missed}", P)
-    ok("glob semantics are real (`*` stops at `/`, `**` does not)",
-       path_matches("a/b.py", "a/*") and not path_matches("a/b/c.py", "a/*")
-       and path_matches("a/b/c.py", "a/**") and path_matches("x/y/README.md", "*.md"),
+    # B13b — the four properties the pattern language now rests on. The last
+    #        clause of this case used to assert the OPPOSITE of the fourth:
+    #        `path_matches("x/y/README.md", "*.md")` was True, because any
+    #        slash-free pattern was re-matched against the basename at any depth.
+    #        That is what put `docs/product/pillars/README.md` in the fast lane
+    #        with auto_merge TRUE. The fallback is deleted; a bare name is root-only.
+    #
+    #        The third and fourth clauses together are what made deleting it safe:
+    #        `**/` means "zero or more whole directories", and ZERO is why a
+    #        `**/`-prefixed pattern still catches the root file. Without that,
+    #        rewriting every slash-free DENY to `**/` would have quietly stopped
+    #        denying the root copies while appearing to fix the depth ones.
+    ok("glob semantics are real (`*` stops at `/`, `**` does not, bare = root only)",
+       path_matches("a/b.py", "a/*")
+       and not path_matches("a/b/c.py", "a/*")
+       and path_matches("a/b/c.py", "a/**")
+       and not path_matches("x/y/README.md", "*.md")      # fallback is GONE
+       and path_matches("x/y/README.md", "**/*.md")       # depth, asked for
+       and path_matches("README.md", "**/*.md"),          # ...and still the root
        "the matcher does not mean what it looks like", ["path_matches"])
 
     # 7. NEGATIVE CONTROL. The safe changes must pass cleanly, or the cage is
@@ -1534,8 +1657,117 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
+    #       THE CONSTANT CHECK ALONE CANNOT GO RED FOR THE DEFECT B03 RECORDS.
+    #       `codes` is built from the constants, so it only fails if someone edits
+    #       the constant block -- while the real regression is behavioural: a
+    #       crash exiting 1, or argparse exiting 2, making a caller's arm
+    #       unreachable. Those leave this green. Kept as a cheap invariant; the
+    #       behaviour is now driven end to end below.
+    #       (CodeRabbit on PR #336, ported.)
     ok("crash, refuse, slack-failure and usage have four different exit codes",
        len(set(codes)) == len(codes), f"collision in {codes}", [])
+
+    # B03b — a bad flag must produce EXIT_USAGE, so any caller switching on that
+    #        code has a reachable arm. argparse RAISES SystemExit rather than
+    #        returning, so the code must be caught, not read from a return value.
+    #        Writing this on #336 proved the point: the first version called
+    #        main() bare and killed the whole drill run, and a self-test that
+    #        aborts the suite it belongs to reports nothing at all.
+    def _exit_code_of(argv: list[str]) -> int:
+        try:
+            return int(main(argv) or 0)
+        except SystemExit as exc:
+            return int(exc.code or 0)
+
+    rc_usage = _exit_code_of(["--no-such-flag"])
+    ok("a bad flag exits EXIT_USAGE, so a caller's usage arm is reachable",
+       rc_usage == EXIT_USAGE,
+       f"exit {rc_usage} (expected {EXIT_USAGE}) -- the usage arm is dead code",
+       ["main"])
+
+    # B18 — A REQUIRED CHECK THAT SKIPPED IS NOT A PASS, AND AN OPTIONAL ONE IS.
+    #       Both halves, because either alone is a bug already shipped here.
+    _req = REQUIRED_CHECKS[0]
+    ok("a REQUIRED check that skipped is refused, not counted as a pass",
+       any("only `success` counts" in r for r in judge_check_runs(
+           [{"name": _req, "status": "completed", "conclusion": "skipped"}], 1)),
+       "a required check proved nothing and still passed the cage",
+       ["judge_check_runs"])
+    _opt = [{"name": n, "status": "completed", "conclusion": "success"}
+            for n in REQUIRED_CHECKS]
+    _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
+                 "conclusion": "skipped"})
+    ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
+       not judge_check_runs(_opt, len(_opt)),
+       f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
+       ["judge_check_runs"])
+
+    # B20 — "NEVER ANSWERED" IS NOT "FAILED", AND THE FIX TEXT MUST SAY SO.
+    #       Found live 2026-08-21: four PRs (#349 #350 #351 #353) had been red for
+    #       two days on `frontend-e2e`. Nothing was wrong with any of them -- the
+    #       job takes about 2 minutes (1m43s-2m01s across the last six green runs)
+    #       and had run 20m18s into a `timeout-minutes: 20`, which GitHub records
+    #       as `cancelled`. The cage said "FIX: make it green" about code that was
+    #       already green, so nobody re-ran it and the red became permanent.
+    #
+    #       All four cases are drilled, because the earlier version of this fix
+    #       was swallowed by the required/optional split -- `Frontend`
+    #       substring-matches `frontend-e2e`, so the required arm answered first
+    #       and the new message never appeared. It passed review by eye and did
+    #       nothing.
+    def _runs_with(name: str, concl: str) -> list[dict]:
+        rs = [{"name": n, "status": "completed", "conclusion": "success"}
+              for n in REQUIRED_CHECKS]
+        rs.append({"name": name, "status": "completed", "conclusion": concl})
+        return rs
+
+    def _said(name: str, concl: str) -> str:
+        return " ".join(r for r in judge_check_runs(_runs_with(name, concl), 5) if name in r)
+
+    ok("a REQUIRED check that was cancelled is told to be RE-RUN, not fixed",
+       "MISSING ANSWER" in _said("Frontend", "cancelled"),
+       "the cage tells the owner to fix code that never failed", ["judge_check_runs"])
+    ok("...and it still BLOCKS -- a missing answer is never consent",
+       bool(_said("Frontend", "cancelled")),
+       "a cancelled check stopped blocking; that is a bypass, not a diagnosis",
+       ["judge_check_runs"])
+    ok("an OPTIONAL check that was cancelled gets the same re-run advice",
+       "MISSING ANSWER" in _said("Doc clutter (CURATE gear)", "cancelled"),
+       "only required checks got the honest message", ["judge_check_runs"])
+    ok("a check that really FAILED is still told to go green",
+       "make it green" in _said("Doc clutter (CURATE gear)", "failure"),
+       "a real failure was mislabelled as a missing answer -- that direction hides bugs",
+       ["judge_check_runs"])
+
+    # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
+    #       DIRECTION IS DRILLED. These were substrings; `Frontend` is inside
+    #       `frontend-e2e`, so a SUCCESSFUL optional run satisfied the
+    #       presence loop and an ABSENT required check looked present. This
+    #       morning's fix only addressed the noisy direction (a skipped optional
+    #       reading as a skipped required) and left the silent one open.
+    def _rs(pairs):
+        return [{"name": n, "status": "completed", "conclusion": c} for n, c in pairs]
+
+    _all_req = [(n, "success") for n in REQUIRED_CHECKS]
+    _no_fe = [p for p in _all_req if p[0] != "Frontend (Node 20)"]
+    _no_fe = _no_fe + [("frontend-e2e", "success")]
+    ok("a green OPTIONAL check cannot stand in for an ABSENT required one",
+       bool(judge_check_runs(_rs(_no_fe), len(_no_fe))),
+       "an absent required check was satisfied by a similarly-named optional one",
+       ["judge_check_runs"])
+    _opt_skip = _all_req + [("frontend-e2e", "skipped")]
+    ok("...and a skipped OPTIONAL check with a similar name still does not block",
+       not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
+       "an optional skip was mistaken for a required one", ["judge_check_runs"])
+
+    # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
+    #       `--merge` flag at all, so "Merged to production" was false on every
+    #       single allowed PR, not merely on a dry run.
+    _v = Verdict("PATHS", "pass", [], claim="no owner-lane file was touched")
+    ok("the advisor does not tell the owner the PR was merged",
+       "Merged to production" not in plain_english(
+           1, {"title": "x: y", "files": 3, "lines": 10}, True, [_v]),
+       "the cage announced a merge it cannot perform", ["plain_english"])
 
     # B22 — --tree separates the tree MEASURED from the tree the RULES come from.
     #       Without it the only way to measure a PR's own numbers was to run the
