@@ -42,6 +42,9 @@ producers and consumers, then asserts every hop actually connects:
       a producer that can die before writing it -- the gate then silently reads
       "" and the handoff is skipped GREEN. This is the shape of the alert path
       whose missing key exited 0 for weeks.
+  W13 (error) a comparison whose LITERAL its SOURCE can never produce --
+              gh --jq .author.login returns `app/NAME`, the webhook returns
+              `NAME[bot]`; triage.yml auto-authorisation had NEVER fired.
   W12 (warn) the same actor is spelled two ways in two places -- the literal
       detect->triage bug.
 
@@ -85,7 +88,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -110,7 +112,7 @@ if hasattr(sys.stdout, "reconfigure"):
 LINE_KEY = "__line__"
 
 # Checks that BREAK the chain if they fire, vs. checks that only smell bad.
-ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"}
+ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W13"}
 WARN_CHECKS = {"W11", "W12"}
 ALL_CHECKS = ERROR_CHECKS | WARN_CHECKS
 
@@ -808,7 +810,7 @@ def gh_last_runs(files: list[str]) -> dict[str, dict]:
             proc = subprocess.run(
                 ["gh", "run", "list", "--workflow", wf_file, "--limit", "30",
                  "--json", "conclusion,createdAt,status"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if proc.returncode != 0:
                 info["error"] = (proc.stderr or "gh failed").strip().splitlines()[:1]
@@ -862,10 +864,76 @@ def render_map(workflows: list[Workflow], hops: list[Hop], live: dict[str, dict]
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# Which spelling of a bot login each SOURCE actually produces. Measured
+# 2026-08-16 against issues #335, #334 and #330 in this repo, not assumed.
+_GH_CLI_SRC = re.compile(r"\$\(\s*gh\s+[^)]*--jq\s+\.?(?:author|user)\.login[^)]*\)")
+_BOT_SUFFIX = re.compile(r"^[A-Za-z0-9_-]+\[bot\]$")
+_APP_PREFIX = re.compile(r"^app/[A-Za-z0-9_-]+$")
+
+
+def _check_source_vs_literal(workflows: list[Workflow], disabled: set[str]) -> list[Finding]:
+    """W13 — a comparison whose LITERAL cannot be produced by its SOURCE.
+
+    W12 catches one identity spelled two ways in the repo. It could not catch
+    this, because triage.yml spelled it ONE way everywhere: `github-actions[bot]`.
+    The mismatch was not inside the file at all -- it was between the file and
+    the API it reads.
+
+        issue_author=$(gh issue view "$n" --json author --jq .author.login)
+        ...
+        echo "$issue_author" | grep -qFx "github-actions[bot]"
+
+    `gh` returns `app/github-actions` for a bot. The webhook payload returns
+    `github-actions[bot]`. So that condition could never be true, and the
+    auto-authorisation path had NEVER FIRED since the day it was written --
+    with nothing red, because falling through to "needs a human" looks exactly
+    like a careful gate doing its job.
+
+    A dead branch that fails SAFE is still dead, and it is the hardest kind to
+    notice precisely because its failure mode is indistinguishable from working.
+    """
+    if "W13" in disabled:
+        return []
+    out: list[Finding] = []
+    for wf in workflows:
+        lines = wf.text.splitlines()
+        # Variables fed by the gh CLI, which renders bot logins as `app/NAME`.
+        gh_vars: dict[str, int] = {}
+        for lineno, line in enumerate(lines, start=1):
+            m = re.match(r"\s*([A-Za-z_][A-Za-z_0-9]*)=(.*)", line)
+            if m and _GH_CLI_SRC.search(m.group(2)):
+                gh_vars[m.group(1)] = lineno
+        if not gh_vars:
+            continue
+        for lineno, line in enumerate(lines, start=1):
+            for var, src_line in gh_vars.items():
+                if f"${var}" not in line and f"${{{var}}}" not in line:
+                    continue
+                lits = re.findall(r"""["']([A-Za-z0-9_./\[\]-]+)["']""", line)
+                bot_lits = [x for x in lits if _BOT_SUFFIX.match(x)]
+                if not bot_lits:
+                    continue
+                # Accepting the `app/` spelling too is the fix; if it is already
+                # on this line, the wire is whole.
+                if any(_APP_PREFIX.match(x) for x in lits):
+                    continue
+                out.append(Finding(
+                    "W13", "error", f"{var} <- gh --jq .author.login",
+                    f"line {src_line} fills `{var}` from the gh CLI, which renders a bot "
+                    f"login as `app/NAME`. This line compares it against "
+                    f"{', '.join(repr(b) for b in bot_lits)} — the WEBHOOK spelling. The two "
+                    f"never match, so this branch can never be taken, and nothing goes red "
+                    f"because falling through looks exactly like the gate working. Accept "
+                    f"both spellings (grep -qFx -e 'NAME[bot]' -e 'app/NAME').",
+                    wf.file, lineno))
+    return out
+
+
 def run_checks(root: Path, disabled: set[str]) -> tuple[list[Finding], list[Workflow], list[str]]:
     workflows, parse_errors = load_workflows(root)
     actions = load_local_actions(root)
     findings = check_wires(workflows, actions, disabled)
+    findings += _check_source_vs_literal(workflows, disabled)
     return findings, workflows, parse_errors
 
 
@@ -878,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-map", action="store_true")
     parser.add_argument("--drill", action="store_true", help="break wires on purpose; the checker must go RED")
     parser.add_argument("--break-checker", default=None, metavar="Wn",
-                        help="blind one check (W1..W12) — used to prove the DRILL itself can fail")
+                        help="blind one check (W1..W13) — used to prove the DRILL itself can fail")
     args = parser.parse_args(argv)
 
     if args.root:
@@ -886,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         try:
             top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
-                                 text=True, check=True).stdout.strip()
+                                 text=True, encoding="utf-8", errors="replace", check=True).stdout.strip()
             root = Path(top)
         except Exception:
             root = Path.cwd()
@@ -1013,6 +1081,15 @@ DRILLS = [
         after='echo "haz=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != \'\' }}" >> "$GITHUB_OUTPUT"',
         expect_check="W1",
         expect_in_message="steps.token.outputs.have",
+    ),
+    Drill(
+        name="a literal its source can never produce",
+        mechanism="W13 -- the mismatch is between the file and the API it reads",
+        target="triage.yml",
+        before='grep -qFx -e "github-actions[bot]" -e "app/github-actions"',
+        after='grep -qFx "github-actions[bot]"',
+        expect_check="W13",
+        expect_in_message="app/NAME",
     ),
     Drill(
         name="misspelt dispatch target",

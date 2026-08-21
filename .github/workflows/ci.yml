@@ -111,7 +111,9 @@ jobs:
   chain:
     name: Chain wires (harness)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must exceed DRILL_TIMEOUT_S (240s) in scripts/drill_registry.py, or a hung
+    # drill is cancelled by the job before it can report DRILL TIMEOUT.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -135,6 +137,38 @@ jobs:
       # stay quiet. If chain_check.py ever silently stops detecting, this fails.
       - name: The checker can still fail
         run: python scripts/chain_check.py --drill
+
+      # The registry is the most dangerous file in the harness: if it stops
+      # detecting, it certifies every other guard. So it is held to its own
+      # standard — five deliberate breaks plus a negative control.
+      #
+      # This runs FIRST, deliberately. A failed step skips the ones after it, so
+      # if the guard sweep below went first and failed, we would never learn
+      # whether the registry can still detect at all — which is the one answer
+      # you need when it is red.
+      - name: The registry can still fail
+        run: python scripts/drill_registry.py --drill
+
+      # Every guard CI runs must declare how to make itself fail. Ten guards here
+      # shipped unable to fire, across four consecutive rounds — each was
+      # correct-looking code in the wrong position, reporting success about a
+      # different question than the one that mattered. A fifth round would find
+      # guard eleven; this is the mechanism instead. Adding a guard to a workflow
+      # is what triggers the requirement, so one cannot slip in by being forgotten.
+      # The merge cage decides what reaches real users without the owner. It is
+      # held to the same standard as everything else it judges: broken on purpose
+      # six ways, plus a negative control. Network-free, so it runs here.
+      # One bug class, 43 copies, nothing stopping the 44th. Exactly the shape
+      # of the seven log-injection alerts sitting open right now: fixing the
+      # instances without adding the guard is how a class grows.
+      - name: No text decoded with the machine's locale
+        run: python scripts/encoding_guard.py
+
+      - name: That guard can still fail
+        run: python scripts/encoding_guard.py --drill
+
+      - name: Every guard declares its drill
+        run: python scripts/drill_registry.py --run-drills
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:

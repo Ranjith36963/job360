@@ -169,6 +169,11 @@ def _mk_repo(tmp: Path) -> tuple[Path, str, str]:
         return subprocess.run(["git", *a], cwd=str(repo), capture_output=True, text=True,
                               encoding="utf-8", errors="replace", env=env, timeout=60)
     g("init", "-b", "main")
+    # A fresh CI runner has no git identity, so commit/revert failed and this
+    # drill read 7/9 there while passing 9/9 locally. A guard that only fires
+    # where its author sits is not a guard.
+    g("config", "user.email", "drill@example.invalid")
+    g("config", "user.name", "revert-gear drill")
     (repo / "a.txt").write_text("one\n", encoding="utf-8")
     g("add", "-A")
     g("commit", "-m", "base")
