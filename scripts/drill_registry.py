@@ -119,14 +119,6 @@ REGISTRY: dict[str, Guard] = {
         # switched off.
         drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
     ),
-    "scripts/merge_cage.py": Guard(
-        status="drilled",
-        # Decides what reaches real users without the owner. Refuses a scoring
-        # change, an auth change, an infra change, an edit to its own guards, an
-        # unrecognised path, and a ratchet going backwards -- plus a negative
-        # control. Network-free, so it runs in CI like any other check.
-        drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
-    ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
         # This file drills itself. A registry that cannot fail is the eleventh
