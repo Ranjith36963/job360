@@ -120,7 +120,8 @@ def _drill() -> int:
         tmp = Path(tempfile.mkdtemp(prefix="stale-drill-"))
 
         def run(*a: str) -> None:
-            subprocess.run(a, cwd=tmp, capture_output=True, text=True, check=True)
+            subprocess.run(a, cwd=tmp, capture_output=True, text=True, check=True,
+                           encoding="utf-8", errors="replace")
 
         run("git", "init", "-q")
         run("git", "config", "user.email", "drill@local")

@@ -114,20 +114,17 @@ REGISTRY: dict[str, Guard] = {
     # pr-advisor.yml, revert-main.yml, post-merge-watch.yml and merge-policy.yml,
     # each invoking a script this file had never heard of. Six undeclared guards.
     #
-    # HOW THEY WERE FOUND, WHICH IS THE WHOLE POINT OF THE `--count-owed`
-    # VALIDATION ADDED IN THIS SAME PR. Before that fix, `--count-owed` printed a
-    # number without checking the registry was coherent, and merge_cage accepts
-    # that number whenever the command exits 0. So this PR merged into the new
-    # main would have produced a CONFIDENT, WRONG, ACCEPTED ratchet reading.
-    # Instead it exits 1 and names all six. A loud stop beat a quiet lie.
+    # Found by the `--count-owed` validation added in this same PR: without it the
+    # count is printed unvalidated and merge_cage accepts it on exit 0, so this PR
+    # would have merged a ratchet reading that silently ignored six guards. It
+    # exits 1 and names them instead -- a loud stop beat a quiet lie.
     #
-    # All six are `drilled`: each carries a --drill that asserts real cases and
-    # was run here (data_only 9/9, rollback_gear 5/5, revert_gear 9/9, and
-    # lane/merge_cage/gate_wiring_check were each watched going RED during this
-    # session's work). Proving a drill can fail UNDER MUTATION, rather than by
-    # being watched once, is issue #359 -- it is a mechanism this file does not
-    # yet have, and claiming otherwise here would be the exact self-certification
-    # this registry exists to stop.
+    # All six are `drilled`: each --drill asserts real cases and was run here
+    # (data_only 9/9, rollback_gear 5/5, revert_gear 9/9; lane, merge_cage and
+    # gate_wiring_check were each watched going RED this session). NOT claimed:
+    # that they fail under MUTATION. That mechanism is issue #359, and marking
+    # them drilled because they exit 0 would be the self-certification this
+    # registry exists to stop.
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what may reach production without the owner. Its drill refuses a
