@@ -63,7 +63,7 @@ reads both the type tag and the date, and flags any doc not verified within
 **If a doc claims something the code does NOT do** (code is behind the doc —
 an "AHEAD" doc): **leave that doc completely untouched** (user's rule —
 promises are backlog, not bugs). Record the gap in
-`docs/maintenance/PARKED.md` only (doc, claim, evidence, date) and mention it
+`docs/harness/maintenance/PARKED.md` only (doc, claim, evidence, date) and mention it
 in the PR body so the user sees it. Never edit, move, or annotate the source
 doc itself.
 

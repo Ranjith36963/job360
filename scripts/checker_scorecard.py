@@ -62,7 +62,7 @@ if hasattr(sys.stdout, "reconfigure"):
 # THE DISTINCTION IS THE WHOLE POINT. An expired token and a genuinely quiet
 # month both produced `[]`, and the scorecard then printed "an honest empty
 # result, not a pass", exited 0, and committed that reassuring sentence to
-# docs/maintenance/CHECKER-SCORECARD.md. A blind measurement tool reporting
+# docs/harness/maintenance/CHECKER-SCORECARD.md. A blind measurement tool reporting
 # "nothing to measure" is the dead-watcher shape one level up: the judge of the
 # judges was itself unjudged.
 GH_BROKE: list[str] = []
