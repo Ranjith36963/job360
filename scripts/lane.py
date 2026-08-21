@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -302,7 +303,8 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         """A repo with the file before -> after. Returns (repo, base_sha, head_sha)."""
         tmp = tempfile.mkdtemp(prefix="lane-drill-")
         run = lambda *a: subprocess.run(  # noqa: E731
-            a, cwd=tmp, capture_output=True, text=True, check=True
+            a, cwd=tmp, capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
         )
         run("git", "init", "-q")
         run("git", "config", "user.email", "drill@local")
@@ -352,17 +354,131 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("neither owner lane ever auto-merges",
           (mig["auto_merge"], cage["auto_merge"]), (False, False))
 
-    # 11. THE LEAKY-GLOB TRAP. This repo's matcher lets `*` cross `/` -- the
-    #     owner lane's `*.env*` and `*docker-compose*` depend on that. So a
-    #     pattern like `*.md` in a FAST lane silently matches every markdown at
-    #     every depth, and any unclassified document auto-merges. That is exactly
-    #     what happened: `docs/product/product_design_rules.md` classified as `harness`,
-    #     auto_merge True -- the canonical text of the owner's product rules,
-    #     mergeable by a machine. No fast lane may carry a bare `*.ext` pattern.
+    # 11. THE LEAKY-GLOB TRAP -- and why this section was rewritten 2026-08-20.
+    #
+    #     The version that stood here asked `pattern.startswith("*.")`. That is
+    #     the SHAPE of the one example someone happened to find (`*.md`), not the
+    #     bug. So it printed
+    #         ok   fast lane `harness` has no depth-crossing glob: README.md
+    #     while that exact pattern was reaching `docs/product/pillars/README.md`
+    #     and classifying it `harness`, auto_merge TRUE. A green sentence that was
+    #     false. It also repeated the wrong MECHANISM -- `*` does not cross `/`,
+    #     it compiles to `[^/]*` -- and a drill written from a wrong mechanism
+    #     tests the wrong thing by construction.
+    #
+    #     These checks ask about BEHAVIOUR instead: they build a real nested path
+    #     and classify it. A syntax rule can only catch the shapes it was taught;
+    #     an outcome check catches any pattern that produces the wrong outcome,
+    #     including ones nobody has invented yet.
+
+    # 11a. THE INVARIANT, STATED AS AN OUTCOME. Nothing the owner filed under
+    #      docs/product/ may ever be merged by a machine, at ANY depth. This is
+    #      the entire point of wave 1, so it is asserted directly rather than
+    #      inferred from the shape of the patterns that happen to implement it.
+    for depth in ("docs/product/x.md",
+                  "docs/product/pillars/README.md",
+                  "docs/product/plans/deep/er/still.md",
+                  "docs/product/research/nested/notes.md"):
+        check(f"no machine may merge a product document: {depth}",
+              classify([depth], policy)["auto_merge"], False)
+
+    # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
+    #
+    #      THE FIRST VERSION OF THIS WAS VACUOUS AND I SHIPPED IT AS THE FIX FOR
+    #      EXACTLY THIS BUG CLASS. It built the witness as `pretend-dir/{pattern}`
+    #      and asserted the pattern did not match it. But the matcher is
+    #      ROOT-ANCHORED, so `docs/README.md` can never match
+    #      `pretend-dir/docs/README.md` no matter how broken it becomes. Every
+    #      case asserted False == False. It could not go red for anything.
+    #      (CodeRabbit, PR #357.)
+    #
+    #      The witness now comes from REAL TRACKED FILES: take a file the pattern
+    #      actually matches, push it one directory deeper, and require the
+    #      pattern to STOP matching. That is the depth-leak question, asked
+    #      somewhere the answer can actually be no.
+    tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace").stdout.split()
     for fast in ("harness", "product"):
         for pattern in policy["lanes"][fast].get("paths") or []:
-            check(f"fast lane `{fast}` has no depth-crossing glob: {pattern}",
-                  pattern.startswith("*.") and "/" not in pattern, False)
+            if "**" in pattern:
+                continue          # asked for depth in writing; that is allowed
+            hit = next((f for f in tracked if path_matches(f, pattern)), None)
+            if hit is None:
+                continue          # nothing in the tree exercises it today
+            head, _, tail = hit.rpartition("/")
+            deeper = f"{head}/pretend-dir/{tail}" if head else f"pretend-dir/{tail}"
+            check(f"fast-lane pattern does not reach one level deeper: {pattern}",
+                  path_matches(deeper, pattern), False)
+
+    # 11c. THE DIRECTIONS ARE NOT SYMMETRIC, so the deny side gets the opposite
+    #      question. Deleting the basename fallback LOOSENED every slash-free
+    #      deny at a stroke; each was rewritten with `**/` in the same commit and
+    #      every one is pinned here by a real nested file that exists in this repo.
+    #      If someone drops a `**/`, the file stops being owner-lane and this goes red.
+    #      ASSERT THE LANE, NOT `auto_merge`. Found by drilling this drill: revert
+    #      `**/CLAUDE.md` to `CLAUDE.md` and `backend/CLAUDE.md` then matches
+    #      nothing, escalates to `product_owner`, and reports auto_merge False --
+    #      so an auto_merge assertion goes GREEN over a deny that stopped working.
+    #      Escalation can fake that answer. It cannot fake the lane name.
+    for nested, want_lane in (("backend/Dockerfile", "product_owner"),
+                              ("backend/railway.json", "product_owner"),
+                              ("frontend/package.json", "product_owner"),
+                              ("frontend/package-lock.json", "product_owner"),
+                              ("backend/pyproject.toml", "product_owner"),
+                              ("frontend/.env.local.example", "product_owner"),
+                              ("backend/CLAUDE.md", "harness_owner")):
+        check(f"still owner-lane at depth after the `**/` rewrite: {nested}",
+              classify([nested], policy)["lane"], want_lane)
+
+    # 11d. THE CAGE MAY NOT EDIT THE CAGE -- derived, not listed. merge-policy.yml
+    #      names the cage's files by hand, and a hand-list is wrong the moment
+    #      someone adds a seventh. So this asks the CODE: whatever merge_cage.py
+    #      imports at run time is part of the cage, and must be owner-lane.
+    #      `cage_blockers.py` was found exactly this way -- merge_cage.py does
+    #      `from cage_blockers import BLOCKERS, undrilled`, so an edit to it
+    #      changes what the cage refuses, while merge_cage.py sat owner-locked.
+    cage_src = (Path(__file__).resolve().parent / "merge_cage.py").read_text(encoding="utf-8")
+    siblings = {f.stem for f in Path(__file__).resolve().parent.glob("*.py")}
+
+    # A SECOND WAY IN, AND THE FIRST VERSION OF THIS CHECK MISSED IT.
+    # Deriving cage membership from IMPORTS alone finds `cage_blockers` and stops.
+    # But merge_cage also reaches code by EXECUTING it: every RATCHET is a
+    # subprocess whose printed number the cage then trusts. `merge_cage.py:367`
+    # runs `backend/scripts/mypy_ratchet.py --count` and `:379` runs
+    # `drill_registry.py --count-owed` -- so a machine able to merge either file
+    # can make a ratchet report a false number while merge_cage.py itself sits
+    # owner-locked. Same escape as the import route, through a different door.
+    #
+    # Found by running the cage over a real PR: `backend/scripts/mypy_ratchet.py`
+    # came back "no rule covers this path" while merge-policy.yml's `backend/
+    # scripts/**` put it in the FAST lane -- two systems, two answers, and this
+    # drill agreeing with neither because it never looked.
+    executed = set(re.findall(r'"cmd":\s*\[sys\.executable,\s*"([^"]+\.py)"', cage_src))
+    imported = {
+        name for name in siblings
+        if re.search(rf"^[ \t]*(?:from {name} import|import {name})\b", cage_src, re.M)
+    }
+    #      A DERIVATION THAT FINDS NOTHING IS NOT A PASS. The first version of
+    #      this check had a doubled escape in its regex, so it derived zero
+    #      imports, printed zero lines, and reported green -- committing, inside
+    #      its own body, the exact failure it exists to catch. An empty
+    #      derivation is now a red.
+    check("the cage-membership derivation actually found something",
+          len(imported) > 0 and len(executed) > 0, True)
+    for name in sorted(imported):
+        check(f"the cage may not edit the cage -- merge_cage imports {name}",
+              classify([f"scripts/{name}.py"], policy)["lane"], "harness_owner")
+    for path in sorted(executed):
+        check(f"the cage may not edit the cage -- merge_cage executes {path}",
+              classify([path], policy)["auto_merge"], False)
+
+    # 11e. THE UNDO. The product lane's speed is explicitly borrowed against
+    #      being able to roll back, so the rollback must not be machine-mergeable.
+    #      These two are what the enforcement workflows actually execute.
+    for gear in ("scripts/rollback_gear.py", "scripts/revert_gear.py"):
+        check(f"the undo is not machine-mergeable: {gear}",
+              classify([gear], policy)["auto_merge"], False)
+
     check("an unclassified nested doc escalates, never auto-merges",
           classify(["docs/somewhere/new.md"], policy)["auto_merge"], False)
     check("a root doc that IS classified still takes the fast lane",

@@ -73,8 +73,75 @@ permissions:
   pull-requests: write
 
 jobs:
+  # BOOTSTRAP, SAID OUT LOUD — AND IT STANDS DOWN RATHER THAN FAILING.
+  #
+  # Until the cage is on the default branch there is no trustworthy source of
+  # rules, and the honest answer is to refuse to judge rather than fall back to
+  # the PR's own copy — falling back is exactly what rule G5 forbids.
+  #
+  # The refusal used to `exit 1` inside `advise`. That is a THIRD wrong answer
+  # next to the two it was avoiding:
+  #
+  #   green  "I judged it and it is fine"         — a lie; nothing was checked
+  #   red    "something is wrong with this PR"    — also a lie; the PR is fine
+  #   grey   "I could not judge, and here is why" — the truth
+  #
+  # Observed 2026-08-21: six PRs (#347 #348 #353 #355 #356 #357) each carried a
+  # red X for this, and on a phone the checks list is one tick or one cross. Six
+  # PRs looked broken because a check correctly declined to run. An alarm that
+  # cries wolf gets muted, and a muted alarm is worse than none, because the repo
+  # still looks watched.
+  #
+  # WHY THIS IS A SEPARATE JOB AND NOT AN `if:` ON A STEP. A job whose steps all
+  # skip still reports SUCCESS — a green tick claiming a judgement that never
+  # happened, which is the worst of the three. Only a skipped JOB reports grey,
+  # and only a job-level `if:` on `needs` can skip one.
+  #
+  # NOT A BYPASS: `merge_cage.py` counts a SKIPPED check as a pass only for an
+  # OPTIONAL check. `Advise` is not in REQUIRED_CHECKS, and if it were ever added
+  # there, a skipped run would correctly refuse. And this gate opens by itself the
+  # moment the cage lands — there is nothing to remember to switch back on.
+  precheck:
+    name: Are the rules available yet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.look.outputs.ready }}
+    # LEAST PRIVILEGE, EXPLICITLY. This job only asks whether a file exists on
+    # the default branch. It was inheriting the workflow's `pull-requests: write`
+    # and letting checkout persist credentials into .git/config, so a job that
+    # needs to read one path could have written to PRs. (CodeRabbit, PR #357.)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: look
+        run: |
+          set -euo pipefail
+          if [ -f scripts/merge_cage.py ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "The cage is on the default branch; the advisor will judge." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Advisor stood down — nothing was checked"
+              echo
+              echo "scripts/merge_cage.py is not on the default branch yet, so there is no"
+              echo "source of rules this PR cannot edit. Falling back to the PR's own copy is"
+              echo "exactly what rule G5 forbids, so this lane declines to judge."
+              echo
+              echo "Expected until the cage lands. Reported as SKIPPED, not FAILED, because the"
+              echo "PR is not at fault — a red X here made six PRs look broken when none were."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   advise:
     name: Advise (never merges)
+    needs: precheck
+    if: needs.precheck.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -114,18 +181,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-
-      # BOOTSTRAP, SAID OUT LOUD. Until the cage is on the default branch there
-      # is no trustworthy source of rules, and the honest answer is to refuse to
-      # judge rather than fall back to the PR's own copy — falling back is the
-      # exact thing rule G5 exists to forbid.
-      - name: The rules must come from a tree the PR cannot edit
-        run: |
-          set -euo pipefail
-          if [ ! -f scripts/merge_cage.py ]; then
-            echo "::error::scripts/merge_cage.py is not on ${{ github.event.repository.default_branch }} yet, so there is no source of rules this PR cannot edit. This lane cannot judge until the cage lands. Nothing was checked."
-            exit 1
-          fi
 
       # Proving the cage still refuses on purpose costs seconds and is the only
       # thing standing between "there is a cage" and "the cage works".
