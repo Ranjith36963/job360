@@ -638,9 +638,31 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     for r in runs:
         name = r.get("name")
         concl = r.get("conclusion")
+        # SKIPPED IS NOT PENDING, BUT FOR A REQUIRED CHECK IT IS NOT A PASS EITHER.
+        # Two true things pulling opposite ways, and this line honoured only one:
+        #   * counting only `success` as green reported 3-6 "pending" checks on
+        #     every PR; all were SKIPPED by a path filter or an `if:` guard, and
+        #     GitHub itself said mergeStateStatus CLEAN. A cage that waits on
+        #     those waits forever and looks exactly like a broken merge queue.
+        #   * a check in REQUIRED_CHECKS that skipped proved NOTHING. The loop
+        #     above already refuses a required check that is ABSENT, on the
+        #     grounds that it "cannot pass by being absent" -- a required check
+        #     that ran and skipped is that same claim wearing a tick.
+        # So the rule is SCOPED, not global: optional checks may skip, required
+        # checks must actually succeed.
+        # (CodeRabbit on PR #336; ported here because this lineage did not have
+        # it and #336's copy of merge_cage.py is being dropped rather than merged.)
+        required = any(req.lower() in (name or "").lower() for req in REQUIRED_CHECKS)
         if r.get("status") != "completed":
             reasons.append(f"`{name}` has not finished ({r.get('status')}). "
                            f"FIX: wait for it, then re-judge.")
+        elif required and concl != "success":
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"required check `{name}` -> {concl}, and only `success` counts for a required "
+                f"check -- `{concl}` means it did not prove it ran and passed. FIX: make it "
+                f"actually run and go green, or take it out of REQUIRED_CHECKS "
+                f"(that removal is the owner's decision, not an agent's) -- {url}".rstrip(" -"))
         elif concl not in ("success", "skipped", "neutral"):
             url = r.get("html_url") or ""
             reasons.append(f"`{name}` -> {concl}. FIX: make it green — {url}".rstrip(" -"))
@@ -1089,7 +1111,20 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
     if allowed:
         claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
         checked = "; ".join(claims) if claims else "no cage reported anything"
-        return (f":shipit: *Merged to production — PR #{pr}*\n"
+        # THIS CAGE CANNOT MERGE, SO IT MAY NOT SAY IT DID.
+        # There is no `--merge` flag on this lineage at all -- it advises and
+        # stops (see `--advise`; the merging is a separate, human act). This line
+        # said "Merged to production" for every allowed PR anyway, so on this
+        # branch the message was false 100% of the time, not merely on dry runs.
+        #
+        # CodeRabbit raised the dry-run half of this on PR #336. It is ported here
+        # rather than merged, because #336's copy of merge_cage.py is being dropped
+        # -- and the defect is strictly worse in this copy.
+        #
+        # An announcement that outruns the act is the same failure as a guard that
+        # cannot go red: the owner reads a green sentence describing something that
+        # did not happen, and has no way to tell from the message itself.
+        return (f":white_check_mark: *Approved — PR #{pr}* (nothing has been merged)\n"
                 f"*What it does:* {plain}\n"
                 f"*Size:* {size}\n"
                 f"*What was actually checked:* {checked}.\n"
@@ -1521,8 +1556,59 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
+    #       THE CONSTANT CHECK ALONE CANNOT GO RED FOR THE DEFECT B03 RECORDS.
+    #       `codes` is built from the constants, so it only fails if someone edits
+    #       the constant block -- while the real regression is behavioural: a
+    #       crash exiting 1, or argparse exiting 2, making a caller's arm
+    #       unreachable. Those leave this green. Kept as a cheap invariant; the
+    #       behaviour is now driven end to end below.
+    #       (CodeRabbit on PR #336, ported.)
     ok("crash, refuse, slack-failure and usage have four different exit codes",
        len(set(codes)) == len(codes), f"collision in {codes}", [])
+
+    # B03b — a bad flag must produce EXIT_USAGE, so any caller switching on that
+    #        code has a reachable arm. argparse RAISES SystemExit rather than
+    #        returning, so the code must be caught, not read from a return value.
+    #        Writing this on #336 proved the point: the first version called
+    #        main() bare and killed the whole drill run, and a self-test that
+    #        aborts the suite it belongs to reports nothing at all.
+    def _exit_code_of(argv: list[str]) -> int:
+        try:
+            return int(main(argv) or 0)
+        except SystemExit as exc:
+            return int(exc.code or 0)
+
+    rc_usage = _exit_code_of(["--no-such-flag"])
+    ok("a bad flag exits EXIT_USAGE, so a caller's usage arm is reachable",
+       rc_usage == EXIT_USAGE,
+       f"exit {rc_usage} (expected {EXIT_USAGE}) -- the usage arm is dead code",
+       ["main"])
+
+    # B18 — A REQUIRED CHECK THAT SKIPPED IS NOT A PASS, AND AN OPTIONAL ONE IS.
+    #       Both halves, because either alone is a bug already shipped here.
+    _req = REQUIRED_CHECKS[0]
+    ok("a REQUIRED check that skipped is refused, not counted as a pass",
+       any("only `success` counts" in r for r in judge_check_runs(
+           [{"name": _req, "status": "completed", "conclusion": "skipped"}], 1)),
+       "a required check proved nothing and still passed the cage",
+       ["judge_check_runs"])
+    _opt = [{"name": n, "status": "completed", "conclusion": "success"}
+            for n in REQUIRED_CHECKS]
+    _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
+                 "conclusion": "skipped"})
+    ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
+       not judge_check_runs(_opt, len(_opt)),
+       f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
+       ["judge_check_runs"])
+
+    # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
+    #       `--merge` flag at all, so "Merged to production" was false on every
+    #       single allowed PR, not merely on a dry run.
+    _v = Verdict("PATHS", "pass", [], claim="no owner-lane file was touched")
+    ok("the advisor does not tell the owner the PR was merged",
+       "Merged to production" not in plain_english(
+           1, {"title": "x: y", "files": 3, "lines": 10}, True, [_v]),
+       "the cage announced a merge it cannot perform", ["plain_english"])
 
     # B22 — --tree separates the tree MEASURED from the tree the RULES come from.
     #       Without it the only way to measure a PR's own numbers was to run the

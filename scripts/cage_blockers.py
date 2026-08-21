@@ -353,7 +353,14 @@ BLOCKERS: list[Blocker] = [
         "three had to be rewritten before they caught anything. Corollary now enforced: "
         "assert on the REASON a check gave, never on the COUNT of reasons; a refusal for "
         "the wrong reason is a guard that has already stopped knowing what it protects.",
-        drill="an exception nobody anticipated becomes a REFUSE, not a traceback",
+        # B17 RECORDS THREE DEFECTS AND NAMED A DRILL COVERING ONE. The named
+        # drill guarded only the deleted catch-all, so reverting the nested-deny
+        # case to COUNTING refusals -- the defect the `rule` field above actually
+        # states -- left this entry green. Every other entry here names the drill
+        # that DIES WITH ITS FIX; this one did not, which is the same "guard that
+        # cannot go red" this whole file exists to record.
+        # (CodeRabbit on PR #336, ported: that copy of the file is being dropped.)
+        drill="a nested file under a recursive deny is still refused, and for the right reason",
         severity="too-permissive",
     ),
     Blocker(
