@@ -102,12 +102,43 @@ def _call_name(call: ast.Call) -> str:
     return ".".join(reversed(parts))
 
 
+def _subprocess_bindings(tree: "ast.AST") -> tuple[set[str], set[str]]:
+    """Which names in THIS file actually refer to subprocess?
+
+    Returns (module aliases, directly-imported function names). A guard that
+    matches on the trailing call name alone cannot tell `subprocess.run` from
+    `client.run`, and cannot see `from subprocess import run as sprun` at all.
+    """
+    mods: set[str] = set()
+    funcs: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "subprocess" or a.name.startswith("subprocess."):
+                    mods.add(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for a in node.names:
+                if a.name in {"run", "check_output", "Popen", "check_call"}:
+                    funcs.add(a.asname or a.name)
+    return mods, funcs
+
+
+def _is_subprocess_call(name: str, mods: set[str], funcs: set[str]) -> bool:
+    """Does this dotted call name resolve to subprocess in this file?"""
+    if "." not in name:
+        return name in funcs
+    head, _, tail = name.rpartition(".")
+    return head in mods and tail in {"run", "check_output", "Popen", "check_call"}
+
+
 def scan_file(path: Path) -> list[tuple[int, str]]:
     """Every call in this file that decodes bytes without saying how."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
     except SyntaxError as exc:
         return [(exc.lineno or 0, f"could not parse: {exc.msg}")]
+
+    mods, funcs = _subprocess_bindings(tree)
 
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -117,7 +148,15 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
 
         # subprocess.run/check_output/Popen with text=True (or universal_newlines)
         # and no explicit codec.
-        if name.split(".")[-1] in {"run", "check_output", "Popen", "check_call"}:
+        #
+        # RESOLVE THE CALL TO subprocess FIRST. Matching on the trailing name
+        # alone was wrong in both directions: `client.run(text=True)` is not a
+        # subprocess call and became a false finding -- which the baseline then
+        # turned into a NEW FILE regression on correct code -- while
+        # `from subprocess import run as sprun` was never detected at all. The
+        # first direction gets a guard switched off; the second is the bug
+        # walking straight past it. (CodeRabbit, PR #336.)
+        if _is_subprocess_call(name, mods, funcs):
             decodes = _kw_is_true(node, "text") or _kw_is_true(node, "universal_newlines")
             # `encoding=None` IS the locale default -- it is the exact bug this
             # guard exists for, written explicitly. Accepting any `encoding=`
@@ -204,6 +243,11 @@ def self_drill() -> int:
     print("DRILL - planting locale-decoded reads. The guard must name each one.")
     print("=" * 72)
     cases = [
+        # RESOLUTION, BOTH DIRECTIONS (CodeRabbit, PR #336). Matching the
+        # trailing call name alone missed this one entirely.
+        ("an ALIASED subprocess import is still subprocess",
+         "from subprocess import run as sprun\nsprun(['ls'], text=True)\n",
+         "locale"),
         # THE TWO GAPS CodeRabbit FOUND ON PR #336, one in each direction.
         ("encoding=None is the locale default written out in full",
          "import subprocess\nsubprocess.run(['ls'], text=True, encoding=None)\n",
@@ -231,6 +275,11 @@ def self_drill() -> int:
         # POSITIONAL args were inspected, so the keyword spelling read as text
         # mode and the baseline turned it into a NEW FILE regression on code
         # that was already right. (CodeRabbit, PR #336.)
+        # ...and the mirror. `client.run(text=True)` is not a subprocess call;
+        # reporting it made the baseline raise a NEW FILE regression on correct
+        # code, which is how a detector gets switched off.
+        ("NEGATIVE: an unrelated .run(text=True) is not subprocess",
+         "client = make()\nclient.run(text=True)\n"),
         ("NEGATIVE: keyword mode='rb' is binary, not a finding",
          "data = open('x', mode='rb').read()\n"),
         ("NEGATIVE: read_text WITH a codec",
