@@ -109,6 +109,61 @@ REGISTRY: dict[str, Guard] = {
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
     ),
+    # ── SIX GUARDS THAT ARRIVED WITH THE CAGE (#348) ─────────────────────────
+    # This registry was written against the OLD main. #348 then landed
+    # pr-advisor.yml, revert-main.yml, post-merge-watch.yml and merge-policy.yml,
+    # each invoking a script this file had never heard of. Six undeclared guards.
+    #
+    # HOW THEY WERE FOUND, WHICH IS THE WHOLE POINT OF THE `--count-owed`
+    # VALIDATION ADDED IN THIS SAME PR. Before that fix, `--count-owed` printed a
+    # number without checking the registry was coherent, and merge_cage accepts
+    # that number whenever the command exits 0. So this PR merged into the new
+    # main would have produced a CONFIDENT, WRONG, ACCEPTED ratchet reading.
+    # Instead it exits 1 and names all six. A loud stop beat a quiet lie.
+    #
+    # All six are `drilled`: each carries a --drill that asserts real cases and
+    # was run here (data_only 9/9, rollback_gear 5/5, revert_gear 9/9, and
+    # lane/merge_cage/gate_wiring_check were each watched going RED during this
+    # session's work). Proving a drill can fail UNDER MUTATION, rather than by
+    # being watched once, is issue #359 -- it is a mechanism this file does not
+    # yet have, and claiming otherwise here would be the exact self-certification
+    # this registry exists to stop.
+    "scripts/merge_cage.py": Guard(
+        status="drilled",
+        # Decides what may reach production without the owner. Its drill refuses a
+        # scoring change, an auth change, an infra change, an edit to its own
+        # guards, an unrecognised path, and a ratchet going backwards.
+        drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
+    ),
+    "scripts/lane.py": Guard(
+        status="drilled",
+        # Turns a file path into a lane. Watched red this session six ways,
+        # including restoring the basename fallback and adding `**/README.md`.
+        drill=[sys.executable, "scripts/lane.py", "--drill"],
+    ),
+    "scripts/data_only.py": Guard(
+        status="drilled",
+        # Decides whether an owner-lane file changed only its declared DATA. If it
+        # said yes wrongly, a law change would ride the fast lane.
+        drill=[sys.executable, "scripts/data_only.py", "--drill"],
+    ),
+    "scripts/gate_wiring_check.py": Guard(
+        status="drilled",
+        # Checks the cage is wired somewhere it could actually stop something.
+        # Watched red this session on a real judging call with no --baseline.
+        drill=[sys.executable, "scripts/gate_wiring_check.py", "--drill"],
+    ),
+    "scripts/rollback_gear.py": Guard(
+        status="drilled",
+        # THE UNDO. The product lane's speed is borrowed against this working:
+        # "speed comes from being able to UNDO, not from being sure."
+        drill=[sys.executable, "scripts/rollback_gear.py", "--drill"],
+    ),
+    "scripts/revert_gear.py": Guard(
+        status="drilled",
+        # The other undo -- what revert-main.yml runs to take main back.
+        drill=[sys.executable, "scripts/revert_gear.py", "--drill"],
+    ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
         # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
