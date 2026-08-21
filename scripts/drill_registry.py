@@ -109,7 +109,16 @@ REGISTRY: dict[str, Guard] = {
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
     ),
-    # ── SIX GUARDS THAT ARRIVED WITH THE CAGE (#348) ─────────────────────────
+    # ── FOUR GUARDS THAT ARRIVED WITH THE CAGE (#348) ────────────────────────
+    # It was six. Two came out again, and finding out why was the whole point.
+    # `discover()` read `.github/merge-policy.yml` as if it RAN the scripts it
+    # names -- but that file is a LIST, and it names scripts precisely because
+    # they are sensitive. So `lane.py` and `data_only.py` looked invoked, got
+    # declared, and the registry certified two guards that NOTHING RUNS.
+    # With the policy file excluded they surface as STALE ENTRY, which is true:
+    # lane.py has no consumer until PR #356 wires it into pr-advisor.yml, and
+    # data_only.py is imported by merge_cage rather than run by a workflow.
+    # Whoever wires either one adds its entry back, with a drill.
     # Written against the OLD main. #348 landed pr-advisor.yml, revert-main.yml,
     # post-merge-watch.yml and merge-policy.yml, each invoking a script this file
     # had never heard of.
@@ -126,18 +135,6 @@ REGISTRY: dict[str, Guard] = {
         # scoring change, an auth change, an infra change, an edit to its own
         # guards, an unrecognised path, and a ratchet going backwards.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
-    ),
-    "scripts/lane.py": Guard(
-        status="drilled",
-        # Turns a file path into a lane. Watched red this session six ways,
-        # including restoring the basename fallback and adding `**/README.md`.
-        drill=[sys.executable, "scripts/lane.py", "--drill"],
-    ),
-    "scripts/data_only.py": Guard(
-        status="drilled",
-        # Decides whether an owner-lane file changed only its declared DATA. If it
-        # said yes wrongly, a law change would ride the fast lane.
-        drill=[sys.executable, "scripts/data_only.py", "--drill"],
     ),
     "scripts/gate_wiring_check.py": Guard(
         status="drilled",
@@ -284,6 +281,16 @@ def discover(github_dir: Path) -> dict[str, set[str]]:
         return found
     files = sorted(github_dir.rglob("*.yml")) + sorted(github_dir.rglob("*.yaml"))
     for wf in files:
+        # NAMING A SCRIPT IS NOT RUNNING IT -- and `.github/merge-policy.yml` is a
+        # LIST of paths, not a runner. It names scripts precisely BECAUSE they are
+        # sensitive (`harness_owner` exists to say "a machine may not merge these"),
+        # so every path added there was read here as a new undeclared guard. Adding
+        # six protections to the policy therefore broke the registry, which broke
+        # the ratchet, which stopped the cage. The policy has no `run:` and cannot
+        # execute anything. (Third instance today of naming-vs-running: see also
+        # `_invokes_cage` in gate_wiring_check.py.)
+        if wf.name == "merge-policy.yml":
+            continue
         text = wf.read_text(encoding="utf-8", errors="replace")
         for m in _SCRIPT_REF.finditer(text):
             found.setdefault(m.group(1), set()).add(wf.relative_to(github_dir).as_posix())

@@ -382,17 +382,33 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         check(f"no machine may merge a product document: {depth}",
               classify([depth], policy)["auto_merge"], False)
 
-    # 11b. EVERY FAST-LANE PATTERN, WITH A NESTED WITNESS. For each pattern in a
-    #      lane that auto-merges, take the deepest literal directory it names and
-    #      ask what happens one level BELOW it. A pattern that reaches somewhere
-    #      its own text does not name is the bug class, whatever its shape.
+    # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
+    #
+    #      THE FIRST VERSION OF THIS WAS VACUOUS AND I SHIPPED IT AS THE FIX FOR
+    #      EXACTLY THIS BUG CLASS. It built the witness as `pretend-dir/{pattern}`
+    #      and asserted the pattern did not match it. But the matcher is
+    #      ROOT-ANCHORED, so `docs/README.md` can never match
+    #      `pretend-dir/docs/README.md` no matter how broken it becomes. Every
+    #      case asserted False == False. It could not go red for anything.
+    #      (CodeRabbit, PR #357.)
+    #
+    #      The witness now comes from REAL TRACKED FILES: take a file the pattern
+    #      actually matches, push it one directory deeper, and require the
+    #      pattern to STOP matching. That is the depth-leak question, asked
+    #      somewhere the answer can actually be no.
+    tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace").stdout.split()
     for fast in ("harness", "product"):
         for pattern in policy["lanes"][fast].get("paths") or []:
             if "**" in pattern:
                 continue          # asked for depth in writing; that is allowed
-            witness = f"pretend-dir/{pattern}"
-            check(f"fast lane `{fast}` pattern does not reach depth: {pattern}",
-                  path_matches(witness, pattern), False)
+            hit = next((f for f in tracked if path_matches(f, pattern)), None)
+            if hit is None:
+                continue          # nothing in the tree exercises it today
+            head, _, tail = hit.rpartition("/")
+            deeper = f"{head}/pretend-dir/{tail}" if head else f"pretend-dir/{tail}"
+            check(f"fast-lane pattern does not reach one level deeper: {pattern}",
+                  path_matches(deeper, pattern), False)
 
     # 11c. THE DIRECTIONS ARE NOT SYMMETRIC, so the deny side gets the opposite
     #      question. Deleting the basename fallback LOOSENED every slash-free

@@ -287,6 +287,12 @@ lanes:
       - "backend/scripts/mypy_ratchet.py"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
+      # THE WORKFLOW THAT RUNS THE UNDO, not just the script it runs. I locked
+      # scripts/revert_gear.py and left the workflow that executes it under the
+      # blanket `.github/workflows/**` fast-lane rule -- so an agent could not
+      # edit the undo, but could edit the thing that calls it. Protecting a
+      # script and not its caller is half a door. (CodeRabbit, PR #357.)
+      - ".github/workflows/revert-main.yml"
       - ".github/workflows/post-merge-watch.yml"
       # the owner's own words
       - "**/CLAUDE.md"

@@ -438,7 +438,22 @@ MAX_CHANGED_FILES = 40
 MAX_CHANGED_LINES = 1200
 PER_PAGE = 100
 
-REQUIRED_CHECKS = ["Backend", "Frontend", "Chain wires", "CodeQL"]
+# EXACT check-run names, matched by EQUALITY. These were substrings, and a
+# substring cuts both ways -- `Frontend` is inside `frontend-e2e`, so:
+#   * a SKIPPED optional `frontend-e2e` was refused as a skipped REQUIRED check;
+#   * a SUCCESSFUL optional `frontend-e2e` satisfied the presence loop below,
+#     so an ABSENT required `Frontend (Node 20)` would have looked present.
+# The second is the dangerous direction and it survived this morning's fix,
+# which only addressed the first. (CodeRabbit, PR #357.)
+#
+# Exact names mean a renamed job reads as ABSENT -- which the presence loop
+# already refuses, loudly, with the real fix. That is the safe way to be wrong.
+REQUIRED_CHECKS = [
+    "Backend (Python 3.12)",
+    "Frontend (Node 20)",
+    "Chain wires (harness)",
+    "CodeQL",
+]
 
 # Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
 # `.github/workflows/codeql.yml` declares `pull_request: branches: ["main"]`, so a
@@ -629,7 +644,7 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
         # Saying it twice, once in a form the author cannot act on, is noise.
         if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
             continue
-        if not any(req.lower() in n.lower() for n in names):
+        if not any(req == n for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
                 f"almost always a stale base: the PR was branched before that check existed. "
@@ -652,7 +667,7 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
         # checks must actually succeed.
         # (CodeRabbit on PR #336; ported here because this lineage did not have
         # it and #336's copy of merge_cage.py is being dropped rather than merged.)
-        required = any(req.lower() in (name or "").lower() for req in REQUIRED_CHECKS)
+        required = (name or "") in REQUIRED_CHECKS
 
         # NEVER ANSWERED is a different fact from FAILED, and it is checked FIRST
         # because it is the more specific one -- and because the required/optional
@@ -1660,6 +1675,27 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "make it green" in _said("Doc clutter (CURATE gear)", "failure"),
        "a real failure was mislabelled as a missing answer -- that direction hides bugs",
        ["judge_check_runs"])
+
+    # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
+    #       DIRECTION IS DRILLED. These were substrings; `Frontend` is inside
+    #       `frontend-e2e`, so a SUCCESSFUL optional run satisfied the
+    #       presence loop and an ABSENT required check looked present. This
+    #       morning's fix only addressed the noisy direction (a skipped optional
+    #       reading as a skipped required) and left the silent one open.
+    def _rs(pairs):
+        return [{"name": n, "status": "completed", "conclusion": c} for n, c in pairs]
+
+    _all_req = [(n, "success") for n in REQUIRED_CHECKS]
+    _no_fe = [p for p in _all_req if p[0] != "Frontend (Node 20)"]
+    _no_fe = _no_fe + [("frontend-e2e", "success")]
+    ok("a green OPTIONAL check cannot stand in for an ABSENT required one",
+       bool(judge_check_runs(_rs(_no_fe), len(_no_fe))),
+       "an absent required check was satisfied by a similarly-named optional one",
+       ["judge_check_runs"])
+    _opt_skip = _all_req + [("frontend-e2e", "skipped")]
+    ok("...and a skipped OPTIONAL check with a similar name still does not block",
+       not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
+       "an optional skip was mistaken for a required one", ["judge_check_runs"])
 
     # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
     #       `--merge` flag at all, so "Merged to production" was false on every

@@ -107,10 +107,17 @@ jobs:
     timeout-minutes: 5
     outputs:
       ready: ${{ steps.look.outputs.ready }}
+    # LEAST PRIVILEGE, EXPLICITLY. This job only asks whether a file exists on
+    # the default branch. It was inheriting the workflow's `pull-requests: write`
+    # and letting checkout persist credentials into .git/config, so a job that
+    # needs to read one path could have written to PRs. (CodeRabbit, PR #357.)
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - id: look
         run: |
           set -euo pipefail
