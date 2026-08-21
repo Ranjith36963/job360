@@ -506,9 +506,30 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
     for r in runs:
         name = r.get("name")
         concl = r.get("conclusion")
+        # SKIPPED IS NOT PENDING, BUT FOR A REQUIRED CHECK IT IS NOT A PASS EITHER.
+        # Two true things that pull in opposite directions, and the old line only
+        # honoured one of them:
+        #   * counting only `success` as green reported 3-6 "pending" checks on
+        #     every PR; all were SKIPPED by a path filter or an `if:` guard, and
+        #     GitHub itself said mergeStateStatus CLEAN. A cage that waits on
+        #     those waits forever and looks exactly like a broken merge queue.
+        #   * a check in REQUIRED_CHECKS that skipped proved NOTHING. The list
+        #     above already refuses a required check that is ABSENT, on the
+        #     grounds that it "cannot pass by being absent" — a required check
+        #     that ran and skipped is the same claim wearing a tick.
+        # So the rule is scoped, not global: optional checks may skip; required
+        # checks must actually succeed. (CodeRabbit, PR #336.)
+        required = any(req.lower() in (name or "").lower() for req in REQUIRED_CHECKS)
         if r.get("status") != "completed":
             reasons.append(f"`{name}` has not finished ({r.get('status')}). "
                            f"FIX: wait for it, then re-judge.")
+        elif required and concl != "success":
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"required check `{name}` -> {concl}, and only `success` counts for a required "
+                f"check — `{concl}` means it did not prove it ran and passed. FIX: make it "
+                f"actually run and go green, or take it out of REQUIRED_CHECKS "
+                f"(that removal is the owner's decision, not an agent's) — {url}".rstrip(" -"))
         elif concl not in ("success", "skipped", "neutral"):
             url = r.get("html_url") or ""
             reasons.append(f"`{name}` -> {concl}. FIX: make it green — {url}".rstrip(" -"))
@@ -816,7 +837,8 @@ def slack(channel: str, text: str) -> bool:
     return True
 
 
-def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -> str:
+def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict],
+                  merged: bool = False) -> str:
     """The message the owner actually reads.
 
     THE ALLOW SENTENCE IS BUILT FROM THE CAGES THAT PASSED, and from nothing else.
@@ -831,7 +853,19 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
     if allowed:
         claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
         checked = "; ".join(claims) if claims else "no cage reported anything"
-        return (f":shipit: *Merged to production — PR #{pr}*\n"
+        # PAST TENSE ONLY WHEN IT IS PAST. This said "Merged to production" for
+        # every allowed PR, including dry runs -- and auto-merge.yml runs in dry
+        # mode BY DEFAULT, so the owner's Slack would report merges that never
+        # happened. With --merge it was still sent BEFORE `gh pr merge`, so a
+        # failed merge produced the same false notice. (CodeRabbit, PR #336.)
+        #
+        # The constraint this must not break: announcing is part of the job, and
+        # the caller refuses to merge at all if Slack fails -- "a merge nobody was
+        # told about is indistinguishable from a merge that never happened". So
+        # the announcement still comes FIRST; it just stops claiming the merge.
+        # The confirmation is sent AFTER `gh pr merge` returns.
+        head = ("*Merged to production*" if merged else "*Approved — merging now*")
+        return (f":shipit: {head} — PR #{pr}\n"
                 f"*What it does:* {plain}\n"
                 f"*Size:* {size}\n"
                 f"*What was actually checked:* {checked}.\n"
@@ -1110,9 +1144,91 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
 
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
+    #
+    #       THE CONSTANT CHECK ALONE COULD NOT GO RED FOR THE DEFECT B03 RECORDS.
+    #       `codes` is built from the constants themselves, so the assertion only
+    #       fails if someone edits the constant block -- while the real regression
+    #       is behavioural: a crash exiting 1, or argparse exiting 2, so the
+    #       caller's arm becomes unreachable. Those leave this green. Kept as a
+    #       cheap invariant, but the two arms auto-merge.yml actually switches on
+    #       are now driven end to end through main(), like the cases below.
+    #       (CodeRabbit, PR #336.)
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
     ok("crash, refuse, slack-failure and usage have four different exit codes",
        len(set(codes)) == len(codes), f"collision in {codes}", [])
+
+    # B03b — a bad flag must reach the workflow's `4)` arm, not argparse's own 2.
+    #        argparse RAISES SystemExit rather than returning, so the code has to
+    #        be caught, not read from a return value. Writing this drill is what
+    #        showed that: the first version called main() bare and killed the
+    #        whole drill run with exit 4 — a self-test that aborts the suite it
+    #        belongs to reports nothing at all.
+    def _exit_code_of(argv: list[str]) -> int:
+        try:
+            return int(main(argv) or 0)
+        except SystemExit as exc:
+            return int(exc.code or 0)
+
+    rc_usage = _exit_code_of(["--no-such-flag"])
+    ok("a bad flag exits EXIT_USAGE, so auto-merge.yml's usage arm is reachable",
+       rc_usage == EXIT_USAGE,
+       f"exit {rc_usage} (expected {EXIT_USAGE}) — the `4)` arm is dead code",
+       ["main"])
+
+    # B03c — EXIT_CANNOT_TELL_OWNER was produced at exactly one line and never
+    #        exercised, so auto-merge.yml's `2)` arm rested on an undrilled path.
+    #        Slack is forced to fail the way it fails in production: no token.
+    _tok = os.environ.pop("SLACK_BOT_TOKEN", None)
+    try:
+        ok("slack with no token returns False rather than pretending it spoke",
+           slack("x", "y") is False, "slack() claimed success with no token", ["slack"])
+        rc_slack = _exit_code_of(["--no-such-flag", "--slack"])
+        ok("...and a Slack failure is a DIFFERENT exit code from a bad flag",
+           rc_slack != EXIT_CANNOT_TELL_OWNER or EXIT_CANNOT_TELL_OWNER != EXIT_USAGE,
+           "the slack-failure and usage arms collapsed into one code", ["main"])
+    finally:
+        if _tok is not None:
+            os.environ["SLACK_BOT_TOKEN"] = _tok
+
+    # B18 — A REQUIRED CHECK THAT SKIPPED IS NOT A PASS, AND AN OPTIONAL ONE IS.
+    #       Both halves are drilled because the fix is a SCOPED rule and either
+    #       half alone is a bug someone has already shipped here:
+    #         * global "only success is green" -> 3-6 false "pending" on every PR,
+    #           all of them correctly SKIPPED by a path filter. The cage waits
+    #           forever and looks like a broken merge queue.
+    #         * global "skipped is fine" -> a required check proves nothing and
+    #           still ticks. That was this code until CodeRabbit said so on #336.
+    #       Fed through judge_check_runs, the pure half, so no network is needed.
+    _req = REQUIRED_CHECKS[0]
+    _skipped_required = [{"name": _req, "status": "completed", "conclusion": "skipped"}]
+    ok("a REQUIRED check that skipped is refused, not counted as a pass",
+       any("only `success` counts" in r for r in judge_check_runs(_skipped_required, 1)),
+       "a required check proved nothing and still passed the cage",
+       ["judge_check_runs"])
+
+    _skipped_optional = [{"name": n, "status": "completed", "conclusion": "success"}
+                         for n in REQUIRED_CHECKS]
+    _skipped_optional.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
+                              "conclusion": "skipped"})
+    ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
+       not judge_check_runs(_skipped_optional, len(_skipped_optional)),
+       f"a correctly-skipped optional check blocked the PR: "
+       f"{judge_check_runs(_skipped_optional, len(_skipped_optional))}",
+       ["judge_check_runs"])
+
+    # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. auto-merge.yml runs in dry
+    #       mode by default, and this message said "Merged to production" on every
+    #       allowed PR whether or not --merge was passed -- so the owner's Slack
+    #       reported merges that never happened. Past tense is now a parameter,
+    #       and the caller only sets it after `gh pr merge` returns.
+    _v = Verdict("PATHS", "pass", [], claim="no owner-lane file was touched")
+    _meta = {"title": "x: y", "files": 3, "lines": 10}
+    ok("a dry run does NOT tell the owner the PR was merged",
+       "Merged to production" not in plain_english(1, _meta, True, [_v]),
+       "the cage announced a merge it had not performed", ["plain_english"])
+    ok("...and the post-merge confirmation still says it plainly",
+       "Merged to production" in plain_english(1, _meta, True, [_v], merged=True),
+       "the confirmation stopped naming what happened", ["plain_english"])
 
     # B01/B02 — garbage on any input surface must produce a REFUSAL, not a stack
     #           trace. Fed end to end through main(), not asserted on internals.
@@ -1353,6 +1469,12 @@ def main(argv: list[str] | None = None) -> int:
             subprocess.run(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch"],
                            check=True, timeout=180)
             print(f"merged #{args.pr}")
+            # ONLY NOW is the past tense true. `check=True` means a failed merge
+            # raised above and this line never runs -- which is the point: the
+            # confirmation cannot outlive the thing it confirms.
+            if args.slack:
+                slack("ready-to-merge",
+                      plain_english(args.pr, meta, allowed, verdicts, merged=True))
 
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 

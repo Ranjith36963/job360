@@ -432,7 +432,12 @@ def self_drill() -> int:
             encoding="utf-8",
         )
         f = new_findings(REGISTRY)
-        results.append(("NEGATIVE CONTROL (workflow running an already-registered guard)", not f,
+        # The fixture above runs `echo hello`, not a guard -- so what this proves
+        # is that a workflow invoking NO script produces no findings. The old
+        # name claimed it ran an already-registered guard, which would be a
+        # different and stronger control. Named for what it actually does.
+        # (CodeRabbit, PR #336.)
+        results.append(("NEGATIVE CONTROL (workflow that invokes no script at all)", not f,
                         "" if not f else f"expected silence, got: {f[0][:120]}"))
         wf.unlink()
 
@@ -482,6 +487,21 @@ def main(argv: list[str] | None = None) -> int:
         # literal 999 when the regex missed -- a sentinel no real value can ever
         # exceed, so a DELETED guard produced an un-regressable baseline. A
         # ratchet input either prints a number it measured or exits non-zero.
+        #
+        # VALIDATE BEFORE COUNTING. The ratchet in merge_cage.py accepts this
+        # number whenever the command exits 0, so counting an unvalidated
+        # REGISTRY lets malformed entries -- a guard naming a drill that does not
+        # exist, a bad status string -- produce a confident, wrong, ACCEPTED
+        # number. Exiting non-zero here is the whole contract: the ratchet then
+        # reads "could not measure", which blocks, instead of a false low count,
+        # which merges. (CodeRabbit, PR #336.)
+        problems = check(ROOT, REGISTRY)
+        if problems:
+            print("cannot count owed drills -- the registry itself is malformed:",
+                  file=sys.stderr)
+            for pr_ in problems:
+                print(f"  * {pr_}", file=sys.stderr)
+            return 1
         print(sum(1 for g in REGISTRY.values() if g.status == "owed"))
         return 0
 

@@ -96,7 +96,15 @@ ROOT_ALLOWED = {"README.md", "CLAUDE.md", "ARCHITECTURE.md", "CONTRIBUTING.md",
 
 
 def sh(*args: str) -> str:
-    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    """Run a command and return its stdout.
+
+    `timeout` is explicit and TimeoutExpired is left to propagate. The choice is
+    deliberate: returning "" on a stall would make a hung `git` indistinguishable
+    from a clean repo, and this checker's findings are counted -- an empty result
+    would report "no clutter" and go green. (CodeRabbit, PR #336.)
+    """
+    return subprocess.run(args, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=60).stdout
 
 
 def tracked_docs() -> list[str]:
