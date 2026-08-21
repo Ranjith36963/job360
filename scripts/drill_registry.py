@@ -110,21 +110,16 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
     ),
     # ── SIX GUARDS THAT ARRIVED WITH THE CAGE (#348) ─────────────────────────
-    # This registry was written against the OLD main. #348 then landed
-    # pr-advisor.yml, revert-main.yml, post-merge-watch.yml and merge-policy.yml,
-    # each invoking a script this file had never heard of. Six undeclared guards.
+    # Written against the OLD main. #348 landed pr-advisor.yml, revert-main.yml,
+    # post-merge-watch.yml and merge-policy.yml, each invoking a script this file
+    # had never heard of.
     #
-    # Found by the `--count-owed` validation added in this same PR: without it the
-    # count is printed unvalidated and merge_cage accepts it on exit 0, so this PR
-    # would have merged a ratchet reading that silently ignored six guards. It
-    # exits 1 and names them instead -- a loud stop beat a quiet lie.
+    # Found by the `--count-owed` validation added in this same PR: unvalidated,
+    # the count is accepted on exit 0, so this PR would have merged a ratchet
+    # reading that silently ignored six guards. A loud stop beat a quiet lie.
     #
-    # All six are `drilled`: each --drill asserts real cases and was run here
-    # (data_only 9/9, rollback_gear 5/5, revert_gear 9/9; lane, merge_cage and
-    # gate_wiring_check were each watched going RED this session). NOT claimed:
-    # that they fail under MUTATION. That mechanism is issue #359, and marking
-    # them drilled because they exit 0 would be the self-certification this
-    # registry exists to stop.
+    # All six are `drilled` -- each --drill asserts real cases and was run under
+    # CI conditions. NOT claimed: that they fail under MUTATION (issue #359).
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what may reach production without the owner. Its drill refuses a
