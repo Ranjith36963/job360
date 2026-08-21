@@ -653,9 +653,29 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
         # (CodeRabbit on PR #336; ported here because this lineage did not have
         # it and #336's copy of merge_cage.py is being dropped rather than merged.)
         required = any(req.lower() in (name or "").lower() for req in REQUIRED_CHECKS)
+
+        # NEVER ANSWERED is a different fact from FAILED, and it is checked FIRST
+        # because it is the more specific one -- and because the required/optional
+        # split below would otherwise swallow it. (`Frontend` substring-matches
+        # `frontend-e2e`, so a cancelled e2e job was being told "make it green".)
+        #
+        # `skipped` and `neutral` are deliberately NOT in this set: they have their
+        # own, different, correct handling below -- skipped is a legitimate pass
+        # for an optional check and a refusal for a required one.
+        no_verdict = concl in ("cancelled", "timed_out", "stale")
+
         if r.get("status") != "completed":
             reasons.append(f"`{name}` has not finished ({r.get('status')}). "
                            f"FIX: wait for it, then re-judge.")
+        elif no_verdict:
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"`{name}` -> {concl}: it never produced a verdict, so this is not a failing "
+                f"test -- it is a MISSING ANSWER, and it still blocks. The usual cause here is "
+                f"a job hitting its `timeout-minutes` or being superseded by a newer push. "
+                f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
+                f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
+                f"not raise the timeout to hide it — {url}".rstrip(" -"))
         elif required and concl != "success":
             url = r.get("html_url") or ""
             reasons.append(
@@ -665,6 +685,9 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                 f"(that removal is the owner's decision, not an agent's) -- {url}".rstrip(" -"))
         elif concl not in ("success", "skipped", "neutral"):
             url = r.get("html_url") or ""
+            # See the `no_verdict` note above: everything reaching this line DID
+            # produce a verdict, and that verdict is "failed". "Make it green" is
+            # the right instruction here and the wrong one there.
             reasons.append(f"`{name}` -> {concl}. FIX: make it green — {url}".rstrip(" -"))
 
         # A check that saw the problem, printed it, and went green anyway. On PR
@@ -1599,6 +1622,43 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
        not judge_check_runs(_opt, len(_opt)),
        f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
+       ["judge_check_runs"])
+
+    # B20 — "NEVER ANSWERED" IS NOT "FAILED", AND THE FIX TEXT MUST SAY SO.
+    #       Found live 2026-08-21: four PRs (#349 #350 #351 #353) had been red for
+    #       two days on `frontend-e2e`. Nothing was wrong with any of them -- the
+    #       job takes about 2 minutes (1m43s-2m01s across the last six green runs)
+    #       and had run 20m18s into a `timeout-minutes: 20`, which GitHub records
+    #       as `cancelled`. The cage said "FIX: make it green" about code that was
+    #       already green, so nobody re-ran it and the red became permanent.
+    #
+    #       All four cases are drilled, because the earlier version of this fix
+    #       was swallowed by the required/optional split -- `Frontend`
+    #       substring-matches `frontend-e2e`, so the required arm answered first
+    #       and the new message never appeared. It passed review by eye and did
+    #       nothing.
+    def _runs_with(name: str, concl: str) -> list[dict]:
+        rs = [{"name": n, "status": "completed", "conclusion": "success"}
+              for n in REQUIRED_CHECKS]
+        rs.append({"name": name, "status": "completed", "conclusion": concl})
+        return rs
+
+    def _said(name: str, concl: str) -> str:
+        return " ".join(r for r in judge_check_runs(_runs_with(name, concl), 5) if name in r)
+
+    ok("a REQUIRED check that was cancelled is told to be RE-RUN, not fixed",
+       "MISSING ANSWER" in _said("Frontend", "cancelled"),
+       "the cage tells the owner to fix code that never failed", ["judge_check_runs"])
+    ok("...and it still BLOCKS -- a missing answer is never consent",
+       bool(_said("Frontend", "cancelled")),
+       "a cancelled check stopped blocking; that is a bypass, not a diagnosis",
+       ["judge_check_runs"])
+    ok("an OPTIONAL check that was cancelled gets the same re-run advice",
+       "MISSING ANSWER" in _said("Doc clutter (CURATE gear)", "cancelled"),
+       "only required checks got the honest message", ["judge_check_runs"])
+    ok("a check that really FAILED is still told to go green",
+       "make it green" in _said("Doc clutter (CURATE gear)", "failure"),
+       "a real failure was mislabelled as a missing answer -- that direction hides bugs",
        ["judge_check_runs"])
 
     # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
