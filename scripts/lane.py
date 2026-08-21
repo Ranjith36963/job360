@@ -302,7 +302,8 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         """A repo with the file before -> after. Returns (repo, base_sha, head_sha)."""
         tmp = tempfile.mkdtemp(prefix="lane-drill-")
         run = lambda *a: subprocess.run(  # noqa: E731
-            a, cwd=tmp, capture_output=True, text=True, check=True
+            a, cwd=tmp, capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
         )
         run("git", "init", "-q")
         run("git", "config", "user.email", "drill@local")
