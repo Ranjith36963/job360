@@ -1,5 +1,5 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
 ## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 

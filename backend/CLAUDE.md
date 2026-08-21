@@ -1,5 +1,5 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
 > (the 31 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
@@ -60,7 +60,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 ## Where things are
 
-- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (47) + `_build_sources()`
+- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (41) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
 - `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
