@@ -153,6 +153,27 @@ REGISTRY: dict[str, Guard] = {
         # The other undo -- what revert-main.yml runs to take main back.
         drill=[sys.executable, "scripts/revert_gear.py", "--drill"],
     ),
+    # ── THE TWO GUARDS THIS PR WIRES UP ──────────────────────────────────────
+    # A guard and its declaration land together, always. #357 removed both of
+    # these as STALE ENTRY because nothing ran them; this PR is what gives them a
+    # consumer, so this PR is what declares them. Splitting those two acts is how
+    # a workflow ends up invoking a script no registry knows about -- which
+    # `--count-owed` then refuses, which stops the ratchet, which stops the cage.
+    # Verified before declaring: both drills exit 0 with GIT_CONFIG_GLOBAL and
+    # GIT_CONFIG_SYSTEM set to /dev/null, i.e. on a runner with no git identity.
+    "scripts/lane.py": Guard(
+        status="drilled",
+        # Turns a path into a lane. Watched RED repeatedly this session --
+        # restoring the basename fallback, un-protecting the undo gears, and
+        # adding the tempting `**/README.md` one-liner all turn it red.
+        drill=[sys.executable, "scripts/lane.py", "--drill"],
+    ),
+    "scripts/stale_path_check.py": Guard(
+        status="drilled",
+        # Asks git which paths a change renamed and fails if any tracked file
+        # still names an old one. The guard that makes a file MOVE safe.
+        drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
+    ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
         # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
