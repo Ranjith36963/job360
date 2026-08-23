@@ -326,13 +326,38 @@ def test_create_webhook_non_url_rejected(api):
     assert r.status_code == 422, r.text
 
 
-def test_create_email_stores_mailtos_url(api, monkeypatch):
-    """POST with email type builds mailtos:// Apprise URL."""
-    from src.api.routes import channels as ch
-    from src.core import settings as s
+def _pin_email_env(monkeypatch, *, resend=None, smtp=None):
+    """Pin the email transport env so these tests never read the real .env.
 
-    monkeypatch.setattr(s, "SMTP_EMAIL", "sender@gmail.com", raising=True)
-    monkeypatch.setattr(s, "SMTP_PASSWORD", "app_pass_word", raising=True)
+    #318 — the URL builder reads ``os.environ`` at call time (like
+    ``auth/email_sender.py``, the transport that actually delivers in prod)
+    rather than the import-time ``settings`` snapshot the route used before.
+    Without pinning, a developer's real RESEND_API_KEY leaks into the assertion
+    messages of a failing test.
+    """
+    for var in ("RESEND_API_KEY", "SMTP_EMAIL", "SMTP_PASSWORD", "SMTP_FROM"):
+        monkeypatch.delenv(var, raising=False)
+    if resend:
+        monkeypatch.setenv("RESEND_API_KEY", resend)
+        monkeypatch.setenv("SMTP_FROM", "alerts@job360.uk")
+    if smtp:
+        monkeypatch.setenv("SMTP_EMAIL", smtp[0])
+        monkeypatch.setenv("SMTP_PASSWORD", smtp[1])
+
+
+def test_create_email_prefers_resend_over_smtp(api, monkeypatch):
+    """An email channel must be built on a transport this host can actually use.
+
+    Railway blocks outbound SMTP (25/465/587) — the reason
+    ``auth/email_sender.py`` moved off smtplib onto Resend's HTTPS API. So when
+    a Resend key is present the channel is ``resend://`` even if SMTP creds are
+    also set; ``mailtos://`` would time out and the user would see silence.
+    """
+    from src.api.routes import channels as ch
+
+    _pin_email_env(
+        monkeypatch, resend="re_fake_test_key", smtp=("sender@gmail.com", "app_pass_word")
+    )
 
     _register(api, "alice@example.com")
     r = api.post(
@@ -356,7 +381,41 @@ def test_create_email_stores_mailtos_url(api, monkeypatch):
 
     row = asyncio.run(_check())
     decrypted = crypto.decrypt(row[0])
-    assert decrypted.startswith("mailtos://"), decrypted
+    # Assert on the SCHEME only — never echo the full URL, it carries the key.
+    assert decrypted.startswith("resend://"), decrypted.split("://")[0]
+    assert "me@example.com" in decrypted
+
+
+def test_create_email_falls_back_to_mailtos_without_resend(api, monkeypatch):
+    """No Resend key but real SMTP creds (local / self-hosted) → mailtos://."""
+    from src.api.routes import channels as ch
+
+    _pin_email_env(monkeypatch, smtp=("sender@gmail.com", "app_pass_word"))
+
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "email",
+            "display_name": "My Email",
+            "credential": "me@example.com",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    db_path = str(ch.DB_PATH)
+
+    async def _check():
+        async with pg.connect(db_path) as db:
+            cur = await db.execute(
+                "SELECT credential_encrypted FROM user_channels WHERE channel_type='email'"
+            )
+            return await cur.fetchone()
+
+    row = asyncio.run(_check())
+    decrypted = crypto.decrypt(row[0])
+    # Scheme only in the message — the full URL embeds the SMTP password.
+    assert decrypted.startswith("mailtos://"), decrypted.split("://")[0]
     assert "to=me%40example.com" in decrypted or "to=me@example.com" in decrypted
 
 
@@ -380,11 +439,8 @@ def test_create_email_bad_address_rejected(api, monkeypatch):
 
 
 def test_create_email_smtp_not_configured(api, monkeypatch):
-    """Email channel when SMTP not configured → 503."""
-    from src.core import settings as s
-
-    monkeypatch.setattr(s, "SMTP_EMAIL", "", raising=True)
-    monkeypatch.setattr(s, "SMTP_PASSWORD", "", raising=True)
+    """No Resend key AND no SMTP creds → 503, not a channel that cannot deliver."""
+    _pin_email_env(monkeypatch)
 
     _register(api, "alice@example.com")
     r = api.post(

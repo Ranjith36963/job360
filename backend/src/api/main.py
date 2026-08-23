@@ -188,5 +188,5 @@ app.include_router(notifications.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
 # Step-3 B-15 — run history
 app.include_router(runs.router, prefix="/api")
-# Per-User AI CV & Cover Letter (docs/peruser_cv_coverletter.md)
+# Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
 app.include_router(tailor.router, prefix="/api")

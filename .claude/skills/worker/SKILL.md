@@ -6,7 +6,7 @@ description: Job360 worker: claim ONE mission from the canonical MISSIONS.md and
 > **⚠️ DORMANT — this skill is not currently in use.**
 > It serves Loop 1 (the ralph-loop worker/integrator), **disabled 2026-06-21**
 > after it wrote straight to `main` and wiped worktrees, and it claims missions
-> from `docs/maintenance/MISSIONS.md`, which has been untouched since 2026-06-17
+> from `docs/harness/maintenance/MISSIONS.md`, which has been untouched since 2026-06-17
 > and says "the loop is paused (no active cron)". So following this skill will
 > find an empty queue.
 > **The live replacement is `.github/workflows/repair.yml`**: label a GitHub

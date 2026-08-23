@@ -99,25 +99,53 @@ def _rescore_finished(task: Any) -> None:
         )
 
 
+def _run_rescore_in_process(user_id: str) -> None:
+    """LAST RESORT: run the re-score inside the web process.
+
+    This is the OLD behaviour and the cause of issue #271 — a fire-and-forget
+    task with no queue entry, no retry and no completion record, which any
+    deploy kills (``main`` auto-deploys on every merge). It survives only as the
+    fallback for "Redis is unreachable", because losing the work outright would
+    be worse than doing it fragilely. Every caller must log that it happened.
+
+    The task reference is pinned to ``_rescore_bg_tasks`` so the GC cannot
+    collect it mid-run, and ``_rescore_finished`` makes a failure audible
+    (PR #315).
+    """
+    import asyncio  # noqa: PLC0415
+
+    # Extraction now happens INLINE in the upload routes (one combined pass), so
+    # the background job only needs to re-SCORE the feed against the
+    # already-extracted profile — it must NOT re-extract.
+    from src.services.rescore import rescore_user_feed  # noqa: PLC0415
+
+    task = asyncio.create_task(rescore_user_feed(user_id))
+    _rescore_bg_tasks.add(task)
+    task.add_done_callback(_rescore_finished)
+
+
 async def _maybe_trigger_rescore(user_id: str) -> None:
-    """Fire-and-forget: schedule a background re-score if the profile content changed.
+    """Queue a durable re-score when the profile content actually changed.
 
-    FIX 2 — changed to ``async def`` so it can safely be awaited from async
-    route handlers.  Uses ``asyncio.create_task`` (mirror of
-    search.py:79 / CLAUDE.md Task-7 spec) so the heavy re-score runs in the
-    background without blocking the HTTP response.  Task reference is pinned
-    to ``_rescore_bg_tasks`` to prevent GC loss.
-    Never lets scheduling errors propagate — the profile save must never 500.
+    THE FIX FOR ISSUE #271. This used to call ``asyncio.create_task`` in the web
+    process: no queue entry, no retry, no completion record
+    (``grep -c rescore src/workers/tasks.py`` was 0), so a deploy alone dropped
+    the work. Measured in prod 2026-08-11: 9,708 ``user_feed`` rows on a
+    profile_version older than their user's current one, ALL of them pointing at
+    jobs still in the catalog — reachable work that simply never ran.
+
+    Now it enqueues ``rescore_user_feed_task`` for the ARQ worker, which retries
+    with a backoff and survives a redeploy of the API.
+
+    Two guarantees, both tested:
+
+    * **The profile save never 500s because of this.** Enqueue failures are
+      caught, and the whole body is wrapped besides.
+    * **A dead Redis does not LOSE the work.** It falls back to the old
+      in-process task and says ``QUEUE UNAVAILABLE`` at WARNING — a degraded
+      path you can find in the logs, not a silent one.
+
     Lazy imports keep the hot GET/POST paths import-cycle-free (rule #16).
-
-    KNOWN LIMITATION — this is fire-and-forget IN THE WEB PROCESS, and that is
-    why issue #271 exists. There is no queue entry, no retry and no ledger:
-    ``grep -c rescore src/workers/tasks.py`` is 0, so nothing outside this
-    process ever knows a re-score was owed. Any restart kills an in-flight run,
-    and `main` auto-deploys on every merge, so deploys alone can drop them.
-    The durable fix is an ARQ job (the worker and Redis already exist) with a
-    retry and a completion record — a change to how production schedules work,
-    so it is deliberately NOT bundled with the logging fix below.
     """
     try:
         from src.services.profile.storage import (  # noqa: PLC0415
@@ -127,18 +155,33 @@ async def _maybe_trigger_rescore(user_id: str) -> None:
         if not profile_content_changed_since_previous(user_id):
             return
 
-        import asyncio  # noqa: PLC0415
+        # Module (not symbol) import so the enqueue door is patchable in tests
+        # and resolved at call time.
+        from src.workers import queue as _queue  # noqa: PLC0415
 
-        # Extraction now happens INLINE in the upload routes (one combined pass),
-        # so the background job only needs to re-SCORE the feed against the
-        # already-extracted profile — it must NOT re-extract, or we'd be doing
-        # the work twice again (the very redundancy this merge removed).
-        from src.services.rescore import rescore_user_feed  # noqa: PLC0415
+        try:
+            queued = await _queue.enqueue_job("rescore_user_feed_task", user_id)
+        except Exception as exc:  # noqa: BLE001 — belt and braces; enqueue_job
+            # already swallows its own failures, but a queue outage must never
+            # be the reason a profile save fails.
+            queued = False
+            logger.warning(
+                "rescore: enqueue raised for user %s: %r", user_id, exc
+            )
 
-        task = asyncio.create_task(rescore_user_feed(user_id))
-        _rescore_bg_tasks.add(task)
-        task.add_done_callback(_rescore_finished)
-        logger.info("rescore: background re-score scheduled for user %s", user_id)
+        if queued:
+            logger.info(
+                "rescore: queued a durable re-score for user %s (ARQ)", user_id
+            )
+            return
+
+        logger.warning(
+            "rescore: QUEUE UNAVAILABLE — running the re-score in the web "
+            "process for user %s. This copy dies on the next deploy (issue "
+            "#271); check REDIS_URL and the worker service.",
+            user_id,
+        )
+        _run_rescore_in_process(user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "rescore: failed to schedule background re-score for user %s: %s",

@@ -379,3 +379,144 @@ async def test_backfilled_job_reaches_enrichment_phase_same_tick(tmp_path, monke
         assert any(ids == [jid] and skip is False for ids, skip in calls), calls
     finally:
         await db.close()
+
+
+# =============================================================================
+# Issue #334 — two sources that were neither IN nor documented OUT
+#
+# ALLOWED_BACKFILL_SOURCES is a deliberate capability list: every entry states
+# why it is in, and the exclusions (linkedin, hn_jobs, aijobs_ai) state why they
+# are out. workable and nofluffjobs appeared in NEITHER — grep returned zero
+# lines for both. They were silently missing, not deliberately excluded, so the
+# 115 workable and 40 nofluffjobs empty rows in prod had nothing to mop them up
+# even after ingestion was fixed. These pin both the membership and the
+# apply_url reversal that makes it usable.
+# =============================================================================
+
+_WORKABLE_HTML = "<p>" + ("Payments platform engineering role in London. " * 8) + "</p>"
+_NFJ_HTML = "<div><p>" + ("Backend engineering role on the payments team. " * 8) + "</p></div>"
+
+
+@pytest.mark.asyncio
+async def test_backfill_refills_a_thin_workable_row(tmp_path, monkeypatch):
+    """apply_url is built at ingestion as
+    https://apply.workable.com/{slug}/j/{shortcode}/ — an exact encoding of both
+    detail-call arguments, so the reversal needs no guessing. Value-presence
+    (rule #21): assert the REAL prose landed, not that the column exists."""
+    import src.core.settings as settings_mod
+    import src.workers.tasks as tasks_mod
+
+    monkeypatch.setattr(settings_mod, "DESCRIPTION_BACKFILL_PER_TICK", 10, raising=False)
+
+    db = await _full_db(str(tmp_path / "t.db"))
+    try:
+        await db.insert_job(_mk_job(
+            0, "workable", "https://apply.workable.com/suade/j/5B62764A74/"))
+        conn = db._db
+        user_id = _seed_user(str(tmp_path / "t.db"))
+        cur = await conn.execute("SELECT id FROM jobs LIMIT 1")
+        jid = (await cur.fetchone())[0]
+        await _seed_feed_row(conn, user_id, jid, 90)
+        await db.commit()
+
+        with aioresponses() as m:
+            m.get(
+                re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/5B62764A74"),
+                payload={"description": _WORKABLE_HTML},
+            )
+            result = await tasks_mod.enrichment_sweep({"db": conn})
+
+        assert result["attempted"] == 1, result
+        assert result["filled"] == 1, result
+        cur = await conn.execute("SELECT description FROM jobs WHERE id = ?", (jid,))
+        stored = (await cur.fetchone())[0]
+        assert "Payments platform engineering role" in stored
+        assert "<p>" not in stored, "HTML must be stripped before storage"
+        assert len(stored.strip()) >= 200
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_refills_a_thin_nofluffjobs_row(tmp_path, monkeypatch):
+    """apply_url is https://nofluffjobs.com/job/{id} and the detail endpoint
+    keys off that same id, so the reversal is one path segment."""
+    import src.core.settings as settings_mod
+    import src.workers.tasks as tasks_mod
+
+    monkeypatch.setattr(settings_mod, "DESCRIPTION_BACKFILL_PER_TICK", 10, raising=False)
+
+    db = await _full_db(str(tmp_path / "t.db"))
+    try:
+        await db.insert_job(_mk_job(
+            0, "nofluffjobs", "https://nofluffjobs.com/job/backend-engineer-acme-London"))
+        conn = db._db
+        user_id = _seed_user(str(tmp_path / "t.db"))
+        cur = await conn.execute("SELECT id FROM jobs LIMIT 1")
+        jid = (await cur.fetchone())[0]
+        await _seed_feed_row(conn, user_id, jid, 90)
+        await db.commit()
+
+        with aioresponses() as m:
+            m.get(
+                re.compile(r"https://nofluffjobs\.com/api/posting/backend-engineer-acme-London"),
+                payload={"requirements": {"description": _NFJ_HTML,
+                                          "musts": [{"value": "Python"}]}},
+            )
+            result = await tasks_mod.enrichment_sweep({"db": conn})
+
+        assert result["attempted"] == 1, result
+        assert result["filled"] == 1, result
+        cur = await conn.execute("SELECT description FROM jobs WHERE id = ?", (jid,))
+        stored = (await cur.fetchone())[0]
+        assert "Backend engineering role on the payments team" in stored
+        assert "Must have: Python" in stored
+        assert "<div>" not in stored, "HTML must be stripped before storage"
+    finally:
+        await db.close()
+
+
+def test_the_two_missing_sources_are_now_declared_capable() -> None:
+    """The membership itself is the fix — the SQL pre-filters on this set, so a
+    source absent from it is never even SELECTed for backfill."""
+    from src.services.description_backfill import ALLOWED_BACKFILL_SOURCES
+
+    assert "workable" in ALLOWED_BACKFILL_SOURCES
+    assert "nofluffjobs" in ALLOWED_BACKFILL_SOURCES
+    assert "linkedin" not in ALLOWED_BACKFILL_SOURCES, (
+        "LinkedIn stays OUT on purpose — hammering a guest-HTML scraper from an "
+        "unattended cron risks the shared IP that the LIVE search path uses."
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unmappable_workable_slug_is_not_guessed(tmp_path, monkeypatch) -> None:
+    """A slug that is not in WORKABLE_COMPANIES cannot be resolved to a real
+    API call, so the reversal returns None rather than inventing one. No HTTP
+    route is registered, so aioresponses would raise on any attempt."""
+    import src.core.settings as settings_mod
+    import src.workers.tasks as tasks_mod
+
+    monkeypatch.setattr(settings_mod, "DESCRIPTION_BACKFILL_PER_TICK", 10, raising=False)
+
+    db = await _full_db(str(tmp_path / "t.db"))
+    try:
+        await db.insert_job(_mk_job(
+            0, "workable", "https://apply.workable.com/not-a-registered-co/j/ABC123/"))
+        conn = db._db
+        user_id = _seed_user(str(tmp_path / "t.db"))
+        cur = await conn.execute("SELECT id FROM jobs LIMIT 1")
+        jid = (await cur.fetchone())[0]
+        await _seed_feed_row(conn, user_id, jid, 90)
+        await db.commit()
+
+        with aioresponses():
+            result = await tasks_mod.enrichment_sweep({"db": conn})
+
+        assert result["attempted"] == 1, result
+        assert result["filled"] == 0, result
+        cur = await conn.execute("SELECT description FROM jobs WHERE id = ?", (jid,))
+        assert (await cur.fetchone())[0] == "short.", "description must be untouched"
+        assert await _attempts(conn, jid) == 1, "the attempt must still be counted"
+    finally:
+        await db.close()

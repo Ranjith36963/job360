@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
@@ -12,6 +13,17 @@ from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.workable")
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Detail-fetch budget per RUN, same shape and reasoning as workday.py (40) and
+# smartrecruiters.py (60): one run must never blow SOURCE_FETCH_TIMEOUT_ATS
+# (240s, core/settings.py). Workable is 21 companies at concurrent=2/delay=1.5
+# (RATE_LIMITS), so 21 list calls + 60 detail calls is ~60s of wall clock — a
+# quarter of the budget. Jobs past the cap keep an empty description for this
+# run and are picked up later by services/description_backfill.py, which now
+# lists "workable" as a capable source.
+_MAX_DETAIL_FETCHES = 60
+
 
 class WorkableSource(BaseJobSource):
     name = "workable"
@@ -23,6 +35,7 @@ class WorkableSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         jobs = []
+        detail_budget = _MAX_DETAIL_FETCHES
         for slug in self._companies:
             url = f"https://apply.workable.com/api/v2/accounts/{slug}/jobs"
             data = await self._post_json(url, body={"query": "", "location": [], "department": [], "worktype": []})
@@ -31,10 +44,6 @@ class WorkableSource(BaseJobSource):
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in cast(dict[str, Any], data)["results"]:
                 title = item.get("title", "")
-                # shortDescription genuinely does not exist on this endpoint
-                # (verified live, 2026-08-08) — leave description empty rather
-                # than invent a source for it.
-                desc = item.get("shortDescription", "")
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
                     location = f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", ")
@@ -44,6 +53,27 @@ class WorkableSource(BaseJobSource):
                 apply_url = f"https://apply.workable.com/{slug}/j/{shortcode}/"
                 raw_published = item.get("published")
                 posted_at, confidence = normalize_posted_at(raw_published)
+
+                # Issue #334: this used to read `shortDescription` off the LIST
+                # response, under a comment asserting the field "genuinely does
+                # not exist on this endpoint". The comment was right about the
+                # field and wrong about the conclusion — every one of the 115
+                # workable rows in prod was stored with an empty description,
+                # which zeroes the scorer's 40-point skill component, and the
+                # source has been 115/115 empty since its first row.
+                #
+                # The text is on the per-job DETAIL endpoint, which the adapter
+                # simply never called (live probe 2026-08-19 across 5 company
+                # slugs: description 2,168-7,840 chars, plus `requirements` and
+                # `benefits`, on every one). Only UK/remote-relevant jobs are
+                # detail-fetched, so the extra request count matches what we
+                # actually keep, and a failed detail fetch degrades to an empty
+                # description — never a dropped job.
+                desc = ""
+                if _is_uk_or_remote(location) and detail_budget > 0:
+                    detail_budget -= 1
+                    desc = await self._fetch_posting_text(slug, shortcode)
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -59,3 +89,45 @@ class WorkableSource(BaseJobSource):
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Workable: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
+
+    async def _fetch_posting_detail(self, slug: str, shortcode: str) -> dict[str, Any]:
+        """Fetch one posting's raw detail JSON from the public detail endpoint.
+
+        Returns ``{}`` on any failure — callers treat a missing detail as an
+        absent description, never an error.
+        """
+        if not slug or not shortcode:
+            return {}
+        detail = await self._get_json(
+            f"https://apply.workable.com/api/v2/accounts/{slug}/jobs/{shortcode}"
+        )
+        return detail if isinstance(detail, dict) else {}
+
+    @staticmethod
+    def _extract_description_text(detail: dict[str, Any]) -> str:
+        """Concatenate the detail payload's prose fields, tag-stripped.
+
+        ``description`` alone already clears the 200-char scoring floor, but
+        ``requirements`` is where the skills a job actually asks for are
+        written, and the skill matcher is the reason #334 matters — so both are
+        kept. All three fields are HTML.
+        """
+        parts: list[str] = []
+        for key in ("description", "requirements", "benefits"):
+            text = detail.get(key)
+            if text:
+                parts.append(_HTML_TAG_RE.sub(" ", str(text)))
+        return " ".join(parts)[:5000].strip()
+
+    async def _fetch_posting_text(self, slug: str, shortcode: str) -> str:
+        """Fetch one posting's full text from the public detail endpoint.
+
+        Kept as its own method (rather than inlined) because
+        ``src/services/description_backfill.py`` calls this directly by name to
+        re-fetch a thin stored description outside the normal ingestion pass —
+        changing this signature/return type would break that caller. Returns
+        ``""`` on any failure; absence of text is a data gap, not an error.
+        """
+        return self._extract_description_text(
+            await self._fetch_posting_detail(slug, shortcode)
+        )

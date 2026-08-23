@@ -386,7 +386,7 @@ git commit -m "chore(step-1.5): write sentinel at green commit"
 4. With backend running, `curl localhost:8000/api/profile/versions -b session-cookie` returns a list with at least one entry (since `save_profile()` writes versions on every CV upload)
 5. With backend running + `SEMANTIC_ENABLED=true` + ESCO fixture data, uploading a CV results in `SkillEntry.esco_uri` being populated for known ESCO concepts ("Python" → ESCO concept URI)
 6. After 3 consecutive `run_search` cycles where job X is missing, DB shows `staleness_state='possibly_stale'` for job X
-7. `docs/IMPLEMENTATION_LOG.md` has a "Step 1.5" entry with test delta + 21-blocker closure table
+7. `docs/harness/IMPLEMENTATION_LOG.md` has a "Step 1.5" entry with test delta + 21-blocker closure table
 
 ---
 

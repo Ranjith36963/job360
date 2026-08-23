@@ -31,6 +31,7 @@ from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
+from src.services.notifications.defaults import seed_notification_defaults
 from src.utils.logger import get_audit_logger, mask_email
 
 logger = logging.getLogger("job360.api.auth")
@@ -180,6 +181,30 @@ async def register(
             # M2 — the email already exists. Do NOT reveal that and do NOT touch the
             # existing account; fall through to the SAME response a new signup gets.
             created = False
+
+        if created:
+            # #318 — give the new account a notification rulebook. Without this
+            # the user is created into permanent silence: every delivery path
+            # (run_search's _enqueue_notifications, the notification_tick cron,
+            # dispatch itself) short-circuits on a missing notification_rules
+            # row, and only a human clicking through two separate settings
+            # screens in the right order could ever create one.
+            #
+            # Rulebook ONLY — no delivery channel. At this point the address is
+            # UNPROVEN, so seeding a channel here would let anyone register with
+            # a victim's email and point job alerts at a mailbox they do not
+            # own. The channel is seeded once the emailed link is clicked (see
+            # magic_link.consume_magic_link / email_verification.confirm).
+            #
+            # Guarded at the CALL SITE as well as inside the helper. The user
+            # row is already committed by this point, so anything that escapes
+            # here would 500 a signup that actually succeeded — the exact trap
+            # `_safe_request_email_verification` exists to avoid. Belt and
+            # braces is cheap; a 500 after a committed INSERT is not.
+            try:
+                await seed_notification_defaults(db, user_id=user_id)
+            except Exception as exc:  # noqa: BLE001 — signup must still succeed
+                logger.warning("notification seed failed for user=%s: %s", user_id, exc)
 
     # M2 — /register no longer auto-logs-in and no longer 409s on a taken email, so
     # it can't be used to enumerate accounts. A session cookie for a new user but

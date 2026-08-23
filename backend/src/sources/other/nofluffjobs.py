@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +16,28 @@ _API_URLS = [
     "https://nofluffjobs.com/api/posting",
     "https://nofluffjobs.com/api/search/posting",
 ]
+
+# Per-posting detail endpoint. Issue #334: the LIST payload carries NO body
+# text at all — a live probe over 1,000 postings (2026-08-19) found the longest
+# string on any list item was the 138-char `id`, and the only text-ish keys are
+# id/url/title/name/category. So there was nothing for `fetch_jobs` to read and
+# the adapter simply never set `description=`; all 40 nofluffjobs rows in prod
+# are empty. The prose lives at `requirements.description` on this endpoint
+# (2,117 chars on the probed posting); `details.description` exists but was
+# empty on every posting sampled, so it is deliberately NOT read.
+_DETAIL_URL = "https://nofluffjobs.com/api/posting/{posting_id}"
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Detail-fetch budget per RUN, in the same shape as workday.py (40) /
+# smartrecruiters.py (60) / workable.py (60). Without one, a run that hit
+# _MAX_RESULTS would fire 200 extra requests at concurrent=2/delay=1.5
+# (RATE_LIMITS) — about 150s, which starts crowding the fetch timeout. Only
+# jobs that already survived the UK/remote filter are fetched, so this budget
+# is spent on rows we are actually keeping; prod holds 40 nofluffjobs rows
+# total, so 40 covers the real volume with room to spare. Anything past it is
+# picked up later by services/description_backfill.py.
+_MAX_DETAIL_FETCHES = 40
 
 
 def _plausible_gbp(val: Any) -> bool:
@@ -48,6 +71,7 @@ class NoFluffJobsSource(BaseJobSource):
             return []
 
         jobs = []
+        detail_budget = _MAX_DETAIL_FETCHES
         for item in postings:
             title = item.get("title", "")
             # NOTE (live probe 2026-08-08): this used to fall back to `name`
@@ -142,10 +166,19 @@ class NoFluffJobsSource(BaseJobSource):
             # as a fallback in case the upstream schema changes back.
             company_name = item.get("name") or item.get("company", "")
 
+            # Issue #334 — the only place body text exists (see _DETAIL_URL).
+            # A failed detail fetch degrades to an empty description, never a
+            # dropped job.
+            description = ""
+            if posting_id and detail_budget > 0:
+                detail_budget -= 1
+                description = await self._fetch_posting_text(str(posting_id))
+
             jobs.append(Job(
                 title=title,
                 company=company_name,
                 location=location,
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
@@ -163,3 +196,39 @@ class NoFluffJobsSource(BaseJobSource):
 
         logger.info("NoFluffJobs: found %s relevant jobs", len(jobs))
         return jobs
+
+    async def _fetch_posting_text(self, posting_id: str) -> str:
+        """Fetch one posting's body text from the per-posting detail endpoint.
+
+        Kept as its own method (rather than inlined) because
+        ``src/services/description_backfill.py`` calls it directly by name to
+        refill a thin stored row — changing this signature/return type would
+        break that caller. Returns ``""`` on any failure; an absent description
+        is a data gap, not an error.
+
+        ``requirements.musts`` / ``.nices`` are appended because they are the
+        skills the ad actually asks for, and the 40-point skill component is the
+        whole reason an empty description matters. They are genuinely fetched ad
+        content, not padding — nothing here writes text the posting did not say.
+        """
+        if not posting_id:
+            return ""
+        detail = await self._get_json(_DETAIL_URL.format(posting_id=posting_id))
+        if not isinstance(detail, dict):
+            return ""
+        block = detail.get("requirements")
+        if not isinstance(block, dict):
+            return ""
+        parts: list[str] = []
+        body = block.get("description")
+        if body:
+            parts.append(_HTML_TAG_RE.sub(" ", str(body)))
+        for key, label in (("musts", "Must have"), ("nices", "Nice to have")):
+            values = [
+                str(entry.get("value"))
+                for entry in (block.get(key) or [])
+                if isinstance(entry, dict) and entry.get("value")
+            ]
+            if values:
+                parts.append(f"{label}: {', '.join(values)}")
+        return " ".join(parts)[:5000].strip()
