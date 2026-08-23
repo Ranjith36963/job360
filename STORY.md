@@ -89,7 +89,9 @@ twice, a GDPR export and a real hard delete, an audit log, circuit breakers per 
 them was in Vietnam. That was false. I produced it with a broken instrument.**
 
 I pulled his top 25 feed rows sorted by `f.score` — the keyword score. **The product does not sort
-that way.** It sorts by `COALESCE(llm_fit_score, score) DESC` (`src/services/feed.py:90,104`) — the
+that way.** It sorts by `COALESCE(llm_fit_score, score) DESC`
+(`backend/src/services/feed.py:104` — the executed query; `:90` is the docstring that
+explains it) — the
 LLM judge's verdict first, keyword only as fallback.
 
 Re-run with the ordering the product actually uses, his real top 25:

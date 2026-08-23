@@ -1419,12 +1419,73 @@ class TestAFailedLinkedInReuploadKeepsTheOldData:
 
         body = api.get("/api/profile").json()
         assert body["summary"]["has_linkedin"] is True
-        subs = body.get("linkedin_subsections") or {}
-        skills = subs.get("skills")
-        if isinstance(skills, list) and skills:
-            flat = " ".join(str(s) for s in skills)
-            assert "NewSkill" in flat, f"the re-upload did not replace: {skills}"
-            assert "OldSkill" not in flat, (
-                "the restore-on-failure path also fired on success -- re-upload "
-                "has become a no-op"
-            )
+
+        # CodeRabbit: this used to read `if isinstance(skills, list) and skills:`
+        # around BOTH replacement asserts. When the subsection came back empty --
+        # which is the exact state a broken re-upload produces -- the test skipped
+        # its own point and went green. A conditional assertion is a test that
+        # decides for itself whether to check. Unconditional now, so an absent or
+        # empty subsection FAILS instead of excusing itself.
+        # ...and `linkedin_subsections` was the WRONG PLACE to look: it exposes
+        # 15 keys (positions, languages, projects, ...) and has no `skills` entry
+        # at all, so `subs.get("skills")` was None on every run. The guard was
+        # not merely unlucky with data — it could never be true. LinkedIn skills
+        # surface in `skills_by_source["linkedin"]` (profile.py:238).
+        by_source = body.get("skills_by_source") or {}
+        skills = by_source.get("linkedin")
+        assert isinstance(skills, list) and skills, (
+            f"skills_by_source carried no linkedin skills, so the replacement was "
+            f"never checked: skills_by_source={by_source!r}"
+        )
+        flat = " ".join(str(x) for x in skills)
+        assert "NewSkill" in flat, f"the re-upload did not replace: {skills}"
+        assert "OldSkill" not in flat, (
+            "the restore-on-failure path also fired on success -- re-upload "
+            "has become a no-op"
+        )
+
+    def test_a_rejected_reupload_does_not_queue_a_rescore(
+        self, api, monkeypatch
+    ) -> None:
+        """CodeRabbit, on the save-before-validate ordering.
+
+        The route clears the old LinkedIn fields, runs extraction, saves, and
+        only THEN decides whether anything merged. The rollback for the SAVE was
+        already fixed; the re-score queued by the same helper was not. On a
+        rejection the worker could therefore score the user's whole catalog
+        against a CLEARED LinkedIn shelf and store that as the final result --
+        the rollback restores the profile, not the scores already written from it.
+        """
+        import src.api.routes.profile as profile_route
+
+        _stub_linkedin_read(monkeypatch)
+        _register_and_login(api, "li-reupload-norescore@example.com")
+
+        rescores: list[str] = []
+
+        async def _record(user_id):
+            rescores.append(user_id)
+
+        async def _extracts_something(profile):
+            profile.cv_data.linkedin_skills = ["Kubernetes"]
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _extracts_something)
+        monkeypatch.setattr(profile_route, "_maybe_trigger_rescore", _record)
+        assert api.post("/api/profile/linkedin", files=_li_pdf()).status_code == 200
+        accepted_count = len(rescores)
+        assert accepted_count >= 1, (
+            "an ACCEPTED upload must still queue a re-score -- otherwise this test "
+            "would pass against a route that never re-scores at all"
+        )
+
+        async def _extracts_nothing(profile):
+            return profile
+
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _extracts_nothing)
+        assert api.post("/api/profile/linkedin", files=_li_pdf()).status_code == 422
+
+        assert len(rescores) == accepted_count, (
+            f"a REJECTED re-upload queued a re-score against the cleared profile "
+            f"({len(rescores) - accepted_count} extra call(s))"
+        )

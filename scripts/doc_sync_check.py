@@ -130,8 +130,13 @@ def scorer_version() -> int:
             targets = [node.target]
         for t in targets:
             if getattr(t, "id", None) == "SCORER_VERSION":
-                if not isinstance(node.value, ast.Constant) or not isinstance(
-                    node.value.value, int
+                # CodeRabbit: `isinstance(True, int)` is True in Python, so
+                # `SCORER_VERSION = True` slipped through a check whose own
+                # error message promises "a plain int literal" — and then
+                # compared equal to a documented 1. `type(...) is int`
+                # rejects bool without rejecting anything else.
+                if not isinstance(node.value, ast.Constant) or (
+                    type(node.value.value) is not int
                 ):
                     raise RuntimeError("SCORER_VERSION is not a plain int literal")
                 return node.value.value
