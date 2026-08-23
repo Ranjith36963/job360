@@ -594,7 +594,51 @@ def check_paths(files: list[str]) -> Verdict:
     )
 
 
-def check_size(n_files: int, n_lines: int, deletions: list[str]) -> Verdict:
+# ── WHAT THE SIZE CAP IS ACTUALLY MEASURING ─────────────────────────────────
+# The cap is a REVIEWABILITY budget: "past this, no reviewer human or machine is
+# actually reading it, they are skimming." So the number it counts must be the
+# number a reviewer has to READ.
+#
+# Recorded fixtures are not that. PR #346 is 3,482 lines, of which 2,120 are one
+# captured GitHub API response -- `scripts/fixtures/review_threads/recorded.json`.
+# Nobody reads a recorded payload line by line; they read the 1,362 lines of code
+# that consume it. Counting the payload against a reading budget measures bytes
+# and calls them review surface. #345 was the same shape: 8,106 of its 9,757 lines
+# were one generated ruleset snapshot.
+#
+# THE OBVIOUS WAY TO GET THIS WRONG is to write "fixtures don't count" and hand
+# out a bypass: drop a 900-line module in `fixtures/` and the cap never sees it.
+# So the rule is deliberately narrow on BOTH axes and it is never silent:
+#
+#   * PATH  — the file must live in a directory literally named `fixtures`.
+#   * TYPE  — and carry a recorded-data extension. Source extensions are NEVER
+#             exempt, wherever they sit. A `.py` under `fixtures/` is code that
+#             happens to be filed oddly, and it counts in full.
+#   * VOICE — the discount is reported in the verdict, every time. An exemption
+#             nobody can see is indistinguishable from a hole.
+_FIXTURE_DIR = "/fixtures/"
+_RECORDED_EXT = (".json", ".txt", ".csv", ".xml", ".har", ".snap")
+
+
+def review_surface(files_json: list[dict]) -> tuple[int, int]:
+    """Split changed lines into (what a reviewer reads, what is recorded data).
+
+    Pure, so the drill tests THIS and not a re-implementation of it.
+    """
+    read = exempt = 0
+    for f in files_json:
+        n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
+        name = str(f.get("filename", ""))
+        recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
+        if recorded:
+            exempt += n
+        else:
+            read += n
+    return read, exempt
+
+
+def check_size(n_files: int, n_lines: int, deletions: list[str],
+               exempt_lines: int = 0) -> Verdict:
     reasons: list[str] = []
     if deletions:
         reasons.append(
@@ -610,7 +654,10 @@ def check_size(n_files: int, n_lines: int, deletions: list[str]) -> Verdict:
             f"{n_lines} lines changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
             f"into PRs under the cap, or the owner merges it by hand.")
     return Verdict("SIZE", "fail" if reasons else "pass", reasons,
-                   claim=f"small enough to reason about ({n_files} files, {n_lines} lines)")
+                   claim=(f"small enough to reason about ({n_files} files, "
+                          f"{n_lines} lines to read"
+                          + (f" + {exempt_lines} recorded-fixture lines not counted"
+                             if exempt_lines else "") + ")"))
 
 
 def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BRANCH) -> list[str]:
@@ -1072,7 +1119,9 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
         files_json = json.loads(files_raw)
         files = [f["filename"] for f in files_json]
         deletions = [f["filename"] for f in files_json if f.get("status") == "removed"]
-        changed_lines = sum(f.get("additions", 0) + f.get("deletions", 0) for f in files_json)
+        # The cap counts what a reviewer READS -- recorded fixtures are reported
+        # separately rather than folded in. See review_surface().
+        changed_lines, exempt_lines = review_surface(files_json)
         pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
         # A MISSING base ref is not `main`. Defaulting an unknown base to the one
         # value that unlocks the full check list would be the permissive guess,
@@ -1080,6 +1129,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
         # string is not `main`, so judge_check_runs says so and the cage refuses.
         base_ref = ((pr_json.get("base") or {}).get("ref")) or ""
         meta = {"files": len(files), "lines": changed_lines,
+                "fixture_lines": exempt_lines,
                 "title": pr_json.get("title") or f"PR #{pr}",
                 "base": base_ref,
                 "merge_sha": pr_json.get("merge_commit_sha") or ""}
@@ -1093,7 +1143,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
     if truncation:
         verdicts.append(Verdict("READ", "fail", truncation))
 
-    verdicts.append(check_size(len(files), changed_lines, deletions))
+    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines))
     verdicts.append(check_paths(files))
 
     for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
@@ -1738,6 +1788,33 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "make it green" in _said("Doc clutter (CURATE gear)", "failure"),
        "a real failure was mislabelled as a missing answer -- that direction hides bugs",
        ["judge_check_runs"])
+
+    # B22 — THE SIZE CAP COUNTS REVIEW SURFACE, AND THE EXEMPTION IS NOT A DOOR.
+    #       The discount exists because a 2,120-line recorded API payload is not
+    #       something anyone reads. The danger is obvious -- "fixtures do not
+    #       count" is one careless step from "put your module in fixtures/ and
+    #       skip the cap" -- so the bypass is drilled explicitly, not assumed shut.
+    _fx = [{"filename": "scripts/fixtures/review_threads/recorded.json",
+            "additions": 2120, "deletions": 0},
+           {"filename": "scripts/review_debt.py", "additions": 883, "deletions": 0}]
+    _read, _ex = review_surface(_fx)
+    ok("a recorded fixture is not counted as review surface",
+       (_read, _ex) == (883, 2120), f"got read={_read} exempt={_ex}", ["review_surface"])
+
+    _bypass = [{"filename": "scripts/fixtures/sneaky.py", "additions": 900, "deletions": 0}]
+    ok("SOURCE under fixtures/ is NOT exempt -- the obvious bypass stays shut",
+       review_surface(_bypass) == (900, 0),
+       "a .py under fixtures/ escaped the cap", ["review_surface"])
+
+    _elsewhere = [{"filename": "backend/data/big.json", "additions": 900, "deletions": 0}]
+    ok("recorded data OUTSIDE a fixtures/ directory is still counted",
+       review_surface(_elsewhere) == (900, 0),
+       "the extension alone was enough to exempt a file", ["review_surface"])
+
+    _v_ex = check_size(3, 900, [], exempt_lines=2120)
+    ok("the discount is SAID OUT LOUD, never silent",
+       "recorded-fixture lines not counted" in (_v_ex.claim or ""),
+       "an exemption nobody can see is indistinguishable from a hole", ["check_size"])
 
     # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
     #       DIRECTION IS DRILLED. These were substrings; `Frontend` is inside
