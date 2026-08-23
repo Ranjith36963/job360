@@ -158,10 +158,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # needed to check out the repo so ./.github/actions/slack resolves
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
+      # A local composite action is just files in the repo — without a checkout
+      # `uses: ./.github/actions/slack` cannot resolve and the step errors.
+      - uses: actions/checkout@v7
+
       - name: Open, update or close the tracking issue
+        id: raise
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -180,6 +186,14 @@ jobs:
             if [ -z "$num" ]; then
               new=$(gh issue create --title "$title" --body-file notify-body.md)
               n="${new##*/}"
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
+              # THE VOLUME RULE, in the one place it can be enforced cheaply.
+              # This check ran 15 times in the measurement window and failed all
+              # 15 (gh run list, 2026-08-13..17). Announcing every failure would
+              # be 29.0 Slack messages a week saying the identical thing. So
+              # `announce` is written ONLY on the green->red edge; the `else`
+              # branch below stays silent in Slack on purpose.
+              echo "announce=broken" >> "$GITHUB_OUTPUT"
               # HAND IT TO TRIAGE EXPLICITLY. Until 2026-08-03 this loop opened
               # the issue and stopped — and because an issue created with
               # GITHUB_TOKEN raises no `issues` run (GitHub blocks that
@@ -198,4 +212,63 @@ jobs:
           elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK ────────────────────────────────────────────────────────────
+      # production-incidents is the strictest channel in the routing table
+      # (.github/actions/slack/action.yml). This earns it: the walk logs into
+      # the real site as a real user, so a failure means a person hitting
+      # job360.uk right now is having the broken experience.
+      - name: Slack — the live site is broken for a real user
+        if: steps.raise.outputs.announce == 'broken'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "job360: the synthetic user walk is FAILING on the live site"
+          body: |
+            A scripted real user could not complete the walk against production.
+            This is the live site, not CI.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE. Every gate above reads an output that the `raise`
+      # step only writes if it REACHES that line. A gh 403 or a rate limit kills
+      # the step, no output exists, every branch skips, and the outage goes
+      # unannounced — the "alarm rang into an empty room" bug this repo has hit
+      # four times. So if the messenger broke, say THAT.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "synthetic-live: the ALARM step failed — a breakage may be unreported"
+          body: |
+            The notify job could not open/close its tracking issue, so the normal
+            alert did not run. This message means the MESSENGER broke, not that
+            the site is fine. Check the run by hand.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # `always()` is load-bearing, not decoration: without it GitHub wraps this
+      # gate in an implicit `success()`, so the incident alert above failing
+      # (rate-limit, rotated token) would silently skip this one too — one broken
+      # alert taking a second, unrelated alert down with it. That exact hazard is
+      # what scripts/check_alert_paths.py exists to catch.
+      - name: Slack — recovered
+        if: always() && steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "synthetic-live: back to green"
+          body: |
+            The synthetic user walk passes again and issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
