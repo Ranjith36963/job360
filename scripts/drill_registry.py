@@ -109,29 +109,70 @@ REGISTRY: dict[str, Guard] = {
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
     ),
-    "scripts/encoding_guard.py": Guard(
-        status="drilled",
-        # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
-        # machine's locale, so an em-dash in a PR title killed the reader thread
-        # and the cage stopped answering instead of refusing. 36 more instances
-        # were live across 18 files. Ratcheted by file+count, never by line
-        # number -- a line-number baseline rots on the next import and gets
-        # switched off.
-        drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
-    ),
+    # ── FOUR GUARDS THAT ARRIVED WITH THE CAGE (#348) ────────────────────────
+    # It was six. Two came out again, and finding out why was the whole point.
+    # `discover()` read `.github/merge-policy.yml` as if it RAN the scripts it
+    # names -- but that file is a LIST, and it names scripts precisely because
+    # they are sensitive. So `lane.py` and `data_only.py` looked invoked, got
+    # declared, and the registry certified two guards that NOTHING RUNS.
+    # With the policy file excluded they surface as STALE ENTRY, which is true:
+    # lane.py has no consumer until PR #356 wires it into pr-advisor.yml, and
+    # data_only.py is imported by merge_cage rather than run by a workflow.
+    # Whoever wires either one adds its entry back, with a drill.
+    # Written against the OLD main. #348 landed pr-advisor.yml, revert-main.yml,
+    # post-merge-watch.yml and merge-policy.yml, each invoking a script this file
+    # had never heard of.
+    #
+    # Found by the `--count-owed` validation added in this same PR: unvalidated,
+    # the count is accepted on exit 0, so this PR would have merged a ratchet
+    # reading that silently ignored six guards. A loud stop beat a quiet lie.
+    #
+    # All six are `drilled` -- each --drill asserts real cases and was run under
+    # CI conditions. NOT claimed: that they fail under MUTATION (issue #359).
     "scripts/merge_cage.py": Guard(
         status="drilled",
-        # Decides what reaches real users without the owner. Refuses a scoring
-        # change, an auth change, an infra change, an edit to its own guards, an
-        # unrecognised path, and a ratchet going backwards -- plus a negative
-        # control. Network-free, so it runs in CI like any other check.
+        # Decides what may reach production without the owner. Its drill refuses a
+        # scoring change, an auth change, an infra change, an edit to its own
+        # guards, an unrecognised path, and a ratchet going backwards.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
     ),
-    "scripts/drill_registry.py": Guard(
+    "scripts/gate_wiring_check.py": Guard(
         status="drilled",
-        # This file drills itself. A registry that cannot fail is the eleventh
-        # guard, and it would be the worst one — it would certify the other ten.
-        drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
+        # Checks the cage is wired somewhere it could actually stop something.
+        # Watched red this session on a real judging call with no --baseline.
+        drill=[sys.executable, "scripts/gate_wiring_check.py", "--drill"],
+    ),
+    "scripts/rollback_gear.py": Guard(
+        status="drilled",
+        # THE UNDO. The product lane's speed is borrowed against this working:
+        # "speed comes from being able to UNDO, not from being sure."
+        drill=[sys.executable, "scripts/rollback_gear.py", "--drill"],
+    ),
+    "scripts/revert_gear.py": Guard(
+        status="drilled",
+        # The other undo -- what revert-main.yml runs to take main back.
+        drill=[sys.executable, "scripts/revert_gear.py", "--drill"],
+    ),
+    # ── THE TWO GUARDS THIS PR WIRES UP ──────────────────────────────────────
+    # A guard and its declaration land together, always. #357 removed both of
+    # these as STALE ENTRY because nothing ran them; this PR is what gives them a
+    # consumer, so this PR is what declares them. Splitting those two acts is how
+    # a workflow ends up invoking a script no registry knows about -- which
+    # `--count-owed` then refuses, which stops the ratchet, which stops the cage.
+    # Verified before declaring: both drills exit 0 with GIT_CONFIG_GLOBAL and
+    # GIT_CONFIG_SYSTEM set to /dev/null, i.e. on a runner with no git identity.
+    "scripts/lane.py": Guard(
+        status="drilled",
+        # Turns a path into a lane. Watched RED repeatedly this session --
+        # restoring the basename fallback, un-protecting the undo gears, and
+        # adding the tempting `**/README.md` one-liner all turn it red.
+        drill=[sys.executable, "scripts/lane.py", "--drill"],
+    ),
+    "scripts/stale_path_check.py": Guard(
+        status="drilled",
+        # Asks git which paths a change renamed and fails if any tracked file
+        # still names an old one. The guard that makes a file MOVE safe.
+        drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
     ),
     "scripts/worktree_census.py": Guard(
         status="drilled",
@@ -151,6 +192,22 @@ REGISTRY: dict[str, Guard] = {
         # pointing this step at the checkout would census one clean worktree and
         # one branch, report all-green, and be the eleventh dead guard.
         drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
+    ),
+    "scripts/encoding_guard.py": Guard(
+        status="drilled",
+        # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
+        # machine's locale, so an em-dash in a PR title killed the reader thread
+        # and the cage stopped answering instead of refusing. 36 more instances
+        # were live across 18 files. Ratcheted by file+count, never by line
+        # number -- a line-number baseline rots on the next import and gets
+        # switched off.
+        drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
+    ),
+    "scripts/drill_registry.py": Guard(
+        status="drilled",
+        # This file drills itself. A registry that cannot fail is the eleventh
+        # guard, and it would be the worst one — it would certify the other ten.
+        drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
     ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/absence_check.py": Guard(
@@ -264,6 +321,16 @@ def discover(github_dir: Path) -> dict[str, set[str]]:
         return found
     files = sorted(github_dir.rglob("*.yml")) + sorted(github_dir.rglob("*.yaml"))
     for wf in files:
+        # NAMING A SCRIPT IS NOT RUNNING IT -- and `.github/merge-policy.yml` is a
+        # LIST of paths, not a runner. It names scripts precisely BECAUSE they are
+        # sensitive (`harness_owner` exists to say "a machine may not merge these"),
+        # so every path added there was read here as a new undeclared guard. Adding
+        # six protections to the policy therefore broke the registry, which broke
+        # the ratchet, which stopped the cage. The policy has no `run:` and cannot
+        # execute anything. (Third instance today of naming-vs-running: see also
+        # `_invokes_cage` in gate_wiring_check.py.)
+        if wf.name == "merge-policy.yml":
+            continue
         text = wf.read_text(encoding="utf-8", errors="replace")
         for m in _SCRIPT_REF.finditer(text):
             found.setdefault(m.group(1), set()).add(wf.relative_to(github_dir).as_posix())
@@ -451,7 +518,12 @@ def self_drill() -> int:
             encoding="utf-8",
         )
         f = new_findings(REGISTRY)
-        results.append(("NEGATIVE CONTROL (workflow running an already-registered guard)", not f,
+        # The fixture above runs `echo hello`, not a guard -- so what this proves
+        # is that a workflow invoking NO script produces no findings. The old
+        # name claimed it ran an already-registered guard, which would be a
+        # different and stronger control. Named for what it actually does.
+        # (CodeRabbit, PR #336.)
+        results.append(("NEGATIVE CONTROL (workflow that invokes no script at all)", not f,
                         "" if not f else f"expected silence, got: {f[0][:120]}"))
         wf.unlink()
 
@@ -501,6 +573,21 @@ def main(argv: list[str] | None = None) -> int:
         # literal 999 when the regex missed -- a sentinel no real value can ever
         # exceed, so a DELETED guard produced an un-regressable baseline. A
         # ratchet input either prints a number it measured or exits non-zero.
+        #
+        # VALIDATE BEFORE COUNTING. The ratchet in merge_cage.py accepts this
+        # number whenever the command exits 0, so counting an unvalidated
+        # REGISTRY lets malformed entries -- a guard naming a drill that does not
+        # exist, a bad status string -- produce a confident, wrong, ACCEPTED
+        # number. Exiting non-zero here is the whole contract: the ratchet then
+        # reads "could not measure", which blocks, instead of a false low count,
+        # which merges. (CodeRabbit, PR #336.)
+        problems = check(ROOT, REGISTRY)
+        if problems:
+            print("cannot count owed drills -- the registry itself is malformed:",
+                  file=sys.stderr)
+            for pr_ in problems:
+                print(f"  * {pr_}", file=sys.stderr)
+            return 1
         print(sum(1 for g in REGISTRY.values() if g.status == "owed"))
         return 0
 

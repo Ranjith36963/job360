@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Per-User AI CV & Cover Letter E2E smoke (docs/peruser_cv_coverletter.md §3.5).
+ * Per-User AI CV & Cover Letter E2E smoke (docs/product/peruser_cv_coverletter.md §3.5).
  * Fakes the session cookie and mocks every `/api/tailor/**` call — checks that
  * the job page's "Tailor my CV" button opens the panel, shows the generated
  * CV + cover letter, lets you edit + save, and offers a PDF download.

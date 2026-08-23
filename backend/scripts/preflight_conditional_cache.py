@@ -28,23 +28,12 @@ import httpx
 
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator) +preflight-conditional-cache"
 
+# jobs_ac_uk / biospace / nhs_jobs_xml were dropped from this list on
+# 2026-08-10 along with their sources — all three upstreams are dead.
 CANDIDATES: list[dict] = [
-    {
-        "name": "jobs_ac_uk",
-        "url": "https://www.jobs.ac.uk/feeds/subject-areas/computer-sciences",
-    },
-    {
-        "name": "biospace",
-        "url": "https://www.biospace.com/rss/jobs/data-science",
-    },
     {
         "name": "weworkremotely",
         "url": "https://weworkremotely.com/remote-jobs.rss",
-    },
-    # Fallbacks
-    {
-        "name": "nhs_jobs_xml",
-        "url": "https://www.jobs.nhs.uk/api/v1/feed/all_current_vacancies.xml",
     },
     {
         "name": "realworkfromanywhere",

@@ -52,7 +52,7 @@ Also skip `ae6ada0` (test patch for the Stage-1/2 merge) and `e5432d7` (import c
 
 ## Files that will change
 
-All under `backend/`: `src/api/routes/profile.py`, `src/core/settings.py`, `src/services/profile/{cv_parser,dep_file_parser,github_enricher,linkedin_parser,llm_provider,preferences,schemas,skill_tiering,two_pass}.py`, the 11 test files listed above + new `tests/test_cv_prompt_steering.py`, plus `docs/PILLAR1_DEEP_DIAGNOSIS.md` and `docs/PILLAR1_EXTRACTION_AUDIT.md`.
+All under `backend/`: `src/api/routes/profile.py`, `src/core/settings.py`, `src/services/profile/{cv_parser,dep_file_parser,github_enricher,linkedin_parser,llm_provider,preferences,schemas,skill_tiering,two_pass}.py`, the 11 test files listed above + new `tests/test_cv_prompt_steering.py`, plus `docs/product/PILLAR1_DEEP_DIAGNOSIS.md` and `docs/product/PILLAR1_EXTRACTION_AUDIT.md`.
 
 ---
 

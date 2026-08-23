@@ -1,0 +1,156 @@
+name: Reverse gear (build the revert — a human merges it)
+
+# THERE WAS NO REVERSE GEAR AT ALL. Grepping every file under .github/workflows/
+# and scripts/ for revert|rollback|redeploy found only: repair.yml reverting an
+# AGENT'S OWN TEST EDITS, migration_roundtrip.sh reverting migrations in a
+# throwaway database, and psycopg's conn.rollback(). Nothing takes production
+# back to the previous commit.
+#
+# Merge -> live is 2m14s forward (PR #337: merged 15:16:24, users live 15:18:38)
+# and undefined backward. Every argument about gates is downstream of that.
+#
+# WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT
+# It BUILDS the revert and opens a PR. It does not push to `main`, and there is
+# no input that makes it. Two reasons, and the second is the load-bearing one:
+#   1. An auto-revert fired by a flaky detector is a second outage on top of the
+#      first, and this repo's semantic detectors are 6-hourly and daily.
+#   2. A push to `main` made with GITHUB_TOKEN triggers NO push-event workflows
+#      (GitHub's anti-recursion rule — dependabot-auto.yml already documents
+#      relying on the opposite). So a revert pushed BY a workflow may land with
+#      no CI at all, and once Railway's "Wait for CI" is enabled it may leave the
+#      deploy hanging in WAITING or SKIPPED — exactly when you need it most.
+#      Until somebody tests that on a throwaway service, a workflow must not be
+#      the thing that pushes an emergency revert.
+#
+# THE FAST GEAR IS NOT THIS ONE. For an actual outage, use Railway's dashboard
+# Rollback: it restores the previous successful deployment's image AND its
+# variables with no rebuild, in seconds. It is dashboard-only (the CLI has
+# redeploy/restart/down and no rollback verb), so it cannot be automated and
+# should not be. Runbook: STATUS.md. This workflow is what reconciles `main`
+# with production AFTERWARDS, because a dashboard rollback leaves the two
+# disagreeing and that will silently bite the next merge.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "MERGE commit to revert (blank = the newest merge on main)"
+        required: false
+      dry_run:
+        description: "Build it in a throwaway clone and throw it away (no PR)"
+        type: boolean
+        default: true
+  # THE MONTHLY DRILL. A reverse gear nobody has ever pulled is a claim, not a
+  # capability — and the failure that actually bites is a revert that CONFLICTS,
+  # i.e. a revert you do not have, discovered during an outage. This rehearses it
+  # while nothing is on fire. It never touches main.
+  schedule:
+    - cron: "0 6 1 * *"
+
+concurrency:
+  group: revert-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build-the-revert:
+    name: Build the revert (never pushes main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # NEGATIVE CONTROL AND FIRE TEST IN ONE. The gear is drilled against a real
+      # throwaway repository: a non-merge SHA must be refused LOUDLY (git revert
+      # -m 1 would otherwise do something plausible and wrong), a conflicting
+      # revert must be reported as "you do not have this revert", and `main` must
+      # be untouched after every one of them.
+      - name: The reverse gear still refuses a bad SHA
+        run: python scripts/revert_gear.py --drill
+
+      - name: Which merge
+        id: pick
+        env:
+          GIVEN: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          sha="${GIVEN:-}"
+          if [ -z "$sha" ]; then
+            sha=$(git log --merges --first-parent -n 1 --pretty=%H main)
+          fi
+          if [ -z "$sha" ]; then
+            echo "::error::no merge commit found on main — nothing to revert."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "subject=$(git log -1 --pretty=%s "$sha")" >> "$GITHUB_OUTPUT"
+
+      # The scheduled run is ALWAYS a dry run, whatever anyone typed. A cron that
+      # can open PRs is a cron that will open one at 06:00 on the first of the
+      # month for no reason.
+      - name: Rehearse it (dry run)
+        if: github.event_name == 'schedule' || inputs.dry_run
+        run: |
+          set -euo pipefail
+          python scripts/revert_gear.py --sha "${{ steps.pick.outputs.sha }}" --dry-run
+          {
+            echo "### Reverse gear rehearsal"
+            echo
+            echo "Newest merge on main: \`${{ steps.pick.outputs.sha }}\`"
+            echo "> ${{ steps.pick.outputs.subject }}"
+            echo
+            echo "The revert was built in a throwaway clone and discarded."
+            echo "\`main\` was not touched."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build it for real and open a PR
+        if: github.event_name != 'schedule' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.pick.outputs.sha }}
+        run: |
+          set -euo pipefail
+          branch="revert/${SHA:0:12}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python scripts/revert_gear.py --sha "$SHA" --branch "$branch"
+          git push origin "HEAD:$branch"
+          gh pr create --base main --head "$branch" \
+            --title "revert: back out ${SHA:0:12}" \
+            --body "$(printf 'Reverts \`%s\`.\n\n> %s\n\n**This PR is the reverse gear. It was built by a workflow and it merges nothing** — a human decides.\n\nIf production is broken RIGHT NOW, do not wait for this: use Railway'"'"'s dashboard Rollback (previous image + variables restored, no rebuild, seconds). This PR is what puts `main` back in agreement with production afterwards.' \
+              "$SHA" "${{ steps.pick.outputs.subject }}")"
+          echo "opened a revert PR on $branch" >> "$GITHUB_STEP_SUMMARY"
+
+      # A rehearsal nobody hears about is a rehearsal that did not happen — and a
+      # FAILED rehearsal is the single most important thing this workflow can
+      # ever say, because it means the revert does not apply.
+      - name: Say so if the rehearsal failed
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_BOT_TOKEN:-}" ]; then
+            echo "::error::no SLACK_BOT_TOKEN — nobody can be told the reverse gear is broken."
+            exit 1
+          fi
+          text=":rotating_light: *The reverse gear could not build a revert of the newest merge on main.*
+          That means there is currently NO tested way back. Railway's dashboard Rollback is
+          the only remaining path until this is fixed. ${RUN_URL}"
+          resp=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data "$(jq -nc --arg c production-incidents --arg t "$text" '{channel:$c,text:$t}')")
+          echo "$resp" | jq -e '.ok == true' >/dev/null || {
+            echo "::error::Slack refused: $(echo "$resp" | jq -r '.error')"; exit 1; }

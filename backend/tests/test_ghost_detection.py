@@ -1,6 +1,6 @@
 """Tests for the ghost-listing state machine (Pillar 3 Batch 1).
 
-See docs/research/pillar_3_batch_1.md §3 "Ghost detection state machine".
+See docs/product/research/pillar_3_batch_1.md §3 "Ghost detection state machine".
 """
 import asyncio
 

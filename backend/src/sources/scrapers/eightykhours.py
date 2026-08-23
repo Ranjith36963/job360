@@ -23,7 +23,7 @@ class EightyKHoursSource(BaseJobSource):
     # S7 fix: without an override this inherited the base class's
     # {"general"} default, so it fired for every user regardless of
     # domain (a nurse/professor search got AI-safety/EA noise injected).
-    # See docs/FABLE_FINDINGS.md.
+    # See docs/harness/FABLE_FINDINGS.md.
     DOMAINS = {"tech"}
 
     async def fetch_jobs(self) -> list[Job]:

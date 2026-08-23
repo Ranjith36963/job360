@@ -167,21 +167,15 @@ jobs:
       - name: That guard can still fail
         run: python scripts/encoding_guard.py --drill
 
-      - name: The merge cage still refuses
-        run: python scripts/merge_cage.py --drill
-
-      # The broom that sorts 62 worktrees / 209 local branches into SAFE / KEEP /
-      # ASK. Its danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE
-      # costs the owner work he never saved. 14 worktrees sit on branches ALREADY
-      # MERGED while still holding uncommitted files, so the obvious
-      # "merged => junk" rule deletes 14 folders of real work.
+      # The broom that sorts worktrees and local branches into SAFE / KEEP / ASK.
+      # Its danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE costs the
+      # owner work he never saved.
       #
-      # ⚠️ ONLY `--drill` MAY RUN HERE. The drill builds its own git repo in a
-      # temp dir, so it is portable and network-free. The CENSUS reads D:\ and a
-      # cloud runner cannot see D:\ — pointing this step at the checkout would
-      # census one clean worktree and one branch, report all-green, and become
-      # the eleventh guard that cannot fire. The census is a LOCAL command; see
-      # the RUNNING IT section in scripts/worktree_census.py.
+      # ONLY `--drill` MAY RUN HERE. The drill builds its own git repo in a temp
+      # dir, so it is portable and network-free. The CENSUS reads the owner's
+      # local disk, which a cloud runner cannot see -- pointing this step at the
+      # checkout would census one clean worktree, report all-green, and become
+      # another guard that cannot fire.
       - name: The broom still refuses to sweep up unsaved work
         run: python scripts/worktree_census.py --drill
 

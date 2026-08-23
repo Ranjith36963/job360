@@ -72,7 +72,6 @@ import argparse
 import hashlib
 import json
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone

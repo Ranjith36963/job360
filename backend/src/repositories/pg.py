@@ -528,7 +528,25 @@ async def _open_raw(schema: str) -> psycopg.AsyncConnection[Row]:
                 # creator (Postgres races on the pg_namespace unique index).
                 # The schema now exists — that's all we needed.
                 pass
-            await cur.execute(f'SET search_path TO "{schema}", public')
+            # The search_path is the per-test schema and NOTHING else. It used to
+            # end in ", public", which quietly defeated the isolation it exists to
+            # provide: Postgres resolves an unqualified table by WALKING the path,
+            # so any name missing from the test schema bound to the real ``public``
+            # catalog instead of erroring. A test pointed at a db_path that has no
+            # tables then read live rows (measured: 6047) and believed they were
+            # its own. SELECT is the benign case — the same resolution applies to
+            # DELETE, which is why database.py:700 and pg_vector_index.py already
+            # hand-defend with current_schema().
+            #
+            # Test-mode only: schema_for_path() returns "public" when TEST_MODE is
+            # False, so the enclosing `if schema != "public"` never fires in
+            # production and production has no second schema to fall back FROM.
+            #
+            # Anything genuinely shared must be schema-qualified explicitly, as
+            # migration 0027 and pg_vector_index.py already do for public.vector /
+            # public.cosine_distance. pg_catalog stays implicitly on the path, so
+            # built-ins and plpgsql are unaffected.
+            await cur.execute(f'SET search_path TO "{schema}"')
     return conn
 
 

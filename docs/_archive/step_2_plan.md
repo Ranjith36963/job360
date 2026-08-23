@@ -12,7 +12,7 @@
 
 **Why this change is being made.** Step 1 + Step 1.5 closed the engine→API seam. The backend now persists 9 score-dim fields, 5 date-model fields, ~13 enrichment fields, profile versions, ESCO-normalised skills, JSON Resume exports, and 3 new S3-MVP endpoints. The frontend uses **almost none of it.** Two parallel audit waves (6 + 8 = 14 sub-agent explorations) on `main @ step-1-5-green` surfaced **the backend has lapped the frontend by ~40 distinct features** spread across 8 surfaces (types, ScoreRadar, FilterPanel, JobCard, JobDetail, Profile, Pipeline, Auth).
 
-**What prompted it.** Following the "seams before surfaces" doctrine from `docs/ExecutionOrder.md`: Step 0 unblocked onboarding, Step 1 wired engine→API, Step 1.5 closed the bombshell + S3-MVP. Step 2 is the first batch where **value becomes visible to the end user.** Without it, the Pipeline page is empty (clicking "Apply" doesn't sync), the radar shows the legacy 4 dims (not the new 7), enrichment fields exist in the JSON but render nowhere, profile versions silently accumulate with no UI to browse them, and `?mode=hybrid` has no toggle to invoke it.
+**What prompted it.** Following the "seams before surfaces" doctrine from `docs/harness/ExecutionOrder.md`: Step 0 unblocked onboarding, Step 1 wired engine→API, Step 1.5 closed the bombshell + S3-MVP. Step 2 is the first batch where **value becomes visible to the end user.** Without it, the Pipeline page is empty (clicking "Apply" doesn't sync), the radar shows the legacy 4 dims (not the new 7), enrichment fields exist in the JSON but render nowhere, profile versions silently accumulate with no UI to browse them, and `?mode=hybrid` has no toggle to invoke it.
 
 **Intended outcome.** After Step 2 completes:
 - Every component that consumes `JobResponse` reads the new fields (seniority, salary structured, visa enum, workplace enum, employment_type, required_skills, title_canonical, industry, date-model)
@@ -198,7 +198,7 @@ Depends on cohorts A+B+C+D.
 |---|---|---|---|
 | Agent-E2E-Smokes | F3 (final tests) | `frontend/tests/e2e/auth-flow.spec.ts`, `frontend/tests/e2e/job-render.spec.ts` (value-presence: dim ≠ 0 AND enrichment ≠ empty), `frontend/tests/e2e/profile-version-restore.spec.ts`, `frontend/tests/e2e/pipeline-advance.spec.ts`, `frontend/tests/e2e/share-preview.spec.ts` (assert og:title + JSON-LD) | `superpowers:test-driven-development` + `superpowers:verification-before-completion` |
 | Agent-Code-Reviewer | meta — independent diff review | (read-only sweep of cohorts A–D diff) | `feature-dev:code-reviewer` (subagent_type) |
-| Agent-Docs | — | `CLAUDE.md` (add rule #22 — pinned Next.js 16 docs reference), `docs/IMPLEMENTATION_LOG.md` (Step 2 entry with blocker closure table + test delta), `docs/step_2_plan.md` (mirror of executed plan) | `/sync` |
+| Agent-Docs | — | `CLAUDE.md` (add rule #22 — pinned Next.js 16 docs reference), `docs/harness/IMPLEMENTATION_LOG.md` (Step 2 entry with blocker closure table + test delta), `docs/step_2_plan.md` (mirror of executed plan) | `/sync` |
 
 **Gate before STEP-2-GREEN:** `make verify-step-2` exits 0; Playwright value-presence smoke green; reviewer has no P0/P1 issues open; sentinel written.
 
@@ -332,7 +332,7 @@ Each arrow is a hard dependency. **Cohort A is sequential** because each agent's
 | `frontend/src/app/robots.ts` | new — allow all + sitemap pointer | Next.js robots docs |
 | `Makefile` | add `verify-step-2` target | mirror existing `verify-step-1-5` target |
 | `CLAUDE.md` | add rule #22: "Frontend code MUST consult Context7 for Next.js 16 / React 19 / Tailwind 4 patterns before editing — `frontend/AGENTS.md` directive" | mirror existing rule format |
-| `docs/IMPLEMENTATION_LOG.md` | Step 2 entry with blocker closure table + test delta + final SHA + tag | mirror Step 1.5 entry |
+| `docs/harness/IMPLEMENTATION_LOG.md` | Step 2 entry with blocker closure table + test delta + final SHA + tag | mirror Step 1.5 entry |
 
 ---
 
@@ -435,7 +435,7 @@ git commit -m "chore(step-2): write sentinel at green commit"
 11. Anonymous visit to `/dashboard` → 307 to `/login?next=/dashboard` (middleware works)
 12. Hit `POST /search` 4 times rapidly → 4th run shows sonner toast "rate limit — please wait"
 13. Toggle theme button → app switches to light mode (or remains dark by default with toggle visible)
-14. `docs/IMPLEMENTATION_LOG.md` has a completed "Step 2 — API→UI Seam" entry with test delta + blocker closure table
+14. `docs/harness/IMPLEMENTATION_LOG.md` has a completed "Step 2 — API→UI Seam" entry with test delta + blocker closure table
 
 ---
 

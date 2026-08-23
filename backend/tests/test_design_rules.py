@@ -1,6 +1,6 @@
 """Product design rule #29: filled shelves work harder; empty shelves stay SILENT.
 
-Owner rule (2026-08-07, docs/product_design_rules.md). Like Indeed/LinkedIn:
+Owner rule (2026-08-07, docs/product/product_design_rules.md). Like Indeed/LinkedIn:
 match on what the user filled; an empty preference means "don't care" — never
 a penalty, never a per-job zero, never a guess.
 

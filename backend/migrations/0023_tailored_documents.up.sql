@@ -1,4 +1,4 @@
--- 0023 — Per-User AI CV & Cover Letter (docs/peruser_cv_coverletter.md)
+-- 0023 — Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
 --
 -- Three tables:
 --   tailored_documents  — the generated CV / cover letter per (user, job, kind),

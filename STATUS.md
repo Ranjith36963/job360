@@ -3,7 +3,7 @@
 
 ## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
-> **Freshest history:** `docs/IMPLEMENTATION_LOG.md` § "2026-08-05 — The funnel batch"
+> **Freshest history:** `docs/harness/IMPLEMENTATION_LOG.md` § "2026-08-05 — The funnel batch"
 > (PRs #224/#226/#227/#228/#229): bounded per-user candidate set (top-800), revived
 > title ranking (Spearman −0.04→+0.29 vs LLM oracle), job text for ~65% of the
 > catalog, user-feedback loop + learned preferences v1/v2, self-healing enrichment
@@ -26,7 +26,7 @@
 > `about_me_inferred_skills`) store raw inputs so both passes re-run from storage on
 > any profile change (`two_pass.reextract_and_rescore`) → new profile version → feed
 > re-score. No DB migration (JSON-blob storage). M2 / LLM judge untouched. See
-> `docs/IMPLEMENTATION_LOG.md` for the full entry.
+> `docs/harness/IMPLEMENTATION_LOG.md` for the full entry.
 
 > **✅ MERGED to main (channels & notifications overhaul, 2026-06-20):** fully
 > shipped and in sync on `origin/main`. Notifications collapsed to ONE rule per user
@@ -40,7 +40,7 @@
 > fixed to server-side; Account/Channels error messages cleaned. Verified end-to-end
 > in a real browser (Playwright manual-tester pass — every button/feature/state).
 > Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
-> Full detail in `docs/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
+> Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
 **Last updated:** 2026-06-20

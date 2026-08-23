@@ -265,11 +265,11 @@ BLOCKERS: list[Blocker] = [
         id="B12",
         met="2026-08-16",
         what="`docs/*` and `*.md` were allowed wholesale, so "
-        "docs/product_design_rules.md — the canonical text of owner rules #29/#30/#31, "
+        "docs/product/product_design_rules.md — the canonical text of owner rules #29/#30/#31, "
         "which CLAUDE.md names as the authority — could ship unsupervised, while "
         "CLAUDE.md itself was correctly denied. The rule delegated; the delegation was "
         "not protected.",
-        repro="check_paths(['docs/product_design_rules.md'])   -> [] (allowed)",
+        repro="check_paths(['docs/product/product_design_rules.md'])   -> [] (allowed)",
         rule="IF A DENIED FILE DELEGATES ITS AUTHORITY TO ANOTHER FILE, THAT FILE "
         "INHERITS THE DENIAL. The documents that ARE decisions are denied by name.",
         drill="a document that is itself a product decision is refused",
@@ -353,7 +353,169 @@ BLOCKERS: list[Blocker] = [
         "three had to be rewritten before they caught anything. Corollary now enforced: "
         "assert on the REASON a check gave, never on the COUNT of reasons; a refusal for "
         "the wrong reason is a guard that has already stopped knowing what it protects.",
-        drill="an exception nobody anticipated becomes a REFUSE, not a traceback",
+        # B17 RECORDS THREE DEFECTS AND NAMED A DRILL COVERING ONE. The named
+        # drill guarded only the deleted catch-all, so reverting the nested-deny
+        # case to COUNTING refusals -- the defect the `rule` field above actually
+        # states -- left this entry green. Every other entry here names the drill
+        # that DIES WITH ITS FIX; this one did not, which is the same "guard that
+        # cannot go red" this whole file exists to record.
+        # (CodeRabbit on PR #336, ported: that copy of the file is being dropped.)
+        drill="a nested file under a recursive deny is still refused, and for the right reason",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B18",
+        met="2026-08-17",
+        what="THE CAGE COULD NOT SAY YES, AND 44 DRILLS DID NOT NOTICE. Every drill proved "
+        "a refusal; not one proved an ALLOW was reachable. In production it was not: "
+        "auto-merge.yml:114 ran `merge_cage.py \"$pr\" --slack $merge_flag` with no "
+        "`--baseline`, `check_ratchets(None)` returns `not_checked`, and `not_checked` "
+        "blocks — so 100% of PRs were refused for a reason about the WIRING, identically, "
+        "regardless of the PR. auto-merge.yml:53 also checked out `ref: main`, which "
+        "ground_problem then refuses as the wrong tree for a tree-scoped ratchet, so the "
+        "lane had two independent reasons to never say yes.",
+        repro="python scripts/merge_cage.py 342 ; python scripts/merge_cage.py 343 ; "
+        "python scripts/merge_cage.py 346   # all three: 'no baseline was given, so no "
+        "number was compared to anything'",
+        rule="A GATE THAT CANNOT SAY YES IS THE SAME DEFECT CLASS AS A GUARD THAT CANNOT "
+        "SAY NO, and it is worse in one way: it gets switched off, and then it protects "
+        "nothing. Every cage must carry a drill proving its PASS is reachable end to end, "
+        "not only that its FAIL fires. The wiring itself is now guarded by "
+        "scripts/gate_wiring_check.py rules G1 and G4, so forgetting the baseline is a red "
+        "build rather than a silent constant refusal.",
+        drill="ALLOW IS REACHABLE (a perfect docs PR with a baseline is allowed end to end)",
+        severity="too-strict",
+    ),
+    Blocker(
+        id="B19",
+        met="2026-08-17",
+        what="REQUIRED_CHECKS WAS NOT BASE-AWARE, so every stacked PR was refused for a "
+        "check that structurally cannot fire there. codeql.yml declares "
+        "`pull_request: branches: [\"main\"]`, so a PR based on a feature branch never "
+        "produces a `CodeQL` run at all — measured on #343/#344/#345/#346, all four "
+        "missing it. Then the first fix introduced the mirror-image bug: the guard read "
+        "`if base_ref and base_ref != 'main'`, so an UNREADABLE base short-circuited into "
+        "the branch that judges against the full list. The permissive guess restored, on "
+        "paper, the one check that reads new security alerts from the diff.",
+        repro="decide() with a stubbed `pulls/1` returning base.ref = "
+        "'feat/every-guard-declares-its-drill', then again with base.ref absent",
+        rule="AN UNKNOWN VALUE IS NEVER THE PERMISSIVE VALUE. A check that cannot exist on "
+        "this base is named and refused, never silently dropped — dropping it would make "
+        "'branch off a feature branch' a way to stop the security question being asked.",
+        drill="a PR whose base ref could not be read is refused, not assumed to be main",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B20",
+        met="2026-08-17",
+        what="THE MERGE CAPABILITY WAS A DEFAULT, NOT AN ABSENCE. `--merge` existed and was "
+        "held off by an unset repo variable (`AUTO_MERGE_ENABLED`) — one click, in a "
+        "settings page with no diff and no review, from an agent merging to a branch that "
+        "auto-deploys to real users in 2m14s. Separately measured: replaying the cage's own "
+        "PATH+SIZE rules over merged PRs #250-338 allows 2 of 60 (3%), and both are "
+        "documentation. The lane was never worth the blast radius.",
+        repro="python scripts/merge_cage.py 1 --merge   # used to be accepted",
+        rule="DELETE THE CAPABILITY, DO NOT DEFAULT IT OFF. `--merge` is gone from this "
+        "file; the cage now only advises, and `--advise` writes a PR comment naming which "
+        "file is the decision. Anthropic's own most autonomous shipped mode still ends at a "
+        "pull request, and its auto-mode classifier names 'running production deploys' as a "
+        "blocked action. Merging here IS deploying.",
+        drill="`--merge` no longer exists: the cage cannot merge anything at all",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B21",
+        met="2026-08-17",
+        what="A RATCHET THAT DOES NOT EXIST YET READ AS A RATCHET THAT BROKE. "
+        "`measure_ratchets` answered 'a number, or None', and None meant both 'the command "
+        "blew up' and 'the command is not in this tree'. Measured: "
+        "`git ls-tree origin/main scripts/drill_registry.py` is EMPTY — the `guards never "
+        "watched failing` ratchet is not on main at all. So on every main-based PR it was "
+        "unmeasurable on BOTH sides, and an unmeasurable ratchet refuses. Round 1 of the "
+        "live run: 27 PRs judged, 0 allowed, and this was one of the two reasons on all 27.",
+        repro="python scripts/merge_cage.py 337   # after a correct two-checkout baseline: "
+        "'ratchet `guards never watched failing` could not be measured'",
+        rule="THREE ANSWERS, NOT TWO: ok / absent / error. `absent` on BOTH sides is NOT "
+        "APPLICABLE and is named in the verdict. `error` always refuses. base=ok with "
+        "head=absent — a PR deleting a ratchet — refuses. And zero comparisons is never a "
+        "pass, or the not-applicable arm becomes a way for the whole cage to evaporate.",
+        drill="a ratchet absent from BOTH base and PR is named as not-compared, "
+        "and does not block",
+        severity="too-strict",
+    ),
+    Blocker(
+        id="B22",
+        met="2026-08-17",
+        what="THE ONLY WAY TO MEASURE A PR'S OWN NUMBERS WAS TO RUN THE PR'S OWN COPY OF THE "
+        "CAGE. `repo_root()` ties ROOT to this file's checkout and every ratchet is "
+        "tree-scoped, so pr-advisor.yml had to check out `refs/pull/N/merge` at the "
+        "workspace root and run the cage from there — the thing being judged supplying the "
+        "judge. Worse, it then measured the baseline by running "
+        "`scripts/merge_cage.py --measure` inside a checkout of `main`, where THIS FILE DOES "
+        "NOT EXIST (measured: `git ls-tree origin/main scripts/merge_cage.py` is empty), so "
+        "the step could only ever fail on a main-based PR.",
+        repro="cd _base && python scripts/merge_cage.py --measure   # on a checkout of main: "
+        "can't open file 'scripts/merge_cage.py'",
+        rule="SEPARATE THE TREE THAT SUPPLIES THE RULES FROM THE TREE THAT SUPPLIES THE "
+        "NUMBERS. `--tree DIR` measures DIR while the rules stay in this file's own "
+        "checkout. A junk --tree is a usage error and a non-git --tree breaks the cage — "
+        "neither may fall back to 'here', because falling back to here is how a ratchet "
+        "compares a tree to itself.",
+        drill="a --tree that is not a git checkout breaks the cage instead of being measured",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B23",
+        met="2026-08-17",
+        what="`--replay` PRINTED AN AGREEMENT RATE IT COULD NOT COMPUTE. It looped "
+        "`decide(pr)` with no baseline; `check_ratchets(None)` returns `not_checked` and "
+        "`not_checked` blocks, so the answer was 0/N by construction, for every N, forever. "
+        "The '13 of 245 (5.3%)' figure quoted from it cannot have come from this code.",
+        repro="python scripts/merge_cage.py --replay 60   # used to print 0/60 and call it "
+        "a measurement",
+        rule="AN INSTRUMENT THAT CANNOT COMPUTE ITS ANSWER MUST REFUSE TO ANSWER. A "
+        "convincing wrong number is worse than no number. The real replay needs a checkout "
+        "per PR and lives in scripts/cage_replay.py; this flag now says so and exits USAGE.",
+        drill="--replay refuses to answer instead of printing an agreement rate "
+        "it cannot compute",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B24",
+        met="2026-08-17",
+        what="THE INSTRUMENT WAS THERE AND THE QUESTION WAS NOT. B21 probed whether a "
+        "ratchet's SCRIPT exists in the tree. `backend/scripts/mypy_ratchet.py` IS on main "
+        "— but `--count` was added by this branch, so main answers "
+        "`usage: mypy_ratchet.py [-h] [--update]` and exits 2. The file-existence probe read "
+        "a MISSING instrument as a BROKEN one, and broken always refuses. Round 2 of the "
+        "live run: 16 of 16 merged PRs refused with an argparse usage message as the "
+        "explanation, which is a reason no owner can act on.",
+        repro="git show origin/main:backend/scripts/mypy_ratchet.py | grep add_argument   "
+        "# only --update; then python scripts/cage_replay.py --merged 16",
+        rule="PROBE THE CAPABILITY, NOT THE FILE. `needs` is {file, supports}: the file must "
+        "exist AND contain the flag the ratchet is about to pass. The probe is static — "
+        "deciding a refusal by parsing an argparse usage message is a guess, and both ways "
+        "of being wrong here fail safe (a differently-spelled flag reads absent, which "
+        "refuses via 'nothing compared'; a flag that appears only in a comment runs, fails, "
+        "and refuses).",
+        drill="a script that exists but does not carry the flag reads ABSENT, not ERROR",
+        severity="too-strict",
+    ),
+    Blocker(
+        id="B25",
+        met="2026-08-17",
+        what="A FLAG THAT DID NOT EXIST WAS ACCEPTED ANYWAY. argparse abbreviates unique "
+        "prefixes by default, so `cage_replay.py --merge` was silently accepted as "
+        "`--merged`. Found by that file's own drill on its first run — the drill asserts "
+        "the runner has no merge surface, and the surface existed, spelled by accident. "
+        "merge_cage.py had the same setting and only escaped because none of its flags "
+        "happen to start with `--merge`.",
+        repro="python scripts/cage_replay.py 1 --merge   # 'argument --merged: expected one "
+        "argument', i.e. ACCEPTED as --merged rather than rejected",
+        rule="allow_abbrev=False ON EVERY PARSER IN THE MERGE PATH. On a repo where merging "
+        "is deploying, a flag that means something other than what it says is a trapdoor, "
+        "not a convenience.",
+        drill="an abbreviated flag is rejected, not silently expanded into a different mode",
         severity="too-permissive",
     ),
 ]
