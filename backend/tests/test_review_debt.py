@@ -275,27 +275,41 @@ def test_open_pr_majors_are_fix_now(findings):
 def test_an_open_pr_anchor_is_never_judged_stale(findings):
     """The bug this rule exists for, pinned against the real recording.
 
-    PR #258 is OPEN and its finding sits in
-    `backend/scripts/distribution_sanity.py` — a file that exists on #258's
-    branch and NOWHERE else: not in this checkout, not on main. The first
-    version of this reader judged anchors against whatever tree happened to be
-    checked out, so it filed a live finding as `stale-and-closeable`.
+    An OPEN PR's code lives on a branch this process never fetched, so its
+    anchor must read `unknown`. The first version of this reader judged anchors
+    against whatever tree happened to be checked out and filed a live finding as
+    `stale-and-closeable` — the dangerous direction of wrong, because it CLOSES
+    real findings. "Not checked" is not "gone".
 
-    That is the dangerous direction of wrong: it closes real findings. An open
-    PR's code is on a branch this process never fetched, and "not checked" is
-    not "gone"."""
+    THIS TEST USED TO NAME PR #258 AND `backend/scripts/distribution_sanity.py`
+    directly, with a guard asserting that file was absent from the tree. The
+    guard was right to exist and it fired exactly as designed — the moment #258
+    merged, the file appeared and the test refused rather than passing
+    vacuously, which is how it was found. But a test that encodes WHICH PR IS
+    OPEN is coupled to the merge queue, and the merge queue is the one thing
+    guaranteed to change.
+
+    So the example is now CHOSEN, not named: any finding in the recording whose
+    PR is open and whose file is genuinely absent from this checkout. Same
+    property, nothing to go stale.
+    """
     open_findings = [f for f in findings if f.pr_state == "OPEN"]
     assert open_findings
     assert all(f.anchor == "unknown" for f in open_findings)
     assert all(f.bucket != "stale-and-closeable" for f in open_findings)
 
-    pr258 = [f for f in findings if f.pr == 258]
-    assert pr258, "PR #258 is in the recording"
-    assert any("distribution_sanity" in f.path for f in pr258)
-    assert not (REPO / "backend/scripts/distribution_sanity.py").exists(), (
-        "this test is only meaningful while that file is absent from this tree"
+    # The sharpest case: an open PR whose file this checkout does not have, so
+    # "judge it against the working tree" and "leave it unknown" give visibly
+    # different answers.
+    absent = [f for f in open_findings if not (REPO / f.path).exists()]
+    assert absent, (
+        "every open-PR finding in the recording now points at a file that "
+        "EXISTS in this checkout, so this test can no longer tell "
+        "'anchored to the branch' from 'anchored to the worktree'. Re-record "
+        "scripts/fixtures/review_threads/ against a PR that is still open."
     )
-    assert all(f.bucket != "stale-and-closeable" for f in pr258)
+    assert all(f.anchor == "unknown" for f in absent)
+    assert all(f.bucket != "stale-and-closeable" for f in absent)
 
 
 def test_merged_pr_findings_are_never_fix_now(findings):
