@@ -1,32 +1,32 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
 > **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
 -----------                   -----------------------------          ------
-                          +-> Sources (46) -+                    +-> Email (Apprise per-user)
+                          +-> Sources (40) -+                    +-> Email (Apprise per-user)
 CLI / Frontend   --+      |  (async fetch)  |                    +-> Slack / Discord / Telegram
                    |      v   tiered cadence v                   +-> Webhook
 Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Markdown report
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
-                                                  Store -> SQLite catalog (jobs table)
+                                                  Store -> Postgres catalog (jobs table)
                                                   Embed (opt-in) -> ChromaDB
 ```
 
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/PILLAR1_EXTRACTION_AUDIT.md`)
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -42,14 +42,14 @@ job360/
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
 │   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
-│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
+│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (72 endpoints, all per-user routes gated)
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
-│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
+│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
@@ -126,24 +126,24 @@ else:
 
 ### 2. Source Instantiation (`main.py:_build_sources`)
 
-All 46 sources get `search_config` passed through:
+All 40 sources get `search_config` passed through:
 ```python
 ReedSource(session, api_key=REED_API_KEY, search_config=sc)
 ArbeitnowSource(session, search_config=sc)
 GreenhouseSource(session, search_config=sc)
-# ... etc for all 46
+# ... etc for all 40
 ```
 
 The `_build_sources()` function groups sources into labeled groups (A through K) and instantiates all of them. When `--source <name>` is passed, it filters to just the matching source. Special case: `--source glassdoor` maps to `JobSpySource` (same as `indeed`).
 
 ### 3. SOURCE_REGISTRY
 
-`SOURCE_REGISTRY` is a `dict[str, type]` mapping 47 source names to their classes. It serves two purposes:
+`SOURCE_REGISTRY` is a `dict[str, type]` mapping 41 source names to their classes. It serves two purposes:
 1. CLI `--source` validation — Click uses it for `click.Choice(sorted(SOURCE_REGISTRY.keys()))`
 2. `sources` command — lists all available source names
-3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 47` and checks the exact set of keys
+3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 41` and checks the exact set of keys
 
-Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 47 registry entries but 46 unique classes.
+Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 41 registry entries but 40 unique classes.
 
 ### 4. Keyword Resolution (`base.py` properties)
 
@@ -543,31 +543,33 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 
 ## Notification System
 
-### Auto-Discovery
+> ⚠️ **REMOVED — do not write against it.** The `NotificationChannel` ABC
+> (`src/services/notifications/base.py`), its auto-discovery helpers
+> (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes
+> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. The only modules
+> left under `src/services/notifications/` are `__init__.py` and `report_generator.py`.
+> Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
+> returns nothing.
+
+### The Apprise dispatcher (the real path)
+
+All delivery goes through `src/services/channels/dispatcher.py`. Channels are **per-user rows
+in the database**, not env-var-configured classes, so one user's Slack webhook is independent
+of another's.
 
 ```python
-def get_all_channels():
-    return [EmailChannel(), SlackChannel(), DiscordChannel()]
-
-def get_configured_channels():
-    return [ch for ch in get_all_channels() if ch.is_configured()]
+async def load_user_channels(db, user_id) -> list[...]   # the user's configured channels
+async def dispatch(...) -> list[ChannelSendResult]       # deliver, honouring the user's rules
+async def test_send(db, channel_id, *, user_id=None)     # one-off "does this work?" send
 ```
 
-Each channel implements:
-- `is_configured() -> bool` — checks if required env vars are set
-- `send(jobs, stats, csv_path=None)` — sends the notification
+`dispatch()` applies the single `notification_rules` row per user (rule #23): score threshold,
+timezone-aware quiet hours (stdlib `zoneinfo`), and `notify_mode`
+(`instant` | `daily` | `every_n_hours`). Anything not sent inline is queued into
+`user_notification_digests` and drained by the `notification_tick` ARQ cron.
 
-### Channel Details
-
-```
-NotificationChannel (ABC)
-├── EmailChannel      — configured if SMTP_EMAIL + SMTP_PASSWORD + NOTIFY_EMAIL set
-│   Uses: Gmail SMTP (smtp.gmail.com:587), HTML template, CSV attachment
-├── SlackChannel      — configured if SLACK_WEBHOOK_URL set
-│   Uses: Block Kit message format, top 10 jobs, webhook POST
-└── DiscordChannel    — configured if DISCORD_WEBHOOK_URL set
-    Uses: Embed message format, top 10 jobs, webhook POST
-```
+Apprise itself is **lazy-imported** inside `_get_apprise_cls()` (rules #11/#16) — it is ~30 MB
+and must never be imported at module top level.
 
 ---
 
@@ -633,7 +635,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 **Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
 
-**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a SQLite DEFAULT).
+**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
 ---
 
@@ -646,7 +648,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 > and must stay pointers-only. It replaced a shorter, staler table that listed only
 > the source API keys. Runtime source of truth is always `backend/src/core/settings.py`.
 
-- `.env` lives in the repo root (see `.env.example`). **39 of 47 sources work without any keys.**
+- `.env` lives in the repo root (see `.env.example`). **33 of 41 sources work without any keys.**
 - Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `user_profile.json`, `chroma/`.
 
 | Variable | Required | Used by |

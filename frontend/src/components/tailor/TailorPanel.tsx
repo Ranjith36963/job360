@@ -27,7 +27,7 @@ import { toast } from "@/lib/toast";
 import type { TailorBundle, TailorDocKind, TailoredDocOut } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// TailorPanel — per-user AI CV + cover letter editor (docs/peruser_cv_coverletter.md §3.5)
+// TailorPanel — per-user AI CV + cover letter editor (docs/product/peruser_cv_coverletter.md §3.5)
 //
 // Dialog with a CV / Cover Letter tab pair. Every doc is ALWAYS editable
 // (guardrail #3) — the textarea is seeded from `polished ?? ai_draft` and
