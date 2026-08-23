@@ -61,9 +61,37 @@ def _resend_api_key() -> Optional[str]:
     return key or None
 
 
+# Characters that are legal in EMAIL_RE but change how a URL PARSES. The resend
+# URL is built by string interpolation and deliberately not percent-encoded
+# (Apprise's resend parser rejects an encoded from/to pair), so anything that can
+# terminate a path segment or start a query must be refused before it gets there
+# -- otherwise Apprise routes to the wrong recipient or silently returns False.
+# EMAIL_RE only excludes whitespace and multi-@; it happily accepts `a/b@x.com`,
+# `a?x@y.com`, `a#f@y.com` and `a%40b@y.com`. Verified, all four.
+# (CodeRabbit, PR #352.)
+_URL_DELIMS = ("/", "?", "#", "%", "\\", "@")
+
+
+def _url_safe_address(addr: str) -> bool:
+    """True when `addr` can be interpolated into a URL path without reparsing it."""
+    local, _, domain = addr.rpartition("@")
+    return bool(local) and bool(domain) and not any(
+        d in local or d in domain for d in _URL_DELIMS if d != "@"
+    )
+
+
 def _from_address() -> str:
-    """Return the address this platform sends alerts from."""
-    return os.environ.get("SMTP_FROM") or os.environ.get("SMTP_EMAIL") or _FALLBACK_FROM
+    """Return the address this platform sends alerts from.
+
+    Falls back to `_FALLBACK_FROM` when the configured value is missing OR
+    unsafe to interpolate: an operator typo in SMTP_FROM used to produce a
+    malformed resend URL that Apprise rejected at delivery time, long after the
+    channel had been stored as working.
+    """
+    for candidate in (os.environ.get("SMTP_FROM"), os.environ.get("SMTP_EMAIL")):
+        if candidate and EMAIL_RE.match(candidate) and _url_safe_address(candidate):
+            return candidate
+    return _FALLBACK_FROM
 
 
 def build_email_apprise_url(dest: str) -> Optional[str]:
@@ -79,7 +107,7 @@ def build_email_apprise_url(dest: str) -> Optional[str]:
     :param dest: the recipient address.
     :raises ValueError: if ``dest`` is not a syntactically valid address.
     """
-    if not EMAIL_RE.match(dest):
+    if not EMAIL_RE.match(dest) or not _url_safe_address(dest):
         raise ValueError("enter a valid email address")
 
     api_key = _resend_api_key()
@@ -95,10 +123,20 @@ def build_email_apprise_url(dest: str) -> Optional[str]:
     if smtp_user and smtp_pass:
         from urllib.parse import quote
 
-        smtp_domain = smtp_user.split("@", 1)[1] if "@" in smtp_user else smtp_user
+        # USE THE CONFIGURED SERVER, NOT THE ADDRESS'S DOMAIN. This derived the
+        # host from SMTP_EMAIL and ignored SMTP_HOST/SMTP_PORT entirely -- while
+        # the auth mailer (email_sender.py) DOES honour them. A deployment with a
+        # relay on a different host got a channel URL pointing at the wrong
+        # server, stored as seeded, and only discovered at delivery time.
+        # (CodeRabbit, PR #352.)
+        smtp_host = os.environ.get("SMTP_HOST", "").strip() or (
+            smtp_user.split("@", 1)[1] if "@" in smtp_user else smtp_user
+        )
+        smtp_port = os.environ.get("SMTP_PORT", "").strip()
+        host_part = f"{smtp_host}:{smtp_port}" if smtp_port else smtp_host
         return (
             f"mailtos://{quote(smtp_user, safe='')}:{quote(smtp_pass, safe='')}"
-            f"@{smtp_domain}?to={quote(dest, safe='')}"
+            f"@{host_part}?to={quote(dest, safe='')}"
         )
 
     return None

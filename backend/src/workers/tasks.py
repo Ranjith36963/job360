@@ -363,15 +363,32 @@ async def send_notification(
 
         dispatcher_fn = real_dispatch
 
-    results = await dispatcher_fn(db, user_id=user_id, title=title, body=body)
+    # `job_id` and `match_score` are NOT optional decoration here. Without
+    # job_id, `dispatcher._queue_digest` returns immediately without writing a
+    # row -- so a `daily` rule produced NO digest AND no send, while the code
+    # below still counted it. (CodeRabbit, PR #352.)
+    results = await dispatcher_fn(
+        db, user_id=user_id, title=title, body=body,
+        job_id=job_id, match_score=job_row.get("match_score"),
+    )
 
     sent = 0
+    queued = 0
     failed = 0
     for result in results:
         channel_key = result.channel_type or f"channel:{result.channel_id}"
         # Ensure a ledger row exists (idempotent per UNIQUE constraint).
         await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel=channel_key)
-        if result.ok:
+        # QUEUED IS NOT SENT. `dispatch()` returns ok=True for a digest it merely
+        # enqueued, so counting `ok` alone marked a notification delivered that
+        # no user will receive until the digest drains -- and then wrote
+        # `notified_at`, which suppresses it from ever being re-notified. A
+        # notification recorded as delivered but never delivered is worse than
+        # one that failed loudly: the failure is invisible in every table that
+        # would show it. (CodeRabbit, PR #352.)
+        if result.queued_digest:
+            queued += 1
+        elif result.ok:
             await mark_ledger_sent(db, user_id=user_id, job_id=job_id, channel=channel_key)
             sent += 1
         else:
@@ -397,7 +414,7 @@ async def send_notification(
         except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
             _log.warning("mark_notified failed user=%s job=%s: %s", user_id, job_id, exc)
 
-    return {"sent": sent, "failed": failed}
+    return {"sent": sent, "queued": queued, "failed": failed}
 
 
 @_logged_task

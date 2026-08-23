@@ -51,7 +51,42 @@ logger = logging.getLogger("job360.notifications.defaults")
 # for "worth spending an LLM call on". A job good enough to judge is good
 # enough to mention. Env-overridable so the number can move with the score
 # distribution rather than rotting the way the old hardcoded 60 did.
-DEFAULT_SCORE_THRESHOLD = int(os.getenv("NOTIFY_SCORE_THRESHOLD", "30"))
+def default_score_threshold() -> int:
+    """The score at which a job is worth telling someone about. CALL TIME.
+
+    THESE FOUR WERE MODULE-LEVEL `os.getenv` CALLS, AND THE DOCSTRING ABOVE
+    CLAIMED THEY COULD BE RETUNED WITHOUT A DEPLOY. They could not: a module
+    constant is evaluated once, at import. Setting NOTIFY_SCORE_THRESHOLD after
+    the process started -- or in a test with `monkeypatch.setenv` -- changed
+    nothing at all, silently. The claim and the code disagreed, and the code won.
+    (CodeRabbit, PR #352.)
+
+    `seeding_enabled()` was already call-time for exactly this reason; these four
+    now match it.
+    """
+    return int(os.getenv("NOTIFY_SCORE_THRESHOLD", "30"))
+
+
+def default_notify_mode() -> str:
+    """'daily', never 'instant' -- see the interlock note below. CALL TIME."""
+    return os.getenv("NOTIFY_DEFAULT_MODE", "daily")
+
+
+def default_daily_send_time() -> str:
+    """Local send time for the daily bundle. CALL TIME."""
+    return os.getenv("NOTIFY_DEFAULT_SEND_TIME", "08:00")
+
+
+def default_interval_hours() -> int:
+    """Hours between sends in `every_n_hours` mode. CALL TIME."""
+    return int(os.getenv("NOTIFY_DEFAULT_INTERVAL_HOURS", "6"))
+
+
+# Back-compat aliases. Existing importers keep working; they simply get the
+# value as of import, which is what they got before. New code calls the
+# functions. Kept rather than removed so this PR does not have to touch every
+# call site to fix a docstring that lied.
+DEFAULT_SCORE_THRESHOLD = default_score_threshold()
 
 # 'daily', never 'instant'. This is the safety interlock on the whole change:
 # in 'daily' mode dispatch() gate 3 routes matches into
@@ -59,10 +94,10 @@ DEFAULT_SCORE_THRESHOLD = int(os.getenv("NOTIFY_SCORE_THRESHOLD", "30"))
 # 'instant' mails one message per job. The nightly ``refresh_catalog`` fan-out
 # is ~280 jobs per tick, so seeding 'instant' would mean up to 280 separate
 # emails per user per night the moment that path is switched on.
-DEFAULT_NOTIFY_MODE = os.getenv("NOTIFY_DEFAULT_MODE", "daily")
+DEFAULT_NOTIFY_MODE = default_notify_mode()
 
-DEFAULT_DAILY_SEND_TIME = os.getenv("NOTIFY_DEFAULT_SEND_TIME", "08:00")
-DEFAULT_INTERVAL_HOURS = int(os.getenv("NOTIFY_DEFAULT_INTERVAL_HOURS", "6"))
+DEFAULT_DAILY_SEND_TIME = default_daily_send_time()
+DEFAULT_INTERVAL_HOURS = default_interval_hours()
 
 # Shown in the channels list so the user can recognise and remove it.
 ACCOUNT_EMAIL_DISPLAY_NAME = "Your account email"
@@ -104,10 +139,10 @@ async def _insert_default_rule(db: pg.Connection, user_id: str) -> bool:
         """,
         (
             user_id,
-            DEFAULT_SCORE_THRESHOLD,
-            DEFAULT_NOTIFY_MODE,
-            DEFAULT_INTERVAL_HOURS,
-            DEFAULT_DAILY_SEND_TIME,
+            default_score_threshold(),
+            default_notify_mode(),
+            default_interval_hours(),
+            default_daily_send_time(),
             now,
             now,
         ),
@@ -132,9 +167,18 @@ async def _insert_account_email_channel(
         logger.warning("account-email channel skipped: unusable address for user=%s", user_id)
         return False
     if url is None:
-        logger.warning(
-            "account-email channel skipped for user=%s: no RESEND_API_KEY and no "
-            "SMTP_EMAIL/SMTP_PASSWORD, so nothing could deliver it",
+        # ERROR, not WARNING. When no transport can be built, the channel is
+        # never created -- but the RULE ROW still is, so `notification_rules`
+        # looks populated while delivery is impossible for EVERY user. That is
+        # a deployment-wide misconfiguration wearing the appearance of a working
+        # system: broken and empty look identical from the database, which is
+        # the precise failure #318 is about. A per-user WARNING is the wrong
+        # volume for a whole-deployment outage. (CodeRabbit, PR #352.)
+        logger.error(
+            "account-email channel NOT created for user=%s: no RESEND_API_KEY and no "
+            "SMTP_EMAIL/SMTP_PASSWORD, so NOTHING can deliver notifications to any "
+            "user. The rulebook row is still written, so this will not show up as a "
+            "missing rule -- check the worker service's environment.",
             user_id,
         )
         return False
@@ -205,8 +249,8 @@ async def seed_notification_defaults(
         logger.info(
             "seeded notification defaults user=%s mode=%s threshold=%s channel=%s",
             user_id,
-            DEFAULT_NOTIFY_MODE,
-            DEFAULT_SCORE_THRESHOLD,
+            default_notify_mode(),
+            default_score_threshold(),
             result["channel_seeded"],
         )
     return result
