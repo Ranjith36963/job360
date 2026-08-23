@@ -110,6 +110,36 @@ def migration_head() -> int:
     return max(nums)
 
 
+def scorer_version() -> int:
+    """SCORER_VERSION from backend/src/services/skill_matcher.py.
+
+    Added 2026-08-23. CLAUDE.md rule #19 stated 4 while the code had already
+    moved to 7 — a load-bearing constant that rotted through three bumps
+    because no pattern here guarded it, and the daily tripwire stayed green
+    the whole time. Same lesson as the 2026-08-03 batch: this checker only
+    ever guards what someone remembered to teach it.
+    """
+    tree = ast.parse(
+        (ROOT / "backend/src/services/skill_matcher.py").read_text(encoding="utf-8")
+    )
+    for node in tree.body:  # top level only
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "SCORER_VERSION":
+                if not isinstance(node.value, ast.Constant) or not isinstance(
+                    node.value.value, int
+                ):
+                    raise RuntimeError("SCORER_VERSION is not a plain int literal")
+                return node.value.value
+    raise RuntimeError(
+        "SCORER_VERSION not found at top level of backend/src/services/skill_matcher.py"
+    )
+
+
 def dead_links() -> list[tuple[str, str]]:
     """(doc, broken target) for every relative .md link pointing at a missing file."""
     files: list[Path] = []
@@ -272,6 +302,11 @@ def main() -> int:
         ("hard-rules", hard_rule_count(), r"the (\d+) hard rules"),
         ("route-modules", route_module_count(), r"(\d+) route modules"),
         ("endpoints", endpoint_count(), r"\((\d+) endpoints"),
+        # Added 2026-08-23. Docs said SCORER_VERSION = 4, code said 7. Every
+        # score-affecting change is supposed to bump it, so a stale claim here
+        # misleads on exactly the constant that decides whether a user's feed
+        # gets re-scored. `\*{0,2}` because the docs bold it.
+        ("scorer-version", scorer_version(), r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)"),
     ]
 
     drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
