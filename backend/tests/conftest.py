@@ -190,6 +190,77 @@ def _close_leaked_app_db():
             dependencies._db = None
 
 
+def cancel_pending_rescores(tasks) -> int:
+    """Cancel every unfinished task in `tasks`, clear it, return how many.
+
+    Split out of the fixture below so it can be TESTED. A teardown hook that
+    only ever runs as a side effect of other tests is exactly the kind of guard
+    this repo keeps finding dead — see scripts/drill_registry.py.
+
+    Each task's loop is the request loop, not this thread's, so the cancel is
+    posted with `call_soon_threadsafe` rather than called directly.
+    """
+    if not tasks:
+        return 0
+    cancelled = 0
+    for task in list(tasks):
+        if task.done():
+            continue
+        try:
+            loop = task.get_loop()
+            if loop.is_closed():
+                continue
+            loop.call_soon_threadsafe(task.cancel)
+            cancelled += 1
+        except (RuntimeError, AttributeError):
+            # Loop already stopping or closed between the check and the call,
+            # or an object that is not a task. Either way there is nothing left
+            # to cancel.
+            continue
+    tasks.clear()
+    return cancelled
+
+
+@pytest.fixture(autouse=True)
+def _drain_leaked_rescore_tasks():
+    """Stop a re-score task from outliving the test whose schema it queries.
+
+    THE FLAKE THIS FIXES (issue #369). Three gate runs on 2026-08-23 failed with
+    ``relation "users" does not exist`` / ``relation "user_profiles" does not
+    exist``, each blaming a DIFFERENT test in ``test_profile_upload.py``, each
+    passing when that file ran alone. The gate log carries the whole chain:
+
+        queue.py:67   enqueue skipped: REDIS_URL is not set, so
+                      rescore_user_feed_task cannot be queued
+        profile.py:94 rescore: background re-score FAILED, feed left on a stale
+                      profile_version: OperationalError('relation
+                      "user_profiles" does not exist')
+
+    i.e. no Redis in tests -> `_run_rescore_in_process` -> `asyncio.create_task`,
+    pinned in `_rescore_bg_tasks` and never awaited. The test ends, the per-test
+    schema is dropped, and the orphan then queries a schema that is gone. The
+    failure is attributed to WHATEVER TEST IS RUNNING NOW, which is why it looked
+    random: the blamed test is innocent.
+
+    It is a RACE, not a certainty — a task that finishes inside its own request
+    is harmless, which is why the same batch passes and fails on different runs.
+
+    The fallback itself is correct and deliberate (issue #271: losing the work is
+    worse than doing it fragilely). What was missing is that nothing collected
+    the tasks it leaves behind.
+
+    Cancelling rather than draining: the task's loop belongs to the request and
+    this synchronous teardown cannot drive it, and a full-feed re-score is not
+    work a unit test needs finished. `_rescore_finished` logs the cancellation,
+    so the tasks stay audible rather than vanishing.
+    """
+    yield
+
+    from src.api.routes import profile as _profile
+
+    cancel_pending_rescores(getattr(_profile, "_rescore_bg_tasks", None))
+
+
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking
 # into fixture-built Job objects. Tier-A #7.
 _TEST_NOW = datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc)
