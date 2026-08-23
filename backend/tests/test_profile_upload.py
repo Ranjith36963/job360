@@ -237,6 +237,17 @@ def test_rescore_scheduled_when_profile_content_changes(api, monkeypatch):
 
     monkeypatch.setattr(_asyncio, "create_task", _fake_create_task)
 
+    # Record the QUEUE path too, so the test can see either mechanism fire.
+    enqueued: list = []
+
+    async def _fake_enqueue(function_name, *args, **kwargs):
+        enqueued.append((function_name, args))
+        return True
+
+    monkeypatch.setattr(
+        "src.workers.queue.enqueue_job", _fake_enqueue, raising=False
+    )
+
     _register_and_login(api)
     minimal_pdf = b"%PDF-1.4\n%%EOF"
     r = api.post(
@@ -244,7 +255,22 @@ def test_rescore_scheduled_when_profile_content_changes(api, monkeypatch):
         files={"cv": ("cv.pdf", io.BytesIO(minimal_pdf), "application/pdf")},
     )
     assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
-    assert len(scheduled) > 0, "Expected rescore_user_feed to be scheduled via create_task"
+    # ASSERT THE CONTRACT, NOT THE MECHANISM.
+    #
+    # This asserted `create_task` was called -- the OLD in-process path. After
+    # issue #271 the route prefers the ARQ queue and only falls back to
+    # `create_task` when `enqueue_job` returns False, so the assertion passed or
+    # failed on whether REDIS_URL happened to be set:
+    #
+    #   locally, no Redis  -> enqueue False -> fallback -> create_task -> PASS
+    #   CI, ci-offline.yml sets REDIS_URL -> queued -> no create_task -> FAIL
+    #
+    # Same commit, opposite results, and it was right about neither. What the
+    # route promises is that a re-score is TRIGGERED, by whichever path exists.
+    assert enqueued or scheduled, (
+        "profile content changed but no re-score was triggered by EITHER path: "
+        f"enqueued={enqueued!r} create_task_calls={len(scheduled)}"
+    )
 
 
 def test_rescore_not_scheduled_when_profile_unchanged(api, monkeypatch):
