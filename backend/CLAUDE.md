@@ -25,7 +25,7 @@ Like Indeed/LinkedIn: match on what the user filled. An empty preference
 (salary, locations, workplace, experience level, about_me) = "don't care" —
 never a penalty, never a per-job zero, never a guess. Dim scorers return a
 constant for an empty user side; prefilter passes everything; the judge prompt
-omits unset prefs. Details + audit: `../docs/product_design_rules.md` (root
+omits unset prefs. Details + audit: `../docs/product/product_design_rules.md` (root
 CLAUDE.md rule #29).
 
 ## Commands (run from `backend/`)

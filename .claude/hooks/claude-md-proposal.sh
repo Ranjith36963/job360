@@ -4,7 +4,7 @@
 # Project .claude/settings.json hooks are loaded by the Claude CLI that
 # claude-code-action runs; no workflow passes a --settings override. Inside
 # repair.yml / pr-repair.yml this hook would tell the agent to append to
-# docs/maintenance/claude-md-proposals.md — and those workflows exit 1 on ANY
+# docs/harness/maintenance/claude-md-proposals.md — and those workflows exit 1 on ANY
 # changed file outside backend/ or frontend/, throwing away a working fix.
 # Headless CI has no human to act on a proposal anyway. Never run there.
 if [ -n "${GITHUB_ACTIONS:-}${CI:-}" ]; then exit 0; fi
@@ -18,7 +18,7 @@ if [ -n "${GITHUB_ACTIONS:-}${CI:-}" ]; then exit 0; fi
 #
 # WHAT: at the end of a substantial session, asks the model ONE question — did you
 # learn anything that contradicts CLAUDE.md? — and tells it to APPEND a <=5-line
-# proposal to docs/maintenance/claude-md-proposals.md. Nothing else.
+# proposal to docs/harness/maintenance/claude-md-proposals.md. Nothing else.
 #
 # WHY APPEND-ONLY, NEVER AN EDIT: ~6 Claude Code sessions and up to 14 worktrees run
 # in parallel on this repo, and cross-session file clobbering has already happened
@@ -79,7 +79,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # Writing to a tracked file would leave an uncommitted change in every worktree,
 # breaking the clean-tree preflight this repo mandates before multi-commit work
 # (CLAUDE.md, "Branch hygiene"), across up to 14 parallel worktrees.
-LEDGER="docs/maintenance/claude-md-proposals.md"
+LEDGER="docs/harness/maintenance/claude-md-proposals.md"
 [ -f "$root/$LEDGER" ] || exit 0   # not seeded here -> stay silent
 
 # 3) ONCE PER SESSION. No session id => no way to dedupe => stay silent rather than

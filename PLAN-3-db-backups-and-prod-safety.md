@@ -27,7 +27,7 @@ Why: the app is live on Railway with a real Postgres database and **no scheduled
 ## Files to touch
 
 - Create: `.github/workflows/db-backup.yml`
-- Create: `docs/RUNBOOK-backups.md`
+- Create: `docs/product/RUNBOOK-backups.md`
 - Modify: `backend/Dockerfile` (healthcheck path), `docker-compose.prod.yml` (healthcheck path)
 - Modify: `backend/src/api/middleware.py` (new `RequestTimeoutMiddleware`), `backend/src/api/main.py` (register it), `backend/src/core/settings.py` (timeout setting)
 - Create: `backend/tests/test_request_timeout.py`
@@ -62,7 +62,7 @@ If visibility is not `PRIVATE`: STOP the backup-workflow task (Tasks 1–2), rep
 ```yaml
 # Nightly Postgres backup of the live Railway database.
 # Dump lands as a workflow artifact (repo is private; artifacts inherit repo ACL).
-# Restore procedure: docs/RUNBOOK-backups.md
+# Restore procedure: docs/product/RUNBOOK-backups.md
 name: db-backup
 on:
   schedule:
@@ -135,12 +135,12 @@ psql "postgresql://job360:job360dev@localhost:5433/job360_restore_drill" -c "SEL
 
 Expected: counts match the source DB; `_schema_migrations` max id equals the highest migration number applied. Record the actual numbers.
 
-- [ ] **Step 2.2: Write `docs/RUNBOOK-backups.md`** containing, concretely: where backups live (Actions → db-backup → artifacts, 14-day retention), how to download one (`gh run download <run-id>`), the exact restore commands from Step 2.1 adapted for prod (restore into a NEW Railway database service, repoint `DATABASE_URL`, never in-place), the drill log (date + counts from Step 2.1), and a "test the restore quarterly" note.
+- [ ] **Step 2.2: Write `docs/product/RUNBOOK-backups.md`** containing, concretely: where backups live (Actions → db-backup → artifacts, 14-day retention), how to download one (`gh run download <run-id>`), the exact restore commands from Step 2.1 adapted for prod (restore into a NEW Railway database service, repoint `DATABASE_URL`, never in-place), the drill log (date + counts from Step 2.1), and a "test the restore quarterly" note.
 
 - [ ] **Step 2.3: Commit:**
 
 ```bash
-git add docs/RUNBOOK-backups.md
+git add docs/product/RUNBOOK-backups.md
 git commit -m "docs(ops): backup restore runbook + first restore drill log"
 ```
 
@@ -319,7 +319,7 @@ gh pr create --title "feat(ops): nightly DB backups + restore drill + healthchec
 ## Acceptance criteria
 
 - [ ] After merge + secret set: one green `db-backup` run with a `.sql.gz` artifact > 10 KB (`gh run list --workflow db-backup.yml`).
-- [ ] `docs/RUNBOOK-backups.md` exists with a logged restore drill (real row counts from Step 2.1).
+- [ ] `docs/product/RUNBOOK-backups.md` exists with a logged restore drill (real row counts from Step 2.1).
 - [ ] `docker-compose.prod.yml` and `backend/Dockerfile` healthchecks point at `/api/livez`.
 - [ ] `python -m pytest tests/test_request_timeout.py -p no:randomly` → 3 passed.
 - [ ] Full backend suite green (one run); `check_env_example.py` passes.

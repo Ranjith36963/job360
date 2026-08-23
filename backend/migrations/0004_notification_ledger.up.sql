@@ -1,5 +1,5 @@
 -- 0004_notification_ledger: durable audit trail + per-channel idempotency.
--- See docs/plans/batch-2-plan.md Phase 5 and blueprint §1 "Deduplication".
+-- See docs/product/plans/batch-2-plan.md Phase 5 and blueprint §1 "Deduplication".
 
 CREATE TABLE IF NOT EXISTS notification_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

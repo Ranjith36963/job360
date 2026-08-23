@@ -3,7 +3,7 @@ name: doc-sync
 # Loop 3 — code↔docs drift check (report-only).
 # Reads hard facts from the code and compares them to the claims in the docs.
 # On drift (scheduled runs) it opens/updates ONE GitHub issue — it NEVER edits
-# files. Read-only by design: see docs/maintenance/loop1_safe_reenable.md.
+# files. Read-only by design: see docs/harness/maintenance/loop1_safe_reenable.md.
 #
 # Also runs on every PR as a NON-BLOCKING report (step summary only) so a
 # stale-branch clobber is visible at review time, not 24h later.
@@ -172,7 +172,7 @@ jobs:
 
       - name: Claude edits the docs (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -187,7 +187,7 @@ jobs:
             - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
               stamp on line 2 of all six LIVING docs (today's date, UTC).
             - If a doc claims something the code does not do, add the gap to
-              docs/maintenance/PARKED.md — and leave that source doc untouched.
+              docs/harness/maintenance/PARKED.md — and leave that source doc untouched.
             - Edit ONLY *.md files. Never touch code, configs, or workflows.
             - Work through every row in drift.md. The workflow re-runs the
               checker immediately after you finish and reports what remains, so
