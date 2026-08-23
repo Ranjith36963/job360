@@ -130,7 +130,7 @@ jobs:
 
       - name: Claude diagnoses it (read-only — no shell, no code edits)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -241,9 +241,23 @@ jobs:
           issue_author=$(gh issue view "$num" --json author --jq .author.login)
           issue_title=$(gh issue view "$num" --json title --jq .title)
           auto="no"
-          # -F -x: exact whole-line match. A substring match would accept any
-          # login merely CONTAINING "github-actions".
-          if [ "$label" = "triage:auto-fixable" ] && echo "$issue_author" | grep -qFx "github-actions[bot]"; then
+          # -F -x: exact whole-line match against a FIXED set. A substring match
+          # would accept any login merely CONTAINING "github-actions", so the
+          # strictness is unchanged — what changes is that the set has BOTH
+          # spellings our own bot answers to.
+          #
+          # THIS CONDITION COULD NEVER BE TRUE.
+          # The webhook payload (line 67) spells it `github-actions[bot]`.
+          # `gh issue view --json author --jq .author.login`, five lines above,
+          # returns `app/github-actions`. Measured 2026-08-16 against issues
+          # #335, #334 and #330 — all three return `app/github-actions`.
+          # So auto-authorisation has never once fired since it was written, and
+          # nothing ever went red: the loop just fell through to "needs a human"
+          # every single time, which is indistinguishable from a careful gate
+          # doing its job. Same disease that cost 17 dead days on detect->triage.
+          # Guarded now by chain_check.py rule W13.
+          if [ "$label" = "triage:auto-fixable" ] && \
+             echo "$issue_author" | grep -qFx -e "github-actions[bot]" -e "app/github-actions"; then
             case "$issue_title" in
               # Auto-authorisation rests on ONE property: the issue body contains
               # no model-generated and no attacker-supplied text.

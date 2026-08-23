@@ -2,7 +2,7 @@
 
 > **Generator handoff.** This is the repo-visible mirror of the plan approved in plan mode on 2026-04-23.
 > Source plan artifact: `C:\Users\Ranjith\.claude\plans\now-i-ve-got-another-crispy-island.md` (local-only, not committed to repo).
-> Sibling: `docs/ExecutionOrder.md` (full Steps 0–5 roadmap).
+> Sibling: `docs/harness/ExecutionOrder.md` (full Steps 0–5 roadmap).
 
 ---
 
@@ -55,10 +55,10 @@ The audit's technical recommendation was "skip Ralph Loop for Step 0; use parall
 - `pytest-xdist` dev dep + `@pytest.mark.fast` marker (~50-test smoke subset)
 - `Makefile` with `verify-step-0` target (drives Ralph Loop's gate check)
 - `backend/scripts/dump_db.py`, `check_logs.py`, `check_worker.py` inspection tools
-- `docs/troubleshooting.md` (port conflicts, SQLite lock, CV parse fail, LLM key missing, Redis on Windows)
+- `docs/product/troubleshooting.md` (port conflicts, SQLite lock, CV parse fail, LLM key missing, Redis on Windows)
 - `STATUS.md` refresh (13 days stale)
 - Enhanced `migrations runner status` output (table format with applied + pending)
-- `pytest-randomly` seed recording in `docs/pytest_baseline_seeds.txt`
+- `pytest-randomly` seed recording in `harness/eval/pytest_baseline_seeds.txt`
 - `down()` migration integration test
 - `frontend/.env.local.example`
 - Log-rotation monitoring helper
@@ -226,7 +226,7 @@ pre-commit run --all-files
 # Expect: all hooks pass
 
 # Docs inventory
-test -f CONTRIBUTING.md && test -f frontend/README.md && test -f backend/README.md && test -f docs/README.md && test -f docs/troubleshooting.md
+test -f CONTRIBUTING.md && test -f frontend/README.md && test -f backend/README.md && test -f docs/README.md && test -f docs/product/troubleshooting.md
 # Expect: all present
 ```
 
