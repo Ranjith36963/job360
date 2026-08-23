@@ -174,6 +174,25 @@ REGISTRY: dict[str, Guard] = {
         # still names an old one. The guard that makes a file MOVE safe.
         drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
     ),
+    "scripts/worktree_census.py": Guard(
+        status="drilled",
+        # Sorts 62 worktrees / 209 local branches into SAFE / KEEP / ASK. The
+        # danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE costs the
+        # owner unsaved work. 20 worktrees hold uncommitted work and 14 of those
+        # sit on branches ALREADY MERGED, so the obvious "merged => junk" rule
+        # deletes 14 folders of real work. The drill plants work in a merged
+        # worktree five different ways (modified / untracked / staged / a live
+        # .env / backend/data) and demands the classifier stop calling it safe,
+        # plus two negative controls: a genuinely clean merged worktree stays
+        # SAFE, and an unrelated newcomer does not move an existing verdict.
+        #
+        # ONLY THE DRILL RUNS IN CI, AND THAT IS NOT AN OVERSIGHT. The drill
+        # builds its own git repo in a temp dir, so it is portable and
+        # network-free. The CENSUS reads D:\ and a runner cannot see D:\ --
+        # pointing this step at the checkout would census one clean worktree and
+        # one branch, report all-green, and be the eleventh dead guard.
+        drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
+    ),
     "scripts/check_alert_paths.py": Guard(
         status="drilled",
         # Guards the two properties an alerting path must have: it may not flip
@@ -189,28 +208,17 @@ REGISTRY: dict[str, Guard] = {
         status="drilled",
         # Checks the CALLERS, not the sender: every slack step passes a token, a
         # non-empty title and a real channel, and every `run:` block still parses
-        # under `bash -n`. Verified clean over 24 workflows / 152 bash blocks.
+        # under `bash -n`.
         #
-        # WAS `owed`, AND THE REASON WAS A WINDOWS MEASUREMENT, NOT A DESIGN FLAW.
-        # The drill applies 3 mutations and re-runs the whole check for each, so
-        # each pass spawns ~300 `bash -n` children. Process spawning is expensive
-        # on Windows -- one pass measured ~150s there, and 3 passes could not be
-        # watched to completion inside DRILL_TIMEOUT_S (240s). I reproduced that
-        # here: it blew past a 120s ceiling without finishing.
-        #
-        # But the registry's budget is enforced where CI runs it, on LINUX, where
-        # a spawn costs orders of magnitude less. The entry's own note said
-        # exactly this: "run it on a Linux runner, confirm it prints RED for every
-        # mutation and finishes well inside 240s, then flip this to drilled."
-        #
-        # Promoted rather than accepted as debt. `owed drills` is a ratchet that
-        # may only FALL, so leaving this `owed` would take the count 15 -> 16 and
-        # the cage would refuse this PR -- correctly. The honest fix is to make
-        # the guard drillable, not to widen the ratchet.
-        #
-        # CI's `--run-drills` step is what proves it: it enforces the 240s budget
-        # on the Linux runner. If it cannot finish there either, this goes red and
-        # the claim is withdrawn -- which is the right way to be wrong.
+        # WAS `owed`, on a WINDOWS measurement. The drill applies 3 mutations and
+        # re-runs the whole check for each, ~300 `bash -n` spawns a pass. On
+        # Windows one pass measured ~150s and three could not finish inside
+        # DRILL_TIMEOUT_S (240s); reproduced here, it blew past a 120s ceiling.
+        # The budget is enforced where CI runs it -- on Linux, where a spawn costs
+        # orders of magnitude less. Promoted rather than accepted as debt, because
+        # `owed drills` may only FALL and leaving it owed takes the count 15 -> 16.
+        # CI's `--run-drills` is the proof: if Linux cannot finish it either, that
+        # step goes red and the claim is withdrawn.
         drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"],
     ),
     "scripts/slack_transition.py": Guard(
@@ -362,7 +370,30 @@ def discover(github_dir: Path) -> dict[str, set[str]]:
         # `_invokes_cage` in gate_wiring_check.py.)
         if wf.name == "merge-policy.yml":
             continue
-        text = wf.read_text(encoding="utf-8", errors="replace")
+        # A SCRIPT NAMED IN A COMMENT IS NOT A GUARD THAT RUNS.
+        #
+        # Fourth instance of one confusion in this repo, found four different
+        # ways: `gate_wiring_check` counted a filename inside an `echo`; this
+        # function counted one inside merge-policy.yml (see above); the lane
+        # matcher counted a basename at any depth; and this line counted a
+        # filename inside a YAML COMMENT.
+        #
+        # Measured on PR #344's tree: `check_workflow_slack_wiring.py` had 0 real
+        # invocations and 3 comment mentions; `check_alert_paths.py` had 0 and 2.
+        # Both were therefore DECLARED as guards, and the registry certified two
+        # guards that nothing runs -- exactly the failure it exists to prevent.
+        # Worse, one of them had been promoted from `owed` to `drilled` on the
+        # strength of that phantom wiring.
+        #
+        # Comment stripping is deliberately line-based and dumb: a line whose
+        # first non-space character is `#` is a comment. YAML has no block
+        # comments, and `#` inside a quoted string is not a script reference, so
+        # the crude rule is exact here. It is NOT applied to shell heredocs
+        # inside `run:` blocks, where a `#` line is still shell comment anyway.
+        text = "\n".join(
+            "" if line.lstrip().startswith("#") else line
+            for line in wf.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
         for m in _SCRIPT_REF.finditer(text):
             found.setdefault(m.group(1), set()).add(wf.relative_to(github_dir).as_posix())
     return found
@@ -558,6 +589,32 @@ def self_drill() -> int:
                         "" if not f else f"expected silence, got: {f[0][:120]}"))
         wf.unlink()
 
+    # 5b. A SCRIPT NAMED ONLY IN A COMMENT IS NOT WIRED.
+    #     Found on PR #344: `check_workflow_slack_wiring.py` had 0 real
+    #     invocations and 3 comment mentions; `check_alert_paths.py` had 0 and
+    #     2. Both were therefore treated as wired, declared as guards, and this
+    #     registry certified two guards that NOTHING RUNS -- the exact failure
+    #     it exists to prevent. One had even been promoted from `owed` to
+    #     `drilled` on the strength of that phantom wiring.
+    #
+    #     Both directions are asserted, because a comment-stripper that ate
+    #     real `run:` lines would be the worse bug: it would silently
+    #     UN-declare working guards, and nothing would notice.
+    with tempfile.TemporaryDirectory() as td2:
+        ghd = Path(td2) / ".github" / "workflows"
+        ghd.mkdir(parents=True)
+        (ghd / "wf.yml").write_text(
+            "jobs:\n  a:\n    steps:\n"
+            "      # python scripts/phantom_guard.py --drill  <- a comment\n"
+            "      - run: python scripts/real_guard.py   # trailing comment\n",
+            encoding="utf-8")
+        seen = discover(Path(td2) / ".github")
+        results.append(("a script named ONLY in a comment is not counted as wired",
+                        "scripts/phantom_guard.py" not in seen,
+                        "a commented-out reference was treated as an invocation"))
+        results.append(("...and a real `run:` invocation is still found",
+                        "scripts/real_guard.py" in seen,
+                        "the comment stripper ate a real invocation"))
     # 6. A drill that does not actually make its guard go red must be caught by
     #    run_drills. Point an entry at a command that exits 0 doing nothing.
     fake = {"scripts/chain_check.py": Guard(status="drilled",

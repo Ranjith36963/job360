@@ -167,6 +167,29 @@ jobs:
       - name: That guard can still fail
         run: python scripts/encoding_guard.py --drill
 
+      # The broom that sorts worktrees and local branches into SAFE / KEEP / ASK.
+      # Its danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE costs the
+      # owner work he never saved.
+      #
+      # ONLY `--drill` MAY RUN HERE. The drill builds its own git repo in a temp
+      # dir, so it is portable and network-free. The CENSUS reads the owner's
+      # local disk, which a cloud runner cannot see -- pointing this step at the
+      # checkout would census one clean worktree, report all-green, and become
+      # another guard that cannot fire.
+      - name: The broom still refuses to sweep up unsaved work
+        run: python scripts/worktree_census.py --drill
+
+      # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
+      # from commented-out example lines, so `drill_registry.discover()` counted
+      # them as invoked and certified two guards that NOTHING RAN. #362 taught
+      # discover() to ignore comments, which turned them into STALE ENTRY --
+      # correctly. The fix is to invoke them, not to un-declare them.
+      - name: Every alert path still reaches a human
+        run: python scripts/check_alert_paths.py
+
+      - name: Every slack step passes a token, a title and a real channel
+        run: python scripts/check_workflow_slack_wiring.py
+
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

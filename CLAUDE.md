@@ -1,5 +1,5 @@
 # CLAUDE.md
-<!-- doc: LIVING | last-verified: 2026-08-11 -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 <!-- SIZE BUDGET: <= 2,000 words. This file is auto-loaded before every session,
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
      docs/harness/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
@@ -40,8 +40,8 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3**) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. **Live on Railway at job360.uk** since 2026-07-02; five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
-- **What automation is actually running:** the **GitHub Actions harness** — 22 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd, dependabot-auto…). The old agent loop (worker/integrator/scout/health, `docs/harness/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**. **Do not wait on it.**
-- **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but 46 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches **five** files (#8/#13). Migrations auto-apply on FastAPI boot via `lifespan` in `src/api/dependencies.py`.
+- **What automation is actually running:** the **GitHub Actions harness** — 26 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd…). The old agent loop (`docs/harness/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**. **Do not wait on it.**
+- **What surprises new sessions:** `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches **five** files (#8/#13). Migrations auto-apply on FastAPI boot via `lifespan` in `src/api/dependencies.py`.
 
 ## Hard Rules (load-bearing, numbered, do not violate)
 
