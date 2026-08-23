@@ -45,8 +45,8 @@
 
 **Last updated:** 2026-06-20
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
-**Source files:** 46 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
-**Job sources:** 47 entries in `SOURCE_REGISTRY`; 46 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 had dropped jobtensor, comeet, gov_apprenticeships, aijobs_global — only jobtensor, comeet, aijobs_global remain removed). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
+**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
@@ -78,7 +78,7 @@
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
 - When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
-- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 47; 46 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
+- `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 41; 40 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
 - All original tests pass without modification
 
 ---
@@ -187,7 +187,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## What Is Working Right Now
 
-- Full 47-source pipeline (46 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16)
+- Full 41-source pipeline (40 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16; 2026-08-10 rotation removed 6 dead upstreams)
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
@@ -198,8 +198,8 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring available when `JobScorer(..., user_preferences=..., enrichment_lookup=...)` is wired (7-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
 - Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + ChromaDB)
-- SQLite database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
-- Email, Slack, Discord (built-in channels) + Apprise-backed multi-channel dispatch (Batch 2)
+- Postgres database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
+- Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
 - Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
@@ -241,7 +241,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Test file | Module tested | Tests |
 |-----------|--------------|-------|
-| `test_sources.py` | All 47 registry entries (46 source classes) | 55+ |
+| `test_sources.py` | All 41 registry entries (40 source classes) | 55+ |
 | `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
 | `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
@@ -251,7 +251,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_deduplicator.py` | `deduplicator.py` | 13 |
 | `test_main.py` | `main.py` orchestrator + error paths | 14 |
 | `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
-| `test_database.py` | SQLite database + migration + source history | 9 |
+| `test_database.py` | Postgres database + migration + source history | 9 |
 | `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |
 | `test_llm_provider.py` | Multi-provider LLM client for CV parsing | 8 |
 | `test_notification_base.py` | Channel base + discovery | 7 |
@@ -293,5 +293,5 @@ python -m src.cli run --dry-run --log-level DEBUG
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"
-# Output: 47 (46 live instances; gov_apprenticeships restored 2026-06-16; only jobtensor/comeet/aijobs_global remain removed)
+# Output: 41 (40 live instances; the 2026-08-10 rotation dropped 6 dead upstreams)
 ```

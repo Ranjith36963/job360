@@ -1,7 +1,7 @@
 # Job360
 <!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
-Automated UK job search system supporting **any professional domain**. Aggregates jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
 > **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
 
@@ -18,7 +18,7 @@ flowchart TD
     CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
     Cron["Cron 4AM/4PM\nEurope/London"]
 
-    subgraph Sources["47 Job Sources (46 live instances)"]
+    subgraph Sources["41 Job Sources (40 live instances)"]
         direction LR
         KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
         FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
@@ -34,9 +34,9 @@ flowchart TD
     Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30\n− Foreign location 15"]
     Scorer --> OptEngines["Enrichment + Semantic +\nLLM Judge (opt-in flags)"]
     OptEngines --> Dedup[Deduplicator\nnormalized company+title]
-    Dedup --> DB[(SQLite\nSeen Jobs + Run Log)]
+    Dedup --> DB[(Postgres\nSeen Jobs + Run Log)]
 
-    DB --> Channels{NotificationChannel ABC}
+    DB --> Channels{Apprise dispatcher}
     Channels --> Email[Email\nHTML + CSV]
     Channels --> Slack[Slack\nBlock Kit]
     Channels --> Discord[Discord\nEmbeds]
@@ -49,9 +49,9 @@ flowchart TD
 
 ## Features
 
-### Job Sources (46 classes / 47 registry keys / 46 instances)
+### Job Sources (40 classes / 41 registry keys / 40 instances)
 
-> The reconciliation: 46 *class files* on disk → 47 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 46 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 47`).
+> The reconciliation: 40 *class files* on disk → 41 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 40 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 41`).
 
 - **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
 - **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
@@ -90,7 +90,7 @@ flowchart TD
 - **Email** — HTML digest with top jobs, scores, apply links, and CSV attachment via Gmail SMTP
 - **Slack** — rich Block Kit message with top 10 jobs via webhook
 - **Discord** — embed message with top 10 jobs via webhook
-- **NotificationChannel ABC** — add a new channel (e.g. Telegram) by implementing one class
+- **Apprise dispatcher** — per-user channels stored in the DB; add one as an Apprise URL, not a Python class
 
 ### CLI (Click)
 - `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email` options
@@ -98,7 +98,7 @@ flowchart TD
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
-- `sources` — list all 47 registry sources (46 live instances)
+- `sources` — list all 41 registry sources (40 live instances)
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
@@ -109,7 +109,7 @@ flowchart TD
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
-- **Persistent tracking** — SQLite database prevents duplicate notifications across runs
+- **Persistent tracking** — Postgres database prevents duplicate notifications across runs
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
 - **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request; per-source fetch ceiling 240s (ATS) / 60s (others) via `TieredScheduler.resolve_fetch_timeout()`
@@ -126,7 +126,7 @@ flowchart TD
 
 | Test file | Approx. count | What it covers |
 |-----------|-------|----------------|
-| `test_sources.py` | 55+ | All 47 sources with mocked HTTP |
+| `test_sources.py` | 55+ | All 41 sources with mocked HTTP |
 | `test_profile.py` | 55+ | CV parser, preferences, keyword generator, JobScorer |
 | `test_linkedin_github.py` | 58+ | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
 | `test_scorer.py` | 53+ | Scoring algorithm, penalties, recency tiers, edge cases |
@@ -136,7 +136,7 @@ flowchart TD
 | `test_deduplicator.py` | 29+ | Cross-source dedup (incl. marketing-suffix B-4 tests) |
 | `test_main.py` | 12 | Orchestrator (excluded from canonical run — hits live Indeed) |
 | `test_cli.py` | 11+ | CLI commands + SOURCE_REGISTRY assertions |
-| `test_database.py` | 9+ | SQLite operations, migrations, source history |
+| `test_database.py` | 9+ | Postgres operations, migrations, source history |
 | `test_api.py` | 9+ | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
 | `test_llm_provider.py` | 8+ | Multi-provider LLM client for CV parsing |
 | `test_notification_base.py` | 7+ | ABC, format_salary, channel discovery |
@@ -185,7 +185,7 @@ bash cron_setup.sh
 ## CLI Usage
 
 ```bash
-# Full pipeline — fetch from all 47 sources (46 live instances), score, deduplicate, notify
+# Full pipeline — fetch from all 41 sources (40 live instances), score, deduplicate, notify
 python -m src.cli run
 
 # Single source only
@@ -245,7 +245,7 @@ python -m src.cli sources
 | Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
 | Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
 
-**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **39 of 47 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global.
+**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, NHS Jobs, WeWorkRemotely, RealWorkFromAnywhere, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **33 of 41 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global. Dropped 2026-08-10 (dead upstreams): aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml.
 
 ## Scoring Algorithm
 
@@ -276,23 +276,31 @@ Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.
 
 ## Notification Channels
 
-Notification delivery goes through the Apprise dispatcher (the `NotificationChannel` ABC that used to live at `backend/src/services/notifications/base.py` was REMOVED — do not write against it). For multi-channel per-user delivery (email/Slack/Discord/Telegram/webhook), the Apprise dispatcher at `backend/src/services/channels/dispatcher.py` handles per-user rules (score threshold, timezone-aware quiet hours, digest mode).
+Notification delivery goes through the **Apprise dispatcher** at
+`backend/src/services/channels/dispatcher.py`. It handles multi-channel per-user delivery
+(email/Slack/Discord/Telegram/webhook) and applies each user's rules: score threshold,
+timezone-aware quiet hours, and digest mode.
 
-```
-NotificationChannel (ABC)
-├── EmailChannel      — configured if SMTP_EMAIL + SMTP_PASSWORD + NOTIFY_EMAIL set
-├── SlackChannel      — configured if SLACK_WEBHOOK_URL set
-└── DiscordChannel    — configured if DISCORD_WEBHOOK_URL set
-```
+> ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
+> `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
+> (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes were all
+> REMOVED. The only modules left under `backend/src/services/notifications/` are
+> `__init__.py` and `report_generator.py`.
 
-`get_configured_channels()` returns only channels whose env vars are set. The orchestrator loops over them:
+Channels are **per-user rows in the database**, not env-var-configured classes. The
+dispatcher's public surface:
 
 ```python
-for channel in get_configured_channels():
-    await channel.send(new_jobs, stats)
+from src.services.channels import dispatcher
+
+channels = await dispatcher.load_user_channels(db, user_id)  # the user's configured channels
+await dispatcher.dispatch(...)                               # deliver, honouring the user's rules
+await dispatcher.test_send(db, channel_id)                   # one-off "does this work?" send
 ```
 
-**Adding a new channel** (e.g. Telegram): create `backend/src/services/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
+**Adding a new channel** (e.g. Telegram): Apprise already speaks most services, so a channel is
+normally a new Apprise URL stored against the user — not a new Python class. Recipe:
+`.claude/skills/add-source/SKILL.md`.
 
 ## Adding a New Job Source
 
@@ -351,7 +359,7 @@ job360/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 13 route modules (46+ endpoints)
+│       ├── api/                 # FastAPI app + 13 route modules (72 endpoints)
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
@@ -379,7 +387,7 @@ job360/
 │       ├── repositories/        # (renamed from storage/)
 │       │   ├── database.py
 │       │   └── csv_export.py
-│       ├── sources/             # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY keys
+│       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
 │       │   ├── apis_free/   (9 free_json + 2 rss-tier)
