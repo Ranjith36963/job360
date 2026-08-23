@@ -197,8 +197,36 @@ def _annotation_type_names(node: ast.AST | None) -> set[str]:
         elif isinstance(child, ast.Attribute):
             names.add(child.attr)
         elif isinstance(child, ast.Constant) and isinstance(child.value, str):
-            names.add(child.value)
+            # CodeRabbit: this used to add the string WHOLE, so the docstring
+            # above was true of `models.CVData` and true of `"CVData"` and
+            # false of the two combined: `"models.CVData"` became one opaque
+            # name, matched nothing in _PROFILE_TYPE_NAMES, and the parameter
+            # read as FOREIGN — silently costing that function its shelf read.
+            # Re-parsing the forward reference makes the string case go through
+            # exactly the same walk as the unquoted one, so the two can no
+            # longer disagree.
+            names |= _forward_ref_names(child.value)
     return names
+
+
+def _forward_ref_names(text: str) -> set[str]:
+    """Leaf names inside a string forward reference, or the string itself.
+
+    An unparseable annotation yields the raw text rather than nothing: an
+    empty set means "unresolvable" to the caller, and quietly widening a
+    typo into "we could not tell" is how a checker stops checking.
+    """
+    try:
+        parsed = ast.parse(text.strip(), mode="eval")
+    except SyntaxError:
+        return {text}
+    inner: set[str] = set()
+    for child in ast.walk(parsed.body):
+        if isinstance(child, ast.Name):
+            inner.add(child.id)
+        elif isinstance(child, ast.Attribute):
+            inner.add(child.attr)
+    return inner or {text}
 
 
 def _is_foreign_annotation(names: set[str]) -> bool:
