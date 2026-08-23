@@ -105,7 +105,7 @@ def main() -> int:
         "education":  lambda c, p: c.get("education"),
         "salary":     lambda c, p: p.get("salary_min") or p.get("salary_max"),
         "location":   lambda c, p: p.get("preferred_locations") or c.get("location"),
-        "workplace":  lambda c, p: p.get("preferred_workplace") or p.get("work_arrangement"),
+        "workplace":  lambda c, p: p.get("work_arrangement"),
         "seniority":  lambda c, p: p.get("experience_level"),
         "visa":       lambda c, p: p.get("needs_visa") is not None,
         "domain":     lambda c, p: c.get("career_domain") or (p.get("industries") or c.get("industries")),

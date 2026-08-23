@@ -51,7 +51,17 @@ def _run(profile: UserProfile, counter: _Counter, *, cv_fails: bool = False) -> 
         counter.cv += 1
         if cv_fails:
             raise RuntimeError("provider down")
-        return CVData(skills=["Epic"], job_titles=["Registered Nurse"])
+        # A real successful CV pass reads a dated role off the document too —
+        # this CV literally has one ("Staff Nurse, Royal London Hospital").
+        # Leaving cv_positions off this fixture would make every "successful"
+        # call look PARTIAL (skills/titles but no positions) to the new
+        # partial-CV retry, silently doubling every call count these cache
+        # tests assert on even though caching itself never changed.
+        return CVData(
+            skills=["Epic"],
+            job_titles=["Registered Nurse"],
+            cv_positions=[{"company": "Royal London Hospital", "title": "Staff Nurse"}],
+        )
 
     async def fake_li(text, *a, **kw):
         counter.linkedin += 1
@@ -158,8 +168,24 @@ def test_re_uploading_the_same_cv_after_a_reset_still_calls_the_llm():
 
 
 def test_a_reset_does_not_discard_linkedin_or_github_work():
-    """Only the CV's hash may be cleared. LinkedIn/GitHub data deliberately
-    survives a CV swap, so re-paying to re-read them would be pure waste."""
+    """A CV swap must not DISCARD other passes' work. That is the outcome; the
+    call count is only a proxy for it, and the proxy was wrong.
+
+    This test used to assert ``c.linkedin == 1`` — LinkedIn is never re-read, so
+    no money is wasted. The intent was right and the assertion inverted the
+    result, because THREE of LinkedIn's outputs do not live on linkedin_*
+    shelves at all: ``education``, ``certifications`` and ``job_titles`` are
+    shared lists that ``enrich_cv_from_linkedin`` appends into, and
+    ``reset_cv_owned_fields`` clears them.
+
+    So "don't re-read LinkedIn" meant: clear the shared lists, skip the pass
+    that refills LinkedIn's half, and lose it permanently — not even
+    recoverable by re-uploading the same PDF, whose unchanged text hits the
+    cache again. The saving was one LLM call; the cost was silent data loss.
+
+    GitHub is genuinely different: every GitHub output has its own shelf, none
+    of which this reset touches, so skipping that pass really is free.
+    """
     p = _profile(linkedin_raw_text="Top Skills\nTriage\n", github_repos_brief="repo: icu-tools")
     c = _Counter()
     _run(p, c)
@@ -168,7 +194,14 @@ def test_a_reset_does_not_discard_linkedin_or_github_work():
     tp.reset_cv_owned_fields(p.cv_data)
     _run(p, c)
 
-    assert c.linkedin == 1, "LinkedIn was re-read because of a CV swap"
+    # LinkedIn MUST be re-read: its contribution to the three shared lists was
+    # just erased, and only this pass can put it back.
+    assert c.linkedin == 2, (
+        "LinkedIn was NOT re-read after a CV swap — its half of education, "
+        "certifications and job_titles has just been cleared and nothing else "
+        "can restore it"
+    )
+    # GitHub must NOT be: nothing it owns was cleared, so a re-read is waste.
     assert c.github == 1, "GitHub was re-read because of a CV swap"
 
 

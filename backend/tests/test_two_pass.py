@@ -736,7 +736,7 @@ class TestCvReplacementResetsCvOwnedFields:
             education=["BSc Computer Science"],
             certifications=["AWS Solutions Architect"],
             achievements=["Cut pipeline cost 40%"],
-            industries=["Energy"],
+            cv_industries=["Energy"],
             cv_languages=["English"],
             cv_skills_esco={"Airflow": "http://esco/airflow"},
             career_domain="data",
@@ -773,7 +773,7 @@ class TestCvReplacementResetsCvOwnedFields:
         assert cv.education == []
         assert cv.certifications == []
         assert cv.achievements == []
-        assert cv.industries == []
+        assert cv.cv_industries == []
         assert cv.cv_languages == []
         assert cv.cv_skills_esco == {}
         assert cv.career_domain is None

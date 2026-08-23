@@ -1,8 +1,8 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-07-18 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
-> (the 28 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
+> (the 31 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
 > algorithm, DB schema, phase history) lives in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
 > read that first. This file only adds backend-local essentials so they're at hand
 > when you're working in this directory. Keep it thin; do not duplicate the root.
@@ -25,7 +25,7 @@ Like Indeed/LinkedIn: match on what the user filled. An empty preference
 (salary, locations, workplace, experience level, about_me) = "don't care" —
 never a penalty, never a per-job zero, never a guess. Dim scorers return a
 constant for an empty user side; prefilter passes everything; the judge prompt
-omits unset prefs. Details + audit: `../docs/product_design_rules.md` (root
+omits unset prefs. Details + audit: `../docs/product/product_design_rules.md` (root
 CLAUDE.md rule #29).
 
 ## Commands (run from `backend/`)
@@ -60,7 +60,7 @@ fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
 
 ## Where things are
 
-- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (47) + `_build_sources()`
+- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (41) + `_build_sources()`
 - `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
 - `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`

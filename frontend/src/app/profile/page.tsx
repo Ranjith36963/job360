@@ -12,14 +12,88 @@ import { CVViewer } from "@/components/profile/CVViewer";
 import { PreferencesForm } from "@/components/profile/PreferencesForm";
 import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer";
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
+import { ClearButton } from "@/components/profile/ClearButton";
 import {
   getProfile,
   uploadProfile,
   uploadLinkedin,
   uploadGithub,
+  clearProfileSection,
+  type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
-import type { ProfileResponse, PreferencesRequest } from "@/lib/types";
+import type { CVDetail, ProfileResponse, PreferencesRequest } from "@/lib/types";
+
+/** Human names for the clear toasts — "cv" is not what a person calls it. */
+const SECTION_LABEL: Record<ClearSection, string> = {
+  cv: "CV",
+  linkedin: "LinkedIn",
+  github: "GitHub",
+  preferences: "Preferences",
+  all: "Profile",
+};
+
+// ── "What we extracted" gate ────────────────────────────────
+//
+// cv_detail is ONLY populated when the CV's raw_text is non-empty
+// (_build_profile_response in backend/src/api/routes/profile.py). LinkedIn
+// and GitHub data arrive on the SAME response independently of the CV, so
+// gating the whole CVViewer on `cv_detail` alone hid real, paid-for,
+// already-fetched LinkedIn/GitHub content whenever a user connected either
+// of those BEFORE uploading a CV — the section just vanished, reading as a
+// failed enrichment. The page calls LinkedIn/GitHub "Optional" (rule #29);
+// the render must not silently require the one input it never demanded.
+//
+// CVViewer's own CV-only sections already stay silent on an empty CVDetail
+// (every one of them checks its own field), so passing this stand-in when
+// there is no CV is safe — it renders nothing extra, it just stops the
+// LinkedIn/GitHub sections from being hidden along with it.
+const EMPTY_CV_DETAIL: CVDetail = {
+  achievements: [],
+  certifications: [],
+  companies: [],
+  cv_experience_level: "",
+  cv_industries: [],
+  cv_positions: [],
+  cv_projects: [],
+  cv_right_to_work: "",
+  education: [],
+  experience_text: "",
+  extraction_score: {},
+  headline: "",
+  highlights: [],
+  job_titles: [],
+  location: "",
+  name: "",
+  raw_text: "",
+  skills: [],
+  summary_text: "",
+};
+
+function hasLinkedinShelf(
+  sections: ProfileResponse["linkedin_subsections"] | undefined
+): boolean {
+  if (!sections) return false;
+  return Object.values(sections).some(
+    (rows) => Array.isArray(rows) && rows.length > 0
+  );
+}
+
+function hasGithubShelf(
+  temporal: ProfileResponse["github_temporal"] | undefined,
+  detail: ProfileResponse["github_detail"] | undefined
+): boolean {
+  const temporalHasContent = Object.values(temporal ?? {}).some(
+    (bucket) => bucket && typeof bucket === "object" && Object.keys(bucket).length > 0
+  );
+  if (temporalHasContent) return true;
+  return Object.values(detail ?? {}).some((value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "string") return value.length > 0;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return false;
+  });
+}
 
 // ── Completeness calculation ────────────────────────────────
 
@@ -52,12 +126,17 @@ function calcCompleteness(profile: ProfileResponse | null): {
   if (summary.skills_count > 0 || prefSkills.length > 0) score += 15;
 
   // Has preferences (at least work arrangement or experience or about_me): 15%
+  //
+  // `prefTitles.length > 0` used to be OR'd in here too, but that is the exact
+  // same signal the "Has job titles" bucket above already pays for -- one
+  // typed title satisfied BOTH buckets, so the meter double-counted a single
+  // answer as 30% of completeness instead of 15%. Each bucket must measure a
+  // DISTINCT thing: this one now looks only at fields no other bucket counts.
   const prefs = preferences as Record<string, unknown>;
   const hasPrefs =
     (prefs?.work_arrangement && prefs.work_arrangement !== "any") ||
     (prefs?.experience_level && prefs.experience_level !== "") ||
-    (typeof prefs?.about_me === "string" && prefs.about_me.length > 0) ||
-    prefTitles.length > 0;
+    (typeof prefs?.about_me === "string" && prefs.about_me.length > 0);
   if (hasPrefs) score += 15;
 
   // Has LinkedIn: 7.5%
@@ -123,7 +202,7 @@ export default function ProfilePage() {
         });
         toast.success("CV uploaded and parsed");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to upload CV";
+        const msg = apiErrorMessage(err, "Failed to upload CV");
         setError(msg);
         toast.error(msg);
       }
@@ -139,7 +218,7 @@ export default function ProfilePage() {
         await fetchProfile();
         toast.success("LinkedIn profile enriched");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to upload LinkedIn data";
+        const msg = apiErrorMessage(err, "Failed to upload LinkedIn data");
         setError(msg);
         toast.error(msg);
       }
@@ -155,13 +234,32 @@ export default function ProfilePage() {
         await fetchProfile();
         toast.success("GitHub profile enriched");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to enrich GitHub";
+        const msg = apiErrorMessage(err, "Failed to enrich GitHub");
         setError(msg);
         toast.error(msg);
       }
     },
     [fetchProfile]
   );
+
+  // One handler for all five clear buttons — the section is the only thing
+  // that differs. The response IS the rebuilt profile, so the page updates from
+  // it directly rather than re-fetching.
+  const handleClear = useCallback(async (section: ClearSection) => {
+    setError(null);
+    try {
+      const data = await clearProfileSection(section);
+      setProfile(data);
+      toast.success(
+        section === "all" ? "Profile cleared" : `${SECTION_LABEL[section]} cleared`,
+        { description: "Undo it from History if that was a mistake." }
+      );
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, "Failed to clear");
+      setError(msg);
+      toast.error(msg);
+    }
+  }, []);
 
   const handleSavePreferences = useCallback(
     async (prefs: PreferencesRequest) => {
@@ -171,7 +269,7 @@ export default function ProfilePage() {
         setProfile(data);
         toast.success("Preferences saved");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to save preferences";
+        const msg = apiErrorMessage(err, "Failed to save preferences");
         setError(msg);
         toast.error(msg);
       }
@@ -234,6 +332,17 @@ export default function ProfilePage() {
                 <History className="h-3.5 w-3.5" />
                 History
               </Button>
+              {/* Sits next to History deliberately: History is the undo for it.
+                  A profile you can empty in one click is what makes "upload a
+                  CV and see exactly what came out" a clean experiment instead
+                  of a reading of everything ever uploaded. */}
+              {profile && (
+                <ClearButton
+                  label="Clear profile"
+                  confirmLabel="Click again to clear everything"
+                  onConfirm={() => handleClear("all")}
+                />
+              )}
             </div>
 
             {/* Completeness badge */}
@@ -318,6 +427,7 @@ export default function ProfilePage() {
                 onUpload={handleCVUpload}
                 onLinkedinUpload={handleLinkedinUpload}
                 onGithubEnrich={handleGithubEnrich}
+                onClearSection={handleClear}
                 profile={profile?.summary ?? null}
                 cvDetail={profile?.cv_detail ?? null}
                 loading={loadingProfile}
@@ -326,7 +436,13 @@ export default function ProfilePage() {
               {/* Right column: Preferences */}
               <PreferencesForm
                 preferences={profile?.preferences ?? {}}
+                // Suggestions are rendered INSIDE the form, next to Additional
+                // Skills, so a tap edits local state and rides the form's own
+                // debounced save. They used to sit further down this page as
+                // dead chips whose helper text told the user to retype them.
+                suggestions={profile?.ai_suggestions ?? []}
                 onSave={handleSavePreferences}
+                onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
               />
             </div>
@@ -335,25 +451,25 @@ export default function ProfilePage() {
                 The API already returns name/summary/skills/dated work
                 history/education/certs/LinkedIn detail/GitHub detail — this
                 was the only place none of it was ever rendered. Each
-                sub-section inside CVViewer renders only when it has data. */}
-            {profile?.cv_detail && (
+                sub-section inside CVViewer renders only when it has data.
+                Gated on ANY of the three shelves having content, not just
+                cv_detail — a LinkedIn or GitHub upload with no CV yet must
+                still show what it found (see EMPTY_CV_DETAIL above). */}
+            {(profile?.cv_detail ||
+              hasLinkedinShelf(profile?.linkedin_subsections) ||
+              hasGithubShelf(profile?.github_temporal, profile?.github_detail)) && (
               <CVViewer
-                cv={profile.cv_detail}
-                skillProvenance={profile.skill_provenance}
-                linkedinSubsections={profile.linkedin_subsections}
-                githubTemporal={profile.github_temporal}
+                cv={profile?.cv_detail ?? EMPTY_CV_DETAIL}
+                skillProvenance={profile?.skill_provenance}
+                linkedinSubsections={profile?.linkedin_subsections}
+                githubTemporal={profile?.github_temporal}
+                githubDetail={profile?.github_detail}
               />
             )}
 
             {/* ── Your Skills (grouped by source) ────────── */}
             {(() => {
-              const bySource =
-                (profile as unknown as {
-                  skills_by_source?: Record<string, string[]>;
-                })?.skills_by_source ?? {};
-              const aiSuggestions =
-                (profile as unknown as { ai_suggestions?: string[] })
-                  ?.ai_suggestions ?? [];
+              const bySource = profile?.skills_by_source ?? {};
               const GROUPS: {
                 key: string;
                 label: string;
@@ -385,8 +501,10 @@ export default function ProfilePage() {
                   (bySource[g.key] ?? []).map((s) => s.toLowerCase())
                 )
               ).size;
-              const hasAny = total > 0 || aiSuggestions.length > 0;
-              if (!hasAny) return null;
+              // Suggestions no longer keep this block alive: they moved into
+              // the preferences form. This panel shows skills the user HAS, so
+              // with none of those there is nothing to show.
+              if (total === 0) return null;
               return (
                 <div className="animate-fade-in-up glass-card rounded-xl p-6">
                   <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
@@ -421,32 +539,6 @@ export default function ProfilePage() {
                     })}
                   </div>
 
-                  {/* AI Suggestions — opt-in, never counted in matching */}
-                  {aiSuggestions.length > 0 && (
-                    <div className="mt-5 border-t border-border/50 pt-4">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                        AI suggestions
-                      </p>
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        Related skills that fit your profile. These aren&apos;t
-                        counted — add the ones you actually have under{" "}
-                        <span className="text-foreground">
-                          Additional Skills
-                        </span>
-                        .
-                      </p>
-                      <ul className="flex flex-wrap gap-1.5">
-                        {aiSuggestions.map((skill) => (
-                          <li
-                            key={`ai-${skill}`}
-                            className="rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90"
-                          >
-                            + {skill}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               );
             })()}

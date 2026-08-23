@@ -24,7 +24,7 @@ The foreign check must survive because positive-only matching has a fatal hole:
 matching would ADMIT it. The country/state override runs first and catches the
 "USA" segment.
 
-SOURCES (all GeoNames, CC BY 4.0 — attribution in data/uk_gazetteer/NOTICE):
+SOURCES (all GeoNames, CC BY 4.0 — attribution in src/data/uk_gazetteer/NOTICE):
   GB.zip                whole UK incl. Northern Ireland (verified: belfast,
                         derry, lisburn, armagh all present; admin1 = ENG/SCT/
                         WLS/NIR). One file, so no GB-only gap to patch.
@@ -52,7 +52,9 @@ import zipfile
 from pathlib import Path
 
 BASE = "https://download.geonames.org/export/dump/"
-OUT = Path(__file__).resolve().parent.parent / "data" / "uk_gazetteer"
+# Inside the package, NOT backend/data/ — `pip install .` ships only `src*`, so
+# data written outside it never reaches production (issue #260).
+OUT = Path(__file__).resolve().parent.parent / "src" / "data" / "uk_gazetteer"
 
 # A foreign city makes a UK name ambiguous when it is at least this fraction of
 # the UK place's population. Tuned by eyeballing the output: at 0.5, Boston and

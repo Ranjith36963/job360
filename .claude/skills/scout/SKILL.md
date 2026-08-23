@@ -6,7 +6,7 @@ description: Job360 scout: read-only problem finder — sweep logs, run_log, DB 
 > **⚠️ DORMANT — this skill is not currently in use.**
 > Its read-only sweep is safe and its "evidence or it didn't happen" discipline
 > is still the right standard — but it writes findings to
-> `docs/maintenance/MISSIONS.md`, a queue whose only consumer (`worker`) is
+> `docs/harness/maintenance/MISSIONS.md`, a queue whose only consumer (`worker`) is
 > disabled and which has been untouched since 2026-06-17. Findings written there
 > reach nobody.
 > **If reviving it, emit GitHub issues instead** — measured base rate: every

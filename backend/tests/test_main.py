@@ -32,7 +32,6 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     m.get(re.compile(r"https://jobicy\.com/.*"), payload={"jobs": []})
     m.get(re.compile(r"https://himalayas\.app/.*"), payload={"jobs": []})
     m.get(re.compile(r"https://remotive\.com/.*"), payload={"jobs": []}, repeat=True)
-    m.get(re.compile(r"https://aijobs\.net/.*"), payload=[], repeat=True)
     m.get(re.compile(r"https://devitjobs\.uk/api/.*"), payload=[], repeat=True)
     m.get(re.compile(r"https://landing\.jobs/api/.*"), payload=[], repeat=True)
     m.get(re.compile(r"https://www\.themuse\.com/.*"), payload={"results": []}, repeat=True)
@@ -55,12 +54,9 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     m.get(re.compile(r"https://www\.bcs\.org/.*"), body="<html></html>", repeat=True)
     m.get(re.compile(r"https://aijobs\.ai/.*"), body="<html></html>", repeat=True)
     # Group E: RSS/XML feeds
-    m.get(re.compile(r"https://www\.jobs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://www\.nhsbsa\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://weworkremotely\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://www\.realworkfromanywhere\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
-    m.get(re.compile(r"https://www\.biospace\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
-    m.get(re.compile(r"https://workanywhere\.pro/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"http://www\.jobs\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://hr-jobs\.lancs\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://jobs\.kent\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
@@ -80,20 +76,15 @@ def _mock_free_sources(m, arbeitnow_payload=None):
     # but doesn't add jobs.
     m.get(re.compile(r"https://teaching-vacancies\.service\.gov\.uk/.*"), payload={"vacancies": []}, repeat=True)
     m.get(re.compile(r"https://www\.jobs\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
-    m.get(re.compile(r"https://ats\.rippling\.com/.*"), payload={"jobs": []}, repeat=True)
     # Step-1.5 fixture-debt closure — sources that hung the original
     # Step-1.5 broad sweep because the inline URL list missed them:
-    m.get(re.compile(r"https://www\.aijobs\.net/.*"), payload=[], repeat=True)
-    m.get(re.compile(r"https://aijobs\.net/.*"), payload=[], repeat=True)
     m.get(re.compile(r"https://api\.workable\.com/.*"), payload={"results": []}, repeat=True)
     m.get(re.compile(r"https://www\.workday\.com/.*"), payload={"jobPostings": []}, repeat=True)
     m.get(re.compile(r"https://api\.lever\.co/v0/postings/.*"), payload=[], repeat=True)
     # M8 rehab — additional sources whose URLs were absent from the catalog:
-    # nhs_jobs + nhs_jobs_xml use jobs.nhs.uk (not nhsbsa.nhs.uk), biospace
-    # uses biospace.com (RSS), climatebase uses climatebase.org/jobs (JSON/HTML),
-    # uni_jobs uses multiple RSS URLs, jobs_ac_uk has subject-area feed URLs.
+    # nhs_jobs uses jobs.nhs.uk (not nhsbsa.nhs.uk), climatebase uses
+    # climatebase.org/jobs (JSON/HTML), uni_jobs uses multiple RSS URLs.
     m.get(re.compile(r"https://www\.jobs\.nhs\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
-    m.get(re.compile(r"https://www\.biospace\.com/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://climatebase\.org/.*"), body="<html></html>", repeat=True)
     m.get(re.compile(r"http://.*\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
     m.get(re.compile(r"https://.*\.cam\.ac\.uk/.*"), body="<rss><channel></channel></rss>", repeat=True)
@@ -238,7 +229,7 @@ def _stub_load_profile():
 # 2. _stub_jobspy (autouse) patches JobSpySource.fetch_jobs → [] so no live
 #    Indeed/Glassdoor calls are made (~32 min hang fully eliminated).
 # 3. _mock_free_sources() URL catalog extended to cover all keyless sources
-#    including post-Batch-3 additions (nhs_jobs, rippling, teaching_vacancies).
+#    including post-Batch-3 additions (nhs_jobs, teaching_vacancies).
 #    gov_apprenticeships (keyed, restored 2026-06-16) skips with no key, so it
 #    needs no mock here.
 #

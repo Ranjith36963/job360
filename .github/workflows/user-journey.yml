@@ -15,6 +15,13 @@ name: User journey (walk every user, find where it breaks for them)
 #   both real users have 130-152 extracted skills          -> over-extraction
 # Aggregate checks said the product was fine. It was fine on average.
 #
+# CORRECTION 2026-08-11 (issue #198): the 7edd5b59 line above was WRONG, and it
+# re-fired here every morning for nine days. That account never confirmed its
+# email, and search - the only thing that fills a feed - is gated on that. No
+# feed bug existed. The audit now says "email-not-confirmed" instead. Keep this
+# note: a detector that names the wrong stage is more expensive than one that
+# says nothing, because every reader goes hunting a bug that is not there.
+#
 # WHAT IT DOES: walks each user down the real pipeline —
 #   signup -> profile -> extraction -> search keywords -> feed -> scoring
 #          -> visible on the dashboard

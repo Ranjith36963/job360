@@ -32,7 +32,45 @@ from src.services.scoring_dimensions import ScoreBreakdown
 #   1 = pre-2026-08-06 (legacy title matching)
 #   2 = revived title lever: evidence-based core domain words + domain+role band
 #   3 = skill-score length normalisation (long ads no longer out-score tight ones)
-SCORER_VERSION = 3
+#
+# MERGE NOTE (2026-08-15): main and this branch BOTH shipped a change numbered
+# "4" — they were different changes, made in parallel. Both are real and both
+# are in this file now, so the numbering below keeps each one's history and the
+# constant jumps to 7, which is above either branch's value. That matters: the
+# score freeze in services/feed.py only re-scores a row when the stored version
+# differs, so a merged tree that kept 4 or 6 would leave some feeds frozen on a
+# score computed by code that no longer exists.
+#   4 = title matching repaired: whole-word phrase containment (was a raw
+#       substring test, so "Intern" matched "Internal Auditor") + the exact
+#       match is reachable again (was shadowed by a longer list-mate)
+#   5 = the RANK-FREE form of each held title joins `config.job_titles` as
+#       extra scorer evidence (keyword_generator, "PART 2: the RANKING
+#       ratchet"). Before this, an ex-intern's "AI/ML Engineer Intern" was the
+#       only exact match in the list, so INTERN postings scored 40/40 on title
+#       while the step-up "AI/ML Engineer" posting capped at 20 — the feed
+#       ranked the jobs the user was trying to leave above the ones they were
+#       searching for. Nothing is demoted; the rank-free posting simply becomes
+#       reachable at the same tier. No code in this module changed, but the
+#       score a given (job, profile) pair produces does, so existing
+#       `user_feed` rows must re-score — which is exactly what this constant is
+#       for.
+#   6 = F5 (rule #29 seam): JobScorer.score() no longer gates the four
+#       enrichment dims (seniority/salary/visa/workplace) behind
+#       `enrichment is not None`. A job with NO enrichment row used to
+#       contribute 0 on all four dims — a 30-point punishment for pipeline
+#       lag, not a real signal (measured: 45 vs 75 on an otherwise-identical
+#       job). Each dim function already returns its documented neutral half
+#       on `enrichment=None`; they now always run when user_preferences is
+#       set, so an un-enriched job lands near its NEUTRAL total (~15 extra)
+#       instead of losing all 30. Existing `user_feed` rows must re-score for
+#       this fix to reach a real feed (PR #224 lesson) — that's what bumping
+#       this constant does.
+#   7 = foreign-location penalty removed (rule #30: the UK gate is a DOOR, not a
+#       penalty). Every job that named a non-UK place scored 15 points too low;
+#       those rows must re-score or the old deficit stays frozen in user_feed.
+#       Landed on main as its own "4" before this branch merged; renumbered here
+#       so it is not confused with the title-matching fix above.
+SCORER_VERSION = 7
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40
@@ -96,127 +134,6 @@ LOCATION_ALIASES = {
 
 REMOTE_TERMS = {"remote", "anywhere", "work from home", "wfh"}
 
-# Countries, major non-UK cities, and US state abbreviations that indicate non-UK jobs
-FOREIGN_INDICATORS = {
-    # Countries
-    "united states",
-    "usa",
-    "canada",
-    "australia",
-    "india",
-    "germany",
-    "france",
-    "spain",
-    "italy",
-    "netherlands",
-    "sweden",
-    "norway",
-    "denmark",
-    "finland",
-    "switzerland",
-    "austria",
-    "belgium",
-    "ireland",
-    "singapore",
-    "japan",
-    "china",
-    "brazil",
-    "mexico",
-    "south korea",
-    "israel",
-    "poland",
-    "portugal",
-    "czech",
-    "romania",
-    "turkey",
-    "south africa",
-    "new zealand",
-    "philippines",
-    # Major non-UK cities
-    "new york",
-    "san francisco",
-    "los angeles",
-    "chicago",
-    "seattle",
-    "austin",
-    "boston",
-    "denver",
-    "toronto",
-    "vancouver",
-    "montreal",
-    "sydney",
-    "melbourne",
-    "berlin",
-    "munich",
-    "paris",
-    "amsterdam",
-    "stockholm",
-    "copenhagen",
-    "oslo",
-    "helsinki",
-    "zurich",
-    "dubai",
-    "bangalore",
-    "hyderabad",
-    "mumbai",
-    "pune",
-    "tokyo",
-    "tel aviv",
-    # Canadian provinces that overlap with UK city names
-    "ontario",
-    "quebec",
-    # US state abbreviations (with comma prefix to avoid false matches)
-    ", ca",
-    ", ny",
-    ", tx",
-    ", wa",
-    ", ma",
-    ", co",
-    ", il",
-    ", ga",
-    ", nc",
-    ", va",
-    ", fl",
-    ", pa",
-    ", oh",
-    ", nj",
-    ", or",
-    ", az",
-    ", mn",
-    ", ct",
-    ", md",
-}
-
-# Terms that confirm UK / remote (checked before foreign indicators)
-UK_TERMS = {
-    "uk",
-    "united kingdom",
-    "london",
-    "manchester",
-    "birmingham",
-    "bristol",
-    "cambridge",
-    "oxford",
-    "edinburgh",
-    "glasgow",
-    "belfast",
-    "leeds",
-    "liverpool",
-    "nottingham",
-    "sheffield",
-    "southampton",
-    "reading",
-    "hatfield",
-    "hertfordshire",
-    "england",
-    "scotland",
-    "wales",
-    "greater london",
-    "city of london",
-    "gb",
-    "great britain",
-}
-
 # Experience level patterns
 _EXPERIENCE_PATTERNS = {
     "intern": re.compile(r"\b(intern|internship)\b", re.IGNORECASE),
@@ -260,6 +177,41 @@ def _word_boundary_pattern(term: str) -> re.Pattern[str]:
 def _text_contains(text: str, term: str) -> bool:
     """Check if term appears as a whole word in text."""
     return bool(_word_boundary_pattern(term).search(text))
+
+
+@lru_cache(maxsize=1024)
+def _phrase_pattern(phrase: str) -> re.Pattern[str]:
+    """Word-boundary-anchored pattern for a WHOLE PHRASE (a job title).
+
+    ``_word_boundary_pattern`` above always wraps in ``\\b``, which silently
+    fails for a phrase whose first/last character is punctuation — e.g. the
+    real CV title "Data Engineer & Backend Developer (Consultant)" ends in
+    ``)``, and ``\\b`` after ``)`` demands a word character NEXT, so the phrase
+    could never match at end-of-string. The boundary is therefore applied only
+    on the sides that actually end in a word character.
+    """
+    escaped = re.escape(phrase)
+    prefix = r"\b" if phrase[:1].isalnum() or phrase[:1] == "_" else ""
+    suffix = r"\b" if phrase[-1:].isalnum() or phrase[-1:] == "_" else ""
+    return re.compile(prefix + escaped + suffix, re.IGNORECASE)
+
+
+def _phrase_contains(text: str, phrase: str) -> bool:
+    """True when ``phrase`` occurs in ``text`` as whole words.
+
+    THE BUG THIS EXISTS FOR (measured 2026-08-13). ``_title_score`` used a raw
+    Python ``in`` test, so the config title "Intern" matched ANY title
+    containing those six letters: "Internal Auditor", "International Sales
+    Manager" and "Intern Nurse" all collected half the title weight (20/40) —
+    enough to clear the relevance gate a 0-skill job should have failed.
+    Same shape one level up: "Data Engineer" matched "Data Engineering
+    Manager". Whole-word matching is what the module already does everywhere
+    else (``_text_contains`` for negative keywords, ``_text_contains_skill``
+    for skills); the title path was the one place it was missing.
+    """
+    if not phrase:
+        return False
+    return bool(_phrase_pattern(phrase).search(text))
 
 
 def _text_contains_skill(text: str, skill: str) -> bool:
@@ -397,23 +349,26 @@ def _negative_penalty(job_title: str) -> int:
     return 0
 
 
-def _foreign_location_penalty(location: str) -> int:
-    """Return penalty if the location indicates a non-UK job."""
-    if not location:
-        return 0  # Unknown location — might be UK, don't penalise
-    loc_lower = location.lower()
-    # Check foreign indicators FIRST — catches "London, Ontario" etc.
-    for indicator in FOREIGN_INDICATORS:
-        if indicator in loc_lower:
-            return 15
-    # Then check UK / remote terms — if present, no penalty
-    for term in UK_TERMS:
-        if term in loc_lower:
-            return 0
-    for term in REMOTE_TERMS:
-        if term in loc_lower:
-            return 0
-    return 0  # Unknown location — don't penalise
+# NO FOREIGN-LOCATION PENALTY LIVES HERE — deliberately (rule #30).
+#
+# There used to be a `_foreign_location_penalty()` docking 15 points off any
+# job whose location matched a hand-typed set of foreign cities, countries and
+# US state codes (`FOREIGN_INDICATORS`). It is gone, and both halves of that
+# are the point:
+#
+#   * WRONG SHAPE. UK-only is a DOOR, not a ranking preference. A foreign job
+#     is refused once, at `services/uk_gate.check_uk` (called in `main.py`
+#     before storage). A penalty ADMITS the job and then argues about its
+#     rank — so the catalog still contained Warsaw and Indianapolis roles,
+#     merely 15 points lower.
+#   * WRONG DATA. Foreign cities are an UNBOUNDED set, so a hand-typed sample
+#     of them rots by construction: "seoul" and "ottawa" were never in the
+#     list, so those jobs paid nothing, while "London, Ontario" and any UK job
+#     mentioning a foreign office paid 15 for nothing. The gate matches UK
+#     places from DATA instead (`src/data/uk_gazetteer/`).
+#
+# Guards: `tests/test_scorer.py::test_no_foreign_penalty_symbol_survives` and
+# the `test_*_gives_foreign_location_no_penalty` pair.
 
 
 def detect_experience_level(title: str) -> str:
@@ -468,8 +423,7 @@ def score_job(job: Job) -> int:
     location_pts = _location_score(job.location)
     recency_pts = recency_score_for_job(job)
     penalty = _negative_penalty(job.title)
-    foreign_penalty = _foreign_location_penalty(job.location)
-    total = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+    total = title_pts + skill_pts + location_pts + recency_pts - penalty
     return min(max(total, 0), 100)
 
 
@@ -508,7 +462,10 @@ class JobScorer:
         Optional kwargs (Batch 2.9):
           * ``user_preferences`` — a `UserPreferences` dataclass with
             `salary_min`, `salary_max`, `experience_level`, `needs_visa`,
-            `preferred_workplace` fields consulted by the new dimensions.
+            `work_arrangement` fields consulted by the new dimensions.
+            (The workplace dimension reads `preferred_workplace`, which is
+            a read-only property derived from `work_arrangement` — there is
+            only one stored answer.)
           * ``enrichment_lookup`` — a callable `(job) -> JobEnrichment | None`
             that returns the enriched row for a given job. Defaults to a
             lambda that returns None (no enrichment dims contribute).
@@ -526,11 +483,23 @@ class JobScorer:
         self._engine1 = engine1
 
     def _title_score(self, job_title: str) -> int:
-        title_lower = job_title.lower()
-        for target in self._config.job_titles:
-            if target.lower() == title_lower:
-                return TITLE_WEIGHT
-            if target.lower() in title_lower or title_lower in target.lower():
+        title_lower = job_title.lower().strip()
+        targets = [t.lower().strip() for t in self._config.job_titles if t and t.strip()]
+        # PASS 1 — EXACT match, checked against the WHOLE list before any
+        # containment. It used to share one loop with the containment test
+        # below, so the first target that merely CONTAINED the job title
+        # returned 20 and the exact entry further down the list was never
+        # reached. Measured on the owner's profile: job_titles[0] is "Senior
+        # Data Engineer (Acting Data Lead)", which contains "Senior Data
+        # Engineer" — so a job titled exactly "Senior Data Engineer" scored
+        # 20/40, and NO job that profile could ever see scored above 20 on
+        # title. Two passes make the full weight reachable again.
+        if title_lower and title_lower in targets:
+            return TITLE_WEIGHT
+        # PASS 2 — whole-phrase containment, either direction, word-boundary
+        # anchored (see ``_phrase_contains`` for the substring bug it fixes).
+        for target in targets:
+            if _phrase_contains(title_lower, target) or _phrase_contains(target, title_lower):
                 return TITLE_WEIGHT // 2
         title_words = set(re.findall(r"\w+", title_lower))
         core_overlap = title_words & self._config.core_domain_words
@@ -603,8 +572,7 @@ class JobScorer:
             location_pts = _location_score(job.location)
             recency_pts = recency_score_for_job(job)
             penalty = self._negative_penalty(job.title)
-            foreign_penalty = _foreign_location_penalty(job.location)
-            base = title_pts + skill_pts + location_pts + recency_pts - penalty - foreign_penalty
+            base = title_pts + skill_pts + location_pts + recency_pts - penalty
         else:
             # Engine 1 OFF — keyword contributes nothing. Only Engine 2 dims
             # (computed below, if enrichment + preferences exist) drive the score.
@@ -617,24 +585,36 @@ class JobScorer:
         visa_pts = 0
         workplace_pts = 0
         if self._user_preferences is not None:
+            # F5 (rule #29): call every dim function UNCONDITIONALLY, passing
+            # whatever the lookup returns — including None. Each dim function
+            # already returns its documented NEUTRAL half-weight when
+            # enrichment is None (scoring_dimensions.py: seniority_score,
+            # salary_score, visa_score, workplace_score). The old
+            # `if enrichment is not None:` gate skipped that neutral path
+            # entirely and left all four dims at 0 for any job the enrichment
+            # pipeline hadn't reached yet — a fresh job (correctly un-enriched)
+            # scored 30 points lower than an identical enriched one, exactly
+            # the rule #29 "absent input became a per-job zero" violation.
+            # `dims_active` (src/api/routes/jobs.py) still reads the
+            # enrichment lookup directly, so the UI still greys the radar for
+            # these rows — only the SCORE stops being punished.
             enrichment = self._enrichment_lookup(job)
-            if enrichment is not None:
-                # Lazy import to avoid import cycles during first test collection.
-                from src.services.scoring_dimensions import (
-                    resolve_experience_level,
-                    salary_score,
-                    seniority_score,
-                    visa_score,
-                    workplace_score,
-                )
+            # Lazy import to avoid import cycles during first test collection.
+            from src.services.scoring_dimensions import (
+                resolve_experience_level,
+                salary_score,
+                seniority_score,
+                visa_score,
+                workplace_score,
+            )
 
-                prefs = self._user_preferences
-                salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
-                # Typed value wins; CV-inferred value fills a genuine blank only
-                # — see resolve_experience_level's docstring (product rule #29).
-                seniority_pts = seniority_score(enrichment, resolve_experience_level(prefs))
-                visa_pts = visa_score(enrichment, prefs.needs_visa)
-                workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
+            prefs = self._user_preferences
+            salary_pts = salary_score(enrichment, prefs.salary_min, prefs.salary_max)
+            # Typed value wins; CV-inferred value fills a genuine blank only
+            # — see resolve_experience_level's docstring (product rule #29).
+            seniority_pts = seniority_score(enrichment, resolve_experience_level(prefs))
+            visa_pts = visa_score(enrichment, prefs.needs_visa)
+            workplace_pts = workplace_score(enrichment, prefs.preferred_workplace)
 
         # The composite uses the RAW points (incl. a negative seniority penalty)
         # then clamps once to [0,100] — rule #27, unchanged.

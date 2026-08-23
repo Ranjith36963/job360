@@ -1,0 +1,18 @@
+====================================================================================================
+TOP 20 REPORT  —  generated 2026-08-15T10:39:05.194622+00:00
+user_id=88e7d9075f32421292a869228c030666
+read path: JobDatabase.get_user_feed_jobs(user_id, days=7, min_score=0) + _maybe_apply_hybrid_reorder  (== GET /api/jobs?hours=168&min_score=0&mode=hybrid, dashboard DEFAULT)
+rows in user's active feed (<=7d, staleness active/null, score>=0): 0
+====================================================================================================
+
+!! FEED IS EMPTY — user_feed has zero active rows for this user in the last 7 days.
+
+----------------------------------------------------------------------------------------------------
+SUMMARY — over the full ranked feed (N=0); top 20 above is a slice of this
+----------------------------------------------------------------------------------------------------
+score distribution: N/A (empty feed)
+description under 300 chars: 0 / 0
+company empty/Unknown: 0 / 0
+judged by the LLM judge (llm_fit_score+verdict set — this is the card's PRIMARY badge number when present): 0 / 0
+would render a STALE badge (frontend JobCard.tsx:146-149, case-sensitive vs uppercase literals — see docstring): 0 / 0
+has a job_enrichment row: 0 / 0

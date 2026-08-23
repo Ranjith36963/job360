@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -14,6 +15,16 @@ _API_URLS = [
     "https://nofluffjobs.com/api/posting",
     "https://nofluffjobs.com/api/search/posting",
 ]
+
+
+def _plausible_gbp(val: Any) -> bool:
+    """A loose sanity bound for a GBP annual salary figure — used only when
+    `salary.currency` is absent, to decide whether a bare number is safe to
+    trust as GBP. Same 10k-500k bound as nhs_jobs._parse_salary."""
+    try:
+        return 10000 <= float(val) <= 500000
+    except (ValueError, TypeError):
+        return False
 
 class NoFluffJobsSource(BaseJobSource):
     name = "nofluffjobs"
@@ -39,9 +50,15 @@ class NoFluffJobsSource(BaseJobSource):
         jobs = []
         for item in postings:
             title = item.get("title", "")
-            name = item.get("name", "")
-            # Some responses use "name" instead of "title"
-            title = title or name
+            # NOTE (live probe 2026-08-08): this used to fall back to `name`
+            # with the comment "some responses use name instead of title".
+            # That is WRONG — `name` is the EMPLOYER, not an alias for the
+            # title (verified across 20,631 live postings: title="Remote Sales
+            # Development Representative", name="LevelUp Leads"). The old
+            # fallback would have silently titled a job with its company name.
+            # A posting with no title is unusable, so skip it instead.
+            if not title:
+                continue
 
             # Location handling
             location_obj = item.get("location", {})
@@ -76,27 +93,58 @@ class NoFluffJobsSource(BaseJobSource):
             raw_posted = item.get("posted")
             posted_at, confidence = normalize_posted_at(raw_posted)
 
-            # Salary
+            # Salary. CURRENCY CORRECTNESS RISK (verified live 2026-08-08):
+            # NoFluffJobs is Polish-focused — 19,229 of 20,631 postings are
+            # priced in PLN, and `salary.currency` is 100% filled. Job has no
+            # currency field, so a bare PLN number stored into
+            # salary_min/salary_max would silently be compared as GBP
+            # downstream (a multi-x overstatement). Only trust the value when
+            # it's GBP, or when currency is entirely absent AND the value is
+            # a plausible GBP figure — never convert here (no FX in this
+            # source). A missing salary is far better than a wrong one.
             salary_obj = item.get("salary", {})
             salary_min = None
             salary_max = None
             if isinstance(salary_obj, dict):
-                salary_min = salary_obj.get("from")
-                salary_max = salary_obj.get("to")
-                if salary_min is not None:
-                    try:
-                        salary_min = float(salary_min)
-                    except (ValueError, TypeError):
-                        salary_min = None
-                if salary_max is not None:
-                    try:
-                        salary_max = float(salary_max)
-                    except (ValueError, TypeError):
-                        salary_max = None
+                currency = salary_obj.get("currency")
+                raw_min = salary_obj.get("from")
+                raw_max = salary_obj.get("to")
+
+                trust_salary = currency == "GBP" or (
+                    currency is None and (_plausible_gbp(raw_min) or _plausible_gbp(raw_max))
+                )
+                if trust_salary:
+                    salary_min = raw_min
+                    salary_max = raw_max
+                    if salary_min is not None:
+                        try:
+                            salary_min = float(salary_min)
+                        except (ValueError, TypeError):
+                            salary_min = None
+                    if salary_max is not None:
+                        try:
+                            salary_max = float(salary_max)
+                        except (ValueError, TypeError):
+                            salary_max = None
+
+            # seniority[] (100% fill live, e.g. ["Senior"]) — take the first
+            # element. Zero extra HTTP cost, this list is already fetched.
+            seniority = item.get("seniority")
+            if isinstance(seniority, list) and seniority:
+                experience_level = str(seniority[0])
+            else:
+                experience_level = ""
+
+            # Live probe 2026-08-08: the `company` key does NOT exist in the
+            # posting payload (0 of 20,631 items had it) — the employer name is
+            # carried in `name`. Reading `company` meant every NoFluffJobs job
+            # was stored with an empty company. Prefer `name`, keep `company`
+            # as a fallback in case the upstream schema changes back.
+            company_name = item.get("name") or item.get("company", "")
 
             jobs.append(Job(
                 title=title,
-                company=item.get("company", ""),
+                company=company_name,
                 location=location,
                 apply_url=apply_url,
                 source=self.name,
@@ -106,6 +154,7 @@ class NoFluffJobsSource(BaseJobSource):
                 date_posted_raw=raw_posted,
                 salary_min=salary_min,
                 salary_max=salary_max,
+                experience_level=experience_level,
             ))
 
             if len(jobs) >= _MAX_RESULTS:

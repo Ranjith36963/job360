@@ -1,5 +1,5 @@
 -- 0003_user_feed: per-user SSOT table that dashboard + notifications both
--- read from. See docs/plans/batch-2-plan.md Phase 3 and blueprint §3.
+-- read from. See docs/product/plans/batch-2-plan.md Phase 3 and blueprint §3.
 
 CREATE TABLE IF NOT EXISTS user_feed (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

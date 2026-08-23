@@ -5,7 +5,7 @@ name: Repair loop (agent:fix)
 # The original Loop 1 (ralph-loop worker/integrator) was disabled 2026-06-21: it
 # ran unsupervised, wrote straight to `main`, and wiped worktrees/branches/the
 # test DB. Root cause, one line: a WRITING+MERGING agent with no cage and no
-# human gate. docs/maintenance/loop1_safe_reenable.md is the checklist; this
+# human gate. docs/harness/maintenance/loop1_safe_reenable.md is the checklist; this
 # workflow implements it.
 #
 #   G1  Never touches `main`. It commits to its own branch and opens a PR.
@@ -223,7 +223,7 @@ jobs:
       - name: Plan first, then critique the plan
         if: steps.token.outputs.have == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -266,7 +266,7 @@ jobs:
 
       - name: Claude repairs the code (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -503,14 +503,27 @@ jobs:
             git diff origin/main...HEAD -- backend/ frontend/ | head -800
             echo
             echo "# INVARIANTS (the repo hard rules)"
-            sed -n '/## Hard Rules/,/## Common Gotchas/p' CLAUDE.md
+            # Extract the Hard Rules section by STRUCTURE, not by naming the
+            # heading that follows it. The old form was
+            #   sed -n '/## Hard Rules/,/## Common Gotchas/p'
+            # and CLAUDE.md's compression on 2026-08-11 deleted '## Common
+            # Gotchas'. An unterminated sed range runs to EOF, so the checker
+            # silently received 82 lines -- the Commands and pointer sections --
+            # as its list of INVARIANTS. It never errored. Anchor on "the next
+            # top-level heading" instead, and fail LOUD if the section is gone.
+            awk '/^## Hard Rules/{f=1;print;next} f&&/^## /{exit} f' CLAUDE.md > hard-rules.txt
+            if [ ! -s hard-rules.txt ]; then
+              echo "::error::'## Hard Rules' not found in CLAUDE.md -- the checker would be judging this PR against an EMPTY invariant list." >&2
+              exit 1
+            fi
+            cat hard-rules.txt
           } > checker-input.md
           echo "--- checker-input.md: $(wc -l < checker-input.md) lines ---"
 
       - name: Checker verdict
         if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome == 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

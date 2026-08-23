@@ -42,9 +42,55 @@ STRONG = 65
 GOOD = 50
 GEM = 70
 
+# A BROKEN INSTRUMENT IS NOT A BAD MEASUREMENT.
+#
+# 2026-08-06 (run 31107748440) and again 2026-08-10 (run 31368793516): all 160
+# judge calls failed instantly with "No LLM API key configured" — GitHub renders
+# an unset secret as an EMPTY string, so the workflow handed the judge nothing
+# and every call raised. The script said only "audit produced no judgments" and
+# the notifier filed it under "Accuracy audit REGRESSED". That headline is a lie
+# with a real cost: a missing key wearing the costume of a quality regression is
+# how a week of eval data gets misread and a real regression gets ignored.
+#
+# So config failure gets its OWN marker, its OWN exit code (3), and its own
+# alarm in accuracy-audit.yml. Exit 2 stays reserved for "we measured, and the
+# number is bad".
+#
+# The four names and the wording of the fix are NOT re-typed here. They come
+# from the one preflight every LLM path shares
+# (``llm_provider.require_llm_key``), so a fifth provider added to the chain
+# cannot be missed by this alarm — and so this script reports the SAME truth
+# the judge acts on: ``settings.py`` also accepts a lowercase ``openai_api_key``,
+# which a raw ``os.environ["OPENAI_API_KEY"]`` check here would have called
+# missing while the judge was happily using it.
+from src.services.profile.llm_provider import (  # noqa: E402
+    NO_LLM_KEY_MESSAGE,
+    configured_llm_keys,
+)
+
+INSTRUMENT_BROKEN = "INSTRUMENT BROKEN"
+RC_BROKEN = 3
+RC_REGRESSED = 2
+
+
+def _missing_llm_key() -> bool:
+    """True when NOT ONE provider key is set — the judge cannot make a single call."""
+    return not configured_llm_keys()
+
 
 async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
     import psycopg
+
+    # Preflight: fail LOUDLY and CHEAPLY. Without this the script opens a prod DB
+    # connection, samples 160 rows and burns a minute to discover the same thing.
+    if _missing_llm_key():
+        print(
+            f"{INSTRUMENT_BROKEN}: {NO_LLM_KEY_MESSAGE} "
+            "For this instrument that means NOT an accuracy regression — no "
+            "ranking number was produced at all.",
+            flush=True,
+        )
+        return RC_BROKEN
 
     from src.models import Job
     from src.services.llm_matcher import match_job, profile_to_matcher_text
@@ -114,7 +160,9 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
                 return {"bucket": bucket, "id": r[0], "title": r[1],
                         "kw": r[7], "fit": v.fit_score}
             except Exception as e:  # noqa: BLE001 — one failure must not kill the audit
-                return {"bucket": bucket, "id": r[0], "title": r[1], "error": str(e)[:80]}
+                # 300, not 80: the 2026-08-10 run truncated the one line that mattered
+                # mid-word ("...or a free tier GEMI"), so the alarm could not name the key.
+                return {"bucket": bucket, "id": r[0], "title": r[1], "error": str(e)[:300]}
 
     for i in range(0, len(work), 30):
         chunk = work[i:i + 30]
@@ -123,6 +171,7 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
 
     ok = [r for r in results if "fit" in r]
     errs = [r for r in results if "error" in r]
+    distinct: list[str] = []
     if errs:
         # Drill finding (2026-08-06, run 31107748440): 160/160 judge calls
         # failed INSTANTLY and the script said only "no judgments" — the
@@ -135,8 +184,18 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
     top_ok = [r for r in ok if r["bucket"] == "top"]
     buried_ok = [r for r in ok if r["bucket"] == "buried"]
     if not top_ok:
+        # EVERY call failed → the judge never worked. Name that as an instrument
+        # fault so the notifier does not dress a config error up as a regression.
+        # (A key set but rate-limited/revoked lands here too — also config, not ranking.)
+        if errs and len(errs) == len(results):
+            cause = distinct[0] if distinct else "unknown"
+            print(
+                f"{INSTRUMENT_BROKEN}: all {len(errs)} judge calls failed — first cause: "
+                f"{cause} | NOTHING WAS MEASURED, so this is NOT a ranking regression."
+            )
+            return RC_BROKEN
         print("audit produced no judgments — treating as failure")
-        return 2
+        return RC_REGRESSED
 
     strong100 = round(100 * sum(1 for r in top_ok if r["fit"] >= STRONG) / len(top_ok))
     good100 = round(100 * sum(1 for r in top_ok if r["fit"] >= GOOD) / len(top_ok))
@@ -155,7 +214,7 @@ async def main(user_id: str | None, top_n: int, buried_n: int) -> int:
 
     failed = strong100 < MIN_STRONG_100 or len(gems) > MAX_GEMS
     print(f"\nverdict: {'REGRESSED — investigate' if failed else 'within benchmark'}")
-    return 2 if failed else 0
+    return RC_REGRESSED if failed else 0
 
 
 if __name__ == "__main__":

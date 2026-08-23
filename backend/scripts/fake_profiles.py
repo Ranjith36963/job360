@@ -304,7 +304,6 @@ def build_user_profile(spec: dict):
         salary_max=p.get("salary_max"),
         work_arrangement=p.get("workplace", ""),
         experience_level=p.get("experience_level", ""),
-        preferred_workplace=p.get("workplace"),
         needs_visa=bool(p.get("needs_visa", False)),
         github_username=spec.get("github_username", ""),
         about_me=spec["summary"],

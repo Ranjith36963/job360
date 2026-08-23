@@ -275,6 +275,27 @@ export async function uploadGithub(
   });
 }
 
+/** Which part of the profile to empty. "all" wipes the lot. */
+export type ClearSection = "cv" | "linkedin" | "github" | "preferences" | "all";
+
+/**
+ * Empty one input (or the whole profile) so the next upload starts clean.
+ *
+ * Every clear is snapshotted server-side before it writes, so it is undoable
+ * from the History drawer — that is what makes a destructive-looking button
+ * safe to offer.
+ */
+export async function clearProfileSection(
+  section: ClearSection
+): Promise<ProfileResponse> {
+  const form = new FormData();
+  form.append("section", section);
+  return request<ProfileResponse>("/api/profile/clear", {
+    method: "POST",
+    body: form,
+  });
+}
+
 // ---- Profile version management (Step-2 A1, S3-MVP endpoints) ----
 
 export async function getProfileVersions(): Promise<ProfileVersionsListResponse> {
@@ -677,7 +698,7 @@ export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> 
 
 // ---- Tailored docs ----
 //
-// Per-user AI CV + cover letter (docs/peruser_cv_coverletter.md). Generation is
+// Per-user AI CV + cover letter (docs/product/peruser_cv_coverletter.md). Generation is
 // quota-gated (402 when the monthly free limit is reached) and requires a CV on
 // file (400 when none). Every write here is a plain async function + toast +
 // queryClient.invalidateQueries at the call site — no useMutation in this codebase.

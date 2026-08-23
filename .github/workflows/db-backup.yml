@@ -8,7 +8,7 @@
 #
 # The dump holds user PII (emails, CVs), so it is encrypted with a passphrase
 # (BACKUP_PASSPHRASE secret) before it ever leaves the runner — R2 only ever sees
-# ciphertext. Restore: docs/RUNBOOK-backups.md.
+# ciphertext. Restore: docs/product/RUNBOOK-backups.md.
 name: db-backup
 on:
   schedule:
@@ -26,8 +26,23 @@ jobs:
     timeout-minutes: 20
     services:
       # Throwaway Postgres used ONLY to restore-verify tonight's dump.
+      #
+      # MUST carry pgvector, not stock postgres. Prod enabled the `vector`
+      # extension on 2026-08-07 (migration 0027, PR #244 — prod runs pgvector
+      # 0.8.3 on server 18.4, verified live 2026-08-11), so pg_dump now emits
+      # `CREATE EXTENSION IF NOT EXISTS vector` near the top of every dump.
+      # Against stock `postgres:18` that line dies with
+      #   psql:dump.sql:26: ERROR: extension "vector" is not available
+      # and `-v ON_ERROR_STOP=1` aborts the restore. That failure SKIPS the
+      # encrypt + upload steps, so four consecutive nights (2026-08-08 ->
+      # 2026-08-11, runs 31237821860/31293351679/31354509976/31456829224)
+      # pushed NOTHING to R2 while the dump itself was healthy (~23 MB).
+      # The dump was never the problem — the verifier was.
+      #
+      # PR #244 moved ci.yml + ci-offline.yml to the pgvector image but missed
+      # this workflow. Keep the major version matched to Railway's Postgres 18.
       verify_db:
-        image: postgres:18
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: verify
           POSTGRES_PASSWORD: verify

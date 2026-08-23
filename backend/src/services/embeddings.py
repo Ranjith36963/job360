@@ -45,6 +45,34 @@ _CHUNK_OVERLAP_WORDS = 50
 _ENCODER: Optional[object] = None
 
 
+def semantic_stack_installed() -> bool:
+    """Is the optional semantic stack actually importable in THIS process?
+
+    WHY THIS EXISTS (measured 2026-08-15). The API image installs
+    ``.[semantic]`` plus torch; the WORKER image installs plain ``.`` —
+    confirmed in the live Railway build log, which shows
+    ``load build definition from backend/Dockerfile.worker`` followed by
+    ``pip install --no-cache-dir .``. So the daily ``refresh_catalog`` cron
+    ingests jobs on a machine that cannot embed them.
+
+    It failed in the worst possible shape: ``sentence_transformers`` is
+    imported lazily (rule #16), so the module import SUCCEEDS and the failure
+    only surfaces per job, inside the loop, where it is caught and logged as
+    ``embed backfill: job <id> failed``. One missing package therefore produced
+    a storm of identical per-job warnings, none of which named the cause or the
+    remedy — and semantic coverage sat at 687 of 9,977 jobs while every
+    instrument stayed green.
+
+    A capability that is switched ON but structurally impossible must say so
+    once, loudly, with the fix — not fail quietly a hundred times.
+    """
+    try:
+        import sentence_transformers  # noqa: F401, PLC0415 — probe only (rule #16)
+    except ImportError:
+        return False
+    return True
+
+
 def _load_encoder() -> object:
     """Lazy-load the sentence-transformers encoder. CLAUDE.md rule #11."""
     global _ENCODER
@@ -170,11 +198,29 @@ def profile_to_embedding_text(profile: Any) -> str:
             "cv_skills_esco",
         ):
             _add_all(getattr(cv, field, []))
-        for text_field in ("summary", "experience_text", "linkedin_summary"):
+        # Facts about the candidate that had a shelf but no consumer until
+        # 2026-08-09: where they have worked (cv_industries), which human
+        # languages they speak (cv_languages — a real requirement on UK ads),
+        # and the domain the CV pass classified them into (career_domain, whose
+        # own comment claimed for months that a scorer read it; none did).
+        _add_all(getattr(cv, "cv_industries", []))
+        _add_all(getattr(cv, "cv_languages", []))
+        domain = getattr(cv, "career_domain", "") or ""
+        if isinstance(domain, str) and domain.strip():
+            parts.append(domain.strip())
+        for text_field in (
+            "summary", "experience_text", "linkedin_summary",
+            "linkedin_headline",
+        ):
             v = getattr(cv, text_field, "") or ""
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())
         _add_all(getattr(cv, "education", []))
+        # Education sub-bullets — dissertation title, coursework, course
+        # projects. Often the only place a student or recent graduate names the
+        # technique they actually know, so leaving them out made the vector
+        # blind to exactly the candidates with the least other evidence.
+        _add_all(getattr(cv, "cv_education_details", []))
         _add_all(getattr(cv, "certifications", []))
         _add_all(getattr(cv, "achievements", []))
         # Roles actually held — title + company + what they did there.
@@ -185,6 +231,34 @@ def profile_to_embedding_text(profile: Any) -> str:
                 blob = " ".join(b for b in bits if b)
                 if blob:
                     parts.append(blob)
+        # TWO DIFFERENTLY-SHAPED LISTS, SO TWO KEY SETS. The CV pass writes
+        # {name, description, technologies}; the LinkedIn pass writes
+        # {title, description}. Reading one shared key set across both meant a
+        # CV project contributed only its description — its NAME and its whole
+        # technology list, the most matchable part of a project, reached the
+        # vector as nothing at all. Concatenating the two lists and reading
+        # "title" is exactly the shape of bug this batch keeps finding: one
+        # hand-written assumption covering two things that are not the same.
+        for proj in getattr(cv, "cv_projects", []) or []:
+            if not isinstance(proj, dict):
+                continue
+            techs = proj.get("technologies")
+            tech_txt = (
+                " ".join(str(t) for t in techs if isinstance(t, str))
+                if isinstance(techs, list)
+                else ""
+            )
+            blob = " ".join(
+                b
+                for b in (
+                    str(proj.get("name") or "").strip(),
+                    str(proj.get("description") or "").strip(),
+                    tech_txt.strip(),
+                )
+                if b
+            ).strip()
+            if blob:
+                parts.append(blob)
         for proj in getattr(cv, "linkedin_projects", []) or []:
             if isinstance(proj, dict):
                 blob = f"{proj.get('title') or ''} {proj.get('description') or ''}".strip()
@@ -209,7 +283,9 @@ def profile_to_embedding_text(profile: Any) -> str:
     if prefs is not None:
         _add_all(getattr(prefs, "industries", []))
         _add_all(getattr(prefs, "preferred_locations", []))
-        for attr in ("preferred_workplace", "experience_level", "work_arrangement"):
+        # preferred_workplace dropped: it is derived from work_arrangement, so it
+        # only duplicated a token already in the vector text.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())

@@ -8,6 +8,7 @@ from src.core.companies import COMPANY_NAME_OVERRIDES, WORKABLE_COMPANIES
 from src.models import Job
 from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.workable")
 
@@ -30,6 +31,9 @@ class WorkableSource(BaseJobSource):
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in cast(dict[str, Any], data)["results"]:
                 title = item.get("title", "")
+                # shortDescription genuinely does not exist on this endpoint
+                # (verified live, 2026-08-08) — leave description empty rather
+                # than invent a source for it.
                 desc = item.get("shortDescription", "")
                 loc = item.get("location", {})
                 if isinstance(loc, dict):
@@ -38,6 +42,8 @@ class WorkableSource(BaseJobSource):
                     location = str(loc)
                 shortcode = item.get("shortcode", "")
                 apply_url = f"https://apply.workable.com/{slug}/j/{shortcode}/"
+                raw_published = item.get("published")
+                posted_at, confidence = normalize_posted_at(raw_published)
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -46,9 +52,9 @@ class WorkableSource(BaseJobSource):
                     apply_url=apply_url,
                     source=self.name,
                     date_found=datetime.now(timezone.utc).isoformat(),
-                    posted_at=None,
-                    date_confidence="fabricated",
-                    date_posted_raw=None,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_published,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Workable: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

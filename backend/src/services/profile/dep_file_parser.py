@@ -279,8 +279,10 @@ def parse_go_mod(content: str) -> set[str]:
     """Extract module paths from ``require (...)`` blocks and single-line requires.
 
     Module paths preserve case (``github.com/Gin-Gonic/Gin`` ≠ ``gin-gonic/gin``
-    at the module level), so we do NOT lowercase here. The lookup map
-    in ``dependency_map.py`` uses the canonical GitHub path casing.
+    at the module level), so we do NOT lowercase here — the name is passed on
+    verbatim for the LLM pass to canonicalise. (This used to say the casing
+    mattered to ``dependency_map.py``'s lookup table; that module was deleted
+    under rule #28.)
     """
     names: set[str] = set()
 

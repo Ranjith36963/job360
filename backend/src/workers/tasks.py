@@ -103,6 +103,8 @@ async def score_and_ingest(
     job_id: int,
     *,
     users_override: Optional[list[tuple[str, FilterProfile, int]]] = None,
+    enrichment_lookup_dict: Optional[dict[int, Any]] = None,
+    suppress_notifications: bool = False,
 ) -> dict[str, int]:
     """Pre-filter + score + upsert feed rows for every active user.
 
@@ -115,6 +117,25 @@ async def score_and_ingest(
     users_override : optional
         Test hook — list of (user_id, FilterProfile, instant_threshold).
         When None, the task loads users from the DB.
+    enrichment_lookup_dict : optional
+        Pre-built ``{job_id: JobEnrichment}`` map (see
+        ``_build_enrichment_lookup``). When None (every call site except the
+        F1 refresh fan-out), this function builds its own — unchanged
+        behaviour. A caller fanning this out over many job ids in one tick
+        (``refresh_catalog``) should build the map ONCE and pass it here:
+        the table is the whole shared catalog's enrichment (~6.5k rows
+        measured in prod, 2026-08-15), so rebuilding it per job turns an
+        O(1) query into an O(n) one for no reason — the map does not change
+        mid-tick (enrichment itself runs as a separate, later ARQ task).
+    suppress_notifications : optional
+        When True, score + feed-write proceeds normally but the
+        score>=threshold ledger-insert + ``send_notification`` enqueue is
+        skipped. Default False — every existing caller/test keeps today's
+        behaviour. ``refresh_catalog`` passes True (see its docstring for
+        why): this is the first production path that can fan a single
+        catalog refresh out into a same-tick notification burst for one
+        user, and that is a deliberate product decision to make explicitly,
+        not something to inherit by accident from a kwarg default.
 
     Returns ``{'ingested': N, 'notifications_queued': M}``.
     """
@@ -138,9 +159,8 @@ async def score_and_ingest(
     if users_override is not None:
         targets = users_override
     else:
-        # No per-user profile storage yet; fall back to "all users see all jobs".
         users = await _load_users(db)
-        targets = [(u["id"], FilterProfile(), 80) for u in users]
+        targets = [(u["id"], _filter_profile_for(u["id"]), 80) for u in users]
 
     # Stage 4 of the 99% cascade (decisions doc D8): per-user scoring via
     # JobScorer. Batch 3.5.2: each user scores against THEIR OWN SearchConfig
@@ -153,7 +173,13 @@ async def score_and_ingest(
     # (job_enrichment is shared catalog per CLAUDE.md rule #10). Build once,
     # share across the per-user scorer cache. Empty dict ⇒ no rows ⇒
     # multi-dim contributes 0 (legacy 4-component path preserved).
-    enrichment_lookup_dict = await _build_enrichment_lookup(db)
+    #
+    # F1 — a caller fanning this out over many job ids in one tick can hand
+    # us an already-built map (see the `enrichment_lookup_dict` param docs
+    # above) so the ~6.5k-row query only runs once per refresh, not once per
+    # job. Falls back to building it here — unchanged for every other caller.
+    if enrichment_lookup_dict is None:
+        enrichment_lookup_dict = await _build_enrichment_lookup(db)
     # `Job.id` is a declared field now (models.py) and _job_from_row populates
     # it from the row, so this lookup actually finds enrichment instead of
     # always calling get(None). Reads `job.id` directly rather than through
@@ -190,7 +216,7 @@ async def score_and_ingest(
         await feed.upsert_feed_row(user_id=user_id, job_id=job_id, score=score, bucket=bucket)
         ingested += 1
 
-        if score >= threshold:
+        if score >= threshold and not suppress_notifications:
             await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel="instant")
             enqueue = ctx.get("enqueue")
             if enqueue is not None:
@@ -397,6 +423,47 @@ def _user_profile_for(user_id: str) -> Optional[UserProfile]:
     except Exception:  # noqa: BLE001, S110 — defensive, multi-dim is opt-in
         pass
     return None
+
+
+def _filter_profile_for(user_id: str) -> FilterProfile:
+    """Build the funnel's first gate from the user's ACTUAL stored profile.
+
+    Until 2026-08-09 the caller passed a bare ``FilterProfile()`` — every field
+    at its default — so all three prefilter stages took their "no preference
+    declared, pass everything" branch. The cheap gate that exists to spare the
+    expensive stages filtered nothing, for every user, since it was written.
+
+    Rule #29 is preserved by construction: each stage already passes everything
+    when its side is empty, so a user who has stated no locations, no workplace
+    and no level is filtered exactly as much as before (not at all).
+
+    Both omissions below were MEASURED against 2,000 live jobs, not guessed.
+
+    SKILLS ARE NOT WIRED. ``skill_overlap_ok`` drops any job whose
+    title+description mentions none of the user's skills. Dry-run on the real
+    catalogue with the owner's real 80-skill profile: it keeps 40% and the
+    combined gate keeps 28.8% — it would silently delete SEVEN JOBS IN TEN
+    before anything scored them. That is a product decision with evidence
+    attached, not a wiring detail.
+
+    THE EXPERIENCE LEVEL IS THE **TYPED** ONE ONLY, never
+    ``resolve_experience_level``. That helper falls back to
+    ``experience_level_inferred``, a value read off the CV's dated job titles
+    rather than stated by anyone. Feeding it to a HARD GATE dropped 24.5% of the
+    catalogue for an owner whose typed level is empty — every senior+ role
+    removed on the strength of a guess he never made. Rule #29 draws exactly
+    this line: an unstated preference means "don't care", so a soft score may
+    lean on an inference but a gate that deletes jobs may not.
+    """
+    profile = _user_profile_for(user_id)
+    if profile is None:
+        return FilterProfile()
+    prefs = profile.preferences
+    return FilterProfile(
+        preferred_locations=list(prefs.preferred_locations or []),
+        work_arrangement=prefs.work_arrangement or "",
+        experience_level=prefs.experience_level or "",
+    )
 
 
 def _search_config_for(user_id: str) -> SearchConfig:
@@ -1252,8 +1319,24 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
     return {"enriched": True}
 
 
+# F1 — cap on how many freshly-fetched job ids one `refresh_catalog` tick
+# will fan out through `score_and_ingest`. Named constant (not inlined) so
+# the number is greppable and documented in one place, not re-derived at
+# every call site.
+#
+# Why 1000, not unbounded: `refresh_catalog` already ran, unfanned, since
+# 2026-07-27 — nothing bounded its output before, so a source outage/replay
+# that suddenly returns a huge batch must not turn one cron tick into an
+# unbounded per-user scoring loop (N ids x every active user x JobScorer).
+# Why 1000, not a tighter number: measured live 2026-08-15, one normal
+# catalog-refill tick inserts ~280-284 new jobs — 1000 is ~3.5x that, real
+# headroom for a bigger-than-usual day without being unbounded.
+MAX_REFRESH_INGEST_IDS = 1000
+
+
 async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
-    """ARQ periodic task: refill the SHARED job catalog on a schedule.
+    """ARQ periodic task: refill the SHARED job catalog on a schedule, then
+    fan the freshly-fetched jobs out into every user's OWN feed.
 
     WHY THIS EXISTS. Nothing fetched jobs on a timer — `run_search` ran only
     when a human clicked Search. Meanwhile `purge_old_jobs` deletes anything
@@ -1264,17 +1347,66 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     PRESENCE (did something break) and none detect ABSENCE (did something
     stop). This task is the missing production loop.
 
-    COST SAFETY — structural, not a promise. It passes ``user_id=None``, and in
-    ``main.run_search`` every per-user stage is gated behind
-    ``if user_id is not None``: the ``user_feed`` write and, critically,
-    ``_run_matcher_stage``, which makes up to ``MATCHER_MAX_JOBS`` PAID LLM
-    calls *per user per run*. With no user attached those stages are
-    unreachable, so this cron costs worker CPU (already running 24/7) plus
-    keyed-API quota — and never per-user LLM spend. Scoring stays on-demand,
-    where the user's own click pays for it.
+    F1 (2026-08-15) — fixing THAT gap was still not enough. This cron
+    refilled the SHARED `jobs` catalog (rule #10: no user_id on that table)
+    but nothing ever re-scored any user's OWN `user_feed` against the new
+    rows, so a healthy catalog cron produced zero felt improvement: measured
+    live, the owner's newest `user_feed` row was 19 days old while the
+    catalog had 280 new jobs that same morning. `score_and_ingest` already
+    did everything needed (per-user prefilter, per-user JobScorer, upsert
+    into `user_feed`) — it just had ZERO production callers. This is that
+    wiring: after the shared fetch, walk every job inserted THIS tick
+    through `score_and_ingest`, capped by `MAX_REFRESH_INGEST_IDS`.
 
-    ``no_notify=True``: a catalog refill belongs to nobody, so there is nobody
-    to notify.
+    COST SAFETY — structural, not a promise. `run_search` passes
+    ``user_id=None``, and in ``main.run_search`` every per-user stage is
+    gated behind ``if user_id is not None``: the ``user_feed`` write and,
+    critically, ``_run_matcher_stage``, which makes up to
+    ``MATCHER_MAX_JOBS`` PAID LLM calls *per user per run*. With no user
+    attached those stages are unreachable during the fetch. The fan-out below
+    is a SEPARATE, pure-local-CPU path — `score_and_ingest` prefilters, runs
+    `JobScorer` (keyword + optional multi-dim), and upserts `user_feed`; it
+    never calls the paid judge, in-process or otherwise (guard:
+    ``test_refresh_catalog_fanout_never_reaches_the_paid_judge``).
+
+    ONE HONEST EXCEPTION, stated because "never calls an LLM" would be a lie
+    the next reader would rely on: `score_and_ingest` ENQUEUES
+    ``enrich_job_task`` — a real LLM extraction — once per job when the first
+    user clears ``ENRICHMENT_THRESHOLD`` (default 10, i.e. nearly every job).
+    It is unreachable today only because ``ENGINE2_ENABLED`` defaults False
+    (settings.py:256, gated as ENGINE2_ENABLED OR the legacy
+    ENRICHMENT_ENABLED — rule #18, so BOTH names must be checked). That is a
+    FLAG, not a guarantee: switching it on turns this nightly fan-out into
+    ~280 LLM extractions per tick. Enrichment is genuinely wanted (it fills
+    the salary/seniority/visa shelves the dim scorers read), so this is not
+    blocked here — but whoever flips that flag should cap or batch this path
+    first, and should know they are flipping it for a cron, not just for
+    on-demand searches.
+
+    So this cron costs worker CPU (already running 24/7) plus keyed-API quota
+    for the fetch, plus bounded local scoring — and no per-user judge spend.
+
+    NOTIFICATIONS — deliberately suppressed on this path
+    (``suppress_notifications=True``). `score_and_ingest` queues an instant
+    notification at score >= 80; wiring it into a nightly cron makes that
+    reachable for the very first time, for EVERY user, EVERY tick, all at
+    once — a materially different shape of risk than a user's own on-demand
+    search enqueuing their own single result. Measured live 2026-08-15:
+    today the blast radius is zero (`notification_rules` and `user_channels`
+    are both empty — no user has a channel configured yet — and only ONE
+    `user_feed` row has ever scored >= 80), but that is a fact about today's
+    data, not a property of this code, and it will stop being true the
+    moment someone adds a channel. Turning per-job instant pushes on for an
+    unattended 04:00 cron is a real product decision (bundle daily? cap per
+    tick? per-user opt-in?) that deserves its own review, not a side-effect
+    of fixing the empty-dashboard bug. Feed rows and scores are written
+    normally either way; the ledger row and the outbound send are BOTH
+    skipped (:219-220), which is the correct pairing — a ledger row with no
+    send would be treated as already-notified by the if-new dedup and would
+    permanently swallow that job's notification. Flipping this back to False
+    later stays a one-line, fully reversible change once that review happens.
+    ``no_notify=True`` on `run_search` itself is unchanged: the shared
+    catalog refill still belongs to nobody.
 
     Returns the run stats so a failure is visible in the ARQ log rather than
     silent.
@@ -1304,6 +1436,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         profiles_used += 1
         for attr in (
             "job_titles",
+            # Must be unioned too: if it were left empty the sources would fall
+            # back to the union of raw `job_titles` (BaseJobSource.search_titles)
+            # and the catalog refill would send the junk queries again.
+            "search_titles",
             "primary_skills",
             "secondary_skills",
             "tertiary_skills",
@@ -1337,6 +1473,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         len(union.job_titles),
         len(union.relevance_keywords),
     )
+    # Captured BEFORE the fetch runs, not after: run_search can take minutes
+    # (multiple sources, retries), so timestamping post-hoc would miss any
+    # job whose date_found was stamped while the fetch was still mid-flight.
+    started = datetime.now(timezone.utc).isoformat()
     stats = await run_search(user_id=None, no_notify=True, search_config=union)
     logging.getLogger(__name__).info(
         "catalog refresh: sources=%s found=%s new=%s",
@@ -1344,8 +1484,77 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         stats.get("total_found"),
         stats.get("new_jobs"),
     )
+
+    # F1 — fan the freshly-fetched jobs out into every user's own feed. This
+    # is a SEPARATE connection from the one run_search opened and already
+    # closed internally: `ctx['db']` is the worker's own long-lived
+    # connection (populated by `worker_startup`; absent in the two
+    # user_id=None cost-safety tests above, which pass ctx={} and exercise
+    # only the fetch half — the `.get` below makes that a clean no-op rather
+    # than a KeyError).
+    scored_jobs = 0
+    ingested_rows = 0
+    db: Optional[pg.Connection] = ctx.get("db")
+    if db is not None:
+        db.row_factory = pg.Row
+        cur = await db.execute(
+            "SELECT id FROM jobs WHERE date_found >= ? ORDER BY id LIMIT ?",
+            (started, MAX_REFRESH_INGEST_IDS),
+        )
+        new_ids = [row["id"] for row in await cur.fetchall()]
+
+        # A capped fan-out LOSES jobs, it does not defer them: the next tick
+        # computes a fresh `started`, so anything past the LIMIT is never
+        # scored into a feed at all. Measured load is ~280 new jobs/tick
+        # against a cap of 1000, so this should not fire — which is exactly
+        # why it must be loud if it ever does, rather than quietly trimming
+        # a busy day's catalog. Sentry picks this up via the logging handler.
+        if len(new_ids) >= MAX_REFRESH_INGEST_IDS:
+            cur = await db.execute(
+                "SELECT COUNT(*) AS n FROM jobs WHERE date_found >= ?", (started,)
+            )
+            row = await cur.fetchone()
+            total_new = int(row["n"]) if row else len(new_ids)
+            _log.error(
+                "FEED FAN-OUT CAPPED: %s new jobs this tick, only %s ingested — "
+                "%s will never reach any user feed. Raise MAX_REFRESH_INGEST_IDS "
+                "or make the fan-out resumable.",
+                total_new,
+                len(new_ids),
+                max(0, total_new - len(new_ids)),
+            )
+
+        if new_ids:
+            # Build the enrichment lookup ONCE for the whole tick instead of
+            # once per job — see `score_and_ingest`'s `enrichment_lookup_dict`
+            # param docstring for why that's safe. Measured live 2026-08-15:
+            # job_enrichment holds ~6.5k rows; at ~280 jobs/tick, rebuilding
+            # per job was ~40s of avoidable worker-loop time each run.
+            enrichment_lookup_dict = await _build_enrichment_lookup(db)
+            for job_id in new_ids:
+                result = await score_and_ingest(
+                    ctx,
+                    job_id,
+                    enrichment_lookup_dict=enrichment_lookup_dict,
+                    # See the NOTIFICATIONS section of this function's
+                    # docstring — deliberate, reversible, not a default.
+                    suppress_notifications=True,
+                )
+                scored_jobs += 1
+                ingested_rows += result.get("ingested", 0)
+
+        logging.getLogger(__name__).info(
+            "catalog refresh: fanned out %s/%s new job id(s) into user feeds "
+            "(%s user_feed row(s) written)",
+            scored_jobs,
+            len(new_ids),
+            ingested_rows,
+        )
+
     return {
         "sources_queried": stats.get("sources_queried", 0),
         "total_found": stats.get("total_found", 0),
         "new_jobs": stats.get("new_jobs", 0),
+        "scored_jobs": scored_jobs,
+        "ingested_rows": ingested_rows,
     }

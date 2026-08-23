@@ -19,7 +19,7 @@ parametrization makes any cheap def-count tolerance flaky — a false-alarming
 check trains people to ignore the loop).
 
 Read-only on purpose: this loop REPORTS drift, it never edits docs
-(see docs/maintenance/loop1_safe_reenable.md — "verify=read is safe").
+(see docs/harness/maintenance/loop1_safe_reenable.md — "verify=read is safe").
 Run: python scripts/doc_sync_check.py   (from the repo root)
 """
 
@@ -43,6 +43,10 @@ LIVING_DOCS = [
     "ARCHITECTURE.md",
     "STATUS.md",
     "backend/CLAUDE.md",
+    # Added 2026-08-11. frontend/CLAUDE.md was NOT here, so the one file carrying
+    # a stale "The 28 hard rules" was the one file this checker could not see --
+    # a guard blind to the exact bug it was written for.
+    "frontend/CLAUDE.md",
     "frontend/README.md",
 ]
 
@@ -134,7 +138,14 @@ def hard_rule_count() -> int:
     and exactly the class of number that rots every time a rule is added.
     """
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
-    return len(re.findall(r"^\d+\. \*\*", text, re.M))
+    # Count distinct rule NUMBERS, not list lines. Two rules that share one entry
+    # ("11 + 16. **Never import ...") are still two rules to the agent reading them,
+    # and the agent is this number's consumer. Counting lines made the checker
+    # report 29 while the document visibly numbered up to 31.
+    numbers: set[int] = set()
+    for m in re.finditer(r"^(\d+(?:\s*\+\s*\d+)*)\. \*\*", text, re.M):
+        numbers.update(int(n) for n in re.findall(r"\d+", m.group(1)))
+    return len(numbers)
 
 
 def route_module_count() -> int:
@@ -199,6 +210,46 @@ def dead_path_claims() -> list[tuple[str, str]]:
     return out
 
 
+def size_budget_drift() -> list[tuple[str, str, str, str, str]]:
+    """CLAUDE.md against the size budget it declares in its own header.
+
+    The budget is a HARD invariant, not a "fix it soon" signal: the number is
+    deterministic, the fix is always the same (move detail out, leave a pointer),
+    and the file is auto-loaded into every session, so an over-budget file taxes
+    every future turn. It is therefore split out from the drift report -- drift is
+    reported daily and repaired by the fixer loop (deliberately non-blocking), while
+    this one gates the PR. Run it alone with: doc_sync_check.py --budget-only
+    """
+    claude_md = ROOT / "CLAUDE.md"
+    if not claude_md.is_file():
+        return []
+    text = claude_md.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"SIZE BUDGET:\s*<=\s*([\d,]+)\s*words", text)
+    if not m:
+        return []
+    budget = int(m.group(1).replace(",", ""))
+    words = len(text.split())
+    if words <= budget:
+        return []
+    return [
+        ("CLAUDE.md", "-", "size-budget", f"{words} words",
+         f"<= {budget} -- move the detail into the doc it belongs to and leave a "
+         f"one-line pointer"),
+    ]
+
+
+def budget_only() -> int:
+    """Blocking PR gate. Prints and exits non-zero ONLY on a budget breach."""
+    rows = size_budget_drift()
+    if not rows:
+        print("CLAUDE.md is within its declared size budget. OK")
+        return 0
+    _, _, _, said, want = rows[0]
+    print(f"::error file=CLAUDE.md::CLAUDE.md is {said}, budget {want}")
+    print(f"CLAUDE.md size budget EXCEEDED: {said} (budget {want}).")
+    return 1
+
+
 def main() -> int:
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
@@ -238,7 +289,10 @@ def main() -> int:
 
         for fact, actual, pattern in checks:
             for i, line in enumerate(lines, start=1):
-                for m in re.finditer(pattern, line):
+                # Case-INSENSITIVE. frontend/CLAUDE.md:5 begins the sentence, so
+                # it reads "The 28 hard rules" while the pattern said "the (\d+)".
+                # One capital letter hid a stale number from its own tripwire.
+                for m in re.finditer(pattern, line, re.IGNORECASE):
                     matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
                     claimed = int(m.group(1))
                     if claimed != actual:
@@ -280,6 +334,8 @@ def main() -> int:
         drift.append((f, ln, "dead-path", claimed, "this path does not exist"))
 
 
+    drift.extend(size_budget_drift())
+
     print("# Doc-sync drift report (Loop 3)\n")
     print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "
           f"unique source classes = **{unique_classes}**, "
@@ -299,6 +355,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--budget-only" in sys.argv[1:]:
+        sys.exit(budget_only())
     # Windows consoles default to cp1252; arrows in doc text or this output
     # would raise UnicodeEncodeError -> bogus exit 2. Force utf-8 stdout.
     try:

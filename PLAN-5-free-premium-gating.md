@@ -23,7 +23,7 @@ Why: monetization needs a plan system before it needs a payment system — the `
 - The first real premium feature already has a seam: `backend/src/api/routes/tailor.py:105-125` enforces a monthly cap (`TAILOR_FREE_PER_MONTH`, default 10, from `backend/src/core/settings.py:141`) returning **402** — with a comment saying a real premium tier will bypass it later. Phase 1 = premium bypasses the cap. (Do NOT convert tailor to `require_premium`-only — free users keep their 10/month.)
 - `GET /api/auth/me` → `backend/src/api/routes/auth.py:226-228`, returns `UserResponse` (`auth.py:85-87`: `id`, `email`). `UserResponse` is ALSO returned by register/login/magic-consume — adding a field touches all their code paths; give it a safe default.
 - Frontend: `User` type is HAND-WRITTEN at `frontend/src/lib/api.ts:340` (`{ id: string; email: string }`) — not generated; `me()` at `api.ts:362-368`. Account page: `frontend/src/app/settings/account/page.tsx` (composes cards; add a PlanCard). `frontend/src/middleware.ts:42` also fetches `/api/auth/me` — additive field is safe there.
-- Test pattern to copy for gating tests: `backend/tests/test_email_enforcement.py` (free vs gated route, per the original plan doc `docs/plans/2026-06-21-free-premium-plans.md`).
+- Test pattern to copy for gating tests: `backend/tests/test_email_enforcement.py` (free vs gated route, per the original plan doc `docs/product/plans/2026-06-21-free-premium-plans.md`).
 - Rule #12/#25 (CLAUDE.md): plan must derive from the session user server-side. NEVER accept a plan value from a request body/URL — no self-upgrade endpoint in Phase 1.
 
 ## Files to touch
@@ -249,7 +249,7 @@ git add -A && git commit -m "feat(plans): plan display on account page + User.pl
 
 ```bash
 git push -u origin feat/plan-gating-phase1
-gh pr create --title "feat(plans): Phase 1 free/premium gating — users.plan, require_premium, tailor-cap bypass, account-page plan card" --body "Phase 1 of docs/plans/2026-06-21-free-premium-plans.md. No payments; plan set server-side via scripts/set_plan.py. Premium currently unlocks: unlimited tailoring. TEXT column leaves room for the Free/Pro/Max model (PR #22 docs) without another migration. Prod migration 0025 auto-applies on deploy boot."
+gh pr create --title "feat(plans): Phase 1 free/premium gating — users.plan, require_premium, tailor-cap bypass, account-page plan card" --body "Phase 1 of docs/product/plans/2026-06-21-free-premium-plans.md. No payments; plan set server-side via scripts/set_plan.py. Premium currently unlocks: unlimited tailoring. TEXT column leaves room for the Free/Pro/Max model (PR #22 docs) without another migration. Prod migration 0025 auto-applies on deploy boot."
 ```
 
 ---

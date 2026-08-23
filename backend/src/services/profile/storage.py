@@ -80,12 +80,23 @@ def save_profile(
     (e.g. missing migration in a stale DB), the tip upsert also rolls
     back rather than leaving the two tables inconsistent.
     """
+    # Sanitise the user-typed preference boxes on EVERY save path — form save,
+    # CV/LinkedIn/GitHub upload, re-extraction, CLI. This is the single write
+    # chokepoint, so cleaning HERE is the only way to guarantee extraction
+    # pollution can never persist regardless of which route saved. The form
+    # handler (_apply_preferences) also cleans, so its response is clean before
+    # the reload; this is the belt that catches the upload/re-extract paths it
+    # doesn't cover. Zero-loss + idempotent — a clean profile is unchanged.
+    # See preferences.sanitize_preferences and tests/test_preference_pollution.py.
+    from src.services.profile.preferences import sanitize_preferences
+
+    clean_prefs = sanitize_preferences(profile.preferences, profile.cv_data)
     cv_json = json.dumps(asdict(profile.cv_data), default=str)
-    pref_json = json.dumps(asdict(profile.preferences), default=str)
+    pref_json = json.dumps(asdict(clean_prefs), default=str)
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     snapshot_id = make_snapshot_id(
-        user_id, profile.cv_data, profile.preferences, when=now_dt
+        user_id, profile.cv_data, clean_prefs, when=now_dt
     )
     with pgsync.connect(str(DB_PATH)) as conn:
         conn.execute(

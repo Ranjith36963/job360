@@ -242,6 +242,80 @@ async def test_match_batch_persists_skips_and_survives_errors(mem_db):
     assert len(calls) == 2
 
 
+@pytest.mark.asyncio
+async def test_match_batch_does_not_swallow_a_missing_key_as_a_judged_nothing(mem_db):
+    """A missing key is not a per-job judge failure — it is the SAME fault for
+    every job, and swallowing it per job is exactly the masquerade that cost a
+    week of eval data.
+
+    Before: no key -> N warnings "judge failed for job X" -> ``[None, None]``.
+    A caller counting verdicts sees "judged 0/2" and reads a quality problem.
+    After: the config fault escapes as itself, once.
+    """
+    import src.services.profile.llm_provider as lp
+
+    conn = mem_db
+    uid = "user-nokey-001"
+    ids = []
+    for title in ("Job A", "Job B"):
+        cur = await conn.execute(
+            "INSERT INTO jobs(title, company, apply_url, source, date_found) "
+            "VALUES (?,?,?,?,?)",
+            (title, "CorpA", f"https://a.com/{title}", "greenhouse", _NOW),
+        )
+        ids.append(cur.lastrowid)
+        await conn.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+            (uid, ids[-1], 50, "top"),
+        )
+    await conn.commit()
+
+    jobs = []
+    for title, jid in zip(("Job A", "Job B"), ids):
+        j = _make_job(title=title)
+        j.id = jid  # type: ignore[attr-defined]
+        jobs.append(j)
+
+    # conftest._offline_openai already blanks all four keys — the production
+    # shape of an unset GitHub secret. No fn is injected, so the real chain runs.
+    lp.reset_llm_key_alarm()
+    with pytest.raises(lp.LLMKeyMissing):
+        await match_batch(jobs, user_id=uid, profile_text="p", conn=conn)
+
+
+@pytest.mark.asyncio
+async def test_match_batch_still_propagates_cancellation(mem_db):
+    """Guard on the `return_exceptions=True` above. It lets every judge settle
+    before speaking, which is right — but it also turns a child's exception into
+    a VALUE, and silently eating a CancelledError is how a shutdown hangs.
+    Anything that escapes `_one` (which already swallows ordinary errors itself)
+    must still come out."""
+    conn = mem_db
+    uid = "user-cancel-001"
+    cur = await conn.execute(
+        "INSERT INTO jobs(title, company, apply_url, source, date_found) VALUES (?,?,?,?,?)",
+        ("Cancel Job", "CorpA", "https://a.com/c", "greenhouse", _NOW),
+    )
+    jid = cur.lastrowid
+    await conn.execute(
+        "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES (?,?,?,?)",
+        (uid, jid, 50, "top"),
+    )
+    await conn.commit()
+
+    job = _make_job(title="Cancel Job")
+    job.id = jid  # type: ignore[attr-defined]
+
+    async def cancelled(prompt, schema, system):
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await match_batch(
+            [job], user_id=uid, profile_text="p", conn=conn,
+            llm_extract_validated_fn=cancelled,
+        )
+
+
 def test_flag_defaults_off(monkeypatch):
     monkeypatch.delenv("MATCHER_ENABLED", raising=False)
     import importlib
@@ -790,6 +864,79 @@ def test_matcher_text_survives_a_bare_profile():
         cv_data = None
         preferences = None
     assert profile_to_matcher_text(_Empty()) == ""
+
+
+def test_matcher_text_widens_judge_with_github_and_typed_skills():
+    """FINDING 5 (HIGH). The judge truncated every repo description to [:200]
+    and never saw github_bio, github_profile_readme, repo topics/README
+    excerpts, or additional_skills (skills the user typed himself). The owner
+    leans heavily on GitHub and has said twice that budget is not a
+    constraint — so the judge must see all of it, uncut."""
+    long_desc = "A production RAG pipeline serving real traffic. " * 6
+    assert len(long_desc) > 200, "test setup: description must exceed the old cap"
+
+    class _CV3:
+        job_titles = ["AI Engineer"]
+        github_bio = "Backend engineer building agentic systems in London."
+        github_profile_readme = "### About me\nI ship production LLM pipelines."
+        github_repos_brief = [{
+            "name": "rag-pipeline",
+            "description": long_desc,
+            "topics": ["nlp", "rag", "langchain"],
+            "readme_excerpt": "This repo implements retrieval-augmentation used in prod.",
+        }]
+
+    class _Prefs3:
+        additional_skills = ["Terraform", "Kubernetes"]
+
+    class _P3:
+        cv_data = _CV3()
+        preferences = _Prefs3()
+
+    txt = profile_to_matcher_text(_P3())
+
+    assert long_desc.strip() in txt, (
+        "repo description was cut short — the [:200] truncation must be gone"
+    )
+    assert "nlp" in txt and "rag" in txt and "langchain" in txt, (
+        "repo topics never reached the judge"
+    )
+    assert "retrieval-augmentation used in prod" in txt, (
+        "repo README excerpt never reached the judge"
+    )
+    assert "Backend engineer building agentic systems" in txt, (
+        "github_bio never reached the judge"
+    )
+    assert "ship production LLM pipelines" in txt, (
+        "github_profile_readme never reached the judge"
+    )
+    assert "Terraform" in txt and "Kubernetes" in txt, (
+        "additional_skills (typed by the user himself) never reached the judge"
+    )
+
+
+def test_matcher_text_empty_github_and_skills_stay_silent():
+    """CONTROL (rule #29) — unset github_bio/README/repos/additional_skills
+    must never emit a stray label or placeholder text. Guards against a fix
+    that always prints 'GitHub bio: ' even when there is nothing to say."""
+    class _CV4:
+        job_titles = ["AI Engineer"]
+        github_bio = ""
+        github_profile_readme = ""
+        github_repos_brief = []
+
+    class _Prefs4:
+        additional_skills = []
+
+    class _P4:
+        cv_data = _CV4()
+        preferences = _Prefs4()
+
+    txt = profile_to_matcher_text(_P4())
+    assert "GitHub bio" not in txt
+    assert "GitHub profile README" not in txt
+    assert "Built (GitHub)" not in txt
+    assert "typed by the user" not in txt
 
 
 @pytest.mark.asyncio

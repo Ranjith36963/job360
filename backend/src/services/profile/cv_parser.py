@@ -54,6 +54,14 @@ Return a JSON object with exactly these fields:
       "details": ["Coursework, dissertation, projects — each as separate string"]
     }}
   ],
+  "projects": [
+    {{
+      "name": "Project name",
+      "description": "What it does and what they built, in their words",
+      "technologies": ["Each tool/framework named for THIS project"],
+      "dates": "Date range if written"
+    }}
+  ],
   "certifications": [
     "Each certification with issuer and date, as a single string"
   ],
@@ -63,6 +71,7 @@ Return a JSON object with exactly these fields:
   "experience_level": "One of: intern, junior, mid, senior, lead, principal, director — infer from experience duration and roles",
   "industries": ["Industries/domains they have experience in"],
   "languages": ["Human languages they speak, if mentioned"],
+  "right_to_work": "Their stated work-authorisation status, VERBATIM, if the CV says it (e.g. 'British citizen', 'Indefinite Leave to Remain', 'Graduate Route visa until 2027', 'requires sponsorship'). Return null if the CV does not mention it — never infer it from nationality, name or place of study.",
   "career_domain": "The ONE coarse career bucket that best fits this person's OVERALL career. Must be EXACTLY one of: software_engineering, data_and_ai, product_and_design, marketing_and_growth, sales_and_bizdev, finance_and_accounting, operations_and_supply, human_resources, legal_and_compliance, healthcare_and_lifesciences, education_and_research, engineering_physical, customer_support, media_and_content, skilled_trades, other. Return null (not a guess) when the CV genuinely does not fit any bucket clearly."
 }}
 
@@ -893,6 +902,15 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
 
     # Education: flatten nested dicts to list of strings for display
     education_lines: list[str] = []
+    # Finding 7 (Pillar-1 closeout audit, 2026-08-16) — MIRRORS
+    # schemas.cv_schema_to_cvdata. Per-degree details (dissertation,
+    # coursework, course project) used to be appended straight into
+    # `education_lines`, mixed in with the degree/institution text where
+    # nothing could tell a detail bullet from a qualification line. They get
+    # their own shelf now, same as the live adapter — this is exactly the
+    # kind of one-adapter-fixed-the-other-wasn't drift `test_adapter_parity`
+    # exists to catch.
+    education_details: list[str] = []
     edu_raw = result.get("education", [])
     if isinstance(edu_raw, list):
         for edu in edu_raw:
@@ -907,8 +925,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
                     if dates:
                         line += f" | {dates}"
                     education_lines.append(line)
-                for detail in _coerce_str_list(edu.get("details")):
-                    education_lines.append(detail)
+                education_details.extend(_coerce_str_list(edu.get("details")))
             elif isinstance(edu, str):
                 education_lines.append(edu)
 
@@ -971,7 +988,8 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
         location=location,
         achievements=achievements,
         cv_skills_esco=cv_skills_esco,
-        industries=industries,
+        cv_industries=industries,
         cv_languages=cv_languages,
         career_domain=career_domain,
+        cv_education_details=education_details,
     )

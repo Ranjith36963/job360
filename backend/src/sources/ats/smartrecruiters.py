@@ -57,50 +57,76 @@ class SmartRecruitersSource(BaseJobSource):
                 raw_released = item.get("releasedDate")
                 posted_at, confidence = normalize_posted_at(raw_released)
 
+                # List response carries experienceLevel {id, label} at 100%
+                # fill in the sample (verified live, 2026-08-08) — free win,
+                # no extra HTTP call.
+                exp_level_obj = item.get("experienceLevel")
+                experience_level = ""
+                if isinstance(exp_level_obj, dict):
+                    experience_level = exp_level_obj.get("label") or ""
+
+                description = ""
+                salary_min: Optional[float] = None
+                salary_max: Optional[float] = None
+                # Job-understanding fix (2026-08-05): the list endpoint has no
+                # posting text (150 prod jobs, 100% empty descriptions). The
+                # public detail endpoint carries the full jobAd sections
+                # (verified live: 6,445 chars for a wise posting) AND a
+                # compensation block ({min, max, currency, period}, 100% fill
+                # in the sample, verified live 2026-08-08) — both come out of
+                # the SAME fetch, no extra HTTP call. Only UK/remote-relevant
+                # jobs are detail-fetched, so the extra request count matches
+                # what we actually keep. A failed detail fetch degrades to the
+                # empty description / no salary, never drops the job.
+                if _is_uk_or_remote(location) and detail_budget > 0:
+                    detail_budget -= 1
+                    detail = await self._fetch_posting_detail(
+                        slug, str(item.get("id", ""))
+                    )
+                    description = self._extract_description_text(detail)
+                    comp = detail.get("compensation")
+                    if isinstance(comp, dict):
+                        salary_min = comp.get("min")
+                        salary_max = comp.get("max")
+
                 job = Job(
                     title=title,
                     company=company_name,
                     location=location,
-                    description="",
+                    description=description,
                     apply_url=apply_url,
                     source=self.name,
                     date_found=now_iso,
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=raw_released,
+                    experience_level=experience_level,
+                    salary_min=salary_min,
+                    salary_max=salary_max,
                 )
-                # Job-understanding fix (2026-08-05): the list endpoint has no
-                # posting text (150 prod jobs, 100% empty descriptions). The
-                # public detail endpoint carries the full jobAd sections
-                # (verified live: 6,445 chars for a wise posting). Only
-                # UK/remote-relevant jobs are detail-fetched, so the extra
-                # request count matches what we actually keep. A failed detail
-                # fetch degrades to the empty description, never drops the job.
-                if _is_uk_or_remote(location) and detail_budget > 0:
-                    detail_budget -= 1
-                    job.description = await self._fetch_posting_text(
-                        slug, str(item.get("id", ""))
-                    )
                 jobs.append(job)
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("SmartRecruiters: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs
 
-    async def _fetch_posting_text(self, slug: str, posting_id: str) -> str:
-        """Fetch one posting's full text from the public detail endpoint.
+    async def _fetch_posting_detail(self, slug: str, posting_id: str) -> dict[str, Any]:
+        """Fetch one posting's raw detail JSON from the public detail endpoint.
 
-        Concatenates the ``jobAd.sections`` texts (companyDescription,
-        jobDescription, qualifications, additionalInformation), tag-stripped.
-        Returns ``""`` on any failure — absence of text is a data gap, not an
-        error (the scorer's unknown-handling treats it neutrally).
+        Returns ``{}`` on any failure — callers treat a missing detail as an
+        absent description/compensation, never an error.
         """
         if not posting_id:
-            return ""
+            return {}
         detail = await self._get_json(
             f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{posting_id}"
         )
-        if not isinstance(detail, dict):
-            return ""
+        return detail if isinstance(detail, dict) else {}
+
+    @staticmethod
+    def _extract_description_text(detail: dict[str, Any]) -> str:
+        """Concatenate ``jobAd.sections`` texts (companyDescription,
+        jobDescription, qualifications, additionalInformation), tag-stripped.
+        """
         sections = (detail.get("jobAd") or {}).get("sections") or {}
         parts: list[str] = []
         for key in ("jobDescription", "qualifications", "additionalInformation", "companyDescription"):
@@ -109,3 +135,16 @@ class SmartRecruitersSource(BaseJobSource):
             if text:
                 parts.append(_HTML_TAG_RE.sub(" ", str(text)))
         return " ".join(parts)[:5000].strip()
+
+    async def _fetch_posting_text(self, slug: str, posting_id: str) -> str:
+        """Fetch one posting's full text from the public detail endpoint.
+
+        Kept as its own method (rather than inlined) because
+        ``src/services/description_backfill.py`` calls this directly by name
+        to re-fetch a thin stored description outside the normal ingestion
+        pass — changing this signature/return type would break that caller.
+        Returns ``""`` on any failure — absence of text is a data gap, not an
+        error (the scorer's unknown-handling treats it neutrally).
+        """
+        detail = await self._fetch_posting_detail(slug, posting_id)
+        return self._extract_description_text(detail)
