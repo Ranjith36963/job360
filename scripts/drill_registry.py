@@ -174,6 +174,25 @@ REGISTRY: dict[str, Guard] = {
         # still names an old one. The guard that makes a file MOVE safe.
         drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
     ),
+    "scripts/worktree_census.py": Guard(
+        status="drilled",
+        # Sorts 62 worktrees / 209 local branches into SAFE / KEEP / ASK. The
+        # danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE costs the
+        # owner unsaved work. 20 worktrees hold uncommitted work and 14 of those
+        # sit on branches ALREADY MERGED, so the obvious "merged => junk" rule
+        # deletes 14 folders of real work. The drill plants work in a merged
+        # worktree five different ways (modified / untracked / staged / a live
+        # .env / backend/data) and demands the classifier stop calling it safe,
+        # plus two negative controls: a genuinely clean merged worktree stays
+        # SAFE, and an unrelated newcomer does not move an existing verdict.
+        #
+        # ONLY THE DRILL RUNS IN CI, AND THAT IS NOT AN OVERSIGHT. The drill
+        # builds its own git repo in a temp dir, so it is portable and
+        # network-free. The CENSUS reads D:\ and a runner cannot see D:\ --
+        # pointing this step at the checkout would census one clean worktree and
+        # one branch, report all-green, and be the eleventh dead guard.
+        drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
+    ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
         # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the
