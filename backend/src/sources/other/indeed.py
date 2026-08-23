@@ -35,7 +35,7 @@ class JobSpySource(BaseJobSource):
             return []
 
         jobs = []
-        queries = self.job_titles[:8]
+        queries = self.search_titles[:8]
         for query in queries:
             try:
                 df = await asyncio.to_thread(

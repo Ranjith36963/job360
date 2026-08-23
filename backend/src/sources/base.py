@@ -43,7 +43,7 @@ def _is_uk_or_remote(location: str) -> bool:
     `services/uk_gate.check_uk`, called in `main.py` before storage with the
     source name and the ad body in hand. This only avoids carrying obviously
     foreign rows through scoring and the O(n^2) dedup (see
-    docs/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
+    docs/product/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
 
     WHY IT ONLY EVER SEES A LOCATION, AND WHY THAT IS LOAD-BEARING
     -------------------------------------------------------------
@@ -115,6 +115,20 @@ class BaseJobSource(ABC):
         if self._search_config is not None:
             return self._search_config.job_titles
         return _DEFAULT_JOB_TITLES
+
+    @property
+    def search_titles(self) -> list[str]:
+        """The titles this source may put in a search request.
+
+        Distinct from `job_titles`, which is the scorer's EVIDENCE list and
+        holds raw CV strings ("… - R&D Department", "… (SDET)", bare "Intern")
+        that no job board indexes. Falls back to `job_titles` so a config built
+        before the split — or a no-profile default config — behaves exactly as
+        it did.
+        """
+        if self._search_config is not None and self._search_config.search_titles:
+            return self._search_config.search_titles
+        return self.job_titles
 
     @property
     def search_queries(self) -> list[str]:

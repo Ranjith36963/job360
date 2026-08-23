@@ -71,7 +71,7 @@ verify-step-0:
 	@test -f backend/README.md        || { echo "MISSING: backend/README.md"; exit 1; }
 	@test -f frontend/README.md       || { echo "MISSING: frontend/README.md"; exit 1; }
 	@test -f docs/README.md           || { echo "MISSING: docs/README.md"; exit 1; }
-	@test -f docs/troubleshooting.md  || { echo "MISSING: docs/troubleshooting.md"; exit 1; }
+	@test -f docs/product/troubleshooting.md  || { echo "MISSING: docs/product/troubleshooting.md"; exit 1; }
 	@test -f .gitattributes           || { echo "MISSING: .gitattributes"; exit 1; }
 	@test -f setup.bat                || { echo "MISSING: setup.bat"; exit 1; }
 	@test -f backend/scripts/bootstrap_dev.py || { echo "MISSING: bootstrap_dev.py"; exit 1; }
@@ -193,7 +193,7 @@ migrate-roundtrip:
 # ---------------------------------------------------------------------------
 # Step-3 gate — New endpoints + Settings UI.
 #
-# Aggregates the verification checks from docs/step_3_plan.md §Stop-criteria.
+# Aggregates the verification checks from docs/harness/step_3_plan.md §Stop-criteria.
 # Ralph Loop halts once this exits 0 and the sentinel is written.
 # ---------------------------------------------------------------------------
 

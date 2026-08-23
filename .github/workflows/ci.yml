@@ -167,24 +167,8 @@ jobs:
       - name: That guard can still fail
         run: python scripts/encoding_guard.py --drill
 
-      - name: The merge cage still refuses
-        run: python scripts/merge_cage.py --drill
-
-      # CodeRabbit has been reviewing here since 2026-08-15. Measured 2026-08-17:
-      # 86 inline threads, 63 unresolved, 43 of those on PRs that ALREADY MERGED
-      # — findings that shipped to real users with nobody answering them. The
-      # reader that collects them is NOT a gate and must never become one: all
-      # six merged PRs with findings merged with them open, so a "no unresolved
-      # threads" condition would have refused six of six.
-      #
-      # What IS drilled here is the reader itself, offline against a recorded
-      # payload: that it reads GraphQL `isResolved` (REST cannot), that the
-      # `Prompt for AI Agents` block in 55 of those bodies cannot reach a model,
-      # and — as a NEGATIVE CONTROL held to the same standard as the breaks —
-      # that 63 real findings still exit 0. Growing teeth here is a regression.
       - name: The review-debt reader can still fail (and still refuses to gate)
         run: python scripts/review_debt.py --drill
-
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

@@ -136,7 +136,7 @@
 
 ---
 
-## Run 8 — FAIR @ n=100 (definitive; report: `docs/engine_eval_report.md`, gold: `docs/engine_eval_gold.json`)
+## Run 8 — FAIR @ n=100 (definitive; report: `harness/eval/engine_eval_report.md`, gold: `harness/eval/engine_eval_gold.json`)
 
 **Fairness fixes applied (this run reverses earlier conclusions — see below):**
 - **Judge (E4) measured on 99/100** (was 21): judged every gold job, lifting the score≥30 + max-jobs caps.
@@ -220,13 +220,13 @@ Set a mid-level full-stack SWE profile, fetched fresh SWE jobs (catalog → 4,78
 3. **The LLM judge (E4) is the stabiliser** — the only single engine solid across all three (0.93–0.95); it adapts to who the candidate is.
 4. **Ship a judge-inclusive combination — E2+E3+E4 or E3+E4** — never below ~0.94 NDCG for any profile. That is the robust, generalising stack.
 
-**Gold-standard hardening — done:** consistency measured (rank-order Spearman 0.977), generalisation tested across 3 profiles. Golds saved + reproducible: `docs/engine_eval_gold.json` (graduate), `docs/engine_eval_gold_senior.json`, `docs/engine_eval_gold_swe.json`. **Remaining bar-raisers (brainstormed, not yet done):** multi-model consensus gold (kill single-grader bias), behavioural gold (real clicks/applies), automate re-grading.
+**Gold-standard hardening — done:** consistency measured (rank-order Spearman 0.977), generalisation tested across 3 profiles. Golds saved + reproducible: `harness/eval/engine_eval_gold.json` (graduate), `harness/eval/engine_eval_gold_senior.json`, `harness/eval/engine_eval_gold_swe.json`. **Remaining bar-raisers (brainstormed, not yet done):** multi-model consensus gold (kill single-grader bias), behavioural gold (real clicks/applies), automate re-grading.
 
 ---
 
 ## Run 10 — 10 fake technical profiles (breadth generalization; harness in scripts/)
 
-Built **10 realistic-but-FAKE profiles** (data engineer, AI engineer, forward-deployed, data analyst, data scientist, cyber security, SOC analyst, business analyst, full-stack, DevOps/SRE) — each a full fake CV + GitHub + LinkedIn + preferences (`scripts/fake_profiles.py`). Each got its own user, a live keyword-scored sample of ~24 jobs from the shared catalog, judged + graded by Claude (a high-bar gold, 238 jobs total, `docs/engine_eval_gold_fake10.json`). Reproducible via `scripts/prep_fake_profiles.py` → `judge_fake_profiles.py` → `score_fake_profiles.py`.
+Built **10 realistic-but-FAKE profiles** (data engineer, AI engineer, forward-deployed, data analyst, data scientist, cyber security, SOC analyst, business analyst, full-stack, DevOps/SRE) — each a full fake CV + GitHub + LinkedIn + preferences (`scripts/fake_profiles.py`). Each got its own user, a live keyword-scored sample of ~24 jobs from the shared catalog, judged + graded by Claude (a high-bar gold, 238 jobs total, `harness/eval/engine_eval_gold_fake10.json`). Reproducible via `scripts/prep_fake_profiles.py` → `judge_fake_profiles.py` → `score_fake_profiles.py`.
 
 **Best config PER profile varies** (no universal single winner): E4-judge (data engineer), E1-keyword (data analyst, cyber), E1+E4 (ai eng, business analyst), E1+E3 (FDE), E1+E3+E4 (data scientist, full-stack), E1+E2+E3 (SOC, DevOps).
 

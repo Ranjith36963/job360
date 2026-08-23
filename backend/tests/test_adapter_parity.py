@@ -54,7 +54,7 @@ _CV_OWNED_FIELDS = [
     "skills", "job_titles", "companies", "education", "certifications",
     "industries", "cv_languages", "cv_skills_esco", "summary",
     "experience_text", "name", "headline", "location", "achievements",
-    "career_domain", "cv_positions",
+    "career_domain", "cv_positions", "cv_education_details",
 ]
 
 # Earned, justified exceptions only. Empty on purpose: this file exists
@@ -180,6 +180,13 @@ class TestAdapterFieldParity:
         assert live.career_domain == fallback.career_domain == "engineering_physical"
         assert set(live.cv_industries) == set(fallback.cv_industries) == {"Construction", "Infrastructure"}
         assert set(live.cv_languages) == set(fallback.cv_languages) == {"English", "Spanish"}
+        # Finding 7 (Pillar-1 closeout audit) — cv_education_details is the
+        # newest CV-owned shelf; check VALUE parity, not just set parity, so a
+        # future edit that empties one adapter's list (while still "populating"
+        # something else) can't hide behind this test.
+        assert live.cv_education_details == fallback.cv_education_details == [
+            "Dissertation: seismic retrofit"
+        ]
 
     def test_a_field_populated_on_only_one_adapter_fails_the_test(self):
         """Meta-test: prove the guard actually guards. Simulates the exact

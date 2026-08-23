@@ -76,8 +76,6 @@ UK_NATIVE_SOURCES = frozenset({
     "careerjet",            # queried with UK locale
     "findwork",             # UK-filtered query
     "nhs_jobs",             # UK public sector
-    "nhs_jobs_xml",
-    "jobs_ac_uk",           # UK academia
     "uni_jobs",             # UK universities
     "teaching_vacancies",   # DfE — England state schools
     "gov_apprenticeships",  # DfE Display Advert API

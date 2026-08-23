@@ -5,7 +5,7 @@ name: Checker scorecard (is our judge any good?)
 # is an opinion wearing a badge.
 #
 # This runs the measurement on a schedule and COMMITS the result, so it cannot
-# rot the way docs/maintenance/TELEMETRY.jsonl did: that file was hand-written
+# rot the way docs/harness/maintenance/TELEMETRY.jsonl did: that file was hand-written
 # by agents and died the moment nobody remembered to append. A cron cannot
 # forget. (Our own law: an artifact with no notifier dies.)
 #
@@ -69,7 +69,7 @@ jobs:
             echo '```'
             DATABASE_URL="$PROD_DATABASE_URL" python backend/scripts/shelf_xray.py 2>&1
             echo '```'
-          } >> docs/maintenance/CHECKER-SCORECARD.md
+          } >> docs/harness/maintenance/CHECKER-SCORECARD.md
 
       - name: Measure the checker
         env:
@@ -78,11 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p docs/maintenance
-          python scripts/checker_scorecard.py --days 30 > docs/maintenance/CHECKER-SCORECARD.md
+          python scripts/checker_scorecard.py --days 30 > docs/harness/maintenance/CHECKER-SCORECARD.md
           python scripts/checker_scorecard.py --days 30 --json > /tmp/score.json
           # Append one line to the telemetry log so the TREND survives, not just
           # the latest snapshot. Trend is what tells you if the judge is drifting.
-          python - <<'PY' >> docs/maintenance/TELEMETRY.jsonl
+          python - <<'PY' >> docs/harness/maintenance/TELEMETRY.jsonl
           import json, os, subprocess
           d = json.load(open("/tmp/score.json"))
           d["kind"] = "checker_scorecard"
@@ -91,14 +91,14 @@ jobs:
                                     capture_output=True, text=True).stdout.strip()
           print(json.dumps(d))
           PY
-          cat docs/maintenance/CHECKER-SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
+          cat docs/harness/maintenance/CHECKER-SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit the scorecard
         run: |
           set -euo pipefail
           git config user.name "checker-scorecard"
           git config user.email "actions@github.com"
-          git add docs/maintenance/CHECKER-SCORECARD.md docs/maintenance/TELEMETRY.jsonl
+          git add docs/harness/maintenance/CHECKER-SCORECARD.md docs/harness/maintenance/TELEMETRY.jsonl
           if git diff --cached --quiet; then
             echo "no change in the scorecard" >> "$GITHUB_STEP_SUMMARY"
             exit 0

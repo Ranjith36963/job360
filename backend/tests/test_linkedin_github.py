@@ -720,7 +720,7 @@ class TestEnrichCVFromGitHub:
 # PROFILE_PATH monkey-patch it used no longer exists. Equivalent
 # per-user round-trip + schema-drift + unknown-key coverage lives in
 # tests/test_profile_storage.py (Batch 3.5.2). See
-# docs/plans/batch-3.5.2-plan.md Deliverable B for the migration
+# docs/product/plans/batch-3.5.2-plan.md Deliverable B for the migration
 # rationale.
 
 
