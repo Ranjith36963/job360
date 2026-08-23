@@ -1370,6 +1370,227 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
 # headroom for a bigger-than-usual day without being unbounded.
 MAX_REFRESH_INGEST_IDS = 1000
 
+# ---------- Issue #271 — durable re-scoring ----------------------------
+#
+# Until 2026-08-12 a profile save fired ``rescore_user_feed`` with
+# ``asyncio.create_task`` IN THE WEB PROCESS: no queue entry, no retry, no
+# completion record (``grep -c rescore src/workers/tasks.py`` was literally 0).
+# ``main`` auto-deploys on every merge, so a deploy alone killed anything in
+# flight. Measured in prod 2026-08-11: 9,708 ``user_feed`` rows on a
+# profile_version older than their user's current one, ALL pointing at jobs
+# still in the catalog (0 orphans) — reachable work that simply never ran.
+
+# Retry backoff for a failed re-score, in seconds: try 2 waits 30s, try 3 waits
+# 60s, and so on. ``WorkerSettings.max_tries = 5`` is the ceiling, so a
+# permanently-poisoned job gives up rather than looping on the single
+# (``max_jobs = 1``) worker slot forever.
+RESCORE_RETRY_DEFER_SECONDS = 30
+
+
+@_logged_task
+async def rescore_user_feed_task(ctx: dict[str, Any], user_id: str) -> dict[str, Any]:
+    """ARQ task: re-score ONE user's feed against their current profile.
+
+    Deliberately thin — the scoring logic stays in ``services/rescore.py`` so
+    the queued path and the in-process fallback can never diverge.
+
+    Uses its OWN database connection (``rescore_user_feed`` opens a
+    ``JobDatabase``), not ``ctx['db']``: the re-score is long and the worker
+    shares one psycopg connection across tasks, so borrowing it would risk the
+    "another operation in progress" hazard that ``max_jobs = 1`` exists to
+    avoid.
+
+    On failure it asks ARQ to retry with a backoff instead of swallowing the
+    error. That is the whole point of moving this onto the queue: a transient DB
+    blip used to strand a user's feed on an old profile_version forever, with
+    nobody to notice.
+    """
+    from src.services import rescore as _rescore  # noqa: PLC0415 — heavy (rule #16)
+
+    try:
+        result = await _rescore.rescore_user_feed(user_id)
+    except Exception as exc:
+        job_try = int(ctx.get("job_try") or 1)
+        _log.error(
+            "rescore_task_failed",
+            extra={
+                "event": "rescore_task_failed",
+                "user_id": user_id,
+                "job_try": job_try,
+                "error": str(exc),
+            },
+            exc_info=True,
+        )
+        try:
+            from arq.worker import Retry  # noqa: PLC0415
+        except Exception:  # noqa: BLE001 — arq absent in a minimal env
+            raise exc from None
+        raise Retry(defer=RESCORE_RETRY_DEFER_SECONDS * job_try) from exc
+
+    _log.info(
+        "rescore_task_done",
+        extra={
+            "event": "rescore_task_done",
+            "user_id": user_id,
+            "rescored": result.get("rescored"),
+            "version": result.get("version"),
+        },
+    )
+    return result
+
+
+# Backfill defaults. Small on purpose: this exists to drain a 9,708-row debt
+# without becoming the thing that takes production down.
+BACKFILL_BATCH_SIZE = 25
+BACKFILL_THROTTLE_SECONDS = 2.0
+
+
+async def _stale_feed_users(
+    db: pg.Connection, *, after: str, limit: int
+) -> list[dict[str, Any]]:
+    """Users whose ``user_feed`` rows are behind their current profile version.
+
+    Keyset pagination on ``user_id`` (``user_id > after``) rather than
+    OFFSET: the set shrinks underneath us as re-scores land, and OFFSET over a
+    shrinking set silently SKIPS rows. It also guarantees the backfill loop
+    terminates — a plain "re-query the stale set" loop would return the same
+    batch forever, because a user stays stale until their queued job actually
+    runs.
+
+    Returns dicts with ``user_id``, ``current_version`` and ``stale_rows``.
+    Returns ``[]`` if the profile-version table is missing (pre-migration DB)
+    rather than aborting the sweep.
+    """
+    try:
+        cur = await db.execute(
+            """
+            SELECT f.user_id AS user_id,
+                   MAX(v.current_version) AS current_version,
+                   COUNT(*) AS stale_rows
+              FROM user_feed f
+              JOIN (SELECT user_id, MAX(id) AS current_version
+                      FROM user_profile_versions
+                     GROUP BY user_id) v
+                ON v.user_id = f.user_id
+             WHERE COALESCE(f.profile_version, -1) <> v.current_version
+               AND f.user_id > ?
+             GROUP BY f.user_id
+             ORDER BY f.user_id
+             LIMIT ?
+            """,
+            (after, limit),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+    except Exception as exc:  # noqa: BLE001 — missing table on a legacy DB
+        _log.warning(
+            "rescore_backfill_query_failed",
+            extra={"event": "rescore_backfill_query_failed", "error": str(exc)},
+            exc_info=True,
+        )
+        return []
+
+
+@_logged_task
+async def rescore_backfill(
+    ctx: dict[str, Any],
+    *,
+    batch_size: int = BACKFILL_BATCH_SIZE,
+    max_users: int = 0,
+    throttle_seconds: float = BACKFILL_THROTTLE_SECONDS,
+) -> dict[str, Any]:
+    """Drain the stale-feed debt: queue ONE re-score per affected user.
+
+    RUN IT DELIBERATELY. It is registered in ``WorkerSettings.functions`` so it
+    can be enqueued on purpose, and it is deliberately NOT on a cron — nothing
+    this expensive should fire on boot.
+
+    Four properties, each one a scar:
+
+    * **Batched + throttled.** It walks users ``batch_size`` at a time and
+      sleeps ``throttle_seconds`` between batches. Never one giant transaction.
+    * **Does not monopolise the event loop.** The sleep between batches is a
+      real ``await``, so anything else on the loop gets CPU while this runs.
+      Pinned by ``tests/test_rescore_on_the_queue.py`` with a competing
+      coroutine and a DB stub that yields nowhere else — delete the await and
+      that test fails. This repo's recorded lesson is exactly this: "a
+      correctness fix with an operational cost is still a regression".
+    * **The heavy work is not done here.** Scoring the whole catalog for one
+      user is a queued ``rescore_user_feed_task``, so each unit is bounded,
+      retried and observable on its own. This function only decides WHO is owed
+      a re-score.
+    * **Resumable, not restartable.** The job id is
+      ``rescore-backfill:<user>:<current_version>``; ARQ refuses a second job
+      with an id it already knows, so a run that dies half-way can simply be
+      re-run — users already re-scored have dropped out of the stale query, and
+      users already queued are deduped by id. A NEW profile change produces a
+      new version, hence a new id, and is still allowed through.
+
+    Args:
+        batch_size: users selected per DB round-trip.
+        max_users: hard ceiling for one run; 0 = no ceiling.
+        throttle_seconds: pause between batches.
+
+    Returns ``{"enqueued", "batches", "skipped_no_queue"}``.
+    """
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
+    enqueue = ctx.get("enqueue")
+
+    enqueued = 0
+    batches = 0
+    skipped_no_queue = 0
+    after = ""
+
+    while True:
+        remaining = batch_size
+        if max_users:
+            remaining = min(batch_size, max_users - enqueued)
+            if remaining <= 0:
+                break
+
+        rows = await _stale_feed_users(db, after=after, limit=remaining)
+        if not rows:
+            break
+        batches += 1
+
+        for row in rows:
+            user_id = str(row["user_id"])
+            after = user_id
+            version = row["current_version"]
+            if enqueue is None:
+                skipped_no_queue += 1
+                continue
+            result = enqueue(
+                "rescore_user_feed_task",
+                user_id,
+                _job_id=f"rescore-backfill:{user_id}:{version}",
+            )
+            if hasattr(result, "__await__"):
+                await result
+            enqueued += 1
+
+        # THE YIELD. Everything above is synchronous once the batch is loaded,
+        # so this is what keeps the worker's other tasks (and its Redis
+        # heartbeat) alive while a long backfill drains.
+        await _asyncio.sleep(throttle_seconds)
+
+    _log.info(
+        "rescore_backfill_done",
+        extra={
+            "event": "rescore_backfill_done",
+            "enqueued": enqueued,
+            "batches": batches,
+            "skipped_no_queue": skipped_no_queue,
+        },
+    )
+    return {
+        "enqueued": enqueued,
+        "batches": batches,
+        "skipped_no_queue": skipped_no_queue,
+    }
+
 
 def _refresh_catalog_notifies() -> bool:
     """True when the nightly catalog refill is allowed to notify. Default False.
