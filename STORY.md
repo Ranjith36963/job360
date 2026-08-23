@@ -157,6 +157,37 @@ Its locked verdict, de-biased, three independent labs:
 was: retrieve with keyword, decide with the judge. That recommendation *was* shipped — `feed.py:90`
 is exactly that funnel. The eval was right and the product followed it.
 
+### And it has a notifier. It runs weekly. It has never produced a number.
+
+I wrote here that the instrument was "built and unplugged, referenced by 0 of 22 CI workflows."
+**False.** `.github/workflows/accuracy-audit.yml` runs `scripts/eval_ranking.py` every Monday at
+06:20 UTC, judges ~160 jobs against the largest real profile, and on regression opens a
+`harness`-labelled issue and wakes the triage loop. Its own header cites the Law it was built to
+obey: *an artifact with no notifier dies.* My grep looked for the string `accuracy_audit`; the
+workflow calls a script named `eval_ranking.py`. I searched for the wrong name and reported an
+absence.
+
+That header also records the number I said had never been taken:
+
+> *"The one manual audit found the shown top-100 at 39% strong precision with 28% outright junk;
+> two measured fix iterations took it to 78% with a 100% first page."*
+
+A 100% clean first page is exactly what my hand-check of the real ordering found (25/25). The
+product was measured, was bad, was fixed, and was measured again — before I arrived.
+
+**The real failure is one line in a config screen.** Every weekly run since has ended:
+
+> *"INSTRUMENT BROKEN: No LLM API key configured — Looked for OPENAI_API_KEY, GEMINI_API_KEY,
+> GROQ_API_KEY, CEREBRAS_API_KEY: ALL 4 are empty, so not one call was made and NOTHING was
+> measured."*
+
+In GitHub Actions an unset secret renders as an empty string, so the judge silently gets nothing.
+The workflow is honest about it — it files "CANNOT RUN (instrument broken, not a regression)" rather
+than a fake quality alarm (open issue #340, plus #335). Four runs, four zeroes measured.
+
+So: the instrument is wired, scheduled, notified, and starved. **One free-tier API key set as a repo
+secret turns weekly ranking accuracy back on.** That is the whole blocker.
+
 ### Where it actually falls down: the judge barely runs
 
 | | |
@@ -219,6 +250,11 @@ Append-only. One line each, with the measurement.
   audit log. Two false absence claims in one document, both about the same thing.
 - **2026-08-18 — wrote "fourteen months of engineering" with no instrument.** Measured after: 10
   months, 1,011 commits. Inflated by 40% while writing the rule forbidding it.
+- **2026-08-18 — wrote that the relevance instrument was "built and unplugged, 0 of 22 workflows."**
+  False. `accuracy-audit.yml` runs it weekly with a notifier and files issues. I grepped for the
+  string `accuracy_audit`; the workflow calls `eval_ranking.py`. Third false absence claim in one
+  document, all about the same subject, each from a search too narrow — and each time I reported the
+  gap in my search as a gap in the repo.
 - **2026-08-18 — THE BAD ONE. Told the owner 1 in 5 of his top jobs was wrong and one was in
   Vietnam.** I sorted by `f.score`; the product sorts by `COALESCE(llm_fit_score, score)`
   (`feed.py:90`). Correct ordering: 25/25 right field, 0 foreign, 0 wrong-domain. Measured: a
@@ -229,7 +265,11 @@ Append-only. One line each, with the measurement.
 
 ## Open wounds, ranked by what they cost the user
 
-1. **The judge covers 1.23% of the feed and last ran a week ago.** The only ranker the evaluation
+1. **No LLM API key is set as a repo secret, so the weekly accuracy audit measures nothing.**
+   `accuracy-audit.yml` is scheduled, notified and correct; all four provider keys render empty in
+   Actions, so four runs produced zero numbers (open issues #340, #335). Any one free-tier key turns
+   ranking accuracy back on. Highest-value switch in the repo, and it is not an engineering task.
+2. **The judge covers 1.23% of the feed and last ran a week ago.** The only ranker the evaluation
    trusts is almost never on. Everything else is ordered by the ranker it scored at −0.25.
 2. **`COALESCE(llm_fit_score, score)` mixes two different scales.** An unjudged keyword 78 outranks a
    judged 75. Visible right now at positions 15–16 of this user's feed.
