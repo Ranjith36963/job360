@@ -193,6 +193,26 @@ REGISTRY: dict[str, Guard] = {
         # one branch, report all-green, and be the eleventh dead guard.
         drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
     ),
+    "scripts/ruleset_gate.py": Guard(
+        status="drilled",
+        # The org-level version of this repo's signature bug. Ruleset
+        # `main-production-gate` names 11 required status checks and sits at
+        # enforcement=disabled, so it stops nothing -- and a required check is
+        # matched by CONTEXT NAME, so flipping it on with one name that no job
+        # reports means nothing can ever merge, silently, forever.
+        #
+        # The drill breaks the checker eight ways (dead context, right name but
+        # wrong app, a context missing from one PR head, an open PR with no
+        # checks at all, stale evidence, a new check mistaken for a flaky one, a
+        # gap swallowed instead of named, a scope that mutes too much) and
+        # demands it name each. Six negative controls must stay silent -- the
+        # important one being a context absent from a NON-PR main commit, which
+        # is legitimate: only the tip of a push gets a run, so 7 of 30 recent
+        # main commits have no CI and no ruleset will ever judge them. Confusing
+        # that with a dead context is how this guard would cry wolf until it was
+        # switched off. Offline and network-free; it reads a recorded snapshot.
+        drill=[sys.executable, "scripts/ruleset_gate.py", "--drill"],
+    ),
     "scripts/check_alert_paths.py": Guard(
         status="drilled",
         # Guards the two properties an alerting path must have: it may not flip

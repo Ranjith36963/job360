@@ -107,3 +107,4 @@ graphify-out/
 # and break the mandated clean-tree preflight. Collated into
 # docs/harness/maintenance/claude-md-proposals.md by a designated session, via PR.
 docs/maintenance/inbox/
+.scratch/
