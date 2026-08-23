@@ -698,7 +698,7 @@ export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> 
 
 // ---- Tailored docs ----
 //
-// Per-user AI CV + cover letter (docs/peruser_cv_coverletter.md). Generation is
+// Per-user AI CV + cover letter (docs/product/peruser_cv_coverletter.md). Generation is
 // quota-gated (402 when the monthly free limit is reached) and requires a CV on
 // file (400 when none). Every write here is a plain async function + toast +
 // queryClient.invalidateQueries at the call site — no useMutation in this codebase.

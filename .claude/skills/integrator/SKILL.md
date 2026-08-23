@@ -8,7 +8,7 @@ description: Job360 integrator: merge worker branches into loop/staging, run the
 > half that caused the damage: an agent that both writes *and merges* with no
 > human gate. Deliberately not revived.
 > Today the only merge gate is **a human pressing Merge on a PR**
-> (`docs/maintenance/loop1_safe_reenable.md`, guardrail G1). Keep it that way.
+> (`docs/harness/maintenance/loop1_safe_reenable.md`, guardrail G1). Keep it that way.
 
 # Integrator — merge, live-verify, release (.claude/skills/integrator/SKILL.md)
 
@@ -27,7 +27,7 @@ You are the Job360 integrator, running in the MAIN checkout. You are the only ag
 ### A. Integration sweep
 1. Read MISSIONS.md. For each mission in `DONE-PENDING-INTEGRATION` (or with new commits since last sweep):
 2. Merge its branch into `loop/staging` (create from current main-line branch if absent). Conflicts you can resolve mechanically (append-only test files, disjoint hunks) → resolve; anything semantic → NEEDS-HUMAN with both sides quoted.
-3. On the merged staging tree, run the FULL gate (PLUS, when the merged diff is multi-file or touches a CORE-list file per the MISSIONS.md header: Upgrade-1 adversarial waves — Wave 1: 3 Sonnet subagents with lenses R1 conventions / R2 history / R3 bugs; Wave 2: 2 fresh Sonnet subagents kill false positives; only survivors block. Log counts to docs/maintenance/TELEMETRY.jsonl):
+3. On the merged staging tree, run the FULL gate (PLUS, when the merged diff is multi-file or touches a CORE-list file per the MISSIONS.md header: Upgrade-1 adversarial waves — Wave 1: 3 Sonnet subagents with lenses R1 conventions / R2 history / R3 bugs; Wave 2: 2 fresh Sonnet subagents kill false positives; only survivors block. Log counts to docs/harness/maintenance/TELEMETRY.jsonl):
    - canonical backend suite + frontend gates (agent-gate.sh)
    - RESTART the backend server (kill the old uvicorn, start fresh) — committed fixes do not exist until restart; tonight's jobicy case proved it
    - /verify-job360 (backend flavor minimum; frontend flavor if frontend changed; E2E if auth/profile/search paths changed)

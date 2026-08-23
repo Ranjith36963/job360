@@ -116,7 +116,7 @@ def test_last_modified_roundtrip():
 
 
 def test_malformed_json_returns_none_not_raise():
-    """S6 fix (docs/FABLE_FINDINGS.md): `_conditional_fetch`'s except only
+    """S6 fix (docs/harness/FABLE_FINDINGS.md): `_conditional_fetch`'s except only
     caught `(aiohttp.ClientError, asyncio.TimeoutError)` even though it calls
     `resp.json()` for the JSON-flavored helper — unlike `_request`, which
     already includes `json.JSONDecodeError`. A malformed/HTML-error body on

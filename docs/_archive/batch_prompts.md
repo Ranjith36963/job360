@@ -23,7 +23,7 @@
 > Run batches strictly in order. Never start Batch N+1 until:
 >   1. Reviewer printed `REVIEW_COMPLETE pillar3/batch-N verdict=APPROVED`
 >   2. Human merged `pillar3/batch-N` into `main`
->   3. `docs/IMPLEMENTATION_LOG.md` has a completion entry for batch N
+>   3. `docs/harness/IMPLEMENTATION_LOG.md` has a completion entry for batch N
 >   4. `docs/CurrentStatus.md` delta-audited for sections batch N touched
 >
 > **Status:** Batch 1 merged 2026-04-18 as commit `31124fa`. Batch 2 is next.
@@ -40,24 +40,24 @@ C:\Users\Ranjith\OneDrive\Documents\job360\.claude\worktrees\generator
 on branch pillar3/batch-2.
 
 Batch 1 is merged at commit 31124fa on main. Do NOT start until
-docs/IMPLEMENTATION_LOG.md has a Batch 1 completion entry (already there).
+docs/harness/IMPLEMENTATION_LOG.md has a Batch 1 completion entry (already there).
 
 STEP 0 — LOCK THE CLEAN BASELINE (before any code change):
   cd backend
   python -m pytest tests/ --ignore=tests/test_main.py -q > /tmp/batch2_baseline.log 2>&1
   tail -5 /tmp/batch2_baseline.log
 
-  Record pass/fail/skip counts at the top of docs/plans/batch-2-plan.md
+  Record pass/fail/skip counts at the top of docs/product/plans/batch-2-plan.md
   as "POST-BATCH-1 BASELINE". Any Batch 2 regression claim compares
   against this number.
 
 MANDATORY pre-reading:
-  1. docs/IMPLEMENTATION_LOG.md              (confirm Batch 1 completion
+  1. docs/harness/IMPLEMENTATION_LOG.md              (confirm Batch 1 completion
                                               entry exists; your entry
                                               gets appended at the bottom)
   2. docs/CurrentStatus.md                   (ground truth post-Batch-1)
-  3. docs/research/pillar_3_batch_2.md       (full blueprint)
-  4. docs/research/pillar_3_report.md        (context — auth + multi-tenant
+  3. docs/product/research/pillar_3_batch_2.md       (full blueprint)
+  4. docs/product/research/pillar_3_report.md        (context — auth + multi-tenant
                                               reasoning lives here)
   5. CLAUDE.md rules #1–9
   6. backend/src/api/*                       (current single-user endpoints)
@@ -66,14 +66,14 @@ SKILLS (mandatory — Batch 2 has too many irreversible design choices to
 skip brainstorming):
   1. superpowers:using-superpowers
   2. superpowers:brainstorming  ← REQUIRED FIRST.  Produce
-     docs/plans/batch-2-decisions.md covering at minimum:
+     docs/product/plans/batch-2-decisions.md covering at minimum:
        - ARQ vs Celery vs RQ for the worker queue
        - Apprise vs Novu vs per-channel SDK
        - Polling vs SSE vs websockets for the feed
        - When to migrate to postgres (now vs Batch 3 vs later)
        - Session-based vs JWT auth
      Each decision: 2-3 options, pros/cons, RECOMMENDATION + reason.
-  3. superpowers:writing-plans          → docs/plans/batch-2-plan.md
+  3. superpowers:writing-plans          → docs/product/plans/batch-2-plan.md
   4. superpowers:test-driven-development
   5. superpowers:subagent-driven-development
   6. superpowers:verification-before-completion
@@ -102,8 +102,8 @@ SUCCESS CRITERIA:
   ☐ New tests: auth flow, tenant isolation (tenant A cannot read tenant
     B's jobs/actions/feed), feed-service correctness, pre-filter cascade,
     ARQ job idempotency, Apprise channel test-send
-  ☐ docs/plans/batch-2-decisions.md + batch-2-plan.md committed
-  ☐ docs/IMPLEMENTATION_LOG.md completion entry drafted
+  ☐ docs/product/plans/batch-2-decisions.md + batch-2-plan.md committed
+  ☐ docs/harness/IMPLEMENTATION_LOG.md completion entry drafted
   ☐ CLAUDE.md updated (new tables, new auth flow, new worker, new ports)
   ☐ Tenant isolation proven by a dedicated test class
 
@@ -133,9 +133,9 @@ STEP 1. Pull the generator's branch into THIS worktree:
   git fetch origin pillar3/batch-2 && git reset --hard origin/pillar3/batch-2
 
 STEP 2. Read:
-  1. docs/research/pillar_3_batch_2.md
-  2. docs/plans/batch-2-decisions.md         (scrutinize the 5 decisions)
-  3. docs/plans/batch-2-plan.md
+  1. docs/product/research/pillar_3_batch_2.md
+  2. docs/product/plans/batch-2-decisions.md         (scrutinize the 5 decisions)
+  3. docs/product/plans/batch-2-plan.md
   4. CLAUDE.md rules #1–9
 
 STEP 3. Skills: superpowers:using-superpowers + coderabbit:code-reviewer
@@ -163,7 +163,7 @@ STEP 4. AUDIT CHECKLIST (in addition to Batch 1's generic checks):
   ☐ All 5 decisions have a recommendation + justification
   ☐ Implementation matches the recommendation (if not, surprise logged)
 
-STEP 5. Write docs/reviews/batch-2-review.md (same structure as Batch 1).
+STEP 5. Write docs/harness/reviews/batch-2-review.md (same structure as Batch 1).
 
 STEP 6. Commit review + print
   "REVIEW_COMPLETE pillar3/batch-2 verdict=<APPROVED|CHANGES>"
@@ -189,20 +189,20 @@ STEP 0 — LOCK THE CLEAN BASELINE (before any code change):
   python -m pytest tests/ --ignore=tests/test_main.py -q > /tmp/batch3_baseline.log 2>&1
   tail -5 /tmp/batch3_baseline.log
 
-  Record pass/fail/skip counts at the top of docs/plans/batch-3-plan.md
+  Record pass/fail/skip counts at the top of docs/product/plans/batch-3-plan.md
   as "POST-BATCH-2 BASELINE".
 
 MANDATORY pre-reading:
-  1. docs/IMPLEMENTATION_LOG.md
+  1. docs/harness/IMPLEMENTATION_LOG.md
   2. docs/CurrentStatus.md
-  3. docs/research/pillar_3_batch_3.md
+  3. docs/product/research/pillar_3_batch_3.md
   4. backend/src/main.py                     (current cron/polling flow)
   5. backend/src/sources/base.py             (rate-limit contract)
   6. CLAUDE.md rule #8 (source count assertion)
 
 SKILLS:
   1. superpowers:using-superpowers
-  2. superpowers:writing-plans → docs/plans/batch-3-plan.md
+  2. superpowers:writing-plans → docs/product/plans/batch-3-plan.md
   3. superpowers:test-driven-development
   4. superpowers:subagent-driven-development (5 new sources are
      independent units)
@@ -266,8 +266,8 @@ STEP 1. Pull the generator's branch into THIS worktree:
   git fetch origin pillar3/batch-3 && git reset --hard origin/pillar3/batch-3
 
 STEP 2. Read:
-  1. docs/research/pillar_3_batch_3.md
-  2. docs/plans/batch-3-plan.md
+  1. docs/product/research/pillar_3_batch_3.md
+  2. docs/product/plans/batch-3-plan.md
   3. CLAUDE.md rule #8
 
 STEP 3. Skills: coderabbit:code-reviewer + superpowers:using-superpowers.
@@ -293,7 +293,7 @@ STEP 4. AUDIT CHECKLIST:
   ☐ Each one honors `_is_uk_or_remote()` filter
   ☐ Each one passes `SearchConfig` through properly
 
-STEP 5. Write docs/reviews/batch-3-review.md (same structure as Batch 1).
+STEP 5. Write docs/harness/reviews/batch-3-review.md (same structure as Batch 1).
 
 STEP 6. Commit + print
   "REVIEW_COMPLETE pillar3/batch-3 verdict=<APPROVED|CHANGES>"
@@ -324,12 +324,12 @@ STEP 0 — LOCK THE CLEAN BASELINE (before any code change):
   as "POST-BATCH-3 BASELINE".
 
 MANDATORY pre-reading:
-  1. docs/research/pillar_3_batch_4.md
-  2. docs/PRD.md                             (the "all UK white-collar
+  1. docs/product/research/pillar_3_batch_4.md
+  2. docs/product/PRD.md                             (the "all UK white-collar
                                               domains" claim fails CAP Code
                                               rule 3.7 substantiation — fix
                                               this)
-  3. docs/IMPLEMENTATION_LOG.md
+  3. docs/harness/IMPLEMENTATION_LOG.md
   4. CLAUDE.md
 
 SKILLS:
@@ -389,10 +389,10 @@ STEP 1. Pull the generator's branch into THIS worktree:
   git fetch origin pillar3/batch-4 && git reset --hard origin/pillar3/batch-4
 
 STEP 2. Read:
-  1. docs/research/pillar_3_batch_4.md
+  1. docs/product/research/pillar_3_batch_4.md
   2. docs/plans/batch-4-plan.md
   3. docs/compliance/*
-  4. docs/PRD.md
+  4. docs/product/PRD.md
 
 STEP 3. Skills: coderabbit:code-reviewer + superpowers:using-superpowers.
 
@@ -443,7 +443,7 @@ git merge --no-ff pillar3/batch-N
 Then:
 
 1. **Re-audit `docs/CurrentStatus.md`** for the sections Batch N touched (delta-only — don't rewrite the whole file).
-2. **Confirm `docs/IMPLEMENTATION_LOG.md` completion entry** is accurate (test deltas, KPI deltas, what shipped, what got deferred, surprises).
+2. **Confirm `docs/harness/IMPLEMENTATION_LOG.md` completion entry** is accurate (test deltas, KPI deltas, what shipped, what got deferred, surprises).
 3. **Save a memory file**: `C:\Users\Ranjith\.claude\projects\C--Users-Ranjith-OneDrive-Documents-job360\memory\project_pillar3_batch_N_done.md` — merge SHA, test deltas, KPI deltas, surprises, deferred items.
 4. **Update `CLAUDE.md`** if any rule, count, or load-bearing file moved.
 5. **Commit the doc updates** with a `docs: post-batch-N housekeeping` commit on `main`.

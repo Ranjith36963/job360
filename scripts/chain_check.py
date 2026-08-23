@@ -42,6 +42,9 @@ producers and consumers, then asserts every hop actually connects:
       a producer that can die before writing it -- the gate then silently reads
       "" and the handoff is skipped GREEN. This is the shape of the alert path
       whose missing key exited 0 for weeks.
+  W13 (error) a comparison whose LITERAL its SOURCE can never produce --
+              gh --jq .author.login returns `app/NAME`, the webhook returns
+              `NAME[bot]`; triage.yml auto-authorisation had NEVER fired.
   W12 (warn) the same actor is spelled two ways in two places -- the literal
       detect->triage bug.
 
@@ -85,12 +88,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,7 +112,7 @@ if hasattr(sys.stdout, "reconfigure"):
 LINE_KEY = "__line__"
 
 # Checks that BREAK the chain if they fire, vs. checks that only smell bad.
-ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"}
+ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W13"}
 WARN_CHECKS = {"W11", "W12"}
 ALL_CHECKS = ERROR_CHECKS | WARN_CHECKS
 
@@ -233,6 +236,24 @@ _ANY_OUTPUT_KEY = re.compile(
     re.MULTILINE,
 )
 _MENTIONS_OUTPUT = re.compile(r"\$\{?GITHUB_OUTPUT")
+# A shell heredoc whose opening line ALSO redirects to $GITHUB_OUTPUT:
+#     python - <<'PY' >> "$GITHUB_OUTPUT"
+#     cat <<EOF >> "$GITHUB_OUTPUT"
+# The `\s` before `<<` is load-bearing. It is what separates a real heredoc from
+# the GHA multiline-output form `echo "body<<$d" >> "$GITHUB_OUTPUT"`, where the
+# `<<` is glued to the key and the following lines are a VALUE, not a script.
+_HEREDOC_OPEN = re.compile(
+    r"""^(?P<pre>.*?)\s<<-?\s*(?P<q>['"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=q)"""
+)
+_OUTPUT_REDIRECT = re.compile(r""">>\s*["']?\$\{?GITHUB_OUTPUT""")
+# Inside a python heredoc, a write is a print — never an `echo`. A checker that
+# knows only echo/printf reads such a step as writing NOTHING, and then reports
+# every live wire out of it as broken (see _iter_output_writes).
+_PY_OUTPUT_KEY = re.compile(
+    r"""^\s*(?:print|sys\.stdout\.write)\s*\(\s*[rbfu]*(?P<q>["'])(?P<key>[A-Za-z_][A-Za-z0-9_-]*)="""
+)
+# Inside a plain `cat <<EOF >> "$GITHUB_OUTPUT"` body the lines ARE the pairs.
+_PLAIN_OUTPUT_KEY = re.compile(r"""^\s*(?P<key>[A-Za-z_][A-Za-z0-9_-]*)=""")
 # A whole value that is one GHA expression comparison -> renders exactly true/false.
 _BOOL_EXPR = re.compile(r"^\$\{\{\s*[^}]*?(?:==|!=|>|<|>=|<=)[^}]*?\}\}$")
 
@@ -242,15 +263,64 @@ _GH_WORKFLOW_RUN = re.compile(r"gh\s+workflow\s+run\s+(?P<target>[A-Za-z0-9_.\-/
 _DISPATCH_INPUT = re.compile(r"-f\s+(?P<key>[A-Za-z0-9_-]+)=")
 
 
+def _iter_output_writes(run: str) -> Iterator[tuple[int, str, str]]:
+    """Yield (1-indexed line, key, op) for every $GITHUB_OUTPUT write in `run`.
+
+    `op` is "=" when the value sits on that same line, and "<<" when it does not
+    (a heredoc body), which is exactly the distinction _parse_writes needs to
+    decide whether it may enumerate the literal values.
+
+    There are TWO writer shapes in this repo and the checker must read both:
+
+        echo "key=value" >> "$GITHUB_OUTPUT"        <- flat
+        python - <<'PY' >> "$GITHUB_OUTPUT"         <- heredoc body
+        print(f"key={value}")
+        PY
+
+    A shape the checker cannot read is indistinguishable from a step that writes
+    nothing, so every live wire out of that step gets reported as severed. That
+    is a false negative in the INSTRUMENT, and it is the same failure this whole
+    script exists to catch: an instrument must count the way its consumer does.
+
+    Heredoc bodies are only read when the OPENING line also redirects to
+    $GITHUB_OUTPUT, so a heredoc writing a temp file is never mistaken for one
+    writing outputs.
+    """
+    if not run:
+        return
+    delim: str | None = None
+    body_is_python = False
+    for n, line in enumerate(run.splitlines(), start=1):
+        if delim is not None:
+            if line.strip() == delim:
+                delim = None
+                continue
+            body = _PY_OUTPUT_KEY if body_is_python else _PLAIN_OUTPUT_KEY
+            hit = body.match(line)
+            if hit is not None:
+                # The value is an f-string / shell interpolation. We will not
+                # pretend to evaluate it, so it is unknowable — the same
+                # contract the `key<<EOF` multiline form already has.
+                yield n, hit.group("key"), "<<"
+            continue
+        opener = _HEREDOC_OPEN.match(line)
+        if opener is not None and _OUTPUT_REDIRECT.search(line):
+            delim = opener.group("delim")
+            body_is_python = "python" in opener.group("pre")
+            continue
+        for m in _ANY_OUTPUT_KEY.finditer(line):
+            yield n, m.group("key"), m.group("op")
+
+
 def _parse_writes(run: str) -> dict[str, set[str] | None]:
     """Which output keys can this run: block set, and to which literal values."""
     if not run or not _MENTIONS_OUTPUT.search(run):
         return {}
     writes: dict[str, set[str] | None] = {}
-    for m in _ANY_OUTPUT_KEY.finditer(run):
-        writes.setdefault(m.group("key"), set())
-        if m.group("op") == "<<":  # heredoc body — value is unknowable here
-            writes[m.group("key")] = None
+    for _, key, op in _iter_output_writes(run):
+        writes.setdefault(key, set())
+        if op == "<<":  # heredoc body — value is unknowable here
+            writes[key] = None
     for m in _ECHO_TO_OUTPUT.finditer(run):
         key, raw = m.group("key"), m.group("val").strip().strip('"').strip("'")
         current = writes.get(key, set())
@@ -281,10 +351,9 @@ def _write_depth(run: str, key: str) -> int:
     """
     if not run or not key:
         return 0
-    for n, line in enumerate(run.splitlines(), start=1):
-        for m in _ANY_OUTPUT_KEY.finditer(line):
-            if m.group("key") == key:
-                return n
+    for n, found, _ in _iter_output_writes(run):
+        if found == key:
+            return n
     return 0
 
 
@@ -741,7 +810,7 @@ def gh_last_runs(files: list[str]) -> dict[str, dict]:
             proc = subprocess.run(
                 ["gh", "run", "list", "--workflow", wf_file, "--limit", "30",
                  "--json", "conclusion,createdAt,status"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if proc.returncode != 0:
                 info["error"] = (proc.stderr or "gh failed").strip().splitlines()[:1]
@@ -795,10 +864,76 @@ def render_map(workflows: list[Workflow], hops: list[Hop], live: dict[str, dict]
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# Which spelling of a bot login each SOURCE actually produces. Measured
+# 2026-08-16 against issues #335, #334 and #330 in this repo, not assumed.
+_GH_CLI_SRC = re.compile(r"\$\(\s*gh\s+[^)]*--jq\s+\.?(?:author|user)\.login[^)]*\)")
+_BOT_SUFFIX = re.compile(r"^[A-Za-z0-9_-]+\[bot\]$")
+_APP_PREFIX = re.compile(r"^app/[A-Za-z0-9_-]+$")
+
+
+def _check_source_vs_literal(workflows: list[Workflow], disabled: set[str]) -> list[Finding]:
+    """W13 — a comparison whose LITERAL cannot be produced by its SOURCE.
+
+    W12 catches one identity spelled two ways in the repo. It could not catch
+    this, because triage.yml spelled it ONE way everywhere: `github-actions[bot]`.
+    The mismatch was not inside the file at all -- it was between the file and
+    the API it reads.
+
+        issue_author=$(gh issue view "$n" --json author --jq .author.login)
+        ...
+        echo "$issue_author" | grep -qFx "github-actions[bot]"
+
+    `gh` returns `app/github-actions` for a bot. The webhook payload returns
+    `github-actions[bot]`. So that condition could never be true, and the
+    auto-authorisation path had NEVER FIRED since the day it was written --
+    with nothing red, because falling through to "needs a human" looks exactly
+    like a careful gate doing its job.
+
+    A dead branch that fails SAFE is still dead, and it is the hardest kind to
+    notice precisely because its failure mode is indistinguishable from working.
+    """
+    if "W13" in disabled:
+        return []
+    out: list[Finding] = []
+    for wf in workflows:
+        lines = wf.text.splitlines()
+        # Variables fed by the gh CLI, which renders bot logins as `app/NAME`.
+        gh_vars: dict[str, int] = {}
+        for lineno, line in enumerate(lines, start=1):
+            m = re.match(r"\s*([A-Za-z_][A-Za-z_0-9]*)=(.*)", line)
+            if m and _GH_CLI_SRC.search(m.group(2)):
+                gh_vars[m.group(1)] = lineno
+        if not gh_vars:
+            continue
+        for lineno, line in enumerate(lines, start=1):
+            for var, src_line in gh_vars.items():
+                if f"${var}" not in line and f"${{{var}}}" not in line:
+                    continue
+                lits = re.findall(r"""["']([A-Za-z0-9_./\[\]-]+)["']""", line)
+                bot_lits = [x for x in lits if _BOT_SUFFIX.match(x)]
+                if not bot_lits:
+                    continue
+                # Accepting the `app/` spelling too is the fix; if it is already
+                # on this line, the wire is whole.
+                if any(_APP_PREFIX.match(x) for x in lits):
+                    continue
+                out.append(Finding(
+                    "W13", "error", f"{var} <- gh --jq .author.login",
+                    f"line {src_line} fills `{var}` from the gh CLI, which renders a bot "
+                    f"login as `app/NAME`. This line compares it against "
+                    f"{', '.join(repr(b) for b in bot_lits)} — the WEBHOOK spelling. The two "
+                    f"never match, so this branch can never be taken, and nothing goes red "
+                    f"because falling through looks exactly like the gate working. Accept "
+                    f"both spellings (grep -qFx -e 'NAME[bot]' -e 'app/NAME').",
+                    wf.file, lineno))
+    return out
+
+
 def run_checks(root: Path, disabled: set[str]) -> tuple[list[Finding], list[Workflow], list[str]]:
     workflows, parse_errors = load_workflows(root)
     actions = load_local_actions(root)
     findings = check_wires(workflows, actions, disabled)
+    findings += _check_source_vs_literal(workflows, disabled)
     return findings, workflows, parse_errors
 
 
@@ -811,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-map", action="store_true")
     parser.add_argument("--drill", action="store_true", help="break wires on purpose; the checker must go RED")
     parser.add_argument("--break-checker", default=None, metavar="Wn",
-                        help="blind one check (W1..W12) — used to prove the DRILL itself can fail")
+                        help="blind one check (W1..W13) — used to prove the DRILL itself can fail")
     args = parser.parse_args(argv)
 
     if args.root:
@@ -819,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         try:
             top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
-                                 text=True, check=True).stdout.strip()
+                                 text=True, encoding="utf-8", errors="replace", check=True).stdout.strip()
             root = Path(top)
         except Exception:
             root = Path.cwd()
@@ -892,11 +1027,49 @@ def main(argv: list[str] | None = None) -> int:
 class Drill:
     name: str
     mechanism: str
-    target: str  # workflow file to mutate
+    target: str  # workflow file to mutate, or to CREATE when `create` is set
     before: str
     after: str
     expect_check: str
     expect_in_message: str
+    # A synthetic workflow written into the copy instead of mutating a real one.
+    # Needed for shapes no workflow in THIS repo happens to use yet: without it
+    # the checker's blind spots can only be found by a branch that trips them.
+    create: str | None = None
+    # This drill must add ZERO findings. Used for a shape the checker is
+    # supposed to read correctly — the false-POSITIVE direction.
+    expect_silent: bool = False
+
+
+# A producer that writes its outputs from a python heredoc. Nothing in .github/
+# uses this shape today, so only a synthetic file can hold the checker to it.
+# The wire here is REAL: `parse` prints `readyz_url=`, the job output reads it.
+_HEREDOC_OK = """\
+name: drill — heredoc writer (synthetic)
+on:
+  workflow_dispatch:
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    outputs:
+      readyz_url: ${{ steps.parse.outputs.readyz_url }}
+    steps:
+      - name: Parse the dial
+        id: parse
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          print(f"readyz_url={watch['readyz_url']}")
+          PY
+"""
+
+# The same shape with the wire genuinely cut: the producer prints `readyz_url`,
+# the consumer reads `readyz_urlx`. Teaching the checker to READ heredocs must
+# not teach it to EXCUSE them — a fix that silences the shape wholesale would
+# make this drill pass by going blind, which is the failure it is here to catch.
+_HEREDOC_BROKEN = _HEREDOC_OK.replace(
+    "readyz_url: ${{ steps.parse.outputs.readyz_url }}",
+    "readyz_url: ${{ steps.parse.outputs.readyz_urlx }}",
+)
 
 
 DRILLS = [
@@ -908,6 +1081,15 @@ DRILLS = [
         after='echo "haz=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != \'\' }}" >> "$GITHUB_OUTPUT"',
         expect_check="W1",
         expect_in_message="steps.token.outputs.have",
+    ),
+    Drill(
+        name="a literal its source can never produce",
+        mechanism="W13 -- the mismatch is between the file and the API it reads",
+        target="triage.yml",
+        before='grep -qFx -e "github-actions[bot]" -e "app/github-actions"',
+        after='grep -qFx "github-actions[bot]"',
+        expect_check="W13",
+        expect_in_message="app/NAME",
     ),
     Drill(
         name="misspelt dispatch target",
@@ -926,6 +1108,27 @@ DRILLS = [
         after="steps.token.outputs.have == 'yes'",
         expect_check="W5",
         expect_in_message="'yes'",
+    ),
+    Drill(
+        name="heredoc writer is READ, not mistaken for silence",
+        mechanism="W1 must stay QUIET — the producer really does write these keys",
+        target="drill-heredoc-ok.yml",
+        before="",
+        after="",
+        expect_check="",
+        expect_in_message="",
+        create=_HEREDOC_OK,
+        expect_silent=True,
+    ),
+    Drill(
+        name="heredoc writer with the wire actually cut",
+        mechanism="W1 — reading heredocs must not mean excusing them",
+        target="drill-heredoc-broken.yml",
+        before="",
+        after="",
+        expect_check="W1",
+        expect_in_message="steps.parse.outputs.readyz_urlx",
+        create=_HEREDOC_BROKEN,
     ),
 ]
 
@@ -957,7 +1160,7 @@ def run_drill(root: Path, disabled: set[str]) -> int:
         base = Path(tmp) / "base"
         base.mkdir(parents=True)
         _copy_github(root, base)
-        baseline, _, parse_errors = run_checks(base, disabled)
+        baseline, baseline_wfs, parse_errors = run_checks(base, disabled)
         if parse_errors:
             print(f"  drill cannot run: baseline copy has parse errors: {parse_errors}")
             return 2
@@ -972,34 +1175,57 @@ def run_drill(root: Path, disabled: set[str]) -> int:
             work.mkdir(parents=True)
             _copy_github(root, work)
             target = work / ".github" / "workflows" / drill.target
-            text = target.read_text(encoding="utf-8")
 
-            # A mutation that did not apply would make the drill pass vacuously.
-            # That is precisely how a self-test becomes a lie, so it is fatal.
-            if drill.before not in text:
-                failed.append(f"{drill.name}: MUTATION DID NOT APPLY — "
-                              f"anchor {drill.before!r} not found in {drill.target}. "
-                              f"The drill is stale, not passing.")
-                print(f"  [FAIL] {drill.name}: anchor missing, drill is stale")
-                continue
-            mutated = text.replace(drill.before, drill.after, 1)
-            if mutated == text:
-                failed.append(f"{drill.name}: replacement was a no-op")
-                continue
-            target.write_text(mutated, encoding="utf-8")
+            if drill.create is not None:
+                # A synthetic workflow. Adding a FILE is the mutation here, so
+                # the anchor check cannot apply — but the vacuity risk is the
+                # same, so the file must really have been loaded as a workflow.
+                if target.exists():
+                    failed.append(f"{drill.name}: {drill.target} already exists in .github/workflows — "
+                                  f"the synthetic drill would be overwriting a real workflow.")
+                    print(f"  [FAIL] {drill.name}: target name collides with a real workflow")
+                    continue
+                target.write_text(drill.create, encoding="utf-8")
+            else:
+                text = target.read_text(encoding="utf-8")
 
-            findings, _, errs = run_checks(work, disabled)
+                # A mutation that did not apply would make the drill pass vacuously.
+                # That is precisely how a self-test becomes a lie, so it is fatal.
+                if drill.before not in text:
+                    failed.append(f"{drill.name}: MUTATION DID NOT APPLY — "
+                                  f"anchor {drill.before!r} not found in {drill.target}. "
+                                  f"The drill is stale, not passing.")
+                    print(f"  [FAIL] {drill.name}: anchor missing, drill is stale")
+                    continue
+                mutated = text.replace(drill.before, drill.after, 1)
+                if mutated == text:
+                    failed.append(f"{drill.name}: replacement was a no-op")
+                    continue
+                target.write_text(mutated, encoding="utf-8")
+
+            findings, work_wfs, errs = run_checks(work, disabled)
             new = [f for f in findings if f.key() not in baseline_keys]
 
-            if drill is CONTROL:
+            # The created file must have PARSED. An unparseable synthetic
+            # workflow is silently ignored by load_workflows, which would make
+            # `expect_silent` pass while proving nothing at all.
+            if drill.create is not None and len(work_wfs) != len(baseline_wfs) + 1:
+                failed.append(f"{drill.name}: the synthetic workflow was not loaded "
+                              f"({len(work_wfs)} workflows vs baseline {len(baseline_wfs)}). "
+                              f"The drill proved nothing.")
+                print(f"  [FAIL] {drill.name}: synthetic workflow never parsed")
+                continue
+
+            if drill is CONTROL or drill.expect_silent:
                 if new or errs:
-                    failed.append(f"{drill.name}: a comment-only edit produced "
-                                  f"{len(new)} new finding(s) — the checker reacts to CHANGE, "
-                                  f"not to breakage")
+                    failed.append(f"{drill.name}: an edit that breaks NOTHING produced "
+                                  f"{len(new)} new finding(s) — the checker is reporting a wire "
+                                  f"as dead that is demonstrably live: {[f.render().strip() for f in new]}")
                     print(f"  [FAIL] {drill.name}: {[f.render().strip() for f in new]}")
                 else:
                     passed += 1
-                    print(f"  [PASS] {drill.name}\n         edited {drill.target}, "
+                    verb = "created" if drill.create is not None else "edited"
+                    print(f"  [PASS] {drill.name}\n         {verb} {drill.target}, "
                           f"0 new findings — the checker stayed quiet, as it must.")
                 continue
 
@@ -1019,7 +1245,8 @@ def run_drill(root: Path, disabled: set[str]) -> int:
                 continue
             passed += 1
             print(f"  [PASS] {drill.name} ({drill.mechanism})")
-            print(f"         broke: {drill.target}: {drill.before[:60]}")
+            broke = f"added {drill.target} with the wire cut" if drill.create is not None else drill.before[:60]
+            print(f"         broke: {drill.target}: {broke}")
             print(f"         RED ->{hit[0].render().lstrip()}")
 
         print("\n" + "=" * 72)

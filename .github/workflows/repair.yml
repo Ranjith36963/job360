@@ -5,7 +5,7 @@ name: Repair loop (agent:fix)
 # The original Loop 1 (ralph-loop worker/integrator) was disabled 2026-06-21: it
 # ran unsupervised, wrote straight to `main`, and wiped worktrees/branches/the
 # test DB. Root cause, one line: a WRITING+MERGING agent with no cage and no
-# human gate. docs/maintenance/loop1_safe_reenable.md is the checklist; this
+# human gate. docs/harness/maintenance/loop1_safe_reenable.md is the checklist; this
 # workflow implements it.
 #
 #   G1  Never touches `main`. It commits to its own branch and opens a PR.
@@ -223,7 +223,7 @@ jobs:
       - name: Plan first, then critique the plan
         if: steps.token.outputs.have == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -266,7 +266,7 @@ jobs:
 
       - name: Claude repairs the code (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -523,7 +523,7 @@ jobs:
       - name: Checker verdict
         if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome == 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
