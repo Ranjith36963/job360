@@ -355,6 +355,18 @@ def test_rescore_task_pinned_to_bg_tasks_set(api, monkeypatch):
 
     monkeypatch.setattr(_asyncio, "create_task", _fake_create_task)
 
+    # THIS TEST IS ABOUT THE IN-PROCESS FALLBACK SPECIFICALLY -- that the task is
+    # pinned to `_rescore_bg_tasks` so the GC cannot collect it mid-run. So it
+    # must FORCE that path rather than depend on whether Redis happens to exist:
+    # with REDIS_URL set (as ci-offline.yml does) the queue wins and create_task
+    # is never called, and the test failed in CI while passing locally.
+    async def _queue_unavailable(*_a, **_kw):
+        return False
+
+    monkeypatch.setattr(
+        "src.workers.queue.enqueue_job", _queue_unavailable, raising=False
+    )
+
     # Clear the module-level set before the test
     profile_route._rescore_bg_tasks.clear()
 
