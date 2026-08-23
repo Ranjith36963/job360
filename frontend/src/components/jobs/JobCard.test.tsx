@@ -182,4 +182,151 @@ describe("JobCard", () => {
     render(<JobCard job={job} onAction={mockOnAction} />);
     expect(screen.getByText("No deadline listed")).toBeInTheDocument();
   });
+
+  // ── F3 — staleness badge vocabulary (real lowercase DB values) ─────────────
+  // Prod (2026-08-15, all 10,257 jobs) only ever writes these four lowercase
+  // strings (ghost_detection.py). The badge used to compare against uppercase
+  // literals that never existed, so every one of these cases rendered wrong.
+
+  it("F3: shows NO staleness badge for 'active'", () => {
+    const job = makeJob({ staleness_state: "active" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.queryByText(/possibly stale/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/may be filled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/expired/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("active")).not.toBeInTheDocument();
+  });
+
+  it("F3: shows amber 'Possibly stale' badge for 'possibly_stale'", () => {
+    const job = makeJob({ staleness_state: "possibly_stale" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    const badge = screen.getByText("Possibly stale");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass("text-amber-400");
+    // The raw DB string must never leak into the UI.
+    expect(screen.queryByText("possibly_stale")).not.toBeInTheDocument();
+  });
+
+  it("F3: shows amber 'May be filled' badge for 'likely_stale'", () => {
+    const job = makeJob({ staleness_state: "likely_stale" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    const badge = screen.getByText("May be filled");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass("text-amber-400");
+    expect(screen.queryByText("likely_stale")).not.toBeInTheDocument();
+  });
+
+  it("F3: shows red 'Expired' badge for 'confirmed_expired'", () => {
+    const job = makeJob({ staleness_state: "confirmed_expired" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    const badge = screen.getByText("Expired");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass("text-red-400");
+    expect(screen.queryByText("confirmed_expired")).not.toBeInTheDocument();
+  });
+
+  it("F3: shows no badge and doesn't crash for null staleness_state", () => {
+    const job = makeJob({ staleness_state: null });
+    expect(() => render(<JobCard job={job} onAction={mockOnAction} />)).not.toThrow();
+    expect(screen.queryByText(/possibly stale/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/expired/i)).not.toBeInTheDocument();
+  });
+
+  it("F3: shows no badge for an unrecognised staleness value (fails safe)", () => {
+    const job = makeJob({ staleness_state: "some_future_value" });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.queryByText("some_future_value")).not.toBeInTheDocument();
+    expect(screen.queryByText(/expired/i)).not.toBeInTheDocument();
+  });
+
+  // ── F4 — score bands: TWO scales need TWO band sets ─────────────────────────
+  // Keyword match_score (unjudged) uses green>=45 / amber>=20, derived from the
+  // live distribution (median 10, p90 42, max 80). Judged llm_fit_score keeps
+  // the old 70/40 bands so it stays matched to the AI-verdict pill's colours.
+
+  it("F4: unjudged match_score of 45 (keyword green boundary) gets score-high", () => {
+    const job = makeJob({ match_score: 45, llm_fit_score: null, llm_verdict: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("45")).toHaveClass("score-high");
+  });
+
+  it("F4: unjudged match_score of 44 (just under keyword green) gets score-mid", () => {
+    const job = makeJob({ match_score: 44, llm_fit_score: null, llm_verdict: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("44")).toHaveClass("score-mid");
+  });
+
+  it("F4: unjudged match_score of 20 (keyword amber boundary) gets score-mid", () => {
+    const job = makeJob({ match_score: 20, llm_fit_score: null, llm_verdict: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("20")).toHaveClass("score-mid");
+  });
+
+  it("F4: unjudged match_score of 19 (just under keyword amber) gets score-low", () => {
+    const job = makeJob({ match_score: 19, llm_fit_score: null, llm_verdict: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("19")).toHaveClass("score-low");
+  });
+
+  it("F4: unjudged match_score of 70 (old threshold) is NOT high under the keyword scale", () => {
+    // 70 clears the OLD single threshold but is still >= the new keyword green (45),
+    // so it should still be score-high — this pins that a keyword score of 70
+    // does not fall through to score-mid/score-low under the new bands.
+    const job = makeJob({ match_score: 70, llm_fit_score: null, llm_verdict: null });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("70")).toHaveClass("score-high");
+  });
+
+  it("F4: judged llm_fit_score of 70 (judge green boundary) gets score-high", () => {
+    const job = makeJob({
+      match_score: 30,
+      llm_fit_score: 70,
+      llm_verdict: "strong_fit",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("70")).toHaveClass("score-high");
+  });
+
+  it("F4: judged llm_fit_score of 69 (just under judge green) gets score-mid", () => {
+    const job = makeJob({
+      match_score: 30,
+      llm_fit_score: 69,
+      llm_verdict: "moderate_fit",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("69")).toHaveClass("score-mid");
+  });
+
+  it("F4: judged llm_fit_score of 40 (judge amber boundary) gets score-mid", () => {
+    const job = makeJob({
+      match_score: 30,
+      llm_fit_score: 40,
+      llm_verdict: "moderate_fit",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("40")).toHaveClass("score-mid");
+  });
+
+  it("F4: judged llm_fit_score of 39 (just under judge amber) gets score-low", () => {
+    const job = makeJob({
+      match_score: 30,
+      llm_fit_score: 39,
+      llm_verdict: "weak_fit",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("39")).toHaveClass("score-low");
+  });
+
+  it("F4: a judged score of 45 (keyword green, but under judge amber) stays score-low — scale must not leak", () => {
+    // 45 clears the KEYWORD green boundary but is judged, so the judge bands
+    // (70/40) must apply, not the keyword bands — proves the two scales don't
+    // cross-contaminate.
+    const job = makeJob({
+      match_score: 10,
+      llm_fit_score: 45,
+      llm_verdict: "moderate_fit",
+    });
+    render(<JobCard job={job} onAction={mockOnAction} />);
+    expect(screen.getByText("45")).toHaveClass("score-mid");
+  });
 });

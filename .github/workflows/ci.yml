@@ -167,9 +167,6 @@ jobs:
       - name: That guard can still fail
         run: python scripts/encoding_guard.py --drill
 
-      - name: The merge cage still refuses
-        run: python scripts/merge_cage.py --drill
-
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

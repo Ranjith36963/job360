@@ -45,7 +45,10 @@ class AshbySource(BaseJobSource):
                     company=company_name,
                     location=location,
                     description=desc[:5000],
-                    apply_url=item.get("applicationUrl", item.get("jobUrl", "")),
+                    # `applicationUrl` does not exist in the live API (verified
+                    # across 1,458 jobs). `applyUrl` is the real key (100% fill,
+                    # links to the application form); `jobUrl` is the info page.
+                    apply_url=item.get("applyUrl", item.get("jobUrl", "")),
                     source=self.name,
                     date_found=now_iso,
                     posted_at=posted_at,

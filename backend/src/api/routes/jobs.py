@@ -15,8 +15,10 @@ from fastapi.responses import StreamingResponse
 from src.api.auth_deps import CurrentUser, optional_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobListResponse, JobResponse
+from src.core.fx import is_known_currency
 from src.repositories.database import JobDatabase
 from src.services.job_signals import signal_backed_lookup
+from src.services.salary import normalize_salary
 from src.services.visa_signal import VisaStatus, detect_visa_status
 
 if TYPE_CHECKING:  # annotation-only; the real import stays lazy (rule #16)
@@ -35,8 +37,23 @@ _VISA_TO_BOOL = {"yes": True, "no": False}
 
 def _parse_enr_salary(raw: object) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str]]:
     """Decode a `job_enrichment.salary` JSON blob into the four
-    JobResponse-flat fields. Returns ``(min_gbp, max_gbp, period, currency)``;
-    every element is None when the blob is missing/malformed/empty."""
+    JobResponse-flat fields. Returns ``(min_gbp, max_gbp, period, currency)``.
+
+    F6 — the `_gbp` fields must actually BE gbp. The blob's raw min/max are
+    in whatever currency/frequency the LLM extracted (e.g. USD, monthly);
+    `normalize_salary()` (services/salary.py) converts + annualises them.
+    Its output is always an annual GBP figure, so `period` is "annual"
+    whenever an amount is returned — never the original raw frequency.
+
+    Every element is None when the blob is missing/malformed/empty, OR when
+    the currency can't actually be priced (`core.fx` only has real rates for
+    a fixed set of codes; anything else would silently render at a 1:1
+    pass-through, i.e. a wrong number wearing a `_gbp` suffix). An absent
+    salary is honest; a wrong one is not — so those rows leave the amount
+    fields unset rather than guess. `currency` is still echoed back
+    (informational — what the ad actually said) even when we can't convert
+    it.
+    """
     if not raw:
         return (None, None, None, None)
     try:
@@ -45,16 +62,23 @@ def _parse_enr_salary(raw: object) -> tuple[Optional[int], Optional[int], Option
         return (None, None, None, None)
     if not isinstance(obj, dict):
         return (None, None, None, None)
-    smin = obj.get("min")
-    smax = obj.get("max")
-    freq = obj.get("frequency")
-    currency = obj.get("currency")
-    return (
-        int(smin) if smin is not None else None,
-        int(smax) if smax is not None else None,
-        freq if freq and freq != "unknown" else None,
-        currency or None,
-    )
+
+    # Coerce to str before validating. `obj` is LLM-produced JSON, so
+    # `currency` can arrive as a number, a list or a dict; passing that
+    # straight into is_known_currency risks a type error on a request path
+    # that should never 500 over a malformed enrichment blob. A non-string is
+    # simply an unknown currency (caught in review, PR #273).
+    currency_raw = obj.get("currency")
+    currency = currency_raw if isinstance(currency_raw, str) and currency_raw else None
+    if not is_known_currency(currency):
+        return (None, None, None, currency)
+
+    normalised = normalize_salary(obj)
+    if normalised is None:
+        return (None, None, None, currency)
+
+    smin, smax = normalised
+    return (smin, smax, "annual", currency)
 
 
 def _parse_json_list(raw: object) -> Optional[list[str]]:

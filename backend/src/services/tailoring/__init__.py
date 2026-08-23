@@ -1,4 +1,4 @@
-"""Per-User AI CV & Cover Letter tailoring (docs/peruser_cv_coverletter.md).
+"""Per-User AI CV & Cover Letter tailoring (docs/product/peruser_cv_coverletter.md).
 
 Turns a user's ONE stored CV + a job's description + the judge's fit reason into a
 CV and cover letter tailored to that job, then learns from the user's edits.

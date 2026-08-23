@@ -51,7 +51,17 @@ def _run(profile: UserProfile, counter: _Counter, *, cv_fails: bool = False) -> 
         counter.cv += 1
         if cv_fails:
             raise RuntimeError("provider down")
-        return CVData(skills=["Epic"], job_titles=["Registered Nurse"])
+        # A real successful CV pass reads a dated role off the document too —
+        # this CV literally has one ("Staff Nurse, Royal London Hospital").
+        # Leaving cv_positions off this fixture would make every "successful"
+        # call look PARTIAL (skills/titles but no positions) to the new
+        # partial-CV retry, silently doubling every call count these cache
+        # tests assert on even though caching itself never changed.
+        return CVData(
+            skills=["Epic"],
+            job_titles=["Registered Nurse"],
+            cv_positions=[{"company": "Royal London Hospital", "title": "Staff Nurse"}],
+        )
 
     async def fake_li(text, *a, **kw):
         counter.linkedin += 1

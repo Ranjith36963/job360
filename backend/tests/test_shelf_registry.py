@@ -212,6 +212,87 @@ class TestTheInstrumentCountsLikeAConsumer:
         assert "salary_min" in self._found("p = UserPreferences(salary_min=1)")
 
 
+class TestReceiverIsTypeAware:
+    """Finding 10 (2026-08-16): the visitor used to trust ANY parameter named
+    ``profile``/``cv``/``prefs`` as a real profile receiver, with no check on
+    what the parameter actually was. ``prefilter.py`` proved that false:
+
+        def skill_overlap_ok(profile: FilterProfile, job: Job, ...) -> bool:
+            if not profile.skills: ...
+
+    ``FilterProfile`` is a dataclass the module docstring calls "decoupled
+    from UserProfile" on purpose — this access never touches a real CV. The
+    old bare-name check credited it anyway, so ``matching_tiers()`` reported
+    the prefilter as narrowing every job on skill overlap when it never does.
+    """
+
+    def _found(self, source: str) -> set[str]:
+        visitor = _ShelfVisitor(frozenset(shelf_names()))
+        visitor.visit(ast.parse(source))
+        return visitor.found
+
+    def test_a_parameter_typed_as_a_different_dataclass_is_not_counted(self) -> None:
+        # The exact shape of the bug: the bare name matches, the annotation
+        # does not.
+        src = (
+            "def skill_overlap_ok(profile: FilterProfile, job: Job) -> bool:\n"
+            "    return bool(profile.skills)\n"
+        )
+        assert "skills" not in self._found(src)
+
+    def test_a_parameter_typed_as_the_real_profile_is_still_counted(self) -> None:
+        # CONTROL — without this, "credit nothing" would also pass the test
+        # above. A genuine, correctly-annotated receiver must keep its credit.
+        src = "def f(cv: CVData) -> list:\n    return cv.skills\n"
+        assert "skills" in self._found(src)
+
+    def test_an_unannotated_parameter_keeps_the_old_bare_name_behaviour(self) -> None:
+        # Most of this codebase's real reads go through a duck-typed `Any`
+        # parameter on purpose (avoids an import cycle, rule #16) — e.g.
+        # `llm_matcher.profile_to_matcher_text(profile: Any)`. Requiring an
+        # annotation to match would silently un-credit all of those and make
+        # the "judge" role look unread. Unannotated / Any-typed parameters
+        # must still be trusted by bare name.
+        src = "def f(cv) -> list:\n    return cv.skills\n"
+        assert "skills" in self._found(src)
+        src_any = "def f(cv: Any) -> list:\n    return cv.skills\n"
+        assert "skills" in self._found(src_any)
+
+    def test_a_non_parameter_local_alias_keeps_the_old_bare_name_behaviour(self) -> None:
+        # `prefs = self._user_preferences; prefs.salary_min` (skill_matcher.py)
+        # and `cv = getattr(profile, "cv_data", None)` (llm_matcher.py) are how
+        # most of the scorer/judge reads are actually written — a LOCAL
+        # variable, never a parameter. Only a parameter's own annotation can
+        # override the bare-name match; an alias must not lose its credit.
+        src = (
+            "def f(profile):\n"
+            "    cv = getattr(profile, 'cv_data', None)\n"
+            "    return cv.skills\n"
+        )
+        assert "skills" in self._found(src)
+
+    def test_the_production_prefilter_role_no_longer_claims_skills(self) -> None:
+        # The regression the finding asked for, run against the REAL
+        # codebase, not a fabricated snippet — proves the fix landed, not
+        # just that the fabricated case above is well-formed.
+        assert "prefilter" not in readers("skills"), (
+            "the prefilter role is credited with reading 'skills' again — "
+            "check whether a FOREIGN-typed parameter (like prefilter.py's "
+            "FilterProfile) started sharing a profile receiver's bare name"
+        )
+
+    def test_the_prefilter_role_still_reads_what_it_actually_reads(self) -> None:
+        # CONTROL for the test above at production scale: dropping the false
+        # 'skills' credit must not silently zero the WHOLE role. The real
+        # read lives in workers/tasks.py::_filter_profile_for, which builds
+        # the FilterProfile prefilter.py runs on from the user's actual
+        # UserPreferences — see the "tasks" -> "prefilter" mapping in
+        # shelf_audit._ROLES.
+        assert "prefilter" in readers("preferred_locations")
+        assert "prefilter" in readers("work_arrangement")
+        assert "prefilter" in readers("experience_level")
+
+
 class TestMatchingCoverageDoesNotRegress:
     """A ratchet. Wiring more shelves into matching is the current goal, so this
     may only ever move UP. If a change drops a shelf out of matching, that is

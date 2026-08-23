@@ -41,3 +41,21 @@ def to_gbp(amount: float | int, currency: str | None) -> float:
         return float(amount)
     rate = _RATES_TO_GBP.get(currency.upper(), 1.0)
     return float(amount) * rate
+
+
+def is_known_currency(currency: str | None) -> bool:
+    """True when `currency` has a real rate in `_RATES_TO_GBP`.
+
+    `to_gbp()` deliberately passes unknown codes through at rate 1.0 — safe
+    for the internal salary_score band-overlap heuristic (over-including a
+    candidate beats silently dropping one), but NOT safe for a user-facing
+    figure: a PEN or BRL amount rendered at 1:1 as GBP is not a rough
+    estimate, it is a wrong number. Callers that display converted amounts
+    (rather than just ranking with them) should check this first and leave
+    the figure unset when it is False. `None`/empty currency is treated as
+    already-GBP (matches `to_gbp`'s and `normalize_salary`'s default), so it
+    counts as "known".
+    """
+    if not currency:
+        return True
+    return currency.upper() in _RATES_TO_GBP

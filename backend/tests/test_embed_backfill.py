@@ -57,7 +57,14 @@ async def test_backfill_embeds_only_missing_up_to_budget(tmp_path):
         if vector_column_available(str(tmp_path / "t.db")):
             await conn.execute(
                 "INSERT INTO job_embeddings(job_id, model_version, embedding) "
-                "VALUES (?, 'm', ?::vector)",
+                # `public.vector`, never a bare `vector`: pgvector installs into
+                # public, and Postgres resolves a TYPE name through search_path
+                # just like a table name. Test schemas do not include public
+                # (that fallback let a "private" test read the shared catalog),
+                # so an unqualified cast fails with `type "vector" does not
+                # exist`. Production code already qualifies every one of these
+                # — see pg_vector_index.py:118,147-149.
+                "VALUES (?, 'm', ?::public.vector)",
                 (ids[0], "[" + ",".join(["0.1"] * 384) + "]"),
             )
         else:

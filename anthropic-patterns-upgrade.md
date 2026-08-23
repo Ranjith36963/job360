@@ -18,7 +18,7 @@ Replace the single self-audit with a two-wave review:
 Rationale: a model grading its own output is too generous, and a single reviewer over-reports. Findings that survive an adversarial pass are nearly all real. Cost control: waves run only when the diff touches >1 file or any file on the CORE list (Upgrade 3); single-file mechanical changes keep the existing lone self-audit.
 
 ## Upgrade 2 — Instrument everything (TELEMETRY.jsonl)
-**Where:** new file `docs/maintenance/TELEMETRY.jsonl`; worker + integrator skills append one JSON line per unit of work.
+**Where:** new file `docs/harness/maintenance/TELEMETRY.jsonl`; worker + integrator skills append one JSON line per unit of work.
 
 Schema (one line per task/round):
 ```json
@@ -57,7 +57,7 @@ This is the shape behind Anthropic's famous result — one engineer pointed Clau
 ## Upgrade 5 — Review packet (make the human gate fast)
 **Where:** integrator skill, end of every round that lands anything on staging.
 
-Generate/refresh `docs/maintenance/REVIEW-PACKET.md`:
+Generate/refresh `docs/harness/maintenance/REVIEW-PACKET.md`:
 ```
 # Staging review packet — <date>
 Since your last merge to main:

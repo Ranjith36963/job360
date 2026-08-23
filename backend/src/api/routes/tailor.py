@@ -1,4 +1,4 @@
-"""Per-User AI CV & Cover Letter routes (docs/peruser_cv_coverletter.md).
+"""Per-User AI CV & Cover Letter routes (docs/product/peruser_cv_coverletter.md).
 
 Every endpoint is per-user (rule #12/#25): ``require_verified_user`` + all queries
 scoped by ``user.id`` (never a user_id from the path/body → no IDOR). Generation is

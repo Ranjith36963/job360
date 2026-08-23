@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import dataclasses
 import json
 import logging
 import os
@@ -188,6 +190,8 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         cv_projects=getattr(cv, "cv_projects", []) or [],
         cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
         cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
+        # Finding 11 — extracted and matched on (JobScorer), never shown.
+        cv_industries=getattr(cv, "cv_industries", []) or [],
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 
@@ -309,6 +313,23 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
     }
 
+    # The real board queries, made visible. `generate_search_config` is the
+    # SAME call the pipeline makes (src/main.py:760) and the job-detail
+    # re-score makes (api/routes/jobs.py:751), so what the user reads here is
+    # what the boards were actually asked — not a second, drifting
+    # reconstruction of it. Best-effort by design: a generator failure must
+    # cost the user a quiet line, never their whole profile page.
+    search_titles: list[str] = []
+    try:
+        from src.services.profile.keyword_generator import (  # noqa: PLC0415 — lazy (rule #16)
+            generate_search_config,
+        )
+
+        search_titles = list(generate_search_config(profile).search_titles)
+    except Exception:
+        logger.warning("search_titles unavailable for user %s", user_id, exc_info=True)
+        search_titles = []
+
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
     # migration just returns None.
@@ -333,6 +354,7 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         github_temporal=github_temporal,
         github_detail=github_detail,
         current_version_id=current_version_id,
+        search_titles=search_titles,
     )
 
 
@@ -667,7 +689,19 @@ async def upload_linkedin(
     file: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ) -> LinkedInResponse:
-    """Enrich user profile with a LinkedIn 'Save to PDF' profile export."""
+    """Enrich user profile with a LinkedIn 'Save to PDF' profile export.
+
+    FAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`
+    from `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic
+    (2 of 3 markers: URL / 3+ headings / page footer) — and return HTTP 200
+    with `merged=True` whenever that heuristic passed, regardless of what the
+    real extraction (deterministic + LLM) actually produced. A layout the
+    heuristic likes but the extractor cannot parse told the owner "LinkedIn
+    profile enriched" while storing nothing usable. `merged` is now computed
+    the SAME way `has_linkedin` is in `_build_profile_response`:
+    `bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER
+    extraction runs — and a merge that yields nothing is a 422, not a 200.
+    """
     # Bounded read — see the CV endpoint: caps memory for oversized uploads.
     content = await file.read(10 * 1024 * 1024 + 1)
 
@@ -675,11 +709,13 @@ async def upload_linkedin(
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
 
-    # V-04 — MIME / extension allowlist (LinkedIn must be PDF only)
+    # V-04 — MIME / extension allowlist (LinkedIn must be PDF only — this
+    # route never accepts DOCX, unlike the CV route, so the message must not
+    # claim it does).
     suffix = os.path.splitext(file.filename or ".pdf")[1].lower() or ".pdf"
     _ctype = (file.content_type or "").lower()
     if suffix != ".pdf" or _ctype not in {"application/pdf", ""}:
-        raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
+        raise HTTPException(status_code=415, detail="Only PDF files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
         # Capture RAW LinkedIn text only; the single extractor below turns it
@@ -688,22 +724,106 @@ async def upload_linkedin(
         # pdfplumber is synchronous, and blocking here froze the API for
         # every other request while one person enriched their profile.
         text = await asyncio.to_thread(extract_linkedin_text, tmp_path)
-        merged = bool(text) and _looks_like_linkedin(text)
-        if merged:
-            profile = load_profile(user.id) or UserProfile()
-            profile.cv_data.linkedin_raw_text = text
-            # Upload receipt — see the CV path. Recorded only on a MERGED
-            # upload: a PDF we could not read as LinkedIn changes nothing, so
-            # claiming a successful upload would be a lie on screen.
-            profile.cv_data.linkedin_filename = os.path.basename(file.filename or "")[:255]
-            profile.cv_data.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
-            await _extract_save_trigger(profile, user.id)
+        if not text or not _looks_like_linkedin(text):
+            # Same "order is the safety guard" contract as the CV route: this
+            # raises BEFORE any profile field is touched, so a file that does
+            # not even look like a LinkedIn export leaves existing data alone.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This doesn't look like a LinkedIn 'Save to PDF' export. "
+                    "On LinkedIn: open your profile -> More -> Save to PDF, "
+                    "and upload that file (not a screenshot or a different "
+                    "document)."
+                ),
+            )
+
+        profile = load_profile(user.id) or UserProfile()
+        cv = profile.cv_data
+        # Finding 6 — reset what THIS input owns before the new upload lands,
+        # exactly as _capture_cv_raw calls reset_cv_owned_fields for the CV
+        # route. Without this, a second export only ever UNIONS into the
+        # linkedin_-owned fields (courses/honors/projects/... all reuse the
+        # same list-union merge as job_titles/education/certifications), so a
+        # section removed on LinkedIn since the last upload could never
+        # disappear from the profile. job_titles/education/certifications are
+        # JOINTLY owned with the CV (enrich_cv_from_linkedin unions into
+        # them, the CV pass does too) and are deliberately NOT touched here —
+        # they have no `linkedin_` prefix, so this scoped reset cannot reach
+        # them, and it must not: a LinkedIn re-upload is not a CV re-upload,
+        # and wiping the CV's own contribution to those lists would be the
+        # opposite failure. The trade-off this accepts: a title/degree/cert
+        # LinkedIn contributed under an OLD export can outlive that export
+        # until the CV itself is re-uploaded (which resets the joint fields
+        # AND drops the LinkedIn hash — see reset_cv_owned_fields). Fixing
+        # that fully needs per-entry provenance on those three lists, which
+        # does not exist yet and is out of this unit's file list.
+        # SNAPSHOT BEFORE THE RESET — the 422 below must not cost the user the
+        # LinkedIn data they already had.
+        #
+        # `_extract_save_trigger` calls `save_profile` unconditionally as part
+        # of its body, so by the time `merged` can be computed the wiped state
+        # is ALREADY PERSISTED. Without this snapshot, a second upload that
+        # passes the cheap shape heuristic but extracts nothing deletes a
+        # previously good LinkedIn profile and then returns an honest-looking
+        # "re-export and try again" — the user is never told anything was lost.
+        # Caught by the review pass, reproduced live against Postgres:
+        # has_linkedin went True -> False and every linkedin_* field emptied.
+        #
+        # upload_github two routes below gets this right by computing `merged`
+        # from an in-memory result BEFORE it saves anything. The LinkedIn route
+        # cannot copy that shape directly (its merge happens inside the shared
+        # extraction pass, not in a returnable value), so it restores instead.
+        _previous_linkedin = {
+            f.name: copy.deepcopy(getattr(cv, f.name))
+            for f in dataclasses.fields(CVData)
+            if f.name.startswith("linkedin_")
+        }
+        _previous_li_hash = cv.llm_input_hashes.get("linkedin")
+
+        _clear_prefixed(cv, "linkedin_")
+        cv.linkedin_raw_text = text
+        await _extract_save_trigger(profile, user.id)
+
+        # merged = did extraction actually PRODUCE LinkedIn signal — not "did
+        # the file merely resemble a LinkedIn export". Mirrors has_linkedin.
+        merged = bool(cv.linkedin_skills or cv.linkedin_positions)
+        if not merged:
+            # Put back exactly what was there, and PERSIST the restoration —
+            # an in-memory rollback would be undone by the save that already
+            # happened above.
+            for name, value in _previous_linkedin.items():
+                setattr(cv, name, value)
+            if _previous_li_hash is None:
+                cv.llm_input_hashes.pop("linkedin", None)
+            else:
+                cv.llm_input_hashes["linkedin"] = _previous_li_hash
+            save_profile(profile, user.id, "linkedin_upload_rejected")
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "We read the PDF but found no skills or work history in "
+                    "it. Your existing LinkedIn data has been kept. Re-export "
+                    "from LinkedIn (profile -> More -> Save to PDF) and make "
+                    "sure the Skills and Experience sections are expanded, "
+                    "not collapsed, before saving."
+                ),
+            )
+
+        # Upload receipt — see the CV path. Recorded only on a MERGED
+        # upload, and only now that we KNOW it merged (not merely that the
+        # pre-extraction heuristic liked the layout): a PDF that read as
+        # LinkedIn-shaped but yielded nothing must not claim a connection
+        # that did not happen.
+        cv.linkedin_filename = os.path.basename(file.filename or "")[:255]
+        cv.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
+        save_profile(profile, user.id, "linkedin_upload")
     finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-    return LinkedInResponse(ok=True, merged=merged)
+    return LinkedInResponse(ok=True, merged=True)
 
 
 @router.post("/profile/github", response_model=GitHubResponse)
@@ -823,40 +943,52 @@ def _clear_cv(cv: CVData) -> None:
     cv.llm_input_hashes.pop("cv", None)
 
 
+def _clear_prefixed(cv: CVData, prefix: str) -> None:
+    """Reset every CVData field owned by one input, found BY PREFIX.
+
+    WHY NOT A HAND-WRITTEN LIST. This was 18 named assignments, and it had
+    already fallen two fields behind the dataclass: `linkedin_summary` and
+    `linkedin_headline` were added, wired into the LLM judge and the semantic
+    vector, and never added here. Measured on the shipped code — after
+    "Clear LinkedIn", `linkedin_skills` and `linkedin_positions` were empty
+    while `linkedin_summary` still held the previous person's About paragraph
+    and `linkedin_headline` their tagline, both of which `profile_to_matcher_text`
+    then sent to the judge for every job.
+
+    Same failure as `reset_cv_owned_fields`, same root cause, third occurrence
+    across the file. Ownership is a PREFIX fact, so read it off the dataclass
+    and the list cannot fall behind again.
+
+    Each field goes back to what a fresh `CVData()` has, so the type is handled
+    for free — a `dict` shelf added tomorrow resets to `{}` without anyone
+    remembering it exists.
+    """
+    import copy
+    import dataclasses
+
+    pristine = CVData()
+    for f in dataclasses.fields(CVData):
+        if not f.name.startswith(prefix):
+            continue
+        default = getattr(pristine, f.name)
+        current = getattr(cv, f.name)
+        # In place for collections — same reason as reset_cv_owned_fields: a
+        # rebind orphans any reference taken before the call.
+        if isinstance(current, (list, dict)) and isinstance(default, (list, dict)):
+            current.clear()
+        else:
+            setattr(cv, f.name, copy.deepcopy(default))
+
+
 def _clear_linkedin(cv: CVData) -> None:
-    cv.linkedin_raw_text = ""
-    cv.linkedin_positions = []
-    cv.linkedin_skills = []
-    cv.linkedin_industry = ""
-    cv.linkedin_languages = []
-    cv.linkedin_projects = []
-    cv.linkedin_volunteer = []
-    cv.linkedin_courses = []
-    cv.linkedin_filename = ""
-    cv.linkedin_uploaded_at = ""
-    cv.linkedin_honors = []
-    cv.linkedin_publications = []
-    cv.linkedin_patents = []
-    cv.linkedin_organizations = []
-    cv.linkedin_test_scores = []
-    cv.linkedin_recommendations = []
-    cv.linkedin_interests = []
-    cv.linkedin_contact = {}
+    _clear_prefixed(cv, "linkedin_")
     cv.llm_input_hashes.pop("linkedin", None)
 
 
 def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
-    cv.github_languages = {}
-    cv.github_topics = []
-    cv.github_skills_inferred = []
-    cv.github_frameworks = []
-    cv.github_llm_skills = []
-    cv.github_repos_brief = []
-    cv.github_bio = ""
-    cv.github_profile_readme = ""
-    cv.github_identity = {}
-    cv.github_connected_at = ""
+    _clear_prefixed(cv, "github_")
     cv.llm_input_hashes.pop("github", None)
+    # Lives on UserPreferences, not CVData, so the prefix sweep cannot reach it.
     prefs.github_username = ""  # the handle belongs to this section
 
 
