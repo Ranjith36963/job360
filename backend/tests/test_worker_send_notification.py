@@ -7,6 +7,13 @@ Redis. Ledger assertions prove:
   3. Idempotency via UNIQUE(user_id, job_id, channel) — retry does not dup.
   4. Return value reports {sent, failed} counts.
 """
+
+# The fakes take **_kw deliberately. `send_notification` now passes `job_id` and
+# `match_score` to `dispatch()` -- without job_id, `dispatcher._queue_digest`
+# returned early and wrote no digest row, so a `daily` rule produced neither a
+# send nor a queue entry while still being counted as sent. These stubs stand in
+# for the real signature, so they must tolerate it growing; pinning them to the
+# old argument list turns a fixed bug into a red test. (CodeRabbit, PR #352.)
 from __future__ import annotations
 
 import os
@@ -108,7 +115,7 @@ async def _ledger_rows(db) -> list[dict]:
 @pytest.mark.asyncio
 async def test_send_notification_dispatches_each_channel_and_marks_sent(db_ctx):
     """Two channels both succeed → two ledger rows in status='sent'."""
-    async def fake_dispatcher(db, *, user_id, title, body):
+    async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
             ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
@@ -117,7 +124,7 @@ async def test_send_notification_dispatches_each_channel_and_marks_sent(db_ctx):
     db_ctx["dispatcher"] = fake_dispatcher
     result = await send_notification(db_ctx, "alice", 1, "instant")
 
-    assert result == {"sent": 2, "failed": 0}
+    assert result == {"sent": 2, "queued": 0, "failed": 0}
     rows = await _ledger_rows(db_ctx["db"])
     assert len(rows) == 2
     assert all(r["status"] == "sent" for r in rows)
@@ -128,7 +135,7 @@ async def test_send_notification_dispatches_each_channel_and_marks_sent(db_ctx):
 @pytest.mark.asyncio
 async def test_send_notification_marks_failed_with_error_message(db_ctx):
     """A failing channel produces status='failed' + error_message."""
-    async def fake_dispatcher(db, *, user_id, title, body):
+    async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(
                 channel_id=3, channel_type="discord",
@@ -139,7 +146,7 @@ async def test_send_notification_marks_failed_with_error_message(db_ctx):
     db_ctx["dispatcher"] = fake_dispatcher
     result = await send_notification(db_ctx, "alice", 1, "instant")
 
-    assert result == {"sent": 0, "failed": 1}
+    assert result == {"sent": 0, "queued": 0, "failed": 1}
     rows = await _ledger_rows(db_ctx["db"])
     assert len(rows) == 1
     assert rows[0]["status"] == "failed"
@@ -148,7 +155,7 @@ async def test_send_notification_marks_failed_with_error_message(db_ctx):
 
 @pytest.mark.asyncio
 async def test_send_notification_returns_mixed_counts(db_ctx):
-    async def fake_dispatcher(db, *, user_id, title, body):
+    async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
             ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
@@ -160,13 +167,13 @@ async def test_send_notification_returns_mixed_counts(db_ctx):
 
     db_ctx["dispatcher"] = fake_dispatcher
     result = await send_notification(db_ctx, "alice", 1, "instant")
-    assert result == {"sent": 2, "failed": 1}
+    assert result == {"sent": 2, "queued": 0, "failed": 1}
 
 
 @pytest.mark.asyncio
 async def test_send_notification_is_idempotent_per_channel(db_ctx):
     """Calling twice produces the same 2 ledger rows (UNIQUE constraint)."""
-    async def fake_dispatcher(db, *, user_id, title, body):
+    async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
             ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
@@ -187,11 +194,11 @@ async def test_send_notification_handles_unknown_job(db_ctx):
     """job_id not in jobs table → {sent: 0, failed: 0}, no dispatcher call."""
     called = []
 
-    async def fake_dispatcher(db, *, user_id, title, body):
+    async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         called.append((user_id, title))
         return []
 
     db_ctx["dispatcher"] = fake_dispatcher
     result = await send_notification(db_ctx, "alice", 9999, "instant")
-    assert result == {"sent": 0, "failed": 0}
+    assert result == {"sent": 0, "queued": 0, "failed": 0}
     assert called == [], "dispatcher should not be invoked for unknown job"

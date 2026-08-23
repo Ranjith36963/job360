@@ -349,7 +349,7 @@ async def send_notification(
     cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
     job_row = await cur.fetchone()
     if job_row is None:
-        return {"sent": 0, "failed": 0}
+        return {"sent": 0, "queued": 0, "failed": 0}
 
     title = f"{job_row['title']} @ {job_row['company']}"
     body = f"Job360 match: {job_row['title']}\n{job_row['apply_url']}"
