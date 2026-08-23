@@ -179,6 +179,17 @@ jobs:
       - name: The broom still refuses to sweep up unsaved work
         run: python scripts/worktree_census.py --drill
 
+      # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
+      # from commented-out example lines, so `drill_registry.discover()` counted
+      # them as invoked and certified two guards that NOTHING RAN. #362 taught
+      # discover() to ignore comments, which turned them into STALE ENTRY --
+      # correctly. The fix is to invoke them, not to un-declare them.
+      - name: Every alert path still reaches a human
+        run: python scripts/check_alert_paths.py
+
+      - name: Every slack step passes a token, a title and a real channel
+        run: python scripts/check_workflow_slack_wiring.py
+
       - name: The review-debt reader can still fail (and still refuses to gate)
         run: python scripts/review_debt.py --drill
       - name: Every guard declares its drill
