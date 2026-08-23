@@ -1,7 +1,7 @@
 """Infer a user's seniority level from their CV / LinkedIn work history.
 
 WHY THIS IS ALLOWED (the rule #29 boundary). Product design rule #29
-(`docs/product_design_rules.md` rule 1) says an EMPTY user field means
+(`docs/product/product_design_rules.md` rule 1) says an EMPTY user field means
 "don't care" — the matcher must never guess a PREFERENCE the user never
 stated (a salary range, a workplace choice, an experience level they simply
 never picked from the dropdown). Seniority is a different kind of thing: it

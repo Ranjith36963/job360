@@ -194,16 +194,12 @@ def test_base_source_has_general_default():
     ("import_path", "class_name", "expected"),
     [
         ("src.sources.feeds.nhs_jobs", "NHSJobsSource", {"healthcare"}),
-        ("src.sources.feeds.nhs_jobs_xml", "NHSJobsXMLSource", {"healthcare"}),
-        ("src.sources.feeds.biospace", "BioSpaceSource", {"healthcare"}),
-        ("src.sources.feeds.jobs_ac_uk", "JobsAcUkSource", {"academia"}),
         ("src.sources.feeds.uni_jobs", "UniJobsSource", {"academia"}),
         ("src.sources.apis_free.teaching_vacancies", "TeachingVacanciesSource", {"education"}),
         ("src.sources.scrapers.climatebase", "ClimatebaseSource", {"climate"}),
         ("src.sources.scrapers.bcs_jobs", "BCSJobsSource", {"tech"}),
         ("src.sources.apis_free.devitjobs", "DevITJobsSource", {"tech"}),
         ("src.sources.apis_free.landingjobs", "LandingJobsSource", {"tech"}),
-        ("src.sources.apis_free.aijobs", "AIJobsSource", {"tech"}),
         ("src.sources.apis_free.hn_jobs", "HNJobsSource", {"tech"}),
         ("src.sources.other.hackernews", "HackerNewsSource", {"tech"}),
         ("src.sources.other.nofluffjobs", "NoFluffJobsSource", {"tech"}),
@@ -239,18 +235,17 @@ def mock_session():
 
 
 def test_build_sources_with_healthcare_profile_skips_tech_only(mock_session):
-    """A healthcare user should NOT get bcs_jobs / climatebase / aijobs_*."""
+    """A healthcare user should NOT get bcs_jobs / climatebase / aijobs_ai."""
     from src.main import _build_sources
 
     profile = _profile(titles=["Registered Nurse"])
     sources = _build_sources(mock_session, user_profile=profile)
     names = _names(sources)
     assert "nhs_jobs" in names
-    assert "nhs_jobs_xml" in names
     assert "reed" in names  # general always included
     assert "bcs_jobs" not in names  # tech-only, skipped
     assert "climatebase" not in names
-    assert "aijobs" not in names
+    assert "aijobs_ai" not in names
 
 
 def test_build_sources_with_tech_profile_skips_healthcare_only(mock_session):
@@ -260,10 +255,9 @@ def test_build_sources_with_tech_profile_skips_healthcare_only(mock_session):
     sources = _build_sources(mock_session, user_profile=profile)
     names = _names(sources)
     assert "bcs_jobs" in names
+    assert "aijobs_ai" in names  # tech-only source IS included
     assert "reed" in names
     assert "nhs_jobs" not in names
-    assert "nhs_jobs_xml" not in names
-    assert "biospace" not in names
 
 
 def test_build_sources_with_zero_profile_includes_everything(mock_session):

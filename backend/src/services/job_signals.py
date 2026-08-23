@@ -32,13 +32,15 @@ short-circuits before any text is touched.
 VOCABULARY LIVES IN DATA FILES (rule #28's rationale, extended past its
 literal scope of profile extraction — the same brittleness applies here: a
 hand-typed keyword dict means "new term = code edit").
-`data/job_signals/workplace_terms.txt`, `workplace_location_terms.txt` and
-`seniority_terms.txt` are TSV: one `<enum_value><TAB><phrase>` pair per
-line; blank lines and lines starting with `#` are ignored. Loaded lazily and
-cached with `lru_cache`, exactly like `uk_gate._gazetteer()` — and, like
-that loader, a missing or unreadable file degrades to an empty vocabulary
-(every detector call then returns UNKNOWN) rather than raising. A forgotten
-data file in a deploy must not crash the pipeline.
+`src/data/job_signals/workplace_terms.txt`, `workplace_location_terms.txt`
+and `seniority_terms.txt` are TSV: one `<enum_value><TAB><phrase>` pair per
+line; blank lines and lines starting with `#` are ignored. They live INSIDE
+the package on purpose — see `_DATA` below; anywhere else and production runs
+without them. Loaded lazily and cached with `lru_cache`, exactly like
+`uk_gate._gazetteer()` — and, like that loader, a missing or unreadable file
+degrades to an empty vocabulary (every detector call then returns UNKNOWN)
+rather than raising, but LOGS AN ERROR naming the path. A forgotten data file
+in a deploy must not crash the pipeline; it must also not be invisible.
 
 WHY LOCATION GETS ITS OWN VOCABULARY AND ITS OWN RULES. Added 2026-08-07
 after a manager audit found 165 prod jobs still UNKNOWN while their
@@ -100,6 +102,7 @@ vocabulary — the same distinction `uk_gate.py` draws for `_POSTCODE`:
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from functools import cache, lru_cache
@@ -108,7 +111,28 @@ from typing import Any, Callable, Optional
 
 from src.services.job_enrichment_schema import SeniorityLevel, WorkplaceType
 
-_DATA = Path(__file__).resolve().parent.parent.parent / "data" / "job_signals"
+logger = logging.getLogger(__name__)
+
+# THE DATA LIVES INSIDE THE PACKAGE, AND THAT IS LOAD-BEARING (issue #260, the
+# third instance of one bug).
+#
+# It used to sit in `backend/data/job_signals/` — one directory further up,
+# `parent.parent.parent`. Production installs the app with `pip install .`, and
+# `[tool.setuptools.packages.find] include = ["src*"]` copies only the `src`
+# packages into site-packages. So `backend/data/` never shipped, this path
+# resolved to `<site-packages>/data/job_signals`, which does not exist in the
+# container, and `_load_terms()` returned {} for all three vocabularies. Both
+# detectors then answered UNKNOWN for every job in production, silently: the
+# `signal_backed_lookup` wrapper that fills 'unknown' enrichment at read time
+# filled nothing, and `detect_seniority` — the one that reads the TITLE, which
+# exists even for the 1,311 jobs with no usable description — decided nothing.
+#
+# Under `src/` the files are package data (`pyproject.toml`
+# `[tool.setuptools.package-data]`), so the dev tree and the installed wheel
+# resolve the SAME relative path. Moving them back out re-opens #260.
+# Guards: `tests/test_job_signals.py::TestTheDataShipsWithTheInstalledPackage`
+# and `tests/test_shipped_data.py`.
+_DATA = Path(__file__).resolve().parent.parent / "data" / "job_signals"
 
 
 # ---------------------------------------------------------------------------
@@ -123,14 +147,22 @@ def _load_terms(filename: str) -> dict[str, tuple[str, ...]]:
     unreadable file returns an empty dict rather than raising — callers then
     naturally fall through to UNKNOWN, so a forgotten data file in a deploy
     degrades the feature instead of crashing the pipeline.
+
+    But it SAYS SO. Graceful degradation is right; SILENT degradation is what
+    let this ship blind — every instrument stayed green (no exception, no
+    failing test, no log line) while both detectors decided nothing for every
+    job. An empty vocabulary is always a deployment fault, never a normal
+    state, so it is logged at ERROR with the path it actually looked at.
     """
     path = _DATA / filename
-    if not path.exists():
-        return {}
     terms: dict[str, list[str]] = {}
+    if not path.exists():
+        _report_empty(path, "file not found")
+        return {}
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError as exc:
+        _report_empty(path, f"unreadable ({exc})")
         return {}
     for line in raw.splitlines():
         line = line.strip()
@@ -141,7 +173,26 @@ def _load_terms(filename: str) -> dict[str, tuple[str, ...]]:
         phrase = phrase.strip()
         if value and phrase:
             terms.setdefault(value, []).append(phrase)
+    if not terms:
+        # Present but useless — the nastier half. `path.exists()` is True, so
+        # any existence check (including a Docker build that copied the file)
+        # looks healthy while the vocabulary is still empty.
+        _report_empty(path, "file present but no `value<TAB>phrase` lines parsed")
+        return {}
     return {k: tuple(v) for k, v in terms.items()}
+
+
+def _report_empty(path: Path, why: str) -> None:
+    """Say loudly that a vocabulary is empty. See `_load_terms`."""
+    logger.error(
+        "JOB SIGNALS DEGRADED — vocabulary empty at %s (%s). Workplace and "
+        "seniority detection will answer 'unknown' for every job: "
+        "signal_backed_lookup fills nothing and detect_seniority decides "
+        "nothing. This is the issue-#260 packaging shape — check that "
+        "src/data/job_signals/*.txt ships with the installed package "
+        "([tool.setuptools.package-data] in backend/pyproject.toml).",
+        path, why,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -542,3 +593,75 @@ def _apply(enrichment: Any, field: str, detected: Any) -> None:
         setattr(enrichment, field, raw)
     except Exception:  # noqa: BLE001 — never let a detector break scoring
         pass
+
+
+
+    return SenioritySignal(SeniorityLevel.UNKNOWN, "no_signal")
+
+
+def _all_seniority_phrases() -> tuple[str, ...]:
+    """Every rank phrase across every tier, as ONE tuple.
+
+    Deliberately derived from `_seniority_terms()` rather than re-typed: this
+    is the single vocabulary CLAUDE.md rule #28 (and `profile/seniority.py`'s
+    "no parallel word list") insists on. Adding a rank word stays a one-line
+    data edit.
+
+    NOT `lru_cache`d, on purpose. `_seniority_terms()` already is, and
+    `_phrase_pattern` is keyed on the returned tuple, so the only work repeated
+    here is building an identical small tuple. A second cache layer would just
+    be a second thing to forget to invalidate — which is exactly the bug
+    `tests/test_job_signals.py`'s missing-file tests kept re-creating.
+    """
+    return tuple(p for phrases in _seniority_terms().values() for p in phrases)
+
+
+# Trailing junk a strip can expose: "Director of Engineering" -> "of
+# Engineering", "Senior, Data Engineer" -> ", Data Engineer". Punctuation only
+# — no vocabulary.
+_STRIP_EDGE = " -–—,/&:·|�"
+
+
+def strip_seniority(text: str) -> str:
+    """Return `text` with its RANK words removed, keeping the DOMAIN.
+
+    "AI/ML Engineer Intern" -> "AI/ML Engineer". "Senior Data Engineer" ->
+    "Data Engineer". "Intern" -> "" (nothing but a rank).
+
+    WHY THIS EXISTS (measured live, 2026-08-13). Reed, Adzuna and Careerjet
+    match a query as AND-of-terms, so one extra rank token collapses the result
+    set instead of re-ranking it: "Machine Learning Engineer" returned 486 /
+    806 / 856 jobs, "Machine Learning Engineer Intern" returned 0 / 1 / 1. A
+    control query with a nonsense word ("… Banana") returned 0 everywhere,
+    proving it is the AND, not the word. So a rank word in a QUERY is a ~99.9%
+    recall loss.
+
+    WHY IT REUSES THE JOB-SIDE VOCABULARY. `seniority_terms.txt` is already
+    tuned for exactly the traps a naive intern/junior/senior list walks into:
+    bare "staff" is absent (NHS "Staff Nurse" is an entry grade) and bare
+    "executive" is absent ("Account Executive" is a UK entry title), so both
+    survive this function untouched. `_SENIORITY_NOISE` is honoured too, so
+    "Lead Generation Executive" keeps its "lead".
+
+    Never raises; returns the input unchanged when the vocabulary is
+    unavailable (see `_load_terms`'s degrade-quietly contract).
+    """
+    if not text:
+        return text
+    pattern = _phrase_pattern(_all_seniority_phrases())
+    if pattern is None:
+        return text
+    protected = [m.span() for m in _SENIORITY_NOISE.finditer(text)]
+
+    def _is_protected(start: int, end: int) -> bool:
+        return any(ps <= start and end <= pe for ps, pe in protected)
+
+    out: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        if _is_protected(*match.span()):
+            continue
+        out.append(text[cursor : match.start()])
+        cursor = match.end()
+    out.append(text[cursor:])
+    return re.sub(r"\s+", " ", "".join(out)).strip(_STRIP_EDGE)

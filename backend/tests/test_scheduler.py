@@ -47,7 +47,7 @@ def _run(coro):
 
 def test_resolve_tier_by_category_and_name():
     ats = _FakeSource("greenhouse", "ats")
-    rss = _FakeSource("jobs_ac_uk", "rss")
+    rss = _FakeSource("uni_jobs", "rss")
     scraper = _FakeSource("linkedin", "scrapers")
     reed = _FakeSource("reed", "keyed_api")
 

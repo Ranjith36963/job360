@@ -46,7 +46,7 @@ def _profile_text(uid):
     return (f"CANDIDATE: {cv.get('name')}\nTarget titles: {titles}\n"
             f"Skills: {skills}\nLevel: {p.get('experience_level')}, "
             f"salary {p.get('salary_min')}-{p.get('salary_max')}, "
-            f"workplace {p.get('preferred_workplace')}, needs_visa {p.get('needs_visa')}")
+            f"workplace {p.get('work_arrangement')}, needs_visa {p.get('needs_visa')}")
 
 
 def _jobs_for(uid, ids):

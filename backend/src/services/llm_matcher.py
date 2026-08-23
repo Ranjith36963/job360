@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from src.models import Job
 from src.repositories import pg
 from src.repositories.db_retry import with_write_retry
-from src.services.profile.llm_provider import llm_extract_validated
+from src.services.profile.llm_provider import LLMKeyMissing, llm_extract_validated
 
 logger = logging.getLogger("job360.services.llm_matcher")
 
@@ -117,6 +117,16 @@ def profile_to_matcher_text(profile: Any) -> str:
     and the full preference set. Written as labelled sections, not a bag of
     words, because a judge reads structure.
 
+    FINDING 5 (2026-08-16, HIGH). This docstring claimed "the WHOLE
+    candidate" while a per-repo description was cut at [:200] chars and
+    ``github_bio``, ``github_profile_readme``, repo ``topics``/
+    ``readme_excerpt``, and ``preferences.additional_skills`` (skills the
+    user typed himself) were never read at all — on a profile that leans
+    heavily on GitHub, judged by the highest-precision stage in the funnel.
+    Fixed: the [:200] cut is gone, repo lines now carry topics + README
+    excerpt, and GitHub identity prose + user-typed skills are their own
+    labelled sections below.
+
     Uncapped on the candidate side by design: there is one profile per user,
     and prompt input tokens are the cheapest thing in this pipeline —
     truncating the candidate to save them is how the 30-skill bug happened.
@@ -154,6 +164,20 @@ def profile_to_matcher_text(profile: Any) -> str:
         if li_headline:
             lines.append(f"LinkedIn headline: {li_headline}")
 
+        # GitHub identity prose (Finding 5, 2026-08-16). ``github_bio`` is the
+        # /users/{u} bio line and ``github_profile_readme`` is the {u}/{u}
+        # portfolio README GitHub renders at the top of a profile — the two
+        # richest self-authored GitHub signals, already fetched and stored on
+        # every profile, but never once sent to the judge. The owner's
+        # profile leans heavily on GitHub, so this was the highest-precision
+        # stage in the funnel reading the thinnest view of him.
+        gh_bio = (getattr(cv, "github_bio", "") or "").strip()
+        if gh_bio:
+            lines.append(f"GitHub bio: {gh_bio}")
+        gh_readme = (getattr(cv, "github_profile_readme", "") or "").strip()
+        if gh_readme:
+            lines.append(f"GitHub profile README: {gh_readme}")
+
         # Skills BY SOURCE — the judge can then weigh evidence strength
         # ("proven in GitHub repos" outranks "listed on a CV").
         for label, field in (
@@ -161,7 +185,11 @@ def profile_to_matcher_text(profile: Any) -> str:
             ("Skills (LinkedIn)", "linkedin_skills"),
             ("Skills (GitHub, from real repos)", "github_llm_skills"),
             ("Frameworks (GitHub dependencies)", "github_frameworks"),
-            ("Skills (stated by the user)", "about_me_inferred_skills"),
+            # Renamed from "stated by the user" (2026-08-16): that phrase now
+            # collides with ``additional_skills`` below, which the user types
+            # into a literal skill box — this field is the LLM's inference
+            # from the *prose* of about_me, a different evidence strength.
+            ("Skills (inferred from the user's own words)", "about_me_inferred_skills"),
         ):
             joined = _join(getattr(cv, field, []))
             if joined:
@@ -183,17 +211,42 @@ def profile_to_matcher_text(profile: Any) -> str:
         if role_lines:
             lines.append("Experience:\n" + "\n".join(role_lines))
 
+        # Repo lines. FINDING 5 (2026-08-16, HIGH): the description here was
+        # cut to [:200] chars and topics/README excerpts were never read at
+        # all — silently shrinking the strongest evidence a GitHub-heavy
+        # profile has (what was actually BUILT) to a headline fragment.
+        # Uncapped on purpose, same rationale as the rest of this function:
+        # one profile per user, and the owner has said twice that prompt
+        # tokens are the cheapest thing in this pipeline.
         projects: list[str] = []
         for repo in getattr(cv, "github_repos_brief", []) or []:
-            if isinstance(repo, dict) and (repo.get("name") or repo.get("description")):
-                projects.append(
-                    f"  - {repo.get('name') or ''}: {(repo.get('description') or '')[:200]}"
-                )
+            if not isinstance(repo, dict):
+                continue
+            name = (repo.get("name") or "").strip()
+            desc = (repo.get("description") or "").strip()
+            if not (name or desc):
+                continue
+            line = f"  - {name}: {desc}" if desc else f"  - {name}"
+            topics = _join(repo.get("topics") or [])
+            if topics:
+                line += f" [topics: {topics}]"
+            readme = (repo.get("readme_excerpt") or "").strip()
+            if readme:
+                line += f"\n    README: {readme}"
+            projects.append(line)
         if projects:
             lines.append("Built (GitHub):\n" + "\n".join(projects))
 
         for label, field in (
             ("Education", "education"),
+            # The sub-bullets under an Education heading: dissertation title,
+            # relevant coursework, a course project. Prompted for and
+            # schema-validated all along, then dropped before they reached
+            # CVData — so a CV whose only ML evidence is "Dissertation:
+            # predictive maintenance with LSTMs" showed the judge a bare degree
+            # line. Wired here the day the shelf was added, because a shelf with
+            # no reader is dead weight that still costs an LLM call.
+            ("Education detail", "cv_education_details"),
             ("Certifications", "certifications"),
             # Facts that had a shelf but reached no consumer until 2026-08-09.
             ("Industries worked in", "cv_industries"),
@@ -247,7 +300,9 @@ def profile_to_matcher_text(profile: Any) -> str:
 
     if prefs is not None:
         pref_bits: list[str] = []
-        for attr in ("experience_level", "work_arrangement", "preferred_workplace"):
+        # work_arrangement only — preferred_workplace is now derived FROM it, so
+        # listing both sent the judge the same answer twice on every job.
+        for attr in ("experience_level", "work_arrangement"):
             v = getattr(prefs, attr, None)
             if v:
                 pref_bits.append(f"{attr}={v}")
@@ -262,6 +317,12 @@ def profile_to_matcher_text(profile: Any) -> str:
             pref_bits.append(f"locations={locs}")
         if pref_bits:
             lines.append(f"Preferences: {', '.join(pref_bits)}")
+        # Skills the user typed HIMSELF into the "beyond your CV" box — the
+        # highest-confidence skill source there is (self-declared, not
+        # inferred from anywhere), and Finding 5 found it was never sent.
+        added_skills = _join(getattr(prefs, "additional_skills", []))
+        if added_skills:
+            lines.append(f"Skills (typed by the user): {added_skills}")
         about = (getattr(prefs, "about_me", "") or "").strip()
         if about:
             lines.append(f"In their own words: {about}")
@@ -440,9 +501,37 @@ async def match_batch(
                     )
                 tel.record_verdict(verdict.fit_score)
                 return verdict
+            except LLMKeyMissing:
+                # NEVER swallowed as a per-job failure. It is the SAME config
+                # fault for every job in the batch, and swallowing it per job is
+                # the masquerade that cost a week of eval data: N warnings, zero
+                # verdicts, and a caller counting "judged 0/160" reading a
+                # missing credential as a quality problem. Re-raised and
+                # surfaced by the gather below.
+                raise
             except Exception as e:  # noqa: BLE001 — judge failure must not kill the run
                 tel.failed += 1
                 logger.warning("match_batch: judge failed for job %s: %s", job_id, e)
                 return None
 
-    return await asyncio.gather(*[_one(j) for j in jobs])
+    # ``return_exceptions=True`` on purpose. A bare gather propagates the FIRST
+    # exception and abandons its siblings mid-flight — on this ONE shared
+    # psycopg connection that is finding C2's bug again (it surfaced in test as
+    # a WinError 10038 during teardown). Let every judge settle, THEN speak.
+    outcomes = await asyncio.gather(*[_one(j) for j in jobs], return_exceptions=True)
+    for out in outcomes:
+        if isinstance(out, BaseException):
+            # ANYTHING that escapes `_one` is meant to escape: it already
+            # swallows ordinary per-job errors itself, so what is left is the
+            # LLMKeyMissing config fault (raised once, carrying the four key
+            # names and the fix, instead of N lines that look like N bad
+            # judgments) or a BaseException like CancelledError, which must
+            # never be turned into a quiet ``None`` by `return_exceptions=True`.
+            # Both live callers still catch Exception (main.py
+            # _run_matcher_stage, rescore.py gem-rescue), so the run survives;
+            # what changes is that their log line now names the cause.
+            raise out
+    # The loop above raised on every exception, so nothing is filtered out here
+    # — order and length are preserved. Written as a comprehension so the type
+    # narrows without a cast.
+    return [o for o in outcomes if not isinstance(o, BaseException)]

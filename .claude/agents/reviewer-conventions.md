@@ -20,7 +20,7 @@ codified this lens (previously re-specified inline in the worker/integrator skil
   from path/body (rules #12/#25); account-mgmt verifies current password then clears the
   session cookie (rule #26).
 - **Scoring defaults** not silently flipped (rules #19/#20); the [0,100] clamp intact (#27).
-- **No hardcoded skill/keyword lists** in `src/services/profile/` (rule #28) — LLM + structural passes only. **ESCO is inert scaffolding, not live** (never built/shipped); do not accept "it uses ESCO" as justification for anything. See `docs/PILLAR1_EXTRACTION_AUDIT.md`.
+- **No hardcoded skill/keyword lists** in `src/services/profile/` (rule #28) — LLM + structural passes only. **ESCO is inert scaffolding, not live** (never built/shipped); do not accept "it uses ESCO" as justification for anything. See `docs/product/PILLAR1_EXTRACTION_AUDIT.md`.
 - **Next.js 16** (frontend rule #22): `params`/`cookies()`/`searchParams` awaited; no
   `"use client"` on a `page.tsx` that also needs `generateMetadata`.
 - **Tests mock HTTP** with `aioresponses` (rule #4) — no live network.

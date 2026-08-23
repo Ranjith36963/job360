@@ -58,7 +58,6 @@ from src.services.skill_matcher import (
     salary_in_range,
 )
 from src.services.uk_gate import check_uk
-from src.sources.apis_free.aijobs import AIJobsSource
 from src.sources.apis_free.arbeitnow import ArbeitnowSource
 from src.sources.apis_free.devitjobs import DevITJobsSource
 from src.sources.apis_free.himalayas import HimalayasSource
@@ -84,20 +83,15 @@ from src.sources.ats.lever import LeverSource
 from src.sources.ats.personio import PersonioSource
 from src.sources.ats.pinpoint import PinpointSource
 from src.sources.ats.recruitee import RecruiteeSource
-from src.sources.ats.rippling import RipplingSource
 from src.sources.ats.smartrecruiters import SmartRecruitersSource
 from src.sources.ats.successfactors import SuccessFactorsSource
 from src.sources.ats.workable import WorkableSource
 from src.sources.ats.workday import WorkdaySource
 from src.sources.base import BaseJobSource
-from src.sources.feeds.biospace import BioSpaceSource
-from src.sources.feeds.jobs_ac_uk import JobsAcUkSource
 from src.sources.feeds.nhs_jobs import NHSJobsSource
-from src.sources.feeds.nhs_jobs_xml import NHSJobsXMLSource
 from src.sources.feeds.realworkfromanywhere import RealWorkFromAnywhereSource
 from src.sources.feeds.uni_jobs import UniJobsSource
 from src.sources.feeds.weworkremotely import WeWorkRemotelySource
-from src.sources.feeds.workanywhere import WorkAnywhereSource
 from src.sources.other.hackernews import HackerNewsSource
 from src.sources.other.indeed import JobSpySource
 from src.sources.other.nofluffjobs import NoFluffJobsSource
@@ -137,7 +131,6 @@ SOURCE_REGISTRY = {
     "google_jobs": GoogleJobsSource,
     "devitjobs": DevITJobsSource,
     "landingjobs": LandingJobsSource,
-    "aijobs": AIJobsSource,
     "themuse": TheMuseSource,
     "hackernews": HackerNewsSource,
     "careerjet": CareerjetSource,
@@ -146,13 +139,10 @@ SOURCE_REGISTRY = {
     "nofluffjobs": NoFluffJobsSource,
     # Phase 4: New free sources
     "hn_jobs": HNJobsSource,
-    "jobs_ac_uk": JobsAcUkSource,
     "nhs_jobs": NHSJobsSource,
     "personio": PersonioSource,
-    "workanywhere": WorkAnywhereSource,
     "weworkremotely": WeWorkRemotelySource,
     "realworkfromanywhere": RealWorkFromAnywhereSource,
-    "biospace": BioSpaceSource,
     "climatebase": ClimatebaseSource,
     "eightykhours": EightyKHoursSource,
     "bcs_jobs": BCSJobsSource,
@@ -161,18 +151,21 @@ SOURCE_REGISTRY = {
     "aijobs_ai": AIJobsAISource,
     # Batch 3 additions
     "teaching_vacancies": TeachingVacanciesSource,
-    "nhs_jobs_xml": NHSJobsXMLSource,
-    "rippling": RipplingSource,
 }
 
 # Number of unique source instances created by _build_sources().
-# 46 not 47 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
+# 40 not 41 because "indeed" and "glassdoor" both map to JobSpySource (one instance).
 # 4 dead sources removed in the 2026-06 M6 rotation: jobtensor, comeet,
 # gov_apprenticeships, aijobs_global — all upstream-dead. gov_apprenticeships
 # was restored 2026-06-16 against the DfE Display Advert API v2 (keyed).
+# 6 more removed 2026-08-10 after live checks (registry 47 -> 41): aijobs
+# (aijobs.net/api/list-jobs/ 404), jobs_ac_uk (all 4 feed URLs 404), biospace
+# (all 3 feed URLs 404), rippling (ats.rippling.com board API gone), nhs_jobs_xml
+# (feed now serves HTML, retired — the separate nhs_jobs source is still ALIVE),
+# workanywhere (HTTP 429 bot-checkpoint on every path).
 # Used by test_main.py::test_source_instance_count_matches_build to catch drift.
 # Update this when adding/removing sources.
-SOURCE_INSTANCE_COUNT = 46
+SOURCE_INSTANCE_COUNT = 40
 
 
 async def _ghost_detection_pass(
@@ -287,7 +280,6 @@ def _build_sources(
         DevITJobsSource(session, search_config=sc),
         LandingJobsSource(session, search_config=sc),
         # Group J: New free/keyed sources
-        AIJobsSource(session, search_config=sc),
         TheMuseSource(session, search_config=sc),
         HackerNewsSource(session, search_config=sc),
         CareerjetSource(session, affid=CAREERJET_AFFID, search_config=sc),
@@ -296,13 +288,10 @@ def _build_sources(
         NoFluffJobsSource(session, search_config=sc),
         # Group K: Phase 4 new free sources
         HNJobsSource(session, search_config=sc),
-        JobsAcUkSource(session, search_config=sc),
         NHSJobsSource(session, search_config=sc),
         PersonioSource(session, search_config=sc),
-        WorkAnywhereSource(session, search_config=sc),
         WeWorkRemotelySource(session, search_config=sc),
         RealWorkFromAnywhereSource(session, search_config=sc),
-        BioSpaceSource(session, search_config=sc),
         ClimatebaseSource(session, search_config=sc),
         EightyKHoursSource(session, search_config=sc),
         BCSJobsSource(session, search_config=sc),
@@ -311,8 +300,6 @@ def _build_sources(
         AIJobsAISource(session, search_config=sc),
         # Group L: Batch 3 additions
         TeachingVacanciesSource(session, search_config=sc),
-        NHSJobsXMLSource(session, search_config=sc),
-        RipplingSource(session, search_config=sc),
     ]
     if source_filter:
         # Special case: glassdoor shares JobSpySource with indeed
@@ -567,12 +554,27 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
     logged and skipped — one bad row never stops the sweep. Returns embedded
     count. Callers gate on SEMANTIC_ENABLED.
     """
-    from src.services.embeddings import MODEL_NAME, encode_job  # noqa: PLC0415 — lazy (rule #16)
+    # PREFLIGHT — say it ONCE, loudly, before the loop.
+    #
+    # The caller has already checked SEMANTIC_ENABLED, so reaching here means
+    # semantic is switched ON. If the stack is not installed in this process,
+    # every single job below would raise, be caught by the per-job handler, and
+    # log an identical "job <id> failed" warning that names neither the cause
+    # nor the fix. That is exactly what the worker has been doing: its image is
+    # built from Dockerfile.worker with a plain `pip install .`, so the daily
+    # refresh_catalog cron ingests jobs it can never embed. Coverage sat at 687
+    # of 9,977 with no error anywhere — the failure was real and invisible.
+    from src.services.embeddings import (  # noqa: PLC0415 — lazy (rule #16)
+        MODEL_NAME,
+        encode_job,
+        semantic_stack_installed,  # noqa: PLC0415
+    )
     from src.services.job_enrichment import load_enrichment  # noqa: PLC0415
     from src.services.pg_vector_index import (  # noqa: PLC0415
         PgVectorIndex,
         vector_column_available,
     )
+
 
     try:
         vix = PgVectorIndex()
@@ -629,6 +631,46 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
             )
             embedded += 1
         except Exception as e:  # noqa: BLE001
+            # ONE missing package must not read as N unrelated job failures.
+            #
+            # This is what the worker has actually been doing. Its image is
+            # built from Dockerfile.worker with a plain `pip install .` (no
+            # `[semantic]` extra) while the API image installs torch +
+            # `.[semantic]` — confirmed in the live Railway build log. Because
+            # sentence_transformers is imported lazily (rule #16), the module
+            # import SUCCEEDS and nothing complains at startup; the failure only
+            # surfaced here, per job, as an identical "job <id> failed" warning
+            # naming neither the cause nor the remedy. Semantic coverage sat at
+            # 687 of 9,977 with every instrument green.
+            #
+            # Detected HERE rather than as an upfront probe on purpose: callers
+            # may inject their own encoder (the backfill tests patch
+            # `encode_job`), and a probe for the real package would wrongly stop
+            # a run that never needed it. Failing first, then escalating, can
+            # only fire when embedding genuinely could not happen.
+            # BOTH halves are required. Testing only "is the stack absent?"
+            # escalates on a failure that has nothing to do with it — CI caught
+            # exactly that: a test poisons ONE row with RuntimeError("encoder
+            # blew up") and expects the sweep to skip it and carry on, but CI
+            # also has no sentence-transformers installed, so the sweep
+            # abandoned instead. The message check is what makes this specific:
+            # it is the marker `embeddings._load_encoder` raises when the import
+            # fails, so an unrelated encoder error can never be mistaken for a
+            # missing package.
+            if "sentence-transformers is not installed" in str(
+                e
+            ) and not semantic_stack_installed():
+                logger.error(
+                    "SEMANTIC_ENABLED is on but sentence-transformers is not "
+                    "installed in this process — abandoning the embed backfill "
+                    "after 0 successes. Semantic search cannot improve while "
+                    "this is true. Install the extra for THIS service "
+                    "(pip install '.[semantic]'), or turn SEMANTIC_ENABLED off "
+                    "so the gap is intentional rather than silent. Underlying "
+                    "error: %s",
+                    e,
+                )
+                break
             logger.warning("embed backfill: job %s failed: %s", r[0], e)
     await db.commit()
     if embedded:
@@ -739,7 +781,7 @@ async def run_search(
     # Load user profile for dynamic keywords.
     # When the HTTP API passes a logged-in `user_id`, score against THAT user's
     # profile; otherwise fall back to the single-tenant CLI path
-    # (DEFAULT_TENANT_ID). See docs/plans/batch-3.5.2-plan.md Deliverable E.
+    # (DEFAULT_TENANT_ID). See docs/product/plans/batch-3.5.2-plan.md Deliverable E.
     # Without this, the web "New Search" ran profile-less (E2E_TEST_REPORT #1).
     #
     # A caller may instead hand us a ready-made `search_config` — the shared
@@ -1367,6 +1409,32 @@ async def run_search(
                 user_id=user_id,
                 matcher_stats=matcher_telemetry().as_dict(),
             )
+
+            # Zero-result alarm. Source rot is SILENT by construction: a 404
+            # makes _get_json return None, a renamed XML tag makes the parse
+            # loop never execute — the source returns [], nothing raises, and
+            # the circuit breaker never trips. nhs_jobs and successfactors sat
+            # at zero for months this way. logger.error() is picked up by
+            # Sentry via its logging integration, so this needs no new channel.
+            # Only REGRESSIONS are reported (a source that once worked and
+            # stopped) — flagging permanently-zero sources every run is how an
+            # alert becomes noise and stops being read.
+            try:
+                dead = await db.get_silently_dead_sources(hours=48)
+                if dead:
+                    logger.error(
+                        "SOURCE ROT: %d source(s) returned ZERO jobs for 48h "
+                        "despite working before — %s",
+                        len(dead),
+                        ", ".join(
+                            f"{name} (peak {peak})"
+                            for name, peak in sorted(
+                                dead.items(), key=lambda kv: -kv[1]
+                            )
+                        ),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("zero-result alarm check failed: %s", exc)
 
             # Step-5 — export metrics snapshots after every run (non-fatal).
             try:

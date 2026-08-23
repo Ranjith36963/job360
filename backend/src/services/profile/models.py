@@ -269,6 +269,16 @@ class CVData:
     # GitHub already contributes ``github_repos_brief`` for people who push
     # code publicly; this is the same signal for the people who do not.
     cv_projects: list[dict[str, Any]] = field(default_factory=list)
+    # Education SUB-BULLETS: dissertation title, coursework, course project —
+    # asked for by the CV prompt, validated by ``EducationEntry.details`` in
+    # ``schemas.py``, and then dropped on the floor (Finding 7, Pillar-1
+    # closeout audit, 2026-08-16). ``education`` above stays ONE combined
+    # "degree — institution | dates" line per qualification (so the
+    # "Education: N" stat keeps counting qualifications, not lines); the
+    # per-degree detail bullets get their own shelf instead of being lost or
+    # inflating that count. For a recent graduate a dissertation title or
+    # named course project is often the strongest evidence they have.
+    cv_education_details: list[str] = field(default_factory=list)
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
     # ``cv_parser._llm_result_to_cvdata`` when ``SEMANTIC_ENABLED=true`` and
     # the ESCO index is on disk. Maps the *canonical* skill label (which
@@ -510,13 +520,41 @@ class UserPreferences:
     about_me: str = ""
     github_username: str = ""
     # Pillar 2 Batch 2.9 — multi-dimensional scoring inputs.
-    # `preferred_workplace` is the enum form of `work_arrangement` so the
-    # dimension scorer can match against `JobEnrichment.workplace_type`
-    # without string juggling. None → user has no preference → neutral score.
     # `needs_visa` gates the visa scorer — when False the dim returns 0
     # (no reward for something the user doesn't need).
-    preferred_workplace: Optional[str] = None  # "remote" | "hybrid" | "onsite" | None
     needs_visa: bool = False
+
+    # Values the workplace scorer can actually match. A CLOSED set, because the
+    # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —
+    # anything outside it can never match anything (rule #30's closed-set test).
+    _WORKPLACE_VALUES = frozenset({"remote", "hybrid", "onsite"})
+
+    @property
+    def preferred_workplace(self) -> Optional[str]:
+        """The enum form of ``work_arrangement``, DERIVED — not stored.
+
+        This was a second stored field holding the same answer, bridged into
+        place by the profile route. The user was answering one question ("do you
+        go in?") and the system kept two boxes for it, which is exactly how they
+        drifted: `cli.py`'s `setup-profile` sets `work_arrangement` and has never
+        set `preferred_workplace`, so that entry point produced a divergent
+        profile from the day it was written. A copy kept in step by discipline
+        eventually is not.
+
+        THE SENTINEL THIS FIXES. The form seeds itself at "any" and offers it as
+        a real option, but "any" is not one of the three values the scorer
+        knows, so `workplace_score` fell through every branch to 0 — while an
+        EMPTY preference returns the neutral 3. Choosing "I don't mind" scored
+        WORSE than saying nothing, on every job in the feed. That is rule #29
+        inverted: a stated "don't care" became a penalty.
+
+        The allowlist below is what makes that unrepresentable. Anything that is
+        not a matchable value — "any", "", whitespace, a future sentinel nobody
+        has invented yet — becomes None, which the scorer already treats as "no
+        preference, score neutral". Empty stays empty; it never guesses.
+        """
+        value = (self.work_arrangement or "").strip().lower()
+        return value if value in self._WORKPLACE_VALUES else None
 
 
 @dataclass
@@ -533,7 +571,26 @@ class UserProfile:
 
 @dataclass
 class SearchConfig:
+    # EVIDENCE list — everything the profile knows about the roles this person
+    # has held or wants. Never filtered, never capped. This is what the SCORER
+    # matches a job title against; it is NOT what we send to a job board.
     job_titles: list[str] = field(default_factory=list)
+    # QUERY list — the cleaned, ranked, capped subset of `job_titles` we are
+    # willing to put in an HTTP request to Reed/Adzuna/LinkedIn/etc.
+    #
+    # WHY THE SPLIT (2026-08-13). `job_titles` was doing both jobs at once, so
+    # raw CV strings leaked straight into query strings: real profiles produced
+    # searches for "AI Solutions Engineer - R&D Department", "Software
+    # Development Engineer in Test (SDET)" and the bare word "Intern" — no
+    # posting on any board carries those as its title, so the requests came
+    # back near-empty and the API budget was spent on nothing. Splitting the
+    # field means query hygiene costs the scorer exactly zero: `job_titles` is
+    # byte-identical to what it was before.
+    #
+    # Built by `keyword_generator._build_search_titles`. Empty on a
+    # default/no-profile config — consumers fall back to `job_titles` via
+    # `BaseJobSource.search_titles`.
+    search_titles: list[str] = field(default_factory=list)
     primary_skills: list[str] = field(default_factory=list)
     secondary_skills: list[str] = field(default_factory=list)
     tertiary_skills: list[str] = field(default_factory=list)
@@ -557,6 +614,7 @@ class SearchConfig:
 
         return cls(
             job_titles=[],
+            search_titles=[],
             primary_skills=[],
             secondary_skills=[],
             tertiary_skills=[],

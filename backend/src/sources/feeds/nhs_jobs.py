@@ -9,6 +9,7 @@ from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignor
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote, _sanitize_xml
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.nhs_jobs")
 
@@ -23,9 +24,11 @@ class NHSJobsSource(BaseJobSource):
         jobs = []
         seen_ids = set()
 
-        queries = self.search_queries[:6]  # Bounded to prevent source timeout
+        # `search_titles`, not `search_queries`: NHS Jobs is a UK-only board, so
+        # the " UK" suffix the query strings carry is pure noise in `keywords`.
+        queries = self.search_titles[:6]  # Bounded to prevent source timeout
         if not queries:
-            logger.info("NHS Jobs: no search queries in profile, skipping")
+            logger.info("NHS Jobs: no search titles in profile, skipping")
             return []
         for query in queries:
             xml_text = await self._get_text(
@@ -53,24 +56,54 @@ class NHSJobsSource(BaseJobSource):
             logger.warning("NHS Jobs: XML parse error: %s", e)
             return []
 
-        for vacancy in root.iter("vacancy"):
+        # Live upstream (verified 2026-08-08) wraps each record in
+        # <vacancyDetails>, not the <vacancy> this loop used to look for —
+        # that mismatch made this source return ZERO jobs. Keep <vacancy> as
+        # a fallback so a future rename back doesn't repeat the outage.
+        vacancy_nodes = list(root.iter("vacancyDetails"))
+        if not vacancy_nodes:
+            vacancy_nodes = list(root.iter("vacancy"))
+
+        for vacancy in vacancy_nodes:
             title = (vacancy.findtext("title") or "").strip()
             employer = (vacancy.findtext("employer") or "").strip()
-            location = (vacancy.findtext("location") or "").strip()
             salary = (vacancy.findtext("salary") or "").strip()
-            closing_date = (vacancy.findtext("closingDate") or "").strip()
+            close_date = (vacancy.findtext("closeDate") or "").strip()
+            post_date = (vacancy.findtext("postDate") or "").strip()
             vacancy_id = (vacancy.findtext("id") or "").strip()
-            advert_url = (vacancy.findtext("advertUrl") or "").strip()
+            # Live tag is <url>; <advertUrl> kept as a fallback for the old
+            # shape (same reasoning as the vacancyDetails/vacancy fallback).
+            advert_url = (vacancy.findtext("url") or vacancy.findtext("advertUrl") or "").strip()
 
             apply_url = advert_url or f"https://www.jobs.nhs.uk/candidate/jobadvert/{vacancy_id}"
+
+            # Live location is nested <locations><location>...</location>...
+            # (can repeat) rather than a flat <location>. Fall back to the
+            # flat tag for the old shape.
+            locations_el = vacancy.find("locations")
+            if locations_el is not None:
+                location = ", ".join(
+                    (loc.text or "").strip()
+                    for loc in locations_el.findall("location")
+                    if loc.text and loc.text.strip()
+                )
+            else:
+                location = (vacancy.findtext("location") or "").strip()
 
             # Parse salary range
             salary_min, salary_max = self._parse_salary(salary)
 
-            # closingDate is the posting DEADLINE, not the post date. Using it as
-            # date_found would produce dates in the future (which inflate recency)
-            # or old posts labelled "today". posted_at=None until the XML feed
-            # exposes a real postedDate; closing_date retained in date_posted_raw.
+            # postDate is the real posting date (100% fill live) — route it
+            # through the shared normalizer so date_confidence reflects
+            # whether it actually parsed, never fabricated.
+            posted_at, confidence = normalize_posted_at(post_date)
+
+            # closeDate is the posting DEADLINE, not the post date — it goes
+            # on the deadline shelf, never into posted_at/date_posted_raw.
+            deadline_iso, deadline_confidence = normalize_posted_at(close_date)
+            deadline = deadline_iso[:10] if deadline_confidence == "high" and deadline_iso else None
+            deadline_source = "listing" if deadline else None
+
             now_iso = datetime.now(timezone.utc).isoformat()
 
             jobs.append(Job(
@@ -81,9 +114,11 @@ class NHSJobsSource(BaseJobSource):
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
-                posted_at=None,
-                date_confidence="low",
-                date_posted_raw=closing_date or None,
+                posted_at=posted_at,
+                date_confidence=confidence,
+                date_posted_raw=post_date or None,
+                deadline=deadline,
+                deadline_source=deadline_source,
                 salary_min=salary_min,
                 salary_max=salary_max,
             ))

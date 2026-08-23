@@ -9,8 +9,11 @@ one implementation instead of the API being the only observed process.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger("job360.observability")
 
 # H4 — request headers that must NEVER reach Sentry (credentials / session).
 _SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie"})
@@ -70,6 +73,28 @@ def init_sentry(*, component: str = "api") -> bool:
         os.environ.get("RAILWAY_ENVIRONMENT", "")
     )
     if not dsn or not is_prod:
+        # SAY SO. The return value used to be the only signal, and both call
+        # sites discard it, so a production process with no DSN reported nothing
+        # and announced nothing. An empty Sentry then reads as "no errors" when
+        # it may mean "never connected" — and those two look identical to
+        # everyone who checks. Found 2026-08-15 trying to answer "what do the
+        # extraction errors look like in Sentry?" and discovering there was no
+        # way to tell whether Sentry was even on.
+        #
+        # Only the REASON is logged, never the DSN — it is a credential.
+        if is_prod:
+            logger.error(
+                "error reporting is OFF for component=%s: running in production "
+                "but SENTRY_DSN is not set. Crashes here will be invisible in "
+                "Sentry, and an empty Sentry will look like a healthy service.",
+                component,
+            )
+        else:
+            logger.info(
+                "error reporting off for component=%s (not a deployed "
+                "production environment) — expected outside prod.",
+                component,
+            )
         return False
 
     import sentry_sdk
@@ -83,6 +108,15 @@ def init_sentry(*, component: str = "api") -> bool:
         traces_sample_rate=0.1,
     )
     sentry_sdk.set_tag("component", component)
+    # The positive half. Without it, "Sentry is quiet" is unfalsifiable: you
+    # cannot tell a healthy service from one that never connected. This line is
+    # the difference between an empty dashboard you can trust and one you cannot.
+    logger.info(
+        "error reporting ON for component=%s (environment=%s) — errors from "
+        "this process will reach Sentry.",
+        component,
+        os.environ.get("RAILWAY_ENVIRONMENT") or "production",
+    )
     # docs/fable/09 P2 — the /api/client-log bridge logs BROWSER-side events at
     # ERROR level ("job360.client"), and Sentry's logging integration turns any
     # ERROR log into a Sentry event. That flooded the BACKEND error stream with

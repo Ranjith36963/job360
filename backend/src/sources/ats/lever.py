@@ -34,7 +34,15 @@ class LeverSource(BaseJobSource):
                 desc = item.get("descriptionPlain", item.get("description", ""))
                 categories = item.get("categories", {})
                 location = categories.get("location", "") if isinstance(categories, dict) else ""
-                if not _is_uk_or_remote(location):
+                # Live API also returns a clean ISO-2 `country` code (GB/US/SE/...)
+                # at 100% fill — a more reliable UK signal than free-text
+                # `categories.location`. Trust it when present (country == "GB"
+                # is unambiguous), but keep the existing text-based check as a
+                # fallback so remote-friendly / unset-country postings are not
+                # newly filtered out.
+                country = item.get("country", "")
+                is_uk_by_country = country == "GB"
+                if not is_uk_by_country and not _is_uk_or_remote(location):
                     continue
                 # Lever createdAt is milliseconds since epoch — real posting date.
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -50,7 +58,10 @@ class LeverSource(BaseJobSource):
                     company=company_name,
                     location=location,
                     description=desc[:5000],
-                    apply_url=item.get("hostedUrl", ""),
+                    # `applyUrl` (= hostedUrl + "/apply") is the real application
+                    # form; `hostedUrl` is just the job info page. Live API fills
+                    # `applyUrl` at 100%.
+                    apply_url=item.get("applyUrl", item.get("hostedUrl", "")),
                     source=self.name,
                     date_found=now_iso,
                     posted_at=posted_at,

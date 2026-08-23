@@ -787,6 +787,53 @@ class JobDatabase:
                 source_history.setdefault(name, []).append(count)
         return source_history
 
+    async def get_silently_dead_sources(
+        self, hours: int = 48, min_runs: int = 2
+    ) -> dict[str, int]:
+        """Sources that USED to return jobs but have returned zero for `hours`.
+
+        The whole failure mode this guards against is silent: a 404 makes
+        `_get_json` return None, a renamed XML tag makes the parse loop never
+        run — the source returns `[]`, nothing raises, and the circuit breaker
+        never trips. Two sources sat at zero for months before anyone noticed.
+
+        Deliberately reports only REGRESSIONS — a source that has never
+        produced a job (keyed source with no API key, permanently dead
+        upstream) is excluded. Alarming on those every run is how an alert
+        becomes noise and stops being read.
+
+        Returns {source_name: peak_jobs_seen_historically}.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+        cursor = await self._db.execute(
+            "SELECT per_source FROM run_log WHERE timestamp >= ? ORDER BY id DESC",
+            (cutoff,),
+        )
+        recent_rows = await cursor.fetchall()
+        if len(recent_rows) < min_runs:
+            return {}  # not enough evidence in the window to judge
+
+        recent: dict[str, list[int]] = {}
+        for row in recent_rows:
+            for name, count in (json.loads(row[0]) if row[0] else {}).items():
+                recent.setdefault(name, []).append(int(count or 0))
+
+        # Historical peak, so we only flag sources that have actually worked.
+        cursor = await self._db.execute("SELECT per_source FROM run_log")
+        peak: dict[str, int] = {}
+        for row in await cursor.fetchall():
+            for name, count in (json.loads(row[0]) if row[0] else {}).items():
+                peak[name] = max(peak.get(name, 0), int(count or 0))
+
+        return {
+            name: peak.get(name, 0)
+            for name, counts in recent.items()
+            if len(counts) >= min_runs
+            and not any(counts)          # zero in every run in the window
+            and peak.get(name, 0) > 0    # but it has produced jobs before
+        }
+
     # --- User Actions ---
     #
     # Batch 3.5 Deliverable C: every method now takes user_id and scopes

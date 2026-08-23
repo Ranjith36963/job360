@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import dataclasses
 import json
 import logging
 import os
@@ -231,6 +233,8 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         cv_projects=getattr(cv, "cv_projects", []) or [],
         cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
         cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
+        # Finding 11 — extracted and matched on (JobScorer), never shown.
+        cv_industries=getattr(cv, "cv_industries", []) or [],
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
 
@@ -352,6 +356,23 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
     }
 
+    # The real board queries, made visible. `generate_search_config` is the
+    # SAME call the pipeline makes (src/main.py:760) and the job-detail
+    # re-score makes (api/routes/jobs.py:751), so what the user reads here is
+    # what the boards were actually asked — not a second, drifting
+    # reconstruction of it. Best-effort by design: a generator failure must
+    # cost the user a quiet line, never their whole profile page.
+    search_titles: list[str] = []
+    try:
+        from src.services.profile.keyword_generator import (  # noqa: PLC0415 — lazy (rule #16)
+            generate_search_config,
+        )
+
+        search_titles = list(generate_search_config(profile).search_titles)
+    except Exception:
+        logger.warning("search_titles unavailable for user %s", user_id, exc_info=True)
+        search_titles = []
+
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
     # migration just returns None.
@@ -376,6 +397,7 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         github_temporal=github_temporal,
         github_detail=github_detail,
         current_version_id=current_version_id,
+        search_titles=search_titles,
     )
 
 
@@ -476,30 +498,96 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
             pass
 
 
+def _normalize_work_arrangement(value: object) -> str:
+    """Store "I don't mind" as SILENCE, not as the literal string "any".
+
+    The preferences select seeds itself at ``"any"`` and posts that value, so
+    "any" reached the database as though the user had stated a constraint. Two
+    consumers then read it RAW, not through the ``preferred_workplace`` property
+    that maps it to None:
+
+      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
+        every judged job was told ``work_arrangement=any``, spending real tokens
+        to state a preference the user explicitly declined to make;
+      * the semantic vector appended "any" as a candidate token.
+
+    The property protects the keyword scorer, but a property cannot protect a
+    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    point where the sentinel can enter — and it holds for the CLI and any older
+    client too, which a frontend-side fix would not.
+
+    Rule #29: an unstated preference is silence. "Any" IS unstated.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in {"remote", "hybrid", "onsite"} else ""
+
+
+# The closed set this route will accept as a STATED experience level — the
+# exact five options the preferences form's Select offers (PreferencesForm.tsx:
+# entry/mid/senior/lead/executive). Anything outside it is not a real answer a
+# user could have picked through this form.
+#
+# scoring_dimensions._USER_EXPERIENCE_RANK recognises a much wider set
+# ("junior", "graduate", "sr", "head", "vp", ...) — that map exists to score
+# whatever string ends up in this field, including values from older data or
+# the CV-inferred fallback, not to define what THIS route should accept as a
+# freshly typed preference. Widening this set to match would let garbage like
+# "graduate" (not offered anywhere in the current UI) reach the DB looking
+# like a deliberate choice, which is the same failure this function exists to
+# stop.
+_VALID_EXPERIENCE_LEVELS = {"entry", "mid", "senior", "lead", "executive"}
+
+
+def _normalize_experience_level(value: object) -> str:
+    """Store an unrecognised experience level as SILENCE, not as a stated preference.
+
+    Mirrors ``_normalize_work_arrangement`` immediately above — same shape,
+    same seam. ``resolve_experience_level`` (scoring_dimensions.py) says
+    "typed always wins": a value in this field skips the CV-inferred fallback
+    entirely and drives ``seniority_score`` at full weight (up to 8 points,
+    either direction, on EVERY job) — the identical amplifier "any" had for
+    ``work_arrangement``. Before this function existed, ``_apply_preferences``
+    stored whatever the client posted with no check at all, so a typo, a stale
+    client sending a value the UI no longer offers, or a future free-text
+    field would reach the judge prompt and the semantic vector as though the
+    user had stated it.
+
+    NOT a fix for "a brand-new account saves 'mid' it never chose" — that
+    defect is the FRONTEND seeding a real, still-selectable dropdown value
+    (`prefsFromRaw`'s missing-key fallback) as if it were a default, fixed in
+    PreferencesForm.tsx/PreferencesForm.experience.test.tsx. "mid" stays in
+    ``_VALID_EXPERIENCE_LEVELS`` and round-trips normally here: it is a real
+    choice a user can make, so silencing it on the backend would drop that
+    choice for everyone who actually picks "Mid" — trading one data-loss bug
+    for a worse one.
+
+    Rule #29: an unstated preference is silence. An unrecognised string IS
+    unstated — the user cannot have meant something the form never offered.
+    """
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in _VALID_EXPERIENCE_LEVELS else ""
+
+
 def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     """Parse the preferences JSON form and set it on the profile.
 
     Fields the form does NOT carry (``github_username`` — set by the separate
-    GitHub route — plus ``preferred_workplace`` / ``needs_visa``) fall back to the
-    EXISTING preferences so a routine preferences save never silently wipes them.
+    GitHub route — plus ``needs_visa``, ``work_arrangement`` and
+    ``experience_level``) fall back to the EXISTING preferences so a routine
+    preferences save never silently wipes them.
     """
     pref_dict = json.loads(preferences_json)
     existing = profile.preferences or UserPreferences()
 
-    # Bridge work_arrangement -> preferred_workplace (2026-08-08).
+    # The work_arrangement -> preferred_workplace bridge used to live here.
     #
-    # The model documents preferred_workplace as "the enum form of
-    # work_arrangement so the dimension scorer can match" — but nothing ever
-    # built that bridge. The form sends work_arrangement; the WORKPLACE scoring
-    # dimension (weight 6, workplace_score) reads preferred_workplace; there is
-    # no preferred_workplace control anywhere in the frontend. So the field the
-    # scorer reads stayed None for every user and the whole workplace dimension
-    # was permanently dead — the "dead pair" the shelf X-ray flagged was caused
-    # HERE, not by users failing to fill anything. Same vocabulary on both
-    # sides ("remote"/"hybrid"/"onsite"), so an empty string maps to None
-    # ("no preference" -> neutral score, per the model comment).
-    _wa = pref_dict.get("work_arrangement", "")
-    _derived_workplace = _wa.strip().lower() or None if isinstance(_wa, str) else None
+    # It existed because the form wrote one field and the scorer read another,
+    # so the workplace dimension was dead for every user until it was built.
+    # A bridge keeps two boxes holding one answer, and they drift: cli.py's
+    # setup-profile writes work_arrangement and has never written the other, so
+    # that entry point produced a divergent profile from the day it was written.
+    # preferred_workplace is now a derived @property on UserPreferences, so
+    # there is exactly one stored answer and the two cannot disagree.
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -508,8 +596,22 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         industries=pref_dict.get("industries", []),
         salary_min=pref_dict.get("salary_min"),
         salary_max=pref_dict.get("salary_max"),
-        work_arrangement=pref_dict.get("work_arrangement", ""),
-        experience_level=pref_dict.get("experience_level", ""),
+        # An OMITTED key keeps the stored value; an explicit "" still clears it.
+        # The old default of "" meant any partial save wiped the answer, and
+        # the damage was hidden by the preferred_workplace fallback that this
+        # change removes — so without this line the workplace dimension would
+        # go dark again, which is the exact regression the bridge was added for.
+        work_arrangement=_normalize_work_arrangement(
+            pref_dict.get("work_arrangement", existing.work_arrangement)
+        ),
+        # Same partial-save shape as work_arrangement just above: an OMITTED
+        # key keeps the stored value, an explicit "" clears it. The old
+        # default of "" made no such distinction, so saving any OTHER field
+        # on the form (salary, locations, about_me...) silently wiped a
+        # previously-chosen experience level on every routine save.
+        experience_level=_normalize_experience_level(
+            pref_dict.get("experience_level", existing.experience_level)
+        ),
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
         # normalize_github_username here too, not only in the dedicated GitHub
@@ -520,11 +622,6 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         github_username=normalize_github_username(
             pref_dict.get("github_username") or existing.github_username or ""
         ),
-        # Explicit value wins (a future dedicated control); otherwise derive
-        # from work_arrangement; only then fall back to the stored value.
-        preferred_workplace=pref_dict.get("preferred_workplace")
-        or _derived_workplace
-        or existing.preferred_workplace,
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the
@@ -635,7 +732,19 @@ async def upload_linkedin(
     file: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI dependency-injection idiom
 ) -> LinkedInResponse:
-    """Enrich user profile with a LinkedIn 'Save to PDF' profile export."""
+    """Enrich user profile with a LinkedIn 'Save to PDF' profile export.
+
+    FAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`
+    from `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic
+    (2 of 3 markers: URL / 3+ headings / page footer) — and return HTTP 200
+    with `merged=True` whenever that heuristic passed, regardless of what the
+    real extraction (deterministic + LLM) actually produced. A layout the
+    heuristic likes but the extractor cannot parse told the owner "LinkedIn
+    profile enriched" while storing nothing usable. `merged` is now computed
+    the SAME way `has_linkedin` is in `_build_profile_response`:
+    `bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER
+    extraction runs — and a merge that yields nothing is a 422, not a 200.
+    """
     # Bounded read — see the CV endpoint: caps memory for oversized uploads.
     content = await file.read(10 * 1024 * 1024 + 1)
 
@@ -643,11 +752,13 @@ async def upload_linkedin(
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
 
-    # V-04 — MIME / extension allowlist (LinkedIn must be PDF only)
+    # V-04 — MIME / extension allowlist (LinkedIn must be PDF only — this
+    # route never accepts DOCX, unlike the CV route, so the message must not
+    # claim it does).
     suffix = os.path.splitext(file.filename or ".pdf")[1].lower() or ".pdf"
     _ctype = (file.content_type or "").lower()
     if suffix != ".pdf" or _ctype not in {"application/pdf", ""}:
-        raise HTTPException(status_code=415, detail="Only PDF or DOCX files are accepted")
+        raise HTTPException(status_code=415, detail="Only PDF files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
         # Capture RAW LinkedIn text only; the single extractor below turns it
@@ -656,22 +767,106 @@ async def upload_linkedin(
         # pdfplumber is synchronous, and blocking here froze the API for
         # every other request while one person enriched their profile.
         text = await asyncio.to_thread(extract_linkedin_text, tmp_path)
-        merged = bool(text) and _looks_like_linkedin(text)
-        if merged:
-            profile = load_profile(user.id) or UserProfile()
-            profile.cv_data.linkedin_raw_text = text
-            # Upload receipt — see the CV path. Recorded only on a MERGED
-            # upload: a PDF we could not read as LinkedIn changes nothing, so
-            # claiming a successful upload would be a lie on screen.
-            profile.cv_data.linkedin_filename = os.path.basename(file.filename or "")[:255]
-            profile.cv_data.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
-            await _extract_save_trigger(profile, user.id)
+        if not text or not _looks_like_linkedin(text):
+            # Same "order is the safety guard" contract as the CV route: this
+            # raises BEFORE any profile field is touched, so a file that does
+            # not even look like a LinkedIn export leaves existing data alone.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This doesn't look like a LinkedIn 'Save to PDF' export. "
+                    "On LinkedIn: open your profile -> More -> Save to PDF, "
+                    "and upload that file (not a screenshot or a different "
+                    "document)."
+                ),
+            )
+
+        profile = load_profile(user.id) or UserProfile()
+        cv = profile.cv_data
+        # Finding 6 — reset what THIS input owns before the new upload lands,
+        # exactly as _capture_cv_raw calls reset_cv_owned_fields for the CV
+        # route. Without this, a second export only ever UNIONS into the
+        # linkedin_-owned fields (courses/honors/projects/... all reuse the
+        # same list-union merge as job_titles/education/certifications), so a
+        # section removed on LinkedIn since the last upload could never
+        # disappear from the profile. job_titles/education/certifications are
+        # JOINTLY owned with the CV (enrich_cv_from_linkedin unions into
+        # them, the CV pass does too) and are deliberately NOT touched here —
+        # they have no `linkedin_` prefix, so this scoped reset cannot reach
+        # them, and it must not: a LinkedIn re-upload is not a CV re-upload,
+        # and wiping the CV's own contribution to those lists would be the
+        # opposite failure. The trade-off this accepts: a title/degree/cert
+        # LinkedIn contributed under an OLD export can outlive that export
+        # until the CV itself is re-uploaded (which resets the joint fields
+        # AND drops the LinkedIn hash — see reset_cv_owned_fields). Fixing
+        # that fully needs per-entry provenance on those three lists, which
+        # does not exist yet and is out of this unit's file list.
+        # SNAPSHOT BEFORE THE RESET — the 422 below must not cost the user the
+        # LinkedIn data they already had.
+        #
+        # `_extract_save_trigger` calls `save_profile` unconditionally as part
+        # of its body, so by the time `merged` can be computed the wiped state
+        # is ALREADY PERSISTED. Without this snapshot, a second upload that
+        # passes the cheap shape heuristic but extracts nothing deletes a
+        # previously good LinkedIn profile and then returns an honest-looking
+        # "re-export and try again" — the user is never told anything was lost.
+        # Caught by the review pass, reproduced live against Postgres:
+        # has_linkedin went True -> False and every linkedin_* field emptied.
+        #
+        # upload_github two routes below gets this right by computing `merged`
+        # from an in-memory result BEFORE it saves anything. The LinkedIn route
+        # cannot copy that shape directly (its merge happens inside the shared
+        # extraction pass, not in a returnable value), so it restores instead.
+        _previous_linkedin = {
+            f.name: copy.deepcopy(getattr(cv, f.name))
+            for f in dataclasses.fields(CVData)
+            if f.name.startswith("linkedin_")
+        }
+        _previous_li_hash = cv.llm_input_hashes.get("linkedin")
+
+        _clear_prefixed(cv, "linkedin_")
+        cv.linkedin_raw_text = text
+        await _extract_save_trigger(profile, user.id)
+
+        # merged = did extraction actually PRODUCE LinkedIn signal — not "did
+        # the file merely resemble a LinkedIn export". Mirrors has_linkedin.
+        merged = bool(cv.linkedin_skills or cv.linkedin_positions)
+        if not merged:
+            # Put back exactly what was there, and PERSIST the restoration —
+            # an in-memory rollback would be undone by the save that already
+            # happened above.
+            for name, value in _previous_linkedin.items():
+                setattr(cv, name, value)
+            if _previous_li_hash is None:
+                cv.llm_input_hashes.pop("linkedin", None)
+            else:
+                cv.llm_input_hashes["linkedin"] = _previous_li_hash
+            save_profile(profile, user.id, "linkedin_upload_rejected")
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "We read the PDF but found no skills or work history in "
+                    "it. Your existing LinkedIn data has been kept. Re-export "
+                    "from LinkedIn (profile -> More -> Save to PDF) and make "
+                    "sure the Skills and Experience sections are expanded, "
+                    "not collapsed, before saving."
+                ),
+            )
+
+        # Upload receipt — see the CV path. Recorded only on a MERGED
+        # upload, and only now that we KNOW it merged (not merely that the
+        # pre-extraction heuristic liked the layout): a PDF that read as
+        # LinkedIn-shaped but yielded nothing must not claim a connection
+        # that did not happen.
+        cv.linkedin_filename = os.path.basename(file.filename or "")[:255]
+        cv.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
+        save_profile(profile, user.id, "linkedin_upload")
     finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-    return LinkedInResponse(ok=True, merged=merged)
+    return LinkedInResponse(ok=True, merged=True)
 
 
 @router.post("/profile/github", response_model=GitHubResponse)
@@ -791,40 +986,52 @@ def _clear_cv(cv: CVData) -> None:
     cv.llm_input_hashes.pop("cv", None)
 
 
+def _clear_prefixed(cv: CVData, prefix: str) -> None:
+    """Reset every CVData field owned by one input, found BY PREFIX.
+
+    WHY NOT A HAND-WRITTEN LIST. This was 18 named assignments, and it had
+    already fallen two fields behind the dataclass: `linkedin_summary` and
+    `linkedin_headline` were added, wired into the LLM judge and the semantic
+    vector, and never added here. Measured on the shipped code — after
+    "Clear LinkedIn", `linkedin_skills` and `linkedin_positions` were empty
+    while `linkedin_summary` still held the previous person's About paragraph
+    and `linkedin_headline` their tagline, both of which `profile_to_matcher_text`
+    then sent to the judge for every job.
+
+    Same failure as `reset_cv_owned_fields`, same root cause, third occurrence
+    across the file. Ownership is a PREFIX fact, so read it off the dataclass
+    and the list cannot fall behind again.
+
+    Each field goes back to what a fresh `CVData()` has, so the type is handled
+    for free — a `dict` shelf added tomorrow resets to `{}` without anyone
+    remembering it exists.
+    """
+    import copy
+    import dataclasses
+
+    pristine = CVData()
+    for f in dataclasses.fields(CVData):
+        if not f.name.startswith(prefix):
+            continue
+        default = getattr(pristine, f.name)
+        current = getattr(cv, f.name)
+        # In place for collections — same reason as reset_cv_owned_fields: a
+        # rebind orphans any reference taken before the call.
+        if isinstance(current, (list, dict)) and isinstance(default, (list, dict)):
+            current.clear()
+        else:
+            setattr(cv, f.name, copy.deepcopy(default))
+
+
 def _clear_linkedin(cv: CVData) -> None:
-    cv.linkedin_raw_text = ""
-    cv.linkedin_positions = []
-    cv.linkedin_skills = []
-    cv.linkedin_industry = ""
-    cv.linkedin_languages = []
-    cv.linkedin_projects = []
-    cv.linkedin_volunteer = []
-    cv.linkedin_courses = []
-    cv.linkedin_filename = ""
-    cv.linkedin_uploaded_at = ""
-    cv.linkedin_honors = []
-    cv.linkedin_publications = []
-    cv.linkedin_patents = []
-    cv.linkedin_organizations = []
-    cv.linkedin_test_scores = []
-    cv.linkedin_recommendations = []
-    cv.linkedin_interests = []
-    cv.linkedin_contact = {}
+    _clear_prefixed(cv, "linkedin_")
     cv.llm_input_hashes.pop("linkedin", None)
 
 
 def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
-    cv.github_languages = {}
-    cv.github_topics = []
-    cv.github_skills_inferred = []
-    cv.github_frameworks = []
-    cv.github_llm_skills = []
-    cv.github_repos_brief = []
-    cv.github_bio = ""
-    cv.github_profile_readme = ""
-    cv.github_identity = {}
-    cv.github_connected_at = ""
+    _clear_prefixed(cv, "github_")
     cv.llm_input_hashes.pop("github", None)
+    # Lives on UserPreferences, not CVData, so the prefix sweep cannot reach it.
     prefs.github_username = ""  # the handle belongs to this section
 
 

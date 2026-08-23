@@ -223,6 +223,10 @@ class CVDetail(BaseModel):
     # one commit later on the shelves that replaced it.
     cv_experience_level: str = ""
     cv_right_to_work: str = ""
+    # Extracted AND used for matching (JobScorer reads it) since before this
+    # field existed here — audit finding 11 (2026-08-16): a shelf scored on
+    # but shown nowhere, the same "stored but not shown" gap as cv_positions.
+    cv_industries: list[str] = []
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []
@@ -281,6 +285,16 @@ class ProfileResponse(BaseModel):
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
     current_version_id: Optional[int] = None
+    # THE ACTUAL QUERIES WE SEND TO JOB BOARDS, in the order we send them.
+    # Mirrors ``SearchConfig.search_titles`` — the ONLY titles a board ever
+    # sees (`sources/base.py::search_titles`). Until 2026-08-13 this list
+    # existed solely inside the engine: zero references in `src/api/`, zero in
+    # the frontend. So when the results were wrong the user could only conclude
+    # "this product does not understand me" — unrecoverable — instead of
+    # "wrong setting", which they fix themselves in one click on the Target Job
+    # Titles field. Empty list when the profile yields no usable title or the
+    # generator raises; the UI renders nothing rather than an empty label.
+    search_titles: list[str] = []
 
 
 # ── Step-1.5 S3-G — six new Pydantic models for Cohort Z endpoints. ──

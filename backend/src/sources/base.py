@@ -13,7 +13,7 @@ from src.core.settings import MAX_RETRIES, RATE_LIMITS, REQUEST_TIMEOUT, RETRY_B
 from src.models import Job
 from src.services.conditional_cache import CachedEntry, ConditionalCache
 from src.services.profile.models import SearchConfig
-from src.services.skill_matcher import FOREIGN_INDICATORS, REMOTE_TERMS, UK_TERMS
+from src.services.uk_gate import names_foreign_place
 from src.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger("job360.sources")
@@ -37,26 +37,47 @@ def _sanitize_xml(text: str) -> str:
 
 
 def _is_uk_or_remote(location: str) -> bool:
-    """Return True if a job location is likely UK, remote, or unknown.
+    """Fetch-time skip for jobs whose LOCATION FIELD names a place outside the UK.
 
-    Uses word-boundary matching (not plain substring `in`) so a term like
-    "uk" only matches the standalone token, not a substring embedded in an
-    unrelated word — e.g. "Milwaukee" or "Ukraine" must not false-match
-    "uk" (S3 fix; see docs/FABLE_FINDINGS.md).
+    This is NOT the door. One chokepoint decides what enters the catalog —
+    `services/uk_gate.check_uk`, called in `main.py` before storage with the
+    source name and the ad body in hand. This only avoids carrying obviously
+    foreign rows through scoring and the O(n^2) dedup (see
+    docs/product/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
+
+    WHY IT ONLY EVER SEES A LOCATION, AND WHY THAT IS LOAD-BEARING
+    -------------------------------------------------------------
+    It used to answer from `FOREIGN_INDICATORS`, a hand-typed set of foreign
+    cities and US state codes. That set is unbounded by nature, so it rotted
+    ("seoul" and "ottawa" were never in it) and it mis-fired ("Belfast, Northern
+    Ireland" matched its "ireland" entry, docking a genuinely UK job). Rule #30
+    bans exactly that. It now asks the gate's `names_foreign_place`, which reads
+    a COMPLETE, data-built set of countries and first-level admin divisions.
+
+    But a complete set of ISO codes contains `LI`, `BR`, `TD`, `TR`, `TH`, `HR` —
+    Liechtenstein, Brazil, Chad, Turkey, Thailand, Croatia. Four callers pass an
+    ad DESCRIPTION here, and the gate splits on `/`, so the closing tag `</li>`
+    yields the segment `li` and ordinary HTML markup reads as a foreign country.
+    A first version of this function did exactly that and would have silently
+    dropped UK-eligible jobs at fetch, before anything could log them.
+
+    So this refuses ONLY on a bare location string, and only when the whole
+    trimmed value names a foreign place. Anything containing markup, or any text
+    long enough to be prose rather than a place, is passed straight to the door,
+    which has the source name and the full body and can judge properly.
+
+    The invariant to preserve if you touch this: nothing dropped here may be
+    something the door would have admitted. Guarded by
+    `tests/test_sources.py::test_fetch_filter_never_drops_what_the_door_admits`.
     """
     if not location:
-        return True  # Unknown — might be UK, don't filter
-    loc_lower = location.lower()
-    for term in UK_TERMS:
-        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
-            return True
-    for term in REMOTE_TERMS:
-        if re.search(rf"\b{re.escape(term)}\b", loc_lower):
-            return True
-    for indicator in FOREIGN_INDICATORS:
-        if re.search(rf"\b{re.escape(indicator)}\b", loc_lower):
-            return False
-    return True  # Unknown location, don't filter out
+        return True  # Unknown — might be UK, the door decides
+
+    text = location.strip()
+    # Markup or prose is not a location. Hand it to the door untouched.
+    if "<" in text or ">" in text or "\n" in text or len(text) > 120:
+        return True
+    return not names_foreign_place(text)
 
 
 class BaseJobSource(ABC):
@@ -94,6 +115,20 @@ class BaseJobSource(ABC):
         if self._search_config is not None:
             return self._search_config.job_titles
         return _DEFAULT_JOB_TITLES
+
+    @property
+    def search_titles(self) -> list[str]:
+        """The titles this source may put in a search request.
+
+        Distinct from `job_titles`, which is the scorer's EVIDENCE list and
+        holds raw CV strings ("… - R&D Department", "… (SDET)", bare "Intern")
+        that no job board indexes. Falls back to `job_titles` so a config built
+        before the split — or a no-profile default config — behaves exactly as
+        it did.
+        """
+        if self._search_config is not None and self._search_config.search_titles:
+            return self._search_config.search_titles
+        return self.job_titles
 
     @property
     def search_queries(self) -> list[str]:

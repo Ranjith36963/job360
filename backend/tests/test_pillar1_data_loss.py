@@ -69,7 +69,7 @@ class TestPreferencesSurviveTheMerge:
     def test_visa_and_workplace_survive(self) -> None:
         from src.services.profile.preferences import merge_cv_and_preferences
 
-        prefs = UserPreferences(needs_visa=True, preferred_workplace="remote",
+        prefs = UserPreferences(needs_visa=True, work_arrangement="remote",
                                 target_job_titles=["ML Engineer"])
         out = merge_cv_and_preferences(["Python"], ["ML Engineer"], prefs)
         assert out.needs_visa is True
@@ -84,7 +84,7 @@ class TestPreferencesSurviveTheMerge:
         from src.services.profile.preferences import merge_cv_and_preferences
 
         prefs = UserPreferences(
-            needs_visa=True, preferred_workplace="hybrid", salary_min=45000,
+            needs_visa=True, work_arrangement="hybrid", salary_min=45000,
             salary_max=90000, experience_level="mid", about_me="hello",
             github_username="someone", preferred_locations=["London"],
             negative_keywords=["sales"], excluded_skills=["php"],
@@ -303,32 +303,45 @@ class TestCertificationsAcceptBothShapes:
         assert cv.certifications == ["Real"]
 
 
-class TestWorkplaceBridge:
+class TestWorkplaceReachesTheScorer:
     """The WORKPLACE scoring dimension (weight 6) reads
-    `UserPreferences.preferred_workplace`, but the preferences form only ever
-    sent `work_arrangement`, and no control for `preferred_workplace` exists
-    anywhere in the frontend. The model documents preferred_workplace as "the
-    enum form of work_arrangement" — but nothing built that bridge, so the
-    field the scorer reads stayed None for every user and the whole dimension
-    was permanently dead. That was the workplace "dead pair" the shelf X-ray
-    flagged; the cause was here, not users failing to fill anything.
+    `UserPreferences.preferred_workplace`. The form only ever sent
+    `work_arrangement`, and no control for `preferred_workplace` ever existed in
+    the frontend — so for a long time the field the scorer reads stayed None for
+    every user and the dimension was permanently dead. That was the workplace
+    "dead pair" the shelf X-ray flagged; the cause was here, not users failing to
+    fill anything.
+
+    It was first fixed with a BRIDGE in this route (one field copied into
+    another on save). On 2026-08-13 the copy was deleted and
+    `preferred_workplace` became a read-only property derived from
+    `work_arrangement`, so there is now one stored answer and no way for the two
+    to disagree.
+
+    These tests are deliberately kept at the ROUTE level even though the
+    derivation is now in the model. The dimension went dark once already because
+    the form and the scorer were wired to different fields — an end-to-end
+    assertion is what catches that class of break, and a model-level unit test
+    would not have.
     """
 
-    def _apply(self, form: dict):
+    def _apply(self, form: dict, existing=None):
         import json
 
         from src.api.routes.profile import _apply_preferences
         from src.services.profile.models import CVData, UserPreferences, UserProfile
 
-        p = UserProfile(cv_data=CVData(), preferences=UserPreferences())
+        p = UserProfile(
+            cv_data=CVData(), preferences=existing or UserPreferences()
+        )
         _apply_preferences(json.dumps(form), p)
         return p.preferences
 
-    def test_work_arrangement_populates_preferred_workplace(self) -> None:
+    def test_work_arrangement_reaches_the_scorers_field(self) -> None:
         for value in ("remote", "hybrid", "onsite"):
             prefs = self._apply({"work_arrangement": value})
             assert prefs.preferred_workplace == value, (
-                f"{value}: the scorer's field was not bridged from the form"
+                f"{value}: the form's answer never reached the scorer's field"
             )
 
     def test_empty_stays_none_not_a_fake_preference(self) -> None:
@@ -336,6 +349,102 @@ class TestWorkplaceBridge:
         neutral score), never a manufactured value."""
         assert self._apply({"work_arrangement": ""}).preferred_workplace is None
         assert self._apply({}).preferred_workplace is None
+
+    def test_an_omitted_key_keeps_the_stored_answer(self) -> None:
+        """Deleting the stored field removed the route's fallback, so a partial
+        save — any client that posts a subset of the form — would have wiped the
+        user's answer and taken the dimension dark again. An ABSENT key keeps
+        what is stored; only an explicit value changes it."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(work_arrangement="remote")
+        assert self._apply({"salary_min": 40000}, stored).work_arrangement == "remote"
+
+    def test_the_forms_any_sentinel_is_stored_as_silence(self) -> None:
+        """The select seeds at "any" and posts it, so "any" was stored as if the
+        user had stated a constraint.
+
+        The derived property protects the keyword scorer, but two consumers read
+        `work_arrangement` RAW and bypass it: the LLM judge builds its prompt
+        with a plain truthiness test, so every judged job was told
+        `work_arrangement=any` — paid tokens spent asserting a preference the
+        user explicitly declined to state — and the semantic vector appended
+        "any" as a candidate token.
+
+        So the sentinel has to die where it ENTERS, not at each reader.
+        """
+        out = self._apply({"work_arrangement": "any"})
+        assert out.work_arrangement == "", (
+            'the "any" sentinel was stored verbatim — the judge and the vector '
+            "read this field raw and will treat it as a stated preference"
+        )
+        assert out.preferred_workplace is None
+
+    def test_the_judge_is_not_told_about_an_unstated_preference(self) -> None:
+        """The outcome, asserted where the user actually pays for it: the prompt
+        text. A field-level assertion alone would not catch a future reader that
+        re-introduces the sentinel."""
+        from src.services.llm_matcher import profile_to_matcher_text
+        from src.services.profile.models import CVData, UserProfile
+
+        prefs = self._apply({"work_arrangement": "any"})
+        text = profile_to_matcher_text(
+            UserProfile(cv_data=CVData(), preferences=prefs)
+        )
+        assert "work_arrangement" not in text, (
+            "the judge prompt states a workplace preference the user declined "
+            f"to make. Prompt was:\n{text}"
+        )
+
+    def test_the_sentinel_never_becomes_a_search_location(self) -> None:
+        """The THIRD consumer that read this field raw, and the worst of them.
+
+        ``keyword_generator`` appends ``work_arrangement.capitalize()`` to the
+        search LOCATIONS list. "any" is truthy, so a place called "Any" was sent
+        to the job sources as somewhere the user wanted to work.
+
+        Three separate consumers bypassed the derived property — scorer-adjacent
+        keyword generation, the judge prompt, and the vector. That is the
+        argument for normalising on SAVE rather than at each reader: a fourth
+        consumer written next month gets the fix for free, and the property
+        alone would not have given it to any of these three.
+        """
+        from src.services.profile.keyword_generator import generate_search_config
+        from src.services.profile.models import CVData, UserProfile
+
+        prefs = self._apply({"work_arrangement": "any"})
+        cfg = generate_search_config(
+            UserProfile(
+                cv_data=CVData(job_titles=["ML Engineer"], skills=["python"]),
+                preferences=prefs,
+            )
+        )
+        assert "Any" not in cfg.locations, (
+            f'"Any" is being searched as a place. Locations: {cfg.locations}'
+        )
+
+    def test_a_real_choice_still_reaches_the_judge(self) -> None:
+        """The control. Without it, deleting the line entirely would also pass
+        the test above."""
+        from src.services.llm_matcher import profile_to_matcher_text
+        from src.services.profile.models import CVData, UserProfile
+
+        prefs = self._apply({"work_arrangement": "remote"})
+        text = profile_to_matcher_text(
+            UserProfile(cv_data=CVData(), preferences=prefs)
+        )
+        assert "work_arrangement=remote" in text
+
+    def test_an_explicit_empty_string_still_clears_it(self) -> None:
+        """The other half, and the reason this is `.get(key, default)` rather
+        than `or`: the user must still be able to UNSET the answer. Rule #29
+        cuts both ways — a preference they cleared must go back to silence."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(work_arrangement="remote")
+        out = self._apply({"work_arrangement": ""}, stored)
+        assert out.work_arrangement == ""
+        assert out.preferred_workplace is None
 
 
 class TestNeedsVisaRoundTripsThroughTheRoute:
@@ -376,6 +485,81 @@ class TestNeedsVisaRoundTripsThroughTheRoute:
         out = self._apply({"target_job_titles": ["ML"]},
                           existing=UserPreferences(needs_visa=True))
         assert out.needs_visa is True
+
+
+class TestExperienceLevelIsNotWipedOrPolluted:
+    """`experience_level` reached `UserPreferences` via a bare
+    `pref_dict.get("experience_level", "")` -- no normalisation, and an
+    OMITTED key silently defaulted to "" exactly like an explicit clear.
+
+    Two separate bugs share that one line:
+
+      1. No validation. `resolve_experience_level` says "typed always wins" --
+         a typed value skips the CV-inferred fallback and drives
+         `seniority_score` at full weight (up to 8 points, either direction) on
+         every job. An unrecognised string reaching that seam the same way
+         "any" reached the workplace one is exactly the class of bug already
+         fixed one field over (`_normalize_work_arrangement`).
+      2. No partial-save protection. Because the fallback default was "" and
+         not the STORED value, saving anything else on the preferences form
+         (salary, locations, about_me...) silently wiped a previously-chosen
+         experience level -- the identical shape as the workplace regression
+         `TestWorkplaceReachesTheScorer` guards, one field over.
+
+    NOTE on "mid": the live defect proven for THIS field (a brand-new account
+    posting "mid" it never chose) is a FRONTEND bug -- `prefsFromRaw` in
+    PreferencesForm.tsx substitutes "mid" for a missing `experience_level`,
+    fixed in `PreferencesForm.experience.test.tsx`. "mid" is a real,
+    selectable option in the dropdown (same list as "entry"/"senior"/"lead"/
+    "executive"), so the backend must NOT silence it -- doing so would drop a
+    genuine choice for every user who actually picks "Mid", which is a worse
+    bug than the one being fixed. This class guards the backend's own half:
+    validating genuinely unrecognised strings and protecting partial saves.
+    """
+
+    def _apply(self, form: dict, existing=None):
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserPreferences, UserProfile
+
+        p = UserProfile(
+            cv_data=CVData(), preferences=existing or UserPreferences()
+        )
+        _apply_preferences(json.dumps(form), p)
+        return p.preferences.experience_level
+
+    def test_each_real_level_round_trips(self) -> None:
+        # The control: without it, "normalise everything to empty" would also
+        # pass every other test in this class.
+        for level in ("entry", "mid", "senior", "lead", "executive"):
+            assert self._apply({"experience_level": level}) == level, (
+                f"{level} is a real dropdown option and must survive a save"
+            )
+
+    def test_an_unrecognised_value_is_silenced(self) -> None:
+        # Not a real dropdown option. Before normalisation this reached the
+        # DB, the LLM judge prompt and the semantic vector as though the user
+        # had stated it -- the same failure `_normalize_work_arrangement`
+        # already fixed for "any".
+        assert self._apply({"experience_level": "ninja-wizard"}) == ""
+
+    def test_an_omitted_key_keeps_the_stored_answer(self) -> None:
+        """The partial-save bug: the old `.get(key, "")` treated an absent
+        key the same as an explicit clear, so saving any OTHER field on the
+        form silently wiped a previously-chosen experience level."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(experience_level="senior")
+        assert self._apply({"salary_min": 40000}, stored) == "senior"
+
+    def test_an_explicit_empty_string_still_clears_it(self) -> None:
+        """Rule #29 cuts both ways -- a preference the user cleared must go
+        back to silence, not keep the old stored value forever."""
+        from src.services.profile.models import UserPreferences
+
+        stored = UserPreferences(experience_level="senior")
+        assert self._apply({"experience_level": ""}, stored) == ""
 
 
 class TestGithubUsernameFallbackIsNormalized:

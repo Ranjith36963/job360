@@ -26,7 +26,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/PILLAR1_EXTRACTION_AUDIT.md`)
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -242,7 +242,8 @@ In dry-run mode: scoring and dedup still happen, but no DB writes and no notific
 | Recency | 10 | <=1 day = 10, <=3d = 8, <=5d = 6, <=7d = 4, older = 0 |
 | **Penalties** | | |
 | Negative title | -30 | Title contains excluded keywords (60 default entries across 12 categories) |
-| Foreign location | -15 | Location matches foreign indicators (US cities/states, EU countries, etc.) |
+
+There is **no foreign-location penalty**. It was deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points.
 
 **Score = title + skill + location + recency - penalties** (clamped to 0-100)
 
@@ -303,7 +304,7 @@ BaseJobSource (ABC)
   |-- _post_json(url, body, headers) -> dict | None
   |-- _get_text(url, params, headers) -> str | None
   |-- _headers(extra) -> dict                           # User-Agent default
-  |-- _is_uk_or_remote(location) -> bool                # Checks UK_TERMS, REMOTE_TERMS, FOREIGN_INDICATORS
+  |-- _is_uk_or_remote(location) -> bool                # fetch-time skip; asks uk_gate.names_foreign_place
   |-- fetch_jobs() -> list[Job]                         # ABSTRACT
 ```
 

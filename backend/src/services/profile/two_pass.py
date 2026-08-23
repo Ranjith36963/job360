@@ -17,6 +17,7 @@ imported at module top so tests can monkeypatch them by name.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -46,6 +47,7 @@ from src.services.profile.preferences import (
     deterministic_about_me_fields,
     llm_infer_from_about_me,
     merge_cv_and_preferences,
+    skills_already_held,
 )
 from src.services.profile.seniority import infer_experience_level
 
@@ -118,8 +120,75 @@ def _input_hash(raw: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def stale_extraction_inputs(profile: UserProfile) -> list[str]:
+    """Which of ``profile``'s raw inputs were last read by an OLDER extractor
+    than the one running right now.
+
+    WHY THIS EXISTS. ``run_two_pass_extraction`` has exactly one caller in
+    this codebase — a user-triggered save route (five handlers in
+    ``api/routes/profile.py``). Nothing scheduled ever re-reads an EXISTING
+    profile, so bumping ``EXTRACTOR_VERSION`` for a prompt fix reaches only
+    the users who happen to re-save; everyone else stays frozen on the old
+    extraction forever, silently. This has already been "fixed" four times in
+    production with throwaway, uncommitted scripts that called
+    ``save_profile()`` directly — which stamps a fresh ``updated_at`` while
+    leaving ``llm_input_hashes`` untouched, so the profile then LOOKS freshly
+    updated while its extraction is still stale. None of those four scripts,
+    or the ``source_action`` values they wrote, exist in this repo — a
+    profile that "looks recent" tells you nothing here.
+
+    This is the read-only check a real sweep (``scripts/
+    reextract_stale_profiles.py``) uses to find who ACTUALLY needs a re-run,
+    so it never has to blanket re-extract every profile — each re-extraction
+    is a paid LLM call.
+
+    Mirrors the exact four-input map ``run_two_pass_extraction`` builds
+    (cv / linkedin / github / about_me) and reuses ``_already_read`` — the
+    hashing algorithm is defined ONCE, there, and never reimplemented here.
+    "Stale" is precisely the inverse of "already read". A key with NO raw
+    input is never stale: there is nothing to extract, so an unfilled field
+    must never look like backlog (rule #29 — an empty shelf is not a broken
+    one).
+
+    Takes the whole ``UserProfile`` rather than just ``CVData`` because one
+    of the four raw inputs (``about_me``) lives on ``UserPreferences``, not
+    on ``CVData`` — even though its cache hash is stored on
+    ``cv.llm_input_hashes`` alongside the other three. Splitting it out would
+    either reimplement half of ``run_two_pass_extraction``'s input map or
+    silently drop about_me from the sweep, which is exactly the kind of gap
+    this function exists to catch.
+
+    Returns the stale keys, e.g. ``["cv", "about_me"]``, or ``[]`` when every
+    input the profile actually has is current.
+    """
+    cv = profile.cv_data
+    prefs = profile.preferences
+
+    # Same "does this input actually have content?" gate run_two_pass_extraction
+    # uses before it will even attempt a pass — a dict with all-empty values
+    # (github's shape) must not count as "present" just because the dict
+    # itself is non-empty.
+    _has_github = bool(cv.github_repos_brief or cv.github_bio or cv.github_profile_readme)
+    inputs: dict[str, tuple[bool, Any]] = {
+        "cv": (bool(cv.raw_text), cv.raw_text),
+        "linkedin": (bool(cv.linkedin_raw_text), cv.linkedin_raw_text),
+        "github": (_has_github, {
+            "repos": cv.github_repos_brief,
+            "bio": cv.github_bio,
+            "readme": cv.github_profile_readme,
+        }),
+        "about_me": (bool(prefs.about_me), prefs.about_me),
+    }
+
+    stale: list[str] = []
+    for key, (has_input, raw) in inputs.items():
+        if has_input and not _already_read(cv, key, raw):
+            stale.append(key)
+    return stale
+
+
 def _pass_produced_data(key: str, res: Any) -> bool:
-    """Did an LLM pass return anything worth caching?
+    """Did an LLM pass return anything worth CACHING?
 
     A pass that returned an empty result from a NON-empty input is almost always
     a soft failure (a rate-limited provider answering with `{}` instead of
@@ -128,6 +197,13 @@ def _pass_produced_data(key: str, res: Any) -> bool:
 
     Shapes differ per input: the CV pass returns a ``CVData``; the others return
     dicts or lists. This reads the fields that actually matter for each.
+
+    Deliberately answers ONLY "is this worth caching" — NOT "is this worth
+    retrying". Those used to be the same question, and that was the bug: a CV
+    pass returning ``skills`` but ZERO ``cv_positions`` passes this check (skills
+    OR titles is enough), so it was graded a cache-worthy success even though a
+    whole section silently vanished. See ``_cv_pass_is_partial`` for the
+    retry-side question this function must NOT be asked.
     """
     if res is None:
         return False
@@ -140,6 +216,37 @@ def _pass_produced_data(key: str, res: Any) -> bool:
         return bool(d.get("skills") or d.get("positions") or d.get("education"))
     # github / about_me return a list[str] of inferred skills.
     return bool(res)
+
+
+def _cv_pass_is_partial(res: Any) -> bool:
+    """Did the CV pass yield SOME data but silently drop ``cv_positions``?
+
+    THE BUG THIS DETECTS (measured on a real profile, Rohith — see the retry
+    block's comment in ``run_two_pass_extraction``): "0 positions via the
+    concurrent API path, 7 in isolation". ``_pass_produced_data`` grades that
+    result a success — it returned skills — so it was cached and the user's
+    dated career history was gone for good, unrecoverable even by re-uploading
+    the identical CV (the input hash still matches).
+
+    A result with NO skills and NO titles is not "partial", it is EMPTY —
+    ``_pass_produced_data`` already sends that case to retry, and double-
+    counting it here would just fire the same retry logic twice for one cause.
+    Partial means the pass clearly ran and read the document (skills or titles
+    landed) but the one section that can silently go missing under load did.
+
+    CV-ONLY on purpose. LinkedIn's own positions are already inside
+    ``_pass_produced_data``'s OR (skills OR positions OR education), so a
+    LinkedIn result missing positions but present on skills is already not
+    "produced data" territory in the same way — its retry trigger is the
+    existing empty-check. GitHub and about_me each return a flat
+    ``list[str]`` with no named subsection that can go missing independently
+    of the whole list, so there is nothing to decide there.
+    """
+    if res is None:
+        return False
+    if not (getattr(res, "skills", None) or getattr(res, "job_titles", None)):
+        return False  # empty, not partial — the existing check already retries this
+    return not getattr(res, "cv_positions", None)
 
 
 def _already_read(cv: CVData, key: str, raw: Any) -> bool:
@@ -263,48 +370,42 @@ def reset_cv_owned_fields(cv: CVData) -> None:
     ``github_*`` and ``about_me_inferred_skills``. Wiping those would silently
     delete work, which is the opposite failure.
     """
-    # Scoring-semantic — these reach SearchConfig and change what matches.
-    cv.skills.clear()
-    cv.job_titles.clear()
-    cv.companies.clear()
-    cv.education.clear()
-    cv.certifications.clear()
-    cv.cv_industries.clear()
-    cv.cv_languages.clear()
-    cv.cv_skills_esco.clear()
-    cv.summary = ""
-    cv.experience_text = ""
-
-    # Identity / display — the fields that put the wrong name on a tailored CV.
-    cv.name = ""
-    cv.headline = ""
-    cv.location = ""
-    cv.achievements.clear()
-
-    # Classified FROM the CV, so it belongs to the CV. ``None`` (not "") is the
-    # documented "not classified" sentinel on CVData.
-    cv.career_domain = None
-
-    # EVERY REMAINING CV-OWNED SCALAR, DERIVED — not hand-listed.
+    # EVERY CV-OWNED FIELD, DERIVED FROM THE DATACLASS — scalars AND collections.
     #
-    # This function's own docstring says its field list "must stay in lockstep
-    # with _merge_cv_llm_into". It did not. Three shelves added on 2026-08-10
-    # (cv_experience_level, cv_right_to_work, cv_projects) were merged in but
-    # never cleared here, so uploading a DIFFERENT person's CV left the previous
-    # person's stated seniority and work-authorisation on the profile — the
-    # exact failure this function exists to prevent, and worse than the missing
-    # data because it is confidently wrong.
+    # THIS LIST HAS NOW DRIFTED THREE TIMES, always the same way: a shelf is
+    # added, wired into the merge and into a reader, and nobody adds it here.
+    #   * 2026-08-07  career_domain
+    #   * 2026-08-10  cv_experience_level, cv_right_to_work, cv_projects
+    #   * 2026-08-15  cv_positions  <- found by running the real function
     #
-    # Both halves now read the same source, so the two cannot drift again.
-    for name in _cv_owned_scalars():
-        if getattr(cv, name, None):
-            setattr(cv, name, "")
-    cv.cv_projects.clear()
-
-    # Regenerated wholesale from the merged skill set on every two-pass run, but
-    # cleared so a failed re-extract cannot leave suggestions computed from a
-    # different person's skills.
-    cv.suggested_skills.clear()
+    # The 2026-08-10 round fixed only the SCALAR half by deriving it from
+    # ``dataclasses.fields``; the collections stayed hand-listed, so
+    # ``cv_positions`` (a ``list[dict]``, invisible to a scalar-only loop)
+    # survived every clear and every CV swap. Measured on the shipped code: a
+    # profile cleared through this function kept
+    # ``[{'company': 'ACME Ltd', 'title': 'Senior Engineer', ...}]`` while name,
+    # summary, skills and job_titles were all correctly emptied — and
+    # ``profile_to_matcher_text`` then fed that dated history to the LLM judge
+    # as the candidate's experience.
+    #
+    # Half a derivation is not a derivation. Resetting each field to the value a
+    # FRESH ``CVData()`` has removes the concept of a list entirely: a shelf
+    # added tomorrow is covered the moment it is declared, whatever its type.
+    # Collections are cleared IN PLACE, never rebound. Rebinding is visible
+    # through ``cv`` and looks equivalent, but it orphans any reference taken
+    # before the call — and there is a test pinning that identity
+    # (test_two_pass.py::test_reset_mutates_in_place_so_the_profile_keeps_its_object),
+    # which caught exactly this when the first version of the derivation used a
+    # blanket setattr. Scalars have no identity to preserve, so they are simply
+    # assigned their default.
+    pristine = CVData()
+    for name in _cv_owned_fields():
+        default = getattr(pristine, name)
+        current = getattr(cv, name)
+        if isinstance(current, (list, dict)) and isinstance(default, (list, dict)):
+            current.clear()
+        else:
+            setattr(cv, name, copy.deepcopy(default))
 
     # MUST be cleared with the fields it guards. The hash means "the LLM's
     # reading of this input is already merged into the fields above" — and we
@@ -348,7 +449,12 @@ _SCALAR_ANNOTATIONS = frozenset({"str", "Optional[str]"})
 
 
 def _cv_owned_scalars() -> tuple[str, ...]:
-    """Every plain-string CVData field the CV pass is allowed to fill.
+    """Every plain-string CVData field the CV pass is allowed to FILL.
+
+    Used by ``_merge_cv_llm_into``, which fills empty scalars only — collections
+    are unioned there by their own explicit rules, so this stays scalar-only.
+    For CLEARING, see ``_cv_owned_fields``: a reset must reach every type, and
+    restricting it to scalars is exactly how ``cv_positions`` survived.
 
     Fields belonging to the other passes are excluded by PREFIX rather than by
     name, so a new ``linkedin_*`` or ``github_*`` scalar can never be clobbered
@@ -364,6 +470,42 @@ def _cv_owned_scalars() -> tuple[str, ...]:
             continue
         if str(f.type) in _SCALAR_ANNOTATIONS:
             out.append(f.name)
+    return tuple(out)
+
+
+# Reset needs different handling from "back to the dataclass default", and each
+# entry must say why. Keep this as small as it can possibly be — every name here
+# is a field the derivation cannot protect.
+_RESET_HANDLED_SEPARATELY = frozenset(
+    {
+        # Only the "cv" and "linkedin" keys are dropped, deliberately, further
+        # down. Blanket-clearing it would discard the GitHub and about_me hashes
+        # too, forcing paid re-reads of inputs the user never touched.
+        "llm_input_hashes",
+    }
+)
+
+
+def _cv_owned_fields() -> tuple[str, ...]:
+    """EVERY CVData field the CV owns — scalars, lists and dicts alike.
+
+    The clearing counterpart to ``_cv_owned_scalars``. Same prefix-based
+    exclusions, but NO type filter: a reset that only understands strings leaves
+    every list and dict behind, which is precisely the defect this replaced
+    (``cv_positions`` survived a full profile clear and reached the LLM judge).
+
+    Ownership is decided by PREFIX, so a shelf added tomorrow is covered the day
+    it is declared — the one property that stops this drifting a fourth time.
+    """
+    import dataclasses as _dc
+
+    out: list[str] = []
+    for f in _dc.fields(CVData):
+        if f.name in _NOT_CV_OWNED_SCALARS or f.name in _RESET_HANDLED_SEPARATELY:
+            continue
+        if f.name.startswith(("linkedin_", "github_", "about_me_")):
+            continue
+        out.append(f.name)
     return tuple(out)
 
 
@@ -509,16 +651,26 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         if prefs.about_me and not _cached["about_me"] else _none(),
     )
 
-    # RETRY A SOFT-EMPTY PASS ONCE, SEQUENTIALLY.
+    # RETRY A SOFT-EMPTY OR SOFT-PARTIAL PASS ONCE, SEQUENTIALLY.
     #
     # The four passes above run concurrently in one gather. On free-tier keys
     # that means up to four simultaneous LLM calls, and the providers
-    # rate-limit: one call gets a valid but EMPTY answer while the same input
-    # extracts fine when it runs alone (measured on Rohith — 0 positions via the
-    # concurrent API path, 7 in isolation). So any pass that RAN but produced no
-    # usable data is retried here one at a time, with no concurrent contention.
-    # Bounded: at most one extra call per empty input, and only when the input
-    # was non-empty and not cached.
+    # rate-limit: one call gets a valid but EMPTY (or, for CV, PARTIAL) answer
+    # while the same input extracts fine when it runs alone (measured on
+    # Rohith — 0 positions via the concurrent API path, 7 in isolation). So any
+    # pass that RAN but produced no usable data is retried here one at a time,
+    # with no concurrent contention.
+    #
+    # PARTIAL is CV-only and stricter than EMPTY: a CV pass that returned
+    # skills or titles PASSES `_pass_produced_data` (worth caching) even when
+    # `cv_positions` came back empty — that shape used to look like a success
+    # and cache forever with the user's dated career history silently gone.
+    # `_cv_pass_is_partial` names that shape; the swap below only takes the
+    # retry's answer when it actually recovered `cv_positions`, so a partial-
+    # but-richer first result is never traded for a thinner "recovery".
+    #
+    # Bounded: at most one extra call per empty-or-partial input, and only
+    # when the input was non-empty and not cached.
     _retryable = [
         ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
         ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
@@ -530,12 +682,35 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     _results = {"cv": _llm_cv_res, "linkedin": _llm_li_res,
                 "github": _llm_gh_res, "about_me": _llm_pr_res}
     for _k, _raw, _call in _retryable:
-        if _raw and not _cached[_k] and not _pass_produced_data(_k, _results[_k]):
-            retried = await _safe(_call(), f"{_k} (retry)")
-            if _pass_produced_data(_k, retried):
-                logger.info("two_pass: %s pass was empty under load — sequential "
-                            "retry recovered it", _k)
+        if not _raw or _cached[_k]:
+            continue
+        _was_empty = not _pass_produced_data(_k, _results[_k])
+        # CV-only: a result that PASSED the caching check (skills or titles
+        # landed) can still be missing cv_positions — the shape that caused
+        # the Rohith bug (see the block comment above). Only CV has a section
+        # that can go missing independently of the rest of the pass; see
+        # `_cv_pass_is_partial`'s docstring for why the others don't.
+        _was_partial = _k == "cv" and not _was_empty and _cv_pass_is_partial(_results[_k])
+        if not (_was_empty or _was_partial):
+            continue
+        retried = await _safe(_call(), f"{_k} (retry)")
+        if _was_partial:
+            # A blanket replace here could trade a rich first result (more
+            # skills, a fuller summary) for a thinner retry that STILL has no
+            # positions — "repairing" nothing while throwing away what the
+            # first call got right. Only swap in when the retry actually
+            # recovered the missing piece.
+            if retried is not None and getattr(retried, "cv_positions", None):
+                logger.info("two_pass: cv pass had skills but lost cv_positions "
+                            "under load — sequential retry recovered them")
                 _results[_k] = retried
+            else:
+                logger.info("two_pass: cv retry did not recover cv_positions — "
+                            "keeping the original (still-useful) result")
+        elif _pass_produced_data(_k, retried):
+            logger.info("two_pass: %s pass was empty under load — sequential "
+                        "retry recovered it", _k)
+            _results[_k] = retried
     _llm_cv_res, _llm_li_res = _results["cv"], _results["linkedin"]
     _llm_gh_res, _llm_pr_res = _results["github"], _results["about_me"]
 
@@ -643,16 +818,20 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
 
     # Adjacent-skill SUGGESTIONS (opt-in, never auto-counted) from the full set of
     # skills the user actually has across all sources.
-    _all_skills = list(
-        dict.fromkeys(
-            (cv.skills or [])
-            + (cv.linkedin_skills or [])
-            + (cv.github_llm_skills or [])
-            + list((cv.github_languages or {}).keys())
-            + (prefs.additional_skills or [])
-        )
+    #
+    # This list USED to be hand-assembled here, and it disagreed with the list
+    # `sanitize_preferences` strips against: it read `github_languages` instead
+    # of `github_skills_inferred` (which is languages PLUS repo topics) and left
+    # out `cv_skills_esco`. So a topic-derived skill could be offered as a
+    # suggestion, accepted by the user, and then stripped from
+    # `additional_skills` on the very next save — the accepted chip just
+    # disappeared, with nothing on screen to explain it.
+    #
+    # Both sides now derive from `skills_already_held`, so the suggester cannot
+    # offer something the sanitizer will immediately take away.
+    cv.suggested_skills = await llm_suggest_adjacent_skills(
+        skills_already_held(cv, prefs)
     )
-    cv.suggested_skills = await llm_suggest_adjacent_skills(_all_skills)
 
     # ── Fold the freshly-extracted CV skills/titles into preferences ──
     # (Was done in the CV upload route; lives here now so the SINGLE extractor
