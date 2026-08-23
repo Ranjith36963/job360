@@ -45,7 +45,9 @@ bellingham
 belmont
 belton
 benton
+berea
 berkeley
+bermuda
 berwick
 berwyn
 bethany
@@ -81,14 +83,17 @@ cairns
 caldwell
 caledon
 calgary
+california
 camberwell
 cambridge
 camden
 campsie
 camrose
+canada
 carmel
 carmichael
 castle hill
+castletown
 central
 ceres
 cessnock
@@ -99,9 +104,12 @@ charlottetown
 chatham
 chatsworth
 chelsea
+christ church
 christchurch
+clarendon
 cleveland
 clifton
+cog
 cogan
 colton
 columbia
@@ -116,6 +124,7 @@ cranbourne
 cranbrook
 cranford
 crofton
+cyprus
 dallas
 dalton
 danbury
@@ -139,6 +148,7 @@ dundee
 dunkirk
 durham
 eagle
+east end
 east hartford
 east haven
 east london
@@ -146,14 +156,17 @@ east village
 easton
 edmonton
 edwardsville
+egypt
 elgin
 ellenbrook
 epping
 epsom
 epworth
+esh
 essendon
 fairfield
 fairview
+falcon
 farmington
 ferndale
 fleetwood
@@ -164,9 +177,12 @@ fordon
 forest
 fountain
 frankfort
+friesland
 fullerton
 garden city
+george hill
 georgetown
+georgia
 germiston
 gibraltar
 glastonbury
@@ -179,6 +195,7 @@ granby
 gravesend
 green
 greenfield
+greenland
 greenvale
 greenwood
 gresham
@@ -187,6 +204,7 @@ guildford
 haddington
 hala
 halifax
+halland
 hamilton
 hampton
 hampton park
@@ -210,6 +228,7 @@ hollywood
 holt
 homestead
 homewood
+hope town
 hornsby
 houston
 howick
@@ -219,12 +238,15 @@ hurst
 hyde park
 ilam
 ilchester
+ireland
 irvine
 irvington
+isle of man
 iwade
 jamestown
 johnston
 jordan
+jura
 kearney
 kearny
 kenmore
@@ -272,6 +294,7 @@ margate
 markham
 marlborough
 martin
+maryland
 meads
 meaux
 melbourne
@@ -303,17 +326,23 @@ needham
 nelson
 new brighton
 new kingston
+new york
+new zealand
 newark
 newburgh
 newcastle
 newington
 newmarket
 newton
+nineveh
 nis
 noma
 norden
 norland
+normandy
+north hill
 north shore
+north side
 northbrook
 northcote
 northdale
@@ -321,6 +350,7 @@ northfield
 northwood
 norton
 norwood
+nova scotia
 nutley
 oak hill
 oakdale
@@ -329,12 +359,19 @@ ogden
 olney
 ostend
 pakenham
+pan
 paradise
 patna
+paul
+peel
+pembroke
+pennsylvania
+penrhyn
 perth
 peterborough
 philadelphia
 pickering
+pool
 port charlotte
 portland
 portmore
@@ -355,6 +392,7 @@ redlands
 reedley
 renton
 reston
+rhodes
 richmond
 richmond hill
 ridgewood
@@ -373,7 +411,12 @@ roseville
 royal oak
 ruston
 ryde
+saint andrew
 saint andrews
+saint anthony
+saint james
+saint lawrence
+saint martin
 saint paul
 sale
 salem
@@ -382,6 +425,7 @@ salt
 salta
 sandy
 sandyford
+santon
 seaside
 selma
 sennan
@@ -399,6 +443,8 @@ southington
 spring hill
 springfield
 springvale
+st john
+st lawrence
 st. charles
 st. john's
 st. johns
@@ -428,20 +474,25 @@ taunton
 temple
 the colony
 the hague
+the quarter
+the valley
 the woodlands
 thomastown
 thornhill
 thornton
 tivoli
 toki
+ton
 toronto
 torrance
 torrington
 tralee
 trelew
+trinity
 troy
 turin
 university
+vale
 valence
 van
 victoria
@@ -456,6 +507,8 @@ waterford
 waterloo
 welland
 wellington
+west bank
+west bay
 west end
 west hill
 west torrington
@@ -465,6 +518,7 @@ westend
 westfield
 westford
 westlake
+westmoreland
 weston
 westport
 wethersfield
