@@ -25,6 +25,8 @@ import pytest
 
 from src.services.profile.shelf_audit import (
     MATCHING_ROLES,
+    _annotation_type_names,
+    _is_foreign_annotation,
     _ShelfVisitor,
     colliding_names,
     is_matching_shelf,
@@ -292,6 +294,63 @@ class TestReceiverIsTypeAware:
         assert "prefilter" in readers("work_arrangement")
         assert "prefilter" in readers("experience_level")
 
+
+class TestQualifiedStringAnnotationsResolve:
+    """CodeRabbit on PR #364: `_annotation_type_names` added a string
+    annotation WHOLE, so `"models.CVData"` became one opaque name, matched
+    nothing in `_PROFILE_TYPE_NAMES`, and the parameter read as FOREIGN.
+
+    That is the same failure as the one `TestReceiverIsTypeAware` pins, but
+    running the other way: instead of crediting a shelf read that never
+    happens, it DROPS one that does. Reproduced before the fix:
+
+        cv: models.CVData        -> foreign=False   correct
+        cv: "CVData"             -> foreign=False   correct
+        cv: "models.CVData"      -> foreign=True    WRONG
+
+    The docstring already claimed both the dotted form and the string form
+    were handled. Both were — separately. Their combination was not, which
+    is exactly the shape a doc-level claim cannot catch.
+    """
+
+    def _foreign(self, annotation_src: str) -> bool:
+        node = ast.parse(f"def f(cv: {annotation_src}): pass").body[0].args.args[0]
+        return _is_foreign_annotation(_annotation_type_names(node.annotation))
+
+    @pytest.mark.parametrize("annotation", [
+        "CVData",
+        "models.CVData",
+        '"CVData"',
+        '"models.CVData"',
+        '"Optional[models.CVData]"',
+        '"schemas.models.UserPreferences"',
+    ])
+    def test_a_canonical_profile_type_is_never_foreign(self, annotation: str) -> None:
+        assert not self._foreign(annotation), (
+            f"{annotation} is a canonical profile type, so the function using it "
+            f"must keep its shelf read"
+        )
+
+    @pytest.mark.parametrize("annotation", [
+        "FilterProfile",
+        '"FilterProfile"',
+        '"models.FilterProfile"',
+    ])
+    def test_a_foreign_type_is_still_foreign_however_it_is_written(
+        self, annotation: str
+    ) -> None:
+        # THE CONTROL. Parsing forward references must not turn the checker
+        # into one that credits everything — that would silently undo
+        # TestReceiverIsTypeAware while leaving it green.
+        assert self._foreign(annotation), (
+            f"{annotation} is not a profile type; crediting it re-opens finding 10"
+        )
+
+    def test_an_unparseable_forward_reference_is_not_silently_widened(self) -> None:
+        # A typo must read as foreign, not as "we could not tell". An empty
+        # name set means unresolvable to the caller, and quietly widening a
+        # typo into unresolvable is how a checker stops checking.
+        assert self._foreign('"not valid python!"')
 
 class TestMatchingCoverageDoesNotRegress:
     """A ratchet. Wiring more shelves into matching is the current goal, so this

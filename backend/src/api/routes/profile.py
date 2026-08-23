@@ -635,7 +635,9 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     profile.preferences = sanitize_preferences(profile.preferences, profile.cv_data)
 
 
-async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
+async def _extract_save_trigger(
+    profile: UserProfile, user_id: str, *, trigger_rescore: bool = True
+) -> None:
     """Shared pipeline tail: ONE extraction, save one version, schedule re-score.
 
     Used by every profile-input route so the merged single-extraction flow is
@@ -656,6 +658,19 @@ async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
     Reuses the existing limiter rather than inventing a counter: it already
     supports a shared Redis backend (RATE_LIMIT_REDIS), so the cap holds across
     replicas instead of being multiplied by replica count.
+
+    ``trigger_rescore=False`` runs the extraction and the save but leaves the
+    re-score to the caller. CodeRabbit, on the LinkedIn re-upload route: that
+    route clears the old LinkedIn fields, calls this, and only THEN checks
+    whether extraction produced anything. On a rejection it rolls the fields
+    back and re-saves — but the re-score had already been queued against the
+    CLEARED snapshot, so the worker could score every job for that user with
+    the LinkedIn shelf empty and store the result as final.
+
+    The rollback comment in that route already recognised the save-ordering
+    problem ("an in-memory rollback would be undone by the save that already
+    happened above") and patched the save. The same ordering leaked the
+    re-score too — fixing one consequence of a bad order leaves the others.
     """
     if PROFILE_EXTRACT_MAX_PER_HOUR > 0 and not auth_rate_limit.check_and_record(
         f"profile_extract:{user_id}",
@@ -677,7 +692,8 @@ async def _extract_save_trigger(profile: UserProfile, user_id: str) -> None:
         )
     await run_two_pass_extraction(profile)
     save_profile(profile, user_id)
-    await _maybe_trigger_rescore(user_id)
+    if trigger_rescore:
+        await _maybe_trigger_rescore(user_id)
 
 
 @router.post("/profile/cv", response_model=ProfileResponse)
@@ -826,7 +842,11 @@ async def upload_linkedin(
 
         _clear_prefixed(cv, "linkedin_")
         cv.linkedin_raw_text = text
-        await _extract_save_trigger(profile, user.id)
+        # No re-score yet: this profile is provisional until `merged`
+        # below says extraction produced real signal. Queueing it here
+        # scores the whole catalog against a CLEARED LinkedIn shelf on
+        # every rejected re-upload.
+        await _extract_save_trigger(profile, user.id, trigger_rescore=False)
 
         # merged = did extraction actually PRODUCE LinkedIn signal — not "did
         # the file merely resemble a LinkedIn export". Mirrors has_linkedin.
@@ -861,6 +881,8 @@ async def upload_linkedin(
         cv.linkedin_filename = os.path.basename(file.filename or "")[:255]
         cv.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
         save_profile(profile, user.id, "linkedin_upload")
+        # Accepted — only now is the stored profile worth scoring against.
+        await _maybe_trigger_rescore(user.id)
     finally:
         try:
             os.unlink(tmp_path)
