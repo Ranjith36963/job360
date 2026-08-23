@@ -1691,7 +1691,17 @@ def test_themuse_skips_non_uk():
 
 # ---- Hacker News ----
 
-HN_SEARCH_PAYLOAD = {"hits": [{"objectID": "99999"}]}
+# Mirrors the real /search_by_date response: newest-first, and the SAME author
+# posts a sibling "Who wants to be hired?" thread on the same day (job seekers
+# advertising themselves — the inverse of this source). The old fixture carried
+# only an objectID and no title, so it could not have caught either the
+# relevance-vs-date bug or the sibling-thread trap.
+HN_SEARCH_PAYLOAD = {
+    "hits": [
+        {"objectID": "99998", "title": "Ask HN: Who wants to be hired? (August 2026)"},
+        {"objectID": "99999", "title": "Ask HN: Who is hiring? (August 2026)"},
+    ]
+}
 
 HN_ITEM_PAYLOAD = {
     "children": [
@@ -2894,6 +2904,121 @@ def test_workday_detail_fetches_are_budgeted(monkeypatch):
         finally:
             await session.close()
     _run(_test())
+
+
+class TestHackerNewsUsesTheCurrentThread:
+    """`/search` ranks by RELEVANCE, not date, so the old query returned the
+    same COVID-era thread forever - "Ask HN: Who is hiring right now?" from
+    2020-03-23. Measured 2026-08-08: all 118 stored HackerNews jobs carried
+    posted_at=2020-03-23, stamped date_confidence='high'. The catalog was
+    serving six-year-old dead postings as current, and recency scored them 0.
+
+    Found by scripts/distribution_sanity.py on its first run (one distinct
+    posted_at across 118 rows) - this test is the pin.
+
+    These drive fetch_jobs() through aioresponses and assert on the URL that
+    was actually REQUESTED and the thread that was actually CHOSEN. The first
+    version of this class asserted `"search_by_date" in <the source file>`,
+    which CodeRabbit correctly refused: that string also appears in a comment
+    four lines above the call, so the test passed whether or not the code
+    called the endpoint. It is the same defect this repo has now hit four
+    times - NAMING A THING IS NOT RUNNING IT - so it is pinned behaviourally.
+    """
+
+    _SEEKERS = {
+        "objectID": "99998",
+        "title": "Ask HN: Who wants to be hired? (August 2026)",
+        "created_at": "2026-08-01T15:00:00.000Z",
+    }
+    _HIRING = {
+        "objectID": "99999",
+        "title": "Ask HN: Who is hiring? (August 2026)",
+        "created_at": "2026-08-01T15:00:00.000Z",
+    }
+    _COMMENT = {
+        "children": [{
+            "text": (
+                "Acme Ltd | London, UK | Full-time | REMOTE&#x2F;hybrid<p>"
+                "Backend Engineer building payment rails in Python and "
+                "Postgres. Apply: https:&#x2F;&#x2F;acme.example&#x2F;jobs&#x2F;1"
+            ),
+            "created_at": "2026-08-01T16:00:00.000Z",
+        }],
+    }
+
+    def _fetch(self, hits, items_by_id):
+        """Run fetch_jobs() against mocked HN endpoints; return (jobs, urls)."""
+        from src.sources.other.hackernews import HackerNewsSource
+
+        seen: list[str] = []
+
+        async def _test():
+            session = aiohttp.ClientSession()
+            try:
+                with aioresponses() as m:
+                    def _record(url, **kwargs):
+                        seen.append(str(url))
+
+                    m.get(
+                        re.compile(r"https://hn\.algolia\.com/api/v1/search_by_date.*"),
+                        payload={"hits": hits}, repeat=True, callback=_record,
+                    )
+                    m.get(
+                        re.compile(r"https://hn\.algolia\.com/api/v1/search\?.*"),
+                        payload={"hits": hits}, repeat=True, callback=_record,
+                    )
+                    for oid, body in items_by_id.items():
+                        m.get(
+                            f"https://hn.algolia.com/api/v1/items/{oid}",
+                            payload=body, repeat=True, callback=_record,
+                        )
+                    source = HackerNewsSource(session, search_config=_sc_ai_defaults())
+                    return await source.fetch_jobs()
+            finally:
+                await session.close()
+
+        jobs = _run(_test())
+        return jobs, seen
+
+    def test_queries_the_date_sorted_endpoint(self) -> None:
+        """The relevance-ranked `/search` must never be called."""
+        jobs, urls = self._fetch([self._HIRING], {"99999": self._COMMENT})
+
+        assert any("search_by_date" in u for u in urls), (
+            f"must sort by date, not relevance; requested: {urls}"
+        )
+        assert not any(
+            "/api/v1/search?" in u or u.endswith("/api/v1/search") for u in urls
+        ), f"the relevance-ranked /search must not be called; requested: {urls}"
+        assert len(jobs) == 1, "the mocked hiring thread must yield its one job"
+
+    def test_skips_the_who_wants_to_be_hired_sibling(self) -> None:
+        """The same author posts "Who wants to be hired?" on the same day -
+        job SEEKERS advertising themselves, the inverse of this source. It is
+        returned FIRST here, so taking hits[0] blindly fails this test."""
+        jobs, urls = self._fetch(
+            [self._SEEKERS, self._HIRING],
+            {"99998": self._COMMENT, "99999": self._COMMENT},
+        )
+
+        assert not any("/items/99998" in u for u in urls), (
+            f"followed the job-SEEKERS thread; requested: {urls}"
+        )
+        assert any("/items/99999" in u for u in urls), (
+            f"did not reach the hiring thread; requested: {urls}"
+        )
+        assert len(jobs) == 1 and jobs[0].company == "Acme Ltd"
+
+    def test_no_hiring_thread_returns_empty_rather_than_the_sibling(self) -> None:
+        """Negative control: with ONLY the seekers thread present, the source
+        must return nothing. Without this, a version that fell back to hits[0]
+        would still pass the test above by never being offered a choice."""
+        jobs, urls = self._fetch([self._SEEKERS], {"99998": self._COMMENT})
+
+        assert jobs == [], "job SEEKERS must never enter the catalog"
+        assert not any("/items/" in u for u in urls), (
+            f"fetched a thread's comments anyway; requested: {urls}"
+        )
 
 
 # =============================================================================
