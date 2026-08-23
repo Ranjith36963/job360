@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import os
 import time
 from datetime import datetime, timezone
 from datetime import time as _time
@@ -348,7 +349,7 @@ async def send_notification(
     cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
     job_row = await cur.fetchone()
     if job_row is None:
-        return {"sent": 0, "failed": 0}
+        return {"sent": 0, "queued": 0, "failed": 0}
 
     title = f"{job_row['title']} @ {job_row['company']}"
     body = f"Job360 match: {job_row['title']}\n{job_row['apply_url']}"
@@ -362,15 +363,32 @@ async def send_notification(
 
         dispatcher_fn = real_dispatch
 
-    results = await dispatcher_fn(db, user_id=user_id, title=title, body=body)
+    # `job_id` and `match_score` are NOT optional decoration here. Without
+    # job_id, `dispatcher._queue_digest` returns immediately without writing a
+    # row -- so a `daily` rule produced NO digest AND no send, while the code
+    # below still counted it. (CodeRabbit, PR #352.)
+    results = await dispatcher_fn(
+        db, user_id=user_id, title=title, body=body,
+        job_id=job_id, match_score=job_row.get("match_score"),
+    )
 
     sent = 0
+    queued = 0
     failed = 0
     for result in results:
         channel_key = result.channel_type or f"channel:{result.channel_id}"
         # Ensure a ledger row exists (idempotent per UNIQUE constraint).
         await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel=channel_key)
-        if result.ok:
+        # QUEUED IS NOT SENT. `dispatch()` returns ok=True for a digest it merely
+        # enqueued, so counting `ok` alone marked a notification delivered that
+        # no user will receive until the digest drains -- and then wrote
+        # `notified_at`, which suppresses it from ever being re-notified. A
+        # notification recorded as delivered but never delivered is worse than
+        # one that failed loudly: the failure is invisible in every table that
+        # would show it. (CodeRabbit, PR #352.)
+        if result.queued_digest:
+            queued += 1
+        elif result.ok:
             await mark_ledger_sent(db, user_id=user_id, job_id=job_id, channel=channel_key)
             sent += 1
         else:
@@ -383,7 +401,20 @@ async def send_notification(
             )
             failed += 1
 
-    return {"sent": sent, "failed": failed}
+    # #318 — make delivery OBSERVABLE. `user_feed.notified_at` was NULL on all
+    # 24,597 live rows because the only writers (`mark_notified`,
+    # `list_pending_notifications`) had no production callers at all — the
+    # re-notify dedup runs off `notification_ledger` instead, so the column was
+    # orphaned rather than load-bearing. Without this, fixing delivery would
+    # still leave the issue's headline symptom ("notified_at is NULL on every
+    # feed row") looking untouched.
+    if sent:
+        try:
+            await FeedService(db).mark_notified_for_jobs(user_id, [job_id])
+        except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
+            _log.warning("mark_notified failed user=%s job=%s: %s", user_id, job_id, exc)
+
+    return {"sent": sent, "queued": queued, "failed": failed}
 
 
 @_logged_task
@@ -1042,6 +1073,12 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         if st == "sent":
             for jid in uniq_jids:
                 await mark_ledger_sent(db, user_id=user_id, job_id=jid, channel=channel)
+            # #318 — same observability wiring as send_notification: stamp
+            # user_feed.notified_at for the jobs this bundle actually carried.
+            try:
+                await FeedService(db).mark_notified_for_jobs(user_id, uniq_jids)
+            except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
+                _log.warning("mark_notified failed user=%s: %s", user_id, exc)
             await db.execute(
                 "UPDATE user_notification_digests SET sent=1, "
                 "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
@@ -1334,6 +1371,31 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
 MAX_REFRESH_INGEST_IDS = 1000
 
 
+def _refresh_catalog_notifies() -> bool:
+    """True when the nightly catalog refill is allowed to notify. Default False.
+
+    #318 turned the old hardcoded ``suppress_notifications=True`` into this
+    switch. The default is unchanged — the nightly fan-out stays silent — but
+    the owner can now flip ``REFRESH_CATALOG_NOTIFY=1`` and restart the worker
+    instead of needing a code change to make a product decision.
+
+    Read at call time, not import time, so a restart is enough.
+
+    Safe to enable ONLY because new users are seeded onto ``notify_mode='daily'``
+    (``services/notifications/defaults.py``). In 'daily' mode dispatch() routes
+    matches into ``user_notification_digests`` and ``send_bundle`` mails ONE
+    bundle per user. Flipping this on while anyone sits on 'instant' is the
+    blast-radius scenario this function's docstring warns about: ~280 new jobs
+    per tick would become ~280 separate emails, per user, every night.
+    """
+    return os.getenv("REFRESH_CATALOG_NOTIFY", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     """ARQ periodic task: refill the SHARED job catalog on a schedule, then
     fan the freshly-fetched jobs out into every user's OWN feed.
@@ -1386,25 +1448,30 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     So this cron costs worker CPU (already running 24/7) plus keyed-API quota
     for the fetch, plus bounded local scoring — and no per-user judge spend.
 
-    NOTIFICATIONS — deliberately suppressed on this path
-    (``suppress_notifications=True``). `score_and_ingest` queues an instant
-    notification at score >= 80; wiring it into a nightly cron makes that
-    reachable for the very first time, for EVERY user, EVERY tick, all at
-    once — a materially different shape of risk than a user's own on-demand
-    search enqueuing their own single result. Measured live 2026-08-15:
-    today the blast radius is zero (`notification_rules` and `user_channels`
-    are both empty — no user has a channel configured yet — and only ONE
-    `user_feed` row has ever scored >= 80), but that is a fact about today's
-    data, not a property of this code, and it will stop being true the
-    moment someone adds a channel. Turning per-job instant pushes on for an
-    unattended 04:00 cron is a real product decision (bundle daily? cap per
-    tick? per-user opt-in?) that deserves its own review, not a side-effect
-    of fixing the empty-dashboard bug. Feed rows and scores are written
-    normally either way; the ledger row and the outbound send are BOTH
-    skipped (:219-220), which is the correct pairing — a ledger row with no
-    send would be treated as already-notified by the if-new dedup and would
-    permanently swallow that job's notification. Flipping this back to False
-    later stays a one-line, fully reversible change once that review happens.
+    NOTIFICATIONS — still suppressed by default, but now a SWITCH
+    (``suppress_notifications=not _refresh_catalog_notifies()``, env
+    ``REFRESH_CATALOG_NOTIFY``, default off). `score_and_ingest` queues an
+    instant notification at score >= 80; wiring it into a nightly cron makes
+    that reachable for EVERY user, EVERY tick, all at once — a materially
+    different shape of risk than a user's own on-demand search enqueuing their
+    own single result. Turning per-job pushes on for an unattended 04:00 cron
+    is a real product decision (bundle daily? cap per tick? per-user opt-in?)
+    that deserves its own review; making it an env var means that decision no
+    longer costs a code change and a deploy.
+
+    **The old "blast radius is zero" note is now STALE — do not rely on it.**
+    It said `notification_rules` and `user_channels` were both empty. That was
+    true on 2026-08-15 and was still true on 2026-08-19 (0 rows, 11 users),
+    but #318 now SEEDS both at signup, so from here on users really do have a
+    rulebook and a channel. What keeps the flip safe is no longer emptiness —
+    it is that seeded users default to ``notify_mode='daily'``, so dispatch()
+    bundles their matches into ``user_notification_digests`` and `send_bundle`
+    mails one digest instead of ~280 separate messages.
+
+    Feed rows and scores are written normally either way; the ledger row and
+    the outbound send are BOTH skipped (:219-220), which is the correct
+    pairing — a ledger row with no send would be treated as already-notified
+    by the if-new dedup and would permanently swallow that job's notification.
     ``no_notify=True`` on `run_search` itself is unchanged: the shared
     catalog refill still belongs to nobody.
 
@@ -1537,8 +1604,11 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
                     job_id,
                     enrichment_lookup_dict=enrichment_lookup_dict,
                     # See the NOTIFICATIONS section of this function's
-                    # docstring — deliberate, reversible, not a default.
-                    suppress_notifications=True,
+                    # docstring. Still suppressed by default, but it is now a
+                    # PARAMETER rather than a hardcode: the owner can turn the
+                    # nightly path on with an env var and a restart, instead of
+                    # needing a code change and a deploy to make the decision.
+                    suppress_notifications=not _refresh_catalog_notifies(),
                 )
                 scored_jobs += 1
                 ingested_rows += result.get("ingested", 0)

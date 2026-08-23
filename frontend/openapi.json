@@ -5554,7 +5554,7 @@
         ]
       },
       "post": {
-        "description": "Create a channel via direct credential input.\n\n* ``slack``, ``discord``, ``telegram`` must use the Connect flow \u2192 400.\n* ``webhook``: ``credential`` must be an http(s) URL; backend converts it\n  to the Apprise ``json[s]://`` URL scheme.\n* ``email``: ``credential`` must be a valid email address; backend builds\n  the ``mailtos://`` Apprise URL from the platform SMTP creds.",
+        "description": "Create a channel via direct credential input.\n\n* ``slack``, ``discord``, ``telegram`` must use the Connect flow \u2192 400.\n* ``webhook``: ``credential`` must be an http(s) URL; backend converts it\n  to the Apprise ``json[s]://`` URL scheme.\n* ``email``: ``credential`` must be a valid email address; the backend\n  builds the Apprise URL from the platform's own mail credentials\n  (``resend://`` where a Resend key is configured, ``mailtos://`` only as\n  the local-SMTP fallback \u2014 see ``services/channels/email_url.py``).",
         "operationId": "create_channel_api_settings_channels_post",
         "parameters": [
           {

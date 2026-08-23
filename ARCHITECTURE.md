@@ -684,6 +684,13 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `SOURCE_FETCH_TIMEOUT` | No (default `60`) | Per-source fetch ceiling in seconds |
 | `SOURCE_FETCH_TIMEOUT_ATS` | No (default `240`) | ATS category fetch ceiling in seconds |
 | `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
+| `RESEND_API_KEY` | Recommended in prod | Resend HTTPS API key. Used for BOTH system email (magic links, `auth/email_sender.py`) and per-user email alert channels (`services/channels/email_url.py`). **Railway blocks outbound SMTP ports 25/465/587**, so `mailtos://` cannot deliver there — with this set, email channels are built as `resend://` over 443 instead. A key placed in `SMTP_PASSWORD` (recognised by its `re_` prefix) is honoured too. |
+| `SMTP_FROM` | No (falls back to `SMTP_EMAIL`, then `onboarding@resend.dev`) | From-address for system email and alert digests |
+| `NOTIFY_SCORE_THRESHOLD` | No (default `30`) | Score a job must clear to be worth notifying about. ONE source of truth, read by the dispatcher, the signup seeder and `save_user_notification_rule` (`services/notifications/defaults.py`) |
+| `NOTIFY_SEED_DEFAULTS` | No (default on; `0`/`false`/`no`/`off` disables) | Master switch for seeding a `notification_rules` row (and, once the address is verified, an account-email channel) at signup. Issue #318: before this, nothing in the product ever created a rule, so no user could ever be alerted |
+| `NOTIFY_DEFAULT_MODE` | No (default `daily`) | `notify_mode` given to a seeded rulebook. Keep it a BUNDLING mode — `instant` plus the nightly cron means one email per matching job (~280/tick) |
+| `NOTIFY_DEFAULT_SEND_TIME` / `NOTIFY_DEFAULT_INTERVAL_HOURS` | No (default `08:00` / `6`) | Seeded digest send time and every-N-hours interval |
+| `REFRESH_CATALOG_NOTIFY` | No (default `0` = off) | Lets the 04:00 `refresh_catalog` cron notify. OFF keeps today's behaviour (the nightly refill is silent, so new jobs reach a user only when they search). Only safe to enable while seeded users default to a bundling `NOTIFY_DEFAULT_MODE` — see `workers/tasks._refresh_catalog_notifies` |
 
 ### Constants (`settings.py`)
 

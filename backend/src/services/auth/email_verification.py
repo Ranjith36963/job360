@@ -37,6 +37,7 @@ from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
+from src.services.notifications.defaults import seed_notification_defaults
 
 logger = logging.getLogger("job360.auth.email_verification")
 
@@ -179,6 +180,25 @@ async def confirm_email_verification(
             (now, row["user_id"]),
         )
         await db.commit()
+
+        # #318 — the address is now PROVEN, so this is the earliest moment an
+        # account-email delivery channel can be created safely. `register`
+        # seeds the rulebook but deliberately no channel, because seeding one
+        # for an unproven address would let anyone sign up with a victim's
+        # email and aim job alerts at a mailbox they do not own.
+        # Guarded here as well as inside the helper: `email_verified_at` is
+        # already committed, so anything escaping would make the route report
+        # "invalid or expired verification token" for a token that in fact
+        # worked — and the token is now spent, so the user could never retry.
+        try:
+            await seed_notification_defaults(
+                db, user_id=row["user_id"], email=row["current_email"]
+            )
+        except Exception as exc:  # noqa: BLE001 — verification must still succeed
+            logger.warning(
+                "notification seed failed for user=%s: %s", row["user_id"], exc
+            )
+
         logger.info("email verification confirm: ok user=%s", row["user_id"])
         return cast(Optional[str], row["user_id"])
 
