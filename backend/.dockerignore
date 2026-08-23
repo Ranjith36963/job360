@@ -32,10 +32,14 @@ data/
 # because the running code is the site-packages copy.
 #
 # Adding a new shipped data directory? Put it under `src/data/`, declare it in
-# pyproject, and `tests/test_shipped_data.py` will check you did — it derives
-# the rule from `.gitignore` and fails on any committed data directory with no
-# delivery mechanism. Both failure modes here are invisible at runtime: empty
-# data, no exception (though both loaders now log an ERROR naming the path).
+# pyproject, and `tests/test_shipped_data.py` will check you did. It checks
+# twice: once per `!` line in `.gitignore`, and once per file git actually
+# TRACKS under `src/data/`. The second is the one that catches a NEW directory,
+# because `.gitignore`'s `!backend/src/data/` already un-ignores the whole
+# subtree — so a new directory is committable without a `!` line of its own and
+# the first check never sees it. Both failure modes here are invisible at
+# runtime: empty data, no exception (though both loaders now log an ERROR
+# naming the path).
 
 # Python caches
 __pycache__/
