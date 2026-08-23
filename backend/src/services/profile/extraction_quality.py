@@ -238,11 +238,31 @@ def score_extraction(
 
 
 def needs_escalation(score: ExtractionScore) -> bool:
-    """Should this extraction be retried, LLM-enhanced, or shown to the user?
+    """True when this extraction should be flagged rather than trusted silently.
 
-    This is the whole point of scoring. A parser cannot be made perfect for
-    every layout, so the product's job is to NOTICE when it did badly and do
-    something — re-run with the LLM, or ask the person to confirm — instead of
-    silently handing someone a profile that will never match a job.
+    WHAT ACTUALLY SHIPS TODAY when this returns True (verified against the
+    one call site, ``two_pass.py::run_two_pass_extraction``, 2026-08-16):
+    the score is stored on ``cv.extraction_score`` — which reaches the
+    profile API response, and is the one thing that lets the frontend show
+    the user an accurate banner — and a ``logger.warning`` fires so a bad
+    extraction is also visible in prod logs. THAT IS THE WHOLE IMPLEMENTED
+    PATH: the user-facing notice (the banner). Nothing here retries the
+    parse and nothing re-runs the LLM pass. A CV that scores 'broken' (e.g.
+    a PDF export that lost its word boundaries) shows the true banner every
+    time, but re-saving the identical file reproduces the identical
+    'broken' verdict forever — there is no automated path back to a working
+    profile, only the person editing the upload by hand.
+
+    NOT IMPLEMENTED HERE, ON PURPOSE, THIS BATCH: automatic retry / LLM
+    re-enhancement needs a change inside ``two_pass.py`` (the only place that
+    knows how to re-invoke the LLM pass), which is out of this module's
+    reach this run. The concrete plan, for whoever picks it up: on a
+    'broken' verdict, ``run_two_pass_extraction`` re-runs ONLY the LLM pass
+    once more with a prompt that names the specific problem
+    (``score.problems``, e.g. "no word boundaries") so the retry targets the
+    actual defect instead of repeating the same read; if the second score is
+    still 'broken', stop there and rely on the banner — a loop that keeps
+    retrying an unreadable file burns cost for no gain, and QUALITY here
+    means one well-aimed retry, not an unbounded one.
     """
     return score.verdict != "good"

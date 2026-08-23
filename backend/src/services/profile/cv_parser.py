@@ -902,6 +902,15 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
 
     # Education: flatten nested dicts to list of strings for display
     education_lines: list[str] = []
+    # Finding 7 (Pillar-1 closeout audit, 2026-08-16) — MIRRORS
+    # schemas.cv_schema_to_cvdata. Per-degree details (dissertation,
+    # coursework, course project) used to be appended straight into
+    # `education_lines`, mixed in with the degree/institution text where
+    # nothing could tell a detail bullet from a qualification line. They get
+    # their own shelf now, same as the live adapter — this is exactly the
+    # kind of one-adapter-fixed-the-other-wasn't drift `test_adapter_parity`
+    # exists to catch.
+    education_details: list[str] = []
     edu_raw = result.get("education", [])
     if isinstance(edu_raw, list):
         for edu in edu_raw:
@@ -916,8 +925,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
                     if dates:
                         line += f" | {dates}"
                     education_lines.append(line)
-                for detail in _coerce_str_list(edu.get("details")):
-                    education_lines.append(detail)
+                education_details.extend(_coerce_str_list(edu.get("details")))
             elif isinstance(edu, str):
                 education_lines.append(edu)
 
@@ -983,4 +991,5 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
         cv_industries=industries,
         cv_languages=cv_languages,
         career_domain=career_domain,
+        cv_education_details=education_details,
     )

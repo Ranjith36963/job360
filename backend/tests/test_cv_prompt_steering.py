@@ -1,6 +1,6 @@
 """Guards for the CV LLM prompt's prose-mining steering.
 
-Diagnosis (docs/PILLAR1_DEEP_DIAGNOSIS.md): with gpt-4o-mini the LLM pass
+Diagnosis (docs/product/PILLAR1_DEEP_DIAGNOSIS.md): with gpt-4o-mini the LLM pass
 anchored on the explicit "Skills" section and returned essentially the same list
 the deterministic pass already had — leaving concept-skills (techniques, methods,
 architectures) that live ONLY in project/experience prose unextracted

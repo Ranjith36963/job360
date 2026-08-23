@@ -1,6 +1,6 @@
 """Ghost-listing state machine (Pillar 3 Batch 1).
 
-Per docs/research/pillar_3_batch_1.md §3, 18-22% of job postings are ghosts
+Per docs/product/research/pillar_3_batch_1.md §3, 18-22% of job postings are ghosts
 (listings that stay visible but are no longer being recruited for). This
 module provides the pure-function state transition logic; the integration
 with scrape loops lives in `src.main` via the `JobDatabase.update_last_seen`

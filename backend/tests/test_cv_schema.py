@@ -131,12 +131,46 @@ def test_adapter_flattens_education_lines():
     cv = cv_schema_to_cvdata(schema, raw_text="")
     # ONE entry per degree, combining degree + institution + dates so the
     # "Education: N" stat counts qualifications, not lines. Coursework/thesis
-    # details are NOT flattened in (each was a separate fake "education entry").
+    # details are NOT flattened into THIS list (each was a separate fake
+    # "education entry") — they get their own shelf, checked below.
     assert len(cv.education) == 1
     entry = cv.education[0]
     assert "BSc CS" in entry and "MIT" in entry and "2018-2022" in entry
     assert "Thesis: NN" not in entry
     assert "Neural Networks" not in cv.education
+    # Finding 7 (Pillar-1 closeout audit) — the dissertation/coursework/project
+    # sub-bullets were prompted for, schema-validated, and then dropped on the
+    # floor. They now land on their own shelf instead of vanishing.
+    assert cv.cv_education_details == ["Thesis: NN", "Neural Networks", "Machine Learning"]
+
+
+def test_adapter_flattens_education_details_across_multiple_degrees():
+    """Two degrees, each with its own details — order preserved, nothing
+    dropped, and no cross-contamination between degrees."""
+    schema = CVSchema.model_validate({
+        "education": [
+            {"degree": "BSc CS", "institution": "MIT", "dates": "2014-2018",
+             "details": ["Thesis: distributed systems"]},
+            {"degree": "MSc AI", "institution": "Edinburgh", "dates": "2019-2020",
+             "details": ["Coursework: reinforcement learning", "Project: RL agent for Atari"]},
+        ]
+    })
+    cv = cv_schema_to_cvdata(schema, raw_text="")
+    assert cv.cv_education_details == [
+        "Thesis: distributed systems",
+        "Coursework: reinforcement learning",
+        "Project: RL agent for Atari",
+    ]
+
+
+def test_adapter_education_details_empty_when_none_stated():
+    """No details on any degree → empty shelf, not a crash (rule #29 shape:
+    absence must not fabricate anything)."""
+    schema = CVSchema.model_validate({
+        "education": [{"degree": "BA History", "institution": "Leeds", "dates": "2010-2013"}]
+    })
+    cv = cv_schema_to_cvdata(schema, raw_text="")
+    assert cv.cv_education_details == []
 
 
 def test_adapter_surfaces_career_domain_string():

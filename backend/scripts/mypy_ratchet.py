@@ -74,6 +74,8 @@ def run_mypy() -> str:
         cwd=BACKEND,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout + proc.stderr
 
@@ -137,7 +139,26 @@ def write_baseline(counts: Dict[Signature, int]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--update", action="store_true", help="regenerate the baseline (only to record FIXES)")
+    ap.add_argument(
+        "--count",
+        action="store_true",
+        help="print the baseline's total error count and exit (no mypy run)",
+    )
     args = ap.parse_args()
+
+    if args.count:
+        # THE ONLY FUNCTION THAT TURNS mypy_baseline.txt INTO A NUMBER.
+        # scripts/merge_cage.py used to re-implement this by counting non-blank
+        # lines, and reported 4 errors for a file of four comments whose last
+        # line reads "# total errors: 0". A ratchet must never re-implement its
+        # consumer's parser, so the consumer exposes the number instead.
+        # Missing baseline exits non-zero: unknown is never a value, and "0"
+        # would be the BEST possible answer to a question we could not ask.
+        if not BASELINE.exists():
+            print(f"no baseline at {BASELINE} — cannot count", file=sys.stderr)
+            return 1
+        print(sum(load_baseline().values()))
+        return 0
 
     current = parse(run_mypy())
     total = sum(current.values())

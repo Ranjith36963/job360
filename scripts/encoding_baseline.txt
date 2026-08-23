@@ -1,0 +1,21 @@
+# Files that decode with the machine's locale, and how many calls each.
+# The count may only go DOWN. A file not listed may have zero.
+# Regenerate deliberately, never to silence a new finding.
+backend/scripts/eval_v2_bias.py 3
+backend/scripts/eval_v2_converge.py 3
+backend/scripts/eval_v2_pool.py 2
+backend/scripts/judge_fake_profiles.py 1
+backend/scripts/judge_two_real.py 1
+backend/scripts/judge_v2.py 1
+backend/scripts/judge_v2_multi.py 3
+backend/scripts/panel_analysis.py 3
+backend/scripts/prep_fake_profiles.py 1
+backend/scripts/prep_two_real.py 1
+backend/scripts/rater_panel.py 3
+backend/scripts/score_fake_profiles.py 1
+backend/scripts/score_two_real.py 1
+backend/scripts/score_v2.py 3
+backend/scripts/score_v2_judgestab.py 2
+backend/scripts/score_v2_seedstab.py 1
+backend/scripts/verify_migration_race.py 4
+backend/scripts/verify_step_0.py 2

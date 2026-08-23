@@ -866,6 +866,79 @@ def test_matcher_text_survives_a_bare_profile():
     assert profile_to_matcher_text(_Empty()) == ""
 
 
+def test_matcher_text_widens_judge_with_github_and_typed_skills():
+    """FINDING 5 (HIGH). The judge truncated every repo description to [:200]
+    and never saw github_bio, github_profile_readme, repo topics/README
+    excerpts, or additional_skills (skills the user typed himself). The owner
+    leans heavily on GitHub and has said twice that budget is not a
+    constraint — so the judge must see all of it, uncut."""
+    long_desc = "A production RAG pipeline serving real traffic. " * 6
+    assert len(long_desc) > 200, "test setup: description must exceed the old cap"
+
+    class _CV3:
+        job_titles = ["AI Engineer"]
+        github_bio = "Backend engineer building agentic systems in London."
+        github_profile_readme = "### About me\nI ship production LLM pipelines."
+        github_repos_brief = [{
+            "name": "rag-pipeline",
+            "description": long_desc,
+            "topics": ["nlp", "rag", "langchain"],
+            "readme_excerpt": "This repo implements retrieval-augmentation used in prod.",
+        }]
+
+    class _Prefs3:
+        additional_skills = ["Terraform", "Kubernetes"]
+
+    class _P3:
+        cv_data = _CV3()
+        preferences = _Prefs3()
+
+    txt = profile_to_matcher_text(_P3())
+
+    assert long_desc.strip() in txt, (
+        "repo description was cut short — the [:200] truncation must be gone"
+    )
+    assert "nlp" in txt and "rag" in txt and "langchain" in txt, (
+        "repo topics never reached the judge"
+    )
+    assert "retrieval-augmentation used in prod" in txt, (
+        "repo README excerpt never reached the judge"
+    )
+    assert "Backend engineer building agentic systems" in txt, (
+        "github_bio never reached the judge"
+    )
+    assert "ship production LLM pipelines" in txt, (
+        "github_profile_readme never reached the judge"
+    )
+    assert "Terraform" in txt and "Kubernetes" in txt, (
+        "additional_skills (typed by the user himself) never reached the judge"
+    )
+
+
+def test_matcher_text_empty_github_and_skills_stay_silent():
+    """CONTROL (rule #29) — unset github_bio/README/repos/additional_skills
+    must never emit a stray label or placeholder text. Guards against a fix
+    that always prints 'GitHub bio: ' even when there is nothing to say."""
+    class _CV4:
+        job_titles = ["AI Engineer"]
+        github_bio = ""
+        github_profile_readme = ""
+        github_repos_brief = []
+
+    class _Prefs4:
+        additional_skills = []
+
+    class _P4:
+        cv_data = _CV4()
+        preferences = _Prefs4()
+
+    txt = profile_to_matcher_text(_P4())
+    assert "GitHub bio" not in txt
+    assert "GitHub profile README" not in txt
+    assert "Built (GitHub)" not in txt
+    assert "typed by the user" not in txt
+
+
 @pytest.mark.asyncio
 async def test_deep_bench_judges_below_the_window(stage_db, monkeypatch):
     """THE DEEP BENCH (2026-08-07). The window judges what the user sees and
