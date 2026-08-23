@@ -244,7 +244,11 @@ REGISTRY: dict[str, Guard] = {
         # have refused six of six and been switched off in a week. "63 real
         # findings still exit 0" is drilled as a NEGATIVE CONTROL, held to the
         # same standard as the deliberate breaks — teeth here are a regression.
-        # 9/9 as of the commit that added it. Network-free: runs off a recorded
+        # 12/12 as of PR #346. CodeRabbit caught this line claiming 9/9 when
+        # self_drill() already appended 10 results — a declared count that
+        # drifts is the registry telling a story about a guard instead of
+        # measuring it. Cases 10 and 11 (the truncation refusal and its
+        # negative control) took it to 12. Network-free: runs off a recorded
         # GraphQL payload in scripts/fixtures/review_threads/.
         drill=[sys.executable, "scripts/review_debt.py", "--drill"],
     ),

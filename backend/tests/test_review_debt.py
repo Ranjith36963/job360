@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -344,21 +345,72 @@ def test_outdated_is_a_hint_never_a_closure():
 # ── 4. It must never become a gate ─────────────────────────────────────────
 
 
-def test_findings_do_not_fail_the_run(capsys):
+def test_findings_do_not_fail_the_run(capsys, payload):
     """63 findings, exit 0. All six merged PRs with findings merged anyway; a
-    gate here would have refused six of six and been switched off in a week."""
+    gate here would have refused six of six and been switched off in a week.
+
+    CodeRabbit: this used to end `assert "63" in out`, which the report satisfies
+    seven times over in discussion URLs alone (`.../pull/336#discussion_r379...`).
+    It would have passed against a header reading `0 unresolved threads`. The
+    count is now read out of the header LINE and compared against the findings
+    the parser actually produced, so the number has to be the reader's number.
+    """
     rc = rd.main(["--fixture", str(FIXTURE), "--against", "worktree"])
     out = capsys.readouterr().out
     assert rc == 0, "the reader reports debt; it does not refuse anything"
-    assert "63" in out
+
+    header = out.splitlines()[0]
+    m = re.match(r"review debt: (\d+) unresolved threads across (\d+) pull requests",
+                 header)
+    assert m, f"the header did not render at all: {header!r}"
+
+    expected = len(rd.parse_payload(
+        json.loads(FIXTURE.read_text(encoding="utf-8")),
+        tree=rd.Tree.for_ref(rd.ROOT, "worktree"),
+    ))
+    assert int(m.group(1)) == expected, (
+        f"header says {m.group(1)} threads, the parser found {expected}"
+    )
+    assert int(m.group(1)) > 0, "a report of zero debt would pass every other assert here"
 
 
-def test_a_broken_pipe_does_fail_the_run(tmp_path):
+def test_a_malformed_payload_does_fail_the_run(tmp_path):
     """The exit code is about the READER. A payload it cannot parse is a real
-    failure — 'not checked' must never render as 'nothing found'."""
+    failure — 'not checked' must never render as 'nothing found'.
+
+    CodeRabbit: renamed. This was called `test_a_broken_pipe_does_fail_the_run`
+    and fed a payload missing `reviewThreads`, which is the `MalformedPayload`
+    branch of `parse_payload` — nowhere near a `BrokenPipeError`. A test whose
+    name claims one failure mode and exercises another is a claim of coverage
+    that nothing backs. The real pipe case is the test below.
+    """
     bad = tmp_path / "bad.json"
     bad.write_text('{"pullRequests": [{"number": 1}]}', encoding="utf-8")
     assert rd.main(["--fixture", str(bad), "--against", "worktree"]) != 0
+
+
+def test_a_broken_pipe_does_fail_the_run(tmp_path, monkeypatch, capsys):
+    """A closed stdout must not render as a clean run.
+
+    `review_debt.py | head -20` closes the pipe once head has its lines; Python
+    then raises BrokenPipeError out of `print`. If that escapes as an unhandled
+    traceback the shell still sees a non-zero status, which is correct — but if
+    anything ever wraps the render in a bare `except`, the reader would exit 0
+    having printed nothing, and 'no output' reads as 'no debt'. This pins the
+    non-zero exit for the pipe path specifically, which the malformed-payload
+    test above never touched despite carrying its name.
+    """
+    real_print = print
+
+    def exploding_print(*args, **kwargs):
+        if kwargs.get("file") in (None, sys.stdout):
+            raise BrokenPipeError(32, "Broken pipe")
+        return real_print(*args, **kwargs)
+
+    monkeypatch.setitem(rd.__builtins__ if isinstance(rd.__builtins__, dict)
+                        else rd.__builtins__.__dict__, "print", exploding_print)
+    with pytest.raises(BrokenPipeError):
+        rd.main(["--fixture", str(FIXTURE), "--against", "worktree"])
 
 
 def test_a_sanitiser_breach_fails_the_run(monkeypatch):

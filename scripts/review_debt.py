@@ -555,6 +555,31 @@ def render_prompt(findings: list[Finding]) -> str:
 # Live collection.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _refuse_if_truncated(pr: dict) -> None:
+    """Refuse a PR whose review threads did not all fit in one page.
+
+    CodeRabbit: the query asks for `reviewThreads(first:60)` and fetches
+    `totalCount` — and then never compared them. A PR with 61+ inline
+    threads silently lost the rest, so THIS TOOL, whose entire job is to
+    report review debt, under-reported it and exited 0.
+
+    Refusing rather than paginating is the same call `merge_cage.check_review`
+    already makes on its own `hasNextPage`: a partial list must never be
+    judged as complete, and a debt number that is quietly low is worse than
+    no number, because it is trusted. `main()` catches MalformedPayload and
+    exits 1 with "'not checked' is not 'nothing found'".
+    """
+    threads = pr["reviewThreads"]
+    total = threads.get("totalCount")
+    read = len(threads["nodes"])
+    if total is not None and total > read:
+        raise MalformedPayload(
+            f"PR #{pr.get('number')} has {total} review threads and only {read} "
+            f"were read — the reader would have under-reported this PR's debt. "
+            f"FIX: raise `reviewThreads(first:)` above {total}, or page it."
+        )
+
+
 _QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
   repository(owner:$owner,name:$name){
@@ -594,14 +619,24 @@ def fetch_live(owner: str, name: str, max_pages: int = 20) -> dict:
             page = json.loads(proc.stdout)
         except json.JSONDecodeError as exc:
             raise MalformedPayload(f"`gh api graphql` returned non-JSON: {exc}") from exc
+        # CodeRabbit: every index below used to sit OUTSIDE this try, so a
+        # page missing `nodes`, `pageInfo` or `reviewThreads` died with a
+        # traceback instead of the typed refusal main() knows how to report.
+        # A reader that crashes and one that finds nothing look different to
+        # a human and identical to a `|| true` in a workflow.
         try:
             conn = page["data"]["repository"]["pullRequests"]
+            page_prs = conn["nodes"]
+            has_next = conn["pageInfo"]["hasNextPage"]
+            next_cursor = conn["pageInfo"]["endCursor"]
+            for pr in page_prs:
+                _refuse_if_truncated(pr)
         except (KeyError, TypeError) as exc:
             raise MalformedPayload(f"unexpected GraphQL shape: {json.dumps(page)[:200]}") from exc
-        prs.extend(conn["nodes"])
-        if not conn["pageInfo"]["hasNextPage"]:
+        prs.extend(page_prs)
+        if not has_next:
             break
-        cursor = conn["pageInfo"]["endCursor"]
+        cursor = next_cursor
     return {"pullRequests": [p for p in prs if p["reviewThreads"]["nodes"]]}
 
 
@@ -811,6 +846,32 @@ def self_drill() -> int:
     same = [(x.thread_id, x.bucket, x.severity) for x in parse_payload(p, tree=tree)] == \
            [(x.thread_id, x.bucket, x.severity) for x in base]
     results.append(("NEGATIVE CONTROL: renaming every PR title changes no verdict", same, ""))
+
+    # 10. A PR whose review threads did not all fit in one page must be REFUSED,
+    #     not silently truncated. `reviewThreads(first:60)` fetched `totalCount`
+    #     and never compared it, so a PR with 61+ threads lost the rest and this
+    #     tool — whose only job is to report review debt — under-reported it and
+    #     exited 0. Found by CodeRabbit on PR #346.
+    truncated = {"number": 999, "reviewThreads": {"totalCount": 61, "nodes": [{"id": "x"}]}}
+    refused = False
+    try:
+        _refuse_if_truncated(truncated)
+    except MalformedPayload:
+        refused = True
+    results.append(("a PR with more threads than were read is REFUSED, not truncated",
+                    refused, "61 threads reported, 1 read, and it did not refuse"))
+
+    # 11. NEGATIVE CONTROL: the refusal must not fire when the page IS complete,
+    #     or the reader refuses every run and gets switched off — which is how
+    #     a fail-closed guard becomes a no-op guard.
+    complete = {"number": 998, "reviewThreads": {"totalCount": 2, "nodes": [{"id": "a"}, {"id": "b"}]}}
+    quiet = True
+    try:
+        _refuse_if_truncated(complete)
+    except MalformedPayload:
+        quiet = False
+    results.append(("NEGATIVE CONTROL: a complete page is not refused", quiet,
+                    "refused a page that held every thread"))
 
     print()
     for name, ok, detail in results:
