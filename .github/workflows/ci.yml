@@ -190,6 +190,8 @@ jobs:
       - name: Every slack step passes a token, a title and a real channel
         run: python scripts/check_workflow_slack_wiring.py
 
+      - name: The review-debt reader can still fail (and still refuses to gate)
+        run: python scripts/review_debt.py --drill
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

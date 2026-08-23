@@ -232,6 +232,26 @@ REGISTRY: dict[str, Guard] = {
         # any change is not a checker. Offline: no token, no network.
         drill=[sys.executable, "scripts/slack_transition.py", "--drill"],
     ),
+    "scripts/review_debt.py": Guard(
+        status="drilled",
+        # Reads unresolved CodeRabbit threads. Two failure modes, both drilled.
+        # (1) It handles untrusted text: 55 of 63 unresolved comment bodies
+        # carry a `Prompt for AI Agents` block — imperative instructions aimed
+        # at an agent, sitting in a pull request. The drill plants an injection
+        # four ways and demands none reach a model.
+        # (2) It must NEVER become a gate. All six merged PRs with findings
+        # merged with them open, so a threads-must-be-resolved condition would
+        # have refused six of six and been switched off in a week. "63 real
+        # findings still exit 0" is drilled as a NEGATIVE CONTROL, held to the
+        # same standard as the deliberate breaks — teeth here are a regression.
+        # 12/12 as of PR #346. CodeRabbit caught this line claiming 9/9 when
+        # self_drill() already appended 10 results — a declared count that
+        # drifts is the registry telling a story about a guard instead of
+        # measuring it. Cases 10 and 11 (the truncation refusal and its
+        # negative control) took it to 12. Network-free: runs off a recorded
+        # GraphQL payload in scripts/fixtures/review_threads/.
+        drill=[sys.executable, "scripts/review_debt.py", "--drill"],
+    ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
         # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the

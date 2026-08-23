@@ -139,3 +139,94 @@ jobs:
               echo "- #$num GREEN (awaiting the author's merge — not the shepherd's call) — $title" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
+
+  # ─── Review debt ───────────────────────────────────────────────────────────
+  # The sweep above watches PRs that are still OPEN. This watches the findings
+  # nobody watched: 43 of 63 unresolved CodeRabbit threads sit on PRs that
+  # ALREADY MERGED, and on this repo a merge auto-deploys — so those shipped to
+  # real users with nobody answering. Nothing read them because nothing was
+  # pointed at them.
+  #
+  # It is a REPORT, deliberately. Findings go to fix-now (the PR is still open),
+  # owner-decides (it merged and the code it names is still on main), or
+  # stale-and-closeable (that file or line is gone — the one thing a machine may
+  # decide alone). It opens nothing, closes nothing, fixes nothing, and blocks
+  # no merge. All six merged PRs that carried findings merged with them open, so
+  # a gate here would have refused six of six.
+  #
+  # It goes red only when the READER fails — API unreachable, payload
+  # unparseable, or untrusted review text reaching the exit door. "Not checked"
+  # is not "passed". This workflow gates nothing, so a red costs a look and
+  # cannot block anyone's merge.
+  #
+  # SEPARATE JOB, and that is the point: the shepherd job above has no checkout
+  # step, so a `run: python scripts/...` bolted onto it would have died on a
+  # missing file every single night — a report that never reports, which is the
+  # exact shape of the ten guards that shipped unable to fire. The drill
+  # registry would NOT have caught it either: it resolves script references
+  # against the REPO, not against what the runner actually has on disk.
+  review-debt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # This job only READS: the repo on disk and the PR list through the API. It
+    # inherited the workflow's four write scopes because nothing said otherwise.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # CodeRabbit: this job authenticates `gh` through GH_TOKEN, never
+          # through the git credential helper, so the checkout was leaving a
+          # token in .git/config that no step uses. zizmor flags it artipacked.
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # CodeRabbit, and it is the ELEVEN FALSE CLOSURES waiting to happen again.
+      # The comment below `--against HEAD` claims "both triggers check out the
+      # DEFAULT BRANCH, so HEAD here IS main". That is true for `schedule` and
+      # FALSE for `workflow_dispatch`, which can name any ref — and dispatch is
+      # this workflow's own drill entrance, so it is the trigger most likely to
+      # be fired by hand. Run it from a feature branch and every merged finding
+      # whose code has not landed there yet reads `stale-and-closeable`: the
+      # reader would invent closures exactly as it did the first time.
+      #
+      # It FAILS rather than skips. A silent skip would satisfy the branch
+      # ruleset with a green tick while reporting no debt, and this file's own
+      # HONESTY RULE says silent skipping is how queues rot.
+      - name: Refuse to read debt from a non-default ref
+        run: |
+          set -euo pipefail
+          want="${{ github.event.repository.default_branch }}"
+          got="${{ github.ref_name }}"
+          if [ "$got" != "$want" ]; then
+            echo "::error::review-debt ran on '$got', not the default branch"
+            echo "::error::'--against HEAD' assumes HEAD is $want. From another"
+            echo "::error::ref, merged findings read stale-and-closeable and the"
+            echo "::error::reader invents closures. FIX: dispatch it on $want."
+            exit 1
+          fi
+          echo "ref is $got — the default branch, so --against HEAD means $want"
+
+      - name: Unanswered review findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Review debt"
+            echo '```'
+            # --against HEAD, not origin/main: this workflow only runs on a
+            # schedule or a dispatch, and both check out the DEFAULT BRANCH, so
+            # HEAD here IS main — the tree merged findings actually shipped to.
+            # Naming origin/main instead would depend on the remote-tracking ref
+            # surviving a shallow checkout, and if it did not, every anchor would
+            # silently read "unknown" and the stale bucket would look empty.
+            python scripts/review_debt.py \
+              --owner "${GITHUB_REPOSITORY%%/*}" \
+              --name  "${GITHUB_REPOSITORY##*/}" \
+              --against HEAD
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
