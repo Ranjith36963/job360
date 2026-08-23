@@ -331,7 +331,30 @@ def discover(github_dir: Path) -> dict[str, set[str]]:
         # `_invokes_cage` in gate_wiring_check.py.)
         if wf.name == "merge-policy.yml":
             continue
-        text = wf.read_text(encoding="utf-8", errors="replace")
+        # A SCRIPT NAMED IN A COMMENT IS NOT A GUARD THAT RUNS.
+        #
+        # Fourth instance of one confusion in this repo, found four different
+        # ways: `gate_wiring_check` counted a filename inside an `echo`; this
+        # function counted one inside merge-policy.yml (see above); the lane
+        # matcher counted a basename at any depth; and this line counted a
+        # filename inside a YAML COMMENT.
+        #
+        # Measured on PR #344's tree: `check_workflow_slack_wiring.py` had 0 real
+        # invocations and 3 comment mentions; `check_alert_paths.py` had 0 and 2.
+        # Both were therefore DECLARED as guards, and the registry certified two
+        # guards that nothing runs -- exactly the failure it exists to prevent.
+        # Worse, one of them had been promoted from `owed` to `drilled` on the
+        # strength of that phantom wiring.
+        #
+        # Comment stripping is deliberately line-based and dumb: a line whose
+        # first non-space character is `#` is a comment. YAML has no block
+        # comments, and `#` inside a quoted string is not a script reference, so
+        # the crude rule is exact here. It is NOT applied to shell heredocs
+        # inside `run:` blocks, where a `#` line is still shell comment anyway.
+        text = "\n".join(
+            "" if line.lstrip().startswith("#") else line
+            for line in wf.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
         for m in _SCRIPT_REF.finditer(text):
             found.setdefault(m.group(1), set()).add(wf.relative_to(github_dir).as_posix())
     return found
@@ -527,6 +550,32 @@ def self_drill() -> int:
                         "" if not f else f"expected silence, got: {f[0][:120]}"))
         wf.unlink()
 
+    # 5b. A SCRIPT NAMED ONLY IN A COMMENT IS NOT WIRED.
+    #     Found on PR #344: `check_workflow_slack_wiring.py` had 0 real
+    #     invocations and 3 comment mentions; `check_alert_paths.py` had 0 and
+    #     2. Both were therefore treated as wired, declared as guards, and this
+    #     registry certified two guards that NOTHING RUNS -- the exact failure
+    #     it exists to prevent. One had even been promoted from `owed` to
+    #     `drilled` on the strength of that phantom wiring.
+    #
+    #     Both directions are asserted, because a comment-stripper that ate
+    #     real `run:` lines would be the worse bug: it would silently
+    #     UN-declare working guards, and nothing would notice.
+    with tempfile.TemporaryDirectory() as td2:
+        ghd = Path(td2) / ".github" / "workflows"
+        ghd.mkdir(parents=True)
+        (ghd / "wf.yml").write_text(
+            "jobs:\n  a:\n    steps:\n"
+            "      # python scripts/phantom_guard.py --drill  <- a comment\n"
+            "      - run: python scripts/real_guard.py   # trailing comment\n",
+            encoding="utf-8")
+        seen = discover(Path(td2) / ".github")
+        results.append(("a script named ONLY in a comment is not counted as wired",
+                        "scripts/phantom_guard.py" not in seen,
+                        "a commented-out reference was treated as an invocation"))
+        results.append(("...and a real `run:` invocation is still found",
+                        "scripts/real_guard.py" in seen,
+                        "the comment stripper ate a real invocation"))
     # 6. A drill that does not actually make its guard go red must be caught by
     #    run_drills. Point an entry at a command that exits 0 doing nothing.
     fake = {"scripts/chain_check.py": Guard(status="drilled",
