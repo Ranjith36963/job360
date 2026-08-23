@@ -213,6 +213,45 @@ REGISTRY: dict[str, Guard] = {
         # switched off. Offline and network-free; it reads a recorded snapshot.
         drill=[sys.executable, "scripts/ruleset_gate.py", "--drill"],
     ),
+    "scripts/check_alert_paths.py": Guard(
+        status="drilled",
+        # Guards the two properties an alerting path must have: it may not flip
+        # the verdict of the work it describes (a failing mid-job Slack step
+        # makes `failure()` true for every later step), and it may not die with
+        # the step it quotes (a gh 403 means the output never exists, every
+        # branch skips, and the outage goes unannounced). Both were live bugs
+        # here. Brute-forces the gate expressions rather than pattern-matching a
+        # known-bad string, so a NEW way of writing the same bug is still caught.
+        drill=[sys.executable, "scripts/check_alert_paths.py", "--drill"],
+    ),
+    "scripts/check_workflow_slack_wiring.py": Guard(
+        status="drilled",
+        # Checks the CALLERS, not the sender: every slack step passes a token, a
+        # non-empty title and a real channel, and every `run:` block still parses
+        # under `bash -n`.
+        #
+        # WAS `owed`, on a WINDOWS measurement. The drill applies 3 mutations and
+        # re-runs the whole check for each, ~300 `bash -n` spawns a pass. On
+        # Windows one pass measured ~150s and three could not finish inside
+        # DRILL_TIMEOUT_S (240s); reproduced here, it blew past a 120s ceiling.
+        # The budget is enforced where CI runs it -- on Linux, where a spawn costs
+        # orders of magnitude less. Promoted rather than accepted as debt, because
+        # `owed drills` may only FALL and leaving it owed takes the count 15 -> 16.
+        # CI's `--run-drills` is the proof: if Linux cannot finish it either, that
+        # step goes red and the claim is withdrawn.
+        drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"],
+    ),
+    "scripts/slack_transition.py": Guard(
+        status="drilled",
+        # The volume rule: announce the TRANSITION, not the state. Its drill
+        # breaks the decision table three ways — red->red starts announcing (the
+        # spam bug), red->green goes silent (he never learns it recovered), and
+        # an unreadable previous state gets GUESSED instead of refused — and
+        # each must go red. Plus a negative control (reword a human-readable
+        # reason string) that must stay quiet, because a checker that fires at
+        # any change is not a checker. Offline: no token, no network.
+        drill=[sys.executable, "scripts/slack_transition.py", "--drill"],
+    ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
         # Born from the cage crashing on 3 of 6 PRs: text=True decodes with the

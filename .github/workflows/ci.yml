@@ -183,6 +183,17 @@ jobs:
         run: python scripts/ruleset_gate.py --drill
       - name: Would the ruleset wedge the repo?
         run: python scripts/ruleset_gate.py --check --scope ruleset
+      # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
+      # from commented-out example lines, so `drill_registry.discover()` counted
+      # them as invoked and certified two guards that NOTHING RAN. #362 taught
+      # discover() to ignore comments, which turned them into STALE ENTRY --
+      # correctly. The fix is to invoke them, not to un-declare them.
+      - name: Every alert path still reaches a human
+        run: python scripts/check_alert_paths.py
+
+      - name: Every slack step passes a token, a title and a real channel
+        run: python scripts/check_workflow_slack_wiring.py
+
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

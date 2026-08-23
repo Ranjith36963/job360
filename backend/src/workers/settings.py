@@ -37,6 +37,8 @@ from src.workers.tasks import (
     nightly_ghost_sweep,
     notification_tick,
     refresh_catalog,
+    rescore_backfill,
+    rescore_user_feed_task,
     score_and_ingest,
     send_bundle,
     send_notification,
@@ -118,11 +120,13 @@ async def worker_startup(ctx: dict[str, Any]) -> None:
     conn.row_factory = pg.Row
     ctx["db"] = conn
 
-    async def _enqueue(function_name: str, *args: object) -> object:
+    async def _enqueue(function_name: str, *args: object, **kwargs: object) -> object:
+        # **kwargs is load-bearing, not decoration: ``rescore_backfill`` passes
+        # ``_job_id=`` so a re-run cannot double-queue work ARQ already holds.
         redis = ctx.get("redis")
         if redis is None:  # defensive — real ARQ always injects redis
             raise RuntimeError("worker enqueue called before redis was injected")
-        return await redis.enqueue_job(function_name, *args)
+        return await redis.enqueue_job(function_name, *args, **kwargs)
 
     ctx["enqueue"] = _enqueue
 
@@ -156,6 +160,12 @@ class WorkerSettings:
         refresh_catalog,
         # Self-heal enrichment coverage of the candidate pool
         enrichment_sweep,
+        # Issue #271 — a profile save queues this instead of firing a
+        # fire-and-forget task in the web process that a deploy then kills.
+        rescore_user_feed_task,
+        # The one-off debt drainer for the 9,708 already-stale feed rows.
+        # Enqueued DELIBERATELY (see its docstring) — never on a cron.
+        rescore_backfill,
     ]
 
     # Lifecycle hooks — open/close the DB connection tasks read from ``ctx['db']``
