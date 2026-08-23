@@ -254,10 +254,18 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     # ONE entry per degree — "degree — institution | dates" combined on a single
     # line so the "Education: N" stat counts qualifications, not lines. The
     # per-degree DETAILS (coursework, thesis, project bullets) are NOT flattened
-    # in — each was becoming its own "education entry", inflating the count to a
-    # meaningless number (28 for a 2-degree CV). Details stay in raw_text.
+    # into THIS list — each was becoming its own "education entry", inflating
+    # the count to a meaningless number (28 for a 2-degree CV).
     # (Education is NOT a CV-highlight source, so combining is display-safe.)
     education_lines: list[str] = []
+    # Finding 7 (Pillar-1 closeout audit, 2026-08-16) — until now the per-degree
+    # DETAILS above (dissertation title, coursework, course project) were
+    # prompted for and schema-validated (``EducationEntry.details``) and then
+    # discarded right here — "stay in raw_text" was the whole treatment, i.e.
+    # unreadable by anything downstream. Flattened across every degree, in
+    # order, onto their own shelf instead — kept OUT of ``education_lines`` so
+    # the "Education: N" stat keeps counting qualifications, not lines.
+    education_details: list[str] = []
     for edu in schema.education:
         parts: list[str] = []
         if edu.degree:
@@ -269,6 +277,7 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
             parts.append(inst)
         if parts:
             education_lines.append(" — ".join(parts))
+        education_details.extend(edu.details)
 
     return CVData(
         raw_text=raw_text,
@@ -297,4 +306,5 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
         cv_right_to_work=(schema.right_to_work or "").strip(),
         cv_projects=[p for p in (schema.projects or []) if isinstance(p, dict)],
         cv_skills_esco=cv_skills_esco,
+        cv_education_details=education_details,
     )

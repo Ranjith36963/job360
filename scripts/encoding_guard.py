@@ -15,12 +15,17 @@ answering.
 
 The same door exists on `open()` and `Path.read_text()` with no `encoding=`.
 
-WHY A GUARD AND NOT JUST TEN FIXES
------------------------------------
-Ten instances were live across seven files when this was written. Fixing ten and moving
-on is what this repo already did with log injection -- SEVEN instances of one bug class
-reached production because nothing stopped the second one. A bug class with many copies
-and no guard is a bug class that will have more copies.
+WHY A GUARD AND NOT JUST FORTY-TWO FIXES
+----------------------------------------
+The baseline shipped beside this file (scripts/encoding_baseline.txt) lists 18 files and
+36 calls, and this PR fixes 6 more in backend/scripts/mypy_ratchet.py,
+scripts/checker_scorecard.py, scripts/doc_clutter_check.py, scripts/watchdog_check.py and
+scripts/chain_check.py. So the real number is about 42, not the ten this paragraph used
+to claim -- a figure that contradicted the baseline committed alongside it. Corrected
+because the argument gets STRONGER with the true number: fixing forty-two by hand and
+moving on is what this repo already did with log injection, where SEVEN instances of one
+bug class reached production because nothing stopped the second one. A bug class with
+many copies and no guard is a bug class that will have more copies. (CodeRabbit, PR #336.)
 
 CI runs on Linux, where the locale is usually UTF-8, so these mostly do NOT fail there.
 That is exactly what makes them dangerous: the failure appears only on the owner's
@@ -70,6 +75,21 @@ def _kw_is_true(call: ast.Call, name: str) -> bool:
     return False
 
 
+def _has_real_encoding(node: "ast.Call") -> bool:
+    """Is there an `encoding=` that actually names a codec?
+
+    `_has_kw` answered "is the keyword present", which is a different question:
+    `encoding=None` is present AND is the locale default, so the very bug this
+    guard hunts could be written out in full and pass. Anything that is not a
+    literal None counts -- a variable or a call cannot be judged statically, and
+    guessing in the strict direction would fire on correct code.
+    """
+    for k in node.keywords:
+        if k.arg == "encoding":
+            return not (isinstance(k.value, ast.Constant) and k.value.value is None)
+    return False
+
+
 def _call_name(call: ast.Call) -> str:
     """Dotted name of the thing being called, e.g. `subprocess.run` or `open`."""
     node: ast.expr = call.func
@@ -82,12 +102,43 @@ def _call_name(call: ast.Call) -> str:
     return ".".join(reversed(parts))
 
 
+def _subprocess_bindings(tree: "ast.AST") -> tuple[set[str], set[str]]:
+    """Which names in THIS file actually refer to subprocess?
+
+    Returns (module aliases, directly-imported function names). A guard that
+    matches on the trailing call name alone cannot tell `subprocess.run` from
+    `client.run`, and cannot see `from subprocess import run as sprun` at all.
+    """
+    mods: set[str] = set()
+    funcs: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "subprocess" or a.name.startswith("subprocess."):
+                    mods.add(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for a in node.names:
+                if a.name in {"run", "check_output", "Popen", "check_call"}:
+                    funcs.add(a.asname or a.name)
+    return mods, funcs
+
+
+def _is_subprocess_call(name: str, mods: set[str], funcs: set[str]) -> bool:
+    """Does this dotted call name resolve to subprocess in this file?"""
+    if "." not in name:
+        return name in funcs
+    head, _, tail = name.rpartition(".")
+    return head in mods and tail in {"run", "check_output", "Popen", "check_call"}
+
+
 def scan_file(path: Path) -> list[tuple[int, str]]:
     """Every call in this file that decodes bytes without saying how."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
     except SyntaxError as exc:
         return [(exc.lineno or 0, f"could not parse: {exc.msg}")]
+
+    mods, funcs = _subprocess_bindings(tree)
 
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -97,9 +148,20 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
 
         # subprocess.run/check_output/Popen with text=True (or universal_newlines)
         # and no explicit codec.
-        if name.split(".")[-1] in {"run", "check_output", "Popen", "check_call"}:
+        #
+        # RESOLVE THE CALL TO subprocess FIRST. Matching on the trailing name
+        # alone was wrong in both directions: `client.run(text=True)` is not a
+        # subprocess call and became a false finding -- which the baseline then
+        # turned into a NEW FILE regression on correct code -- while
+        # `from subprocess import run as sprun` was never detected at all. The
+        # first direction gets a guard switched off; the second is the bug
+        # walking straight past it. (CodeRabbit, PR #336.)
+        if _is_subprocess_call(name, mods, funcs):
             decodes = _kw_is_true(node, "text") or _kw_is_true(node, "universal_newlines")
-            if decodes and not _has_kw(node, "encoding"):
+            # `encoding=None` IS the locale default -- it is the exact bug this
+            # guard exists for, written explicitly. Accepting any `encoding=`
+            # keyword let it through silently. (CodeRabbit, PR #336.)
+            if decodes and not _has_real_encoding(node):
                 out.append((node.lineno,
                             f"`{name}(text=True)` decodes with the machine's locale. On "
                             f"Windows that is cp1252 and any non-ASCII byte raises inside "
@@ -109,12 +171,20 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
         # open(...) / Path.read_text() with no encoding, in read-text mode.
         tail = name.rsplit(".", 1)[-1]
         if name == "open" or tail in {"read_text", "write_text"}:
-            if not _has_kw(node, "encoding"):
-                # `open(p, "rb")` is bytes and therefore fine.
+            if not _has_real_encoding(node):
+                # `open(p, "rb")` is bytes and therefore fine -- and so is
+                # `open(p, mode="rb")`. Only positional args were inspected, so
+                # the keyword spelling read as TEXT mode, produced a finding, and
+                # the baseline turned that into a NEW FILE regression on correct
+                # code. A detector that goes red on correct code gets switched
+                # off, which costs more than the bug it was chasing.
+                # (CodeRabbit, PR #336.)
+                mode_kw = next((k.value for k in node.keywords if k.arg == "mode"), None)
                 binary = any(
                     isinstance(a, ast.Constant) and isinstance(a.value, str) and "b" in a.value
                     for a in node.args[1:2]
-                )
+                ) or (isinstance(mode_kw, ast.Constant)
+                      and isinstance(mode_kw.value, str) and "b" in mode_kw.value)
                 if not binary:
                     out.append((node.lineno,
                                 f"`{name}(...)` with no encoding= reads with the machine's "
@@ -139,6 +209,33 @@ def run(root: Path, extra_skip: set[str] | None = None) -> list[str]:
     return findings
 
 
+def compare_to_baseline(by_file: dict[str, list[str]],
+                        base: dict[str, int]) -> list[str]:
+    """The half of this guard that can actually FAIL CI. Pure, so it is drillable.
+
+    It used to live inline in main(). The drill therefore only ever called run()
+    and inspected findings, while the two branches that return 1 -- NEW FILE and
+    the count regression -- were never exercised. If load_baseline() mis-parsed a
+    line, or these keys stopped matching baseline keys (by_file splits on the
+    first ":", the baseline stores bare paths), the guard would print
+    "0 regressions" and CI would stay green for the wrong reason.
+
+    Extracted so the drill tests THIS rather than a re-implementation of it: a
+    self-test that recomputes the comparison it is checking proves only that it
+    agrees with itself. (CodeRabbit, PR #336.)
+    """
+    regressions: list[str] = []
+    for path, hits in sorted(by_file.items()):
+        allowed = base.get(path)
+        if allowed is None:
+            detail = "\n      ".join(h.split("  ", 1)[1][:110] for h in hits[:2])
+            regressions.append(
+                f"NEW FILE {path} has {len(hits)} locale-decoded call(s):\n      {detail}")
+        elif len(hits) > allowed:
+            regressions.append(f"{path} went {allowed} -> {len(hits)}; the count may only fall")
+    return regressions
+
+
 def self_drill() -> int:
     """Break it on purpose. A guard nobody has watched fail cannot be trusted."""
     import tempfile
@@ -146,6 +243,15 @@ def self_drill() -> int:
     print("DRILL - planting locale-decoded reads. The guard must name each one.")
     print("=" * 72)
     cases = [
+        # RESOLUTION, BOTH DIRECTIONS (CodeRabbit, PR #336). Matching the
+        # trailing call name alone missed this one entirely.
+        ("an ALIASED subprocess import is still subprocess",
+         "from subprocess import run as sprun\nsprun(['ls'], text=True)\n",
+         "locale"),
+        # THE TWO GAPS CodeRabbit FOUND ON PR #336, one in each direction.
+        ("encoding=None is the locale default written out in full",
+         "import subprocess\nsubprocess.run(['ls'], text=True, encoding=None)\n",
+         "locale"),
         ("subprocess text=True with no codec",
          "import subprocess\nsubprocess.run(['ls'], capture_output=True, text=True)\n",
          "locale"),
@@ -164,6 +270,18 @@ def self_drill() -> int:
          "import subprocess\nsubprocess.run(['ls'], text=True, encoding='utf-8')\n"),
         ("NEGATIVE: binary mode needs no codec",
          "open('x.bin', 'rb').read()\n"),
+        # A DETECTOR THAT FIRES ON CORRECT CODE GETS SWITCHED OFF, so the
+        # absence of a finding is drilled as hard as its presence. Only
+        # POSITIONAL args were inspected, so the keyword spelling read as text
+        # mode and the baseline turned it into a NEW FILE regression on code
+        # that was already right. (CodeRabbit, PR #336.)
+        # ...and the mirror. `client.run(text=True)` is not a subprocess call;
+        # reporting it made the baseline raise a NEW FILE regression on correct
+        # code, which is how a detector gets switched off.
+        ("NEGATIVE: an unrelated .run(text=True) is not subprocess",
+         "client = make()\nclient.run(text=True)\n"),
+        ("NEGATIVE: keyword mode='rb' is binary, not a finding",
+         "data = open('x', mode='rb').read()\n"),
         ("NEGATIVE: read_text WITH a codec",
          "from pathlib import Path\nPath('x').read_text(encoding='utf-8')\n"),
     ]
@@ -190,6 +308,35 @@ def self_drill() -> int:
             print(f"         CAUGHT -> {detail[:130]}")
         elif not ok and detail:
             print(f"         {detail[:160]}")
+
+    # THE BRANCH THAT ACTUALLY FAILS CI, DRILLED AT LAST. Everything above
+    # calls run() and reads findings -- but run() never returns an exit code.
+    # What turns this guard red is compare_to_baseline(), and until now nothing
+    # exercised it. A mis-parsed baseline line, or by_file keys drifting away
+    # from baseline keys (by_file splits on the first ":", the baseline stores
+    # bare paths), would have printed "0 regressions" and gone green for the
+    # wrong reason. Both failing branches are now driven directly, against a
+    # baseline built in memory so no file on disk is touched.
+    # (CodeRabbit, PR #336.)
+    _base = {"scripts/known.py": 2}
+    _hit = "scripts/known.py:10  subprocess.run(x, text=True)"
+
+    results.append((
+        "a baselined file that GAINS a call is a regression",
+        bool(compare_to_baseline({"scripts/known.py": [_hit, _hit, _hit]}, _base)),
+        "2 -> 3 was accepted; the ratchet does not ratchet"))
+
+    results.append((
+        "an UNLISTED file with a call is a NEW FILE regression",
+        any("NEW FILE" in r for r in
+            compare_to_baseline({"scripts/ghost.py": [_hit]}, _base)),
+        "an unbaselined file slipped through as if it were allowed"))
+
+    results.append((
+        "a baselined file at or BELOW its count is not a regression",
+        not compare_to_baseline({"scripts/known.py": [_hit, _hit]}, _base),
+        "a file that held its count was reported as a regression -- and a guard "
+        "that goes red on correct code gets switched off"))
 
     n = sum(1 for _, ok, _ in results if ok)
     print()
@@ -226,15 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     base = load_baseline()
-    regressions: list[str] = []
-    for path, hits in sorted(by_file.items()):
-        allowed = base.get(path)
-        if allowed is None:
-            detail = "\n      ".join(h.split("  ", 1)[1][:110] for h in hits[:2])
-            regressions.append(
-                f"NEW FILE {path} has {len(hits)} locale-decoded call(s):\n      {detail}")
-        elif len(hits) > allowed:
-            regressions.append(f"{path} went {allowed} -> {len(hits)}; the count may only fall")
+    regressions = compare_to_baseline(by_file, base)
 
     improved = [f"{p}: {c} -> {len(by_file.get(p, []))}"
                 for p, c in sorted(base.items()) if len(by_file.get(p, [])) < c]

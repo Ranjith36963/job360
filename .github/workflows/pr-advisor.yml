@@ -1,0 +1,518 @@
+name: PR advisor (the cage advises, it never merges)
+
+# WHAT THIS REPLACES, AND WHY
+# ---------------------------
+# `auto-merge.yml` used to live here. It could not run at all — scheduled
+# workflows only run from the default branch and it was never on main — its
+# `AUTO_MERGE_ENABLED` variable did not exist, and as written it refused 100% of
+# PRs because it passed no `--baseline` (blocker log entry B18). Three ways off.
+# Nothing about its behaviour had ever been observed.
+#
+# It was also aimed at a problem the owner does not have. Measured over the last
+# 60 merged PRs: median time from opened to merged is 12.9 minutes, 39 of 60
+# merged inside 30 minutes, and in 25 of the last 25 merges the final check run
+# completed BEFORE `mergedAt`. He already waits for green. Automating that click
+# saves ~13 minutes of wall clock on work he is standing next to, and saves zero
+# attention. Meanwhile the cage's PATH cage allows 2 of those 60 PRs (3%) — I
+# re-ran that here on 2026-08-17 and got the same two, #265 and #274 — because
+# his merge stream IS product code and the cage's allow list is docs and tests.
+#
+# So this lane keeps the cage and drops the merge. On every PR it posts ONE
+# comment saying which of the files in front of him is the one that is actually a
+# decision, and labels the PR. 100% traffic, zero deploy risk.
+#
+# WHY `pull_request` AND NOT A SCHEDULE
+# The whole point is that the advice arrives BEFORE the merge, which is the only
+# moment anything can still change. Measured on PR #337: merged 15:16:24, users
+# on the new code 15:18:38, CI finished 15:22:17 — four minutes after the users.
+#
+# THE THREE CHECKOUTS, AND WHY EACH ONE IS A DIFFERENT TREE
+# --------------------------------------------------------
+# This is the part the first version got wrong, and gate_wiring_check rule G5
+# now catches it at lint time:
+#
+#   ROOT   the DEFAULT BRANCH -> the RULES. A PR must not supply the code that
+#          judges it. The old version checked out `refs/pull/N/merge` at the
+#          root and ran that copy of merge_cage.py, and its own header called
+#          that an acceptable trade because the lane merges nothing. It is still
+#          the wrong shape, and it hid a worse defect: the next step ran
+#          `cd _base && python scripts/merge_cage.py --measure` inside a
+#          checkout of `main`, WHERE THAT FILE DOES NOT EXIST. Measured
+#          2026-08-17: `git ls-tree origin/main scripts/merge_cage.py` is empty.
+#          The lane could only ever fail on a main-based PR.
+#   _pr    `refs/pull/N/merge` -> the tree that would actually ship. Its numbers
+#          are read via `--tree`, never its code.
+#   _base  the PR's base ref -> the numbers to compare against. A ratchet
+#          measured on the same tree twice compares a value to itself.
+#
+# HONEST BOUND, STATED ON PURPOSE
+# Measuring a tree means RUNNING that tree's ratchet scripts, so a PR that edits
+# `scripts/` or `backend/scripts/` gets its own code executed here. That is the
+# same trust model as any CI that runs a PR's tests, and it is contained twice:
+# this lane merges nothing, and the PATH cage refuses `scripts/**` outright, so
+# such a PR is refused whatever its numbers say.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # The drill entrance. Two loops in this repo were dead on arrival on main and
+  # only firing them on purpose revealed it, so every loop gets a door you can
+  # open by hand.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to advise on"
+        required: true
+
+concurrency:
+  group: pr-advisor-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # BOOTSTRAP, SAID OUT LOUD — AND IT STANDS DOWN RATHER THAN FAILING.
+  #
+  # Until the cage is on the default branch there is no trustworthy source of
+  # rules, and the honest answer is to refuse to judge rather than fall back to
+  # the PR's own copy — falling back is exactly what rule G5 forbids.
+  #
+  # The refusal used to `exit 1` inside `advise`. That is a THIRD wrong answer
+  # next to the two it was avoiding:
+  #
+  #   green  "I judged it and it is fine"         — a lie; nothing was checked
+  #   red    "something is wrong with this PR"    — also a lie; the PR is fine
+  #   grey   "I could not judge, and here is why" — the truth
+  #
+  # Observed 2026-08-21: six PRs (#347 #348 #353 #355 #356 #357) each carried a
+  # red X for this, and on a phone the checks list is one tick or one cross. Six
+  # PRs looked broken because a check correctly declined to run. An alarm that
+  # cries wolf gets muted, and a muted alarm is worse than none, because the repo
+  # still looks watched.
+  #
+  # WHY THIS IS A SEPARATE JOB AND NOT AN `if:` ON A STEP. A job whose steps all
+  # skip still reports SUCCESS — a green tick claiming a judgement that never
+  # happened, which is the worst of the three. Only a skipped JOB reports grey,
+  # and only a job-level `if:` on `needs` can skip one.
+  #
+  # NOT A BYPASS: `merge_cage.py` counts a SKIPPED check as a pass only for an
+  # OPTIONAL check. `Advise` is not in REQUIRED_CHECKS, and if it were ever added
+  # there, a skipped run would correctly refuse. And this gate opens by itself the
+  # moment the cage lands — there is nothing to remember to switch back on.
+  precheck:
+    name: Are the rules available yet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.look.outputs.ready }}
+    # LEAST PRIVILEGE, EXPLICITLY. This job only asks whether a file exists on
+    # the default branch. It was inheriting the workflow's `pull-requests: write`
+    # and letting checkout persist credentials into .git/config, so a job that
+    # needs to read one path could have written to PRs. (CodeRabbit, PR #357.)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: look
+        run: |
+          set -euo pipefail
+          if [ -f scripts/merge_cage.py ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "The cage is on the default branch; the advisor will judge." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Advisor stood down — nothing was checked"
+              echo
+              echo "scripts/merge_cage.py is not on the default branch yet, so there is no"
+              echo "source of rules this PR cannot edit. Falling back to the PR's own copy is"
+              echo "exactly what rule G5 forbids, so this lane declines to judge."
+              echo
+              echo "Expected until the cage lands. Reported as SKIPPED, not FAILED, because the"
+              echo "PR is not at fault — a red X here made six PRs look broken when none were."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  advise:
+    name: Advise (never merges)
+    needs: precheck
+    if: needs.precheck.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Which PR
+        id: pick
+        env:
+          FROM_EVENT: ${{ github.event.pull_request.number }}
+          FROM_INPUT: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          pr="${FROM_EVENT:-$FROM_INPUT}"
+          if [ -z "$pr" ]; then
+            echo "::error::no PR number — this workflow cannot guess one."
+            exit 1
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      # THE RULES. From the default branch, which the PR cannot edit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # THE TREE UNDER JUDGEMENT — the PR merged into its base, which is what
+      # would actually ship, not the PR's head, which has never been combined
+      # with anything.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ steps.pick.outputs.pr }}/merge
+          path: _pr
+
+      # THE BASELINE TREE.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          path: _base
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Proving the cage still refuses on purpose costs seconds and is the only
+      # thing standing between "there is a cage" and "the cage works".
+      - name: The cage still refuses — and can still allow
+        run: python scripts/merge_cage.py --drill
+
+      - name: The merge wiring is still in a place it could stop something
+        run: python scripts/gate_wiring_check.py
+
+      - name: Measure the baseline on the PR's base
+        id: base
+        run: |
+          set -euo pipefail
+          echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
+
+      - name: Judge, and write the advice
+        id: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.pick.outputs.pr }}
+          BASE_JSON: ${{ steps.base.outputs.json }}
+        run: |
+          set -euo pipefail
+          set +e
+          python scripts/merge_cage.py "$PR" \
+            --baseline "$BASE_JSON" \
+            --tree _pr \
+            --advise advice.md \
+            --verdict-json verdict.json
+          rc=$?
+          set -e
+          # merge_cage's exit codes are a TYPED channel, one meaning each. 0 and 1
+          # are both VERDICTS here — this lane merges nothing, so "ask the owner"
+          # is a normal, successful outcome and must not fail the job. 3 and 4
+          # mean the cage could not judge, which is a real failure.
+          case "$rc" in
+            0) echo "label=agent-safe"    >> "$GITHUB_OUTPUT" ;;
+            1) echo "label=owner-decision" >> "$GITHUB_OUTPUT" ;;
+            3) echo "::error::the cage itself broke on PR #$PR — fix merge_cage.py."; exit 1 ;;
+            4) echo "::error::merge_cage was called wrongly on PR #$PR."; exit 1 ;;
+            *) echo "::error::merge_cage exited $rc on PR #$PR — an undefined code."; exit 1 ;;
+          esac
+          if [ ! -s advice.md ]; then
+            # An empty advice file would post an empty comment, which reads as
+            # "nothing to say" — the exact shape of a guard reporting success
+            # about a question it never asked.
+            echo "::error::merge_cage produced no advice text; refusing to post silence."
+            exit 1
+          fi
+
+      # ONE comment, updated in place. A new comment per push turns advice into
+      # noise, and noise is what gets muted. The comment id is taken from the
+      # API's own `id` field rather than sliced off the end of a URL string —
+      # the URL shape is GitHub's to change and was the least-tested line here.
+      - name: Post the advice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          LABEL: ${{ steps.judge.outputs.label }}
+        run: |
+          set -euo pipefail
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- merge-cage-advice -->")) | .id] | last // ""')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              -F body=@advice.md >/dev/null
+            echo "updated advice comment $existing"
+          else
+            gh pr comment "$PR" --body-file advice.md
+            echo "posted a new advice comment"
+          fi
+          gh pr edit "$PR" --remove-label agent-safe --remove-label owner-decision 2>/dev/null || true
+          gh pr edit "$PR" --add-label "$LABEL" 2>/dev/null \
+            || echo "::warning::could not set the label $LABEL (it may not exist yet)"
+          {
+            echo "### PR #$PR -> \`$LABEL\`"
+            echo
+            cat advice.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # If the advisor itself dies the PR simply has no comment, and a missing
+      # comment reads as "nothing to flag". Six of seven alarms in this repo sat
+      # unread for days for exactly that reason, so the failure path speaks.
+      - name: Say so if the advisor itself broke
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body "$(printf '%s\n**The merge cage could not judge this PR.** No advice was produced, so the absence of a verdict here means nothing — it is not a clean bill of health. %s' '<!-- merge-cage-advice -->' "$RUN_URL")"
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # THE LANE — the first consumer the separation has ever had.
+  #
+  # Wave 1 moved 109 files so that a file's DIRECTORY would carry its lane.
+  # Then nothing read it. Measured on this branch before this job existed:
+  #
+  #     git grep -n "lane\.py"         -> 2 hits, both self-referential
+  #         .github/merge-policy.yml:211   listing it as an owner-lane path
+  #         scripts/lane.py:223            printing its own name in its drill
+  #     git grep -n "stale_path_check" -> 1 hit, its own drill banner
+  #
+  # No workflow invoked either one. Four lanes, a precedence rule, an
+  # escalation rule and the data exemptions were all PROSE — a map nobody
+  # navigated by. This job is the consumer. It decides nothing and it merges
+  # nothing; on every PR it says which lane the owner is actually standing in.
+  #
+  # WHY A SEPARATE JOB AND NOT TWO MORE STEPS IN `advise`
+  # ----------------------------------------------------
+  # `advise` refuses to judge until the cage is on the default branch, and it
+  # is right to: its bootstrap step exits 1 when `scripts/merge_cage.py` is
+  # missing there. Measured 2026-08-19 — `git ls-tree origin/main
+  # scripts/merge_cage.py` is EMPTY — so that step fails on every PR today and
+  # every step after it is dead. Appending the lane verdict there would have
+  # shipped it stillborn, which is the exact failure this repo keeps
+  # re-learning: an artifact with no notifier dies.
+  #
+  # The lane verdict needs none of that machinery — just `lane.py`, the policy
+  # file, and a list of filenames. So it gets its own job, and it starts
+  # working the moment those two files reach the default branch.
+  # ═════════════════════════════════════════════════════════════════════════
+  lane:
+    name: Which lane (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Which PR
+        id: pick
+        env:
+          FROM_EVENT: ${{ github.event.pull_request.number }}
+          FROM_INPUT: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          pr="${FROM_EVENT:-$FROM_INPUT}"
+          if [ -z "$pr" ]; then
+            echo "::error::no PR number — this workflow cannot guess one."
+            exit 1
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      # THE RULES. From the default branch, which the PR cannot edit. Same
+      # discipline as `advise`, for the same reason: a PR must never supply the
+      # code that classifies it, or the classification is its own author's
+      # opinion wearing a CI badge.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # THE TREE UNDER JUDGEMENT — the PR merged into its base. Full history,
+      # because the rename detection below diffs base against merged and a
+      # shallow clone cannot answer that question at all.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ steps.pick.outputs.pr }}/merge
+          fetch-depth: 0
+          path: _pr
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # `lane.py` imports PyYAML; `merge_cage.py` does not, so the `advise` job
+      # above never needed it. Left implicit, its absence would have surfaced
+      # here on the first real PR as a traceback nobody was watching for.
+      - name: The classifier's one dependency
+        run: python -m pip install --quiet pyyaml
+
+      # BOOTSTRAP, SAID OUT LOUD — and the reason this job still runs today.
+      # Until `lane.py` and the policy are on the default branch there is no
+      # trustworthy source of lanes. The honest answer is to SAY SO in the
+      # comment: not to fall back to the PR's own copy (rule G5 forbids it),
+      # and not to stay quiet (silence reads as "nothing to flag", which is how
+      # six of seven alarms in this repo went unread for days).
+      - name: Can the lane map be trusted yet?
+        id: rules
+        run: |
+          set -euo pipefail
+          if [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the lane map is not on the default branch yet — no lane verdict is possible, and its absence is not a clean bill of health."
+          fi
+
+      # The changed-file list comes from GitHub's own record, not from either
+      # checkout, so neither tree can shade it.
+      - name: Which files changed
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
+            --jq '.[].path' > changed.txt
+          echo "--- changed files ---"
+          cat changed.txt
+
+      # ADVISORY ON PURPOSE, AND ONLY FOR NOW. A brand-new guard that hard-fails
+      # every PR on day one is how guards get switched off permanently, so the
+      # first landing cannot block. The verdict is posted either way; what
+      # `continue-on-error` buys is that a bug in ME never stops the owner.
+      - name: Which lane is this PR in
+        id: classify
+        if: steps.rules.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # No --base/--head deliberately: without two revisions `lane.py` skips
+          # the data exemptions, which is its own documented STRICT default. An
+          # exemption can only ever LOOSEN a lane, so the safe direction when
+          # this job cannot verify one is to withhold it.
+          python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
+
+      # RUN THE RULES' COPY OF THE SCRIPT, AGAINST THE PR'S TREE. Both halves
+      # matter. Pointing `--repo` at the default-branch checkout instead would
+      # compare that branch to itself, find zero renames, print "no stale
+      # references" and mean nothing — a guard reporting success about a
+      # question it never asked, which is the defect this repo has shipped ten
+      # times over.
+      - name: Did anything keep pointing at a path this PR moved
+        id: stale
+        if: steps.rules.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          base_sha=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.sha')
+          set +e
+          python scripts/stale_path_check.py --repo _pr --base "$base_sha" --head HEAD > stale.txt 2>&1
+          rc=$?
+          set -e
+          cat stale.txt
+          # 0 clean · 1 real stale references · 2 could not measure. 2 is NOT a
+          # pass and must never be rendered as one.
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      # ONE comment, updated in place, under its own marker so this job and the
+      # cage's advisor never overwrite each other. `always()` because the case
+      # most worth reporting is the one where a step above fell over.
+      - name: Post the lane verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          READY: ${{ steps.rules.outputs.ready }}
+          STALE_RC: ${{ steps.stale.outputs.rc }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          out = ["<!-- lane-advice -->", "### Which lane is this PR in", ""]
+          ready = os.environ.get("READY") == "true"
+          branch = os.environ.get("DEFAULT_BRANCH") or "the default branch"
+
+          if not ready:
+              out += [
+                  f"**No verdict — the lane map is not on `{branch}` yet.**",
+                  "",
+                  "`scripts/lane.py` and `.github/merge-policy.yml` are the only trustworthy",
+                  "source of lanes, and a PR may not supply the code that judges it. Until they",
+                  "land, this section is blank because it *could not look* — not because there",
+                  "was nothing to see.",
+              ]
+          else:
+              verdict = pathlib.Path("verdict.json")
+              if not verdict.is_file():
+                  out += [
+                      "**The classifier did not produce a verdict.**",
+                      "",
+                      "That is a failure of this job, not a clean bill of health.",
+                      f"[Run log]({os.environ.get('RUN_URL', '')})",
+                  ]
+              else:
+                  data = json.loads(verdict.read_text(encoding="utf-8"))
+                  lane = data.get("lane", "?")
+                  auto = "yes" if data.get("auto_merge") else "no"
+                  out += [
+                      f"**lane: `{lane}`** · a machine may merge it: **{auto}**",
+                      "",
+                      "Why:",
+                  ]
+                  out += [f"- {w}" for w in data.get("why") or []]
+                  requires = data.get("requires") or []
+                  if requires:
+                      out += ["", "Green before this may merge: "
+                              + ", ".join(f"`{r}`" for r in requires)]
+                  if data.get("watch_minutes"):
+                      out.append(
+                          f"After the merge this lane is WATCHED for "
+                          f"{data['watch_minutes']} minutes; the undo is "
+                          f"`{data.get('rollback')}`."
+                      )
+
+              rc = os.environ.get("STALE_RC") or ""
+              report = pathlib.Path("stale.txt")
+              body = report.read_text(encoding="utf-8").strip() if report.is_file() else ""
+              out += ["", "### Did anything keep pointing at a path this PR moved"]
+              if rc == "0":
+                  out.append("No stale references. The move is finished.")
+              elif rc == "1":
+                  out += ["**Something still names a path this PR renamed.**",
+                          "", "```", body, "```"]
+              elif rc == "2":
+                  out += ["**Could not measure.** Not a pass — the checker could not look.",
+                          "", "```", body, "```"]
+              else:
+                  out.append(f"The checker reached no verdict (rc={rc or 'none'}). Not a pass.")
+
+          out += ["", "_Advisory only. This lane comments; it never merges._"]
+          pathlib.Path("lane-advice.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+          print("\n".join(out))
+          PY
+
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- lane-advice -->")) | .id] | last // ""')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              -F body=@lane-advice.md >/dev/null
+            echo "updated lane comment $existing"
+          else
+            gh pr comment "$PR" --body-file lane-advice.md
+            echo "posted a new lane comment"
+          fi
+          cat lane-advice.md >> "$GITHUB_STEP_SUMMARY"

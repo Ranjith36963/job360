@@ -1,0 +1,240 @@
+name: Verify (the eyes)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE BLIND SPOT THIS CLOSES
+#
+# The old cage judged a change by its FILENAME. Its own comment admits the
+# limit, on `backend/src/api/routes/profile.py`:
+#
+#   "a per-user API route — a filename cannot tell a logging fix from a
+#    removed `Depends(require_user)`."
+#
+# That sentence is true, and the conclusion drawn from it was wrong. The cage
+# concluded "so refuse the file". The right conclusion is "so ASK SOMETHING
+# THAT CAN SEE IT."
+#
+# Something that can see it already existed in this repo, unconnected:
+#
+#   backend/tests/test_route_auth_coverage.py
+#     enumerates EVERY route out of the routers in a clean subprocess and fails
+#     unless each one either reaches `require_user` / `require_verified_user` /
+#     `optional_user`, or is on an explicit PUBLIC_ROUTES list.
+#
+# A removed `Depends(require_user)` cannot survive that test. So the file does
+# not need to be denied — it needs that test to be a REQUIRED TAG. That is all
+# this workflow is.
+#
+# THE GENERAL RULE, worth more than this one file:
+#
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │  A DENY IS A DEBT, NOT A VERDICT.                                   │
+#   │  Every denied path must name the test that would let it out.        │
+#   │  No such test = write it. Test exists = connect it and open the door│
+#   └─────────────────────────────────────────────────────────────────────┘
+#
+# HONESTY
+# No model participates in this workflow. There is nothing here to persuade.
+# Every tag is an exit code from a process that ran the real thing. The verdict
+# is a check run named `verify`, and a missing `verify` is NOT a pass — the
+# merge cage treats absence as "wait", never as "fine".
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {} # drill entrance — every guard must be fireable on demand
+
+concurrency:
+  group: verify-live-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # BACKEND EYES — boot the real app against a real Postgres and ask it
+  # questions a filename cannot answer.
+  # ───────────────────────────────────────────────────────────────────────
+  backend-eyes:
+    name: verify / backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Mirrors ci.yml's Backend job exactly. NOT re-invented: a verifier that
+    # stands somewhere different from CI answers a different question, and then
+    # the two disagree and you trust neither.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports: ["5432:5432"]
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports: ["6379:6379"]
+
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-test-secret-not-used-in-prod
+      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # ── The four questions a path cage cannot ask ────────────────────────
+      # Each one is an EXISTING test file. Nothing is invented here; the whole
+      # point is that the answers were already sitting in the repo unread.
+
+      - name: "Q1 — is every route still auth-classified on purpose?"
+        working-directory: backend
+        run: python -m pytest tests/test_route_auth_coverage.py -q -p no:randomly
+
+      - name: "Q2 — can one user still reach another user's data?"
+        working-directory: backend
+        run: python -m pytest tests/test_api_idor.py tests/test_tenancy_isolation.py -q -p no:randomly
+
+      - name: "Q3 — do the owner's product rules still hold?"
+        working-directory: backend
+        run: |
+          if [ -f tests/test_design_rules.py ]; then
+            python -m pytest tests/test_design_rules.py -q -p no:randomly
+          else
+            echo "::notice::test_design_rules.py absent on this branch — rules #29-31 unenforced here"
+          fi
+
+      - name: "Q4 — does a whole user journey still work end to end?"
+        working-directory: backend
+        run: python -m pytest tests/test_e2e_lifecycle.py -q -p no:randomly
+
+  # ───────────────────────────────────────────────────────────────────────
+  # FRONTEND EYES — a real Chromium clicks the real buttons.
+  #
+  # You asked how I would honestly check the frontend. This is the answer, and
+  # it is not "I looked at the code and it seems fine": Playwright drives a
+  # PRODUCTION build (`playwright.config.ts` deliberately does not use `npm run
+  # dev` — dev-mode per-route compilation blew the 30s timeout on CI runners).
+  #
+  # 13 specs already exist. They cover login, the dashboard, job rendering,
+  # sorting, uploads, the pipeline, sharing, settings, and — the one that
+  # matters most — two-account isolation.
+  #
+  # When it fails, the trace and the screenshot are uploaded. That is the
+  # honesty mechanism: you do not have to take my word for what the page looked
+  # like, you can open the picture.
+  # ───────────────────────────────────────────────────────────────────────
+  frontend-eyes:
+    name: verify / frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Drive the real browser
+        working-directory: frontend
+        run: npx playwright test
+
+      # ── WHAT THIS EYE CANNOT SEE ────────────────────────────────────────
+      # Four specs are quarantined with `test.fixme` (dashboard-sort x2,
+      # landing-cta sign-in redirect, tailor-cv dialog). A green `verify`
+      # therefore does NOT mean those four flows work — it means every
+      # UNQUARANTINED spec passed. Printing the bound is the point: a verdict
+      # from a narrower test than it implies is misinformation, and this is the
+      # cheapest place to say so out loud.
+      - name: State the coverage bound
+        if: always()
+        working-directory: frontend
+        run: |
+          fixmes=$(grep -rlc "test.fixme" tests/e2e/ 2>/dev/null | wc -l || echo "?")
+          {
+            echo "### frontend eye — coverage bound"
+            echo ""
+            echo "Spec files containing a quarantined (\`test.fixme\`) case: **$fixmes**"
+            echo ""
+            echo "A green verify covers every spec that RAN. It says nothing about the"
+            echo "quarantined ones. Do not read this tag as 'the frontend works'."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-frontend-evidence-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────
+  # THE TAG
+  #
+  # One check run the merge cage can require by name. It is green only if BOTH
+  # eyes are green. `if: always()` plus an explicit result test, because a
+  # skipped job reports neither success nor failure and a naive `needs:` would
+  # let a skip read as a pass — the exact shape of bug that shipped ten
+  # unfireable guards here before.
+  # ───────────────────────────────────────────────────────────────────────
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    needs: [backend-eyes, frontend-eyes]
+    if: always()
+    steps:
+      - name: Decide
+        run: |
+          be='${{ needs.backend-eyes.result }}'
+          fe='${{ needs.frontend-eyes.result }}'
+          echo "backend-eyes=$be  frontend-eyes=$fe"
+          {
+            echo "### verify"
+            echo ""
+            echo "| eye | result |"
+            echo "|---|---|"
+            echo "| backend (routes, IDOR, product rules, journey) | \`$be\` |"
+            echo "| frontend (13 specs, real Chromium) | \`$fe\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$be" != "success" ] || [ "$fe" != "success" ]; then
+            echo "::error::verify is RED — the app was run and it did not behave."
+            exit 1
+          fi
+          echo "verify is GREEN — the app was actually run."

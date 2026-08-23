@@ -5,7 +5,7 @@ name: Checker scorecard (is our judge any good?)
 # is an opinion wearing a badge.
 #
 # This runs the measurement on a schedule and COMMITS the result, so it cannot
-# rot the way docs/maintenance/TELEMETRY.jsonl did: that file was hand-written
+# rot the way docs/harness/maintenance/TELEMETRY.jsonl did: that file was hand-written
 # by agents and died the moment nobody remembered to append. A cron cannot
 # forget. (Our own law: an artifact with no notifier dies.)
 #
@@ -69,7 +69,7 @@ jobs:
             echo '```'
             DATABASE_URL="$PROD_DATABASE_URL" python backend/scripts/shelf_xray.py 2>&1
             echo '```'
-          } >> docs/maintenance/CHECKER-SCORECARD.md
+          } >> docs/harness/maintenance/CHECKER-SCORECARD.md
 
       - name: Measure the checker
         env:
@@ -78,11 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p docs/maintenance
-          python scripts/checker_scorecard.py --days 30 > docs/maintenance/CHECKER-SCORECARD.md
+          python scripts/checker_scorecard.py --days 30 > docs/harness/maintenance/CHECKER-SCORECARD.md
           python scripts/checker_scorecard.py --days 30 --json > /tmp/score.json
           # Append one line to the telemetry log so the TREND survives, not just
           # the latest snapshot. Trend is what tells you if the judge is drifting.
-          python - <<'PY' >> docs/maintenance/TELEMETRY.jsonl
+          python - <<'PY' >> docs/harness/maintenance/TELEMETRY.jsonl
           import json, os, subprocess
           d = json.load(open("/tmp/score.json"))
           d["kind"] = "checker_scorecard"
@@ -91,18 +91,21 @@ jobs:
                                     capture_output=True, text=True).stdout.strip()
           print(json.dumps(d))
           PY
-          cat docs/maintenance/CHECKER-SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
+          cat docs/harness/maintenance/CHECKER-SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
 
-      # The ruleset judge. `main-production-gate` names 11 required checks and
-      # enforces nothing; the question that matters is not "is it on" (one
-      # boolean, passes forever once flipped) but "would every required context
-      # actually be REPORTED, by the app the rule pins, on the commits it will
-      # judge". This re-reads GitHub and REWRITES the recorded snapshot that the
-      # per-PR gate reads offline.
-      #
-      # That makes the refresh itself an absence detector: if this weekly job
-      # stops, the snapshot ages out and `ruleset_gate.py --check` in ci.yml goes
-      # RED on staleness. A stopped loop cannot stay silent.
+      - name: Commit the scorecard
+        run: |
+          set -euo pipefail
+          git config user.name "checker-scorecard"
+          git config user.email "actions@github.com"
+          git add docs/harness/maintenance/CHECKER-SCORECARD.md docs/harness/maintenance/TELEMETRY.jsonl
+          if git diff --cached --quiet; then
+            echo "no change in the scorecard" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf 'chore(harness): weekly blind-checker scorecard\n\nMeasured, not asserted: coverage, verdict mix, and agreement with the human\nmerge decision. Deliberately does NOT publish a catch rate - that needs\nplanted bugs with known answers, and a made-up number is worse than none.\n' > /tmp/sc-msg.txt
+          git commit -F /tmp/sc-msg.txt
+          git push origin HEAD:${{ github.ref_name }}
       - name: Would the ruleset wedge the repo?
         if: ${{ !cancelled() }}
         env:
@@ -116,31 +119,6 @@ jobs:
             python scripts/ruleset_gate.py --live 2>&1
             echo '```'
           } >> docs/maintenance/CHECKER-SCORECARD.md
-
-      - name: Commit the scorecard
-        run: |
-          set -euo pipefail
-          git config user.name "checker-scorecard"
-          git config user.email "actions@github.com"
-          git add docs/maintenance/CHECKER-SCORECARD.md docs/maintenance/TELEMETRY.jsonl
-          git add .github/rulesets/main-gate-snapshot.json
-          if git diff --cached --quiet; then
-            echo "no change in the scorecard" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          printf 'chore(harness): weekly blind-checker scorecard\n\nMeasured, not asserted: coverage, verdict mix, and agreement with the human\nmerge decision. Deliberately does NOT publish a catch rate - that needs\nplanted bugs with known answers, and a made-up number is worse than none.\n' > /tmp/sc-msg.txt
-          git commit -F /tmp/sc-msg.txt
-          git push origin HEAD:${{ github.ref_name }}
-
-      # Deliberately AFTER the commit, and deliberately able to fail. The step
-      # above appends the report inside a `{ ... } >> file` block whose exit
-      # status is the final `echo`, so a wedge finding there is swallowed — the
-      # report would be written and the job would stay green, which is this
-      # repo's signature failure. This step re-reads the freshly written snapshot
-      # (offline, no network) and turns the wedge into a RED build.
-      #
-      # Scope is `all` here, unlike the per-PR gate: this run is FOR the owner,
-      # and the live PR queue is exactly what he can act on.
       - name: A wedge finding must turn this job RED
         if: ${{ !cancelled() }}
         run: python scripts/ruleset_gate.py --check --scope all

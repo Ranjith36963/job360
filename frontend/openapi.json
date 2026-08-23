@@ -206,6 +206,14 @@
             "title": "Cv Experience Level",
             "type": "string"
           },
+          "cv_industries": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cv Industries",
+            "type": "array"
+          },
           "cv_positions": {
             "default": [],
             "items": {
@@ -1593,6 +1601,14 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "search_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Search Titles",
+            "type": "array"
           },
           "skill_esco": {
             "additionalProperties": {
@@ -4894,7 +4910,7 @@
     },
     "/api/profile/linkedin": {
       "post": {
-        "description": "Enrich user profile with a LinkedIn 'Save to PDF' profile export.",
+        "description": "Enrich user profile with a LinkedIn 'Save to PDF' profile export.\n\nFAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`\nfrom `_looks_like_linkedin(text)` alone \u2014 a cheap PRE-extraction heuristic\n(2 of 3 markers: URL / 3+ headings / page footer) \u2014 and return HTTP 200\nwith `merged=True` whenever that heuristic passed, regardless of what the\nreal extraction (deterministic + LLM) actually produced. A layout the\nheuristic likes but the extractor cannot parse told the owner \"LinkedIn\nprofile enriched\" while storing nothing usable. `merged` is now computed\nthe SAME way `has_linkedin` is in `_build_profile_response`:\n`bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER\nextraction runs \u2014 and a merge that yields nothing is a 422, not a 200.",
         "operationId": "upload_linkedin_api_profile_linkedin_post",
         "parameters": [
           {

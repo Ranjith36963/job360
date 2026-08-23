@@ -28,7 +28,10 @@ console = Console()
 def _load_jobs_sync(
     db_path: str | None = None, days: int = 7, min_score: int = 30
 ) -> list[dict[str, Any]]:
-    """Load recent jobs from SQLite synchronously."""
+    """Load recent jobs from Postgres synchronously.
+
+    Returns ``[]`` when the database has no ``jobs`` table to read.
+    """
     path = db_path or str(DB_PATH)
     conn = pgsync.connect(path)
     conn.row_factory = pgsync.Row

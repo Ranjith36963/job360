@@ -137,9 +137,11 @@ include = ["src*"]
 # `signal_backed_lookup` and `detect_seniority` answered UNKNOWN for every job.
 #
 # ANY new shipped data directory must be added here AND live under `src/`.
-# `tests/test_shipped_data.py` derives that rule from `.gitignore` and fails if
-# a committed data directory has no delivery mechanism. Verify by hand after
-# any packaging change with:
+# `tests/test_shipped_data.py` matches EVERY git-tracked file under `src/data/`
+# against the globs below, so an undeclared directory fails — and so does a new
+# EXTENSION in a declared one (`*.txt` and `NOTICE` are all that is listed, so a
+# `uk_places.json` would be dropped from the wheel just as silently).
+# Verify by hand after any packaging change with:
 #   pip wheel . --no-deps -w /tmp/wh
 #   python -c "import zipfile,glob;print('\n'.join(n for n in zipfile.ZipFile(glob.glob('/tmp/wh/job360-*.whl')[0]).namelist() if '/data/' in n))"
 [tool.setuptools.package-data]

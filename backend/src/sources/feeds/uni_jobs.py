@@ -52,6 +52,12 @@ class UniJobsSource(BaseJobSource):
             link = (item.findtext("link") or "").strip()
             description = (item.findtext("description") or "").strip()
             pub_date = (item.findtext("pubDate") or "").strip()
+            apply_online_url = (item.findtext("applyOnlineUrl") or "").strip()
+
+            # applyOnlineUrl (92% fill live) is the direct application form;
+            # <link> is only the listing page. Prefer the direct form, fall
+            # back to the listing when the feed omits it.
+            apply_url = apply_online_url or link
 
             # Use university name as company, or extract department
             company = university
@@ -67,7 +73,7 @@ class UniJobsSource(BaseJobSource):
                 company=company,
                 location="UK",
                 description=description[:5000],
-                apply_url=link,
+                apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
                 posted_at=posted_at,

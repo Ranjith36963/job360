@@ -156,12 +156,42 @@ def repo_root() -> Path:
 #
 #     *            any run of characters, stopping at `/`
 #     **           any run of characters, crossing `/`
-#     **/          zero or more whole directories
-#     no `/` at all   matches the BASENAME at any depth (so `*.md` still works)
+#     **/          zero or more whole directories, INCLUDING none — so a
+#                  `**/`-prefixed pattern matches at the root as well as at depth
 #
 # `*` no longer crossing `/` would have LOOSENED every deny, so every recursive
 # deny was rewritten to `**` in the same commit. The drill checks nested paths
 # under each one.
+#
+# ── THE BASENAME FALLBACK IS GONE (2026-08-20) ───────────────────────────────
+# There used to be a fifth rule: "no `/` at all -> match the BASENAME at any
+# depth". It was written so `*.md` would keep working, and it is why
+# `docs/product/pillars/README.md` classified as lane `harness`, auto_merge TRUE
+# — `README.md` is listed in the fast lane for the ROOT readme, and the fallback
+# quietly extended it to every README in the tree.
+#
+# Note what the old comment two lanes up blamed: "`*` crosses `/`". It does not.
+# `*` compiles to `[^/]*` and stops dead at a slash (see below). The wrong
+# mechanism was written down, so the drill was written to catch the wrong thing
+# and passed. Both are corrected here.
+#
+# WHY DELETING IT IS SAFE, AND WHY IT COULD NOT BE DONE ALONE. `**/` already
+# compiles to `(?:[^/]+/)*` — zero or more whole directories, and *zero* means it
+# still matches at the root. So every pattern that genuinely wanted depth says so
+# now: `**/*.env*`, `**/package.json`, `**/CLAUDE.md`. The fallback expressed
+# nothing that `**/` cannot.
+#
+# The DIRECTIONS ARE NOT SYMMETRIC, which is the whole reason this is one commit:
+#   on ALLOW, an over-wide pattern is fail-OPEN  — it auto-merges something.
+#   on DENY,  an over-wide pattern is fail-CLOSED — it merely asks for a human.
+# So deleting the fallback TIGHTENS allow (good, immediately) and LOOSENS every
+# deny (bad, immediately). Every slash-free DENY entry was rewritten with `**/`
+# in this same commit, and the drill pins a NESTED witness for each one. This is
+# the same hazard, and the same remedy, as the `*`->`**` migration recorded above.
+#
+# The new failure direction is the safe one: a bare name now matches the root
+# only, so a pattern someone forgets to prefix under-matches, the file matches no
+# lane, and it escalates to `product_owner`. Forgetting costs one refusal.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -188,13 +218,17 @@ def _glob_to_re(pattern: str) -> re.Pattern[str]:
 
 
 def path_matches(path: str, pattern: str) -> bool:
-    """Does this repo-relative path match this pattern?"""
-    rx = _glob_to_re(pattern)
-    if rx.match(path):
-        return True
-    if "/" not in pattern:  # a bare name is a basename rule, at any depth
-        return bool(rx.match(path.rsplit("/", 1)[-1]))
-    return False
+    """Does this repo-relative path match this pattern?
+
+    One matcher, one answer. `scripts/lane.py` imports this rather than writing a
+    second one, so a change here changes both classifiers at once.
+
+    A pattern means exactly what it says: it is anchored at the repo root and the
+    only way to reach depth is to ask for it with `**/` or `**`. There is no
+    implicit basename rule — see the note above for why it was removed and what
+    had to move in the same commit.
+    """
+    return bool(_glob_to_re(pattern).match(path))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,10 +279,10 @@ DENY: list[tuple[str, str]] = [
      f"from a removed `Depends(require_user)`. {_OWNER_MERGES}"),
     # ── infrastructure ───────────────────────────────────────────────────────
     ("backend/migrations/**", f"schema change — irreversible against live data. {_OWNER_MERGES}"),
-    ("*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
+    ("**/*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
+    ("**/*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
     ("backend/src/core/settings.py",
      f"flags here change production behaviour globally. {_OWNER_MERGES}"),
     # ── dependency manifests ─────────────────────────────────────────────────
@@ -257,25 +291,25 @@ DENY: list[tuple[str, str]] = [
     # have waved through PR #291 (motion 12.42.2 -> 13.0.0) which
     # dependabot-auto.yml already routes to a human. Manifests also carry
     # postinstall scripts: allowing one is allowing arbitrary code on the build host.
-    ("package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
+    ("**/package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
                      "owns this decision and sends MAJOR bumps to a human; a manifest also "
                      "runs postinstall scripts on the build host. "
                      "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("package-lock.json", "a dependency change — see package.json. "
+    ("**/package-lock.json", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("pyproject.toml", "a dependency change — see package.json. "
+    ("**/pyproject.toml", "a dependency change — see package.json. "
                        "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("requirements*.txt", "a dependency change — see package.json. "
+    ("**/requirements*.txt", "a dependency change — see package.json. "
                           "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
     # ── documents that ARE decisions ─────────────────────────────────────────
     # `docs/**` and `*.md` are allowed, which meant the canonical text of the
     # owner's product rules could ship unsupervised while CLAUDE.md, which merely
     # points AT it, was denied. If a denied file delegates its authority to
     # another file, that file inherits the denial.
-    ("docs/product_design_rules.md",
+    ("docs/product/product_design_rules.md",
      f"the canonical text of owner rules #29/#30/#31 — changing it changes the "
      f"product. {_OWNER_MERGES}"),
-    ("docs/plans/batch-2-decisions.md",
+    ("docs/product/plans/batch-2-decisions.md",
      f"a record of irreversible choices. {_OWNER_MERGES}"),
     # ── the harness must not quietly edit its own cage ───────────────────────
     (".github/**", "part of the harness that judges this very PR — an agent editing its "
@@ -284,7 +318,7 @@ DENY: list[tuple[str, str]] = [
                    f"own guards is how a cage is escaped. {_OWNER_MERGES}"),
     (".claude/**", "the instructions agents read — editing them unsupervised is circular. "
                    + _OWNER_MERGES),
-    ("CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
+    ("**/CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
                   + _OWNER_MERGES),
 ]
 
@@ -299,8 +333,32 @@ ALLOW: list[str] = [
     "frontend/src/**/*.spec.ts",
     "frontend/src/**/*.spec.tsx",
     "frontend/tests/**",
-    "docs/**",
-    "*.md",
+    # ── DOCUMENTS, BY LANE — NOT `docs/**`, AND NEVER `*.md` ─────────────────
+    # Wave 1 moved 109 files so the DIRECTORY carries the lane, and updated the
+    # DENY entries above to the new `docs/product/` paths. It did not touch this
+    # list, so the two classifiers disagreed about the same file: `scripts/lane.py`
+    # escalated `docs/product/PRD.md` to `product_owner` while THIS file — the only
+    # one CI runs, via `pr-advisor.yml` — passed it. Measured on this tree before
+    # the change: of the 45 documents wave 1 moved specifically to protect,
+    # `docs/**` auto-allowed 43. The two the move did protect were protected by
+    # their own DENY lines, not by anything here.
+    #
+    # `*.md` was worse than redundant. `path_matches` treats any SLASH-FREE
+    # pattern as a BASENAME rule at every depth, so `*.md` reached markdown
+    # anywhere in the repo — it is what made those 43 allowable in the first
+    # place, and removing `docs/**` alone would have left them allowed.
+    #
+    # So the lanes are named, and nothing is allowed by being a document:
+    "docs/harness/**",       # the harness's own record. Breaks Ranjith, never a user.
+    # TWO archive spellings, and this is NOT a typo to be collapsed:
+    # `stale_path_check.py:53` already carries both in ARCHIVE_PREFIXES.
+    "docs/_archive/**",
+    "docs/archive/**",
+    "docs/README.md",        # the index over both lanes; `harness` in merge-policy.yml
+    # DELIBERATELY NOT LISTED: `docs/product/**`. Those are the owner's product
+    # decisions, and a document that IS a decision goes to a human. A new document
+    # filed nowhere now matches nothing and escalates, which is the safe direction:
+    # forgetting to classify costs one refusal, never a silent auto-merge.
     "backend/src/api/routes/client_log.py",  # deliberately public: no user scoping
 ]
 
@@ -331,6 +389,11 @@ RATCHETS: list[dict] = [
     {
         "name": "mypy errors",
         "cmd": [sys.executable, "backend/scripts/mypy_ratchet.py", "--count"],
+        # The file AND the flag. `--count` was added by this very branch; on
+        # `main` the script exists and answers `usage: mypy_ratchet.py [-h]
+        # [--update]`. Probing only the file read that as a BROKEN instrument
+        # and refused the PR, when the truth is a MISSING one.
+        "needs": {"file": "backend/scripts/mypy_ratchet.py", "supports": "--count"},
         "direction": "down",
         "scope": "tree",
         "why": "type errors were driven 803 -> 0; nothing may add them back",
@@ -338,11 +401,52 @@ RATCHETS: list[dict] = [
     {
         "name": "guards never watched failing",
         "cmd": [sys.executable, "scripts/drill_registry.py", "--count-owed"],
+        "needs": {"file": "scripts/drill_registry.py", "supports": "--count-owed"},
         "direction": "down",
         "scope": "tree",
         "why": "guards that have never been watched failing are debt; it may only shrink",
     },
 ]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY A RATCHET NEEDS THREE ANSWERS, NOT TWO
+#
+# `measure_ratchets` used to answer "a number, or None". None meant BOTH "the
+# command exists and blew up" and "the command is not in this tree at all", and
+# the second one is not a fault — it is a fact about history. Measured
+# 2026-08-17: `git ls-tree origin/main scripts/drill_registry.py` is EMPTY. The
+# `guards never watched failing` ratchet does not exist on main. So every
+# main-based PR produced `could not be measured` on both sides of the
+# comparison, and an unmeasurable ratchet refuses. That is the same defect shape
+# as the missing --baseline: a refusal about the WIRING wearing the clothes of a
+# refusal about the PR.
+#
+# So three statuses, and the asymmetry is where the safety lives:
+#
+#   ok       a number was measured.
+#   absent   that tree's instrument cannot answer this question at all — the
+#            script is not there, or it is there and does not carry the flag.
+#            Not a fault. Found the hard way on round 2 of the live run:
+#            `backend/scripts/mypy_ratchet.py` IS on main, but `--count` was
+#            added by this branch, so main answers `usage: mypy_ratchet.py [-h]
+#            [--update]`. A file-existence probe read that as a BROKEN
+#            instrument and refused 16 of 16 merged PRs for it. The capability,
+#            not the file, is what has to be probed.
+#   error    the instrument claims to support this and failed anyway. Always a
+#            refusal — this is the real-breakage case, and treating it as
+#            `absent` would be the permissive guess.
+#
+# The capability probe is STATIC (does the file contain the flag?) and never
+# executes anything to decide. Both ways of being wrong fail safe: a flag spelled
+# differently reads as `absent` (and zero comparisons refuses), and a flag that
+# appears only in a comment reads as present, runs, fails, and refuses.
+#
+# base=ok + head=absent REFUSES: that is a PR deleting a ratchet, the one
+# direction that must never be waved through. base=absent + head=absent is NOT
+# APPLICABLE and is NAMED in the verdict, never silently folded into a pass.
+# ─────────────────────────────────────────────────────────────────────────────
+
+R_OK, R_ABSENT, R_ERROR = "ok", "absent", "error"
 
 # The "open security alerts" ratchet was REMOVED, not silently kept. Its command
 # was `gh api repos/<repo>/code-scanning/alerts?state=open` with no `ref`, which
@@ -358,7 +462,36 @@ MAX_CHANGED_FILES = 40
 MAX_CHANGED_LINES = 1200
 PER_PAGE = 100
 
-REQUIRED_CHECKS = ["Backend", "Frontend", "Chain wires", "CodeQL"]
+# EXACT check-run names, matched by EQUALITY. These were substrings, and a
+# substring cuts both ways -- `Frontend` is inside `frontend-e2e`, so:
+#   * a SKIPPED optional `frontend-e2e` was refused as a skipped REQUIRED check;
+#   * a SUCCESSFUL optional `frontend-e2e` satisfied the presence loop below,
+#     so an ABSENT required `Frontend (Node 20)` would have looked present.
+# The second is the dangerous direction and it survived this morning's fix,
+# which only addressed the first. (CodeRabbit, PR #357.)
+#
+# Exact names mean a renamed job reads as ABSENT -- which the presence loop
+# already refuses, loudly, with the real fix. That is the safe way to be wrong.
+REQUIRED_CHECKS = [
+    "Backend (Python 3.12)",
+    "Frontend (Node 20)",
+    "Chain wires (harness)",
+    "CodeQL",
+]
+
+# Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
+# `.github/workflows/codeql.yml` declares `pull_request: branches: ["main"]`, so a
+# stacked PR (base = another feature branch) never gets a `CodeQL` check run at
+# all. Requiring it by name there is an unclearable block — the PR can never
+# satisfy it, no matter what the author does.
+#
+# The fix is NOT to quietly drop it and judge the thinner set as if it were the
+# full one. That would hand out a one-branch bypass of the only check in this
+# repo that reads NEW security alerts from a PR's own diff: base your work off a
+# feature branch and the security question stops being asked, silently. So a
+# non-main base is REFUSED, with the missing check named. Honest and unbypassable.
+MAIN_ONLY_CHECKS = {"CodeQL"}
+MAIN_BRANCH = "main"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,7 +594,51 @@ def check_paths(files: list[str]) -> Verdict:
     )
 
 
-def check_size(n_files: int, n_lines: int, deletions: list[str]) -> Verdict:
+# ── WHAT THE SIZE CAP IS ACTUALLY MEASURING ─────────────────────────────────
+# The cap is a REVIEWABILITY budget: "past this, no reviewer human or machine is
+# actually reading it, they are skimming." So the number it counts must be the
+# number a reviewer has to READ.
+#
+# Recorded fixtures are not that. PR #346 is 3,482 lines, of which 2,120 are one
+# captured GitHub API response -- `scripts/fixtures/review_threads/recorded.json`.
+# Nobody reads a recorded payload line by line; they read the 1,362 lines of code
+# that consume it. Counting the payload against a reading budget measures bytes
+# and calls them review surface. #345 was the same shape: 8,106 of its 9,757 lines
+# were one generated ruleset snapshot.
+#
+# THE OBVIOUS WAY TO GET THIS WRONG is to write "fixtures don't count" and hand
+# out a bypass: drop a 900-line module in `fixtures/` and the cap never sees it.
+# So the rule is deliberately narrow on BOTH axes and it is never silent:
+#
+#   * PATH  — the file must live in a directory literally named `fixtures`.
+#   * TYPE  — and carry a recorded-data extension. Source extensions are NEVER
+#             exempt, wherever they sit. A `.py` under `fixtures/` is code that
+#             happens to be filed oddly, and it counts in full.
+#   * VOICE — the discount is reported in the verdict, every time. An exemption
+#             nobody can see is indistinguishable from a hole.
+_FIXTURE_DIR = "/fixtures/"
+_RECORDED_EXT = (".json", ".txt", ".csv", ".xml", ".har", ".snap")
+
+
+def review_surface(files_json: list[dict]) -> tuple[int, int]:
+    """Split changed lines into (what a reviewer reads, what is recorded data).
+
+    Pure, so the drill tests THIS and not a re-implementation of it.
+    """
+    read = exempt = 0
+    for f in files_json:
+        n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
+        name = str(f.get("filename", ""))
+        recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
+        if recorded:
+            exempt += n
+        else:
+            read += n
+    return read, exempt
+
+
+def check_size(n_files: int, n_lines: int, deletions: list[str],
+               exempt_lines: int = 0) -> Verdict:
     reasons: list[str] = []
     if deletions:
         reasons.append(
@@ -477,18 +654,55 @@ def check_size(n_files: int, n_lines: int, deletions: list[str]) -> Verdict:
             f"{n_lines} lines changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
             f"into PRs under the cap, or the owner merges it by hand.")
     return Verdict("SIZE", "fail" if reasons else "pass", reasons,
-                   claim=f"small enough to reason about ({n_files} files, {n_lines} lines)")
+                   claim=(f"small enough to reason about ({n_files} files, "
+                          f"{n_lines} lines to read"
+                          + (f" + {exempt_lines} recorded-fixture lines not counted"
+                             if exempt_lines else "") + ")"))
 
 
-def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
-    """Pure half of the PROOF cage, so it can be drilled with real shapes."""
+def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BRANCH) -> list[str]:
+    """Pure half of the PROOF cage, so it can be drilled with real shapes.
+
+    `base_ref` is load-bearing, not decoration. Measured 2026-08-17: PRs #343,
+    #344, #345 and #346 all have base `feat/every-guard-declares-its-drill`, and
+    all four are MISSING `Analyze (python)` and `Analyze (javascript-typescript)`
+    on their head SHAs — codeql.yml only fires for main-targeted PRs. The cage
+    judged them against a list containing a check that could not exist, i.e. it
+    refused them for a reason no author could ever clear, while ci.yml and
+    security.yml really did run. Naming the reason is the whole fix.
+    """
     reasons: list[str] = []
+    cannot = ", ".join(sorted(MAIN_ONLY_CHECKS))
+    if not base_ref:
+        # Caught by this file's own drill on the first run: the guard was
+        # `if base_ref and base_ref != MAIN_BRANCH`, so an unreadable base
+        # short-circuited into the branch that judges against the FULL check
+        # list — the permissive guess, in the one place a permissive guess
+        # silently restores a security check that cannot be there.
+        reasons.append(
+            f"I could not read this PR's base branch, so I cannot tell whether it targets "
+            f"`{MAIN_BRANCH}` — and `{cannot}` only runs for main-targeted PRs. An unknown "
+            f"base is not `{MAIN_BRANCH}`; guessing the permissive way is how a check comes "
+            f"back to life on paper. "
+            f"FIX: check `gh pr view <PR> --json baseRefName` returns something, then re-judge.")
+    elif base_ref != MAIN_BRANCH:
+        reasons.append(
+            f"this PR's base is `{base_ref}`, not `{MAIN_BRANCH}`. `{cannot}` only runs for "
+            f"main-targeted PRs (.github/workflows/codeql.yml declares "
+            f"`pull_request: branches: [\"main\"]`), so on this base it cannot exist — and I "
+            f"will not call a thinner check set a pass, because that would make \"branch off "
+            f"a feature branch\" a way to stop the security question being asked. "
+            f"FIX: retarget this PR at `{MAIN_BRANCH}`, or the owner merges the stack by hand.")
     if not runs:
-        return ["NO CHECKS RAN AT ALL. An empty check list is not a pass — it is the "
-                "signature of a PR opened with GITHUB_TOKEN, which GitHub refuses to start "
-                "workflows for. Nothing about this change has been verified. "
-                "FIX: push an empty commit from a human account, or re-run the workflows, "
-                "then re-judge."]
+        # `return reasons + [...]`, never `return [...]`: an early return that drops
+        # a reason already found is how a cage forgets what it knew. The base-ref
+        # finding above must survive to the owner.
+        return reasons + [
+            "NO CHECKS RAN AT ALL. An empty check list is not a pass — it is the "
+            "signature of a PR opened with GITHUB_TOKEN, which GitHub refuses to start "
+            "workflows for. Nothing about this change has been verified. "
+            "FIX: push an empty commit from a human account, or re-run the workflows, "
+            "then re-judge."]
     reasons += page_was_full(len(runs), PER_PAGE, "check-run")
     if total_count and total_count > len(runs):
         reasons.append(f"GitHub reports {total_count} check runs and I received {len(runs)} — "
@@ -497,7 +711,11 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
 
     names = [r.get("name", "") for r in runs]
     for req in REQUIRED_CHECKS:
-        if not any(req.lower() in n.lower() for n in names):
+        # On a non-main base the reason above already says why this one is absent.
+        # Saying it twice, once in a form the author cannot act on, is noise.
+        if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
+            continue
+        if not any(req == n for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
                 f"almost always a stale base: the PR was branched before that check existed. "
@@ -506,11 +724,56 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
     for r in runs:
         name = r.get("name")
         concl = r.get("conclusion")
+        # SKIPPED IS NOT PENDING, BUT FOR A REQUIRED CHECK IT IS NOT A PASS EITHER.
+        # Two true things pulling opposite ways, and this line honoured only one:
+        #   * counting only `success` as green reported 3-6 "pending" checks on
+        #     every PR; all were SKIPPED by a path filter or an `if:` guard, and
+        #     GitHub itself said mergeStateStatus CLEAN. A cage that waits on
+        #     those waits forever and looks exactly like a broken merge queue.
+        #   * a check in REQUIRED_CHECKS that skipped proved NOTHING. The loop
+        #     above already refuses a required check that is ABSENT, on the
+        #     grounds that it "cannot pass by being absent" -- a required check
+        #     that ran and skipped is that same claim wearing a tick.
+        # So the rule is SCOPED, not global: optional checks may skip, required
+        # checks must actually succeed.
+        # (CodeRabbit on PR #336; ported here because this lineage did not have
+        # it and #336's copy of merge_cage.py is being dropped rather than merged.)
+        required = (name or "") in REQUIRED_CHECKS
+
+        # NEVER ANSWERED is a different fact from FAILED, and it is checked FIRST
+        # because it is the more specific one -- and because the required/optional
+        # split below would otherwise swallow it. (`Frontend` substring-matches
+        # `frontend-e2e`, so a cancelled e2e job was being told "make it green".)
+        #
+        # `skipped` and `neutral` are deliberately NOT in this set: they have their
+        # own, different, correct handling below -- skipped is a legitimate pass
+        # for an optional check and a refusal for a required one.
+        no_verdict = concl in ("cancelled", "timed_out", "stale")
+
         if r.get("status") != "completed":
             reasons.append(f"`{name}` has not finished ({r.get('status')}). "
                            f"FIX: wait for it, then re-judge.")
+        elif no_verdict:
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"`{name}` -> {concl}: it never produced a verdict, so this is not a failing "
+                f"test -- it is a MISSING ANSWER, and it still blocks. The usual cause here is "
+                f"a job hitting its `timeout-minutes` or being superseded by a newer push. "
+                f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
+                f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
+                f"not raise the timeout to hide it — {url}".rstrip(" -"))
+        elif required and concl != "success":
+            url = r.get("html_url") or ""
+            reasons.append(
+                f"required check `{name}` -> {concl}, and only `success` counts for a required "
+                f"check -- `{concl}` means it did not prove it ran and passed. FIX: make it "
+                f"actually run and go green, or take it out of REQUIRED_CHECKS "
+                f"(that removal is the owner's decision, not an agent's) -- {url}".rstrip(" -"))
         elif concl not in ("success", "skipped", "neutral"):
             url = r.get("html_url") or ""
+            # See the `no_verdict` note above: everything reaching this line DID
+            # produce a verdict, and that verdict is "failed". "Make it green" is
+            # the right instruction here and the wrong one there.
             reasons.append(f"`{name}` -> {concl}. FIX: make it green — {url}".rstrip(" -"))
 
         # A check that saw the problem, printed it, and went green anyway. On PR
@@ -529,7 +792,7 @@ def judge_check_runs(runs: list[dict], total_count: int) -> list[str]:
     return reasons
 
 
-def check_proof(pr: int) -> Verdict:
+def check_proof(pr: int, base_ref: str = MAIN_BRANCH) -> Verdict:
     """Did the checks really run, and really pass?
 
     The dangerous answer here is not 'red'. It is 'nothing ran' — a PR opened by a
@@ -539,7 +802,7 @@ def check_proof(pr: int) -> Verdict:
     sha = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".head.sha"])
     data = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"]))
     runs = data.get("check_runs", [])
-    reasons = judge_check_runs(runs, int(data.get("total_count") or 0))
+    reasons = judge_check_runs(runs, int(data.get("total_count") or 0), base_ref)
     return Verdict("PROOF", "fail" if reasons else "pass", reasons,
                    claim="every required check really ran and really passed")
 
@@ -642,42 +905,115 @@ def ground_problem(expected_sha: str, actual_sha: str) -> str | None:
     return None
 
 
-def head_sha() -> str:
+def measured_tree() -> Path:
+    """The tree whose NUMBERS are read. Distinct from ROOT, which is where the
+    RULES come from — see `--tree` in main()."""
+    return MEASURE_TREE or ROOT
+
+
+def head_sha(tree: Path | None = None) -> str:
+    t = tree or measured_tree()
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=30, cwd=str(ROOT))
+                             encoding="utf-8", errors="replace", timeout=30, cwd=str(t))
         return out.stdout.strip() if out.returncode == 0 else ""
     except Exception:
         return ""
 
 
-def measure_ratchets() -> dict[str, int | None]:
-    """Current value of every ratchet. `None` means COULD NOT MEASURE.
+def capability_gap(tree: Path, needs: object) -> str:
+    """Why this tree's instrument cannot answer, or "" if it can.
 
-    It used to skip unmeasurable ratchets silently, so a baseline could be
-    missing a number entirely and nothing said so. Unknown is never a value.
+    STATIC ON PURPOSE. Asking the tree's script "do you support --count?" by
+    running it means reading an argparse usage message and guessing, and a guess
+    in this position decides whether a PR is refused. Reading the file is
+    deterministic and both errors fail safe.
     """
-    vals: dict[str, int | None] = {}
+    if not needs:
+        return ""
+    if isinstance(needs, str):
+        needs = {"file": needs}
+    if not isinstance(needs, dict):
+        return f"the ratchet's `needs` is malformed ({needs!r})"
+    rel = str(needs.get("file") or "")
+    target = tree / rel
+    if not target.exists():
+        return f"{rel} is not in this tree"
+    flag = needs.get("supports")
+    if flag:
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return f"{rel} could not be read ({exc})"
+        if str(flag) not in text:
+            return f"{rel} in this tree has no `{flag}` — it cannot answer this question"
+    return ""
+
+
+def measure_ratchets(tree: Path | None = None) -> dict[str, dict]:
+    """Current value of every ratchet, as {name: {status, value, detail}}.
+
+    Three answers, never two — see the comment above `R_OK`. `absent` is a fact
+    about the tree's history; `error` is a fault and always refuses.
+    """
+    t = tree or measured_tree()
+    vals: dict[str, dict] = {}
     for r in RATCHETS:
+        gap = capability_gap(t, r.get("needs"))
+        if gap:
+            vals[r["name"]] = {"status": R_ABSENT, "value": None, "detail": gap}
+            continue
         try:
             out = subprocess.run(r["cmd"], capture_output=True, text=True, encoding="utf-8",
-                                 errors="replace", timeout=180, cwd=str(ROOT))
-            vals[r["name"]] = int(out.stdout.strip().splitlines()[-1]) if out.returncode == 0 else None
-        except Exception:
-            vals[r["name"]] = None
+                                 errors="replace", timeout=300, cwd=str(t))
+            if out.returncode != 0:
+                vals[r["name"]] = {"status": R_ERROR, "value": None,
+                                   "detail": (out.stderr or out.stdout).strip()[-200:]}
+                continue
+            vals[r["name"]] = {"status": R_OK,
+                               "value": int(out.stdout.strip().splitlines()[-1]), "detail": ""}
+        except Exception as exc:
+            vals[r["name"]] = {"status": R_ERROR, "value": None,
+                               "detail": f"{type(exc).__name__}: {exc}"}
     return vals
 
 
-def check_ratchets(base_values: dict[str, int] | None, expected_sha: str = "") -> Verdict:
+def as_reading(raw: object) -> dict:
+    """Normalise one baseline entry into {status, value}.
+
+    Accepts the flat legacy form (`5`, `null`) as well as the current object
+    form, because a baseline is passed in as text on a command line and a
+    half-upgraded caller must not be read as something it did not say. A flat
+    `null` is `error`, NOT `absent`: the old format could not express "the
+    script was not there", so assuming the harmless meaning would be exactly
+    the permissive guess this file exists to refuse.
+    """
+    if isinstance(raw, dict):
+        st = raw.get("status")
+        if st in (R_OK, R_ABSENT, R_ERROR):
+            return {"status": st, "value": raw.get("value")}
+        return {"status": R_ERROR, "value": None}
+    if isinstance(raw, bool):  # bool is an int in Python; a bool is not a reading
+        return {"status": R_ERROR, "value": None}
+    if isinstance(raw, int):
+        return {"status": R_OK, "value": raw}
+    return {"status": R_ERROR, "value": None}
+
+
+def check_ratchets(base_values: dict | None, expected_sha: str = "",
+                   tree: Path | None = None) -> Verdict:
     """Numbers may hold or improve. Never regress."""
     reasons: list[str] = []
-    now_values = measure_ratchets()
+    notes: list[str] = []
+    now_values = measure_ratchets(tree)
     for r in RATCHETS:
-        if now_values.get(r["name"]) is None:
+        now = now_values.get(r["name"], {"status": R_ERROR, "detail": "not measured at all"})
+        if now["status"] == R_ERROR:
             reasons.append(
-                f"ratchet `{r['name']}` could not be measured — an unmeasurable ratchet is not "
-                f"a passing one. FIX: run `{' '.join(str(c) for c in r['cmd'][1:])}` from the "
-                f"repo root and make it print a number.")
+                f"ratchet `{r['name']}` could not be measured ({now.get('detail') or 'no detail'})"
+                f" — an unmeasurable ratchet is not a passing one. FIX: run "
+                f"`{' '.join(str(c) for c in r['cmd'][1:])}` from the repo root and make it "
+                f"print a number.")
     if reasons:
         return Verdict("RATCHET", "fail", reasons, claim="no quality number went backwards")
 
@@ -695,25 +1031,72 @@ def check_ratchets(base_values: dict[str, int] | None, expected_sha: str = "") -
             claim="no quality number went backwards")
 
     if any(r.get("scope") == "tree" for r in RATCHETS):
-        problem = ground_problem(expected_sha, head_sha())
+        problem = ground_problem(expected_sha, head_sha(tree))
         if problem:
             return Verdict("RATCHET", "fail", [f"ratchet comparison refused: {problem}"],
                            claim="no quality number went backwards")
 
+    compared = 0
     for r in RATCHETS:
-        was = base_values.get(r["name"])
+        was = as_reading(base_values.get(r["name"]))
         now = now_values[r["name"]]
-        if was is None:
-            reasons.append(f"ratchet `{r['name']}` is missing from the baseline, so there is "
-                           f"nothing to compare. FIX: regenerate the baseline with "
-                           f"`python scripts/merge_cage.py --measure`.")
+
+        if was["status"] == R_ERROR:
+            reasons.append(
+                f"ratchet `{r['name']}` has no readable value in the baseline, so there is "
+                f"nothing to compare — and I will not call an uncompared number a pass. "
+                f"FIX: regenerate the baseline with `python scripts/merge_cage.py --measure` "
+                f"on a checkout of the PR's BASE.")
             continue
-        assert now is not None  # checked above
-        if is_worse(r["direction"], was, now):
-            reasons.append(f"ratchet `{r['name']}` got worse: {was} -> {now} ({r['why']}). "
-                           f"FIX: bring it back to {was} or better in this PR.")
-    return Verdict("RATCHET", "fail" if reasons else "pass", reasons,
-                   claim="no quality number went backwards")
+
+        # THE DANGEROUS DIRECTION, AND THE ONLY ONE THAT IS A REFUSAL HERE: the
+        # base could measure this number and the PR's tree cannot. That is a PR
+        # deleting a ratchet, which is how a ratchet stops ratcheting forever.
+        if was["status"] == R_OK and now["status"] == R_ABSENT:
+            reasons.append(
+                f"ratchet `{r['name']}` was measurable on the base ({was['value']}) and is NOT "
+                f"measurable in this PR's tree — {now.get('detail')}. A PR that removes a "
+                f"ratchet removes every future comparison, so this is a refusal, not a note. "
+                f"FIX: put `{r.get('needs')}` back, or the owner merges it by hand.")
+            continue
+
+        if was["status"] == R_ABSENT and now["status"] == R_ABSENT:
+            # NOT APPLICABLE. Neither tree has the ratchet, so nothing regressed
+            # and nothing was checked. Named out loud, never folded into a pass.
+            notes.append(f"`{r['name']}` does not exist in this lineage ({now.get('detail')}), "
+                         f"so it was NOT compared")
+            continue
+
+        if was["status"] == R_ABSENT and now["status"] == R_OK:
+            notes.append(f"`{r['name']}` is new in this PR ({now['value']}) — there is no "
+                         f"earlier value to compare it to")
+            continue
+
+        assert was["value"] is not None and now["value"] is not None
+        compared += 1
+        if is_worse(r["direction"], was["value"], now["value"]):
+            reasons.append(f"ratchet `{r['name']}` got worse: {was['value']} -> {now['value']} "
+                           f"({r['why']}). FIX: bring it back to {was['value']} or better "
+                           f"in this PR.")
+
+    # ZERO COMPARISONS IS NOT A PASS. Without this the n/a arm above becomes a
+    # way for the whole cage to evaporate: a lineage with no ratchet in it would
+    # print "no quality number went backwards" having compared nothing, which is
+    # the precise sentence this file was rewritten to make impossible.
+    if not reasons and compared == 0:
+        reasons.append(
+            "not one ratchet could be compared against the base"
+            + (" — " + "; ".join(notes) if notes else "")
+            + ". A cage that measured nothing did not pass; it did not run. "
+              "FIX: land at least one ratchet on the base branch, or the owner merges by hand.")
+
+    # THE CLAIM MUST NAME WHAT IT ACTUALLY COVERED. "no quality number went
+    # backwards" over zero compared numbers is the same sentence that was
+    # printed for the cage's whole life while nothing had been compared at all.
+    claim = f"{compared} quality number(s) compared against the base, none went backwards"
+    if notes:
+        claim += " (" + "; ".join(notes) + ")"
+    return Verdict("RATCHET", "fail" if reasons else "pass", reasons, claim=claim)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -736,10 +1119,19 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
         files_json = json.loads(files_raw)
         files = [f["filename"] for f in files_json]
         deletions = [f["filename"] for f in files_json if f.get("status") == "removed"]
-        changed_lines = sum(f.get("additions", 0) + f.get("deletions", 0) for f in files_json)
+        # The cap counts what a reviewer READS -- recorded fixtures are reported
+        # separately rather than folded in. See review_surface().
+        changed_lines, exempt_lines = review_surface(files_json)
         pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
+        # A MISSING base ref is not `main`. Defaulting an unknown base to the one
+        # value that unlocks the full check list would be the permissive guess,
+        # and the permissive guess is what this file exists to refuse. An empty
+        # string is not `main`, so judge_check_runs says so and the cage refuses.
+        base_ref = ((pr_json.get("base") or {}).get("ref")) or ""
         meta = {"files": len(files), "lines": changed_lines,
+                "fixture_lines": exempt_lines,
                 "title": pr_json.get("title") or f"PR #{pr}",
+                "base": base_ref,
                 "merge_sha": pr_json.get("merge_commit_sha") or ""}
     except Exception as exc:
         # A cage that cannot see the change must never approve it.
@@ -751,10 +1143,10 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
     if truncation:
         verdicts.append(Verdict("READ", "fail", truncation))
 
-    verdicts.append(check_size(len(files), changed_lines, deletions))
+    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines))
     verdicts.append(check_paths(files))
 
-    for name, fn in (("PROOF", check_proof), ("REVIEW", check_review)):
+    for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
         try:
             verdicts.append(fn(pr))
         except Exception as exc:
@@ -764,7 +1156,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
                 f"is reachable."]))
 
     try:
-        verdicts.append(check_ratchets(base_values, meta.get("merge_sha", "")))
+        verdicts.append(check_ratchets(base_values, meta.get("merge_sha", ""), measured_tree()))
     except Exception as exc:
         verdicts.append(Verdict("RATCHET", "fail", [
             f"the RATCHET cage could not run ({type(exc).__name__}: {exc}) — refusing. "
@@ -831,7 +1223,20 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
     if allowed:
         claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
         checked = "; ".join(claims) if claims else "no cage reported anything"
-        return (f":shipit: *Merged to production — PR #{pr}*\n"
+        # THIS CAGE CANNOT MERGE, SO IT MAY NOT SAY IT DID.
+        # There is no `--merge` flag on this lineage at all -- it advises and
+        # stops (see `--advise`; the merging is a separate, human act). This line
+        # said "Merged to production" for every allowed PR anyway, so on this
+        # branch the message was false 100% of the time, not merely on dry runs.
+        #
+        # CodeRabbit raised the dry-run half of this on PR #336. It is ported here
+        # rather than merged, because #336's copy of merge_cage.py is being dropped
+        # -- and the defect is strictly worse in this copy.
+        #
+        # An announcement that outruns the act is the same failure as a guard that
+        # cannot go red: the owner reads a green sentence describing something that
+        # did not happen, and has no way to tell from the message itself.
+        return (f":white_check_mark: *Approved — PR #{pr}* (nothing has been merged)\n"
                 f"*What it does:* {plain}\n"
                 f"*Size:* {size}\n"
                 f"*What was actually checked:* {checked}.\n"
@@ -844,6 +1249,64 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
             f"*Size:* {size}\n"
             f"*Why I did not merge it:*\n{reasons}{more}\n"
             f"{link}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ADVISOR. The cage's most valuable output is not the verdict — it is the
+# sentence naming WHICH of the seven files in front of the owner is the one he
+# should actually look at. Measured: median PR here is open 12.9 minutes, and in
+# 25 of the last 25 merges the final check completed BEFORE `mergedAt`. He is not
+# the bottleneck and the merge button is not the leak, so automating the click
+# buys ~13 minutes of wall clock and zero attention. Naming the risky file buys
+# attention, on 100% of PRs instead of the 3% a merge lane could ever cover.
+#
+# ADVICE NEVER MERGES. There is no flag on this file that merges any more — the
+# old `--merge` was removed, and `--merge` now exits with a usage error, drilled
+# below. That is a capability deletion, not a default change: a default can be
+# flipped by a repo variable nobody reviews.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MARKER = "<!-- merge-cage-advice -->"
+LABEL_OWNER = "owner-decision"
+LABEL_SAFE = "agent-safe"
+
+
+def advice_label(allowed: bool) -> str:
+    return LABEL_SAFE if allowed else LABEL_OWNER
+
+
+def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -> str:
+    """The PR comment. Same evidence rule as `plain_english`: a claim may only be
+    printed by the cage that produced it, so a cage that did not run cannot
+    appear as reassurance."""
+    size = f"{meta.get('files', '?')} files, {meta.get('lines', '?')} lines"
+    base = meta.get("base") or "?"
+    head = [MARKER, "### Merge cage — advisory only", "",
+            f"**Size:** {size} · **Base:** `{base}`", ""]
+
+    if allowed:
+        claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
+        head += [
+            f"**`{LABEL_SAFE}`** — nothing in this PR is a decision the cage was told to "
+            "reserve for you.", "",
+            "What was actually checked: " + ("; ".join(claims) if claims
+                                             else "_no cage reported anything_") + ".", "",
+            "This is advice. It merges nothing, and it never will — no flag on "
+            "`scripts/merge_cage.py` can merge.",
+        ]
+    else:
+        blocks = blocks_of(verdicts)
+        head += [f"**`{LABEL_OWNER}`** — {len(blocks)} thing(s) here are yours to decide.", ""]
+        head += [f"- {b}" for b in blocks[:8]]
+        if len(blocks) > 8:
+            head += ["", f"_(+{len(blocks) - 8} more)_"]
+        skipped = [v.name for v in verdicts if v.status == "not_checked"]
+        if skipped:
+            head += ["", f"Cages that did **not** run: {', '.join(skipped)}. "
+                         f"Not checked is not passed."]
+        head += ["", "This is advice, not a block. Merge it yourself whenever you like — "
+                     "the list above is only saying which part is the decision."]
+    return "\n".join(head)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -865,8 +1328,13 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
 DECISION_PATH = [
     "check_size", "check_paths", "judge_check_runs", "check_proof", "judge_threads",
     "check_review", "measure_ratchets", "check_ratchets", "is_worse", "ground_problem",
+    "as_reading", "measured_tree", "capability_gap",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
+    # The advisory path is now the cage's ONLY output that reaches a human on
+    # every PR, so it is on the decision path even though `decide` does not call
+    # it. An unread verdict is a verdict that did not happen.
+    "advice_markdown", "advice_label",
 ]
 
 
@@ -913,7 +1381,46 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         check_paths(["frontend/package.json"]), "dependabot-auto", P)
     # B12 — a document that IS a decision inherits the denial it delegates from.
     red("a document that is itself a product decision is refused",
-        check_paths(["docs/product_design_rules.md"]), "product", P)
+        check_paths(["docs/product/product_design_rules.md"]), "product", P)
+
+    # B12b — THE WHOLE PRODUCT LANE IS REFUSED, not just the two files that
+    #        happen to carry their own DENY line. Wave 1 moved 45 documents into
+    #        `docs/product/` to protect them and updated DENY, but left `docs/**`
+    #        and `*.md` on ALLOW — so the file that actually decides auto-allowed
+    #        43 of those 45. Measured on this tree before the fix, and the reason
+    #        this case exists: a green drill said nothing about it.
+    #
+    #        These paths are deliberately NOT the two denied ones. If someone
+    #        restores `docs/**` or `*.md` to ALLOW, every line here goes red,
+    #        which is the only thing stopping this from rotting back.
+    leaked = [f for f in ("docs/product/PRD.md",
+                          "docs/product/plans/uk-first-eligibility.md",
+                          "docs/product/pillars/README.md",
+                          "docs/product/research/anything.md")
+              if check_paths([f]).status == "pass"]
+    ok("no document under docs/product/ can be merged by a machine",
+       not leaked, f"the product lane is auto-allowed again: {leaked}", P)
+
+    # B12c — and the refusal must not be bought by refusing ALL documents. The
+    #        harness lane is Ranjith's own record; breaking it cannot reach a
+    #        user, so it stays fast. A cage that refuses everything is an off
+    #        switch, which is the failure this whole file was rewritten to end.
+    doc_safe = ["docs/harness/IMPLEMENTATION_LOG.md", "docs/harness/reviews/x.md",
+                "docs/_archive/CurrentStatus.md", "docs/archive/README.md",
+                "docs/README.md"]
+    v_docs = check_paths(doc_safe)
+    ok("NEGATIVE CONTROL (harness + archived documents still pass the path cage)",
+       v_docs.status == "pass", f"the cage refused a harness doc: {v_docs.reasons}", P)
+
+    # B12d — `docs/README.md` is listed WITH ITS SLASH on purpose. A bare
+    #        `README.md` is a basename rule at every depth (see path_matches),
+    #        so it would have re-opened `docs/product/pillars/README.md` — the
+    #        exact leak this change closes, wearing the clothes of a root file.
+    ok("the docs index is allowed by its path, not by its basename at any depth",
+       check_paths(["docs/README.md"]).status == "pass"
+       and check_paths(["docs/product/pillars/README.md"]).status == "fail",
+       "a bare basename rule crept back into ALLOW", P)
+
     # B13 — `**` really crosses directories now, and `*` really stops at one.
     #        If the rewrite from `x/*` to `x/**` had been botched, this goes red.
     #        Each nested path must be refused BY ITS DENY REASON. Counting
@@ -931,9 +1438,25 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
               if not any(needle in r for r in check_paths([f]).reasons)]
     ok("a nested file under a recursive deny is still refused, and for the right reason",
        not missed, f"fell through to a generic refusal: {missed}", P)
-    ok("glob semantics are real (`*` stops at `/`, `**` does not)",
-       path_matches("a/b.py", "a/*") and not path_matches("a/b/c.py", "a/*")
-       and path_matches("a/b/c.py", "a/**") and path_matches("x/y/README.md", "*.md"),
+    # B13b — the four properties the pattern language now rests on. The last
+    #        clause of this case used to assert the OPPOSITE of the fourth:
+    #        `path_matches("x/y/README.md", "*.md")` was True, because any
+    #        slash-free pattern was re-matched against the basename at any depth.
+    #        That is what put `docs/product/pillars/README.md` in the fast lane
+    #        with auto_merge TRUE. The fallback is deleted; a bare name is root-only.
+    #
+    #        The third and fourth clauses together are what made deleting it safe:
+    #        `**/` means "zero or more whole directories", and ZERO is why a
+    #        `**/`-prefixed pattern still catches the root file. Without that,
+    #        rewriting every slash-free DENY to `**/` would have quietly stopped
+    #        denying the root copies while appearing to fix the depth ones.
+    ok("glob semantics are real (`*` stops at `/`, `**` does not, bare = root only)",
+       path_matches("a/b.py", "a/*")
+       and not path_matches("a/b/c.py", "a/*")
+       and path_matches("a/b/c.py", "a/**")
+       and not path_matches("x/y/README.md", "*.md")      # fallback is GONE
+       and path_matches("x/y/README.md", "**/*.md")       # depth, asked for
+       and path_matches("README.md", "**/*.md"),          # ...and still the root
        "the matcher does not mean what it looks like", ["path_matches"])
 
     # 7. NEGATIVE CONTROL. The safe changes must pass cleanly, or the cage is
@@ -1029,8 +1552,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     consumer = subprocess.run([sys.executable, "backend/scripts/mypy_ratchet.py", "--count"],
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace", cwd=str(ROOT), timeout=120)
-    cage_val = measure_ratchets().get("mypy errors")
-    same = consumer.returncode == 0 and cage_val is not None \
+    cage_reading = measure_ratchets().get("mypy errors") or {}
+    cage_val = cage_reading.get("value")
+    same = consumer.returncode == 0 and cage_reading.get("status") == R_OK \
         and int(consumer.stdout.strip().splitlines()[-1]) == cage_val
     ok("the cage's mypy number equals the number its consumer reports",
        same, f"cage={cage_val} consumer={consumer.stdout.strip()!r} rc={consumer.returncode}",
@@ -1052,6 +1576,78 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         v_ok = check_ratchets({"drill": 9}, expected_sha=head_sha())
         ok("NEGATIVE CONTROL (an improving ratchet passes)", v_ok.status == "pass",
            f"improving ratchet was refused: {v_ok.reasons}", ["check_ratchets"])
+
+        # B21 — THE THREE ANSWERS. `absent` and `error` were one value (None) and
+        # the difference decides whether a main-based PR can ever be judged:
+        # `scripts/drill_registry.py` is NOT on origin/main (measured 2026-08-17,
+        # `git ls-tree origin/main` is empty for it), so that ratchet is absent on
+        # BOTH sides of every main-based PR. Folding absent into error refused
+        # 100% of them for a fact about history, not about the PR.
+        RATCHETS[:] = [
+            {"name": "present", "cmd": [sys.executable, "-c", "print(1)"],
+             "direction": "down", "scope": "tree", "why": "drill"},
+            {"name": "gone", "cmd": [sys.executable, "-c", "print(1)"],
+             "needs": "no/such/file/anywhere.py",
+             "direction": "down", "scope": "tree", "why": "drill"},
+        ]
+        vals = measure_ratchets()
+        ok("a ratchet whose own script is missing reads ABSENT, not ERROR and not a number",
+           vals["gone"]["status"] == R_ABSENT and vals["present"]["status"] == R_OK
+           and vals["gone"]["value"] is None,
+           f"got {vals}", ["measure_ratchets", "capability_gap"])
+
+        # B24 — the live one. The FILE was there and the FLAG was not, so a
+        # file-existence probe called a missing instrument a broken one and
+        # refused 16 of 16 merged PRs with `usage: mypy_ratchet.py [-h]
+        # [--update]` as the explanation.
+        ok("a script that exists but does not carry the flag reads ABSENT, not ERROR",
+           capability_gap(ROOT, {"file": "backend/scripts/mypy_ratchet.py",
+                                 "supports": "--no-such-flag-anywhere"}).endswith(
+               "it cannot answer this question")
+           and capability_gap(ROOT, {"file": "backend/scripts/mypy_ratchet.py",
+                                     "supports": "--count"}) == ""
+           and capability_gap(ROOT, {"file": "nope/nope.py"}) != "",
+           "the capability probe cannot tell a missing flag from a working one",
+           ["capability_gap"])
+
+        # base absent + head absent -> NOT APPLICABLE, named, does not block.
+        v_na = check_ratchets({"present": 1, "gone": {"status": R_ABSENT, "value": None}},
+                              expected_sha=head_sha())
+        ok("a ratchet absent from BOTH base and PR is named as not-compared, and does not block",
+           v_na.status == "pass" and "does not exist in this lineage" in v_na.claim
+           and "1 quality number(s) compared" in v_na.claim,
+           f"status={v_na.status} claim={v_na.claim!r} reasons={v_na.reasons}",
+           ["check_ratchets", "as_reading"])
+
+        # THE DANGEROUS DIRECTION: base could measure it, the PR cannot.
+        red("a PR that makes a measurable ratchet unmeasurable is refused",
+            check_ratchets({"present": 1, "gone": 4}, expected_sha=head_sha()),
+            "removes a ratchet removes every future comparison", ["check_ratchets"])
+
+        # ZERO COMPARISONS IS NOT A PASS — otherwise the n/a arm above is a way
+        # for the whole RATCHET cage to evaporate on a tree with no ratchets.
+        RATCHETS[:] = [{"name": "gone", "cmd": [sys.executable, "-c", "print(1)"],
+                        "needs": "no/such/file/anywhere.py",
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        red("a PR where NOTHING could be compared is refused, not passed",
+            check_ratchets({"gone": {"status": R_ABSENT, "value": None}},
+                           expected_sha=head_sha()),
+            "not one ratchet could be compared", ["check_ratchets"])
+
+        # A flat `null` in a baseline is an ERROR, never `absent`. The old format
+        # could not say "the script was not there", so reading the harmless
+        # meaning into it would be the permissive guess.
+        RATCHETS[:] = [{"name": "drill", "cmd": [sys.executable, "-c", "print(1)"],
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        red("a baseline entry of `null` refuses instead of being read as 'not applicable'",
+            check_ratchets({"drill": None}, expected_sha=head_sha()),
+            "no readable value in the baseline", ["check_ratchets", "as_reading"])
+        ok("as_reading never turns a non-number into a number",
+           as_reading(3)["status"] == R_OK and as_reading(None)["status"] == R_ERROR
+           and as_reading(True)["status"] == R_ERROR and as_reading("0")["status"] == R_ERROR
+           and as_reading({"status": R_ABSENT, "value": None})["status"] == R_ABSENT
+           and as_reading({"status": "nonsense"})["status"] == R_ERROR,
+           "a baseline value was coerced into something it did not say", ["as_reading"])
     finally:
         RATCHETS[:] = saved
 
@@ -1111,8 +1707,186 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
+    #       THE CONSTANT CHECK ALONE CANNOT GO RED FOR THE DEFECT B03 RECORDS.
+    #       `codes` is built from the constants, so it only fails if someone edits
+    #       the constant block -- while the real regression is behavioural: a
+    #       crash exiting 1, or argparse exiting 2, making a caller's arm
+    #       unreachable. Those leave this green. Kept as a cheap invariant; the
+    #       behaviour is now driven end to end below.
+    #       (CodeRabbit on PR #336, ported.)
     ok("crash, refuse, slack-failure and usage have four different exit codes",
        len(set(codes)) == len(codes), f"collision in {codes}", [])
+
+    # B03b — a bad flag must produce EXIT_USAGE, so any caller switching on that
+    #        code has a reachable arm. argparse RAISES SystemExit rather than
+    #        returning, so the code must be caught, not read from a return value.
+    #        Writing this on #336 proved the point: the first version called
+    #        main() bare and killed the whole drill run, and a self-test that
+    #        aborts the suite it belongs to reports nothing at all.
+    def _exit_code_of(argv: list[str]) -> int:
+        try:
+            return int(main(argv) or 0)
+        except SystemExit as exc:
+            return int(exc.code or 0)
+
+    rc_usage = _exit_code_of(["--no-such-flag"])
+    ok("a bad flag exits EXIT_USAGE, so a caller's usage arm is reachable",
+       rc_usage == EXIT_USAGE,
+       f"exit {rc_usage} (expected {EXIT_USAGE}) -- the usage arm is dead code",
+       ["main"])
+
+    # B18 — A REQUIRED CHECK THAT SKIPPED IS NOT A PASS, AND AN OPTIONAL ONE IS.
+    #       Both halves, because either alone is a bug already shipped here.
+    _req = REQUIRED_CHECKS[0]
+    ok("a REQUIRED check that skipped is refused, not counted as a pass",
+       any("only `success` counts" in r for r in judge_check_runs(
+           [{"name": _req, "status": "completed", "conclusion": "skipped"}], 1)),
+       "a required check proved nothing and still passed the cage",
+       ["judge_check_runs"])
+    _opt = [{"name": n, "status": "completed", "conclusion": "success"}
+            for n in REQUIRED_CHECKS]
+    _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
+                 "conclusion": "skipped"})
+    ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
+       not judge_check_runs(_opt, len(_opt)),
+       f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
+       ["judge_check_runs"])
+
+    # B20 — "NEVER ANSWERED" IS NOT "FAILED", AND THE FIX TEXT MUST SAY SO.
+    #       Found live 2026-08-21: four PRs (#349 #350 #351 #353) had been red for
+    #       two days on `frontend-e2e`. Nothing was wrong with any of them -- the
+    #       job takes about 2 minutes (1m43s-2m01s across the last six green runs)
+    #       and had run 20m18s into a `timeout-minutes: 20`, which GitHub records
+    #       as `cancelled`. The cage said "FIX: make it green" about code that was
+    #       already green, so nobody re-ran it and the red became permanent.
+    #
+    #       All four cases are drilled, because the earlier version of this fix
+    #       was swallowed by the required/optional split -- `Frontend`
+    #       substring-matches `frontend-e2e`, so the required arm answered first
+    #       and the new message never appeared. It passed review by eye and did
+    #       nothing.
+    def _runs_with(name: str, concl: str) -> list[dict]:
+        rs = [{"name": n, "status": "completed", "conclusion": "success"}
+              for n in REQUIRED_CHECKS]
+        rs.append({"name": name, "status": "completed", "conclusion": concl})
+        return rs
+
+    def _said(name: str, concl: str) -> str:
+        return " ".join(r for r in judge_check_runs(_runs_with(name, concl), 5) if name in r)
+
+    ok("a REQUIRED check that was cancelled is told to be RE-RUN, not fixed",
+       "MISSING ANSWER" in _said("Frontend", "cancelled"),
+       "the cage tells the owner to fix code that never failed", ["judge_check_runs"])
+    ok("...and it still BLOCKS -- a missing answer is never consent",
+       bool(_said("Frontend", "cancelled")),
+       "a cancelled check stopped blocking; that is a bypass, not a diagnosis",
+       ["judge_check_runs"])
+    ok("an OPTIONAL check that was cancelled gets the same re-run advice",
+       "MISSING ANSWER" in _said("Doc clutter (CURATE gear)", "cancelled"),
+       "only required checks got the honest message", ["judge_check_runs"])
+    ok("a check that really FAILED is still told to go green",
+       "make it green" in _said("Doc clutter (CURATE gear)", "failure"),
+       "a real failure was mislabelled as a missing answer -- that direction hides bugs",
+       ["judge_check_runs"])
+
+    # B22 — THE SIZE CAP COUNTS REVIEW SURFACE, AND THE EXEMPTION IS NOT A DOOR.
+    #       The discount exists because a 2,120-line recorded API payload is not
+    #       something anyone reads. The danger is obvious -- "fixtures do not
+    #       count" is one careless step from "put your module in fixtures/ and
+    #       skip the cap" -- so the bypass is drilled explicitly, not assumed shut.
+    _fx = [{"filename": "scripts/fixtures/review_threads/recorded.json",
+            "additions": 2120, "deletions": 0},
+           {"filename": "scripts/review_debt.py", "additions": 883, "deletions": 0}]
+    _read, _ex = review_surface(_fx)
+    ok("a recorded fixture is not counted as review surface",
+       (_read, _ex) == (883, 2120), f"got read={_read} exempt={_ex}", ["review_surface"])
+
+    _bypass = [{"filename": "scripts/fixtures/sneaky.py", "additions": 900, "deletions": 0}]
+    ok("SOURCE under fixtures/ is NOT exempt -- the obvious bypass stays shut",
+       review_surface(_bypass) == (900, 0),
+       "a .py under fixtures/ escaped the cap", ["review_surface"])
+
+    _elsewhere = [{"filename": "backend/data/big.json", "additions": 900, "deletions": 0}]
+    ok("recorded data OUTSIDE a fixtures/ directory is still counted",
+       review_surface(_elsewhere) == (900, 0),
+       "the extension alone was enough to exempt a file", ["review_surface"])
+
+    _v_ex = check_size(3, 900, [], exempt_lines=2120)
+    ok("the discount is SAID OUT LOUD, never silent",
+       "recorded-fixture lines not counted" in (_v_ex.claim or ""),
+       "an exemption nobody can see is indistinguishable from a hole", ["check_size"])
+
+    # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
+    #       DIRECTION IS DRILLED. These were substrings; `Frontend` is inside
+    #       `frontend-e2e`, so a SUCCESSFUL optional run satisfied the
+    #       presence loop and an ABSENT required check looked present. This
+    #       morning's fix only addressed the noisy direction (a skipped optional
+    #       reading as a skipped required) and left the silent one open.
+    def _rs(pairs):
+        return [{"name": n, "status": "completed", "conclusion": c} for n, c in pairs]
+
+    _all_req = [(n, "success") for n in REQUIRED_CHECKS]
+    _no_fe = [p for p in _all_req if p[0] != "Frontend (Node 20)"]
+    _no_fe = _no_fe + [("frontend-e2e", "success")]
+    ok("a green OPTIONAL check cannot stand in for an ABSENT required one",
+       bool(judge_check_runs(_rs(_no_fe), len(_no_fe))),
+       "an absent required check was satisfied by a similarly-named optional one",
+       ["judge_check_runs"])
+    _opt_skip = _all_req + [("frontend-e2e", "skipped")]
+    ok("...and a skipped OPTIONAL check with a similar name still does not block",
+       not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
+       "an optional skip was mistaken for a required one", ["judge_check_runs"])
+
+    # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
+    #       `--merge` flag at all, so "Merged to production" was false on every
+    #       single allowed PR, not merely on a dry run.
+    _v = Verdict("PATHS", "pass", [], claim="no owner-lane file was touched")
+    ok("the advisor does not tell the owner the PR was merged",
+       "Merged to production" not in plain_english(
+           1, {"title": "x: y", "files": 3, "lines": 10}, True, [_v]),
+       "the cage announced a merge it cannot perform", ["plain_english"])
+
+    # B22 — --tree separates the tree MEASURED from the tree the RULES come from.
+    #       Without it the only way to measure a PR's own numbers was to run the
+    #       PR's own copy of this file, i.e. to let the thing being judged supply
+    #       the judge. Both halves are drilled: a junk --tree must BREAK the cage
+    #       (exit 3, never a quiet fallback to "here"), and with no --tree the
+    #       measured tree must still be exactly ROOT.
+    def run_main(argv: list[str]) -> int:
+        """main() end to end, including the argparse exits it deliberately raises."""
+        try:
+            return main(argv)
+        except SystemExit as e:
+            return int(e.code or 0)
+
+    rc_tree = run_main(["1", "--tree", str(ROOT / "no-such-directory-anywhere")])
+    ok("a --tree that is not a directory is a usage error, not a silent fallback to here",
+       rc_tree == EXIT_USAGE, f"exit {rc_tree} (expected {EXIT_USAGE})", ["measured_tree"])
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        rc_nogit = run_main(["1", "--tree", _td])
+        ok("a --tree that is not a git checkout breaks the cage instead of being measured",
+           rc_nogit == EXIT_CAGE_BROKE, f"exit {rc_nogit} (expected {EXIT_CAGE_BROKE})",
+           ["measured_tree"])
+    globals()["MEASURE_TREE"] = None
+    ok("with no --tree, the measured tree is exactly the tree the rules came from",
+       measured_tree() == ROOT, f"{measured_tree()} != {ROOT}", ["measured_tree"])
+
+    # B25 — argparse abbreviates unique prefixes by default. `--dri` silently
+    #       meaning `--drill` is a cage whose MODE can be changed by a typo, and
+    #       cage_replay.py's own drill caught the live version of this
+    #       (`--merge` was accepted as `--merged`).
+    rc_abbrev = run_main(["--dril"])
+    ok("an abbreviated flag is rejected, not silently expanded into a different mode",
+       rc_abbrev == EXIT_USAGE, f"exit {rc_abbrev} (expected {EXIT_USAGE}) — `--dril` was "
+                                f"accepted as `--drill`", [])
+
+    # B23 — --replay used to print an agreement rate that was 0/N by
+    #       construction (no baseline -> not_checked -> blocks). A convincing
+    #       wrong number is worse than no number, so it must not answer at all.
+    rc_replay = run_main(["--replay", "5"])
+    ok("--replay refuses to answer instead of printing an agreement rate it cannot compute",
+       rc_replay == EXIT_USAGE, f"exit {rc_replay} (expected {EXIT_USAGE})", [])
 
     # B01/B02 — garbage on any input surface must produce a REFUSAL, not a stack
     #           trace. Fed end to end through main(), not asserted on internals.
@@ -1178,6 +1952,96 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not vague, f"{len(vague)} reason(s) with no FIX clause, e.g. {vague[:1]}",
        ["check_paths", "check_size", "judge_check_runs", "judge_threads", "check_ratchets"])
 
+    # ── THE CAGE MUST BE ABLE TO SAY YES ─────────────────────────────────────
+    # B18. Forty-four drills proved this cage can say NO. Not one proved it can
+    # say YES, which is exactly why nobody noticed that ALLOW was unreachable in
+    # production for the cage's whole life: auto-merge.yml:114 passed no
+    # `--baseline`, `check_ratchets(None)` returns `not_checked`, and
+    # `not_checked` blocks. Every PR was refused for a reason about the WIRING.
+    # A gate that cannot say yes is the same defect class as a guard that cannot
+    # say no, and it is worse in one way: it gets switched off, and then it
+    # protects nothing.
+    saved_gh = globals()["gh"]
+    saved_r = list(RATCHETS)
+    try:
+        sha_now = head_sha()
+
+        def perfect_gh(a: list[str]) -> str:
+            j = " ".join(a)
+            if "graphql" in j:
+                return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
+                    "pageInfo": {"hasNextPage": False}, "nodes": [thread_done]}}}}})
+            if a[-1] == ".head.sha":
+                return "d" * 40
+            if "check-runs" in j:
+                return json.dumps({"total_count": len(done), "check_runs": done})
+            if "/files" in j:
+                return json.dumps([{"filename": "docs/README.md", "status": "modified",
+                                    "additions": 3, "deletions": 1}])
+            if j.endswith("pulls/1"):
+                return json.dumps({"title": "docs: tidy the readme",
+                                   "merge_commit_sha": sha_now, "base": {"ref": "main"}})
+            raise RuntimeError(f"the drill did not expect: {j}")
+
+        globals()["gh"] = perfect_gh
+        RATCHETS[:] = [{"name": "drill", "cmd": [sys.executable, "-c", "print(3)"],
+                        "direction": "down", "scope": "tree", "why": "drill"}]
+        allowed_y, v_y, meta_y = decide(1, {"drill": 3})
+        ok("ALLOW IS REACHABLE (a perfect docs PR with a baseline is allowed end to end)",
+           allowed_y, f"the cage refused a PR with nothing wrong with it: {blocks_of(v_y)}",
+           ["decide", "check_proof", "check_review", "check_ratchets"])
+
+        md_yes = advice_markdown(1, meta_y, allowed_y, v_y)
+        ok("the advice for an allowed PR is labelled agent-safe and merges nothing",
+           LABEL_SAFE in md_yes and MARKER in md_yes and "no cage reported anything" not in md_yes,
+           f"advice text was wrong: {md_yes[:200]}", ["advice_markdown", "advice_label"])
+
+        # The SAME PR, one field changed: base is a feature branch. codeql.yml
+        # only fires for main-targeted PRs, so `CodeQL` cannot exist here.
+        # Measured on PRs #343/#344/#345/#346, all four missing both Analyze jobs.
+        def stacked_gh(a: list[str]) -> str:
+            if " ".join(a).endswith("pulls/1"):
+                return json.dumps({"title": "docs: tidy", "merge_commit_sha": sha_now,
+                                   "base": {"ref": "feat/every-guard-declares-its-drill"}})
+            return perfect_gh(a)
+
+        globals()["gh"] = stacked_gh
+        allowed_s, v_s, _ = decide(1, {"drill": 3})
+        ok("a PR based on a feature branch is refused, naming the check that cannot fire",
+           not allowed_s and any("cannot exist" in r and "CodeQL" in r for r in blocks_of(v_s)),
+           f"allowed={allowed_s} reasons={blocks_of(v_s)[:2]}",
+           ["decide", "judge_check_runs", "check_proof"])
+    finally:
+        globals()["gh"] = saved_gh
+        RATCHETS[:] = saved_r
+
+    # B19 — a missing base ref must not be guessed as `main`. The permissive
+    # guess is the one that unlocks the full check list, and guessing in the
+    # permissive direction is the whole thing this file refuses to do.
+    red("a PR whose base ref could not be read is refused, not assumed to be main",
+        judge_check_runs(done, len(done), ""), "not `main`", ["judge_check_runs"])
+    ok("NEGATIVE CONTROL (a main-based PR with a full check list still passes)",
+       not judge_check_runs(done, len(done), "main"),
+       "base-awareness broke the ordinary main-targeted case", ["judge_check_runs"])
+
+    # B17 — the merge capability is GONE, not defaulted off. A default can be
+    # flipped by a repo variable nobody reviews; a deleted flag cannot. Asserted
+    # end to end through main(), not by grepping for the string — a self-test
+    # that greps stayed fully green here after the only authorisation call was
+    # deleted.
+    # argparse signals a usage error by RAISING (`_Parser.error` -> SystemExit),
+    # so this must catch it. Asserting on a return value alone would have made
+    # this case blow the drill up rather than report — a self-test that crashes
+    # is not a self-test that passed.
+    try:
+        rc_merge = main(["1", "--merge"])
+    except SystemExit as exc:
+        rc_merge = int(exc.code or 0)
+    ok("`--merge` no longer exists: the cage cannot merge anything at all",
+       rc_merge == EXIT_USAGE,
+       f"exit {rc_merge} (expected {EXIT_USAGE}) — merge_cage still accepts a merge flag",
+       ["decide"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -1228,31 +2092,27 @@ def _shadow_probe() -> list[str]:
 
 
 def replay(limit: int) -> int:
-    """MEASUREMENT ONLY: how often would the cage have agreed with the owner?
+    """DELETED AS AN ANSWER, KEPT AS A SIGNPOST.
 
-    The owner merges by hand. Every merged PR is therefore a ground-truth "yes",
-    and a cage that refuses all of them is a cage that will be switched off.
+    This function used to loop `decide(pr)` with NO baseline. `check_ratchets(None)`
+    returns `not_checked` and `not_checked` blocks, so it returned 0/N by
+    construction — for every N, on every repo, forever. It could not have produced
+    the "13 of 245 (5.3%)" figure that has been quoted from it, and any decision
+    resting on that number is resting on nothing.
 
-    Deliberately NOT a ratchet, and deliberately without a target. A ratchet on
-    the allow rate would create standing automated pressure to widen the ALLOW
-    list until the number is met — a mechanism built to stop decay, manufacturing
-    it instead. Print the number; let the owner decide what it means.
+    A real replay needs a checkout per PR (the base, to measure the baseline, and
+    `refs/pull/<N>/merge`, to measure the PR's own tree). That is worktree
+    management, so it lives in a runner: scripts/cage_replay.py. Leaving a
+    convincing-looking wrapper here would just be a second place for the same lie
+    to come from.
     """
-    raw = gh(["pr", "list", "--state", "merged", "--limit", str(limit),
-              "--json", "number,title"])
-    prs = json.loads(raw)
-    agree = 0
-    print(f"REPLAY — judging the last {len(prs)} merged PRs. Each was shipped by the owner, "
-          f"so ALLOW = agreement.")
-    for p in prs:
-        allowed, verdicts, _ = decide(int(p["number"]))
-        agree += 1 if allowed else 0
-        top = (blocks_of(verdicts) or ["-"])[0]
-        print(f"  #{p['number']:>4} {'ALLOW ' if allowed else 'REFUSE'}  {top[:100]}")
-    pct = (100 * agree / len(prs)) if prs else 0.0
-    print(f"\nagreement with the owner: {agree}/{len(prs)} ({pct:.0f}%)")
-    print("This is a measurement, not a target. Do not widen ALLOW to raise it.")
-    return 0
+    print("merge_cage --replay no longer answers, because the answer it used to give was "
+          "0/N by construction.", file=sys.stderr)
+    print(f"  It called decide(pr) with no --baseline, so RATCHET returned `not_checked` and "
+          f"`not_checked` blocks. Every PR refused, whatever the PR was.\n"
+          f"  FIX: `python scripts/cage_replay.py --merged {limit}` — it does the two "
+          f"checkouts per PR that a tree-scoped ratchet actually requires.", file=sys.stderr)
+    return EXIT_USAGE
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1266,13 +2126,28 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = _Parser(description=__doc__.splitlines()[0])
+    # allow_abbrev=False. argparse abbreviates unique prefixes by default, so a
+    # flag that does not exist can still be ACCEPTED as a shortening of one that
+    # does — cage_replay.py's own drill caught exactly that (`--merge` silently
+    # became `--merged`). On a repo where merging is deploying, a flag that means
+    # something other than what it says is a trapdoor, not a convenience.
+    ap = _Parser(description=__doc__.splitlines()[0], allow_abbrev=False)
     ap.add_argument("pr", nargs="?", type=int, help="PR number to judge")
     ap.add_argument("--drill", action="store_true", help="break the cage on purpose")
-    ap.add_argument("--merge", action="store_true", help="actually merge when allowed")
     ap.add_argument("--slack", action="store_true", help="announce the verdict in Slack")
+    ap.add_argument("--advise", metavar="FILE",
+                    help="write a markdown verdict for a PR comment; NEVER merges")
+    ap.add_argument("--verdict-json", metavar="FILE",
+                    help="write the per-cage verdicts as JSON. Added because the only way to "
+                         "ask 'which cage refused, and would it still refuse tomorrow?' was to "
+                         "grep the English reasons — and a reader that greps prose is the same "
+                         "instrument-shaped mistake as a self-test that greps its own source.")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
     ap.add_argument("--measure", action="store_true", help="print current ratchet values as JSON")
+    ap.add_argument("--tree", metavar="DIR",
+                    help="the checkout whose NUMBERS are measured (default: this file's own). "
+                         "The RULES always come from this file's checkout — that separation is "
+                         "the point: a PR must not be judged by its own copy of the cage.")
     ap.add_argument("--blockers", action="store_true", help="print the blocker log and exit")
     ap.add_argument("--replay", type=int, metavar="N",
                     help="judge the last N merged PRs and print the agreement rate")
@@ -1299,6 +2174,26 @@ def main(argv: list[str] | None = None) -> int:
         if contradictions:
             raise CageBroke("the cage's own rules contradict each other, so it cannot judge:\n  "
                             + "\n  ".join(contradictions))
+
+        # THE TREE UNDER MEASUREMENT. Set before anything reads a number.
+        global MEASURE_TREE
+        if args.tree:
+            t = Path(args.tree).resolve()
+            if not t.is_dir():
+                ap.error(f"--tree {args.tree} is not a directory")
+            probe = subprocess.run(["git", "-C", str(t), "rev-parse", "HEAD"],
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", timeout=30)
+            if probe.returncode != 0:
+                # A tree whose HEAD cannot be read cannot be ground-checked, and a
+                # ratchet compared without a ground check is a number about an
+                # unknown tree. Refuse where it is parsed, not six frames later.
+                raise CageBroke(
+                    f"--tree {t} is not a git checkout I can read a commit from "
+                    f"({probe.stderr.strip()[:120]}), so I could not prove which tree the "
+                    f"numbers belong to. FIX: point --tree at a `git worktree add` of "
+                    f"`refs/pull/<N>/merge`.")
+            MEASURE_TREE = t
 
         if args.drill:
             return self_drill()
@@ -1349,10 +2244,22 @@ def main(argv: list[str] | None = None) -> int:
                 print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
                 return EXIT_CANNOT_TELL_OWNER
 
-        if args.merge and allowed:
-            subprocess.run(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch"],
-                           check=True, timeout=180)
-            print(f"merged #{args.pr}")
+        if args.advise:
+            Path(args.advise).write_text(advice_markdown(args.pr, meta, allowed, verdicts),
+                                         encoding="utf-8")
+            print(f"advice written to {args.advise} (label: {advice_label(allowed)})")
+
+        if args.verdict_json:
+            Path(args.verdict_json).write_text(json.dumps({
+                "pr": args.pr, "allowed": allowed, "meta": meta,
+                "cages": [{"name": v.name, "status": v.status, "reasons": v.reasons,
+                           # The claim is emitted ONLY for a cage that passed —
+                           # the same rule the printed output obeys. A machine
+                           # reader must not be able to see a sentence a human
+                           # reader is forbidden.
+                           "claim": v.claim if v.status == "pass" else ""}
+                          for v in verdicts],
+            }, indent=1), encoding="utf-8")
 
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 
@@ -1382,6 +2289,10 @@ try:
 except CageBroke as _exc:
     ROOT = Path(__file__).resolve().parent.parent
     _GROUND_ERROR = str(_exc)
+
+# The tree whose NUMBERS are read, when it is not ROOT. `None` until --tree says
+# otherwise, so the default behaviour is byte-for-byte what it was.
+MEASURE_TREE: Path | None = None
 
 if __name__ == "__main__":
     raise SystemExit(main())

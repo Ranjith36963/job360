@@ -434,15 +434,23 @@ export function PreferencesForm({
       </div>
 
       <div className="space-y-6">
-        {/* ── Target Job Titles ──────────────────── */}
-        <TagInput
-          label="Target Job Titles"
-          icon={<Briefcase className="h-3.5 w-3.5" />}
-          tags={targetTitles}
-          onChange={setTargetTitles}
-          placeholder="e.g. Data Scientist"
-          description="Roles you're targeting"
-        />
+        {/* ── Target Job Titles ────────────────────
+            The `id` is the landing spot for the dashboard's "Searching for: …
+            [change]" line (components/jobs/SearchingFor.tsx). `scroll-mt-24`
+            keeps it clear of the sticky Navbar — Next.js skips fixed/sticky
+            elements when it picks a scroll target, so without the margin the
+            field lands underneath the header (documented in
+            node_modules/next/dist/docs/…/components/link.md). */}
+        <div id="target-job-titles" className="scroll-mt-24">
+          <TagInput
+            label="Target Job Titles"
+            icon={<Briefcase className="h-3.5 w-3.5" />}
+            tags={targetTitles}
+            onChange={setTargetTitles}
+            placeholder="e.g. Data Scientist"
+            description="Roles you're targeting"
+          />
+        </div>
 
         {/* ── Additional Skills ──────────────────── */}
         <TagInput
@@ -479,7 +487,7 @@ export function PreferencesForm({
           tags={industries}
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
-          description="Target industries for relevance scoring bonus"
+          description="Used only for AI similarity matching today — most jobs are not affected by this at all."
         />
 
         <Separator />

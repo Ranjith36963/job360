@@ -36,8 +36,11 @@ there, an unknown place is a UK place we simply do not have.
 
 AMBIGUITY IS COMPUTED, NOT TYPED. Boston, Cambridge and Perth name real places
 both here and abroad; `ambiguous.txt` is derived at build time by comparing UK
-populations against world cities. On a global source those names need one
-corroborating signal; on a UK-native source they pass.
+populations against world cities — AND, since issue #330, against the country
+and admin1 lists too. The UK has hamlets called New York, California and Canada,
+and none of those is a world CITY name, so all three scored as trusted UK places
+and let 135 foreign jobs ride the dual-site escape below. On a global source an
+ambiguous name needs one corroborating signal; on a UK-native source it passes.
 """
 from __future__ import annotations
 
@@ -76,8 +79,6 @@ UK_NATIVE_SOURCES = frozenset({
     "careerjet",            # queried with UK locale
     "findwork",             # UK-filtered query
     "nhs_jobs",             # UK public sector
-    "nhs_jobs_xml",
-    "jobs_ac_uk",           # UK academia
     "uni_jobs",             # UK universities
     "teaching_vacancies",   # DfE — England state schools
     "gov_apprenticeships",  # DfE Display Advert API
@@ -332,16 +333,42 @@ def check_uk(
         # both ways, and the UK reading is the right one; 238 live UK rows
         # depend on it.
         #
-        # KNOWN GAP, left deliberately: "London, Ontario", "New York, NY" and
-        # "Remote - New York" still pass, for exactly the reason "London, New
-        # York" is asserted to pass two tests up — a UK city name beside a
-        # foreign region is how BOTH a foreign address and a genuine two-site
-        # ad get written, and "New York" is also a real (tiny) UK hamlet.
-        # Splitting those needs ambiguity DATA — a gazetteer rebuild marking
-        # `new york` and `california` ambiguous, which is where the knowledge
-        # belongs — not another branch here.
+        # THAT GAP IS NOW CLOSED, AND IT WAS CLOSED IN THE DATA (issue #330).
+        # "New York, NY", "San Francisco, California" and bare "Canada" used to
+        # ride this escape, because `new york`, `california` and `canada` are
+        # all real (pop 0-830) UK hamlets that `ambiguous.txt` did not know
+        # about: it was computed against world CITY names only, and those three
+        # are a city GeoNames calls "New York City", a US state, and a country.
+        # `scripts/build_uk_gazetteer.py` now weights countries and admin1
+        # divisions into that computation too, so the escape's existing
+        # "unambiguous UK signal" requirement finally has the data to refuse
+        # them. Measured over the live catalog 2026-08-19: 135 of the 190 rows
+        # violating `catalog_is_uk_only` flip to blocked, 0 clean rows lost.
+        #
+        # TWO REFINEMENTS THE MEASUREMENT FORCED, both about WHICH UK segment
+        # gets to speak for the ad:
+        #
+        #  * Pick a NON-ambiguous UK segment, not merely the first one. This
+        #    block has always demanded "an UNAMBIGUOUS UK signal", but it read
+        #    that signal off `uk_place`, which is just the first gazetteer hit
+        #    in segment order. So "San Francisco, New York, London" resolved to
+        #    `new york`, and once `new york` became ambiguous a genuine
+        #    three-site ad that INCLUDES LONDON was refused. Preferring an
+        #    unambiguous hit is what the sentence above already promised.
+        #  * A UK-native source keeps an ambiguous place, exactly as step 4
+        #    already lets it (`uk_place in ambiguous and not is_native`). The
+        #    two rules were asymmetric for no stated reason, and the asymmetry
+        #    cost a real job: Adzuna's "New York, Lincoln" is New York,
+        #    LINCOLNSHIRE — the location field even names the county.
+        #
+        # Both were dry-run over all 14,378 live rows (rule #30) before landing:
+        # together they change exactly 2 verdicts versus the data fix alone, and
+        # both of those are UK jobs being kept.
         named = [s for s in segs if any(t not in _REMOTE_TOKENS for t in s.split())]
-        escape_place = uk_place
+        escape_place = next(
+            (m for s in segs if (m := _uk_hit(s, places)) and m not in ambiguous),
+            uk_place,
+        )
         if len(named) > 1 and any(
             s in foreign and not _uk_hit(s, places) for s in named
         ):
@@ -349,7 +376,9 @@ def check_uk(
                 (m for s in named if s not in foreign and (m := _uk_hit(s, places))),
                 None,
             )
-        if uk_named or (escape_place and escape_place not in ambiguous):
+        if uk_named or (
+            escape_place and (escape_place not in ambiguous or is_native)
+        ):
             return GateVerdict(True, "dual_site_includes_uk")
         return GateVerdict(False, "foreign_location")
 

@@ -1,6 +1,6 @@
 -- 0002_multi_tenant: add user_id scoping to per-user tables.
 --
--- Design (see docs/plans/batch-2-decisions.md §D6, and plan Phase 2):
+-- Design (see docs/product/plans/batch-2-decisions.md §D6, and plan Phase 2):
 -- * `jobs` is a shared catalog (one row per unique company+title across all
 --   users). It is NOT modified here — Batch 1 owns its schema, CLAUDE.md
 --   rule #1 forbids touching its uniqueness key.

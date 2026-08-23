@@ -12,6 +12,29 @@ from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.recruitee")
 
+
+def _coerce_salary(value: Any) -> Optional[float]:
+    """Recruitee sends salary.min/max as STRINGS ('0', '25000', '13.40').
+
+    Verified live 2026-08-10 across the 31-slug list: 53 of 671 UK/remote
+    offers carry string salaries (first offender: transperfect / "Marketing
+    Lead - Legal Solutions", min='0' max='0'). `Job.__post_init__`
+    (models.py:92) compares salary_min against an int, so an un-coerced
+    string raised TypeError and killed the ENTIRE source mid-loop — the
+    scheduler recorded it as a failure (scheduler.py:186) and recruitee
+    contributed 0 jobs every run. Coerce here, in the source, so the shared
+    Job model keeps its numeric contract.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 class RecruiteeSource(BaseJobSource):
     name = "recruitee"
     category = "ats"
@@ -39,8 +62,29 @@ class RecruiteeSource(BaseJobSource):
                 raw_published = item.get("published_at")
                 posted_at, confidence = normalize_posted_at(raw_published)
 
-                salary_min = item.get("min_salary")
-                salary_max = item.get("max_salary")
+                # Live schema (verified 2026-08-08): salary is a NESTED object,
+                # not flat min_salary/max_salary keys — those never existed.
+                salary_obj = item.get("salary")
+                if not isinstance(salary_obj, dict):
+                    salary_obj = {}
+                salary_min = _coerce_salary(salary_obj.get("min"))
+                salary_max = _coerce_salary(salary_obj.get("max"))
+
+                # close_at is the offer's closing date. Null in the sample, so
+                # guard for it — a missing/unparseable value must never crash
+                # or fabricate a deadline.
+                deadline = None
+                deadline_source = None
+                raw_close_at = item.get("close_at")
+                if raw_close_at:
+                    try:
+                        deadline = datetime.fromisoformat(
+                            str(raw_close_at).replace("Z", "+00:00")
+                        ).date().isoformat()
+                        deadline_source = "listing"
+                    except ValueError:
+                        pass
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -54,6 +98,8 @@ class RecruiteeSource(BaseJobSource):
                     date_posted_raw=raw_published,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
                 ))
         logger.info("Recruitee: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

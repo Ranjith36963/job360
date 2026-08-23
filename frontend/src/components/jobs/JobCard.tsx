@@ -26,23 +26,14 @@ import {
 import { createPipelineApplication } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { safeUrl } from "@/lib/utils";
+import { scoreClass } from "@/lib/scoring";
+import { stalenessBadge } from "@/lib/staleness";
 import type { JobResponse } from "@/lib/types";
 import { TailorButton } from "@/components/tailor/TailorButton";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function scoreClass(score: number): string {
-  // 3-tier bands (70 / 40) matched to the AI-verdict pill's colours (emerald /
-  // amber / red) so the big badge and the pill never show a different colour for
-  // the SAME score. The old extra "good" band coloured 50-69 green while the pill
-  // called it amber "moderate"; score-good stays in CSS but is intentionally
-  // unused now.
-  if (score >= 70) return "score-high"; // green  — strong
-  if (score >= 40) return "score-mid"; // amber  — moderate
-  return "score-low"; // red    — weak
-}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -79,16 +70,6 @@ function formatSalaryRange(min?: number | null, max?: number | null): string | n
   if (min) return `${fmt(min)}+`;
   if (max) return `up to ${fmt(max)}`;
   return null;
-}
-
-function stalenessColor(state?: string | null): string {
-  switch (state) {
-    case "ACTIVE": return "text-green-400 border-green-400/30";
-    case "STALE": return "text-yellow-400 border-yellow-400/30";
-    case "GHOST": return "text-orange-400 border-orange-400/30";
-    case "CONFIRMED_EXPIRED": return "text-red-400 border-red-400/30";
-    default: return "text-muted-foreground border-border";
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -143,10 +124,7 @@ export function JobCard({ job, onAction }: JobCardProps) {
       ? "Deadline parsed from the listing text — verify on the source site."
       : null;
 
-  const hasStalenessBadge =
-    job.staleness_state &&
-    job.staleness_state !== "ACTIVE" &&
-    job.staleness_state !== "UNKNOWN";
+  const staleness = stalenessBadge(job.staleness_state);
 
   async function handleApply(e: React.MouseEvent) {
     e.stopPropagation();
@@ -194,7 +172,7 @@ export function JobCard({ job, onAction }: JobCardProps) {
             other engine's score. */}
         <div className="flex flex-col items-center gap-1 flex-shrink-0">
           <div
-            className={`score-badge ${scoreClass(primaryScore)} flex items-center justify-center rounded-lg w-11 h-11 text-lg font-bold`}
+            className={`score-badge ${scoreClass(primaryScore, isJudged)} flex items-center justify-center rounded-lg w-11 h-11 text-lg font-bold`}
             aria-label={`${isJudged ? "AI fit" : "Keyword match"} score: ${primaryScore}`}
             title={
               isJudged
@@ -303,26 +281,20 @@ export function JobCard({ job, onAction }: JobCardProps) {
         </div>
 
         {/* Staleness badge */}
-        {hasStalenessBadge && (
+        {staleness && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Badge
                   variant="outline"
-                  className={`flex-shrink-0 text-xs gap-1 ${stalenessColor(job.staleness_state)}`}
+                  className={`flex-shrink-0 text-xs gap-1 ${staleness.colorClass}`}
                 />
               }
             >
               <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-              {job.staleness_state === "CONFIRMED_EXPIRED" ? "Expired" : job.staleness_state}
+              {staleness.label}
             </TooltipTrigger>
-            <TooltipContent>
-              {job.staleness_state === "CONFIRMED_EXPIRED"
-                ? "This listing has been confirmed expired"
-                : job.staleness_state === "GHOST"
-                ? "Job listing appears to be gone"
-                : "Listing may be stale — check before applying"}
-            </TooltipContent>
+            <TooltipContent>{staleness.description}</TooltipContent>
           </Tooltip>
         )}
       </div>

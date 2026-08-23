@@ -1,0 +1,141 @@
+# The door you walk through to find out whether the harness can actually speak.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# Everything about the Slack voice can be tested offline EXCEPT the one thing
+# that has historically been broken: whether the credential in this repo can
+# really reach a real channel. `backend/tests/test_slack_voice.py` drives the
+# real `post.sh` against a localhost stub, so it proves the LOGIC. It cannot
+# prove that `SLACK_BOT_TOKEN` is valid, that the bot was invited to the
+# channel, or that the channel name is spelled the way Slack spells it.
+#
+# Those three are exactly what killed the previous attempt. `.github/actions/
+# alert` was wired, green, and reaching nobody for weeks because RESEND_API_KEY
+# was never added to Actions. Nothing in CI noticed, because a missing key was
+# treated as a skip.
+#
+# Two loops in this repo were also dead on arrival and only firing them ON
+# PURPOSE revealed it. So the voice gets the same entrance every other guard
+# here has: a button, a known-good expectation, and a result you can see.
+#
+# HOW THE OWNER USES IT — the first-time verification, in order:
+#
+#   1. Actions -> "Slack drill" -> Run workflow. Leave the channel as
+#      log-github-ci so a failed experiment does not spend the credibility of
+#      production-incidents.
+#   2. Watch the run. It asserts, in this order:
+#        a. the transition logic goes RED when broken   (offline, no token)
+#        b. a MISSING token exits 1                     (offline, no token)
+#        c. a BAD channel with the REAL token exits 1   (proves ok:false handling
+#           against real Slack, and proves the token is being read at all)
+#        d. a real message is delivered                 (exit 0)
+#   3. Look in Slack. If step (d) is green and NO message appeared, the token is
+#      valid but the bot is not in that channel — invite it with /invite @<bot>.
+#      That is the only failure this workflow cannot tell you about itself, and
+#      it is why step 3 is a human step.
+#
+# Step (c) is the important one and the least obvious. If the token were empty
+# or wrong, (c) would still "fail" and could be mistaken for success. So (c)
+# asserts on the ERROR STRING: it must be `channel_not_found`, which only a
+# VALID token can produce. An invalid token answers `invalid_auth`, and a
+# missing one never reaches Slack at all. That distinction is the whole test.
+
+name: Slack drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Where to send the real test message. Keep it in a log-* channel."
+        type: string
+        required: false
+        default: "log-github-ci"
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # ── a. the volume rule can go red ────────────────────────────────────
+      # Breaks the decision table on purpose (in a temp copy) and demands the
+      # self-check fails, plus a negative control that must stay quiet. Needs no
+      # token and no network.
+      - name: Transition logic — break it on purpose, demand RED
+        run: python scripts/slack_transition.py --drill
+
+      # ── b. a missing token is a FAILURE, never a skip ────────────────────
+      - name: Missing token must exit non-zero
+        env:
+          SLACK_BOT_TOKEN: ""
+          SLACK_CHANNEL: log-github-ci
+          SLACK_TITLE: "drill — must never be sent"
+        run: |
+          # `run:` blocks execute under `bash -e`, so a non-zero exit would abort
+          # the step before it could be judged. `set +e` is load-bearing: a
+          # FAILING script is the PASSING outcome of this drill.
+          set +e
+          bash .github/actions/slack/post.sh
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::DRILL FAILED — an empty SLACK_BOT_TOKEN exited 0. This is the RESEND_API_KEY bug reproduced: the harness is mute and every workflow looks healthy."
+            exit 1
+          fi
+          echo "DRILL PASSED — missing token exited $code." >> "$GITHUB_STEP_SUMMARY"
+
+      # ── c. ok:false is a FAILURE, and the token is genuinely valid ───────
+      - name: Bad channel must exit non-zero with a real Slack error
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: zzz-this-channel-cannot-exist
+          SLACK_TITLE: "drill — must never be sent"
+        run: |
+          set +e
+          out=$(bash .github/actions/slack/post.sh 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          if [ "$code" -eq 0 ]; then
+            echo "::error::DRILL FAILED — Slack answered ok:false and post.sh exited 0. A message that never arrived would look sent."
+            exit 1
+          fi
+          # The DIAGNOSTIC half. A missing/!invalid token also exits non-zero, so
+          # a non-zero alone proves nothing about the credential. Only a VALID
+          # token can produce channel_not_found.
+          if echo "$out" | grep -q "channel_not_found"; then
+            echo "DRILL PASSED — exited $code with channel_not_found, which proves the token is VALID and being read." >> "$GITHUB_STEP_SUMMARY"
+          elif echo "$out" | grep -q "invalid_auth\|not_authed\|token_revoked"; then
+            echo "::error::SLACK_BOT_TOKEN is present but REJECTED by Slack. Rotate it: https://api.slack.com/apps -> OAuth & Permissions. (The bot token starts xoxb-.)"
+            exit 1
+          elif echo "$out" | grep -q "SLACK_BOT_TOKEN is empty"; then
+            echo "::error::SLACK_BOT_TOKEN is not set in Actions. Settings -> Secrets and variables -> Actions. This is the whole reason the harness has been mute."
+            exit 1
+          else
+            echo "::error::Failed for an UNEXPECTED reason — read the output above before trusting the send path."
+            exit 1
+          fi
+
+      # ── d. and finally, actually speak ───────────────────────────────────
+      # If this is green and nothing shows up in Slack, the bot is not a member
+      # of the channel. Slack reports that as `not_in_channel`, so a green here
+      # with no message means look at the channel membership, nothing else.
+      - name: Send one real message
+        uses: ./.github/actions/slack
+        with:
+          channel: ${{ inputs.channel }}
+          severity: info
+          title: "Slack drill — the harness can speak"
+          body: |
+            This message was sent by .github/workflows/slack-drill.yml, on purpose.
+            If you are reading it, the token, the scopes and the channel all work.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

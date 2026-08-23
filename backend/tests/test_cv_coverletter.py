@@ -1,4 +1,4 @@
-"""Tests for the Per-User AI CV & Cover Letter feature (docs/peruser_cv_coverletter.md).
+"""Tests for the Per-User AI CV & Cover Letter feature (docs/product/peruser_cv_coverletter.md).
 
 Covers, per the spec's Definition of Done:
   - the locked "reshape, don't fabricate" prompts (guardrail #2)

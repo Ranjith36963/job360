@@ -6,7 +6,7 @@
 -- `services/profile/storage.py` handles the round-trip.
 --
 -- Access path is the PK; no additional indexes needed.
--- See docs/plans/batch-3.5.2-plan.md Deliverable A.
+-- See docs/product/plans/batch-3.5.2-plan.md Deliverable A.
 
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id TEXT PRIMARY KEY

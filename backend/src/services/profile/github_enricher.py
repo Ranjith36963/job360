@@ -109,17 +109,19 @@ MAX_REPOS = 30
 # Temporal weighting constants (plan §4.2 — "repos pushed within 12 months → ×3")
 RECENT_WINDOW_DAYS = 365
 RECENT_REPO_MULTIPLIER = 3
-# Dep-file parsing is I/O heavy (7 files × N repos). Cap the repo count
-# we probe to stay within GitHub's 60 unauthenticated / 5000 authenticated
-# requests-per-hour budget. Authenticated runs comfortably cover this.
-MAX_REPOS_FOR_DEPS = 10
+# Dep-file parsing is I/O heavy (7 files × N repos). Authenticated requests
+# (5000/hr) probe every fetched repo — see the rate-limit math where `dep_n`
+# is set, in `fetch_github_profile`. There used to be a second, tighter
+# AUTHENTICATED cap here (MAX_REPOS_FOR_DEPS=10); Finding 8 (Pillar-1
+# closeout audit, 2026-08-16) removed it — authenticated budget was never the
+# constraint, so capping below MAX_REPOS was just losing signal for nothing.
 # "Read 100% of GitHub" — README prose is the richest signal, but each README
 # is one more request AND more prompt tokens, so cap how many we read and how
-# long each excerpt is. Authenticated (5000/hr) reads far more than
-# unauthenticated (60/hr, where the whole probe must fit ≈54 < 60).
+# long each excerpt is. Authenticated (5000/hr) now reads up to MAX_REPOS —
+# same removal as above (there used to be a README_REPOS_AUTHED=15 ceiling).
+# Unauthenticated (60/hr) stays deliberately tight — that limit is real.
 README_EXCERPT_CHARS = 1200          # per-repo README, truncated for the prompt
 PROFILE_README_CHARS = 2500          # the self-authored {u}/{u} portfolio README
-README_REPOS_AUTHED = 15
 README_REPOS_UNAUTHED = 4
 
 
@@ -482,8 +484,26 @@ async def fetch_github_profile(
         # reliably returns data. With a token (5000/hr) we keep full coverage.
         authed = bool(GITHUB_TOKEN)
         lang_n = 20 if authed else 12
-        dep_n = MAX_REPOS_FOR_DEPS if authed else 5
-        readme_n = README_REPOS_AUTHED if authed else README_REPOS_UNAUTHED
+        # Finding 8 (Pillar-1 closeout audit) — authenticated dep/README caps
+        # used to stop at MAX_REPOS_FOR_DEPS (10) / README_REPOS_AUTHED (15)
+        # even though the fetched repo list already goes up to MAX_REPOS (30).
+        # Rate-limit math (read from this file, not guessed):
+        #   1 (user) + 1 (repos list) + 1 (pinned GraphQL) + lang_n (20)
+        #   + dep_n * 7 manifest probes/repo + readme_n + 1 (profile README)
+        # OLD, authed (dep_n=10, readme_n=15):
+        #   1+1+1+20 + 10*7 + 15 + 1 = 109 requests/profile => ~4,891 of 5000/hr
+        #   spare — matches the audit's "roughly 4,900 spare" measurement.
+        # NEW, authed (dep_n=readme_n=MAX_REPOS=30):
+        #   1+1+1+20 + 30*7 + 30 + 1 = 264 requests/profile => 4,736 of 5000/hr
+        #   still spare. Quality (owner's standing instruction: budget is not a
+        #   constraint) says read every repo the API already returned, not half
+        #   of them — a developer with 20+ public repos was silently losing
+        #   README prose and dependency proof for their older work.
+        # Unauthenticated stays exactly as conservative as before: that path
+        # has a REAL 60/hour ceiling and the existing budget (~48 < 60) is
+        # already tight.
+        dep_n = MAX_REPOS if authed else 5
+        readme_n = MAX_REPOS if authed else README_REPOS_UNAUTHED
 
         # The user's PINNED repos are their own curated highlights. Pull them to
         # the front so the capped language / dep-file / README probes cover the

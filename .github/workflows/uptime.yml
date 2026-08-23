@@ -55,10 +55,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # needed to check out the repo for ./.github/actions/slack
       issues: write
       actions: write # to wake the triage loop (gh workflow run triage.yml)
     steps:
+      # A local composite action is just files in the repo — without a checkout
+      # `uses: ./.github/actions/slack` cannot resolve and the step errors.
+      - uses: actions/checkout@v7
+
       - name: Open, update or close the tracking issue
+        id: raise
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -86,6 +92,12 @@ jobs:
               # diagnosis; #185 sat unread for days. Seven loops shared this bug.
               new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
               n="${new##*/}"
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
+              # Slack follows the SAME dedupe doctrine as the issue: announce the
+              # START of an outage, not every 10-minute re-confirmation of it. A
+              # channel that repeats itself 144 times a day is a channel he mutes,
+              # and a muted production-incidents channel is worse than none.
+              echo "announce=down" >> "$GITHUB_OUTPUT"
               if gh workflow run triage.yml -f issue="$n"; then
                 echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
               else
@@ -97,4 +109,65 @@ jobs:
           elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "Green again in run ${{ github.run_id }}. (auto-close)"
+            echo "issue=$num" >> "$GITHUB_OUTPUT"
+            echo "announce=recovered" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── SLACK: the harness finally has a voice ────────────────────────────
+      # production-incidents is the STRICTEST channel in the routing table and
+      # this is one of the few things that earns it: /api/readyz or the
+      # frontend is not returning 200, so a real user loading job360.uk right
+      # now sees a broken site. Nothing weaker than that belongs here.
+      - name: Slack — the site is DOWN (real users affected)
+        if: steps.raise.outputs.announce == 'down'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "job360 is DOWN — the uptime probe is failing"
+          body: |
+            The backend readiness probe (/api/readyz, which checks DB + Redis) or
+            the frontend did not return 200. Users hitting job360.uk see this.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Recovery is NOT an incident — it is news. It goes to the muted log
+      # channel so production-incidents only ever contains things still broken.
+      # FALLBACK LAST MILE. Every branch above keys off an output that the step
+      # only writes if it SUCCEEDS — so a failure inside the issue step (a gh
+      # 403, a rate limit) would skip all of them and the outage would go
+      # unannounced. That is the "alarm rang into an empty room" bug this repo
+      # has now hit four separate times, and it is always the LAST call in the
+      # job that hides it. So: if the alarm path itself broke, say THAT.
+      - name: Slack — the alarm path itself broke
+        if: always() && steps.raise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "uptime: the ALARM step failed — an outage may be unreported"
+          body: |
+            The uptime job could not open/close its tracking issue, so the normal
+            notification did not run. Check the probe result by hand — this
+            message means the messenger broke, not that the site is fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # `always()` is load-bearing, not decoration: without it GitHub wraps this
+      # gate in an implicit `success()`, so the DOWN alert above failing (a
+      # rate-limit, a rotated token) would silently skip this one too — one
+      # broken alert taking a second, unrelated alert down with it.
+      - name: Slack — recovered
+        if: always() && steps.raise.outputs.announce == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "uptime: back to green"
+          body: |
+            The uptime probe passes again and outage issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
