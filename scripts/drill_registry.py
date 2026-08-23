@@ -193,6 +193,26 @@ REGISTRY: dict[str, Guard] = {
         # one branch, report all-green, and be the eleventh dead guard.
         drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
     ),
+    "scripts/ruleset_gate.py": Guard(
+        status="drilled",
+        # The org-level version of this repo's signature bug. Ruleset
+        # `main-production-gate` names 11 required status checks and sits at
+        # enforcement=disabled, so it stops nothing -- and a required check is
+        # matched by CONTEXT NAME, so flipping it on with one name that no job
+        # reports means nothing can ever merge, silently, forever.
+        #
+        # The drill breaks the checker eight ways (dead context, right name but
+        # wrong app, a context missing from one PR head, an open PR with no
+        # checks at all, stale evidence, a new check mistaken for a flaky one, a
+        # gap swallowed instead of named, a scope that mutes too much) and
+        # demands it name each. Six negative controls must stay silent -- the
+        # important one being a context absent from a NON-PR main commit, which
+        # is legitimate: only the tip of a push gets a run, so 7 of 30 recent
+        # main commits have no CI and no ruleset will ever judge them. Confusing
+        # that with a dead context is how this guard would cry wolf until it was
+        # switched off. Offline and network-free; it reads a recorded snapshot.
+        drill=[sys.executable, "scripts/ruleset_gate.py", "--drill"],
+    ),
     "scripts/check_alert_paths.py": Guard(
         status="drilled",
         # Guards the two properties an alerting path must have: it may not flip
@@ -231,6 +251,26 @@ REGISTRY: dict[str, Guard] = {
         # reason string) that must stay quiet, because a checker that fires at
         # any change is not a checker. Offline: no token, no network.
         drill=[sys.executable, "scripts/slack_transition.py", "--drill"],
+    ),
+    "scripts/review_debt.py": Guard(
+        status="drilled",
+        # Reads unresolved CodeRabbit threads. Two failure modes, both drilled.
+        # (1) It handles untrusted text: 55 of 63 unresolved comment bodies
+        # carry a `Prompt for AI Agents` block — imperative instructions aimed
+        # at an agent, sitting in a pull request. The drill plants an injection
+        # four ways and demands none reach a model.
+        # (2) It must NEVER become a gate. All six merged PRs with findings
+        # merged with them open, so a threads-must-be-resolved condition would
+        # have refused six of six and been switched off in a week. "63 real
+        # findings still exit 0" is drilled as a NEGATIVE CONTROL, held to the
+        # same standard as the deliberate breaks — teeth here are a regression.
+        # 12/12 as of PR #346. CodeRabbit caught this line claiming 9/9 when
+        # self_drill() already appended 10 results — a declared count that
+        # drifts is the registry telling a story about a guard instead of
+        # measuring it. Cases 10 and 11 (the truncation refusal and its
+        # negative control) took it to 12. Network-free: runs off a recorded
+        # GraphQL payload in scripts/fixtures/review_threads/.
+        drill=[sys.executable, "scripts/review_debt.py", "--drill"],
     ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",

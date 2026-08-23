@@ -73,21 +73,41 @@ class HackerNewsSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[Job]:
         # Step 1: Find latest "Who is Hiring" thread
+        # `/search` ranks by RELEVANCE, not date, so this query returned the
+        # same COVID-era thread forever: "Ask HN: Who is hiring right now?"
+        # from 2020-03-23. Measured 2026-08-08 — all 118 stored HackerNews
+        # jobs carried posted_at=2020-03-23 (and we stamped them
+        # date_confidence='high'), i.e. the catalog held six-year-old dead
+        # postings presented as current. Found by scripts/distribution_sanity
+        # on its first run: one distinct posted_at across 118 rows.
+        #
+        # `/search_by_date` returns newest-first. Ask for a few hits, not one,
+        # because the same author posts a sibling "Who wants to be hired?"
+        # thread on the same day — that one is job SEEKERS advertising
+        # themselves, the exact inverse of what this source is for.
         params = {
-            "query": "Ask HN: Who is hiring?",
             "tags": "story,author_whoishiring",
-            "hitsPerPage": "1",
+            "hitsPerPage": "5",
         }
         data = await self._get_json(
-            "https://hn.algolia.com/api/v1/search",
+            "https://hn.algolia.com/api/v1/search_by_date",
             params=params,
         )
         if not data or not cast(dict[str, Any], data).get("hits"):
             logger.info("HackerNews: no 'Who is Hiring' thread found")
             return []
 
-        story_id = cast(dict[str, Any], data)["hits"][0].get("objectID")
+        # Newest-first, so the first title that is a HIRING thread wins.
+        story_id = None
+        for hit in cast(dict[str, Any], data)["hits"]:
+            title = str(hit.get("title") or "").lower()
+            if "who is hiring" in title and "wants to be hired" not in title:
+                story_id = hit.get("objectID")
+                logger.info("HackerNews: using thread %r", hit.get("title"))
+                break
         if not story_id:
+            logger.info("HackerNews: no current 'Who is hiring' thread in the "
+                        "newest %s stories", params["hitsPerPage"])
             return []
 
         # Step 2: Fetch comments (each comment = one job posting)

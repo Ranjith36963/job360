@@ -179,6 +179,10 @@ jobs:
       - name: The broom still refuses to sweep up unsaved work
         run: python scripts/worktree_census.py --drill
 
+      - name: The ruleset checker can still fail
+        run: python scripts/ruleset_gate.py --drill
+      - name: Would the ruleset wedge the repo?
+        run: python scripts/ruleset_gate.py --check --scope ruleset
       # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
       # from commented-out example lines, so `drill_registry.discover()` counted
       # them as invoked and certified two guards that NOTHING RAN. #362 taught
@@ -190,6 +194,8 @@ jobs:
       - name: Every slack step passes a token, a title and a real channel
         run: python scripts/check_workflow_slack_wiring.py
 
+      - name: The review-debt reader can still fail (and still refuses to gate)
+        run: python scripts/review_debt.py --drill
       - name: Every guard declares its drill
         run: python scripts/drill_registry.py --run-drills
 

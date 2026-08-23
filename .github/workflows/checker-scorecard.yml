@@ -106,3 +106,19 @@ jobs:
           printf 'chore(harness): weekly blind-checker scorecard\n\nMeasured, not asserted: coverage, verdict mix, and agreement with the human\nmerge decision. Deliberately does NOT publish a catch rate - that needs\nplanted bugs with known answers, and a made-up number is worse than none.\n' > /tmp/sc-msg.txt
           git commit -F /tmp/sc-msg.txt
           git push origin HEAD:${{ github.ref_name }}
+      - name: Would the ruleset wedge the repo?
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          {
+            echo ""
+            echo "## Ruleset gate ($(date -u +%F))"
+            echo '```'
+            python scripts/ruleset_gate.py --live 2>&1
+            echo '```'
+          } >> docs/maintenance/CHECKER-SCORECARD.md
+      - name: A wedge finding must turn this job RED
+        if: ${{ !cancelled() }}
+        run: python scripts/ruleset_gate.py --check --scope all
