@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Bell, BellOff } from "lucide-react";
 
@@ -33,11 +34,15 @@ type Draft = {
   enabled: boolean;
 };
 
+// #318 — must mirror backend services/notifications/defaults.py. 'daily' (not
+// 'instant') because an unattended cron on instant mode sends one email per
+// matching job; 30 (not 60) because that is MATCHER_THRESHOLD, the bar the rest
+// of the system already uses for "worth an LLM call".
 const DEFAULT_DRAFT: Draft = {
-  notify_mode: "instant",
+  notify_mode: "daily",
   interval_hours: 6,
   daily_send_time: "08:00",
-  score_threshold: 60,
+  score_threshold: 30,
   quiet_hours_start: null,
   quiet_hours_end: null,
   enabled: true,
@@ -45,10 +50,10 @@ const DEFAULT_DRAFT: Draft = {
 
 function draftFromRule(rule: NotificationRule): Draft {
   return {
-    notify_mode: (rule.notify_mode as Mode) ?? "instant",
-    interval_hours: rule.interval_hours ?? 6,
-    daily_send_time: rule.daily_send_time ?? "08:00",
-    score_threshold: rule.score_threshold ?? 60,
+    notify_mode: (rule.notify_mode as Mode) ?? DEFAULT_DRAFT.notify_mode,
+    interval_hours: rule.interval_hours ?? DEFAULT_DRAFT.interval_hours,
+    daily_send_time: rule.daily_send_time ?? DEFAULT_DRAFT.daily_send_time,
+    score_threshold: rule.score_threshold ?? DEFAULT_DRAFT.score_threshold,
     quiet_hours_start: rule.quiet_hours_start ?? null,
     quiet_hours_end: rule.quiet_hours_end ?? null,
     enabled: rule.enabled ?? true,
@@ -150,239 +155,258 @@ export default function NotificationRulePage() {
         </p>
       )}
 
-      {channels.length === 0 ? (
+      {/* #318 — this was `channels.length === 0 ? <EmptyState/> : <Card/>`,
+          which kept the Save button out of the DOM entirely until the user had
+          already added a channel somewhere else. That made this page unable to
+          create a rule on its own, and forced an order (channel first, then
+          rule) that nothing here told the user about. The rulebook is
+          per-USER, not per-channel (rule #23), so gating its editor on the
+          channel count was a category error. The notice stays, as a
+          non-blocking banner with a way out. */}
+      {channels.length === 0 && (
         <EmptyState
-          title="No channels connected"
-          description="Add a notification channel first, then come back here to set when and how often you get notified."
+          title="No channels connected yet"
+          description="Your settings below are saved either way — add a channel to start receiving these alerts."
+          action={
+            <Link
+              href="/channels"
+              className="text-sm font-medium text-primary underline underline-offset-4"
+            >
+              Add a channel
+            </Link>
+          }
         />
-      ) : (
-        <Card>
-          <CardHeader className="border-b pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle>Notification rule</CardTitle>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={draft.enabled}
-                aria-label={`Notifications are ${draft.enabled ? "on" : "off"} — click to turn ${draft.enabled ? "off" : "on"}`}
-                onClick={() => update({ enabled: !draft.enabled })}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                  draft.enabled
-                    ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25"
-                    : "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30 hover:bg-amber-500/25"
-                }`}
-              >
-                {draft.enabled ? (
-                  <Bell className="h-3.5 w-3.5" aria-hidden="true" />
-                ) : (
-                  <BellOff className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                {draft.enabled ? "On" : "Off"}
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Applies to {channels.length} connected channel
-              {channels.length > 1 ? "s" : ""}.
-            </p>
-          </CardHeader>
+      )}
 
-          <CardContent className="space-y-6 pt-4">
-            {/* Off-state notice — make a disabled rule unmistakable so a user
-                doesn't configure everything and silently receive nothing. */}
-            {!draft.enabled && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                <BellOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>
-                  Notifications are <strong>off</strong>. You won&apos;t receive any job
-                  alerts until you turn them on (top-right) and Save.
+      <Card>
+        <CardHeader className="border-b pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle>Notification rule</CardTitle>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={draft.enabled}
+              aria-label={`Notifications are ${draft.enabled ? "on" : "off"} — click to turn ${draft.enabled ? "off" : "on"}`}
+              onClick={() => update({ enabled: !draft.enabled })}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                draft.enabled
+                  ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25"
+                  : "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30 hover:bg-amber-500/25"
+              }`}
+            >
+              {draft.enabled ? (
+                <Bell className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <BellOff className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {draft.enabled ? "On" : "Off"}
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {channels.length === 0
+              ? "Saved now, applied as soon as you connect a channel."
+              : `Applies to ${channels.length} connected channel${
+                  channels.length > 1 ? "s" : ""
+                }.`}
+          </p>
+        </CardHeader>
+
+        <CardContent className="space-y-6 pt-4">
+          {/* Off-state notice — make a disabled rule unmistakable so a user
+              doesn't configure everything and silently receive nothing. */}
+          {!draft.enabled && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              <BellOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                Notifications are <strong>off</strong>. You won&apos;t receive any job
+                alerts until you turn them on (top-right) and Save.
+              </span>
+            </div>
+          )}
+
+          {/* Delivery mode */}
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium leading-none">
+              How often
+            </legend>
+            <div className="flex flex-col gap-2 pt-1">
+              {(
+                [
+                  ["instant", "Instant — the moment a job matches"],
+                  ["every_n_hours", "Every few hours — a bundle on a timer"],
+                  ["daily", "Once a day — a bundle at a set time"],
+                ] as [Mode, string][]
+              ).map(([value, label]) => (
+                <label
+                  key={value}
+                  className="flex cursor-pointer items-center gap-2 text-sm"
+                >
+                  <input
+                    type="radio"
+                    name="notify-mode"
+                    value={value}
+                    checked={draft.notify_mode === value}
+                    onChange={() => update({ notify_mode: value })}
+                    className="accent-primary"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {/* every_n_hours: interval */}
+          {draft.notify_mode === "every_n_hours" && (
+            <div className="space-y-2">
+              <Label htmlFor="interval-hours">Send a bundle every</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="interval-hours"
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={draft.interval_hours}
+                  onChange={(e) =>
+                    update({
+                      interval_hours: Math.min(
+                        24,
+                        Math.max(1, Number(e.target.value) || 1)
+                      ),
+                    })
+                  }
+                  className="h-9 w-20 rounded-md border bg-background px-3 text-sm"
+                />
+                <span className="text-sm text-muted-foreground">
+                  hours (1–24)
                 </span>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Delivery mode */}
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium leading-none">
-                How often
-              </legend>
-              <div className="flex flex-col gap-2 pt-1">
-                {(
-                  [
-                    ["instant", "Instant — the moment a job matches"],
-                    ["every_n_hours", "Every few hours — a bundle on a timer"],
-                    ["daily", "Once a day — a bundle at a set time"],
-                  ] as [Mode, string][]
-                ).map(([value, label]) => (
-                  <label
-                    key={value}
-                    className="flex cursor-pointer items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="radio"
-                      name="notify-mode"
-                      value={value}
-                      checked={draft.notify_mode === value}
-                      onChange={() => update({ notify_mode: value })}
-                      className="accent-primary"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+          {/* daily: send time */}
+          {draft.notify_mode === "daily" && (
+            <div className="space-y-2">
+              <Label htmlFor="daily-send-time">Daily send time</Label>
+              <input
+                id="daily-send-time"
+                type="time"
+                value={draft.daily_send_time}
+                onChange={(e) =>
+                  update({ daily_send_time: e.target.value || "08:00" })
+                }
+                className="h-9 rounded-md border bg-background px-3 text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Jobs are batched and sent once a day at this time (your
+                timezone).
+              </p>
+            </div>
+          )}
 
-            {/* every_n_hours: interval */}
-            {draft.notify_mode === "every_n_hours" && (
-              <div className="space-y-2">
-                <Label htmlFor="interval-hours">Send a bundle every</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="interval-hours"
-                    type="number"
-                    min={1}
-                    max={24}
-                    value={draft.interval_hours}
-                    onChange={(e) =>
-                      update({
-                        interval_hours: Math.min(
-                          24,
-                          Math.max(1, Number(e.target.value) || 1)
-                        ),
-                      })
-                    }
-                    className="h-9 w-20 rounded-md border bg-background px-3 text-sm"
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    hours (1–24)
-                  </span>
-                </div>
-              </div>
-            )}
+          {/* Score threshold */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="threshold">Score threshold</Label>
+              <span
+                className="text-sm font-medium tabular-nums"
+                aria-hidden="true"
+              >
+                {draft.score_threshold}
+              </span>
+            </div>
+            <input
+              id="threshold"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={draft.score_threshold}
+              aria-label={`Score threshold: ${draft.score_threshold}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={draft.score_threshold}
+              onChange={(e) =>
+                update({ score_threshold: Number(e.target.value) })
+              }
+              className="w-full accent-primary"
+            />
+            <p className="text-xs text-muted-foreground">
+              Only notify when a job scores ≥ {draft.score_threshold} / 100.
+            </p>
+          </div>
 
-            {/* daily: send time */}
-            {draft.notify_mode === "daily" && (
-              <div className="space-y-2">
-                <Label htmlFor="daily-send-time">Daily send time</Label>
+          {/* Quiet hours */}
+          <div className="space-y-2">
+            <p
+              className="text-sm font-medium leading-none"
+              id="quiet-hours-label"
+            >
+              Quiet hours (optional)
+            </p>
+            <div
+              className="flex items-center gap-3"
+              role="group"
+              aria-labelledby="quiet-hours-label"
+            >
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="quiet-start"
+                  className="text-xs text-muted-foreground"
+                >
+                  Start
+                </label>
                 <input
-                  id="daily-send-time"
+                  id="quiet-start"
                   type="time"
-                  value={draft.daily_send_time}
+                  value={draft.quiet_hours_start ?? ""}
+                  aria-label="Quiet hours start time"
                   onChange={(e) =>
-                    update({ daily_send_time: e.target.value || "08:00" })
+                    update({ quiet_hours_start: e.target.value || null })
                   }
                   className="h-9 rounded-md border bg-background px-3 text-sm"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Jobs are batched and sent once a day at this time (your
-                  timezone).
-                </p>
               </div>
-            )}
-
-            {/* Score threshold */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="threshold">Score threshold</Label>
-                <span
-                  className="text-sm font-medium tabular-nums"
-                  aria-hidden="true"
+              <span className="mt-4 text-muted-foreground" aria-hidden="true">
+                to
+              </span>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="quiet-end"
+                  className="text-xs text-muted-foreground"
                 >
-                  {draft.score_threshold}
-                </span>
+                  End
+                </label>
+                <input
+                  id="quiet-end"
+                  type="time"
+                  value={draft.quiet_hours_end ?? ""}
+                  aria-label="Quiet hours end time"
+                  onChange={(e) =>
+                    update({ quiet_hours_end: e.target.value || null })
+                  }
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                />
               </div>
-              <input
-                id="threshold"
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={draft.score_threshold}
-                aria-label={`Score threshold: ${draft.score_threshold}`}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={draft.score_threshold}
-                onChange={(e) =>
-                  update({ score_threshold: Number(e.target.value) })
-                }
-                className="w-full accent-primary"
-              />
-              <p className="text-xs text-muted-foreground">
-                Only notify when a job scores ≥ {draft.score_threshold} / 100.
-              </p>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Sends are held during these hours and delivered once the window
+              ends.
+            </p>
+          </div>
 
-            {/* Quiet hours */}
-            <div className="space-y-2">
-              <p
-                className="text-sm font-medium leading-none"
-                id="quiet-hours-label"
-              >
-                Quiet hours (optional)
-              </p>
-              <div
-                className="flex items-center gap-3"
-                role="group"
-                aria-labelledby="quiet-hours-label"
-              >
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="quiet-start"
-                    className="text-xs text-muted-foreground"
-                  >
-                    Start
-                  </label>
-                  <input
-                    id="quiet-start"
-                    type="time"
-                    value={draft.quiet_hours_start ?? ""}
-                    aria-label="Quiet hours start time"
-                    onChange={(e) =>
-                      update({ quiet_hours_start: e.target.value || null })
-                    }
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                  />
-                </div>
-                <span className="mt-4 text-muted-foreground" aria-hidden="true">
-                  to
-                </span>
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="quiet-end"
-                    className="text-xs text-muted-foreground"
-                  >
-                    End
-                  </label>
-                  <input
-                    id="quiet-end"
-                    type="time"
-                    value={draft.quiet_hours_end ?? ""}
-                    aria-label="Quiet hours end time"
-                    onChange={(e) =>
-                      update({ quiet_hours_end: e.target.value || null })
-                    }
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Sends are held during these hours and delivered once the window
-                ends.
-              </p>
-            </div>
-
-            {/* Save */}
-            <div className="flex items-center gap-3 pt-1">
-              <Button onClick={onSave} disabled={saving} aria-label="Save notification settings">
-                {saving ? "Saving…" : "Save"}
-              </Button>
-              {saved && (
-                <span className="text-sm text-emerald-400" role="status">
-                  Saved
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          {/* Save */}
+          <div className="flex items-center gap-3 pt-1">
+            <Button onClick={onSave} disabled={saving} aria-label="Save notification settings">
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            {saved && (
+              <span className="text-sm text-emerald-400" role="status">
+                Saved
+              </span>
+            )}
+          </div>
+      </CardContent>
+      </Card>
     </div>
   );
 }

@@ -230,5 +230,49 @@ def setup_profile(
     click.echo("Next pipeline run will use your personalised keywords.")
 
 
+@cli.command("rescore-backfill")
+@click.option("--batch-size", default=25, type=int, show_default=True,
+              help="Users selected per DB round-trip.")
+@click.option("--max-users", default=0, type=int, show_default=True,
+              help="Hard ceiling for one run (0 = no ceiling).")
+@click.option("--throttle", default=2.0, type=float, show_default=True,
+              help="Seconds to pause between batches.")
+def rescore_backfill_cmd(batch_size: int, max_users: int, throttle: float) -> None:
+    """Queue the one-off re-score backfill for users with a stale feed (issue #271).
+
+    This does NOT do the work here — it puts ``rescore_backfill`` on the ARQ
+    queue, and that job in turn queues one bounded ``rescore_user_feed_task``
+    per affected user. Deliberate by design: nothing this expensive fires on a
+    cron or on boot.
+
+    Needs ``REDIS_URL`` and a running worker. Safe to re-run: the job ids are
+    keyed on (user, current profile version), so ARQ drops a duplicate rather
+    than paying for the same re-score twice.
+    """
+    from src.workers.queue import enqueue_job
+
+    queued = asyncio.run(
+        enqueue_job(
+            "rescore_backfill",
+            batch_size=batch_size,
+            max_users=max_users,
+            throttle_seconds=throttle,
+        )
+    )
+    if queued:
+        click.echo(
+            f"Queued rescore_backfill (batch_size={batch_size}, "
+            f"max_users={max_users or 'all'}, throttle={throttle}s). "
+            "Watch the worker logs for 'rescore_backfill_done'."
+        )
+    else:
+        click.echo(
+            "Could not queue rescore_backfill — check REDIS_URL and that the "
+            "worker service is up. Nothing was run.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     cli()

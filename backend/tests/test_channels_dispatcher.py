@@ -200,3 +200,152 @@ async def test_test_send_rejects_cross_user_channel_id(channel_db):
     assert "not found" in result.error
     # Apprise was never called — ownership check rejected before dispatch.
     assert MockApp.return_value.notify.call_count == 0
+
+
+# ── Rule #24 matrix: all three notify_modes × both quiet-hours states ────────
+#
+# #318 made these paths reachable for the first time. Until signup seeded a
+# rulebook, `_load_notification_rule` returned None for every user in
+# production, so dispatch always took the rule-is-None branch and defaulted to
+# 'instant'. Seeded users default to 'daily', which routes through gate 3 into
+# `user_notification_digests` — a branch that had never executed against a real
+# user. Rule #24 requires the full grid on any newly-live dispatch path, so
+# here it is: 3 modes × {inside, outside} quiet hours = 6 cases.
+
+
+async def _insert_rule(
+    db_path,
+    user_id,
+    *,
+    notify_mode,
+    quiet_start=None,
+    quiet_end=None,
+    score_threshold=0,
+    enabled=1,
+):
+    async with pg.connect(db_path) as db:
+        await db.execute(
+            "INSERT INTO notification_rules(user_id, notify_mode, score_threshold, "
+            "quiet_hours_start, quiet_hours_end, enabled, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            (user_id, notify_mode, score_threshold, quiet_start, quiet_end, enabled),
+        )
+        await db.commit()
+
+
+async def _pending_digest_count(db_path, user_id):
+    async with pg.connect(db_path) as db:
+        cur = await db.execute(
+            "SELECT COUNT(*) FROM user_notification_digests "
+            "WHERE user_id = ? AND sent = 0",
+            (user_id,),
+        )
+        return (await cur.fetchone())[0]
+
+
+# A quiet window that is active whatever time the suite runs, so the grid is
+# not flaky by clock. 00:00–23:59 covers all but one minute of the day.
+_QUIET_NOW = ("00:00", "23:59")
+
+
+async def _run_dispatch(db_path, *, job_id=7, force=False):
+    """Dispatch one job to alice's single channel; return (results, apprise_mock)."""
+    with patch("apprise.Apprise") as MockApp:
+        instance = MockApp.return_value
+        instance.add.return_value = None
+        instance.notify.return_value = True
+        if hasattr(instance, "async_notify"):
+            del instance.async_notify
+        async with pg.connect(db_path) as db:
+            results = await dispatcher.dispatch(
+                db,
+                user_id="alice",
+                title="Hi",
+                body="there",
+                job_id=job_id,
+                match_score=90,
+                force=force,
+            )
+    return results, instance
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["instant", "daily", "every_n_hours"])
+async def test_rule24_outside_quiet_hours(channel_db, mode):
+    """Outside quiet hours: only 'instant' sends now; both bundling modes queue."""
+    await _insert_channel(channel_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
+    await _insert_rule(channel_db, "alice", notify_mode=mode)
+
+    results, notify = await _run_dispatch(channel_db)
+
+    assert len(results) == 1
+    if mode == "instant":
+        assert results[0].ok and not results[0].queued_digest
+        assert notify.notify.call_count == 1
+        assert await _pending_digest_count(channel_db, "alice") == 0
+    else:
+        assert results[0].queued_digest, f"{mode} must bundle, not send inline"
+        assert notify.notify.call_count == 0, (
+            f"{mode} sent inline — that is the ~280-emails-a-night shape"
+        )
+        assert await _pending_digest_count(channel_db, "alice") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["instant", "daily", "every_n_hours"])
+async def test_rule24_inside_quiet_hours(channel_db, mode):
+    """Inside quiet hours: EVERY mode queues, 'instant' included."""
+    await _insert_channel(channel_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
+    await _insert_rule(
+        channel_db,
+        "alice",
+        notify_mode=mode,
+        quiet_start=_QUIET_NOW[0],
+        quiet_end=_QUIET_NOW[1],
+    )
+
+    results, notify = await _run_dispatch(channel_db)
+
+    assert results[0].queued_digest, f"{mode} sent during quiet hours"
+    assert notify.notify.call_count == 0
+    assert await _pending_digest_count(channel_db, "alice") == 1
+
+
+@pytest.mark.asyncio
+async def test_rule24_force_overrides_quiet_hours_and_mode(channel_db):
+    """`force=True` is how send_bundle drains a digest — it bypasses both gates."""
+    await _insert_channel(channel_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
+    await _insert_rule(
+        channel_db,
+        "alice",
+        notify_mode="daily",
+        quiet_start=_QUIET_NOW[0],
+        quiet_end=_QUIET_NOW[1],
+    )
+
+    results, notify = await _run_dispatch(channel_db, force=True)
+
+    assert results[0].ok and not results[0].queued_digest
+    assert notify.notify.call_count == 1
+    assert await _pending_digest_count(channel_db, "alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_seeded_default_mode_bundles(channel_db):
+    """The seeded default must be a BUNDLING mode.
+
+    This is the interlock that makes flipping REFRESH_CATALOG_NOTIFY safe: the
+    nightly refill fans out ~280 jobs per tick, so a seeded 'instant' default
+    would mean up to 280 separate emails per user per night.
+    """
+    from src.services.notifications.defaults import DEFAULT_NOTIFY_MODE
+
+    assert DEFAULT_NOTIFY_MODE in ("daily", "every_n_hours")
+
+    await _insert_channel(channel_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
+    await _insert_rule(channel_db, "alice", notify_mode=DEFAULT_NOTIFY_MODE)
+
+    results, notify = await _run_dispatch(channel_db)
+
+    assert results[0].queued_digest
+    assert notify.notify.call_count == 0

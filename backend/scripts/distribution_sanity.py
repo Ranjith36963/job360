@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -56,8 +57,14 @@ def main() -> int:
     dsn = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
     if not dsn:
         raise SystemExit("set DATABASE_URL or DATABASE_PUBLIC_URL")
-    conn = psycopg.connect(dsn)
-    cur = conn.cursor()
+    # CodeRabbit: conn.close() sat on the success path only, so any raising
+    # cur.execute() below exited with the connection still open. `with` also
+    # rolls back cleanly, and removes the branch instead of duplicating it.
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        return _run_checks(cur)
+
+
+def _run_checks(cur: Any) -> int:
     active = "(staleness_state IS NULL OR staleness_state = 'active')"
     findings: list[str] = []
 
@@ -91,9 +98,17 @@ def main() -> int:
         "AND salary_min > salary_max"
     )
     inverted = cur.fetchone()[0]
+    # CodeRabbit: filtering on salary_min alone left two whole classes of
+    # units bug silent -- a plausible min beside a 3,000,000 max (minor units,
+    # or hourly applied to the upper bound only), and rows where min is NULL
+    # and only max is set. A units bug does not politely land on both columns,
+    # so EACH bound is range-checked on its own, wherever it is present.
     cur.execute(
-        f"SELECT source, count(*) FROM jobs WHERE {active} AND salary_min IS NOT NULL "
-        f"AND (salary_min < {SALARY_FLOOR} OR salary_min > {SALARY_CEILING}) "
+        f"SELECT source, count(*) FROM jobs WHERE {active} AND ("
+        f"  (salary_min IS NOT NULL AND (salary_min < {SALARY_FLOOR}"
+        f"   OR salary_min > {SALARY_CEILING}))"
+        f"  OR (salary_max IS NOT NULL AND (salary_max < {SALARY_FLOOR}"
+        f"   OR salary_max > {SALARY_CEILING})) ) "
         "GROUP BY source ORDER BY count(*) DESC"
     )
     odd = cur.fetchall()
@@ -119,6 +134,24 @@ def main() -> int:
     print(f"\n[3] posted_at in the future or pre-2015: {bad_dates}")
     if bad_dates:
         findings.append(f"{bad_dates} jobs have an absurd posted_at")
+    # CodeRabbit: the ISO regex above is a FILTER, so everything it rejects
+    # was counted as fine -- a raw epoch (1751932800), a bare "0", an empty
+    # string. Those are the values most likely to BE the parse damage, so a
+    # check that skips them reports health it never measured.
+    cur.execute(
+        f"SELECT source, count(*) FROM jobs WHERE {active} "
+        "AND posted_at IS NOT NULL AND posted_at <> '' "
+        "AND posted_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
+        "GROUP BY source ORDER BY count(*) DESC"
+    )
+    unparseable = cur.fetchall()
+    print(f"    posted_at set but not an ISO date: "
+          f"{sum(n for _, n in unparseable)}")
+    for src, n in unparseable:
+        findings.append(
+            f"posted_at unparseable: {src} has {n} rows that are not ISO dates"
+        )
+        print(f"    FIRING  {src}: {n}")
 
     # ── 4. posted_at monoculture — we stamped it, we did not read it ────────
     print("\n[4] posted_at monoculture (one date for a whole source):")
@@ -171,7 +204,6 @@ def main() -> int:
     else:
         print("no findings — every checked distribution is plausible")
     print("=" * 72)
-    conn.close()
     return 1 if findings else 0
 
 

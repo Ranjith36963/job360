@@ -1145,8 +1145,10 @@ export interface paths {
          *     * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
          *     * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
          *       to the Apprise ``json[s]://`` URL scheme.
-         *     * ``email``: ``credential`` must be a valid email address; backend builds
-         *       the ``mailtos://`` Apprise URL from the platform SMTP creds.
+         *     * ``email``: ``credential`` must be a valid email address; the backend
+         *       builds the Apprise URL from the platform's own mail credentials
+         *       (``resend://`` where a Resend key is configured, ``mailtos://`` only as
+         *       the local-SMTP fallback — see ``services/channels/email_url.py``).
          */
         post: operations["create_channel_api_settings_channels_post"];
         delete?: never;

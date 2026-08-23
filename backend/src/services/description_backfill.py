@@ -50,7 +50,12 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from src.core.companies import GREENHOUSE_COMPANIES, SMARTRECRUITERS_COMPANIES, WORKDAY_COMPANIES
+from src.core.companies import (
+    GREENHOUSE_COMPANIES,
+    SMARTRECRUITERS_COMPANIES,
+    WORKABLE_COMPANIES,
+    WORKDAY_COMPANIES,
+)
 
 logger = logging.getLogger("job360.services.description_backfill")
 
@@ -93,6 +98,16 @@ ALLOWED_BACKFILL_SOURCES: frozenset[str] = frozenset({
     # nothing more for them — that is a real ceiling of the source, not a
     # bug in this module.
     "devitjobs",
+    # IN (issue #334) — same shape as smartrecruiters: apply_url is built at
+    # ingestion as f"https://apply.workable.com/{slug}/j/{shortcode}/", an
+    # EXACT, lossless encoding of both call arguments. Workable was neither
+    # IN nor documented OUT before — it was simply missing, so all 115 of its
+    # prod rows (100% of the source) were empty with nothing to mop them up.
+    "workable",
+    # IN (issue #334) — apply_url is f"https://nofluffjobs.com/job/{id}" and
+    # the detail endpoint keys off that same id, so the reversal is exact and
+    # costs one precise HTTP call per job.
+    "nofluffjobs",
 })
 # OUT, by explicit spec mandate — LinkedIn is a scraper (regex over guest
 # HTML, no official API). Hammering it from an unattended 30-min cron risks
@@ -112,6 +127,8 @@ ALLOWED_BACKFILL_SOURCES: frozenset[str] = frozenset({
 
 _GREENHOUSE_PATH_RE = re.compile(r"/([^/]+)/jobs/(\d+)")
 _SMARTRECRUITERS_PATH_RE = re.compile(r"smartrecruiters\.com/([^/]+)/([^/?#]+)")
+_WORKABLE_PATH_RE = re.compile(r"apply\.workable\.com/([^/]+)/j/([^/?#]+)")
+_NOFLUFFJOBS_PATH_RE = re.compile(r"nofluffjobs\.com/job/([^/?#]+)")
 
 
 def _normalize_slug(value: str) -> str:
@@ -199,6 +216,43 @@ async def _refetch_greenhouse(apply_url: str, session: aiohttp.ClientSession) ->
     return await source._fetch_job_content(slug, job_id)
 
 
+async def _refetch_workable(apply_url: str, session: aiohttp.ClientSession) -> Optional[str]:
+    """Reconstruct the (slug, shortcode) pair a stored Workable apply_url
+    encodes. ``WorkableSource.fetch_jobs`` builds it as
+    ``f"https://apply.workable.com/{slug}/j/{shortcode}/"``, so the reversal is
+    exact — no guessing. The slug is still resolved through the canonical
+    ``WORKABLE_COMPANIES`` registry (same reason as SmartRecruiters: casing and
+    dashes can disagree between a stored URL and the registry entry the API
+    call needs).
+    """
+    from src.sources.ats.workable import WorkableSource
+
+    m = _WORKABLE_PATH_RE.search(apply_url)
+    if not m:
+        return None
+    slug = _match_registry_slug(m.group(1), WORKABLE_COMPANIES)
+    if slug is None:
+        return None
+    source = WorkableSource(session)
+    return await source._fetch_posting_text(slug, m.group(2))
+
+
+async def _refetch_nofluffjobs(apply_url: str, session: aiohttp.ClientSession) -> Optional[str]:
+    """Reconstruct the posting id a stored NoFluffJobs apply_url encodes.
+
+    ``NoFluffJobsSource`` builds it as ``f"https://nofluffjobs.com/job/{id}"``
+    from the very id the detail endpoint keys off, so this is a straight
+    read-back of one path segment.
+    """
+    from src.sources.other.nofluffjobs import NoFluffJobsSource
+
+    m = _NOFLUFFJOBS_PATH_RE.search(apply_url)
+    if not m:
+        return None
+    source = NoFluffJobsSource(session)
+    return await source._fetch_posting_text(m.group(1))
+
+
 async def _refetch_devitjobs(
     apply_url: str, session: aiohttp.ClientSession, *, cache: dict[str, dict[str, str]]
 ) -> Optional[str]:
@@ -245,6 +299,10 @@ async def fetch_description(
             return await _refetch_smartrecruiters(apply_url, session)
         if source_name == "greenhouse":
             return await _refetch_greenhouse(apply_url, session)
+        if source_name == "workable":
+            return await _refetch_workable(apply_url, session)
+        if source_name == "nofluffjobs":
+            return await _refetch_nofluffjobs(apply_url, session)
         if source_name == "devitjobs":
             return await _refetch_devitjobs(apply_url, session, cache=devitjobs_cache)
     except Exception:  # noqa: BLE001 — network/parse failures degrade to "no new text"
