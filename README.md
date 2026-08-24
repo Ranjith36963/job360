@@ -400,7 +400,7 @@ job360/
 │       │   └── other/       (4 classes / 5 keys)
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # 3,297 collected / 3,295 selected (2 live deselected) across 217 test_*.py files (defer to runtime count)
+├── backend/tests/               # 3,297 collected / 3,295 selected (2 live deselected) across 218 test_*.py files (defer to runtime count)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
