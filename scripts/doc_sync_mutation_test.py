@@ -47,6 +47,18 @@ CASES: list[tuple[str, str, str, str]] = [
     ("docs/product/pillars/glossary.md",
      r"`RATE_LIMITS` dict in `settings\.py` \((\d+) entries",
      "`RATE_LIMITS` dict in `settings.py` (999 entries", "rate-limits"),
+    # Third batch, 2026-08-24 — the glossary's remaining countable facts.
+    ("docs/product/pillars/glossary.md",
+     r"\((\d+) slugs across \d+ platforms\)", "(999 slugs across 11 platforms)", "ats-slugs"),
+    ("docs/product/pillars/glossary.md",
+     r"\(\d+ slugs across (\d+) platforms\)", "(302 slugs across 99 platforms)", "ats-platforms"),
+    ("docs/product/pillars/glossary.md",
+     r"every source must produce: (\d+) fields", "every source must produce: 999 fields", "job-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"shape with (\d+) strict-typed fields", "shape with 999 strict-typed fields",
+     "enrichment-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
 ]
 
 

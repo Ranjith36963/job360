@@ -168,6 +168,57 @@ def source_subclass_count() -> int:
     return n
 
 
+def ats_slug_count() -> tuple[int, int]:
+    """(total ATS company slugs, number of *_COMPANIES lists).
+
+    Third promotion batch, 2026-08-24. The glossary said "~256 slugs across 11
+    platforms" against a real 302. A tilde is not a measurement -- it is a
+    number nobody intends to keep true.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
+    total = lists = 0
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            name = getattr(t, "id", None)
+            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
+                total += len(node.value.elts)
+                lists += 1
+    if not lists:
+        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
+    return total, lists
+
+
+def dataclass_field_count(rel: str, cls: str) -> int:
+    """Annotated fields on a dataclass. Used for Job and JobEnrichment.
+
+    The glossary described `Job` as "~27 fields" (31) and `JobEnrichment` as
+    "18 fields, 8 enums" (16, 7). These are the shapes every source and the
+    whole scorer are written against, so a wrong count teaches the wrong model.
+    """
+    tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == cls:
+            return len([x for x in node.body if isinstance(x, ast.AnnAssign)])
+    raise RuntimeError(f"class {cls} not found in {rel}")
+
+
+def enrichment_enum_count() -> int:
+    """Enum classes in the JobEnrichment schema module."""
+    tree = ast.parse(
+        (ROOT / "backend/src/services/job_enrichment_schema.py").read_text(encoding="utf-8")
+    )
+    return len([
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef)
+        and any(getattr(b, "id", "") == "str" or getattr(b, "attr", "") == "Enum" for b in n.bases)
+    ])
+
+
 def workflow_count() -> int:
     """Number of GitHub Actions workflow files.
 
@@ -396,6 +447,12 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     """
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
+    ats_slugs, ats_lists = ats_slug_count()
+    job_fields = dataclass_field_count("backend/src/models.py", "Job")
+    enr_fields = dataclass_field_count(
+        "backend/src/services/job_enrichment_schema.py", "JobEnrichment"
+    )
+    enr_enums = enrichment_enum_count()
 
     # (fact-name, actual-value, regex-with-one-capture-group). Patterns are
     # deliberately SPECIFIC phrases so unrelated numbers never false-match.
@@ -441,6 +498,13 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         ("registry", registry, r"from a (\d+)-key `?SOURCE_REGISTRY"),
         ("registry", registry, r"The (\d+)-key dict in `?main\.py`?"),
         ("unique-classes", unique_classes, r"[Bb]uilds (\d+) instances"),
+        # Third batch, 2026-08-24: the remaining countable facts in the glossary,
+        # the densest such file in the repo. Each was wrong until today.
+        ("ats-slugs", ats_slugs, r"\((\d+) slugs across \d+ platforms\)"),
+        ("ats-platforms", ats_lists, r"\(\d+ slugs across (\d+) platforms\)"),
+        ("job-fields", job_fields, r"every source must produce: (\d+) fields"),
+        ("enrichment-fields", enr_fields, r"shape with (\d+) strict-typed fields"),
+        ("enrichment-enums", enr_enums, r"strict-typed fields, (\d+) enums"),
         # Deliberately NOT matching `SOURCE_INSTANCE_COUNT = N`. That is a
         # verbatim code quote, and docs legitimately cite it -- including dated
         # decision notes that are correct at the time of writing. Guarding it
