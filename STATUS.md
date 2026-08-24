@@ -41,7 +41,9 @@
 > in a real browser (Playwright manual-tester pass — every button/feature/state).
 > Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
 > Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
-> delivery to live Slack/Telegram/Gmail (needs provider credentials).
+> delivery to a live inbox. (Historical note: Slack/Telegram/Discord were deleted outright
+> on 2026-08-24 — never configured in production, zero users ever connected one. See
+> `docs/plans/2026-08-24-email-webhook-only-delivery.md`.)
 
 **Last updated:** 2026-06-20
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
@@ -247,7 +249,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | `test_scorer.py` | `skill_matcher.py` scoring | 53 |
 | `test_time_buckets.py` | `time_buckets.py` | 33 |
 | `test_models.py` | `models.py` Job dataclass | 21 |
-| `test_notifications.py` | Slack + Discord + Email channels | 19 |
+| `test_decision_card.py` + `test_digest_email_body.py` | `services/delivery/` — what a job says, and how the email reads it | 28 |
 | `test_deduplicator.py` | `deduplicator.py` | 13 |
 | `test_main.py` | `main.py` orchestrator + error paths | 14 |
 | `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |

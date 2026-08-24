@@ -73,6 +73,76 @@ def _clean(value: Any) -> Optional[str]:
     return text or None
 
 
+def salary_from_enrichment(raw: Any) -> Optional[str]:
+    """Turn a ``job_enrichment.salary`` JSON blob into the dashboard's words.
+
+    Parity matters at the SOURCE, not just the format. The dashboard's salary
+    does not come from ``jobs.salary_min_gbp_annual`` — it comes from the
+    enrichment blob, parsed by ``services.salary.normalize_salary`` and
+    currency-checked by ``core.fx.is_known_currency``
+    (``api/routes/jobs.py:55-81``). Reading a different column here would
+    produce a number that is defensible on its own and still disagrees with the
+    screen, which is the exact failure this module exists to prevent.
+
+    Returns None for missing, malformed or unknown-currency data — the caller
+    then omits the salary line rather than guessing.
+    """
+    if not raw:
+        return None
+    # Imported inside the function: `services.salary` pulls the FX table, and
+    # this module is imported by the worker on every digest build (rule #16's
+    # habit — keep import cost off the hot path).
+    import json as _json
+
+    from src.core.fx import is_known_currency
+    from src.services.salary import normalize_salary
+
+    try:
+        obj = _json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    currency = obj.get("currency")
+    if not isinstance(currency, str) or not currency or not is_known_currency(currency):
+        return None
+
+    normalised = normalize_salary(obj)
+    if normalised is None:
+        return None
+    return format_salary_range(*normalised)
+
+
+def format_salary_range(
+    min_gbp: Optional[float], max_gbp: Optional[float]
+) -> Optional[str]:
+    """Format an annual GBP range the SAME way the dashboard does.
+
+    Mirrors ``formatSalaryRange`` in ``frontend/src/components/jobs/JobCard.tsx``
+    line-for-line: ``£70k–£85k``, ``£70k+``, ``up to £85k``, and a bare ``£950``
+    below a thousand. If that function changes, this must change with it — the
+    whole point of the card is that the email and the screen say the same words,
+    and "£70k–£85k" versus "£70,000 - £85,000" is a visible difference to the
+    only person who matters.
+
+    Returns None when neither bound is known, so the caller omits the line
+    rather than printing an empty one.
+    """
+    def fmt(n: float) -> str:
+        return f"£{round(n / 1000)}k" if n >= 1000 else f"£{int(n)}"
+
+    if not min_gbp and not max_gbp:
+        return None
+    if min_gbp and max_gbp:
+        return fmt(min_gbp) if min_gbp == max_gbp else f"{fmt(min_gbp)}–{fmt(max_gbp)}"
+    if min_gbp:
+        return f"{fmt(min_gbp)}+"
+    if max_gbp:
+        return f"up to {fmt(max_gbp)}"
+    return None
+
+
 def resolve_primary_score(
     feed_score: Optional[int],
     llm_fit_score: Optional[int],
@@ -135,5 +205,10 @@ def build_decision_card(
         verdict=_clean(row.get("llm_verdict")) if is_judged else None,
         reason=_clean(row.get("llm_reason")) if is_judged else None,
         location=_clean(row.get("location")),
-        salary=_clean(row.get("salary")),
+        # Same source and same parser as the dashboard: the enrichment blob.
+        # A pre-formatted ``salary`` string wins only as a fallback, for callers
+        # (and tests) that already hold one.
+        salary=(
+            salary_from_enrichment(row.get("enr_salary")) or _clean(row.get("salary"))
+        ),
     )

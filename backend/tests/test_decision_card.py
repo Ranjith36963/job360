@@ -24,6 +24,8 @@ the ranking is arbitrary.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.services.delivery.decision_card import (
@@ -200,6 +202,79 @@ def test_unjudged_card_has_no_verdict_words_and_says_so():
     assert card.primary_score == 62
     assert card.verdict is None
     assert card.reason is None
+
+
+def _enr(min_v=None, max_v=None, currency="GBP", frequency="annual"):
+    """A ``job_enrichment.salary`` blob, the shape the dashboard reads."""
+    return json.dumps(
+        {"min": min_v, "max": max_v, "currency": currency, "frequency": frequency}
+    )
+
+
+def test_salary_is_formatted_exactly_as_the_dashboard_formats_it():
+    """Parity is about the WORDS, not just the numbers.
+
+    ``formatSalaryRange`` in JobCard.tsx renders ``£70k–£85k``. An email saying
+    "£70,000 - £85,000" for the same job is a visible discrepancy to the only
+    person whose opinion counts, even though both are "correct".
+    """
+    card = build_decision_card(
+        _row(salary=None, enr_salary=_enr(70000, 85000)),
+        site_base_url="https://job360.uk",
+    )
+    assert card.salary == "£70k–£85k"
+
+
+def test_salary_open_ended_and_sub_thousand_forms_match_the_dashboard():
+    def salary_for(lo, hi):
+        return build_decision_card(
+            _row(salary=None, enr_salary=_enr(lo, hi)),
+            site_base_url="https://job360.uk",
+        ).salary
+
+    # normalize_salary mirrors a single-sided band, so one bound produces an
+    # equal min/max — which the dashboard renders as one number, not "£70k+".
+    assert salary_for(70000, 70000) == "£70k", "an equal range is one number, not a range"
+    assert salary_for(950, 950) == "£950", "below £1k the dashboard does not use 'k'"
+    assert salary_for(None, None) is None
+
+
+def test_unknown_currency_yields_no_salary_rather_than_a_wrong_one():
+    """An unconvertible currency must produce silence, not a guess.
+
+    The dashboard drops the salary entirely when ``is_known_currency`` fails
+    (``api/routes/jobs.py:73-75``). Printing an unconverted foreign number next
+    to a UK-only catalog would be worse than printing nothing.
+    """
+    card = build_decision_card(
+        _row(salary=None, enr_salary=_enr(70000, 85000, currency="ZZZ")),
+        site_base_url="https://job360.uk",
+    )
+    assert card.salary is None
+
+
+def test_malformed_enrichment_blob_does_not_raise():
+    """Enrichment JSON is LLM-produced. It must never 500 a send."""
+    for junk in ("not json", "[]", "", None, "{"):
+        card = build_decision_card(
+            _row(salary=None, enr_salary=junk), site_base_url="https://job360.uk"
+        )
+        assert card.salary is None, f"junk blob {junk!r} should yield no salary"
+
+
+def test_structured_salary_wins_over_a_legacy_string():
+    """When both exist the normalised blob is the truth.
+
+    The legacy free-text ``salary`` column is whatever a source happened to
+    scrape; the enrichment blob is normalised to annual GBP by the same parser
+    the dashboard uses. Preferring the string would reintroduce the per-source
+    formatting chaos the normalisation removed.
+    """
+    card = build_decision_card(
+        _row(salary="70k-85k per annum", enr_salary=_enr(70000, 85000)),
+        site_base_url="https://job360.uk",
+    )
+    assert card.salary == "£70k–£85k"
 
 
 def test_missing_optional_fields_do_not_become_the_string_none():

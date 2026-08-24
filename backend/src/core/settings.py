@@ -92,6 +92,17 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 # .github/actions/slack). Those page the owner when a build breaks, are
 # configured as GitHub repo secrets rather than app settings, and are untouched.
 
+# Where a link in a delivered notification points. Every job link in an email
+# is built from this, never from the employer's raw ``apply_url`` — the click
+# has to land on our page so we can (a) attribute it, (b) say "this closed"
+# instead of dumping the reader on a 404, and (c) not look like the scam mail
+# job seekers are drowning in.
+#
+# A PARAMETER, not a hardcode: staging, preview deploys and local dev all need
+# a different origin, and a link that silently points at production from a
+# staging send is a real way to mislead a real person.
+SITE_BASE_URL = os.getenv("SITE_BASE_URL", "https://job360.uk").rstrip("/")
+
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
 # threshold used by the CLI viewer and sent by the dashboard as ``min_score``.

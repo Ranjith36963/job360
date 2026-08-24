@@ -228,6 +228,66 @@ anyway, because the blast radius grows the moment a reply can trigger a tailored
 - SI2 quiet-hours flush (`tasks.py:1276-1283`) — without it, instant-mode matches stranded in quiet
   hours never drain.
 
+## Build log — what is actually done (updated as it lands)
+
+| Phase | State | Evidence |
+|---|---|---|
+| 0 — docs tell the truth first | **done** | ARCHITECTURE, PRD FR-6.1, glossary, STATUS, STORY, README, .env.example, BREACH-RUNBOOK, user pillar, verify-job360 checklist, add-source + debug skills |
+| 1 — backend removal (TDD) | **done** | `channels.py` −591 lines; `settings.py` −9 settings; `format_payload` chat branches gone with a resurrection guard; `test_channels_oauth.py` (976 lines) deleted, its one live guard relocated |
+| 2 — migration 0031 | **written** | up + down; `oauth_states` also removed from `database._PER_USER_TABLES` in the same commit (see below) |
+| 3 — frontend removal | **done** | connect UI, provider fetch, OAuth URL builders; api-types regenerated (0 chat refs); privacy policy corrected; 333/333 unit tests, lint + type-check clean |
+| 4 — the email that says what the dashboard says | **wired** | `services/delivery/decision_card.py` + `email_body.py`; `send_bundle` now joins `user_feed` and `job_enrichment` and renders cards |
+| 5 — telemetry | **not started** | still the highest-value next step |
+| 6 — verification | see below | layer 3 (a real human, a real inbox) not yet run |
+
+### Three bugs caught during the build, worth remembering
+
+1. **Account deletion would have crashed.** `oauth_states` was listed in
+   `database._PER_USER_TABLES`, which account deletion iterates issuing a DELETE per table.
+   Dropping the table without editing that tuple turns "delete my account" into an
+   `UndefinedTable` error (rule #26). Schema and list must move in one commit.
+2. **`/providers` answered 405, not 404.** After deleting the route, the path still matched
+   `DELETE /{channel_id}`, so a GET returned "method not allowed" — which reads as "the route
+   is still there". Fixed by declaring the path `{channel_id:int}` so a non-numeric segment
+   no longer matches at all.
+3. **An infinite drain loop, introduced by this very change.** The new digest query INNER
+   JOINs `user_feed`. A queued job whose feed row has gone produces no card — and its queue
+   row would never be marked sent, so `notification_tick` would re-enqueue it every five
+   minutes forever. The old catalog-only query could not produce this state; the new one can.
+   Guarded by `test_send_bundle_drains_queued_jobs_that_have_no_feed_row`.
+
+### A latent outage found but NOT fixed here — do this next
+
+`build_email_apprise_url` bakes the **live Resend API key into every user's encrypted
+channel credential** at create/seed time (`services/channels/email_url.py:117`):
+
+```python
+return f"resend://{api_key}:{_from_address()}/{dest}/"
+```
+
+The key is stored, per user, at the moment the channel is created. **Rotate that key —
+routine security hygiene, or forced by a leak — and every existing email channel breaks
+silently**: Apprise gets a 401, the dispatcher records `ok=False`, the row retries five
+times and lands in the DLQ, and the user simply stops receiving email with no error
+anywhere a human looks.
+
+The fix, when someone picks this up: store the **address** as the credential and build the
+transport URL **at send time** from current settings. The credential then contains nothing
+secret, which also shrinks what a database leak exposes. Not done here because it changes
+the meaning of stored rows and deserves its own migration and its own tests — but it is the
+highest-severity thing this audit found that is still live.
+
+### One parity decision worth stating plainly
+
+Salary in the email comes from the **same source and the same parser** as the dashboard —
+the `job_enrichment` blob through `services.salary.normalize_salary` — not from the
+`jobs.salary_*` columns. Reading a different column would have produced a number that is
+defensible on its own and still disagrees with the screen. Formatting mirrors
+`formatSalaryRange` in `JobCard.tsx` exactly (`£70k–£85k`), because "£70,000 - £85,000" is
+a visible difference to the only person who matters.
+
+---
+
 ## Phase plan
 
 Each phase is a separate commit. Tests first, always. `main` is production — every merge

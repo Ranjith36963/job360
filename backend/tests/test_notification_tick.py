@@ -303,6 +303,13 @@ async def test_send_bundle_dispatches(tick_db):
             ("Dev", "Corp", "https://x.com", "test", now_str, "corp", "dev", now_str),
         )
         job_id = cur.lastrowid
+        # The digest query INNER JOINs user_feed — the score and the judge's
+        # words are per-user and live there. A queued job with no feed row is
+        # not deliverable and is deliberately not sent (see _seed_job_and_digest).
+        await db.execute(
+            "INSERT INTO user_feed(user_id, job_id, score, bucket) VALUES(?,?,?,?)",
+            ("alice", job_id, 62, "today"),
+        )
         await db.execute(
             "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?,?,?)",
             ("alice", "email", job_id),
@@ -329,21 +336,114 @@ async def test_send_bundle_dispatches(tick_db):
 # ── send_bundle ledger + failure handling (caught by live verification) ──────
 
 
-async def _seed_job_and_digest(path, channel="email"):
+async def _seed_job_and_digest(path, channel="email", *, with_feed_row=True, tag=""):
+    """Seed a job, its per-user feed row, and a queued digest row.
+
+    The ``user_feed`` row is not optional decoration. Since 2026-08-24 the
+    digest query INNER JOINs ``user_feed`` — the score, the judge's verdict and
+    the reason it wrote are per-user and live there, not on the shared ``jobs``
+    catalog, so a job with no feed row cannot be scored or explained and is not
+    sent. That mirrors production, where ``score_and_ingest`` always writes the
+    feed row before anything is queued.
+
+    ``with_feed_row=False`` deliberately creates the orphan state, to prove the
+    queue still drains instead of looping forever.
+
+    ``tag`` makes the job distinct. ``jobs`` is UNIQUE on the normalized
+    company+title key (rule #1), so seeding twice in one test with the same
+    strings is a UniqueViolation, not a second job.
+    """
     async with pg.connect(path) as db:
         now_str = datetime.now(timezone.utc).isoformat()
         cur = await db.execute(
             "INSERT INTO jobs(title, company, apply_url, source, date_found, "
             "normalized_company, normalized_title, first_seen) VALUES(?,?,?,?,?,?,?,?)",
-            ("Dev", "Corp", "https://x.com", "test", now_str, "corp", "dev", now_str),
+            (f"Dev{tag}", "Corp", "https://x.com", "test", now_str,
+             "corp", f"dev{tag}", now_str),
         )
         job_id = cur.lastrowid
+        if with_feed_row:
+            await db.execute(
+                "INSERT INTO user_feed(user_id, job_id, score, bucket, "
+                "llm_fit_score, llm_verdict, llm_reason) VALUES(?,?,?,?,?,?,?)",
+                ("alice", job_id, 62, "today", 81, "strong",
+                 "Four years of Postgres matches their core requirement."),
+            )
         await db.execute(
             "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?,?,?)",
             ("alice", channel, job_id),
         )
         await db.commit()
     return job_id
+
+
+@pytest.mark.asyncio
+async def test_send_bundle_email_says_what_the_dashboard_says(tick_db):
+    """The whole point of the rebuild: the email carries the judge's work.
+
+    Before 2026-08-24 the digest body was one line per job — title, company and
+    a raw apply_url — because the query only read the shared ``jobs`` catalog.
+    The score, verdict and reason are per-user and live on ``user_feed``, so
+    they were computed and then thrown away.
+
+    This asserts the four things that make the email trustworthy, and one thing
+    that keeps it safe.
+    """
+    await _seed_job_and_digest(tick_db)
+    from src.services.channels.dispatcher import ChannelSendResult
+
+    captured: dict = {}
+
+    async def capture(db, *, user_id, title, body, force=False, **kw):
+        captured["title"] = title
+        captured["body"] = body
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=True)]
+
+    async with pg.connect(tick_db) as db:
+        await send_bundle({"db": db, "dispatcher": capture}, "alice")
+
+    body = captured["body"]
+    # The judge's score, not the keyword score — same number the dashboard ranks by.
+    assert "81" in body
+    assert "strong" in body
+    # The reason: our proof of legitimacy, and the thing a scammer cannot write.
+    assert "Four years of Postgres" in body
+    # The link goes to OUR page, never the employer's board.
+    assert "/jobs/" in body
+    assert "https://x.com" not in body, "raw apply_url must not appear in the email"
+    # Quiet register — no scam grammar.
+    assert "!" not in captured["title"]
+
+
+@pytest.mark.asyncio
+async def test_send_bundle_drains_queued_jobs_that_have_no_feed_row(tick_db):
+    """An undeliverable queue row must be dropped, not retried forever.
+
+    The digest query INNER JOINs ``user_feed``. If a feed row disappears (purge,
+    or the user's verdicts were cleared) the job produces no card — and if its
+    queue row were left at ``sent=0``, ``notification_tick`` would re-enqueue
+    ``send_bundle`` for it every five minutes, forever. Same class of infinite
+    loop the all-jobs-purged branch already guards; this is the partial case,
+    which the old catalog-only query could not even produce.
+    """
+    good_id = await _seed_job_and_digest(tick_db, tag="-good")
+    orphan_id = await _seed_job_and_digest(tick_db, with_feed_row=False, tag="-orphan")
+    from src.services.channels.dispatcher import ChannelSendResult
+
+    async def ok_dispatch(db, *, user_id, title, body, force=False, **kw):
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=True)]
+
+    async with pg.connect(tick_db) as db:
+        await send_bundle({"db": db, "dispatcher": ok_dispatch}, "alice")
+        rows = await (await db.execute(
+            "SELECT job_id, sent FROM user_notification_digests WHERE user_id='alice'"
+        )).fetchall()
+
+    sent_by_job = {r[0]: r[1] for r in rows}
+    assert sent_by_job[good_id] == 1, "the deliverable job should be marked sent"
+    assert sent_by_job[orphan_id] == 1, (
+        "the orphan must be drained too, or the tick re-enqueues it forever"
+    )
 
 
 @pytest.mark.asyncio
