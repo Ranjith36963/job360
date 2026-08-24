@@ -163,6 +163,16 @@ jobs:
           # One line per PR, always. `note` is called on every exit path below.
           note() { echo "- **#$1** — $2" >> "$GITHUB_STEP_SUMMARY"; }
 
+          # `exit 0` BELOW, NEVER `continue`. Every "skip this PR" inside the
+          # subshell is an `exit 0` from the SUBSHELL, which returns to the for
+          # loop and moves to the next PR. `continue` refers to a loop that is
+          # not in this execution context, and bash says so —
+          #   "continue: only meaningful in a `for', `while', or `until' loop"
+          # — then `set -e` kills the step. Measured live on run 32732145130,
+          # the first execution of the subshell fix: the guards stopped guarding
+          # and the job went red. The isolation and the skips have to be written
+          # together or one silently breaks the other.
+          #
           # ONE PR'S BAD DAY MUST NOT END THE SWEEP. `set -e` is on and every
           # `gh api` below can fail on a rate limit or a transient 502. Without
           # this, PR #3 failing means #4..#30 are never looked at AND never get
@@ -173,18 +183,18 @@ jobs:
           for pr in $PRS; do
            (
             meta=$(gh pr view "$pr" --json state,isDraft,headRefName,headRepositoryOwner,author,labels 2>/dev/null || echo '')
-            if [ -z "$meta" ]; then note "$pr" "could not be read — skipped"; continue; fi
+            if [ -z "$meta" ]; then note "$pr" "could not be read — skipped"; exit 0; fi
             state=$(echo "$meta"     | jq -r .state)
             draft=$(echo "$meta"     | jq -r .isDraft)
             branch=$(echo "$meta"    | jq -r .headRefName)
             headowner=$(echo "$meta" | jq -r .headRepositoryOwner.login)
             author=$(echo "$meta"    | jq -r .author.login)
 
-            [ "$state" = "OPEN" ]        || { note "$pr" "is $state — left alone"; continue; }
-            [ "$draft" = "false" ]       || { note "$pr" "is a draft — drafts are left alone"; continue; }
+            [ "$state" = "OPEN" ]        || { note "$pr" "is $state — left alone"; exit 0; }
+            [ "$draft" = "false" ]       || { note "$pr" "is a draft — drafts are left alone"; exit 0; }
             # A fork PR is a stranger's code. pr-repair refuses it anyway (G1);
             # not dispatching means the refusal never has to be the safety net.
-            [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; continue; }
+            [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; exit 0; }
             case "$author" in
               # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches
               # `dependabot-helper`, `dependabot2`, and anything else a stranger
@@ -224,14 +234,14 @@ jobs:
 
             if [ "$threads" -eq 0 ] && [ "$red" -eq 0 ]; then
               note "$pr" "clean — 0 unresolved review threads, 0 failed checks. Nothing to fix."
-              continue
+              exit 0
             fi
 
             # ── GUARD 1: never chase the fixer's own commit ──────────────────
             last=$(gh api "repos/$GH_REPO/commits/$sha" --jq '.commit.author.name' 2>/dev/null || echo "")
             if [ "$last" = "pr-repair-loop" ] && [ "$red" -eq 0 ]; then
               note "$pr" "$threads unresolved thread(s), but the newest commit is the fixer's own and CI is not red — waiting for the review to catch up rather than dispatching again."
-              continue
+              exit 0
             fi
 
             # ── GUARD 2: one fixer at a time, full stop ──────────────────────
@@ -252,7 +262,7 @@ jobs:
               --json status --jq '[.[]|select(.status=="queued" or .status=="in_progress")]|length' 2>/dev/null || echo 0)
             if [ "$busy" -gt 0 ]; then
               note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already in flight (they run one at a time) — not starting a second one."
-              continue
+              exit 0
             fi
 
             # ── GUARD 3: the hard ceiling ────────────────────────────────────
@@ -272,7 +282,7 @@ jobs:
                 gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
                 gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null || true
               fi
-              continue
+              exit 0
             fi
 
             # ── RING THE BELL ────────────────────────────────────────────────
