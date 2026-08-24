@@ -59,6 +59,10 @@ CASES: list[tuple[str, str, str, str]] = [
      "enrichment-fields"),
     ("docs/product/pillars/glossary.md",
      r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
+    # The only CODE file guarded here. It shipped "47 Job Sources" to every
+    # visitor of job360.uk for a week after the roster dropped to 41.
+    ("frontend/src/app/page.tsx",
+     r"title: \"(\d+) Job Sources\"", 'title: "999 Job Sources"', "landing-source-count"),
 ]
 
 

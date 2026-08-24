@@ -219,6 +219,34 @@ def enrichment_enum_count() -> int:
     ])
 
 
+def landing_page_source_claims() -> list[tuple[int, int]]:
+    """(line, claimed count) for every source-count claim on the landing page.
+
+    Added 2026-08-24. This is the only guard here that watches CODE rather than
+    a doc, and it exists because the doc was RIGHT and the code was LYING:
+    01-user-pillar.md faithfully quoted the landing page as "47 sources", and
+    the page really did say 47 -- to every visitor of job360.uk -- while the
+    registry held 41. Six sources were pruned on 2026-08-17 and the marketing
+    copy never moved.
+
+    Doc-sync found it by looking at the seam between doc and code. The nightly
+    routine never could: it may only edit *.md.
+    """
+    page = ROOT / "frontend/src/app/page.tsx"
+    if not page.exists():
+        return []
+    out: list[tuple[int, int]] = []
+    pat = re.compile(r"(\d+)\s+(?:[Jj]ob\s+)?[Ss]ources?\b|value:\s*\"(\d+)\"")
+    for i, line in enumerate(page.read_text(encoding="utf-8").splitlines(), 1):
+        if "Source" not in line and "source" not in line:
+            continue
+        for m in pat.finditer(line):
+            claimed = m.group(1) or m.group(2)
+            if claimed:
+                out.append((i, int(claimed)))
+    return out
+
+
 def workflow_count() -> int:
     """Number of GitHub Actions workflow files.
 
@@ -578,6 +606,15 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # The landing page is a claim to USERS, and it drifted the same way a doc
+    # does — it advertised 47 sources against a registry of 41 for a week.
+    for line_no, claimed in landing_page_source_claims():
+        if claimed != registry:
+            drift.append((
+                "frontend/src/app/page.tsx", str(line_no), "landing-source-count",
+                str(claimed), str(registry),
+            ))
 
     # Dead relative links anywhere in the doc tree (archive moves, renames).
     for doc, target in dead_links():

@@ -417,7 +417,7 @@ Backed by the `applications` table (also rebuilt in `0002_multi_tenant`) and a s
 
 | URL | File | Server/Client | What the user sees |
 | --- | --- | --- | --- |
-| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "47 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
+| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "41 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
 | `/(auth)/login` | `frontend/src/app/(auth)/login/page.tsx` | Client | Email + password form, `?next` honoured via `safeNext()` |
 | `/(auth)/register` | `frontend/src/app/(auth)/register/page.tsx` | Client | Same shape, redirects to `/profile` on success |
 | `/dashboard` | `frontend/src/app/dashboard/page.tsx` | Client | Job browser. Time-bucket pills (24h / 48h / 3d / 5d / 7d / all), min-score slider, source dropdown, visa toggle, async "Run search" button polling `getSearchStatus()`. Renders `<JobList>` of `<JobCard>`s. |
@@ -668,7 +668,7 @@ For completeness — these belong in the other two pillars and you won't find th
 
 ---
 
-*Last updated 2026-08-15. HEAD `09727e5` (origin/main, 2026-08-14). Backend suite: 2,854 tests
+*Last updated 2026-08-24. Backend suite: 3,297 collected / 3,295 selected across 217 test files — measure it, never quote it
 collected, 2 deselected (measured `python -m pytest --collect-only -q`, this session —
 per root `CLAUDE.md`: "never quote a test count from a doc, measure it"). Pass/fail count
 NOT verified this session (no local Postgres reachable — the suite needs `docker-compose.dev.yml`
