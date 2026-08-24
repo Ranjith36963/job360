@@ -313,7 +313,7 @@ lanes:
       - ".github/workflows/post-merge-watch.yml"
       # ── THE FILES THAT DECIDE WHEN A WRITER STARTS (added 2026-08-24) ──────
       # Same rule as everything above it -- "the cage may not edit the cage" --
-      # applied to a door nobody had noticed was open. These four are not
+      # applied to a door nobody had noticed was open. These five are not
       # ordinary workflows: each one decides WHO GETS AN AGENT POINTED AT THEM,
       # and every one of them sat under the blanket `.github/workflows/**`
       # fast-lane rule, i.e. a machine could widen its own authorisation.

@@ -108,7 +108,16 @@ jobs:
           [ "$draft" = "false" ]       || fail "PR #$num is a draft — drafts are left alone"
           [ "$headowner" = "$repoowner" ] || fail "PR #$num comes from a FORK ($headowner) — a stranger's code never gets an agent pushed onto it (G1)"
           case "$author" in
-            Ranjith36963|dependabot*|app/dependabot) : ;;
+            # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches
+            # `dependabot-helper`, `dependabot2`, and anything else a stranger
+            # can register — an allowlist with a wildcard on the end is an
+            # allowlist with a door in it. The three spellings below are the
+            # real ones: the webhook payload says `dependabot[bot]`, the REST
+            # API says `app/dependabot`, and `gh pr view --json author` returns
+            # a bare `dependabot` for some shapes. All three are named because
+            # picking one is how chain_check's W12 rule describes a dead wire.
+            # (CodeRabbit, PR #380.)
+            Ranjith36963|dependabot|"dependabot[bot]"|app/dependabot) : ;;
             *) fail "PR #$num author '$author' is not on the repair allowlist (G2)" ;;
           esac
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
@@ -478,6 +487,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # WHAT THIS REPAIR ITSELF CHANGED starts here. Recorded BEFORE the
+          # commit so the diff below is this run's work and not the PR author's.
+          echo "before=$(git rev-parse "origin/${{ steps.gate.outputs.branch }}")" >> "$GITHUB_OUTPUT"
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
           git add -A
           if git diff --cached --quiet && git log origin/${{ steps.gate.outputs.branch }}..HEAD --oneline | grep -q .; then
             : # merge commit exists but no agent edits — still worth pushing
@@ -489,6 +502,11 @@ jobs:
             git commit -F /tmp/commit-msg.txt
           fi
           git push origin HEAD:${{ steps.gate.outputs.branch }}
+          # A REAL PUSH HAPPENED. The no-op arm above `exit 0`s before reaching
+          # this line, so anything downstream that must not run on a no-op
+          # checks THIS, not `steps.ship.outcome` — that outcome is `success`
+          # on the no-op path too.
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
           # A push made with GITHUB_TOKEN parks the resulting pull_request CI
           # runs in `action_required` (the same recursion rule, fourth
           # appearance — measured on run 30551513619: 5 runs sat waiting and
@@ -518,7 +536,7 @@ jobs:
       # `continue-on-error`: a repair that landed and verified must not be
       # reported as failed because the review API was briefly unavailable.
       - name: Reply to each finding this repair actually touched, then resolve it
-        if: steps.token.outputs.have == 'true' && steps.ship.outcome == 'success' && steps.threads.outputs.count != '0' && steps.threads.outputs.count != ''
+        if: steps.token.outputs.have == 'true' && steps.ship.outputs.pushed == 'true' && steps.threads.outputs.count != '0' && steps.threads.outputs.count != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -530,7 +548,19 @@ jobs:
           # the agent. A file list the model produced would be a self-report,
           # and self-reports are what the independent verification exists to
           # avoid trusting.
-          git diff --name-only "origin/main...HEAD" > repaired-files.txt || true
+          # THIS REPAIR'S OWN DIFF. Not `origin/main...HEAD`, which is the whole
+          # PR — every file the author changed before the fixer ever ran. Review
+          # threads sit on files the PR changed BY DEFINITION, so that form
+          # matched nearly every thread and the narrow rule in the comment above
+          # was not enforced by anything. Combined with the no-op path also
+          # reaching this step, a repair that changed NOTHING would have replied
+          # to and resolved every open finding on the PR, `check_review` would
+          # then pass, and the arm could queue it: the findings this whole
+          # change exists to surface, cleared without being answered.
+          # (CodeRabbit, PR #380 — Critical, and correctly so.)
+          git diff --name-only "${{ steps.ship.outputs.before }}..HEAD" > repaired-files.txt || true
+          echo "files this repair changed:" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/  - /' repaired-files.txt >> "$GITHUB_STEP_SUMMARY" || true
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           # Same subshell caveat as security-watch.yml: a `while` on the right of
           # a pipe cannot carry a counter back out, so each thread reports itself

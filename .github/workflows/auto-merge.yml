@@ -84,19 +84,49 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
       - id: look
         run: |
           set -euo pipefail
-          if [ -f scripts/merge_cage.py ] && [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ]; then
+          # THE FILE EXISTING IS NOT THE CAPABILITY EXISTING.
+          # The first version of this step asked only "is merge_cage.py here?".
+          # It is — on the default branch, without `--queue`, because the arm
+          # arrives in the same PR as this workflow. So `ready` said true, the
+          # arm ran, and `merge_cage` exited 4 (called wrongly) on its own PR.
+          # Measured on run 32723877283, the very first time this file executed.
+          #
+          # The three-checkout rule was working exactly as designed: the RULES
+          # come from a branch the PR cannot edit, and that branch genuinely
+          # could not do what it was being asked. The bug was this precheck
+          # asking the wrong question. Ask the cage what it can do, by running
+          # it — a capability you have not confirmed you possess is not one you
+          # can build a lane on, which is the same rule the policy applies to
+          # `canRollback` before it lets the product lane merge at all.
+          if [ -f scripts/merge_cage.py ] && [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ] \
+             && python scripts/merge_cage.py --help 2>&1 | grep -q -- "--queue"; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            # A GREEN RUN THAT QUEUED NOTHING AND A GREEN RUN THAT HAD NOTHING
+            # TO QUEUE MUST NOT LOOK THE SAME IN THE RUN LIST. The stand-down is
+            # correct behaviour, so this is not a failure — but a step summary
+            # inside a green run is invisible to anyone not already reading it,
+            # and a silent skip in an alerting path IS the bug. The annotation
+            # puts it on the run's own face. (CodeRabbit, PR #380.)
+            echo "::warning::auto-merge stood down — the default branch's cage cannot queue yet, so NO PR was judged"
             {
               echo "### Auto-merge stood down — nothing was queued"
               echo
-              echo "The cage, the lane map or the policy is not on the default branch yet, so"
-              echo "there is no source of rules a PR cannot edit. Falling back to the PR's own"
-              echo "copy is exactly what rule G5 forbids, so this lane declines to act."
+              echo "The default branch either lacks the cage, the lane map and the policy, or"
+              echo "has a copy of \`merge_cage.py\` with no \`--queue\`. Either way the rules a PR"
+              echo "cannot edit cannot do the job, and falling back to the PR's own copy is"
+              echo "exactly what rule G5 forbids — so this lane declines to act."
+              echo
+              echo "**Expected until the arm lands on the default branch.** Reported as a"
+              echo "stand-down and not a failure: the PR is not at fault, and a red X here made"
+              echo "six PRs look broken when none were."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -180,24 +210,37 @@ jobs:
       # arrived at through a different door: not the wrong checkout, but the
       # right checkout of the wrong ref. The matrix means one job per PR, so
       # there is a correct answer available for each one and no excuse to guess.
-      - name: Which ref is this PR based on
+      - name: Which COMMIT is this PR based on
         id: baseref
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # A SHA, NOT A REF. `.base.ref` is a moving branch name: another
+          # session merges to main between the `_pr` checkout and the `_base`
+          # checkout, and the two trees are then snapshots of different moments
+          # — a ratchet comparison between two things that never coexisted. The
+          # PR API hands back `.base.sha`, which is the commit the merge ref was
+          # actually computed against, so it is the only honest baseline.
+          # (CodeRabbit, PR #380.)
+          sha=$(gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}" --jq '.base.sha')
           ref=$(gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}" --jq '.base.ref')
-          [ -n "$ref" ] || { echo "::error::could not read the base ref for PR #${{ matrix.pr }}"; exit 1; }
+          [ -n "$sha" ] && [ -n "$ref" ] || { echo "::error::could not read the base commit for PR #${{ matrix.pr }}"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          echo "PR #${{ matrix.pr }} is based on \`$ref\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "PR #${{ matrix.pr }} is based on \`$ref\` at \`${sha:0:7}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      # THE BASELINE TREE.
+      # THE BASELINE TREE, PINNED TO THAT COMMIT.
+      # NOT `continue-on-error`. That was paired with `[ -d _base ]` below, and a
+      # failed checkout can leave the directory behind — so the "did it work?"
+      # test could pass over a tree that is empty or half-written, and the
+      # ratchet would then be measured against nothing while the run stayed
+      # green. A baseline that cannot be fetched must stop the lane, which is
+      # the safe direction and costs one retry.
       - uses: actions/checkout@v7
-        id: base
-        continue-on-error: true
         with:
-          ref: ${{ steps.baseref.outputs.ref }}
+          ref: ${{ steps.baseref.outputs.sha }}
           path: _base
 
       - uses: actions/setup-python@v7
@@ -245,13 +288,17 @@ jobs:
         id: baseline
         run: |
           set -euo pipefail
-          # A BASELINE THAT COULD NOT BE MEASURED IS NOT AN EMPTY BASELINE.
-          # `check_ratchets(None)` returns `not_checked`, and `not_checked`
-          # blocks — so this failing means the cage refuses, which is the safe
-          # direction and is exactly what rule G1 exists to preserve.
-          if [ ! -d _base ]; then
-            echo "::warning::the base tree could not be checked out — the ratchet cage will refuse"
-            echo "json=" >> "$GITHUB_OUTPUT"; exit 0
+          # PROVE THE TREE IS THE COMMIT WE ASKED FOR, don't just check that a
+          # directory exists — a failed checkout can leave the directory behind,
+          # so `[ -d _base ]` was a test that could pass over an empty or
+          # half-written tree while the ratchet was measured against nothing.
+          # Asking git which commit is actually there is the only form that
+          # cannot be satisfied by wreckage. (CodeRabbit, PR #380.)
+          want="${{ steps.baseref.outputs.sha }}"
+          got=$(git -C _base rev-parse HEAD 2>/dev/null || echo "")
+          if [ "$got" != "$want" ]; then
+            echo "::error::the baseline tree is at '${got:-nothing}' but PR #${{ matrix.pr }} is based on '$want' — refusing to ratchet against a tree I cannot identify"
+            exit 1
           fi
           echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
 
@@ -309,7 +356,18 @@ jobs:
             {
               echo "### PR #$PR — **not queued**, and here is every reason"
               echo '```'
-              sed -n '/VERDICT/,$p' cage-output.txt 2>/dev/null | head -40 || echo "(no cage output captured)"
+              # NOT `sed ... | head -40`. `set -o pipefail` is on, so when the
+              # output is longer than 40 lines `head` exits first, `sed` takes
+              # SIGPIPE and returns 141, the pipeline fails AFTER head has
+              # already written its lines, and the `||` arm then appends "no
+              # output captured" underneath the output it just captured. The
+              # bug only appears on a big PR, which is the worst time to learn
+              # about it. Two seds, no pipe, no size dependence.
+              if [ -s cage-output.txt ]; then
+                sed -n '/VERDICT/,$p' cage-output.txt | sed -n '1,40p'
+              else
+                echo "(no cage output captured)"
+              fi
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           else

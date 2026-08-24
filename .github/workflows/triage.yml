@@ -58,13 +58,28 @@ concurrency:
 
 jobs:
   triage:
-    # Only triage issues our own detectors opened, or ones explicitly marked for
-    # the harness. Triaging arbitrary public issues would burn tokens and widen
-    # the prompt-injection surface for no benefit. A manual dispatch is always
-    # allowed — someone with write access asked for it by hand.
+    # Only triage issues our own detectors opened, ones the OWNER opened, or
+    # ones explicitly marked for the harness. Triaging arbitrary public issues
+    # would burn tokens and widen the prompt-injection surface for no benefit.
+    # A manual dispatch is always allowed — someone with write access asked for
+    # it by hand.
+    #
+    # THE OWNER CLAUSE, ADDED 2026-08-24, AND WHY IT HAD TO BE HERE.
+    # The auto-authorisation step further down learned to trust the owner's own
+    # issues — and that branch could never be reached, because THIS condition
+    # never let the job start on one. An owner-opened issue is not
+    # `github-actions[bot]` and carries no `harness` label, so the wire was dead
+    # at the door while the logic behind the door looked correct. Exactly the
+    # failure this repo has now recorded three times: a condition that can never
+    # be true, going green forever, indistinguishable from a careful gate doing
+    # its job. Found by CodeRabbit on PR #380 before it ever ran.
+    #
+    # `repository_owner` is derived from the repository, never typed, so it
+    # cannot drift from reality on a rename or a fork.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.issue.user.login == 'github-actions[bot]' ||
+      github.event.issue.user.login == github.repository_owner ||
       contains(github.event.issue.labels.*.name, 'harness')
     runs-on: ubuntu-latest
     timeout-minutes: 15

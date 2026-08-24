@@ -74,7 +74,20 @@ jobs:
           echo "### Security watch" >> "$GITHUB_STEP_SUMMARY"
           note() { echo "- $1" >> "$GITHUB_STEP_SUMMARY"; }
 
-          alerts=$(gh api "repos/$GH_REPO/code-scanning/alerts?state=open&per_page=100" 2>/dev/null || echo '[]')
+          # A BROKEN SWEEP MUST NOT LOOK LIKE A QUIET DAY.
+          # `|| echo '[]'` turned a 403 (scanning disabled, token scope changed,
+          # Advanced Security switched off) into an empty list. This job then
+          # reported "0 open alerts", printed the line below claiming a quiet day
+          # is distinguishable from a broken sweep, and exited GREEN — every day,
+          # forever, while alerts piled up. That is precisely the disease this
+          # file exists to cure, reproduced inside the cure. (CodeRabbit, PR
+          # #380.) So the two states are separated: unreadable is LOUD and red.
+          if ! alerts=$(gh api "repos/$GH_REPO/code-scanning/alerts?state=open&per_page=100" 2>alert-err.txt); then
+            note "**the code-scanning API could not be read — this is NOT 'no alerts'.**"
+            note "$(head -3 alert-err.txt | tr -d '\r')"
+            echo "::error::code-scanning alerts could not be read — refusing to report zero, because zero is what a broken sweep and a clean repo look like from here"
+            exit 1
+          fi
           total=$(echo "$alerts" | jq 'length')
           note "**$total open code-scanning alert(s).**"
 
@@ -142,8 +155,17 @@ jobs:
               echo "reads it, not this issue."
             } > body.md
 
-            if gh issue create --title "$title" --body-file body.md --label "security" >/dev/null 2>&1; then
-              inum=$(gh issue list --state open --search "\"alert #$num\" in:title" --limit 1 --json number --jq '.[0].number')
+            # THE NUMBER COMES FROM THE CREATE CALL. `gh issue create` prints the
+            # new issue's URL; recovering the number from `gh issue list
+            # --search` instead reads GitHub's SEARCH INDEX, which lags creation
+            # by seconds to minutes. When it lagged, `inum` was empty, the guard
+            # below fell through, and the run printed "could not dispatch triage
+            # on #" with no number — an issue that exists and a fixer that never
+            # starts. (CodeRabbit, PR #380.) The idempotence check above still
+            # uses search, and that is fine: lag there costs one duplicate issue
+            # at worst, never a dropped wire.
+            if issue_url=$(gh issue create --title "$title" --body-file body.md --label "security" 2>/dev/null); then
+              inum="${issue_url##*/}"
               note "alert #$num (\`$rule\`, $sev, \`$path:$line\`) — **opened issue #$inum**"
               # An issue created with GITHUB_TOKEN raises NO `issues: [opened]`
               # event, so triage would never see it. This repo has been bitten

@@ -51,8 +51,10 @@ name: Finding watch (a finding wakes the fixer)
 # wired, this file dispatches the fixer, the fixer pushes, the push wakes this
 # file, forever -- an infinite loop that spends real money.
 #   1. NEVER re-dispatch for a commit the fixer itself wrote (author check).
-#   2. NEVER dispatch while a pr-repair run for that branch is already queued
-#      or running.
+#   2. NEVER dispatch while ANY pr-repair run is already queued or running.
+#      Deliberately not branch-scoped: a dispatched run records the ref it was
+#      dispatched on, never the branch it repairs, so a branch-scoped query
+#      answers 0 every time and the guard would never fire.
 #   3. A HARD ATTEMPT CEILING recorded as a label on the PR. After
 #      MAX_ATTEMPTS the loop stops, says so on the PR, and waits for a human.
 #      A loop without a stop is not a loop, it is a leak.
@@ -161,7 +163,15 @@ jobs:
           # One line per PR, always. `note` is called on every exit path below.
           note() { echo "- **#$1** — $2" >> "$GITHUB_STEP_SUMMARY"; }
 
+          # ONE PR'S BAD DAY MUST NOT END THE SWEEP. `set -e` is on and every
+          # `gh api` below can fail on a rate limit or a transient 502. Without
+          # this, PR #3 failing means #4..#30 are never looked at AND never get
+          # their summary line -- the honesty rule broken by the same stroke
+          # that breaks the sweep, and both invisibly, because the job simply
+          # stops. The loop body runs in a subshell that is allowed to fail; the
+          # sweep continues and says which PR it lost. (CodeRabbit, PR #380.)
           for pr in $PRS; do
+           (
             meta=$(gh pr view "$pr" --json state,isDraft,headRefName,headRepositoryOwner,author,labels 2>/dev/null || echo '')
             if [ -z "$meta" ]; then note "$pr" "could not be read — skipped"; continue; fi
             state=$(echo "$meta"     | jq -r .state)
@@ -176,7 +186,16 @@ jobs:
             # not dispatching means the refusal never has to be the safety net.
             [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; continue; }
             case "$author" in
-              Ranjith36963|dependabot*|app/dependabot) : ;;
+              # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches
+              # `dependabot-helper`, `dependabot2`, and anything else a stranger
+              # can register — an allowlist with a wildcard on the end is an
+              # allowlist with a door in it. The three spellings below are the
+              # real ones: the webhook payload says `dependabot[bot]`, the REST
+              # API says `app/dependabot`, and `gh pr view --json author` returns
+              # a bare `dependabot` for some shapes. All three are named because
+              # picking one is how chain_check's W12 rule describes a dead wire.
+              # (CodeRabbit, PR #380.)
+              Ranjith36963|dependabot|"dependabot[bot]"|app/dependabot) : ;;
               *) note "$pr" "author \`$author\` is not on the repair allowlist — left alone"; continue ;;
             esac
 
@@ -215,11 +234,24 @@ jobs:
               continue
             fi
 
-            # ── GUARD 2: one fixer per branch at a time ──────────────────────
-            busy=$(gh run list --workflow pr-repair.yml --branch "$branch" --limit 5 \
+            # ── GUARD 2: one fixer at a time, full stop ──────────────────────
+            # NOT `--branch "$branch"`. A workflow_dispatch run records the ref
+            # it was DISPATCHED ON — the default branch — never the PR branch it
+            # was asked to repair. So the branch-scoped query returned 0 every
+            # single time and this guard could not fire at all: the doorbell
+            # would have started a second, third and fourth fixer on the same PR
+            # while the first was still running. Caught by CodeRabbit on PR #380
+            # before it ever ran, which is the only reason this is not a story
+            # about a runaway.
+            #
+            # `pr-repair.yml` carries `concurrency: group: pr-repair` — ONE run
+            # repo-wide, everything else queues behind it. So "is any pr-repair
+            # busy?" is exactly the right question, and it is one this API can
+            # actually answer.
+            busy=$(gh run list --workflow pr-repair.yml --limit 20 \
               --json status --jq '[.[]|select(.status=="queued" or .status=="in_progress")]|length' 2>/dev/null || echo 0)
             if [ "$busy" -gt 0 ]; then
-              note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already working on \`$branch\` — not starting a second one."
+              note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already in flight (they run one at a time) — not starting a second one."
               continue
             fi
 
@@ -249,11 +281,17 @@ jobs:
             # nothing (GitHub's recursion rule — this repo has been bitten by it
             # four separate times), which is exactly why the wake-up is a
             # dispatch and not a label.
-            gh pr edit "$pr" --add-label "autofix:attempt-$next" 2>/dev/null || true
+            # THE LABEL GOES ON AFTER THE DISPATCH SUCCEEDS, NOT BEFORE.
+            # Labelling first means three FAILED dispatches reach the ceiling and
+            # the PR is told "the fixer has had 3 attempts" when it ran zero
+            # times -- a counter measuring the attempt to try rather than the
+            # try. (CodeRabbit, PR #380.)
             if gh workflow run pr-repair.yml -f pr="$pr"; then
+              gh pr edit "$pr" --add-label "autofix:attempt-$next" 2>/dev/null || true
               note "$pr" "**fixer dispatched** (attempt $next/${MAX_ATTEMPTS}) — $threads unresolved review thread(s), $red failed check(s)."
             else
               note "$pr" "needs the fixer ($threads thread(s), $red red check(s)) but \`workflow dispatch\` FAILED — start \`pr-repair.yml\` by hand for this PR."
               echo "::error::could not dispatch pr-repair.yml for PR #$pr"
             fi
+           ) || note "$pr" "the sweep hit an error while looking at this one (see the log) - every other PR was still checked"
           done

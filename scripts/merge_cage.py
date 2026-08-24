@@ -1464,6 +1464,9 @@ DECISION_PATH = [
     # ruleset — so nothing else in GitHub or in this file would notice its
     # absence.
     "judge_tags", "check_tags",
+    # THE ARM. On the decision path because `--auto` is the whole reason the arm
+    # is allowed to exist — see the drill case that captures its real argv.
+    "request_auto_merge",
 ]
 
 
@@ -2292,6 +2295,40 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        f"exit {rc_bad} (expected {EXIT_CAGE_BROKE}) — an unreadable lane was survivable",
        ["decide"])
 
+    # ...AND `--auto` IS THE ENTIRE SAFETY ARGUMENT, SO IT GETS ITS OWN CASE.
+    # Everything written about `--queue` rests on GitHub holding the PR until
+    # `main-production-gate` is satisfied. Delete six characters from the
+    # command in request_auto_merge and it becomes an immediate merge on this
+    # file's judgement alone — B20 restored, silently, with every other case
+    # still green. Caught by CodeRabbit on PR #380: the case above guards the
+    # FLAG and nothing guarded the FLAG'S ARGUMENT. Asserted by capturing the
+    # real argv rather than by reading the source, because a self-test that
+    # greps its own file has already failed in this repo once.
+    _seen_argv: list[list[str]] = []
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "queued"
+        stderr = ""
+
+    _saved_run = subprocess.run
+    try:
+        def _spy(cmd, *_a, **_k):  # noqa: ANN001, ANN202 - a drill stub
+            _seen_argv.append(list(cmd))
+            return _FakeProc()
+        subprocess.run = _spy  # type: ignore[assignment]
+        request_auto_merge(1)
+    finally:
+        subprocess.run = _saved_run  # type: ignore[assignment]
+    _argv = _seen_argv[0] if _seen_argv else []
+    ok("the queue request really passes `--auto`, so GitHub still holds the gate",
+       "--auto" in _argv,
+       f"the command was {_argv} — without `--auto` this is an immediate merge on this "
+       f"file's judgement alone, which is exactly the capability B20 deleted",
+       ["request_auto_merge"])
+    ok("...and it squashes, matching the one merge shape this repo already uses",
+       "--squash" in _argv, f"the command was {_argv}", ["request_auto_merge"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -2550,6 +2587,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # THE ACT COMES BEFORE THE ANNOUNCEMENT, ALWAYS.
         queued = False
+        queue_failed = False
         if args.queue and allowed:
             ok_queue, detail = request_auto_merge(args.pr)
             if ok_queue:
@@ -2566,7 +2604,14 @@ def main(argv: list[str] | None = None) -> int:
                       f"repository, which is the owner's switch and nobody else's: "
                       f"`gh api -X PATCH repos/{REPO} -F allow_auto_merge=true`. "
                       f"The verdict above stands either way.", file=sys.stderr)
-                return EXIT_CAGE_BROKE
+                # DEFERRED, NOT RETURNED. Returning here would skip Slack, the
+                # advice file and --verdict-json — and this is the one case
+                # where every cage PASSED, so it is the case a machine reader
+                # most needs to be able to see. An early return in the arm's
+                # failure branch would make "the cages passed but the queue
+                # refused" the quietest outcome in the file, which is backwards.
+                # (CodeRabbit, PR #380.)
+                queue_failed = True
 
         if args.slack:
             chan = "ready-to-merge" if allowed else "needs-your-decision"
@@ -2593,6 +2638,10 @@ def main(argv: list[str] | None = None) -> int:
                           for v in verdicts],
             }, indent=1), encoding="utf-8")
 
+        # The arm's own failure is reported LAST, after every output above has
+        # been produced. Same code as before, a later line.
+        if queue_failed:
+            return EXIT_CAGE_BROKE
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 
     except SystemExit:
