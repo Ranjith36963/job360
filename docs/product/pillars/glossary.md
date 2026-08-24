@@ -88,13 +88,13 @@ A *batched* notification sent at a scheduled time (e.g. 08:00 in user's timezone
 
 ### ESCO
 
-European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 uses ESCO URIs to canonicalise CV skills when `SEMANTIC_ENABLED=true`.
+European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
 **Code:** `_maybe_normalise_skills_via_esco()` in `cv_parser.py` · **Pillars 1 + 2**
 
 ### Feature flags
 
 Two env-var booleans that gate Pillar-2's advanced features, both **default off** (rule #18):
-- `ENRICHMENT_ENABLED` — LLM enrichment + DB writes + multi-dim scoring activation
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. Every call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`, `rescore.py:85`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
 - `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
 
 ### Feed (user_feed)
