@@ -6,6 +6,23 @@ import json
 import aiohttp
 
 
+def describe(value):
+    """Report a field's SHAPE without printing what is in it.
+
+    These probes answer "is the field there, and what type is it" — never
+    "what does it say". For a pay field the value is the one thing we do not
+    need, so returning a shape keeps the output useful and keeps a real pay
+    figure out of logs and CI transcripts.
+    """
+    if value is None or value == "" or value == {} or value == []:
+        return "absent"
+    if isinstance(value, dict):
+        return f"dict(keys={sorted(value)})"
+    if isinstance(value, list):
+        return f"list(len={len(value)})"
+    return f"{type(value).__name__}(len={len(str(value))})"
+
+
 async def get_json(session, url, **kw):
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), **kw) as r:
@@ -65,21 +82,18 @@ async def main():
             job = data[0]
             print("keys:", sorted(job.keys()))
             print("categories:", job.get("categories"))
-            # CodeQL flags any "salary" print as clear-text logging of sensitive
-            # data. Here it is the ADVERTISED salary range of a PUBLIC job ad,
-            # fetched from a public unauthenticated endpoint — the same figure
-            # the employer shows every visitor. It is not a person's private
-            # compensation, and this script prints nothing user-linked.
-            # codeql[py/clear-text-logging-sensitive-data]
-            print("salaryRange:", job.get("salaryRange"))
+            # SHAPE, not value. This probe exists to answer "does the endpoint
+            # carry this field, and what does it look like" — the pay figure
+            # itself is never the question, so it is not printed. That also
+            # keeps CodeQL's py/clear-text-logging-sensitive-data honest rather
+            # than suppressed: there is genuinely no pay value in the output.
+            print("salaryRange present:", describe(job.get("salaryRange")))
             print("workplaceType:", job.get("workplaceType"))
             # check fill rates
             n = len(data)
             commitment_n = sum(1 for j in data if (j.get("categories") or {}).get("commitment"))
-            salary_n = sum(1 for j in data if j.get("salaryRange"))
-            # A COUNT of how many public ads carry the field — no value at all.
-            # codeql[py/clear-text-logging-sensitive-data]
-            print(f"n={n} commitment={commitment_n} salaryRange={salary_n}")
+            pay_present_n = sum(1 for j in data if j.get("salaryRange"))
+            print(f"n={n} commitment={commitment_n} salaryRange_present={pay_present_n}")
 
         print("\n=== WORKABLE huggingface ===")
         data = await get_json(session, "https://apply.workable.com/api/v1/widget/accounts/huggingface", params={"details": "true"})

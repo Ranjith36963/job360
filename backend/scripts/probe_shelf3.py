@@ -98,11 +98,18 @@ async def main():
                                     print("datePosted:", d.get("datePosted"))
                                     print("employmentType:", d.get("employmentType"))
                                     print("validThrough:", d.get("validThrough"))
-                                    # Public job-ad JSON-LD: `baseSalary` is the
-                                    # figure the employer publishes to every
-                                    # visitor, not private compensation data.
-                                    # codeql[py/clear-text-logging-sensitive-data]
-                                    print("baseSalary:", d.get("baseSalary"))
+                                    # SHAPE only — this probe asks whether the
+                                    # JSON-LD carries a pay block, never what it
+                                    # says. Printing the figure adds nothing to
+                                    # the answer and puts pay data in logs.
+                                    _pay = d.get("baseSalary")
+                                    print(
+                                        "baseSalary present:",
+                                        "absent" if not _pay
+                                        else f"dict(keys={sorted(_pay)})"
+                                        if isinstance(_pay, dict)
+                                        else type(_pay).__name__,
+                                    )
                                 except Exception as e:
                                     print("json err", e, ld.group(1)[:500])
                             else:
