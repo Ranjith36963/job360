@@ -36,19 +36,39 @@ REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"
 METRICS_DIR = DATA_DIR / "metrics"
 
+def _secret(name: str) -> str:
+    """Read a credential, stripping surrounding whitespace.
+
+    Secrets are pasted into a dashboard by hand, so a trailing newline or space
+    rides along more often than anyone expects. It is invisible in every UI and
+    fatal wherever the value is concatenated rather than form-encoded — a key in
+    a URL path or a header becomes a DIFFERENT key, and the upstream answers 401
+    or 403, which reads exactly like "the key is wrong" rather than "the key has
+    a space on the end".
+
+    Measured on production 2026-08-24: SERPAPI_KEY and JSEARCH_API_KEY both carry
+    surrounding whitespace on the worker service, and google_jobs was returning
+    HTTP 401 while the same account's key looked correct.
+
+    Stripping is safe for every credential here: none of these vendors issue keys
+    whose leading or trailing whitespace is significant.
+    """
+    return os.getenv(name, "").strip()
+
+
 # API Keys (Group A)
-REED_API_KEY = os.getenv("REED_API_KEY", "")
-ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
-ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
-JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
-JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
-CAREERJET_AFFID = os.getenv("CAREERJET_AFFID", "")
-FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+REED_API_KEY = _secret("REED_API_KEY")
+ADZUNA_APP_ID = _secret("ADZUNA_APP_ID")
+ADZUNA_APP_KEY = _secret("ADZUNA_APP_KEY")
+JSEARCH_API_KEY = _secret("JSEARCH_API_KEY")
+JOOBLE_API_KEY = _secret("JOOBLE_API_KEY")
+SERPAPI_KEY = _secret("SERPAPI_KEY")
+CAREERJET_AFFID = _secret("CAREERJET_AFFID")
+FINDWORK_API_KEY = _secret("FINDWORK_API_KEY")
 # DfE "Find an apprenticeship" Display Advert API v2 — register for a free
 # subscription key at https://developer.apprenticeships.education.gov.uk.
 # Empty (default) → the gov_apprenticeships source skips gracefully.
-DFE_APPRENTICESHIPS_API_KEY = os.getenv("DFE_APPRENTICESHIPS_API_KEY", "")
+DFE_APPRENTICESHIPS_API_KEY = _secret("DFE_APPRENTICESHIPS_API_KEY")
 
 # GitHub (optional — for higher rate limits on profile enrichment)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
