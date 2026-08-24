@@ -516,6 +516,27 @@ export default function ProfilePage() {
               // the preferences form. This panel shows skills the user HAS, so
               // with none of those there is nothing to show.
               if (total === 0) return null;
+
+              // The whole point of this panel is telling sources APART. With a
+              // CV as the only source there is nothing to tell apart, and
+              // CVViewer directly above has already listed exactly these
+              // skills — so a CV-only profile printed the same six chips three
+              // times down one page (highlighted in the CV preview, again under
+              // "What we extracted", again here), costing a full card of height
+              // to repeat itself.
+              //
+              // Only the cv+CVViewer combination is suppressed: skills the user
+              // typed themselves can be the sole group while CVViewer is not
+              // rendered at all (it is gated on CV/LinkedIn/GitHub content), and
+              // that case still needs somewhere to appear.
+              const activeGroups = GROUPS.filter(
+                (g) => (bySource[g.key] ?? []).length > 0
+              );
+              const alreadyShownByCVViewer =
+                activeGroups.length === 1 &&
+                activeGroups[0].key === "cv" &&
+                Boolean(profile?.cv_detail);
+              if (alreadyShownByCVViewer) return null;
               return (
                 <div className="animate-fade-in-up glass-card rounded-xl p-6">
                   <h2 className="font-heading text-base font-semibold mb-1 text-foreground">

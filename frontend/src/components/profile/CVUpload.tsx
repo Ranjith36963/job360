@@ -497,26 +497,41 @@ export function CVUpload({
               </div>
             )}
 
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-              <span className="font-medium">Highlighted = extracted for job matching:</span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-2 rounded-sm bg-primary/30 border-b-2 border-primary/60" />
-                Skills
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-2 rounded-sm bg-blue-500/30 border-b-2 border-blue-400/60" />
-                Roles
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-2 rounded-sm bg-amber-500/25 border-b-2 border-amber-400/50" />
-                Education
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-2 rounded-sm bg-purple-500/25 border-b-2 border-purple-400/50" />
-                Certifications
-              </span>
-            </div>
+            {/* Legend — only for categories this CV actually highlighted.
+                It used to print all four unconditionally, so a CV that yielded
+                six skills and nothing else still advertised amber Education and
+                purple Certifications swatches that appear nowhere in the text
+                above. That reads as "we found your degree, it is up there
+                somewhere" when we did not find it — the opposite of rule #29's
+                empty shelves staying silent. It also let a four-item legend
+                wrap awkwardly, stranding "Certifications" on its own line. */}
+            {(() => {
+              const LEGEND = [
+                { category: "skill", label: "Skills", swatch: "bg-primary/30 border-primary/60" },
+                { category: "title", label: "Roles", swatch: "bg-blue-500/30 border-blue-400/60" },
+                { category: "education", label: "Education", swatch: "bg-amber-500/25 border-amber-400/50" },
+                { category: "certification", label: "Certifications", swatch: "bg-purple-500/25 border-purple-400/50" },
+              ] as const;
+              const present = LEGEND.filter((l) =>
+                highlightTerms.some((t) => t.category === l.category)
+              );
+              if (present.length === 0) return null;
+              return (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+                  <span className="font-medium">
+                    Highlighted = extracted for job matching:
+                  </span>
+                  {present.map((l) => (
+                    <span key={l.category} className="flex items-center gap-1">
+                      <span
+                        className={`inline-block w-3 h-2 rounded-sm border-b-2 ${l.swatch}`}
+                      />
+                      {l.label}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Re-upload + clear, side by side: the two things you do to a CV
                 that is already here. */}
