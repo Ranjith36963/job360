@@ -56,16 +56,41 @@ from src.core.companies import (
     WORKABLE_COMPANIES,
     WORKDAY_COMPANIES,
 )
+from src.services.shelf_gate import _STUB_DESCRIPTION_MIN_CHARS
 
 logger = logging.getLogger("job360.services.description_backfill")
 
-# Selection floor shared with workers/tasks.py's SQL
-# (`length(description) < MIN_DESCRIPTION_CHARS`) and the "did this fetch
-# actually help" check below — a single constant so the two can never drift
-# apart. Also happens to equal coverage.py's `_SKILL_TEXT_MIN_CHARS` (not a
-# coincidence: this IS the floor that decides whether the skill-matcher
-# considers a description real text).
+# SUCCESS floor — "did this fetch actually give us real text?". Equals
+# coverage.py's `_SKILL_TEXT_MIN_CHARS` (not a coincidence: this IS the floor
+# that decides whether the skill-matcher considers a description real text).
 MIN_DESCRIPTION_CHARS = 200
+
+# SELECTION floor — "is this row worth trying to improve?". Deliberately NOT the
+# same number, and previously it was.
+#
+# Using one constant for both meant the sweep only ever looked at rows under 200
+# chars, i.e. rows that are nearly empty. Measured on production 2026-08-24:
+#
+#     0 (empty)            2,613   15.4%
+#     1-199   selected     2,969   17.6%
+#     200-599 NEVER SELECTED 5,525 32.7%   <-- a third of the catalog
+#     600+    usable       5,807   34.3%
+#
+# That middle band is the problem. Those rows clear the skill-matcher's 200-char
+# floor, so they score — but they sit under the 600-char floor that
+# shelf_gate.is_stub_description enforces before enrichment, so they can NEVER be
+# enriched, and the sweep would never try to lengthen them because 307 chars is
+# not "thin" by the old definition. devitjobs alone holds 3,620 of them at an
+# average of 307 characters.
+#
+# Selecting against the ENRICHMENT floor instead means the sweep targets every
+# row that is not yet good enough to read. The success check below is unchanged
+# and already handles a fetch that improves a row without clearing 200 (the
+# "genuine improvement, still short" branch), so widening selection cannot
+# discard a shorter-but-better result.
+#
+# Imported rather than re-typed so the two floors cannot drift the way these did.
+BACKFILL_SELECT_BELOW_CHARS = _STUB_DESCRIPTION_MIN_CHARS
 
 # Real per-job retry cap (migration 0029, jobs.description_backfill_attempts).
 # A job fetched this many times without ever clearing MIN_DESCRIPTION_CHARS

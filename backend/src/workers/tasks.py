@@ -677,7 +677,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     Selects the ``budget`` highest-value ACTIVE jobs (same
     COALESCE(llm_fit_score, score) value ordering as the other phases) whose
-    ``description`` is under ``MIN_DESCRIPTION_CHARS`` AND whose source is on
+    ``description`` is under ``BACKFILL_SELECT_BELOW_CHARS`` AND whose source is on
     the ``ALLOWED_BACKFILL_SOURCES`` capability list (LinkedIn and
     structurally-textless sources are OUT — pushed into the SQL itself,
     not filtered in Python after the fact, so a 50/tick budget is never
@@ -716,6 +716,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     from src.services.description_backfill import (  # noqa: PLC0415
         ALLOWED_BACKFILL_SOURCES,
+        BACKFILL_SELECT_BELOW_CHARS,
         MAX_BACKFILL_ATTEMPTS,
         MIN_DESCRIPTION_CHARS,
         fetch_description,
@@ -740,7 +741,12 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
         ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
         LIMIT ?
         """,  # noqa: S608 — source_placeholders is "?"*len(allowed_sources), no user input
-        (MIN_DESCRIPTION_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
+        # SELECT below the ENRICHMENT floor (600), not the skill-text floor (200).
+        # The two are different questions and sharing one constant meant the sweep
+        # only ever looked at nearly-empty rows, leaving 5,525 production rows
+        # (32.7% of the catalog) at 200-599 chars permanently un-enrichable and
+        # never retried. See BACKFILL_SELECT_BELOW_CHARS for the measurement.
+        (BACKFILL_SELECT_BELOW_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
     )
     rows = [dict(r) for r in await cur.fetchall()]
 
