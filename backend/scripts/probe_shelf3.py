@@ -101,15 +101,9 @@ async def main():
                                     # SHAPE only — this probe asks whether the
                                     # JSON-LD carries a pay block, never what it
                                     # says. Printing the figure adds nothing to
-                                    # the answer and puts pay data in logs.
-                                    _pay = d.get("baseSalary")
-                                    print(
-                                        "baseSalary present:",
-                                        "absent" if not _pay
-                                        else f"dict(keys={sorted(_pay)})"
-                                        if isinstance(_pay, dict)
-                                        else type(_pay).__name__,
-                                    )
+                                    # the answer and puts pay data in logs. Key
+                                    # membership only — the value is never read.
+                                    print("baseSalary key present:", "baseSalary" in d)
                                 except Exception as e:
                                     print("json err", e, ld.group(1)[:500])
                             else:

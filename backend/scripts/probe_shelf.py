@@ -6,23 +6,6 @@ import json
 import aiohttp
 
 
-def describe(value):
-    """Report a field's SHAPE without printing what is in it.
-
-    These probes answer "is the field there, and what type is it" — never
-    "what does it say". For a pay field the value is the one thing we do not
-    need, so returning a shape keeps the output useful and keeps a real pay
-    figure out of logs and CI transcripts.
-    """
-    if value is None or value == "" or value == {} or value == []:
-        return "absent"
-    if isinstance(value, dict):
-        return f"dict(keys={sorted(value)})"
-    if isinstance(value, list):
-        return f"list(len={len(value)})"
-    return f"{type(value).__name__}(len={len(str(value))})"
-
-
 async def get_json(session, url, **kw):
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), **kw) as r:
@@ -82,17 +65,21 @@ async def main():
             job = data[0]
             print("keys:", sorted(job.keys()))
             print("categories:", job.get("categories"))
-            # SHAPE, not value. This probe exists to answer "does the endpoint
-            # carry this field, and what does it look like" — the pay figure
-            # itself is never the question, so it is not printed. That also
-            # keeps CodeQL's py/clear-text-logging-sensitive-data honest rather
-            # than suppressed: there is genuinely no pay value in the output.
-            print("salaryRange present:", describe(job.get("salaryRange")))
+            # KEY membership, not the value. The probe's question is "does this
+            # endpoint carry a pay field at all" — the figure is never needed.
+            # `"salaryRange" in job` reads the key set and never touches the
+            # value, so no pay data can reach the output by any path. Passing
+            # it through a shape helper was not enough: CodeQL follows the
+            # value into the callee, and it was right to — the helper read
+            # len(str(value)).
+            print("salaryRange key present:", "salaryRange" in job)
             print("workplaceType:", job.get("workplaceType"))
             # check fill rates
             n = len(data)
             commitment_n = sum(1 for j in data if (j.get("categories") or {}).get("commitment"))
-            pay_present_n = sum(1 for j in data if j.get("salaryRange"))
+            # Key membership here too, for the same reason as above: counting
+            # presence must not require reading a single pay figure.
+            pay_present_n = sum(1 for j in data if "salaryRange" in j)
             print(f"n={n} commitment={commitment_n} salaryRange_present={pay_present_n}")
 
         print("\n=== WORKABLE huggingface ===")
