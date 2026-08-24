@@ -335,6 +335,48 @@ def test_file_count() -> int:
     return len(list((ROOT / "backend/tests").glob("test_*.py")))
 
 
+def migration_file_count() -> int:
+    """Number of forward-migration files (NNNN_*.up.sql).
+
+    Distinct from ``migration_head()``: head is the highest NNNN, count is
+    how many actually exist. Both must exist (no gap in the sequence) for the
+    schema story a doc tells to be true, but only file count matches the
+    ``N-migration forward-compat schema`` prose docs write.
+
+    Promoted 2026-08-24 by the nightly routine. ARCHITECTURE.md said
+    ``25-migration forward-compat schema`` and the search-and-match-engine
+    pillar said ``14-migration`` while 31 forward migrations existed. Six
+    doc bumps (0025→0030) landed with the migration-head guard staying
+    green, because that guard only watches ``0000 → NNNN`` phrasing —
+    not the total. Countable fact, cheap to hold here.
+    """
+    return len(list((ROOT / "backend/migrations").glob("*.up.sql")))
+
+
+def source_subfolder_counts() -> dict[str, int]:
+    """{'apis_keyed': N, 'apis_free': N, 'ats': N, 'feeds': N, 'other': N, 'scrapers': N}
+
+    File count per source subfolder, excluding ``__init__.py`` and ``base.py``.
+    Docs everywhere use a tree-diagram of ``apis_keyed/ (8)  apis_free/ (9) ...`` —
+    the numbers rot every rotation, and until today no guard watched them.
+
+    Promoted 2026-08-24 by the nightly routine. README.md said ``ats/ (12)``
+    against 10, ``feeds/ (8)`` against 4, ``scrapers/ (7)`` against 5.
+    Countable, on-tree, and the same shape as ATS platform slugs -- exactly
+    the class of number this file is meant to own.
+    """
+    out: dict[str, int] = {}
+    base = ROOT / "backend/src/sources"
+    if not base.is_dir():
+        return out
+    for d in base.iterdir():
+        if d.is_dir() and d.name != "__pycache__":
+            out[d.name] = len([
+                p for p in d.glob("*.py") if p.name not in {"__init__.py", "base.py"}
+            ])
+    return out
+
+
 def frontend_versions() -> tuple[str, str]:
     """(next, react) exact versions from frontend/package.json.
 
@@ -605,7 +647,26 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # decision notes that are correct at the time of writing. Guarding it
         # fires on every honest citation, and a permanent false alarm is how a
         # loop dies. The prose form above covers the claim that matters.
+        #
+        # Fourth batch, 2026-08-24 -- promoted from the nightly routine after
+        # ARCHITECTURE.md read "25-migration forward-compat schema" and the
+        # search-and-match-engine pillar read "14-migration" against 31 actual
+        # forward migrations. The existing `migration-head` guard watches only
+        # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
+        ("migrations-schema", migration_file_count(),
+         r"(\d+)-migration forward-compat schema"),
     ]
+
+    # Per-subfolder source counts. Docs everywhere use a tree diagram
+    # `apis_keyed/ (8)  ats/ (10) ...` and the numbers rot every rotation;
+    # until today no guard watched them and README.md carried three drifted
+    # values (ats/12, feeds/8, scrapers/7) against real 10/4/5.
+    for _name, _count in source_subfolder_counts().items():
+        checks.append((
+            f"subfolder-{_name}",
+            _count,
+            rf"\b{re.escape(_name)}/\s*\((\d+)\)",
+        ))
 
     # String-valued facts. Kept separate because the numeric loop below does
     # int(m.group(1)); a version like "16.3.0" is not an int and must be

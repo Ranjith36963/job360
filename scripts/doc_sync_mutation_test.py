@@ -86,6 +86,16 @@ CASES: list[tuple[str, str, str, str]] = [
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
+    # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
+    # schema" (real 31) and README.md's source-tree said `ats/ (12)` (real 10).
+    # The migration-head guard could not see either — it watches "0000 → NNNN"
+    # phrasing only — and no per-subfolder count was ever guarded.
+    ("ARCHITECTURE.md",
+     r"(\d+)-migration forward-compat schema",
+     "999-migration forward-compat schema", "migrations-schema"),
+    ("ARCHITECTURE.md",
+     r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
 ]
 
 

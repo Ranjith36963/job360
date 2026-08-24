@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -328,7 +328,7 @@ What `keywords.py` still contains (domain-agnostic, applies to any profession):
 - **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
-**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: Gemini→Groq→Cerebras free-tier fallback chain). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
+**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
 
 ### ATS Companies (`backend/src/core/companies.py`)
 
@@ -393,11 +393,11 @@ job360/
 │       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
-│       │   ├── apis_free/   (9 free_json + 2 rss-tier)
-│       │   ├── ats/         (12)
-│       │   ├── feeds/       (8)
-│       │   ├── scrapers/    (7)
-│       │   └── other/       (4 classes / 5 keys)
+│       │   ├── apis_free/   (9)   # 8 free_json + 1 rss (teaching_vacancies)
+│       │   ├── ats/         (10)
+│       │   ├── feeds/       (4)   # all rss-tier
+│       │   ├── scrapers/    (5)
+│       │   └── other/       (4 classes / 5 keys)   # indeed+glassdoor share JobSpySource
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
 ├── backend/tests/               # 3,297 collected / 3,295 selected (2 live deselected) across 218 test_*.py files (defer to runtime count)
