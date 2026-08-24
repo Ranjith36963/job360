@@ -893,6 +893,34 @@ async def run_search(
                 logger.error("No sources matched filter: %s", source_filter)
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
 
+            # A source with no credential returns [] INSTANTLY and logs at INFO,
+            # so in run_log it is byte-identical to a source that ran properly and
+            # found nothing: per_source=0, no exception, ~0.0s duration.
+            #
+            # Measured 2026-08-24 on three consecutive prod runs: seven sources
+            # (careerjet, findwork, google_jobs, gov_apprenticeships, indeed,
+            # jooble, jsearch) sat at 0 jobs / 0.0s / no error. Reading the run log
+            # could not tell "we never asked" from "we asked and there was
+            # nothing", and probing them by hand showed gov_apprenticeships
+            # returning 250 real UK jobs and careerjet 121 the moment they were
+            # invoked with a key. That gap is the bug: the absence was invisible.
+            #
+            # Naming them at WARNING makes the unasked question answerable from the
+            # run itself. It does not fix a missing key — it stops a missing key
+            # from looking like an empty upstream.
+            unconfigured = sorted(
+                s.name for s in sources if not getattr(s, "is_configured", True)
+            )
+            if unconfigured:
+                logger.warning(
+                    "%d of %d sources are NOT CONFIGURED and will self-skip "
+                    "(0 jobs, no error, ~0s — indistinguishable from an empty "
+                    "upstream unless you read this line): %s",
+                    len(unconfigured),
+                    len(sources),
+                    ", ".join(unconfigured),
+                )
+
             # Fetch via TieredScheduler (Batch 3.5 Deliverable E):
             #   * One-shot CLI runs pass force=True so every source dispatches
             #     exactly once — the tier intervals only matter for the
