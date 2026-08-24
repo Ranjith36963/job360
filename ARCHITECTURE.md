@@ -74,11 +74,11 @@ job360/
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
-│   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
+│   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
+│   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 25-migration forward-compat schema
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 31-migration forward-compat schema (0000 → 0030)
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -94,7 +94,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 3,297 collected / 3,295 selected (2 `live` deselected) across 218 test_*.py files (defer to runtime count)
+│   └── tests/                        # across 218 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
