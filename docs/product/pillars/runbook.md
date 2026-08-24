@@ -439,17 +439,25 @@ tolerant: on a Postgres without pgvector it skips the column entirely, and then
 `UPDATE … SET embedding = NULL` fails with `column "embedding" does not exist`.
 
 ```sql
--- 0 rows here means pgvector is absent and 0027 was a no-op. Install the
--- extension and re-run the migration before the UPDATE below; the DELETE
--- underneath works either way.
+-- RUN NOTHING BELOW UNTIL THIS RETURNS ONE ROW.
+--
+-- 0 rows has TWO causes and they need different fixes, so check which:
+--   * to_regclass is NULL  -> the TABLE is missing. Run the base migrations
+--     (`python -m migrations.runner up`). Neither the UPDATE nor the DELETE
+--     below works in this state.
+--   * to_regclass is set but no row  -> the table is there and the COLUMN is
+--     not, i.e. pgvector is absent and 0027 was a tolerant no-op. Install the
+--     extension and re-run the migration. The DELETE below still works here;
+--     the UPDATE does not.
 --
 -- to_regclass, not information_schema.table_name: the UPDATE below is
 -- UNQUALIFIED, so it hits whichever job_embeddings the current search_path
 -- resolves to. Matching on the bare table name can pass on a same-named table
 -- in another schema and still leave the UPDATE erroring.
+SELECT to_regclass('job_embeddings') AS relation;   -- NULL = table missing
 SELECT 1 FROM pg_attribute
  WHERE attrelid = to_regclass('job_embeddings')
-   AND attname = 'embedding' AND NOT attisdropped;
+   AND attname = 'embedding' AND NOT attisdropped;  -- 1 row = safe to reset
 
 -- Force a re-embed of everything (the vector goes, the audit row stays):
 UPDATE job_embeddings SET embedding = NULL;
@@ -460,7 +468,8 @@ DELETE FROM job_embeddings;
 The next `SEMANTIC_ENABLED` run re-fills them: `_embed_backfill_budget`
 (`backend/src/main.py:548`) selects `WHERE e.job_id IS NULL OR e.embedding IS NULL`.
 
-How many jobs actually have a vector:
+How many jobs actually have a vector (same preflight applies — this query errors
+outright if the table or the column is missing):
 
 ```sql
 SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL;

@@ -484,12 +484,14 @@ When on:
   2. Pulls semantic top-500 from `job_embeddings.embedding` (cosine distance `<=>`, exact scan — no ANN index yet, see `0027`).
   3. Fuses via **Reciprocal Rank Fusion** with `k=60`: `score(item) = Σ 1 / (k + rank_i + 1)` across all input lists.
   4. Optionally reranks the top-50 with the **cross-encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (Batch 2.8).
-- ESCO skill normalisation in CV parsing also flips on (Pillar 1 Ring 2 §3.2).
+- ESCO skill normalisation does **not** flip on with it: `cv_parser.py:821,830` needs this flag AND `is_available()`, and the index artefacts have never been built (Pillar 1 Ring 2 §3.2).
 
-When off:
+When **both** `ENGINE3_ENABLED` and `SEMANTIC_ENABLED` are off:
 - No `sentence_transformers` import at all (saves ~150 ms–2 s startup).
 - No vector queries; retrieval is keyword-only.
 - `is_hybrid_available(vector_index_count)` returns `False` → API defaults `mode=keyword`.
+
+The two flags are not interchangeable, so "off" has to name both. `ENGINE3_ENABLED=true` with `SEMANTIC_ENABLED=false` still ENTERS hybrid retrieval (`api/routes/jobs.py:368-369`) and queries whatever vectors already exist — it just never writes new ones, because the embed path reads `SEMANTIC_ENABLED` alone (`main.py:1292,1348`).
 
 ### 5.3 The lazy-import rule (CLAUDE.md #16)
 
