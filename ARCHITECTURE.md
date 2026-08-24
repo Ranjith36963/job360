@@ -546,8 +546,9 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 > ⚠️ **REMOVED — do not write against it.** The `NotificationChannel` ABC
 > (`src/services/notifications/base.py`), its auto-discovery helpers
 > (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes
-> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. The only modules
-> left under `src/services/notifications/` are `__init__.py` and `report_generator.py`.
+> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. What is left
+> under `src/services/notifications/` is `__init__.py`, `report_generator.py` and
+> `defaults.py` (signup rulebook seeder) — no channel classes, no discovery.
 > Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
 > returns nothing.
 

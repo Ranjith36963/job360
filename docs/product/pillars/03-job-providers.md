@@ -616,4 +616,4 @@ backend/tests/
 
 ---
 
-*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend test baseline ~1,409 collected (2 live deselected — defer to runtime count).*
+*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend test baseline 3,297 collected / 3,295 selected (2 live deselected — defer to runtime count).*
