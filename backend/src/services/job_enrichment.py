@@ -214,11 +214,18 @@ async def enrich_batch(
                             e,
                         )
             try:
-                tel.llm_calls += 1
+                # NOT counted before the call. `enrich_job` refuses a stub
+                # description BEFORE it reaches any provider, so incrementing
+                # here made the counter report LLM calls that never happened —
+                # a batch of stubs read as "3 calls made, 3 validation
+                # failures" when the true answer is "0 calls, 3 skipped". The
+                # counter is the thing we bill and alert on, so it has to count
+                # requests, not attempts.
                 result = await enrich_job(
                     job,
                     llm_extract_validated_fn=llm_extract_validated_fn,
                 )
+                tel.llm_calls += 1
                 # B7-1 fix: persist successful enrichments. Without this,
                 # every LLM call's result was discarded — pure cost, no value.
                 if result is not None and conn is not None:
@@ -238,6 +245,20 @@ async def enrich_batch(
                 logger.warning(
                     "enrich_batch: enrich_job timed out for %s",
                     getattr(job, "id", job.title),
+                )
+                return None
+            except StubDescriptionError as e:
+                # A REFUSAL, not a failure. The ad was too thin to read
+                # honestly, so no provider was called and nothing was
+                # validated. Counting it as a validation failure would blame
+                # the LLM for a decision made before it was asked, and would
+                # hide the thing actually worth alerting on: how much of the
+                # catalog arrives too thin to enrich.
+                tel.stub_skipped += 1
+                logger.info(
+                    "enrich_batch: skipped %s — %s",
+                    getattr(job, "id", job.title),
+                    e,
                 )
                 return None
             except Exception as e:  # noqa: BLE001 — one bad job must not kill the batch

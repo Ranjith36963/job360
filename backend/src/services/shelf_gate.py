@@ -129,8 +129,10 @@ def is_stub_description(description: Optional[str], title: Optional[str]) -> boo
     """True if `description` is too thin to safely hand to an LLM.
 
     Two independent, either-one-disqualifies signals:
-      - shorter than 200 chars once whitespace is trimmed (the p10-length
-        floor several sources sit at — devitjobs, workday, smartrecruiters)
+      - shorter than ``_STUB_DESCRIPTION_MIN_CHARS`` (600) once whitespace is
+        trimmed. The number is stated once, at the constant, with the
+        measurement behind it; this docstring used to hardcode "200 chars",
+        which was the earlier value and silently became wrong.
       - byte-identical to the title once both are trimmed (a known live bug:
         successfactors ships description == title for ~1,800 jobs/run)
 

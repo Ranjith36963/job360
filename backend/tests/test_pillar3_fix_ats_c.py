@@ -19,6 +19,7 @@ not a valid enum value (high|medium|low). The feed carries a real ISO
 createdAt and a seniority field — both get wired up here.
 """
 import asyncio
+import json
 import re
 
 import aiohttp
@@ -80,6 +81,10 @@ def test_successfactors_google_namespace_extracts_urls():
         try:
             with aioresponses() as m:
                 m.get("https://careers.qinetiq.com/sitemap.xml", body=GOOGLE_NS_SITEMAP)
+                m.get("https://careers.qinetiq.com/job/software-engineer-uk",
+                      body=_jsonld_job_page("Software Engineer Uk"))
+                m.get("https://careers.qinetiq.com/job/data-scientist-london",
+                      body=_jsonld_job_page("Data Scientist London"))
                 source = SuccessFactorsSource(
                     session,
                     companies=[{"name": "QinetiQ", "sitemap_url": "https://careers.qinetiq.com/sitemap.xml"}],
@@ -104,6 +109,8 @@ def test_successfactors_sitemaps_org_namespace_still_works():
         try:
             with aioresponses() as m:
                 m.get("https://careers.example.com/sitemap.xml", body=SITEMAPS_ORG_NS_SITEMAP)
+                m.get("https://careers.example.com/job/backend-engineer-london",
+                      body=_jsonld_job_page("Backend Engineer London"))
                 source = SuccessFactorsSource(
                     session,
                     companies=[{"name": "Example Co", "sitemap_url": "https://careers.example.com/sitemap.xml"}],
@@ -124,6 +131,8 @@ def test_successfactors_no_namespace_still_works():
         try:
             with aioresponses() as m:
                 m.get("https://careers.example.com/sitemap.xml", body=NO_NS_SITEMAP)
+                m.get("https://careers.example.com/job/platform-engineer-remote",
+                      body=_jsonld_job_page("Platform Engineer Remote"))
                 source = SuccessFactorsSource(
                     session,
                     companies=[{"name": "Example Co", "sitemap_url": "https://careers.example.com/sitemap.xml"}],
@@ -144,6 +153,41 @@ def _child_sitemap(job_slug: str) -> str:
 """
 
 
+# The sitemap carries NO location — it is a list of URLs and nothing else — so
+# the adapter must open each job page to learn where the job is, and a posting
+# with no location cannot be UK-gated and is therefore dropped. That means these
+# sitemap tests only reach a Job if the DETAIL page is mocked too. Before the
+# detail fetch existed they passed on URL extraction alone; now the page is part
+# of the path under test.
+def _jsonld_job_page(title: str = "Engineer", city: str = "London") -> str:
+    # Built with json.dumps, NOT an f-string. Hand-writing this payload inside an
+    # f-string needs `}}` per literal brace, and getting that count wrong yields
+    # invalid JSON that json.loads rejects silently — the extractor returns None,
+    # the job is dropped, and the test fails as "0 jobs" with no hint that the
+    # FIXTURE was malformed rather than the code.
+    payload = {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": title,
+        "description": f"<p>Build things for {title}.</p>",
+        "datePosted": "2026-08-01",
+        "employmentType": "FULL_TIME",
+        "jobLocation": {
+            "@type": "Place",
+            "address": {
+                "@type": "PostalAddress",
+                "addressLocality": city,
+                "addressCountry": "United Kingdom",
+            },
+        },
+    }
+    return (
+        '<html><head><script type="application/ld+json">'
+        + json.dumps(payload)
+        + "</script></head><body></body></html>"
+    )
+
+
 def test_successfactors_follows_sitemap_index():
     """BAE and Thales serve a sitemap INDEX (nested sitemapindex -> child
     sitemap entries), which the old code never followed, so they yielded 0
@@ -162,6 +206,10 @@ def test_successfactors_follows_sitemap_index():
                 m.get("https://jobs.baesystems.com/sitemap.xml", body=index_xml)
                 m.get("https://jobs.baesystems.com/sitemap-jobs-1.xml", body=_child_sitemap("cyber-security-engineer"))
                 m.get("https://jobs.baesystems.com/sitemap-jobs-2.xml", body=_child_sitemap("systems-engineer-london"))
+                m.get("https://jobs.baesystems.com/job/cyber-security-engineer",
+                      body=_jsonld_job_page("Cyber Security Engineer"))
+                m.get("https://jobs.baesystems.com/job/systems-engineer-london",
+                      body=_jsonld_job_page("Systems Engineer London"))
                 source = SuccessFactorsSource(
                     session,
                     companies=[{"name": "BAE Systems", "sitemap_url": "https://jobs.baesystems.com/sitemap.xml"}],
@@ -199,6 +247,11 @@ def test_successfactors_sitemap_index_is_bounded():
                     m.get(
                         f"https://jobs.baesystems.com/sitemap-jobs-{i}.xml",
                         body=_child_sitemap(f"engineer-{i}"),
+                    )
+                    m.get(
+                        f"https://jobs.baesystems.com/job/engineer-{i}",
+                        body=_jsonld_job_page(f"Engineer {i}"),
+                        repeat=True,
                     )
                 source = SuccessFactorsSource(
                     session,
