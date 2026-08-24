@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Runbook — Operational Answers
 
 > **Audience.** Agents and operators answering "I see a problem — what do I do?" Each section below is a question phrased as a verb; the answer is a command, an SQL query, or a code pointer you can act on without first re-reading the pillar docs.
@@ -17,7 +18,7 @@ python -m src.cli status
 ### See the last 20 runs with per-source timing + errors
 
 ```bash
-sqlite3 data/jobs.db \
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL" -c \
   "SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
    FROM run_log ORDER BY timestamp DESC LIMIT 20;"
 ```
@@ -44,9 +45,8 @@ python -m src.cli view --visa-only
 ### Open the DB
 
 ```bash
-sqlite3 data/jobs.db
-.headers on
-.mode column
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL"
+-- psql formats headers by default; \x toggles expanded rows
 ```
 
 ### See what migrations have been applied
@@ -54,7 +54,7 @@ sqlite3 data/jobs.db
 ```bash
 python -m migrations.runner status
 # or:
-sqlite3 data/jobs.db "SELECT * FROM _schema_migrations ORDER BY version;"
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL" -c "SELECT * FROM _schema_migrations ORDER BY version;"
 ```
 
 ### Apply pending migrations (idempotent, safe to re-run)
@@ -75,13 +75,13 @@ python -m migrations.runner down data/jobs.db # explicit DB path
 ### Show all tables
 
 ```bash
-sqlite3 data/jobs.db ".tables"
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL" -c "\\dt"
 ```
 
 ### Inspect a specific table's schema
 
 ```bash
-sqlite3 data/jobs.db ".schema user_feed"
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL" -c "\\d user_feed"
 ```
 
 ---
