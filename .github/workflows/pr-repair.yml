@@ -407,7 +407,22 @@ jobs:
         id: cage
         run: |
           set -euo pipefail
-          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md
+          # EVERY SCRATCH FILE THIS WORKFLOW WRITES, IN ONE PLACE.
+          # The path cage compares `git status --porcelain` against
+          # backend/|frontend/, so anything the WORKFLOW leaves in the repo root
+          # is indistinguishable from the AGENT escaping its cage.
+          # `threads.json` and `open-threads.json` arrived with the review-thread
+          # reader and were not added here, so the first repair run that ever got
+          # past the conflict-marker check died on:
+          #     agent edited outside the cage: open-threads.json threads.json
+          # (run 32746446218) — and the agent had touched neither.
+          #
+          # A LIST LIKE THIS IS A COUPLING, so it is labelled as one: add a
+          # scratch file above, add it here in the same commit. Writing scratch
+          # outside the working tree entirely is the better shape and a bigger
+          # change than this fix should carry.
+          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md \
+                threads.json open-threads.json
           # No conflict marker may survive — a half-resolved merge must not ship.
           #
           # THE OLD PATTERN MATCHED `main` ITSELF, SO THIS LOOP COULD NEVER SHIP.
