@@ -495,7 +495,7 @@ Almost all are the keyed-source API credentials. The 43 free sources need no env
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
 | `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
 | `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
-| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py:45` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source silently skips ("GoogleJobs: no SERPAPI_KEY, skipping") |
+| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py:45` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py:47`) — visible in the run log, but the run still reports success |
 | `CAREERJET_AFFID` | `CareerjetSource` | (unset) | Affiliate ID |
 | `FINDWORK_API_KEY` | `FindworkSource` | (unset) | Token auth |
 | `GITHUB_TOKEN` | (none directly, but used by `github_enricher` in Pillar 1) | (unset) | Anonymous GitHub API has 60 req/hr; token raises to 5000 |

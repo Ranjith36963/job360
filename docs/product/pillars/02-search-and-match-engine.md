@@ -172,7 +172,7 @@ Survives unchanged.
 
 If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), then `PgVectorIndex().upsert(job_id, vector)` writes the vector AND its audit stamp into the same `job_embeddings` row in one statement — `model_version` is taken from `embeddings.MODEL_NAME` inside the method and `embedding_updated_at` is set to `now()` (`backend/src/main.py:1295-1298`, `services/pg_vector_index.py:99-123`).
 
-> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so nothing was ever embedded in prod (catalog 7,761 → 8,184 overnight, embeddings stuck at 284). `services/vector_index.py` (the Chroma wrapper) still exists but **no production call site constructs it**; the only importers left are `backend/scripts/build_job_embeddings.py:73` and `backend/scripts/eval_v2_pool.py:125`.
+> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so nothing was ever embedded in prod (catalog 7,761 → 8,184 overnight, embeddings stuck at 284). `services/vector_index.py` (the Chroma wrapper) still exists and still builds a `chromadb.PersistentClient` when called (`vector_index.py:39-45`) — but **no production call site constructs it**. Its only remaining callers are two scripts (`backend/scripts/build_job_embeddings.py:73`, `backend/scripts/eval_v2_pool.py:125`) and two tests (`test_embeddings.py:22`, `test_vector_index_path.py:18`).
 
 `db.log_run(stats, run_uuid, per_source_errors={...}, per_source_duration={greenhouse: 12.4}, total_duration=68.2)` writes the run row (migration `0010`).
 
@@ -520,7 +520,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
 | `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
 | `ENRICHMENT_ENABLED` | `false` | Master switch for LLM enrichment + multi-dim activation | Flip on after setting LLM keys — see rule #18 |
-| `SEMANTIC_ENABLED` | `false` | Master switch for embeddings + the pgvector store + hybrid retrieval + ESCO | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
+| `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
 | `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
 | `GROQ_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Cerebras |
@@ -606,7 +606,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Surface | Status | Notes |
 | --- | --- | --- |
 | `encode_job()` 384-dim with 300/50 chunking | ✅ | `sentence-transformers/all-MiniLM-L6-v2`, lazy |
-| `PgVectorIndex` — the live vector store | ✅ | `job_embeddings.embedding`, pgvector, migration `0027`. The older `VectorIndex` ChromaDB wrapper still compiles but no production call site builds it |
+| `PgVectorIndex` — the live vector store | ✅ | `job_embeddings.embedding`, pgvector, migration `0027`. The older `VectorIndex` ChromaDB wrapper still works when called — from two scripts and two tests — but no production call site builds it |
 | `job_embeddings` table | ✅ | migration `0009` (row) + `0027` (the `embedding` column). Vector and audit stamp share one row in Postgres — they cannot desync |
 | `reciprocal_rank_fusion(k=60)` | ✅ | pure function, deterministic tiebreaker |
 | `retrieve_for_user()` hybrid orchestrator | ✅ | injectable keyword_fn / semantic_fn for testability |
@@ -668,7 +668,7 @@ backend/
 │   │   ├── job_enrichment_schema.py           — 16-field Pydantic JobEnrichment
 │   │   ├── embeddings.py                      — encode_job() (opt-in, lazy)
 │   │   ├── pg_vector_index.py                 — THE vector store: job_embeddings.embedding (pgvector)
-│   │   ├── vector_index.py                    — legacy ChromaDB wrapper; no production caller left
+│   │   ├── vector_index.py                    — legacy ChromaDB wrapper; scripts + tests only, no production caller
 │   │   ├── retrieval.py                       — RRF fusion + cross-encoder rerank (opt-in)
 │   │   ├── scheduler.py                       — TieredScheduler + TIER_INTERVALS_SECONDS
 │   │   ├── circuit_breaker.py                 — 5-fail/300s state machine + BreakerRegistry
@@ -684,7 +684,7 @@ backend/
     ├── 0011_score_dimensions.up.sql           — 9 dim columns on jobs table
     └── 0027_job_embedding_vectors.up.sql      — adds job_embeddings.embedding (pgvector); tolerant no-op without the extension
 
-backend/data/chroma/                            — (gitignored) LEGACY ChromaDB collection; nothing in src/ reads it
+backend/data/chroma/                            — (gitignored) LEGACY ChromaDB collection; the production pipeline and API never read it (two scripts still can)
 ```
 
 Test coverage (relevant files):

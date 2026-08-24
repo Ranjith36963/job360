@@ -429,10 +429,22 @@ enrichment = await enrich_job(job)  # raises RuntimeError on all-providers-fail
 **The vectors are in Postgres, not on disk.** Migration `0027` (2026-08-07) added
 `job_embeddings.embedding` (pgvector) and `services/pg_vector_index.py` is the only
 store the pipeline and the API use — `backend/src/main.py:580`, `main.py:1298`,
-`backend/src/api/routes/jobs.py:379`. `rm -rf data/chroma/` clears a directory
-nothing in `src/` reads any more; it will not fix anything.
+`backend/src/api/routes/jobs.py:379`. `rm -rf data/chroma/` clears a directory the
+production pipeline and API never read; it will not fix anything here. (Two
+legacy helpers, `backend/scripts/build_job_embeddings.py` and
+`eval_v2_pool.py`, do still use that store — deleting it costs them their index.)
+
+**Check the column exists before the first statement.** Migration `0027` is
+tolerant: on a Postgres without pgvector it skips the column entirely, and then
+`UPDATE … SET embedding = NULL` fails with `column "embedding" does not exist`.
 
 ```sql
+-- 0 rows here means pgvector is absent and 0027 was a no-op. Install the
+-- extension and re-run the migration before the UPDATE below; the DELETE
+-- underneath works either way.
+SELECT 1 FROM information_schema.columns
+ WHERE table_name = 'job_embeddings' AND column_name = 'embedding';
+
 -- Force a re-embed of everything (the vector goes, the audit row stays):
 UPDATE job_embeddings SET embedding = NULL;
 -- Or drop the bookkeeping too, for a truly fresh start:

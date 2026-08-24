@@ -53,7 +53,7 @@ A user's configured notification destination — one row in `user_channels` with
 
 ### ChromaDB (legacy — superseded)
 
-The on-disk vector database job embeddings USED to live in, at `backend/data/chroma/`, wrapped by `VectorIndex`. Migration `0027` moved the vectors into Postgres on 2026-08-07 and **no production call site constructs `VectorIndex` any more** — the class and the `chromadb` optional dep both still exist, and two `backend/scripts/` helpers still import it, but the live store is `PgVectorIndex`. See **Vector store** below.
+The on-disk vector database job embeddings USED to live in, at `backend/data/chroma/`, wrapped by `VectorIndex`. Migration `0027` moved the vectors into Postgres on 2026-08-07 and **no production call site constructs `VectorIndex` any more** — the class still builds a real Chroma client when called, and two `backend/scripts/` helpers plus two tests still import it, but the live store is `PgVectorIndex`. See **Vector store** below.
 **Code:** `backend/src/services/vector_index.py` · **Pillar 2**
 
 ### Conditional fetch
@@ -95,7 +95,7 @@ European Skills, Competences, Qualifications and Occupations — a multilingual 
 
 Two env-var booleans that gate Pillar-2's advanced features, both **default off** (rule #18):
 - `ENRICHMENT_ENABLED` — LLM enrichment + DB writes + multi-dim scoring activation
-- `SEMANTIC_ENABLED` — embeddings + the pgvector store + hybrid retrieval + ESCO
+- `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
 
 ### Feed (user_feed)
 

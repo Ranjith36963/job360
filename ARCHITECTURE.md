@@ -26,7 +26,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`) + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
+- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -72,7 +72,7 @@ job360/
 │   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
 │   │   │   ├── pg_vector_index.py    # THE vector store — job_embeddings.embedding (pgvector)
-│   │   │   ├── vector_index.py       # legacy ChromaDB wrapper; no production caller left
+│   │   │   ├── vector_index.py       # legacy ChromaDB wrapper (still builds a client itself); no production caller
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
@@ -775,7 +775,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | rapidfuzz / scikit-learn | >=3.0 / >=1.4 | Pillar 2 dedup layers 2–3 (**lazy-imported**, rule #16) |
 | arq | >=0.25 | Async task queue (worker process) |
 | sentry-sdk | >=1.40.0 | Error tracking + performance monitoring (Phase 3) |
-| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings (**lazy-imported**, opt-in). `chromadb` is still declared and still imported by `services/vector_index.py`, but the live vector store is pgvector — nothing in `src/` builds a Chroma client any more |
+| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings (**lazy-imported**, opt-in). `chromadb` is still declared, and `services/vector_index.py:39-45` still builds a `PersistentClient` when something calls it — but the live vector store is pgvector, and nothing on the production pipeline or API path calls it. Its remaining callers are two `backend/scripts/` helpers and two tests |
 
 ### Dev (`pip install -e ".[dev]"` from `backend/`)
 
