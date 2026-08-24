@@ -227,6 +227,23 @@ lanes:
       # the owner's product rules — changing the text changes the product
       - "docs/product/product_design_rules.md"   # the canonical text of rules #29-31
       - "docs/product/plans/batch-2-decisions.md"
+      # ── THE WHOLE OF docs/product/, WRITTEN DOWN (2026-08-24) ─────────────
+      # This changes NO verdict. Every file under here already reached the owner
+      # lane — by ESCALATION, because no rule covered it. Measured on PR #379:
+      # `docs/product/pillars/*.md` reported "4 file(s) match no lane ... so they
+      # escalate", which is the right answer given for the wrong reason.
+      #
+      # The reason matters, because the two states behave differently the moment
+      # anyone tidies up. "Nobody classified this" reads like an oversight and
+      # invites exactly one fix — adding `docs/**` to the fast lane — which is
+      # the bug wave 1 spent 109 file moves undoing. "This is the owner's product
+      # thinking" invites none. Recording the intent is what stops the next
+      # reader from helpfully deleting it.
+      #
+      # NOT a widening: the deny list beats allow, these paths were never
+      # auto-mergeable, and the two files above stay named individually because
+      # they are cited by number in CLAUDE.md.
+      - "docs/product/**"
     requires: [ci, review, security, verify, ratchets]
     auto_merge: false          # your hand, always
     watch_minutes: 15          # ...but the watcher still runs after you merge
