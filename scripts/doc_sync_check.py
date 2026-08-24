@@ -232,18 +232,39 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
     Doc-sync found it by looking at the seam between doc and code. The nightly
     routine never could: it may only edit *.md.
     """
-    page = ROOT / "frontend/src/app/page.tsx"
-    if not page.exists():
-        return []
+    # Not just the landing page. The first sweep found five copies there and
+    # stopped; a wider grep then found the SAME stale number in the site
+    # metadata (the description Google and every social card show) and in the
+    # footer strapline that renders on every page. Reach was larger than the
+    # page that was fixed first, so the guard watches all three.
+    targets = [
+        "frontend/src/app/page.tsx",
+        "frontend/src/app/layout.tsx",
+        "frontend/src/components/layout/Footer.tsx",
+        "frontend/src/lib/catalog.ts",
+    ]
     out: list[tuple[int, int]] = []
-    pat = re.compile(r"(\d+)\s+(?:[Jj]ob\s+)?[Ss]ources?\b|value:\s*\"(\d+)\"")
-    for i, line in enumerate(page.read_text(encoding="utf-8").splitlines(), 1):
-        if "Source" not in line and "source" not in line:
+    pat = re.compile(r"(\d+)\s+(?:[Jj]ob\s+)?[Ss]ources?\b|SOURCE_COUNT\s*=\s*(\d+)")
+    for rel in targets:
+        f = ROOT / rel
+        if not f.exists():
             continue
-        for m in pat.finditer(line):
-            claimed = m.group(1) or m.group(2)
-            if claimed:
-                out.append((i, int(claimed)))
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            # Case-INSENSITIVE. The first draft tested `"ource" not in line`,
+            # which skipped `SOURCE_COUNT = 41` -- the constant every other
+            # site reads from -- because that spelling is uppercase. Setting it
+            # to 99 left the guard green. Exactly the failure this file already
+            # records for the hard-rule count: one capital letter hiding a
+            # stale number from its own tripwire.
+            if "ource" not in line.lower():
+                continue
+            # Prose in a comment explaining the old bug legitimately says 47.
+            if line.lstrip().startswith(("*", "//", "#")):
+                continue
+            for m in pat.finditer(line):
+                claimed = m.group(1) or m.group(2)
+                if claimed:
+                    out.append((i, int(claimed)))
     return out
 
 
@@ -612,7 +633,7 @@ def main() -> int:
     for line_no, claimed in landing_page_source_claims():
         if claimed != registry:
             drift.append((
-                "frontend/src/app/page.tsx", str(line_no), "landing-source-count",
+                "frontend (user-facing copy)", str(line_no), "landing-source-count",
                 str(claimed), str(registry),
             ))
 

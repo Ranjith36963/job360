@@ -61,8 +61,18 @@ CASES: list[tuple[str, str, str, str]] = [
      r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
     # The only CODE file guarded here. It shipped "47 Job Sources" to every
     # visitor of job360.uk for a week after the roster dropped to 41.
-    ("frontend/src/app/page.tsx",
-     r"title: \"(\d+) Job Sources\"", 'title: "999 Job Sources"', "landing-source-count"),
+    # The only CODE files guarded here. The copy shipped "47 Job Sources" to
+    # every visitor of job360.uk for a week after the roster dropped to 41 --
+    # on the landing page, in the site metadata Google and social cards read,
+    # and in the footer on every page.
+    #
+    # The constant is drilled SEPARATELY and deliberately. The first version of
+    # this guard filtered lines with `"ource" not in line`, which skipped
+    # `SOURCE_COUNT = 41` because that spelling is uppercase: setting it to 99
+    # left the report green. Drilling only the page copy would never have found
+    # that. One capital letter, one blind guard.
+    ("frontend/src/lib/catalog.ts",
+     r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
 ]
 
 
