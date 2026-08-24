@@ -131,28 +131,43 @@ def registry_counts() -> tuple[int, int]:
     raise RuntimeError("SOURCE_REGISTRY dict literal not found at top level of backend/src/main.py")
 
 
-def registry_keys() -> list[str]:
-    """The SOURCE_REGISTRY keys — the names `_build_sources()` actually polls.
+def built_source_classes() -> set[str]:
+    """Class names `_build_sources()` actually INSTANTIATES.
 
-    Same AST-strict parse as registry_counts(); split out so active_ats_inventory()
-    can ask "is this platform registered?" instead of trusting a filename.
+    CodeRabbit, third round on PR #394, correcting a false claim this file made
+    in its previous revision. `_build_sources()` does NOT iterate
+    SOURCE_REGISTRY -- it hand-writes `all_sources = [ReedSource(...), ...]`
+    (`backend/src/main.py:251-303`). The registry is a SEPARATE surface, used by
+    the CLI `--source` choices and `GET /api/sources`.
+
+    That gap is the whole point of CLAUDE.md rules #8/#13: registry and
+    `_build_sources()` are two of the five surfaces that must move together
+    precisely BECAUSE nothing makes them move together automatically. A source
+    can sit in the registry, have a module on disk, and still never be polled.
+
+    So "is this platform polled?" has exactly one honest answer: is its class in
+    this list. Reading the registry instead was a guard pointed at the wrong
+    authority -- the same mistake, one layer up, as reading the directory.
     """
     tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            if getattr(t, "id", None) == "SOURCE_REGISTRY":
-                if not isinstance(node.value, ast.Dict):
-                    raise RuntimeError("SOURCE_REGISTRY is not a plain dict literal")
-                return [
-                    k.value for k in node.value.keys
-                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
-                ]
-    raise RuntimeError("SOURCE_REGISTRY dict literal not found in backend/src/main.py")
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == "_build_sources"):
+            continue
+        for st in ast.walk(node):
+            if not isinstance(st, ast.Assign):
+                continue
+            if not any(getattr(x, "id", None) == "all_sources" for x in st.targets):
+                continue
+            if not isinstance(st.value, ast.List):
+                raise RuntimeError("_build_sources: all_sources is not a list literal")
+            names = {
+                e.func.id for e in st.value.elts
+                if isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
+            }
+            if not names:
+                raise RuntimeError("_build_sources: all_sources instantiates nothing")
+            return names
+    raise RuntimeError("all_sources list not found in _build_sources() in backend/src/main.py")
 
 
 def _migration_pairs() -> dict[int, str]:
@@ -311,28 +326,28 @@ def active_ats_inventory() -> tuple[int, int]:
     platform counts as active when it is actually POLLED, so retiring one moves
     both numbers automatically.
 
-    Second CodeRabbit round: "polled" is read from SOURCE_REGISTRY, not from the
-    files in `sources/ats/`. The first draft scanned module filenames, so a
-    module left on disk after being dropped from the registry kept inflating
-    both totals while the pipeline never called it — the mirror image of the
-    Rippling case this function exists for (slugs with no class, versus a class
-    with no registration). The registry is what `_build_sources()` iterates, so
-    it is the only list that answers "does this platform get polled?".
+    "Polled" is read from the classes `_build_sources()` INSTANTIATES, and it
+    took two corrections to get there. Draft 1 scanned module filenames in
+    `sources/ats/`, so a module left on disk counted forever. Draft 2 switched
+    to SOURCE_REGISTRY on the belief that `_build_sources()` iterates it -- it
+    does not (CodeRabbit, third round): the registry is a separate surface for
+    the CLI and `GET /api/sources`, while `_build_sources()` hand-writes its own
+    `all_sources` list. A source can be in the registry, have a module on disk,
+    and still never be fetched.
+
+    Both drafts made the same mistake at different depths: guarding a proxy for
+    the behaviour instead of the behaviour. `built_source_classes()` is the list
+    the pipeline actually constructs, so it is the only one that answers
+    "does this platform get polled?".
     """
     per_platform = ats_platform_slugs()
-    registered = {k.replace("_", "") for k in registry_keys()}
-    ats_dir = ROOT / "backend/src/sources/ats"
-    # A platform is active only if BOTH a module exists AND the registry names
-    # it. Either alone is a half-truth: an unregistered module is dead code, and
-    # a registry key with no module would have failed at import long before here.
-    modules = {
-        p.stem.replace("_", "")
-        for p in ats_dir.glob("*.py")
-        if p.name != "__init__.py"
-    } if ats_dir.is_dir() else set()
+    # GREENHOUSE -> greenhousesource; a platform is active when some class the
+    # pipeline builds starts with its name. RIPPLING_COMPANIES has no
+    # RipplingSource, which is exactly why 302 configured and 297 polled differ.
+    built = {c.lower().replace("_", "") for c in built_source_classes()}
     active = {
         k: v for k, v in per_platform.items()
-        if k.replace("_", "").lower() in (modules & registered)
+        if any(c.startswith(k.lower().replace("_", "")) for c in built)
     }
     return len(active), sum(active.values())
 
