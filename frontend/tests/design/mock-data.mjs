@@ -60,7 +60,48 @@ function job(over) {
   };
 }
 
+// Reproduces the three cards from the owner's own dashboard screenshot
+// (2026-08-24) field for field: an AI-judged score with the keyword score
+// alongside it, a structured salary range on one card and a legacy salary
+// string on another, seniority/workplace/industry pills, and a verdict line.
+// The first card carries FIVE pills and the other two carry one, which is what
+// made their action rows sit at different heights.
 export const MOCK_JOBS = [
+  job({
+    id: 101,
+    title: "Generative AI Engineer",
+    company: "Unknown",
+    location: "Manchester Area, United Kingdom",
+    match_score: 90,
+    llm_fit_score: 85,
+    llm_verdict: "Strong fit for the role",
+    salary: null,
+    salary_min_gbp: 55000,
+    salary_max_gbp: 75000,
+    seniority: "mid",
+    workplace_type: "hybrid",
+    industry: "software_engineering",
+  }),
+  job({
+    id: 102,
+    title: "Machine Learning Engineer",
+    company: "SL5 Task Force",
+    location: "Remote",
+    match_score: 70,
+    llm_fit_score: 85,
+    llm_verdict: "Strong fit for the role",
+    salary: null,
+  }),
+  job({
+    id: 103,
+    title: "Machine Learning Engineer",
+    company: "Xantura",
+    location: "Southwark, South East London",
+    match_score: 70,
+    llm_fit_score: 85,
+    llm_verdict: "Strong fit for the role",
+    salary: "50000-70000",
+  }),
   job({ id: 1, match_score: 98, title: "Senior Data Engineer", company: "Monzo" }),
   // Wraps to two or three lines at 390px — the case that pushes a card's
   // internals out of alignment with its neighbours.

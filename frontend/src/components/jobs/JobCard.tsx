@@ -372,10 +372,12 @@ export function JobCard({ job, onAction }: JobCardProps) {
           </Tooltip>
         )}
 
-        {/* Industry */}
+        {/* Industry — same treatment as the seniority and workplace pills above.
+            Without it the raw column value reached the screen: the owner's own
+            dashboard showed a chip reading "software_engineering". */}
         {job.industry && (
-          <Badge variant="secondary" className="text-xs text-muted-foreground">
-            {job.industry}
+          <Badge variant="secondary" className="text-xs capitalize text-muted-foreground">
+            {job.industry.replace(/_/g, " ")}
           </Badge>
         )}
       </div>
@@ -443,27 +445,33 @@ export function JobCard({ job, onAction }: JobCardProps) {
           mt-auto: with h-full above, this pins the actions to the bottom of the
           card so the button rows line up across a row of cards instead of
           floating at whatever height the title happened to end. */}
-      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/50 pt-2">
-        <Button
-          size="sm"
-          className="gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-          onClick={handleApply}
-          aria-label={`Apply for ${job.title} at ${job.company}`}
-        >
-          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-          Apply
-        </Button>
+      <div className="mt-auto flex flex-col gap-2 border-t border-border/50 pt-3">
+        {/* Row 1 — the two things you DO with a job. Equal width so the pair
+            reads as one control and lands on the same baseline on every card. */}
+        <div className="flex items-stretch gap-2">
+          <Button
+            size="sm"
+            className="h-9 flex-1 gap-1.5"
+            onClick={handleApply}
+            aria-label={`Apply for ${job.title} at ${job.company}`}
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            Apply
+          </Button>
 
-        {/* Compact "Tailor my CV" — dashboard card doesn't need to open the job first */}
-        <TailorButton jobId={job.id} variant="ghost" size="sm" />
+          {/* Compact "Tailor my CV" — dashboard card doesn't need to open the job first */}
+          <TailorButton jobId={job.id} variant="outline" size="sm" className="h-9 flex-1" />
+        </div>
 
+        {/* Row 2 — triage + metadata, deliberately quieter. */}
+        <div className="flex items-center gap-1">
         <Button
           size="sm"
           variant={isLiked ? "default" : "ghost"}
           className={
             isLiked
-              ? "gap-1.5 bg-pink-500/15 text-pink-400 hover:bg-pink-500/25 border border-pink-500/20"
-              : "gap-1.5 text-muted-foreground hover:text-pink-400"
+              ? "h-8 gap-1.5 bg-pink-500/15 text-pink-400 hover:bg-pink-500/25 border border-pink-500/20"
+              : "h-8 gap-1.5 text-muted-foreground hover:text-pink-400"
           }
           onClick={(e) => {
             e.stopPropagation();
@@ -481,8 +489,8 @@ export function JobCard({ job, onAction }: JobCardProps) {
           variant={isSkipped ? "default" : "ghost"}
           className={
             isSkipped
-              ? "gap-1.5 bg-destructive/15 text-destructive hover:bg-destructive/25 border border-destructive/20"
-              : "gap-1.5 text-muted-foreground hover:text-destructive"
+              ? "h-8 gap-1.5 bg-destructive/15 text-destructive hover:bg-destructive/25 border border-destructive/20"
+              : "h-8 gap-1.5 text-muted-foreground hover:text-destructive"
           }
           onClick={(e) => {
             e.stopPropagation();
@@ -499,7 +507,7 @@ export function JobCard({ job, onAction }: JobCardProps) {
         <Button
           size="sm"
           variant="ghost"
-          className="gap-1.5 text-muted-foreground hover:text-foreground ml-auto"
+          className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
           onClick={(e) => {
             e.stopPropagation();
             router.push(`/jobs/${job.id}`);
@@ -507,16 +515,19 @@ export function JobCard({ job, onAction }: JobCardProps) {
           aria-label={`View details for ${job.title}`}
         >
           <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">Details</span>
+          Details
         </Button>
 
-        {/* Source tag */}
+        {/* Source tag — ml-auto puts it on the right without the row needing to
+            wrap, and truncate stops a long source name pushing it off the card
+            (that is how "weworkremotely" ended up 169px past the edge). */}
         <span
-          className="text-xs text-muted-foreground/60 font-mono flex-shrink-0"
+          className="ml-auto max-w-[7rem] truncate font-mono text-xs text-muted-foreground/60"
           title={job.source}
         >
           {job.source}
         </span>
+        </div>
       </div>
     </div>
   );

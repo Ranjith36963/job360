@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import { cn } from "@/lib/utils";
 
 interface TimeBucketsProps {
@@ -22,6 +24,28 @@ export function TimeBuckets({
   onBucketChange,
   counts,
 }: TimeBucketsProps) {
+  // Keep the SELECTED bucket on screen.
+  //
+  // This row is overflow-x-auto with scrollbar-none, so on a phone it scrolls
+  // but shows no scrollbar to say so. The default bucket is the LAST one (7d),
+  // which meant a 390px screen opened on "All 24h 48h 3d 5d…" with the active
+  // filter off the right edge and no hint it existed — the user could not see
+  // which range they were looking at, and the row looked truncated rather than
+  // scrollable. Centring the active chip fixes both: the selection is always
+  // visible, and chips are visibly cut off on BOTH sides, which reads as
+  // "scroll me".
+  // Feature-detected: jsdom implements no layout, so Element.scrollIntoView is
+  // simply absent there. Calling it unguarded threw during mount and took the
+  // whole DashboardPage down with it — 9 dashboard tests failed on a change
+  // that was purely cosmetic. Scrolling is an enhancement; never let it break
+  // rendering.
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = activeRef.current;
+    if (typeof el?.scrollIntoView !== "function") return;
+    el.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [activeBucket]);
+
   return (
     <div
       className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none"
@@ -35,6 +59,7 @@ export function TimeBuckets({
         return (
           <button
             key={key}
+            ref={isActive ? activeRef : undefined}
             onClick={() => onBucketChange(key)}
             aria-pressed={isActive}
             aria-label={`${label} — ${count} job${count !== 1 ? "s" : ""}`}

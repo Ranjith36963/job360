@@ -158,6 +158,45 @@ function audit() {
     meta.set(el, { cs, r, visible: isVisible(el, cs, r) });
   }
 
+  // What is ACTUALLY on screen, as opposed to what has coordinates.
+  //
+  // getBoundingClientRect reports where an element WOULD be, even when an
+  // ancestor's overflow has clipped it out of sight. Inside a scrolling pane
+  // that is most of the content: on a real profile, the CV preview scrolls
+  // 2821px of text through a 498px window, and every line below the fold still
+  // reports a position on the page. Comparing those raw rectangles produced 97
+  // "overlaps" between CV text and headings elsewhere on the page — none of
+  // which a human could ever see — plus 122 bogus "clipped" findings.
+  //
+  // Intersecting with every clipping ancestor gives the rectangle a user can
+  // actually see. An empty result means the element is scrolled or clipped out
+  // of view, and nothing off-screen can collide with anything.
+  const EMPTY = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+  const clipped = new Map();
+  const visibleRect = (el) => {
+    if (clipped.has(el)) return clipped.get(el);
+    let box = meta.get(el).r;
+    let cur = el.parentElement;
+    while (cur && cur !== document.documentElement) {
+      const cs = getComputedStyle(cur);
+      if (cs.overflow !== "visible" && cs.overflowX !== "visible") {
+        const cr = cur.getBoundingClientRect();
+        const left = Math.max(box.left, cr.left);
+        const top = Math.max(box.top, cr.top);
+        const right = Math.min(box.right, cr.right);
+        const bottom = Math.min(box.bottom, cr.bottom);
+        if (right - left <= 0 || bottom - top <= 0) {
+          clipped.set(el, EMPTY);
+          return EMPTY;
+        }
+        box = { left, top, right, bottom, width: right - left, height: bottom - top };
+      }
+      cur = cur.parentElement;
+    }
+    clipped.set(el, box);
+    return box;
+  };
+
   // ── OVERFLOW ──────────────────────────────────────────────────────────────
   // A page that scrolls sideways on a phone is always a bug. Name the widest
   // offenders so the cause is actionable, not just "something is too wide".
@@ -219,13 +258,34 @@ function audit() {
     return el.classList.contains("sr-only") || cs.clip === "rect(0px, 0px, 0px, 0px)" || r.width <= 1 || r.height <= 1;
   };
 
-  const content = all.filter((el) => {
+  // Two lists, and the difference between them is load-bearing.
+  //
+  // `candidates` is everything that counts as content by style alone.
+  // `content` additionally requires the element to be ON SCREEN.
+  //
+  // Filtering by on-screen is right for OVERLAP, COVERED, CONTRAST and
+  // TAP_TARGET: something scrolled out of a pane cannot collide with, cover, or
+  // be covered by anything, and its contrast against a background nobody sees
+  // is not a defect.
+  //
+  // It is exactly WRONG for CLIPPED_BY_CONTAINER, whose whole purpose is to
+  // find content that has been clipped out of sight. Running that check over
+  // the on-screen list would silently drop its worst cases — the ones clipped
+  // ENTIRELY out of their container, like the source label sitting 169px past
+  // the edge of every job card on production — and report a page as clean
+  // precisely because the defect was total rather than partial.
+  const candidates = all.filter((el) => {
     const { cs, visible } = meta.get(el);
     if (!visible) return false;
     if (cs.pointerEvents === "none") return false; // decoration, not content
     if (el.closest("[aria-hidden=true]")) return false;
     if (isDevChrome(el) || isScreenReaderOnly(el)) return false;
     return ownsText(el) || el.matches(INTERACTIVE);
+  });
+
+  const content = candidates.filter((el) => {
+    const vr = visibleRect(el);
+    return vr.width >= 1 && vr.height >= 1;
   });
 
   // ── COVERED ───────────────────────────────────────────────────────────────
@@ -237,7 +297,7 @@ function audit() {
     const { cs, r, visible } = meta.get(el);
     return (
       visible &&
-      cs.position === "fixed" &&
+      (cs.position === "fixed" || cs.position === "sticky") &&
       cs.pointerEvents !== "none" &&
       r.height > 40 &&
       !isDevChrome(el)
@@ -288,7 +348,12 @@ function audit() {
   const insideFixed = (el) => fixedBars.some((bar) => bar.contains(el));
   const flow = content.filter((el) => {
     const { cs } = meta.get(el);
-    if (cs.position === "fixed" || insideFixed(el)) return false;
+    // `sticky` as well as `fixed`. The navbar is sticky top-0, so once the page
+    // is scrolled it legitimately sits over the article beneath it — that is
+    // what a sticky header IS, and it carries a backdrop blur for the purpose.
+    // Counting it reported the four nav links and the user's email as
+    // "overlapping" body copy: 12 findings, all of them correct behaviour.
+    if (cs.position === "fixed" || cs.position === "sticky" || insideFixed(el)) return false;
     if (cs.display === "inline" && el.getClientRects().length > 1) return false;
     return true;
   });
@@ -297,8 +362,8 @@ function audit() {
       const a = flow[i];
       const b = flow[j];
       if (a.contains(b) || b.contains(a)) continue;
-      const ra = meta.get(a).r;
-      const rb = meta.get(b).r;
+      const ra = visibleRect(a);
+      const rb = visibleRect(b);
       const ox = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
       const oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
       if (ox > OVERLAP_TOLERANCE && oy > OVERLAP_TOLERANCE) {
@@ -363,10 +428,20 @@ function audit() {
   // perfectly happy size and it is the card around it that hides it. Because
   // the card is overflow:hidden rather than auto, the content cannot even be
   // scrolled to — it is simply gone, with no visual hint that it exists.
-  for (const el of content) {
+  for (const el of candidates) {
     let cur = el.parentElement;
     while (cur && cur !== document.body) {
       const ccs = getComputedStyle(cur);
+      // A SCROLLABLE ancestor ends the search: content below the fold of a
+      // scroll box is reachable, not lost. Without this the check reported
+      // every line of a long CV as "clipped" — 122 findings on a real profile,
+      // all of them the CV preview pane (overflow:auto, scrollHeight 2821 vs
+      // clientHeight 498) being read against the card's overflow:hidden
+      // further up. Hidden means gone; auto means scroll down.
+      const scrollable =
+        /auto|scroll/.test(ccs.overflowY + ccs.overflowX) &&
+        (cur.scrollHeight > cur.clientHeight + 2 || cur.scrollWidth > cur.clientWidth + 2);
+      if (scrollable) break;
       if (ccs.overflow === "hidden" || ccs.overflowX === "hidden") {
         const cr = cur.getBoundingClientRect();
         const r = meta.get(el).r;
