@@ -73,6 +73,19 @@ CASES: list[tuple[str, str, str, str]] = [
     # that. One capital letter, one blind guard.
     ("frontend/src/lib/catalog.ts",
      r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
+    # Fourth batch, 2026-08-24, from the nightly routine.
+    #
+    # suite-baseline is the odd one out and the point of it: every other guard
+    # asks "does this doc match the code?". This one asks "do two docs disagree
+    # with EACH OTHER?" -- the question none of the others can ask, and the one
+    # that would have caught README.md contradicting itself on a single page
+    # (3,297 collected at :124, ~1,409 at :402) while every check stayed green.
+    # Breaking ONE doc's number is therefore a real mutation: it creates the
+    # disagreement.
+    ("ARCHITECTURE.md",
+     r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
+    ("backend/CLAUDE.md",
+     r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
 ]
 
 

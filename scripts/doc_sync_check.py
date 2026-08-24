@@ -75,6 +75,17 @@ LIVING_DOCS = [
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
 FORBIDDEN_PHRASES = [
     ("async SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
+    # Added 2026-08-24 by the nightly routine. 01-user-pillar.md described
+    # profile storage as "SQLite" and walked straight past this list, because
+    # the single entry above pins one exact two-word phrase.
+    #
+    # Deliberately NOT a bare "SQLite": pg.py is honestly documented as an
+    # aiosqlite-SHAPED driver, and the migrations legitimately discuss SQLite
+    # DDL limits. A bare match would fire on both forever, and a permanent
+    # false alarm is how a loop dies.
+    ("SQLite table", "the DB is Postgres via psycopg3 — pg.py is aiosqlite-SHAPED, not SQLite"),
+    ("SQLite database", "the DB is Postgres via psycopg3 — pg.py is aiosqlite-SHAPED, not SQLite"),
+    ("stored in SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
 ]
 
 # Header spec (DOC-MAINTENANCE.md): one HTML comment near the top of a doc,
@@ -265,6 +276,41 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
                 claimed = m.group(1) or m.group(2)
                 if claimed:
                     out.append((i, int(claimed)))
+    return out
+
+
+def collected_baseline_claims() -> list[tuple[str, str, int]]:
+    """(doc, line, collected-count) for every stated test-suite baseline.
+
+    NOT a check against a live collection. Collecting the suite imports conftest,
+    which wants a Postgres on 5433, and this runs in a blocking CI step that must
+    stay fast and offline — test_file_count() exists for what the filesystem can
+    answer.
+
+    This asks a different question, and the only one every other guard here is
+    structurally unable to ask: DO TWO DOCS DISAGREE WITH EACH OTHER?
+
+    Every guard above compares a doc to the code. None of them notices when six
+    docs say 3,297 and two say ~1,409 — which is exactly what happened, with
+    README.md contradicting ITSELF on one page (3,297 at :124, ~1,409 at :402)
+    while every check stayed green. Root CLAUDE.md already warns about this
+    exact failure: "three docs once disagreed by 400-800 tests".
+
+    Consistency is checkable without a database. One baseline, stated the same
+    everywhere, or red.
+    """
+    pat = re.compile(r"([\d,]{3,})\s+collected")
+    out: list[tuple[str, str, int]] = []
+    for rel in LIVING_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                try:
+                    out.append((rel, str(i), int(m.group(1).replace(",", ""))))
+                except ValueError:
+                    continue
     return out
 
 
@@ -627,6 +673,20 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # Do the docs agree with EACH OTHER about the suite baseline? Every other
+    # guard compares a doc to the code; none can see six docs saying 3,297 while
+    # two say ~1,409, or README.md contradicting itself on one page.
+    baselines = collected_baseline_claims()
+    distinct = {n for _, _, n in baselines}
+    if len(distinct) > 1:
+        agreed = max(distinct)  # the freshest measurement wins the comparison
+        for rel, line_no, claimed in baselines:
+            if claimed != agreed:
+                drift.append((
+                    rel, line_no, "suite-baseline", f"{claimed:,} collected",
+                    f"{agreed:,} collected — docs must agree with each other",
+                ))
 
     # The landing page is a claim to USERS, and it drifted the same way a doc
     # does — it advertised 47 sources against a registry of 41 for a week.
