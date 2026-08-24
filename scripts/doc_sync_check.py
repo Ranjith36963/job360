@@ -131,16 +131,80 @@ def registry_counts() -> tuple[int, int]:
     raise RuntimeError("SOURCE_REGISTRY dict literal not found at top level of backend/src/main.py")
 
 
+def registry_keys() -> list[str]:
+    """The SOURCE_REGISTRY keys — the names `_build_sources()` actually polls.
+
+    Same AST-strict parse as registry_counts(); split out so active_ats_inventory()
+    can ask "is this platform registered?" instead of trusting a filename.
+    """
+    tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "SOURCE_REGISTRY":
+                if not isinstance(node.value, ast.Dict):
+                    raise RuntimeError("SOURCE_REGISTRY is not a plain dict literal")
+                return [
+                    k.value for k in node.value.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                ]
+    raise RuntimeError("SOURCE_REGISTRY dict literal not found in backend/src/main.py")
+
+
+def _migration_pairs() -> dict[int, str]:
+    """{NNNN: stem} for migrations the RUNNER will actually apply.
+
+    Mirrors ``migrations/runner.py::_discover_pairs``, which includes a stem only
+    when BOTH ``.up.sql`` and ``.down.sql`` exist. CodeRabbit, on PR #394: the
+    two guards below used to glob the filesystem independently -- ``*.sql`` for
+    the head, ``*.up.sql`` for the count -- so a lone ``0031_x.up.sql`` with no
+    matching down-file would push both numbers to a schema state the runner
+    silently ignores. A guard that validates a migration the app will never
+    apply is measuring the directory, not the database.
+
+    One inventory now feeds both, and the pairing rule is the runner's own.
+    """
+    d = ROOT / "backend/migrations"
+    seen: dict[int, str] = {}
+    for u in sorted(d.glob("*.up.sql")):
+        stem = u.name[: -len(".up.sql")]
+        m = re.match(r"(\d{4})_.+$", stem)
+        if not m:
+            raise RuntimeError(
+                f"migration {u.name} does not match NNNN_<name>.up.sql — "
+                "a file the runner cannot order is not a migration"
+            )
+        if not (d / f"{stem}.down.sql").exists():
+            raise RuntimeError(
+                f"migration {u.name} has no matching {stem}.down.sql — "
+                "the runner skips unpaired migrations, so this one never applies"
+            )
+        num = int(m.group(1))
+        if num in seen:
+            raise RuntimeError(
+                f"duplicate migration prefix {m.group(1)}: {seen[num]} and {stem}"
+            )
+        seen[num] = stem
+    if not seen:
+        raise RuntimeError("no paired NNNN_*.up.sql/.down.sql migrations found")
+    head = max(seen)
+    missing = sorted(set(range(head + 1)) - set(seen))
+    if missing:
+        raise RuntimeError(
+            "migration sequence has gaps at "
+            + ", ".join(f"{n:04d}" for n in missing)
+            + f" (head is {head:04d}) — the schema cannot be rebuilt from 0000"
+        )
+    return seen
+
+
 def migration_head() -> int:
-    """Highest NNNN prefix among backend/migrations/*.sql filenames."""
-    nums = []
-    for p in (ROOT / "backend/migrations").glob("*.sql"):
-        m = re.match(r"(\d{4})_", p.name)
-        if m:
-            nums.append(int(m.group(1)))
-    if not nums:
-        raise RuntimeError("no NNNN_*.sql migrations found")
-    return max(nums)
+    """Highest NNNN the runner will apply (paired migrations only)."""
+    return max(_migration_pairs())
 
 
 def rate_limit_count() -> int:
@@ -244,17 +308,32 @@ def active_ats_inventory() -> tuple[int, int]:
     rotation that retires another platform would leave "297" stale and green.
 
     Added 2026-08-24 at CodeRabbit's request on PR #394. Derived, not typed: a
-    platform counts as active when a source class in `sources/ats/` exists for
-    it, so retiring one moves both numbers automatically.
+    platform counts as active when it is actually POLLED, so retiring one moves
+    both numbers automatically.
+
+    Second CodeRabbit round: "polled" is read from SOURCE_REGISTRY, not from the
+    files in `sources/ats/`. The first draft scanned module filenames, so a
+    module left on disk after being dropped from the registry kept inflating
+    both totals while the pipeline never called it — the mirror image of the
+    Rippling case this function exists for (slugs with no class, versus a class
+    with no registration). The registry is what `_build_sources()` iterates, so
+    it is the only list that answers "does this platform get polled?".
     """
     per_platform = ats_platform_slugs()
+    registered = {k.replace("_", "") for k in registry_keys()}
     ats_dir = ROOT / "backend/src/sources/ats"
+    # A platform is active only if BOTH a module exists AND the registry names
+    # it. Either alone is a half-truth: an unregistered module is dead code, and
+    # a registry key with no module would have failed at import long before here.
     modules = {
-        p.stem.replace("_", "").upper()
+        p.stem.replace("_", "")
         for p in ats_dir.glob("*.py")
         if p.name != "__init__.py"
     } if ats_dir.is_dir() else set()
-    active = {k: v for k, v in per_platform.items() if k.replace("_", "") in modules}
+    active = {
+        k: v for k, v in per_platform.items()
+        if k.replace("_", "").lower() in (modules & registered)
+    }
     return len(active), sum(active.values())
 
 
@@ -408,32 +487,13 @@ def migration_file_count() -> int:
     run is required to be contiguous ``0000..head`` with no duplicates; a
     malformed or gapped set raises (exit 2), which is this file's contract:
     fail LOUD, never silently green.
+
+    Second CodeRabbit round: it now shares ``_migration_pairs()`` with
+    ``migration_head()``, so both read the RUNNER's definition of a migration
+    (an ``.up.sql`` with a matching ``.down.sql``) rather than each globbing the
+    directory its own way.
     """
-    seen: dict[int, str] = {}
-    for p in sorted((ROOT / "backend/migrations").glob("*.up.sql")):
-        m = re.match(r"(\d{4})_.+\.up\.sql$", p.name)
-        if not m:
-            raise RuntimeError(
-                f"migration {p.name} does not match NNNN_<name>.up.sql — "
-                "a file the runner cannot order is not a migration"
-            )
-        num = int(m.group(1))
-        if num in seen:
-            raise RuntimeError(
-                f"duplicate migration prefix {m.group(1)}: {seen[num]} and {p.name}"
-            )
-        seen[num] = p.name
-    if not seen:
-        raise RuntimeError("no NNNN_*.up.sql forward migrations found")
-    head = max(seen)
-    missing = sorted(set(range(head + 1)) - set(seen))
-    if missing:
-        raise RuntimeError(
-            "migration sequence has gaps at "
-            + ", ".join(f"{n:04d}" for n in missing)
-            + f" (head is {head:04d}) — the schema cannot be rebuilt from 0000"
-        )
-    return len(seen)
+    return len(_migration_pairs())
 
 
 # The source subfolders that MUST exist. Named explicitly rather than
