@@ -43,7 +43,8 @@ python -m migrations.runner up                        # apply migrations (non-AP
 
 `test_main.py` is now part of the canonical run. The M8 batch stubbed JobSpy
 (`fetch_jobs → []` via autouse fixture) and patched `load_profile`, making it
-fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
+fully offline (18 `def test_` as of 2026-08-24 — measure, don't quote). Do NOT
+add `--ignore=tests/test_main.py` back.
 
 ## Backend test-infra notes (hard-won; don't relearn)
 

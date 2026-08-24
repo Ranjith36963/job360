@@ -1,7 +1,16 @@
 # Job360 — Documentation Index
 
-The map of everything under `docs/` (plus the load-bearing docs at the repo root).
-Start here to find the right doc fast.
+A curated map of the docs worth reading under `docs/` (plus the load-bearing
+docs at the repo root). Start here to find the right doc fast.
+
+> **NOT a complete listing.** Measured 2026-08-24: 105 `*.md` files are tracked
+> under `docs/`, and this index links 49 of them. The other 56 are mostly
+> `_archive/` and dated `harness/` records, which are deliberately left out —
+> but the gap means "not in this index" does NOT mean "does not exist". Use
+> `git ls-files "docs/*.md"` when you need the real list.
+>
+> This file used to call itself "the map of everything", which is the kind of
+> claim that stops people looking further.
 
 > **Regenerated 2026-06-21** after a docs audit (dead/stale files removed, drift fixed).
 > **Legend:** 🟢 current ground truth · 📘 stable reference · 🗄️ historical (append-only / not kept current)
