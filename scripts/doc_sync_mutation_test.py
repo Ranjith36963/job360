@@ -82,11 +82,148 @@ CASES: list[tuple[str, str, str, str]] = [
     # (3,297 collected at :124, ~1,409 at :402) while every check stayed green.
     # Breaking ONE doc's number is therefore a real mutation: it creates the
     # disagreement.
-    ("ARCHITECTURE.md",
+    # Points at CONTRIBUTING.md, not ARCHITECTURE.md, and the move is the
+    # lesson. #393 deleted the collected count from every doc that stated it as
+    # fact -- correctly: a number no guard can check against the code rots
+    # silently, so the fix is NO number, not a better one. That left this drill
+    # mutating a claim that no longer existed, and the drill SAID SO rather
+    # than passing quietly.
+    #
+    # CONTRIBUTING.md keeps it twice on purpose, as the merge-gate ratchet
+    # floor -- a policy threshold, not a claim about current state. Two sites
+    # is exactly what this guard needs: it fires on DISAGREEMENT, so mutating
+    # one of the pair is the only mutation that can make it red.
+    ("CONTRIBUTING.md",
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
+    # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
+    # schema" (real 31) and README.md's source-tree said `ats/ (12)` (real 10).
+    # The migration-head guard could not see either — it watches "0000 → NNNN"
+    # phrasing only — and no per-subfolder count was ever guarded.
+    ("ARCHITECTURE.md",
+     r"(\d+)-migration forward-compat schema",
+     "999-migration forward-compat schema", "migrations-schema"),
+    ("ARCHITECTURE.md",
+     r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
 ]
+
+
+def structural_drills() -> list[str]:
+    """Drills for failure paths a TEXT mutation cannot express.
+
+    The CASES above all work by planting a lie in a file and re-running the
+    checker. Two failure modes cannot be reached that way, and CodeRabbit
+    caught both on the PR that added the migration/subfolder guards:
+
+    1. Deleting a source subfolder used to delete its own guard. The checker
+       discovered folders by iterating the directory, so removing ``ats/``
+       removed ``subfolder-ats`` too and left a stale ``ats/ (10)`` green
+       forever. There is no text to mutate here -- the bug is an ABSENT check.
+    2. The migration guard counted every ``*.up.sql`` while documenting the
+       ``NNNN_`` shape, so a gapped or malformed sequence (delete 0020, add
+       ``notes.up.sql``) kept both count and head unchanged and stayed green.
+
+    Both are checked against a THROWAWAY root, never the real tree: renaming a
+    live source package to prove a point is how a drill becomes an outage.
+    """
+    import tempfile  # noqa: PLC0415 — only this drill needs it
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import doc_sync_check as dsc  # noqa: PLC0415
+
+    failures: list[str] = []
+    real_root = dsc.ROOT
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp)
+        try:
+            dsc.ROOT = fake
+
+            # 1. Every expected subfolder must still yield a guard (count 0)
+            #    when backend/src/sources/ is not there at all.
+            counts = dsc.source_subfolder_counts()
+            for name in dsc.EXPECTED_SOURCE_SUBFOLDERS:
+                if name not in counts:
+                    failures.append(
+                        f"subfolder-{name}: guard VANISHES when the folder is missing "
+                        "— a deleted folder would silently retire its own check"
+                    )
+                elif counts[name] != 0:
+                    failures.append(
+                        f"subfolder-{name}: missing folder scored {counts[name]}, expected 0"
+                    )
+
+            # 2. A gapped migration sequence must RAISE, not count quietly.
+            migs = fake / "backend" / "migrations"
+            migs.mkdir(parents=True)
+            for n in (0, 1, 3):  # deliberate hole at 0002
+                (migs / f"{n:04d}_drill.up.sql").write_text("-- drill\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: a sequence with a hole at 0002 returned {got} "
+                    "instead of raising — a schema that cannot rebuild from 0000 stayed green"
+                )
+            except RuntimeError:
+                pass
+
+            # 3. A file the runner cannot order must RAISE too.
+            (migs / f"{2:04d}_drill.up.sql").write_text("-- drill\n", encoding="utf-8")
+            (migs / "notes.up.sql").write_text("-- not a migration\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: a malformed 'notes.up.sql' counted as a migration "
+                    f"(returned {got}) instead of raising"
+                )
+            except RuntimeError:
+                pass
+
+            # 4. TWO files claiming the same prefix must RAISE. CodeRabbit, on
+            #    PR #394: cases 2 and 3 leave the duplicate-prefix branch
+            #    unexercised, so deleting it would not fail this drill. A
+            #    contiguous 0000..0002 run with 0002 claimed twice is the
+            #    smallest fixture that isolates it from the gap and malformed
+            #    checks above.
+            (migs / "notes.up.sql").unlink()
+            (migs / "0002_duplicate.up.sql").write_text("-- drill\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: two files claiming prefix 0002 returned {got} "
+                    "instead of raising — duplicate-prefix detection is dead code"
+                )
+            except RuntimeError:
+                pass
+        finally:
+            dsc.ROOT = real_root
+
+    # 5. The GENERATED guard, not just the count behind it. CodeRabbit, on
+    #    PR #394: drill 1 proves source_subfolder_counts() keeps a zero entry,
+    #    but a regression that filtered zero-count folders out of
+    #    build_checks() would still pass it -- the count survives while the
+    #    check it feeds disappears. Force ats to 0 and require the emitted
+    #    check list to still carry `subfolder-ats`. Runs against the REAL root
+    #    (build_checks parses main.py, settings.py, companies.py...), with only
+    #    the counts function swapped.
+    real_counts = dsc.source_subfolder_counts
+    try:
+        dsc.source_subfolder_counts = lambda: {**real_counts(), "ats": 0}  # noqa: E731
+        emitted = {name for name, _, _ in dsc.build_checks()[0]}
+        if "subfolder-ats" not in emitted:
+            failures.append(
+                "subfolder-ats: build_checks() DROPS the guard when the folder counts 0 "
+                "— the count survives but the check it feeds does not"
+            )
+    finally:
+        dsc.source_subfolder_counts = real_counts
+
+    if not failures:
+        print("PASS  structural      missing subfolder (count + emitted guard), "
+              "gapped/malformed/duplicate migrations")
+    return failures
 
 
 def unwatched_claims() -> list[str]:
@@ -175,6 +312,10 @@ def main() -> int:
                 failures.append(f"{fact}: stayed GREEN on a broken {rel} — the guard is blind")
         finally:
             path.write_bytes(original)
+
+    # Failure paths no text mutation can express: an ABSENT check (deleted
+    # source folder) and a structurally broken migration run.
+    failures.extend(structural_drills())
 
     # Second half of the drill: docs that make a guarded claim while sitting
     # outside LIVING_DOCS. Planting a lie proves the LISTED docs are scanned;

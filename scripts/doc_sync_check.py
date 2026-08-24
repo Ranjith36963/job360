@@ -131,16 +131,95 @@ def registry_counts() -> tuple[int, int]:
     raise RuntimeError("SOURCE_REGISTRY dict literal not found at top level of backend/src/main.py")
 
 
+def built_source_classes() -> set[str]:
+    """Class names `_build_sources()` actually INSTANTIATES.
+
+    CodeRabbit, third round on PR #394, correcting a false claim this file made
+    in its previous revision. `_build_sources()` does NOT iterate
+    SOURCE_REGISTRY -- it hand-writes `all_sources = [ReedSource(...), ...]`
+    (`backend/src/main.py:251-303`). The registry is a SEPARATE surface, used by
+    the CLI `--source` choices and `GET /api/sources`.
+
+    That gap is the whole point of CLAUDE.md rules #8/#13: registry and
+    `_build_sources()` are two of the five surfaces that must move together
+    precisely BECAUSE nothing makes them move together automatically. A source
+    can sit in the registry, have a module on disk, and still never be polled.
+
+    So "is this platform polled?" has exactly one honest answer: is its class in
+    this list. Reading the registry instead was a guard pointed at the wrong
+    authority -- the same mistake, one layer up, as reading the directory.
+    """
+    tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == "_build_sources"):
+            continue
+        for st in ast.walk(node):
+            if not isinstance(st, ast.Assign):
+                continue
+            if not any(getattr(x, "id", None) == "all_sources" for x in st.targets):
+                continue
+            if not isinstance(st.value, ast.List):
+                raise RuntimeError("_build_sources: all_sources is not a list literal")
+            names = {
+                e.func.id for e in st.value.elts
+                if isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
+            }
+            if not names:
+                raise RuntimeError("_build_sources: all_sources instantiates nothing")
+            return names
+    raise RuntimeError("all_sources list not found in _build_sources() in backend/src/main.py")
+
+
+def _migration_pairs() -> dict[int, str]:
+    """{NNNN: stem} for migrations the RUNNER will actually apply.
+
+    Mirrors ``migrations/runner.py::_discover_pairs``, which includes a stem only
+    when BOTH ``.up.sql`` and ``.down.sql`` exist. CodeRabbit, on PR #394: the
+    two guards below used to glob the filesystem independently -- ``*.sql`` for
+    the head, ``*.up.sql`` for the count -- so a lone ``0031_x.up.sql`` with no
+    matching down-file would push both numbers to a schema state the runner
+    silently ignores. A guard that validates a migration the app will never
+    apply is measuring the directory, not the database.
+
+    One inventory now feeds both, and the pairing rule is the runner's own.
+    """
+    d = ROOT / "backend/migrations"
+    seen: dict[int, str] = {}
+    for u in sorted(d.glob("*.up.sql")):
+        stem = u.name[: -len(".up.sql")]
+        m = re.match(r"(\d{4})_.+$", stem)
+        if not m:
+            raise RuntimeError(
+                f"migration {u.name} does not match NNNN_<name>.up.sql — "
+                "a file the runner cannot order is not a migration"
+            )
+        if not (d / f"{stem}.down.sql").exists():
+            raise RuntimeError(
+                f"migration {u.name} has no matching {stem}.down.sql — "
+                "the runner skips unpaired migrations, so this one never applies"
+            )
+        num = int(m.group(1))
+        if num in seen:
+            raise RuntimeError(
+                f"duplicate migration prefix {m.group(1)}: {seen[num]} and {stem}"
+            )
+        seen[num] = stem
+    if not seen:
+        raise RuntimeError("no paired NNNN_*.up.sql/.down.sql migrations found")
+    head = max(seen)
+    missing = sorted(set(range(head + 1)) - set(seen))
+    if missing:
+        raise RuntimeError(
+            "migration sequence has gaps at "
+            + ", ".join(f"{n:04d}" for n in missing)
+            + f" (head is {head:04d}) — the schema cannot be rebuilt from 0000"
+        )
+    return seen
+
+
 def migration_head() -> int:
-    """Highest NNNN prefix among backend/migrations/*.sql filenames."""
-    nums = []
-    for p in (ROOT / "backend/migrations").glob("*.sql"):
-        m = re.match(r"(\d{4})_", p.name)
-        if m:
-            nums.append(int(m.group(1)))
-    if not nums:
-        raise RuntimeError("no NNNN_*.sql migrations found")
-    return max(nums)
+    """Highest NNNN the runner will apply (paired migrations only)."""
+    return max(_migration_pairs())
 
 
 def rate_limit_count() -> int:
@@ -202,6 +281,75 @@ def ats_slug_count() -> tuple[int, int]:
     if not lists:
         raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
     return total, lists
+
+
+def ats_platform_slugs() -> dict[str, int]:
+    """{'GREENHOUSE': 82, 'LEVER': 35, ...} — slugs per *_COMPANIES list.
+
+    ats_slug_count() returns only the TOTAL, which is why README's per-platform
+    breakdown table rotted invisibly: the total guard was satisfied by the
+    glossary's one-line claim while the table beneath it disagreed on six of
+    eleven rows (Greenhouse 80/82, Workable 25/21, Pinpoint 15/39,
+    Recruitee 20/31, Personio 18/26, total ~264/302).
+
+    Promoted 2026-08-24 after CodeRabbit flagged the stale total. The rows are
+    worse than the total: someone reading "Pinpoint 15" plans against a quarter
+    of the real board list.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
+    out: dict[str, int] = {}
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            name = getattr(t, "id", None)
+            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
+                out[name[: -len("_COMPANIES")]] = len(node.value.elts)
+    if not out:
+        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
+    return out
+
+
+def active_ats_inventory() -> tuple[int, int]:
+    """(ATS source classes, slugs those classes actually poll).
+
+    CONFIGURED is not ACTIVE, and the gap is load-bearing: companies.py holds
+    302 slugs across 11 platform lists, but `RIPPLING_COMPANIES` has had no
+    source class since the 2026-08-10 rotation, so 10 boards poll 297. Docs
+    state BOTH numbers, and only the configured one was ever guarded — a
+    rotation that retires another platform would leave "297" stale and green.
+
+    Added 2026-08-24 at CodeRabbit's request on PR #394. Derived, not typed: a
+    platform counts as active when it is actually POLLED, so retiring one moves
+    both numbers automatically.
+
+    "Polled" is read from the classes `_build_sources()` INSTANTIATES, and it
+    took two corrections to get there. Draft 1 scanned module filenames in
+    `sources/ats/`, so a module left on disk counted forever. Draft 2 switched
+    to SOURCE_REGISTRY on the belief that `_build_sources()` iterates it -- it
+    does not (CodeRabbit, third round): the registry is a separate surface for
+    the CLI and `GET /api/sources`, while `_build_sources()` hand-writes its own
+    `all_sources` list. A source can be in the registry, have a module on disk,
+    and still never be fetched.
+
+    Both drafts made the same mistake at different depths: guarding a proxy for
+    the behaviour instead of the behaviour. `built_source_classes()` is the list
+    the pipeline actually constructs, so it is the only one that answers
+    "does this platform get polled?".
+    """
+    per_platform = ats_platform_slugs()
+    # GREENHOUSE -> greenhousesource; a platform is active when some class the
+    # pipeline builds starts with its name. RIPPLING_COMPANIES has no
+    # RipplingSource, which is exactly why 302 configured and 297 polled differ.
+    built = {c.lower().replace("_", "") for c in built_source_classes()}
+    active = {
+        k: v for k, v in per_platform.items()
+        if any(c.startswith(k.lower().replace("_", "")) for c in built)
+    }
+    return len(active), sum(active.values())
 
 
 def dataclass_field_count(rel: str, cls: str) -> int:
@@ -333,6 +481,77 @@ def test_file_count() -> int:
     count is filesystem-only and cannot lie.
     """
     return len(list((ROOT / "backend/tests").glob("test_*.py")))
+
+
+def migration_file_count() -> int:
+    """Number of forward-migration files, as a VALIDATED ``0000..head`` sequence.
+
+    Distinct from ``migration_head()``: head is the highest NNNN, this is how
+    many actually exist. Promoted 2026-08-24 by the nightly routine, which found
+    ARCHITECTURE.md saying ``25-migration forward-compat schema`` and the
+    search-and-match-engine pillar saying ``14-migration`` while 31 forward
+    migrations existed. Six doc bumps (0025→0030) landed with the
+    migration-head guard staying green, because that guard only watches
+    ``0000 → NNNN`` phrasing, not the total.
+
+    CodeRabbit, on the PR that added this: the first draft globbed every
+    ``*.up.sql`` and merely DOCUMENTED the ``NNNN_`` shape. Deleting
+    ``0020_....up.sql`` and adding ``notes.up.sql`` left both the count and the
+    head unchanged, so a schema with a hole in it stayed green -- a count that
+    does not measure the thing that breaks. The prefixes are now parsed and the
+    run is required to be contiguous ``0000..head`` with no duplicates; a
+    malformed or gapped set raises (exit 2), which is this file's contract:
+    fail LOUD, never silently green.
+
+    Second CodeRabbit round: it now shares ``_migration_pairs()`` with
+    ``migration_head()``, so both read the RUNNER's definition of a migration
+    (an ``.up.sql`` with a matching ``.down.sql``) rather than each globbing the
+    directory its own way.
+    """
+    return len(_migration_pairs())
+
+
+# The source subfolders that MUST exist. Named explicitly rather than
+# discovered, so a deleted or renamed folder is drift instead of a guard that
+# quietly stops existing -- see source_subfolder_counts().
+EXPECTED_SOURCE_SUBFOLDERS = (
+    "apis_keyed", "apis_free", "ats", "feeds", "other", "scrapers",
+)
+
+
+def source_subfolder_counts() -> dict[str, int]:
+    """{'apis_keyed': N, 'apis_free': N, 'ats': N, 'feeds': N, 'other': N, 'scrapers': N}
+
+    File count per source subfolder, excluding ``__init__.py`` and ``base.py``.
+    Docs everywhere use a tree diagram of ``apis_keyed/ (8)  apis_free/ (9) ...``
+    — the numbers rot every rotation, and until today no guard watched them.
+
+    Promoted 2026-08-24 by the nightly routine. README.md said ``ats/ (12)``
+    against 10, ``feeds/ (8)`` against 4, ``scrapers/ (7)`` against 5.
+
+    CodeRabbit, on the PR that added this: the first draft DISCOVERED the
+    folders by iterating the directory, so deleting ``ats/`` deleted the
+    ``subfolder-ats`` guard along with it and left ``ats/ (10)`` green forever
+    — a check that cannot be made to go red on demand. The expected set is now
+    named as a constant and a missing folder yields a count of 0, which the
+    docs' non-zero claim then contradicts loudly. A NEW folder is still
+    discovered (and, having no doc claim, trips the "claim not found in any
+    doc" alarm), so the set can grow without editing this file.
+    """
+    out: dict[str, int] = {}
+    base = ROOT / "backend/src/sources"
+    # A missing folder scores 0 rather than vanishing: the guard must survive
+    # the deletion of the thing it guards.
+    for name in EXPECTED_SOURCE_SUBFOLDERS:
+        out[name] = 0
+    if not base.is_dir():
+        return out
+    for d in base.iterdir():
+        if d.is_dir() and d.name != "__pycache__":
+            out[d.name] = len([
+                p for p in d.glob("*.py") if p.name not in {"__init__.py", "base.py"}
+            ])
+    return out
 
 
 def frontend_versions() -> tuple[str, str]:
@@ -548,6 +767,7 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         "backend/src/services/job_enrichment_schema.py", "JobEnrichment"
     )
     enr_enums = enrichment_enum_count()
+    active_boards, active_slugs = active_ats_inventory()
 
     # (fact-name, actual-value, regex-with-one-capture-group). Patterns are
     # deliberately SPECIFIC phrases so unrelated numbers never false-match.
@@ -605,7 +825,82 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # decision notes that are correct at the time of writing. Guarding it
         # fires on every honest citation, and a permanent false alarm is how a
         # loop dies. The prose form above covers the claim that matters.
+        #
+        # Fourth batch, 2026-08-24 -- promoted from the nightly routine after
+        # ARCHITECTURE.md read "25-migration forward-compat schema" and the
+        # search-and-match-engine pillar read "14-migration" against 31 actual
+        # forward migrations. The existing `migration-head` guard watches only
+        # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
+        ("migrations-schema", migration_file_count(),
+         r"(\d+)-migration forward-compat schema"),
+        # The same COUNT, stated two other ways in the directory trees. Found by
+        # CodeRabbit on PR #394: both lines end "(0000 → 0030)", so
+        # `migration-head` matched them and they LOOKED guarded -- but that guard
+        # reads the HEAD, not the count beside it. Adding migration 0031 would
+        # correctly force the head to 0031 while "31 forward/reverse SQL
+        # migrations" quietly stayed 31. A guard on the same line is not a guard
+        # on the same fact.
+        ("migrations-schema", migration_file_count(),
+         r"(\d+) forward/reverse SQL migrations"),
+        ("migrations-schema", migration_file_count(),
+         r"(\d+) forward\+reverse SQL migration pairs"),
+        # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
+        # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
+        # polling 297) was not, though the docs state both. A rotation that
+        # retires another platform would leave "297" stale and green.
+        ("ats-boards-active", active_boards, r"\*\*(\d+) ATS boards\*\* polling"),
+        ("ats-boards-active", active_boards, r"ATS Boards \((\d+), \d+ slugs polled\)"),
+        ("ats-boards-active", active_boards, r"so (\d+) ATS boards poll"),
+        ("ats-slugs-active", active_slugs, r"polling (\d+) company slugs"),
+        ("ats-slugs-active", active_slugs, r"ATS Boards \(\d+, (\d+) slugs polled\)"),
+        ("ats-slugs-active", active_slugs, r"ATS boards poll (\d+) company slugs"),
+        # A THIRD wording of the same two numbers, added to the companies.py
+        # tree comment in ARCHITECTURE.md:54 / README.md:379 while this PR was
+        # open: "297 polled across 10 ATS sources". Found by CodeRabbit.
+        #
+        # This is the failure mode the "claim not found in any doc" alarm cannot
+        # catch, and the reason it cannot is worth stating: that alarm is keyed
+        # on the FACT NAME, not the site. Both facts already had other matching
+        # claims elsewhere, so matches_per_fact stayed non-zero and the checker
+        # reported a clean run while two fresh, unwatched copies of the same
+        # numbers sat in the two most-read files in the repo. Every new phrasing
+        # of a guarded fact needs its own pattern.
+        ("ats-boards-active", active_boards, r"\d+ polled across (\d+) ATS sources"),
+        ("ats-slugs-active", active_slugs, r"(\d+) polled across \d+ ATS sources"),
     ]
+
+    # Per-platform ATS slug counts. The TOTAL was guarded; the breakdown table
+    # under it was not, and six of its eleven rows were stale (Greenhouse
+    # 80/82, Workable 25/21, Pinpoint 15/39, Recruitee 20/31, Personio 18/26).
+    # A reader planning against "Pinpoint 15" is off by a factor of two and a
+    # half. Matches the README table row `| Pinpoint | 39 | ... |`.
+    #
+    # The negative lookahead is load-bearing, not tidiness. 03-job-providers.md
+    # has a RATE-LIMIT table whose rows are `| personio | 1 | 3.0 | XML feed |`
+    # — same shape, different meaning — and the matcher below runs IGNORECASE,
+    # so the first draft read that "1" as a slug count and reported personio as
+    # 1-vs-26 drift on a doc that was perfectly correct. Requiring the third
+    # column NOT to open with a decimal separates the two tables: slug rows
+    # carry prose notes or nothing, rate rows carry a delay like `3.0`.
+    # A permanent false alarm is how a loop dies (see the module docstring).
+    for _plat, _n in ats_platform_slugs().items():
+        _label = re.escape(_plat.title().replace("_", ""))
+        checks.append((
+            f"ats-slugs-{_plat.lower()}",
+            _n,
+            rf"^\|\s*{_label}\s*\|\s*(\d+)\s*\|(?!\s*\d+\.\d)",
+        ))
+
+    # Per-subfolder source counts. Docs everywhere use a tree diagram
+    # `apis_keyed/ (8)  ats/ (10) ...` and the numbers rot every rotation;
+    # until today no guard watched them and README.md carried three drifted
+    # values (ats/12, feeds/8, scrapers/7) against real 10/4/5.
+    for _name, _count in source_subfolder_counts().items():
+        checks.append((
+            f"subfolder-{_name}",
+            _count,
+            rf"\b{re.escape(_name)}/\s*\((\d+)\)",
+        ))
 
     # String-valued facts. Kept separate because the numeric loop below does
     # int(m.group(1)); a version like "16.3.0" is not an int and must be

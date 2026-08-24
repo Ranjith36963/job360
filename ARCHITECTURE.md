@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 > **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
@@ -51,7 +51,7 @@ job360/
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
-│   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
+│   │   │   ├── companies.py          # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
@@ -272,7 +272,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
 - `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
-- Uses `llm_provider.llm_extract_validated` (Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
+- Uses `llm_provider.llm_extract_validated` (OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain — `llm_provider.py:329-334`). Test isolation via `llm_extract_validated_fn` kwarg.
 - Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
 - `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
 - Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
@@ -511,7 +511,7 @@ PDF/DOCX -> extract_text() -> raw text
   |
   +-> _find_sections() -> {skills, experience, education, certifications, summary}
   |
-  +-> LLM extraction via llm_provider.py (Gemini/Groq/Cerebras with free-tier fallback)
+  +-> LLM extraction via llm_provider.py (OpenAI PRIMARY, then Gemini/Groq/Cerebras free-tier fallback)
   |     Returns: skills[], job_titles[], education[], certifications[], summary
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```

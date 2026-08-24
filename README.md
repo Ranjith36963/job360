@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -20,10 +20,10 @@ flowchart TD
 
     subgraph Sources["41 Job Sources (40 live instances)"]
         direction LR
-        KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
-        FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
-        ATSBoards["ATS Boards (11, ~264 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling"]
-        RSSFeeds["RSS/XML Feeds (9)\njobs.ac.uk, NHS Jobs, NHS Jobs XML\nWorkAnywhere, WeWorkRemotely\nRealWorkFromAnywhere, BioSpace\nUniversity Jobs, Teaching Vacancies"]
+        KeyedAPIs["Keyed APIs (8)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork\nGov Apprenticeships"]
+        FreeJSON["Free JSON APIs (8)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nHN Jobs"]
+        ATSBoards["ATS Boards (10, 297 slugs polled)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors"]
+        RSSFeeds["RSS/XML Feeds (5)\nNHS Jobs, WeWorkRemotely\nRealWorkFromAnywhere\nUniversity Jobs, Teaching Vacancies"]
         HTMLScrapers["HTML Scrapers (5)\nLinkedIn, Climatebase\n80000Hours, BCS Jobs, AIJobs AI"]
         OtherSources["Other (4 classes / 5 keys)\nIndeed+Glassdoor (JobSpySource)\nHackerNews, TheMuse, NoFluffJobs"]
     end
@@ -54,9 +54,9 @@ flowchart TD
 > The reconciliation: 40 *class files* on disk → 41 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 40 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 41`).
 
 - **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
-- **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
-- **11 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
-- **9 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
+- **8 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is a 9th file in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier, so it is counted under RSS/XML below
+- **10 ATS boards** polling 297 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors — see `backend/src/core/companies.py`, which holds **302** slugs across 11 platform lists; `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 boards poll the other 297
+- **5 RSS/XML feeds** (`category="rss"`): NHS Jobs (keyword search), WeWorkRemotely, RealWorkFromAnywhere, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
 - **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
 - **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
 
@@ -103,7 +103,7 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 25 routes (health, jobs, actions, profile, search, pipeline)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 72 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
@@ -337,7 +337,7 @@ What `keywords.py` still contains (domain-agnostic, applies to any profession):
 - **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
-**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: Gemini→Groq→Cerebras free-tier fallback chain). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
+**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
 
 ### ATS Companies (`backend/src/core/companies.py`)
 
@@ -345,18 +345,18 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 
 | Platform | Slugs | Notes |
 |----------|-------|-------|
-| Greenhouse | 80 | 25 original + 55 Batch 3 additions |
-| Lever | 35 | 12 original + 23 Batch 3 additions |
-| Workable | 25 | 8 original + 17 Batch 3 additions |
-| Ashby | 25 | 9 original + 16 Batch 3 additions |
-| SmartRecruiters | 15 | 6 original + 9 Batch 3 additions |
-| Pinpoint | 15 | 8 original + 7 Batch 3 additions |
-| Recruitee | 20 | 8 original + 12 Batch 3 additions |
-| Workday | 20 | 15 original + 5 Batch 3 additions (dict format: tenant/wd/site) |
-| Personio | 18 | 10 original + 8 Batch 3 additions |
+| Greenhouse | 82 | |
+| Lever | 35 | |
+| Workable | 21 | |
+| Ashby | 25 | |
+| SmartRecruiters | 15 | |
+| Pinpoint | 39 | |
+| Recruitee | 31 | |
+| Workday | 20 | dict format: tenant/wd/site |
+| Personio | 26 | |
 | SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
-| Rippling | 5 | Added Batch 3 |
-| **Total** | **~264** | |
+| Rippling | 5 | **not polled** — no source class since the 2026-08-10 rotation |
+| **Total** | **(302 slugs across 11 platforms)** | `RIPPLING_COMPANIES` has no source class, so 10 ATS boards poll 297 company slugs |
 
 ## Project Structure
 
@@ -376,7 +376,7 @@ job360/
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
-│       │   ├── companies.py     # ATS company slugs (~264 across 11 platforms)
+│       │   ├── companies.py     # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py
 │       │   └── tenancy.py
@@ -402,11 +402,11 @@ job360/
 │       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
-│       │   ├── apis_free/   (9 free_json + 2 rss-tier)
-│       │   ├── ats/         (12)
-│       │   ├── feeds/       (8)
-│       │   ├── scrapers/    (7)
-│       │   └── other/       (4 classes / 5 keys)
+│       │   ├── apis_free/   (9)   # 8 free_json + 1 rss (teaching_vacancies)
+│       │   ├── ats/         (10)
+│       │   ├── feeds/       (4)   # all rss-tier
+│       │   ├── scrapers/    (5)
+│       │   └── other/       (4 classes / 5 keys)   # indeed+glassdoor share JobSpySource
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
 ├── backend/tests/               # 218 test_*.py files (collected-test count: measure it, never quote it)

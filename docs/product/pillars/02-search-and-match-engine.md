@@ -670,9 +670,9 @@ backend/
 │   │   ├── scheduler.py                       — TieredScheduler + TIER_INTERVALS_SECONDS
 │   │   ├── circuit_breaker.py                 — 5-fail/300s state machine + BreakerRegistry
 │   │   ├── conditional_cache.py               — 256-entry FIFO for ETag/Last-Modified
-│   │   └── profile/llm_provider.py            — Gemini/Groq/Cerebras chain + llm_extract_validated
+│   │   └── profile/llm_provider.py            — OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain + llm_extract_validated
 │   ├── workers/tasks.py                       — score_and_ingest (per-user worker path)
-│   ├── repositories/database.py               — JobDatabase + 14-migration forward-compat schema
+│   ├── repositories/database.py               — JobDatabase + 31-migration forward-compat schema
 │   └── api/routes/jobs.py                     — exposes match_score + 9-field breakdown to API
 └── migrations/
     ├── 0008_job_enrichment.up.sql             — shared-catalog enrichment table
