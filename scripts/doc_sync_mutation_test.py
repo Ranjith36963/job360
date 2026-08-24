@@ -180,11 +180,49 @@ def structural_drills() -> list[str]:
                 )
             except RuntimeError:
                 pass
+
+            # 4. TWO files claiming the same prefix must RAISE. CodeRabbit, on
+            #    PR #394: cases 2 and 3 leave the duplicate-prefix branch
+            #    unexercised, so deleting it would not fail this drill. A
+            #    contiguous 0000..0002 run with 0002 claimed twice is the
+            #    smallest fixture that isolates it from the gap and malformed
+            #    checks above.
+            (migs / "notes.up.sql").unlink()
+            (migs / "0002_duplicate.up.sql").write_text("-- drill\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: two files claiming prefix 0002 returned {got} "
+                    "instead of raising — duplicate-prefix detection is dead code"
+                )
+            except RuntimeError:
+                pass
         finally:
             dsc.ROOT = real_root
 
+    # 5. The GENERATED guard, not just the count behind it. CodeRabbit, on
+    #    PR #394: drill 1 proves source_subfolder_counts() keeps a zero entry,
+    #    but a regression that filtered zero-count folders out of
+    #    build_checks() would still pass it -- the count survives while the
+    #    check it feeds disappears. Force ats to 0 and require the emitted
+    #    check list to still carry `subfolder-ats`. Runs against the REAL root
+    #    (build_checks parses main.py, settings.py, companies.py...), with only
+    #    the counts function swapped.
+    real_counts = dsc.source_subfolder_counts
+    try:
+        dsc.source_subfolder_counts = lambda: {**real_counts(), "ats": 0}  # noqa: E731
+        emitted = {name for name, _, _ in dsc.build_checks()[0]}
+        if "subfolder-ats" not in emitted:
+            failures.append(
+                "subfolder-ats: build_checks() DROPS the guard when the folder counts 0 "
+                "— the count survives but the check it feeds does not"
+            )
+    finally:
+        dsc.source_subfolder_counts = real_counts
+
     if not failures:
-        print("PASS  structural      missing subfolder + gapped/malformed migrations all caught")
+        print("PASS  structural      missing subfolder (count + emitted guard), "
+              "gapped/malformed/duplicate migrations")
     return failures
 
 

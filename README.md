@@ -345,18 +345,18 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 
 | Platform | Slugs | Notes |
 |----------|-------|-------|
-| Greenhouse | 80 | 25 original + 55 Batch 3 additions |
-| Lever | 35 | 12 original + 23 Batch 3 additions |
-| Workable | 25 | 8 original + 17 Batch 3 additions |
-| Ashby | 25 | 9 original + 16 Batch 3 additions |
-| SmartRecruiters | 15 | 6 original + 9 Batch 3 additions |
-| Pinpoint | 15 | 8 original + 7 Batch 3 additions |
-| Recruitee | 20 | 8 original + 12 Batch 3 additions |
-| Workday | 20 | 15 original + 5 Batch 3 additions (dict format: tenant/wd/site) |
-| Personio | 18 | 10 original + 8 Batch 3 additions |
+| Greenhouse | 82 | |
+| Lever | 35 | |
+| Workable | 21 | |
+| Ashby | 25 | |
+| SmartRecruiters | 15 | |
+| Pinpoint | 39 | |
+| Recruitee | 31 | |
+| Workday | 20 | dict format: tenant/wd/site |
+| Personio | 26 | |
 | SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
-| Rippling | 5 | Added Batch 3 |
-| **Total** | **~264** | |
+| Rippling | 5 | **not polled** — no source class since the 2026-08-10 rotation |
+| **Total** | **(302 slugs across 11 platforms)** | `RIPPLING_COMPANIES` has no source class, so 10 ATS boards poll 297 company slugs |
 
 ## Project Structure
 

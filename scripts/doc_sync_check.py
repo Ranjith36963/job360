@@ -204,6 +204,60 @@ def ats_slug_count() -> tuple[int, int]:
     return total, lists
 
 
+def ats_platform_slugs() -> dict[str, int]:
+    """{'GREENHOUSE': 82, 'LEVER': 35, ...} — slugs per *_COMPANIES list.
+
+    ats_slug_count() returns only the TOTAL, which is why README's per-platform
+    breakdown table rotted invisibly: the total guard was satisfied by the
+    glossary's one-line claim while the table beneath it disagreed on six of
+    eleven rows (Greenhouse 80/82, Workable 25/21, Pinpoint 15/39,
+    Recruitee 20/31, Personio 18/26, total ~264/302).
+
+    Promoted 2026-08-24 after CodeRabbit flagged the stale total. The rows are
+    worse than the total: someone reading "Pinpoint 15" plans against a quarter
+    of the real board list.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
+    out: dict[str, int] = {}
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            name = getattr(t, "id", None)
+            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
+                out[name[: -len("_COMPANIES")]] = len(node.value.elts)
+    if not out:
+        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
+    return out
+
+
+def active_ats_inventory() -> tuple[int, int]:
+    """(ATS source classes, slugs those classes actually poll).
+
+    CONFIGURED is not ACTIVE, and the gap is load-bearing: companies.py holds
+    302 slugs across 11 platform lists, but `RIPPLING_COMPANIES` has had no
+    source class since the 2026-08-10 rotation, so 10 boards poll 297. Docs
+    state BOTH numbers, and only the configured one was ever guarded — a
+    rotation that retires another platform would leave "297" stale and green.
+
+    Added 2026-08-24 at CodeRabbit's request on PR #394. Derived, not typed: a
+    platform counts as active when a source class in `sources/ats/` exists for
+    it, so retiring one moves both numbers automatically.
+    """
+    per_platform = ats_platform_slugs()
+    ats_dir = ROOT / "backend/src/sources/ats"
+    modules = {
+        p.stem.replace("_", "").upper()
+        for p in ats_dir.glob("*.py")
+        if p.name != "__init__.py"
+    } if ats_dir.is_dir() else set()
+    active = {k: v for k, v in per_platform.items() if k.replace("_", "") in modules}
+    return len(active), sum(active.values())
+
+
 def dataclass_field_count(rel: str, cls: str) -> int:
     """Annotated fields on a dataclass. Used for Job and JobEnrichment.
 
@@ -638,6 +692,7 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         "backend/src/services/job_enrichment_schema.py", "JobEnrichment"
     )
     enr_enums = enrichment_enum_count()
+    active_boards, active_slugs = active_ats_inventory()
 
     # (fact-name, actual-value, regex-with-one-capture-group). Patterns are
     # deliberately SPECIFIC phrases so unrelated numbers never false-match.
@@ -703,7 +758,39 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
         ("migrations-schema", migration_file_count(),
          r"(\d+)-migration forward-compat schema"),
+        # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
+        # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
+        # polling 297) was not, though the docs state both. A rotation that
+        # retires another platform would leave "297" stale and green.
+        ("ats-boards-active", active_boards, r"\*\*(\d+) ATS boards\*\* polling"),
+        ("ats-boards-active", active_boards, r"ATS Boards \((\d+), \d+ slugs polled\)"),
+        ("ats-boards-active", active_boards, r"so (\d+) ATS boards poll"),
+        ("ats-slugs-active", active_slugs, r"polling (\d+) company slugs"),
+        ("ats-slugs-active", active_slugs, r"ATS Boards \(\d+, (\d+) slugs polled\)"),
+        ("ats-slugs-active", active_slugs, r"ATS boards poll (\d+) company slugs"),
     ]
+
+    # Per-platform ATS slug counts. The TOTAL was guarded; the breakdown table
+    # under it was not, and six of its eleven rows were stale (Greenhouse
+    # 80/82, Workable 25/21, Pinpoint 15/39, Recruitee 20/31, Personio 18/26).
+    # A reader planning against "Pinpoint 15" is off by a factor of two and a
+    # half. Matches the README table row `| Pinpoint | 39 | ... |`.
+    #
+    # The negative lookahead is load-bearing, not tidiness. 03-job-providers.md
+    # has a RATE-LIMIT table whose rows are `| personio | 1 | 3.0 | XML feed |`
+    # — same shape, different meaning — and the matcher below runs IGNORECASE,
+    # so the first draft read that "1" as a slug count and reported personio as
+    # 1-vs-26 drift on a doc that was perfectly correct. Requiring the third
+    # column NOT to open with a decimal separates the two tables: slug rows
+    # carry prose notes or nothing, rate rows carry a delay like `3.0`.
+    # A permanent false alarm is how a loop dies (see the module docstring).
+    for _plat, _n in ats_platform_slugs().items():
+        _label = re.escape(_plat.title().replace("_", ""))
+        checks.append((
+            f"ats-slugs-{_plat.lower()}",
+            _n,
+            rf"^\|\s*{_label}\s*\|\s*(\d+)\s*\|(?!\s*\d+\.\d)",
+        ))
 
     # Per-subfolder source counts. Docs everywhere use a tree diagram
     # `apis_keyed/ (8)  ats/ (10) ...` and the numbers rot every rotation;
