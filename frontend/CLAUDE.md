@@ -16,7 +16,7 @@ of text — say what happened, what I did, what's next.
 
 ## What this is
 
-The Job360 web app: **Next.js 16.2.2 (App Router) + React 19.2.4 + Tailwind 4 +
+The Job360 web app: **Next.js 16.3.0 (App Router) + React 19.2.8 + Tailwind 4 +
 shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
 forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
 **recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.

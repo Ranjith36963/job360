@@ -43,11 +43,11 @@ job360/
 │   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
-│   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
+│   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (72 endpoints, all per-user routes gated)
-│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
@@ -89,12 +89,12 @@ job360/
 │   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 │   │   │   └── other/        (4)     # indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)
-│   │   │   └── tasks.py              # score_and_ingest, send_notification, send_daily_digest, nightly_ghost_sweep, enrich_job_task
+│   │   │   └── tasks.py              # score_and_ingest, send_notification, send_bundle, notification_tick, nightly_ghost_sweep, refresh_catalog, enrichment_sweep, enrich_job_task, rescore_user_feed_task, rescore_backfill
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+│   └── tests/                        # 3,297 collected / 3,295 selected (2 `live` deselected) across 217 test_*.py files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -285,7 +285,7 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 
 Two operating modes:
 
-- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it fires `rescore_user_feed` as a FastAPI `BackgroundTask`. The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
+- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
 - **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Existing `user_feed` rows are left untouched — their scores and verdicts stay as-is (`skip_existing` lock in `match_batch`).
 
 **Invariant:** a job's score only changes when the PROFILE changes, never just because time passed. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
@@ -657,8 +657,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
 | `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
-| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:24). Enforced by `validate_required_env()` |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:56-63) |
+| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
@@ -668,9 +668,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:139) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:136) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:135) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
