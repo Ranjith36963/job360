@@ -487,9 +487,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # WHAT THIS REPAIR ITSELF CHANGED starts here. Recorded BEFORE the
-          # commit so the diff below is this run's work and not the PR author's.
-          echo "before=$(git rev-parse "origin/${{ steps.gate.outputs.branch }}")" >> "$GITHUB_OUTPUT"
+          # WHAT THIS REPAIR ITSELF CHANGED starts at THE LOCAL HEAD, which is
+          # the merge of `main` that this run already made — NOT
+          # `origin/<branch>`, which is still the pre-merge tip.
+          #
+          # The difference is the whole safety of the resolver downstream.
+          # `origin/<branch>..HEAD` includes every file `git merge origin/main`
+          # brought in, so a review thread sitting on a file that main happened
+          # to touch would count as "this repair changed it" and be resolved
+          # with no agent edit behind it. Same defect as using the whole-PR
+          # diff, one merge later, and CodeRabbit caught the second version too.
+          #
+          # `git rev-parse HEAD` here is after the merge and before the repair
+          # commit, so the range below is exactly the agent's work.
+          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "pushed=false" >> "$GITHUB_OUTPUT"
           git add -A
           if git diff --cached --quiet && git log origin/${{ steps.gate.outputs.branch }}..HEAD --oneline | grep -q .; then

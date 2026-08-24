@@ -121,7 +121,14 @@ concurrency:
   # PR. `cancel-in-progress: true` belongs on workflows whose output nobody
   # gates on — this one's output is a check run, so it is gated on by
   # construction.
-  group: finding-watch-${{ github.event.pull_request.number || github.event.check_suite.pull_requests[0].number || inputs.pr || github.run_id }}
+  # THE FALLBACK IS A FIXED STRING, NOT `github.run_id`.
+  # `run_id` is unique per run, so every scheduled sweep and every blank manual
+  # dispatch got its OWN group and none of them queued behind the others. Two
+  # sweeps could then both read "no fixer is busy" before either dispatched, and
+  # both dispatch — the runaway guard beaten by a race, not by a bug in the
+  # guard. A stable key makes the sweeps a queue of one, which is what "one
+  # fixer at a time" needs to be true. (CodeRabbit, PR #380.)
+  group: finding-watch-${{ github.event.pull_request.number || github.event.check_suite.pull_requests[0].number || inputs.pr || 'sweep' }}
   cancel-in-progress: false
 
 env:
@@ -223,7 +230,15 @@ jobs:
               # picking one is how chain_check's W12 rule describes a dead wire.
               # (CodeRabbit, PR #380.)
               Ranjith36963|dependabot|"dependabot[bot]"|app/dependabot) : ;;
-              *) note "$pr" "author \`$author\` is not on the repair allowlist — left alone"; continue ;;
+              # `exit 0`, NOT `continue` — see the note above the loop. This one
+              # survived the sweep that converted the others because it sits in a
+              # `case` arm and did not match the shapes I searched for, and it is
+              # the WORST one to have missed: `continue` prints an error and then
+              # carries straight on, so a PR from an author who is NOT on the
+              # allowlist would have fallen through to `gh workflow run`. A guard
+              # that logs its own failure and then does the thing anyway is worse
+              # than no guard. (CodeRabbit, PR #380.)
+              *) note "$pr" "author \`$author\` is not on the repair allowlist — left alone"; exit 0 ;;
             esac
 
             # ── THE TWO CHANNELS, READ SEPARATELY ────────────────────────────
@@ -238,16 +253,33 @@ jobs:
                   }
                 }
               }' -f owner="$owner" -f name="$name" -F number="$pr" \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length' 2>/dev/null || echo 0)
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') || {
+              note "$pr" "the review-thread query FAILED — not dispatching, because 'I could not look' is not 'nothing to fix'."
+              exit 0
+            }
 
             # Failed checks. `failure`, `timed_out`, `cancelled` and `action_required`
             # all mean "this did not pass"; `skipped` and `neutral` deliberately
             # do not — a job that correctly skipped is not a finding, and
             # treating it as one is what made an earlier sweep report 3-6
             # phantom problems on every single PR.
-            sha=$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha)
+            #
+            # FAIL CLOSED, ALL THREE OF THESE. They used to end
+            # `2>/dev/null || echo 0`, which turns "the API did not answer" into
+            # "there is nothing wrong" — the same substitution security-watch was
+            # corrected for two commits ago, pointing the other way: here a failed
+            # lookup makes the sweep skip a PR that really does need the fixer,
+            # silently. An unanswered question is not an answer.
+            # (CodeRabbit, PR #380.)
+            sha=$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha) || {
+              note "$pr" "could not read the head SHA — skipped this round"
+              exit 0
+            }
             red=$(gh api "repos/$GH_REPO/commits/$sha/check-runs?per_page=100" \
-              --jq '[.check_runs[]|select(.status=="completed" and (.conclusion|IN("failure","timed_out","cancelled","action_required")))]|length' 2>/dev/null || echo 0)
+              --jq '[.check_runs[]|select(.status=="completed" and (.conclusion|IN("failure","timed_out","cancelled","action_required")))]|length') || {
+              note "$pr" "the check-run query FAILED — not dispatching on a picture I could not see."
+              exit 0
+            }
 
             if [ "$threads" -eq 0 ] && [ "$red" -eq 0 ]; then
               note "$pr" "clean — 0 unresolved review threads, 0 failed checks. Nothing to fix."
@@ -275,8 +307,21 @@ jobs:
             # repo-wide, everything else queues behind it. So "is any pr-repair
             # busy?" is exactly the right question, and it is one this API can
             # actually answer.
-            busy=$(gh run list --workflow pr-repair.yml --limit 20 \
-              --json status --jq '[.[]|select(.status=="queued" or .status=="in_progress")]|length' 2>/dev/null || echo 0)
+            # EVERY ACTIVE RUN, NOT TWO NAMED STATUSES, AND FAIL CLOSED.
+            # `queued`/`in_progress` are not the whole set — `waiting`,
+            # `requested` and `pending` are also runs that have not finished, and
+            # `waiting` is exactly the state a GITHUB_TOKEN-triggered run parks
+            # in here. Counting "not completed" cannot miss a status GitHub adds
+            # later. `--limit 20` could also age an active run off the list, so
+            # this reads the API with a full page and no client-side cap. And
+            # `|| echo 0` is gone: a failed lookup used to mean "nobody is busy",
+            # i.e. the runaway guard failed OPEN — the one direction it must
+            # never fail. (CodeRabbit, PR #380.)
+            busy=$(gh api "repos/$GH_REPO/actions/workflows/pr-repair.yml/runs?per_page=100" \
+              --jq '[.workflow_runs[]|select(.status!="completed")]|length') || {
+              note "$pr" "could not tell whether a fixer is already running — refusing to start one, because 'I do not know' must not mean 'go ahead'."
+              exit 0
+            }
             if [ "$busy" -gt 0 ]; then
               note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already in flight (they run one at a time) — not starting a second one."
               exit 0
@@ -314,7 +359,17 @@ jobs:
             # times -- a counter measuring the attempt to try rather than the
             # try. (CodeRabbit, PR #380.)
             if gh workflow run pr-repair.yml -f pr="$pr"; then
-              gh pr edit "$pr" --add-label "autofix:attempt-$next" 2>/dev/null || true
+              # THE LABEL IS THE COUNTER, SO A LOST WRITE IS A BROKEN CEILING.
+              # This was `2>/dev/null || true`. The label is the ONLY thing
+              # carrying the attempt count to the next run, so silently losing
+              # the write means the count never rises, the ceiling never trips,
+              # and the fix→push→fix loop runs forever — the exact leak guard 3
+              # exists to stop, defeated by the one line allowed to fail quietly.
+              # (CodeRabbit, PR #380.)
+              if ! gh pr edit "$pr" --add-label "autofix:attempt-$next"; then
+                note "$pr" "**dispatched, but the attempt label could not be written** — the ceiling cannot count this one, so watch it by hand."
+                echo "::error::could not record autofix:attempt-$next on PR #$pr — the attempt ceiling is not counting"
+              fi
               note "$pr" "**fixer dispatched** (attempt $next/${MAX_ATTEMPTS}) — $threads unresolved review thread(s), $red failed check(s)."
             else
               note "$pr" "needs the fixer ($threads thread(s), $red red check(s)) but \`workflow dispatch\` FAILED — start \`pr-repair.yml\` by hand for this PR."

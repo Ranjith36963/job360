@@ -322,9 +322,46 @@ def root_checkout_is_the_pr(job_text: str) -> bool:
 
 
 def _merges(text: str) -> bool:
-    return bool(_GH_MERGE.search(text)) or (
-        bool(_CAGE_CALL.search(text)) and bool(_CAGE_MERGE.search(text))
-    )
+    """Does this job text actually cause a merge?
+
+    JUDGED PER COMMAND, NOT PER JOB, AND THAT MATTERS FOR ONE REAL LINE.
+    The old form asked two whole-text questions — "is merge_cage.py mentioned
+    anywhere?" and "does `--merge`/`--queue` appear anywhere?" — and answered
+    yes to auto-merge.yml's bootstrap probe:
+
+        python scripts/merge_cage.py --help 2>&1 | grep -q -- "--queue"
+
+    `--queue` is there, as an ARGUMENT TO GREP. The command cannot queue or
+    judge anything: argparse prints usage and exits. G2 would have reported it
+    as a merge on a post-merge trigger, i.e. the checker firing on the one line
+    written to ask a question honestly. The `--help` exemption added for G1
+    lives in `judging_cage_calls()` and never reached here. (CodeRabbit, PR #380.)
+
+    So the cage half is now decided command by command, with the same
+    non-judging exemption `judging_cage_calls` applies. `gh pr merge` is still a
+    whole-text match: there is no form of it that does not merge.
+    """
+    if _GH_MERGE.search(_strip_shell_strings(text)):
+        return True
+    for line in text.splitlines():
+        for seg in _SHELL_SPLIT.split(line):
+            if "merge_cage.py" not in seg:
+                continue
+            if any(flag in seg for flag in _CAGE_NON_JUDGING):
+                continue  # --help/--drill/--measure/... judge and merge nothing
+            if _CAGE_MERGE.search(seg):
+                return True
+    return False
+
+
+def _strip_shell_strings(text: str) -> str:
+    """Blank out quoted strings so a MENTION is not read as an INVOCATION.
+
+    `gh pr comment ... --body "...never runs gh pr merge..."` is prose about the
+    rule, not the rule being broken. Comments are already stripped upstream;
+    quoted arguments were not.
+    """
+    return re.sub(r"\"[^\"\n]*\"|'[^'\n]*'", '""', text)
 
 
 def _has_green_floor(job_text: str) -> bool:
@@ -547,6 +584,23 @@ def self_drill(disabled: frozenset[str] = frozenset()) -> int:
                         hits[0].message[:150] if hits else
                         "no G2 finding — `_CAGE_MERGE` no longer recognises `--queue`, so "
                         "every merge rule is blind to the mechanism this repo actually uses"))
+        probe.unlink()
+
+        # G2 NEGATIVE CONTROL — the capability probe on a POST-MERGE trigger.
+        # The same `--help | grep -- "--queue"` line as the G1 control, but hung
+        # off `push:` so it runs through `_merges` and G2 rather than through
+        # `judging_cage_calls` and G1. That is the path the G1 exemption did NOT
+        # cover, and the path auto-merge.yml's real bootstrap step takes.
+        # A checker that fires on the one line written to ask an honest question
+        # is a checker that gets switched off. (CodeRabbit, PR #380.)
+        probe.write_text(
+            "name: drill\non:\n  push:\n    branches: [main]\njobs:\n  prober:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n"
+            '      - run: python scripts/merge_cage.py --help 2>&1 | grep -q -- "--queue"\n',
+            encoding="utf-8")
+        f = new_findings()
+        results.append(("NEGATIVE CONTROL (a `--help` probe is not a merge, even on `push`)",
+                        not f, "" if not f else f"the capability probe was flagged: {f[0].rule}"))
         probe.unlink()
 
         # G3 — merging on "no red", the PR #342 shape.
