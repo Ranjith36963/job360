@@ -58,8 +58,11 @@ In `BaseJobSource.__init__`:
 ```python
 async def fetch_jobs(self) -> list[Job]:
     jobs = []
-    for slug in GREENHOUSE_COMPANIES:        # 82 slugs
-        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    for slug in self._companies:             # GREENHOUSE_COMPANIES by default — 82 slugs
+        # `?content=true` is LOAD-BEARING, not decoration: without it the board
+        # list endpoint returns no `content` field at all, which is why 996 prod
+        # rows carried an empty description until 2026-08-05 (greenhouse.py:31-36).
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
         data = await self._get_json(url)     # all retry/rate-limit machinery
         if not data:
             continue
