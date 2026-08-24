@@ -71,7 +71,7 @@ async def fetch_jobs(self) -> list[Job]:
 
 Each `_get_json(url)` call goes through `_request()`:
 
-1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 80 companies; 1.5 s minimum delay between acquisitions.
+1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 82 companies; 1.5 s minimum delay between acquisitions.
 2. `aiohttp.GET(url, timeout=30)`.
 3. Response handling:
    - `200` → `response.json()`, return.
@@ -120,7 +120,7 @@ Two things the `Job.__post_init__` does automatically:
 
 ### T+0 — Return + scheduler post-processing
 
-`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 80 companies.
+`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 82 companies.
 
 Back in `TieredScheduler.tick()`:
 

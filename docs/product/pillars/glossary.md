@@ -237,7 +237,7 @@ Polling-cadence bucket for sources. Today: `ats`=60s, `reed`=5min, `workday`=15m
 
 ### Worker (ARQ tasks)
 
-The background process that runs `score_and_ingest`, `send_notification`, `send_daily_digest`, `nightly_ghost_sweep`, `enrich_job_task`. Tests call these as pure async functions; production runs them under ARQ + Redis.
+The background process that runs `score_and_ingest`, `send_notification`, `send_bundle`, `notification_tick`, `nightly_ghost_sweep`, `enrich_job_task`. Tests call these as pure async functions; production runs them under ARQ + Redis.
 **Code:** `backend/src/workers/tasks.py` · **Pillars 1 + 2**
 
 ---

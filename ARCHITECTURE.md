@@ -329,19 +329,20 @@ RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource,
 HNJobsSource
 ```
 
-**ATS Boards** (11 — iterate company slugs from companies.py):
+**ATS Boards** (10 — iterate company slugs from companies.py):
 ```
-GreenhouseSource(session, companies, search_config)   # 25 companies
-LeverSource(session, companies, search_config)         # 12 companies
-WorkableSource(session, companies, search_config)      # 8 companies
-AshbySource(session, companies, search_config)         # 9 companies
-SmartRecruitersSource(session, companies, search_config) # 6 companies
-PinpointSource(session, companies, search_config)      # 8 companies
-RecruiteeSource(session, companies, search_config)     # 8 companies
-WorkdaySource(session, companies, search_config)       # 15 companies (dict format)
-PersonioSource(session, companies, search_config)      # 10 companies
+GreenhouseSource(session, companies, search_config)   # 82 companies
+LeverSource(session, companies, search_config)         # 35 companies
+WorkableSource(session, companies, search_config)      # 21 companies
+AshbySource(session, companies, search_config)         # 25 companies
+SmartRecruitersSource(session, companies, search_config) # 15 companies
+PinpointSource(session, companies, search_config)      # 39 companies
+RecruiteeSource(session, companies, search_config)     # 31 companies
+WorkdaySource(session, companies, search_config)       # 20 companies (dict format)
+PersonioSource(session, companies, search_config)      # 26 companies
 SuccessFactorsSource(session, companies, search_config) # 3 companies (sitemap format)
-RipplingSource(session, companies, search_config)       # added Batch 3
+# RipplingSource retired in the 2026-08-10 rotation — RIPPLING_COMPANIES (5)
+# remains in companies.py but no source class builds it, so 10 boards poll 297.
 ```
 
 **RSS/XML Feeds** (9 — parse with xml.etree.ElementTree):
