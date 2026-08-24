@@ -100,8 +100,9 @@ Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "M
 
 On the channels page:
 
-- `POST /api/settings/channels {channel_type:"email", display_name:"primary", credential:"mailtos://alice@gmail.com:apppassword@smtp.gmail.com?to=alice@example.com"}`
-- `channels.crypto.encrypt(credential)` → Fernet ciphertext → INSERT `user_channels`.
+- `POST /api/settings/channels {channel_type:"email", display_name:"primary", credential:"alice@example.com"}` — for `email` the `credential` is a **plain address**, not an Apprise URL. Anything that is not a valid address is refused 422 (`backend/src/api/routes/channels.py:160-166`).
+- The backend builds the Apprise URL itself from the PLATFORM's mail credentials — `build_email_apprise_url(dest)` (`services/channels/email_url.py:97`) — then `channels.crypto.encrypt(...)` → Fernet ciphertext → INSERT `user_channels`. With no mail transport configured the route returns 503 "email delivery is not configured" (`channels.py:179-183`).
+- `slack`, `discord` and `telegram` cannot be created here at all: they are Connect-flow only and this route returns 400 for them (`channels.py:36,128-132`).
 - Alice clicks "Test" → `POST /api/settings/channels/{id}/test` → dispatcher decrypts, calls Apprise, returns `{ok: true}`.
 
 Then a rule:
@@ -330,7 +331,7 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
 ### 4.4 Channels — `backend/src/services/channels/`
 
 - **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Five `channel_type` values map to Apprise URL schemes:
-  - `email` → `mailtos://user:pass@smtp.gmail.com?to=dest`
+  - `email` → `resend://{key}:{from}/{to}/` (HTTPS:443). `mailtos://` is only the **fallback**, used when no Resend key is present but `SMTP_EMAIL` + `SMTP_PASSWORD` are — Railway blocks outbound SMTP 25/465/587, so a `mailtos://` channel cannot deliver there. Built by `services/channels/email_url.py:97-142`, never supplied by the user
   - `slack` → `slack://tokenA/tokenB/tokenC`
   - `discord` → `discord://webhook_id/webhook_token`
   - `telegram` → `tgram://bot_token/chat_id`
@@ -480,8 +481,9 @@ Consolidated so you can `grep` once and see them all. Defaults come from `backen
 | `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All three unset** → CV parse raises `RuntimeError`. |
 | `GITHUB_TOKEN` | no | (unset) | Bumps GitHub API quota from 60 → 5000 req/hr. Anonymous still works for public repos. |
 | `LOG_LEVEL` | no | `INFO` | Python logging level. `DEBUG` exposes request bodies + profile parsing internals. |
-| `SMTP_EMAIL` / `SMTP_PASSWORD` / `NOTIFY_EMAIL` | no | — | **Legacy** notification system (CLI batch summaries only). Per-user emails go through `user_channels` instead. |
-| `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | no | — | Same — legacy CLI summaries only. |
+| `RESEND_API_KEY` | recommended in prod | (unset) | The platform's mail transport. Used for BOTH system email (magic links, `auth/email_sender.py`) and the per-user email alert channel, which is built as `resend://` (`services/channels/email_url.py:51-61`). A key sitting in `SMTP_PASSWORD` is recognised by its `re_` prefix and honoured too. |
+| `SMTP_EMAIL` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_HOST` / `SMTP_PORT` | no | — | **Live, not legacy.** These are the PLATFORM's mail credentials. `SMTP_FROM`→`SMTP_EMAIL`→`onboarding@resend.dev` is the from-address (`email_url.py:83-94`), and with no Resend key the email channel falls back to `mailtos://` built from `SMTP_EMAIL`/`SMTP_PASSWORD`/`SMTP_HOST`/`SMTP_PORT` (`email_url.py:121-140`). A user never supplies any of these. |
+| `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | no | — | **DEAD.** Declared at `core/settings.py:78,81,82` and read by nothing — not `src/`, not `tests/`, not `scripts/`. They belonged to the pre-Batch-2 single-tenant notifier that was deleted; setting them today does nothing at all. |
 
 ---
 
@@ -498,7 +500,7 @@ A non-exhaustive table of failures an operator or agent will actually see, where
 | CV upload returns 502; profile fields empty | All 3 LLM providers exhausted / returned malformed JSON twice | `parse_cv_async` raises `RuntimeError`, route surfaces 502 | Check provider env vars; tail logs filtered by `cv_parser`; try a smaller/cleaner PDF |
 | LinkedIn PDF treated as a regular CV | 2-of-3 detection heuristic failed | `is_linkedin_pdf` returns False → CV pipeline runs → fields land in wrong slots | Inspect PDF for: `linkedin.com/in/` URL, ≥3 known section headings, "Page N of M" footer |
 | GitHub enrichment slow / 403 errors | Anonymous rate limit (60 req/hr) hit | `github_enricher` logs 403 rate limited | Set `GITHUB_TOKEN` (no scopes needed for public repos) |
-| Notification rule fires, no email arrives | Apprise URL malformed, or Gmail "App Password" not used | `notification_ledger.status='failed'`, `error_message` populated | `GET /api/notifications?status=failed` to see the error; Gmail requires App Password not account password |
+| Notification rule fires, no email arrives | The platform has no mail transport, or the built URL is malformed. Note the user never types this URL — the backend builds it from `RESEND_API_KEY` / `SMTP_*` | `notification_ledger.status='failed'`, `error_message` populated. If the channel could not even be created, `POST /api/settings/channels` returned 503 | `GET /api/notifications?status=failed` to see the error. Check `RESEND_API_KEY` first: on Railway `mailtos://` cannot deliver (SMTP ports blocked), so a channel built on the SMTP fallback times out silently |
 | Digest queue fills, never drains | ARQ worker not running, or digest_send_time evaluated in wrong zone | `user_notification_digests.sent=0` count growing | Confirm `arq` process up; verify `users.timezone` value; quiet-hours and digest_send_time both read this column |
 | `POST /api/pipeline/applications` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
 | Pipeline UI shows wrong stage after advance | `applications.stage` ≠ latest `application_stage_history.to_stage` (only possible via direct SQL) | `/pipeline` shows stale stage | Re-derive: `SELECT to_stage FROM application_stage_history WHERE job_id=? AND user_id=? ORDER BY transitioned_at DESC LIMIT 1` and UPDATE applications |

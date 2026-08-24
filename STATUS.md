@@ -200,7 +200,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
-- Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + ChromaDB)
+- Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + the pgvector store, `job_embeddings.embedding`)
 - Postgres database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
 - Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
 - CLI commands: run, view, api, status, sources, setup-profile
@@ -230,7 +230,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 |-------|----------|-------|
 | 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_setup.sh` — pass on Linux/Mac |
 | ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
-| Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
+| Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; the layer needs an `embedding_lookup` handed in (vectors now come from `job_embeddings.embedding`) and is not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |
 | python-jobspy not in backend/pyproject.toml core deps | Low | Intentionally optional (heavy dependencies). Indeed/Glassdoor source skips with warning if not installed. |

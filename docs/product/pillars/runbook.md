@@ -424,18 +424,36 @@ from src.services.job_enrichment import enrich_job
 enrichment = await enrich_job(job)  # raises RuntimeError on all-providers-fail
 ```
 
-### ChromaDB persistent dir is corrupt — rebuild
+### Embeddings look wrong / stale — rebuild
 
-```bash
-rm -rf data/chroma/
-# next SEMANTIC_ENABLED run will recreate the collection and re-embed
-```
-
-Embeddings audit rows survive in `job_embeddings`; you'll need to clear that too if you want truly fresh:
+**The vectors are in Postgres, not on disk.** Migration `0027` (2026-08-07) added
+`job_embeddings.embedding` (pgvector) and `services/pg_vector_index.py` is the only
+store the pipeline and the API use — `backend/src/main.py:580`, `main.py:1298`,
+`backend/src/api/routes/jobs.py:379`. `rm -rf data/chroma/` clears a directory
+nothing in `src/` reads any more; it will not fix anything.
 
 ```sql
+-- Force a re-embed of everything (the vector goes, the audit row stays):
+UPDATE job_embeddings SET embedding = NULL;
+-- Or drop the bookkeeping too, for a truly fresh start:
 DELETE FROM job_embeddings;
 ```
+
+The next `SEMANTIC_ENABLED` run re-fills them: `_embed_backfill_budget`
+(`backend/src/main.py:548`) selects `WHERE e.job_id IS NULL OR e.embedding IS NULL`.
+
+How many jobs actually have a vector:
+
+```sql
+SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL;
+```
+
+If that is 0 with `SEMANTIC_ENABLED=true`, check the two structural causes before
+anything else: this Postgres may not have the `vector` extension (migration `0027`
+is deliberately tolerant — it skips the column rather than failing boot, and every
+`PgVectorIndex` method then degrades to empty), or the process doing the ingest may
+not have the `[semantic]` extra installed. `Dockerfile.worker` runs a plain
+`pip install .`, and the worker is what runs the scheduled refresh.
 
 ---
 
@@ -566,7 +584,7 @@ arq src.workers.settings.WorkerSettings
 | `ModuleNotFoundError: psycopg` | Backend deps not installed in this env | `pip install -e .` from `backend/` (these commands assume `cwd = backend/`, so a `backend/`-prefixed path would resolve to `backend/backend/`). There is **no `requirements.txt`** — `backend/pyproject.toml` is the only dependency manifest. Note: **`aiosqlite` is not a dependency** — every module does `from src.repositories import pg as aiosqlite`, so the name is a local alias for the Postgres shim, never an installed package |
 | Notification rule fires but no message arrives | Channel credential decrypted wrong, or Apprise URL malformed | `POST /api/settings/channels/{id}/test` to surface the error |
 | Pipeline shows "stalled" too aggressively | Default is 7-day threshold | Hard-coded in `pipeline.py` reminder logic — adjust there |
-| Hybrid retrieval returns 0 results | ChromaDB empty or `SEMANTIC_ENABLED=false` | Check `VectorIndex.count()`; if zero, re-ingest with the flag on |
+| Hybrid retrieval returns 0 results | No row carries a vector, or `SEMANTIC_ENABLED=false` | `SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL` (that is exactly what `PgVectorIndex.count()` runs); if zero, see §10 "Embeddings look wrong / stale" — it is usually pgvector missing or the worker lacking `[semantic]`, not an empty run |
 
 ---
 

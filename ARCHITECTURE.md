@@ -5,7 +5,7 @@
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into Postgres (pgvector), and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
@@ -20,13 +20,13 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
                                                   Store -> Postgres catalog (jobs table)
-                                                  Embed (opt-in) -> ChromaDB
+                                                  Embed (opt-in) -> job_embeddings.embedding (pgvector)
 ```
 
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
+- `SEMANTIC_ENABLED=true` → embeddings + the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`) + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -71,7 +71,8 @@ job360/
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
 │   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
-│   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
+│   │   │   ├── pg_vector_index.py    # THE vector store — job_embeddings.embedding (pgvector)
+│   │   │   ├── vector_index.py       # legacy ChromaDB wrapper; no production caller left
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
@@ -658,7 +659,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 |----------|----------|---------|
 | `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
+| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py:78,81,82` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
 | `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
@@ -773,7 +775,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | rapidfuzz / scikit-learn | >=3.0 / >=1.4 | Pillar 2 dedup layers 2–3 (**lazy-imported**, rule #16) |
 | arq | >=0.25 | Async task queue (worker process) |
 | sentry-sdk | >=1.40.0 | Error tracking + performance monitoring (Phase 3) |
-| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings + ChromaDB (**lazy-imported**, opt-in) |
+| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings (**lazy-imported**, opt-in). `chromadb` is still declared and still imported by `services/vector_index.py`, but the live vector store is pgvector — nothing in `src/` builds a Chroma client any more |
 
 ### Dev (`pip install -e ".[dev]"` from `backend/`)
 
