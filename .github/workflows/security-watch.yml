@@ -1,0 +1,162 @@
+name: Security watch (an alert becomes a fix, not a badge)
+
+# THE COUNT THAT NOBODY WAS CARRYING.
+# -----------------------------------
+# Measured 2026-08-24: 8 open code-scanning alerts on this repo, 0 open
+# dependabot alerts. The dependabot side has had a loop since July
+# (`dependabot-auto.yml` merges the safe ones and routes the rest). The
+# code-scanning side had NOTHING. An alert appeared in the Security tab, the tab
+# is not on anyone's route to work, and it stayed there.
+#
+# This repo already documented the exact failure: on PR #327 `CodeQL` concluded
+# SUCCESS with the title "1 new alert including 1 medium severity security
+# vulnerability", and that alert is still open today. A green tick over an open
+# alert is how nine of them reached production here. `merge_cage.judge_check_runs`
+# now reads the check TITLE for that reason. This file is the other half: it
+# reads the alerts themselves, on a schedule, whether or not a PR is open.
+#
+# WHY IT OPENS AN ISSUE INSTEAD OF DISPATCHING THE FIXER DIRECTLY
+# Because the repair chain already exists and already has a cage:
+#
+#     issue (trusted prefix) -> triage.yml judges it -> auto-authorises
+#         `agent:fix` -> repair.yml opens a PR -> CI + CodeRabbit + the cage
+#
+# Dispatching `repair.yml` from here would be a SECOND route into a
+# write-capable agent, bypassing triage's judgement. Two doors into the same
+# room is how a cage stops being one. So this file does the least it can: it
+# turns an alert into an issue in the shape the existing chain already trusts,
+# and gets out of the way.
+#
+# WHY THE ISSUE BODY IS SAFE TO HAND AN AGENT.
+# triage.yml auto-authorises only bodies with no attacker-supplied and no
+# model-generated text. This body is: a CodeQL rule id and description (written
+# by GitHub or by us), a file path, a line number, and a severity — all read
+# from the code-scanning API about OUR OWN repository. No third-party string
+# reaches it. That is the same standard `PRODUCT:`/`ABSENCE:`/`INVARIANT:` meet,
+# and it is why `SECURITY:` may join them. The alert's own code snippet is
+# deliberately NOT included: it is our code, but quoting it adds nothing the
+# agent cannot read from the file itself, and every line of text in a prompt is
+# a line that has to be justified.
+#
+# IDEMPOTENCE. The issue title ends with the alert number, and the sweep
+# searches for that exact string before opening anything. Re-running this
+# workflow every hour must produce one issue per alert, not one per run — a
+# detector that spams is a detector that gets muted, and a muted detector is
+# indistinguishable from no detector.
+
+on:
+  schedule:
+    - cron: "20 8 * * *" # daily, before the 09:30 dependabot sweep
+  workflow_dispatch: {} # the drill entrance — every loop must be fireable on purpose
+
+permissions:
+  contents: read
+  issues: write
+  security-events: read
+  actions: write # start triage on the issue we open (GITHUB_TOKEN raises no issue events)
+
+concurrency:
+  group: security-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Every open alert, and what happened to it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          echo "### Security watch" >> "$GITHUB_STEP_SUMMARY"
+          note() { echo "- $1" >> "$GITHUB_STEP_SUMMARY"; }
+
+          alerts=$(gh api "repos/$GH_REPO/code-scanning/alerts?state=open&per_page=100" 2>/dev/null || echo '[]')
+          total=$(echo "$alerts" | jq 'length')
+          note "**$total open code-scanning alert(s).**"
+
+          if [ "$total" -eq 0 ]; then
+            note "Nothing to route. (This line exists so a quiet day is distinguishable from a broken sweep.)"
+            exit 0
+          fi
+
+          # A FULL PAGE IS NOT A COMPLETE ANSWER — the same rule merge_cage.py
+          # applies to its own listings. Saying so beats silently sweeping 100
+          # of 140 alerts while the summary reads like a full pass.
+          if [ "$total" -ge 100 ]; then
+            note "⚠️ the alert listing came back at the page limit ($total), so this sweep may not have seen all of it."
+            echo "::warning::code-scanning alert listing hit the page limit — some alerts were not swept"
+          fi
+
+          # NOTE ON THE LOOP SHAPE: `while` on the right of a pipe runs in a
+          # SUBSHELL, so any counter incremented in here is lost at the `done`.
+          # Rather than pretend otherwise with a total that would always print
+          # zero, every alert reports itself on its own line as it is handled —
+          # which is the honesty rule anyway: one line per thing, not a summary
+          # number nobody can check.
+          echo "$alerts" | jq -c '.[]' | while read -r a; do
+            num=$(echo "$a"  | jq -r '.number')
+            rule=$(echo "$a" | jq -r '.rule.id // "unknown-rule"')
+            desc=$(echo "$a" | jq -r '.rule.description // .rule.name // "no description"')
+            sev=$(echo "$a"  | jq -r '.rule.security_severity_level // .rule.severity // "unknown"')
+            path=$(echo "$a" | jq -r '.most_recent_instance.location.path // "unknown file"')
+            line=$(echo "$a" | jq -r '.most_recent_instance.location.start_line // 0')
+            url=$(echo "$a"  | jq -r '.html_url')
+
+            title="SECURITY: $rule in $path (alert #$num)"
+
+            # ── IDEMPOTENCE, checked against BOTH open and closed issues ─────
+            # Only `state:open` would re-open an issue the owner had already
+            # closed as won't-fix, every single day, forever. A detector that
+            # cannot take no for an answer is a detector that gets switched off.
+            existing=$(gh issue list --state all --search "\"alert #$num\" in:title" \
+                        --limit 5 --json number --jq 'length' 2>/dev/null || echo 0)
+            if [ "$existing" -gt 0 ]; then
+              note "alert #$num (\`$rule\`) — already has an issue, left alone"
+              continue
+            fi
+
+            {
+              echo "A code-scanning alert is open against this repository. Raised automatically"
+              echo "by \`.github/workflows/security-watch.yml\` from the code-scanning API — every"
+              echo "field below is read from that API about our own code, so there is no"
+              echo "human-written and no third-party text in this issue."
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| **Rule** | \`$rule\` |"
+              echo "| **Severity** | $sev |"
+              echo "| **Where** | \`$path:$line\` |"
+              echo "| **Alert** | [#$num]($url) |"
+              echo
+              echo "**What the rule says:** $desc"
+              echo
+              echo "---"
+              echo
+              echo "**How to close this properly.** Either fix the code at \`$path:$line\`, or"
+              echo "dismiss the alert in the Security tab with a reason. Closing this ISSUE"
+              echo "does not close the ALERT — the alert is the source of truth and this sweep"
+              echo "reads it, not this issue."
+            } > body.md
+
+            if gh issue create --title "$title" --body-file body.md --label "security" >/dev/null 2>&1; then
+              inum=$(gh issue list --state open --search "\"alert #$num\" in:title" --limit 1 --json number --jq '.[0].number')
+              note "alert #$num (\`$rule\`, $sev, \`$path:$line\`) — **opened issue #$inum**"
+              # An issue created with GITHUB_TOKEN raises NO `issues: [opened]`
+              # event, so triage would never see it. This repo has been bitten
+              # by that recursion rule four times; `workflow_dispatch` is the
+              # documented way back in and is the only event the token can
+              # always raise.
+              if [ -n "$inum" ] && gh workflow run triage.yml -f issue="$inum" 2>/dev/null; then
+                note "  ↳ triage dispatched on #$inum"
+              else
+                note "  ↳ ⚠️ could not dispatch triage on #$inum — run \`triage.yml\` by hand for it"
+              fi
+            else
+              note "alert #$num (\`$rule\`) — ⚠️ could not open an issue"
+              echo "::warning::failed to open an issue for code-scanning alert #$num"
+            fi
+          done

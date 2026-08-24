@@ -1,0 +1,245 @@
+name: Finding watch (a finding wakes the fixer)
+
+# THE MISSING DOORBELL.
+# ---------------------
+# Measured 2026-08-24, and this is the whole reason this file exists:
+#
+#   `pr-repair.yml`  on: workflow_dispatch          <- a human clicks it
+#   `repair.yml`     on: issues: [labeled]          <- a human labels it
+#
+# Both fixers are real, caged, and good. NOTHING STARTS EITHER OF THEM. The
+# harness could see a problem and could fix a problem, and the only wire between
+# those two facts was the owner noticing and pressing a button.
+#
+# THE SNEAKIER HALF. On PR #375 every CI check was SUCCESS, CodeRabbit's own
+# status check was SUCCESS, and SIX OF SIX review threads were unresolved -- one
+# of them a Major on data integrity. GitHub called that PR clean. `pr-shepherd`
+# only acts on RED checks, so it filed #375 under "GREEN+IDLE -> a summary line
+# only" and moved on. A status tick and a review thread are two different
+# channels, and everything in this harness was reading the wrong one.
+#
+# CodeRabbit runs with `fail_commit_status: false` -- its tick is STRUCTURALLY
+# INCAPABLE of saying no. `merge_cage.check_review` already knew this and reads
+# GraphQL `reviewThreads` instead. This file reads the same channel, so the
+# thing that WAKES the fixer and the thing that BLOCKS the merge agree about
+# what a finding is. Two instruments disagreeing about that is how a queue rots
+# while every dashboard is green.
+#
+# WHAT IT DOES: counts unresolved review threads and failed checks on a PR, and
+# if there are any, dispatches `pr-repair.yml` at it. That is all. It never
+# merges, never pushes, never edits code -- it rings a bell that already had no
+# rope.
+#
+# WHY THE TRIGGERS ARE SHAPED LIKE THIS
+#   pull_request_review / _review_comment  a finding ARRIVING is the event that
+#       matters. CodeRabbit is a GitHub App, not GITHUB_TOKEN, so its reviews DO
+#       start workflows -- the recursion rule that kills our own bots' events
+#       does not apply to it. (Checked before writing this: the rule is about
+#       the automatic token, not about apps in general.)
+#   check_suite: completed                 CI going red.
+#   pull_request                           a new or updated PR: judge it once.
+#   schedule                               THE SWEEP. Every event above can be
+#       missed -- a webhook drops, a run is cancelled, a PR is opened while this
+#       file is being edited. A queue whose only input is events silently
+#       forgets things; the sweep is what makes it eventually consistent.
+#   workflow_dispatch                      the drill entrance. Two loops in this
+#       repo were dead on arrival on main and only firing them on purpose ever
+#       revealed it.
+#
+# THE RUNAWAY IS THE REAL RISK, AND IT IS GUARDED THREE WAYS.
+# pr-repair PUSHES to the PR branch. A push is a `synchronize` event. Naively
+# wired, this file dispatches the fixer, the fixer pushes, the push wakes this
+# file, forever -- an infinite loop that spends real money.
+#   1. NEVER re-dispatch for a commit the fixer itself wrote (author check).
+#   2. NEVER dispatch while a pr-repair run for that branch is already queued
+#      or running.
+#   3. A HARD ATTEMPT CEILING recorded as a label on the PR. After
+#      MAX_ATTEMPTS the loop stops, says so on the PR, and waits for a human.
+#      A loop without a stop is not a loop, it is a leak.
+#
+# HONESTY RULE (same as dependabot-auto and pr-shepherd): every PR this file
+# looks at gets one line in the job summary -- acted on or left alone, with the
+# reason. Silent skipping is how a queue rots invisibly.
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  check_suite:
+    types: [completed]
+  schedule:
+    - cron: "*/30 * * * *" # the sweep — events get missed, this does not
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to look at (blank = sweep every open PR)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write # the one comment that says the ceiling was hit
+  actions: write # dispatch pr-repair.yml
+  checks: read
+
+concurrency:
+  # Per PR, so two findings arriving together collapse into one look. The sweep
+  # gets its own group so it never cancels a real event's run.
+  group: finding-watch-${{ github.event.pull_request.number || github.event.check_suite.pull_requests[0].number || inputs.pr || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  MAX_ATTEMPTS: "3"
+
+jobs:
+  wake-the-fixer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Which PRs am I looking at
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          SUITE_PR: ${{ github.event.check_suite.pull_requests[0].number }}
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          # A single event names one PR. The sweep and a blank dispatch name all
+          # of them. Both paths produce the same thing — a list — so there is
+          # one code path below and not two that can drift apart.
+          case "$EVENT" in
+            schedule) prs=$(gh pr list --state open --limit 50 --json number --jq '.[].number') ;;
+            workflow_dispatch)
+              if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
+              else prs=$(gh pr list --state open --limit 50 --json number --jq '.[].number'); fi ;;
+            check_suite) prs="${SUITE_PR:-}" ;;
+            *) prs="${EVENT_PR:-}" ;;
+          esac
+          prs=$(echo "$prs" | tr ' ' '\n' | grep -E '^[0-9]+$' || true)
+          if [ -z "$prs" ]; then
+            echo "no PR in scope for a \`$EVENT\` event — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "prs<<EOF"
+            echo "$prs"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Count the findings, and wake the fixer where there are any
+        if: steps.scope.outputs.prs != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRS: ${{ steps.scope.outputs.prs }}
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%%/*}"
+          name="${GH_REPO##*/}"
+
+          echo "### Finding watch" >> "$GITHUB_STEP_SUMMARY"
+
+          # One line per PR, always. `note` is called on every exit path below.
+          note() { echo "- **#$1** — $2" >> "$GITHUB_STEP_SUMMARY"; }
+
+          for pr in $PRS; do
+            meta=$(gh pr view "$pr" --json state,isDraft,headRefName,headRepositoryOwner,author,labels 2>/dev/null || echo '')
+            if [ -z "$meta" ]; then note "$pr" "could not be read — skipped"; continue; fi
+            state=$(echo "$meta"     | jq -r .state)
+            draft=$(echo "$meta"     | jq -r .isDraft)
+            branch=$(echo "$meta"    | jq -r .headRefName)
+            headowner=$(echo "$meta" | jq -r .headRepositoryOwner.login)
+            author=$(echo "$meta"    | jq -r .author.login)
+
+            [ "$state" = "OPEN" ]        || { note "$pr" "is $state — left alone"; continue; }
+            [ "$draft" = "false" ]       || { note "$pr" "is a draft — drafts are left alone"; continue; }
+            # A fork PR is a stranger's code. pr-repair refuses it anyway (G1);
+            # not dispatching means the refusal never has to be the safety net.
+            [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; continue; }
+            case "$author" in
+              Ranjith36963|dependabot*|app/dependabot) : ;;
+              *) note "$pr" "author \`$author\` is not on the repair allowlist — left alone"; continue ;;
+            esac
+
+            # ── THE TWO CHANNELS, READ SEPARATELY ────────────────────────────
+            # Unresolved review threads (GraphQL — the ONLY API that can express
+            # resolution; the REST comments endpoint has no such field and was
+            # wrong in both directions when merge_cage used it).
+            threads=$(gh api graphql -f query='
+              query($owner:String!,$name:String!,$number:Int!){
+                repository(owner:$owner,name:$name){
+                  pullRequest(number:$number){
+                    reviewThreads(first:100){ nodes{ isResolved } }
+                  }
+                }
+              }' -f owner="$owner" -f name="$name" -F number="$pr" \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length' 2>/dev/null || echo 0)
+
+            # Failed checks. `failure`, `timed_out`, `cancelled` and `action_required`
+            # all mean "this did not pass"; `skipped` and `neutral` deliberately
+            # do not — a job that correctly skipped is not a finding, and
+            # treating it as one is what made an earlier sweep report 3-6
+            # phantom problems on every single PR.
+            sha=$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha)
+            red=$(gh api "repos/$GH_REPO/commits/$sha/check-runs?per_page=100" \
+              --jq '[.check_runs[]|select(.status=="completed" and (.conclusion|IN("failure","timed_out","cancelled","action_required")))]|length' 2>/dev/null || echo 0)
+
+            if [ "$threads" -eq 0 ] && [ "$red" -eq 0 ]; then
+              note "$pr" "clean — 0 unresolved review threads, 0 failed checks. Nothing to fix."
+              continue
+            fi
+
+            # ── GUARD 1: never chase the fixer's own commit ──────────────────
+            last=$(gh api "repos/$GH_REPO/commits/$sha" --jq '.commit.author.name' 2>/dev/null || echo "")
+            if [ "$last" = "pr-repair-loop" ] && [ "$red" -eq 0 ]; then
+              note "$pr" "$threads unresolved thread(s), but the newest commit is the fixer's own and CI is not red — waiting for the review to catch up rather than dispatching again."
+              continue
+            fi
+
+            # ── GUARD 2: one fixer per branch at a time ──────────────────────
+            busy=$(gh run list --workflow pr-repair.yml --branch "$branch" --limit 5 \
+              --json status --jq '[.[]|select(.status=="queued" or .status=="in_progress")]|length' 2>/dev/null || echo 0)
+            if [ "$busy" -gt 0 ]; then
+              note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already working on \`$branch\` — not starting a second one."
+              continue
+            fi
+
+            # ── GUARD 3: the hard ceiling ────────────────────────────────────
+            # Recorded as a label so the count survives this run, the next run,
+            # and a workflow edit. A counter that lives in a workflow's memory
+            # is a counter that resets every time it matters.
+            attempt=0
+            for n in $(seq 1 20); do
+              if echo "$meta" | jq -e --arg L "autofix:attempt-$n" '.labels[]|select(.name==$L)' >/dev/null 2>&1; then
+                attempt=$n
+              fi
+            done
+            next=$((attempt + 1))
+            if [ "$next" -gt "${MAX_ATTEMPTS}" ]; then
+              note "$pr" "**stopped at the ceiling** — the fixer has already had $attempt goes and the findings are still there ($threads thread(s), $red red check(s)). This one needs a human."
+              if ! gh pr view "$pr" --json labels --jq '.labels[].name' | grep -qx "autofix:exhausted"; then
+                gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
+                gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null || true
+              fi
+              continue
+            fi
+
+            # ── RING THE BELL ────────────────────────────────────────────────
+            # `workflow_dispatch` is the one event GITHUB_TOKEN can always
+            # raise. A label or an issue event raised with this token starts
+            # nothing (GitHub's recursion rule — this repo has been bitten by it
+            # four separate times), which is exactly why the wake-up is a
+            # dispatch and not a label.
+            gh pr edit "$pr" --add-label "autofix:attempt-$next" 2>/dev/null || true
+            if gh workflow run pr-repair.yml -f pr="$pr"; then
+              note "$pr" "**fixer dispatched** (attempt $next/${MAX_ATTEMPTS}) — $threads unresolved review thread(s), $red failed check(s)."
+            else
+              note "$pr" "needs the fixer ($threads thread(s), $red red check(s)) but \`workflow dispatch\` FAILED — start \`pr-repair.yml\` by hand for this PR."
+              echo "::error::could not dispatch pr-repair.yml for PR #$pr"
+            fi
+          done

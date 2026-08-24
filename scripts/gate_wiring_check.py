@@ -101,10 +101,19 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = Path(__file__).resolve().parent.parent
 RULES = ("G1", "G2", "G3", "G4", "G5")
 
-# Anything that actually performs a merge. `gh pr merge` is the direct form;
-# `merge_cage.py --merge` is this repo's caged form. Both count.
+# Anything that actually performs a merge, OR causes one to happen later.
+# `gh pr merge` is the direct form; `merge_cage.py --merge` was this repo's
+# caged form; `merge_cage.py --queue` is the caged form that exists today.
+#
+# `--queue` MUST COUNT, and getting this wrong would have been the whole bug.
+# It asks GitHub to merge when the ruleset is satisfied — the PR lands without a
+# human, which is the only property G1-G5 care about. A detector that only knew
+# the word "merge" would have gone silent the moment the mechanism was renamed,
+# reported "0 findings", and read exactly like a clean bill of health. That is
+# this repo's own recorded failure mode: an instrument must count the way its
+# consumer counts, or its silence means nothing.
 _GH_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
-_CAGE_MERGE = re.compile(r"--merge\b")
+_CAGE_MERGE = re.compile(r"--(?:merge|queue)\b")
 _CAGE_CALL = re.compile(r"merge_cage\.py")
 _BASELINE = re.compile(r"--baseline\b")
 # merge_cage modes that judge NO PR and therefore need no baseline.
@@ -445,6 +454,17 @@ def self_drill(disabled: frozenset[str] = frozenset()) -> int:
         # G1 — the exact line that was live in auto-merge.yml:114.
         case("judging a PR with no --baseline is caught", "G1",
              "      - run: python scripts/merge_cage.py \"$pr\" --slack\n",
+             "never passes")
+
+        # G1 THROUGH THE NEW FLAG. `--queue` reaches production exactly as the
+        # old `--merge` did — GitHub lands the PR, no human in the path — so
+        # every rule here must see it. Written as its own case because renaming
+        # the mechanism is the cheapest way in the world to go silently blind:
+        # before this, `gate_wiring_check` reported "0 findings" over an
+        # auto-merge lane it could not see at all, and that reads identically to
+        # a clean bill of health.
+        case("a --queue job with no --baseline is caught, same as --merge", "G1",
+             "      - run: python scripts/merge_cage.py \"$pr\" --queue --lane lane.json\n",
              "never passes")
 
         # G1 NEGATIVE CONTROL — `--drill` judges no PR, so it needs no baseline.
