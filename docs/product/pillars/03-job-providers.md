@@ -105,6 +105,15 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
 For each upstream posting, the source builds a canonical `Job`:
 
 ```python
+# The date contract, established BEFORE the Job is built (greenhouse.py:64-68).
+# posted_at comes from `first_published`, NOT `updated_at` — the latter tracks
+# edits (a salary tweak) and would bump a stale posting back into the "just
+# posted" bucket. normalize_posted_at() returns the confidence alongside it, so
+# an unparseable value is reported low rather than fabricated as "high".
+raw_updated_at = posting.get("updated_at")          # audit only, never recency
+raw_published = posting.get("first_published")
+posted_at, confidence = normalize_posted_at(raw_published)
+
 job = Job(
     title=posting["title"],
     company="acme-corp",  # or via COMPANY_NAME_OVERRIDES → "Acme Corp"
@@ -113,13 +122,9 @@ job = Job(
     location=posting.get("location", {}).get("name", ""),
     description=_strip_html(posting["content"]),  # raw HTML → text
     date_found=now_iso(),
-    # posted_at comes from `first_published`, NOT `updated_at` — the latter
-    # tracks edits (a salary tweak) and would bump a stale posting back into
-    # the "just posted" bucket. normalize_posted_at() decides the confidence,
-    # so an unparseable value is reported low rather than fabricated.
-    posted_at=posted_at,                           # normalize_posted_at(first_published)[0]
-    date_confidence=confidence,                    # ...[1] — derived, never hardcoded
-    date_posted_raw=raw_updated_at,                # updated_at kept for audit
+    posted_at=posted_at,
+    date_confidence=confidence,                    # derived, never hardcoded
+    date_posted_raw=raw_updated_at,
 )
 ```
 
