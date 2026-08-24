@@ -1,6 +1,7 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Job360 Backend
 
-FastAPI backend for Job360. Async job aggregator across 47 sources + scoring +
+FastAPI backend for Job360. Async job aggregator across 41 sources + scoring +
 semantic retrieval. Serves the Next.js dashboard, runs the scheduled pipeline,
 and hosts the ARQ worker for notifications.
 
@@ -41,7 +42,7 @@ copy ..\.env.example ..\.env   # Windows
 ```
 
 Edit `../.env` to set your API keys, webhook URLs, and `FRONTEND_ORIGIN`.
-Free sources (39 of 47) work without any keys. See [`CLAUDE.md`](../CLAUDE.md)
+Free sources (33 of 41) work without any keys. See [`CLAUDE.md`](../CLAUDE.md)
 for the full env-var table.
 
 ## Run the API
@@ -64,11 +65,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ## Run the pipeline (CLI)
 
 ```bash
-python -m src.cli run                          # all 47 sources
+python -m src.cli run                          # all 41 sources
 python -m src.cli run --source arbeitnow       # single source
 python -m src.cli run --dry-run --log-level DEBUG
 python -m src.cli status                       # last-run summary
-python -m src.cli sources                      # list all 47 sources
+python -m src.cli sources                      # list all 41 sources
 python -m src.cli view --hours 24 --min-score 50
 python -m src.cli setup-profile --cv path/to/cv.pdf
 ```
@@ -81,10 +82,10 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing. (Live count is **1000+ test functions**
-across 30+ files — run `python -m pytest --collect-only -q | tail -1` for the
-exact number; the 600 baseline you'll see referenced in older docs was the
-post-3.5.4 figure before Step 1 → Step 3 added their tests.) The
+Invariant: full suite passes, 0 failing. (Live count is **3,297 collected / 3,295 selected**
+(2 `live` deselected) across **217** `test_*.py` files — run
+`python -m pytest --collect-only -q -p no:randomly | tail -1` for the exact
+number, and defer to it rather than to any figure written down here.) The
 `-p no:randomly` flag keeps the default order deterministic (pytest-randomly is
 installed but opt-in).
 

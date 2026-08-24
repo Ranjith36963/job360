@@ -1,14 +1,15 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Pillar 3 — Job Providers
 
-> **Audience.** Read this if you want to understand where Job360's raw job postings actually come from — the 46 source classes, the one base class they all inherit, the shared retry/rate-limit/conditional-fetch machinery, the ATS company-slug catalog, and how a posting becomes a normalised `Job` row in the shared catalog.
+> **Audience.** Read this if you want to understand where Job360's raw job postings actually come from — the 40 source classes, the one base class they all inherit, the shared retry/rate-limit/conditional-fetch machinery, the ATS company-slug catalog, and how a posting becomes a normalised `Job` row in the shared catalog.
 >
-> **Scope.** Covers code on `main`, post-Batch-3 source rotation and the **M6 rotation (2026-06)** that dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global) — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2. Current canonical counts: **46 classes / 47 registry keys / 46 instances**. Counts in this doc were verified against the files on disk and the test assertions.
+> **Scope.** Covers code on `main`, post-Batch-3 source rotation and the **M6 rotation (2026-06)** that dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global) — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2. Current canonical counts: **40 classes / 41 registry keys / 40 instances**. Counts in this doc were verified against the files on disk and the test assertions.
 
 ---
 
 ## 1. TL;DR — what the providers pillar does
 
-> *Job360 talks to 46 distinct job-source classes — keyed aggregators, free JSON APIs, company ATS boards, RSS/XML feeds, HTML scrapers, and a few one-offs. Every one inherits a single `BaseJobSource` that gives it retry-with-backoff, per-source rate limiting, optional conditional (ETag/304) fetching, and a UK/remote location filter for free. Each source's only real job is to implement one async method — `fetch_jobs() -> list[Job]` — turning whatever shape the upstream returns into the canonical `Job` dataclass. The orchestrator (Pillar 2) then scores, dedups, and stores them.*
+> *Job360 talks to 40 distinct job-source classes — keyed aggregators, free JSON APIs, company ATS boards, RSS/XML feeds, HTML scrapers, and a few one-offs. Every one inherits a single `BaseJobSource` that gives it retry-with-backoff, per-source rate limiting, optional conditional (ETag/304) fetching, and a UK/remote location filter for free. Each source's only real job is to implement one async method — `fetch_jobs() -> list[Job]` — turning whatever shape the upstream returns into the canonical `Job` dataclass. The orchestrator (Pillar 2) then scores, dedups, and stores them.*
 
 ### The count reconciliation (read this once, never wonder again)
 
@@ -16,17 +17,17 @@ Three numbers float around the codebase and they're all correct because they cou
 
 | Number | What it counts | Where |
 | --- | --- | --- |
-| **46** | Source *class files* on disk | `find src/sources -name '*.py'` minus `__init__`/`base` = 8+10+11+8+5+4 |
-| **47** | *Registry keys* in `SOURCE_REGISTRY` | `main.py:103-152` — `"glassdoor"` is a second key that aliases `JobSpySource` |
-| **46** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 46` (`main.py:160`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
+| **40** | Source *class files* on disk | `find backend/src/sources -name '*.py'` minus `__init__`/`base` |
+| **41** | *Registry keys* in `SOURCE_REGISTRY` | `main.py` — `"glassdoor"` is a second key that aliases `JobSpySource` |
+| **40** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 40` (`main.py:168`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
 
-So: **46 classes → 47 registry keys → 46 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 47`, `test_api.py` asserts `sources_total == 47` in three places (CLAUDE.md rule #13).
+So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-17 and this table said 46/47/46 for a week afterwards.
 
 ---
 
 ## Walkthrough — One source's fetch cycle (worked example)
 
-> Trace exactly what happens from the scheduler deciding it's time to poll `greenhouse` to a `Job` row landing back in the orchestrator. Uses Greenhouse because it's the cleanest of the ATS sources, but the same shape applies to all 46.
+> Trace exactly what happens from the scheduler deciding it's time to poll `greenhouse` to a `Job` row landing back in the orchestrator. Uses Greenhouse because it's the cleanest of the ATS sources, but the same shape applies to all 40.
 
 ### T+0 — Scheduler decides
 
@@ -178,7 +179,7 @@ def __init__(self, session: aiohttp.ClientSession, search_config=None):
 
 - `session` — one shared `aiohttp.ClientSession` across all sources (connection pooling).
 - `search_config=None` — when present, the source uses the user's dynamic keywords; when `None`, it falls back to the (now-empty) hard-coded defaults from `keywords.py`.
-- Rate limiter is pulled per-source from `RATE_LIMITS` (47 entries) with a safe `{concurrent:2, delay:1.0}` default.
+- Rate limiter is pulled per-source from `RATE_LIMITS` (41 entries) with a safe `{concurrent:2, delay:1.0}` default.
 
 ### 2.2 The three dynamic properties (`base.py:71-87`)
 
@@ -295,7 +296,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ## 4. The six source categories
 
-46 classes across 6 folders. The pattern each follows is the differentiator.
+40 classes across 6 folders. The pattern each follows is the differentiator.
 
 ### 4.1 Keyed APIs — `apis_keyed/` (8)
 
@@ -379,7 +380,7 @@ A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited
 
 ### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:93-146`
 
-47 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
+41 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
 
 | Source | concurrent | delay (s) | Why |
 | --- | --- | --- | --- |
@@ -411,7 +412,7 @@ Effect: at most `concurrent` parallel requests, with a minimum `delay` between a
 
 ## 7. Source rotations (Batch 3, then M6)
 
-Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
+Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. A further prune on 2026-08-17 dropped six upstream-dead sources, taking the registry **47 → 41**. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
 
 ### Dropped (verified absent from disk)
 
@@ -437,20 +438,20 @@ Adding/removing a source means moving **all five** together, or tests break:
 
 1. `src/main.py` — `SOURCE_REGISTRY` dict + `_build_sources()` list
 2. `src/core/settings.py` — `RATE_LIMITS` dict
-3. `tests/test_cli.py` — `len(SOURCE_REGISTRY) == 47` + the expected set
-4. `tests/test_api.py` — three `== 47` checks (`test_sources_returns_*`, `test_status_returns_counts`, `test_full_api_workflow`)
+3. `tests/test_cli.py` — `len(SOURCE_REGISTRY) == 41` + the expected set
+4. `tests/test_api.py` — two `== 41` checks (`:43`, `:160`)
 5. `CLAUDE.md` — the documented count
 
-All five are currently aligned at **47**.
+All five are currently aligned at **41**.
 
 ---
 
 ## 8. Testing — `backend/tests/test_sources.py` + friends
 
-- **`test_sources.py`** — 81 test functions covering all 47 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
+- **`test_sources.py`** — 110 test functions covering all 41 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
 - **`test_conditional_fetch.py`** — 11 tests for the shared ETag/Last-Modified/304 machinery, FIFO eviction at 256 entries, and the `nhs_jobs_xml` pilot proving `If-None-Match` is sent on the second call.
-- **`test_cli.py`** — `len(SOURCE_REGISTRY) == 47` + exact expected set.
-- **`test_api.py`** — the three hardcoded `== 47` assertions.
+- **`test_cli.py`** — `len(SOURCE_REGISTRY) == 41` + exact expected set.
+- **`test_api.py`** — the two hardcoded `== 41` assertions.
 
 There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source tests live inline in `test_sources.py`.
 
@@ -568,7 +569,7 @@ backend/src/sources/
 
 backend/src/
 ├── models.py                       — Job dataclass + normalized_key() (rule #1)
-├── main.py:103-318                 — SOURCE_REGISTRY (47 keys) + _build_sources() + domain filter
+├── main.py                         — SOURCE_REGISTRY (41 keys) + _build_sources() + domain filter
 ├── core/
 │   ├── companies.py                — ~256 ATS slugs across 11 platforms + name overrides
 │   ├── settings.py:93-146          — RATE_LIMITS (47 entries)
@@ -578,8 +579,8 @@ backend/src/
 backend/tests/
 ├── test_sources.py                 — 81 tests, all sources, aioresponses-mocked
 ├── test_conditional_fetch.py       — 11 tests, ETag/304/FIFO + nhs_jobs_xml pilot
-├── test_cli.py                     — len(SOURCE_REGISTRY) == 47
-└── test_api.py                     — three == 47 assertions
+├── test_cli.py                     — len(SOURCE_REGISTRY) == 41
+└── test_api.py                     — two == 41 assertions
 ```
 
 ---

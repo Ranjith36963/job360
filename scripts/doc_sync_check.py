@@ -48,6 +48,18 @@ LIVING_DOCS = [
     # a guard blind to the exact bug it was written for.
     "frontend/CLAUDE.md",
     "frontend/README.md",
+    # Added 2026-08-24 by the coverage half of doc_sync_mutation_test.py, which
+    # asks the question this list could never ask itself: which docs state a
+    # guarded fact while sitting OUTSIDE it? All three were lying.
+    #   CONTRIBUTING.md         "the 26 hard rules"        (31)
+    #   backend/README.md       "list all 47 sources"      (41)
+    #   .../03-job-providers.md "SOURCE_REGISTRY (47"      (41), in ten places
+    # The last one is the worst: root CLAUDE.md calls docs/product/pillars/ the
+    # AUTHORITATIVE code-verified architecture reference, and it carried the
+    # pre-2026-08-17 source counts that started this whole audit.
+    "CONTRIBUTING.md",
+    "backend/README.md",
+    "docs/product/pillars/03-job-providers.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -108,6 +120,42 @@ def migration_head() -> int:
     if not nums:
         raise RuntimeError("no NNNN_*.sql migrations found")
     return max(nums)
+
+
+def workflow_count() -> int:
+    """Number of GitHub Actions workflow files.
+
+    Promoted from the nightly doc-truth routine 2026-08-24, which found the
+    docs claiming 26 while three more had landed. A countable fact an LLM
+    re-discovers every night is a fact this script should hold for free.
+    """
+    return len(list((ROOT / ".github/workflows").glob("*.yml")))
+
+
+def test_file_count() -> int:
+    """Number of backend test_*.py files.
+
+    NOT the collected-test count. Collection imports conftest, which wants a
+    live Postgres, and this checker runs in a blocking CI step that must stay
+    fast and offline. The collected number stays the routine's job; the file
+    count is filesystem-only and cannot lie.
+    """
+    return len(list((ROOT / "backend/tests").glob("test_*.py")))
+
+
+def frontend_versions() -> tuple[str, str]:
+    """(next, react) exact versions from frontend/package.json.
+
+    Also promoted 2026-08-24: docs said Next.js 16.2.2 / React 19.2.4 while
+    package.json pinned 16.3.0 / 19.2.8. Only FULL x.y.z claims are matched,
+    so prose like "Next.js 16" stays legal.
+    """
+    import json
+
+    pkg = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))
+    deps = pkg.get("dependencies", {})
+    clean = lambda v: str(v).lstrip("^~>=< ")  # noqa: E731
+    return clean(deps.get("next", "")), clean(deps.get("react", ""))
 
 
 def scorer_version() -> int:
@@ -285,7 +333,14 @@ def budget_only() -> int:
     return 1
 
 
-def main() -> int:
+def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str]]]:
+    """Return (numeric checks, text checks).
+
+    Extracted from main() 2026-08-24 so scripts/doc_sync_mutation_test.py can
+    read the real patterns instead of keeping its own copy. A drill with a
+    duplicated pattern list stops testing this checker the moment the two
+    drift apart — which is the exact failure mode this whole file exists for.
+    """
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
 
@@ -297,6 +352,13 @@ def main() -> int:
         ("registry", registry, r"Current count: \*\*(\d+)\*\*"),
         ("registry", registry, r"[Ll]ist all (\d+) sources"),
         ("registry", registry, r"(\d+) SOURCE_REGISTRY entries"),
+        # Added 2026-08-24 by scripts/doc_sync_mutation_test.py on its first
+        # full run. CLAUDE.md:44 phrases it "`SOURCE_REGISTRY` has 41 entries",
+        # which matched none of the five patterns above. Other docs DID claim
+        # it in a matching form, so the "nobody claims this fact" alarm stayed
+        # quiet and the number in the most-read doc in the repo was guarded by
+        # nothing at all.
+        ("registry", registry, r"SOURCE_REGISTRY`?\s+has\s+(\d+)\s+entries"),
         ("unique-classes", unique_classes, r"(\d+) unique source classes"),
         ("migration-head", mig_head, r"0000 → (\d{4})"),
         # Added 2026-08-03. The checker tracked THREE facts, so every other
@@ -312,7 +374,29 @@ def main() -> int:
         # misleads on exactly the constant that decides whether a user's feed
         # gets re-scored. `\*{0,2}` because the docs bold it.
         ("scorer-version", scorer_version(), r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)"),
+        # Promoted from the nightly doc-truth routine 2026-08-24. Each of these
+        # was drift the LLM found by reading; they are countable, so they belong
+        # here where they cost nothing and are caught on every push.
+        ("workflows", workflow_count(), r"(\d+) workflows in"),
+        ("test-files", test_file_count(), r"across (\d+) `?test_\*\.py`? files"),
     ]
+
+    # String-valued facts. Kept separate because the numeric loop below does
+    # int(m.group(1)); a version like "16.3.0" is not an int and must be
+    # compared as text.
+    next_ver, react_ver = frontend_versions()
+    text_checks = [
+        # Only FULL x.y.z claims match, so prose like "Next.js 16" stays legal.
+        ("nextjs-version", next_ver, r"Next\.js (\d+\.\d+\.\d+)"),
+        ("react-version", react_ver, r"React (\d+\.\d+\.\d+)"),
+    ]
+    return checks, text_checks
+
+
+def main() -> int:
+    checks, text_checks = build_checks()
+    registry, unique_classes = registry_counts()
+    mig_head = migration_head()
 
     drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
     matches_per_fact: dict[str, int] = {}
@@ -337,6 +421,13 @@ def main() -> int:
                     claimed = int(m.group(1))
                     if claimed != actual:
                         drift.append((rel, str(i), fact, str(claimed), str(actual)))
+
+        for fact, actual_text, pattern in text_checks:
+            for i, line in enumerate(lines, start=1):
+                for m in re.finditer(pattern, line, re.IGNORECASE):
+                    matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
+                    if m.group(1) != actual_text:
+                        drift.append((rel, str(i), fact, m.group(1), actual_text))
 
         for phrase, why in FORBIDDEN_PHRASES:
             for i, line in enumerate(lines, start=1):
@@ -363,7 +454,7 @@ def main() -> int:
 
     # A fact nobody claims anymore = the claim was reworded/deleted and this
     # checker just went blind to it. That is drift, not success.
-    for fact in {c[0] for c in checks}:
+    for fact in {c[0] for c in checks} | {c[0] for c in text_checks}:
         if matches_per_fact.get(fact, 0) == 0:
             drift.append(("(all docs)", "-", fact, "claim not found in any doc",
                           "reworded/removed — update checker patterns or restore the claim"))
