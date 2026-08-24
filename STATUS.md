@@ -44,8 +44,8 @@
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
 **Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
-**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Total tests:** defer to the runtime collected count (3,297 collected / 3,295 selected, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 217 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
@@ -202,7 +202,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
+- Tests: defer to the runtime collected count (3,297 collected / 3,295 selected, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests), 0 failing
 
 ---
 
@@ -225,7 +225,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
+| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_setup.sh` — pass on Linux/Mac |
 | ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
@@ -239,30 +239,23 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## Test Coverage by Module
 
-| Test file | Module tested | Tests |
-|-----------|--------------|-------|
-| `test_sources.py` | All 41 registry entries (40 source classes) | 55+ |
-| `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
-| `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
-| `test_scorer.py` | `skill_matcher.py` scoring | 53 |
-| `test_time_buckets.py` | `time_buckets.py` | 33 |
-| `test_models.py` | `models.py` Job dataclass | 21 |
-| `test_notifications.py` | Slack + Discord + Email channels | 19 |
-| `test_deduplicator.py` | `deduplicator.py` | 13 |
-| `test_main.py` | `main.py` orchestrator + error paths | 14 |
-| `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
-| `test_database.py` | Postgres database + migration + source history | 9 |
-| `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |
-| `test_llm_provider.py` | Multi-provider LLM client for CV parsing | 8 |
-| `test_notification_base.py` | Channel base + discovery | 7 |
-| `test_reports.py` | Report generation | 6 |
-| `test_setup.py` | setup.sh + requirements | 6 |
-| `test_rate_limiter.py` | `rate_limiter.py` | 5 |
-| `test_cron.py` | cron_run.sh | 5 |
-| `test_cli_view.py` | `cli_view.py` | 5 |
-| `test_csv_export.py` | CSV export | 4 |
-| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+> **The per-file table lives in `README.md` ("Testing") and nowhere else.** It used to be
+> duplicated here, and the copy rotted: it still listed `test_notifications.py` and
+> `test_notification_base.py` (both deleted with the `NotificationChannel` ABC), named
+> `cron_run.sh` for what `test_cron.py` actually exercises (`cron_setup.sh`), and carried
+> per-file counts roughly a third of the real ones. Two copies of a number is one copy too
+> many — README's is the measured one.
+
+**Current green baseline:** 3,297 collected / 3,295 selected (2 `live` deselected), 0 failing,
+3 skipped on Windows. Measure it, never quote it:
+`cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
+
+Broad coverage beyond the top-20 files: migrations, auth, feed, prefilter, channels, crypto,
+dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker,
+conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims,
+score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep,
+application history, notification rules + tick + bundling, ledger filters, dim-score
+round-trips, harness guards.
 
 ### Not covered or lightly covered
 

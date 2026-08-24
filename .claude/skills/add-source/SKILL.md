@@ -78,9 +78,9 @@ that is the **only** delivery path.
 
 ⚠️ **Older docs told you to implement a `NotificationChannel` ABC and register it
 in `get_all_channels()` in `src/services/notifications/base.py`. That module and
-both symbols no longer exist** (verified 2026-08-03 and re-verified 2026-08-11 —
-`src/services/notifications/` now holds only `__init__.py` and
-`report_generator.py`). An agent following the old instruction would be writing
+both symbols no longer exist** (verified 2026-08-03, re-verified 2026-08-24 —
+`src/services/notifications/` now holds `__init__.py`, `report_generator.py` and
+`defaults.py`, and no channel classes). An agent following the old instruction would be writing
 against a deleted API.
 
 Respect rules #23 and #24 while you are in there:

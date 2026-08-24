@@ -315,7 +315,7 @@ jobs:
       - name: Plan first, then critique the plan
         if: steps.token.outputs.have == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
+        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -358,7 +358,7 @@ jobs:
 
       - name: Claude repairs the branch (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
+        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -409,8 +409,33 @@ jobs:
           set -euo pipefail
           rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md
           # No conflict marker may survive — a half-resolved merge must not ship.
-          if git grep -lE '^(<{7}|={7}|>{7})' -- 'backend' 'frontend' >/dev/null 2>&1; then
-            echo "::error::conflict markers still present — refusing to ship"; exit 1
+          #
+          # THE OLD PATTERN MATCHED `main` ITSELF, SO THIS LOOP COULD NEVER SHIP.
+          # It was `^(<{7}|={7}|>{7})` — "starts with seven", with NO end anchor.
+          # `backend/scripts/top20_report_{BEFORE,AFTER}_2026-08-15.txt` open with
+          # a 100-character `=` rule, which starts with seven equals signs. So the
+          # guard fired on a clean tree, on every PR, for every repair, forever.
+          #
+          # It stayed invisible for one reason: nothing ever started this
+          # workflow. The moment `finding-watch.yml` began dispatching it
+          # automatically (2026-08-24), three runs in a row died here —
+          # 32732226564, 32733843746, 32734907978 — all with "conflict markers
+          # still present" against trees that had none. The fixer had been
+          # structurally unable to ship for its whole life and nobody could know,
+          # because nobody had ever run it.
+          #
+          # A REAL git marker is exact, and that is what makes it recognisable:
+          #   <<<<<<<  seven, then a space and a label
+          #   |||||||  seven, then a space (diff3 style, when merge.conflictStyle
+          #            is diff3 — worth matching so a diff3 merge is not waved through)
+          #   =======  seven, ALONE ON THE LINE
+          #   >>>>>>>  seven, then a space and a label
+          # Anchored that way, `=====...=` (100 chars) is a rule in a report and
+          # `=======` is a conflict. The distinction the old pattern threw away.
+          if git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' -- 'backend' 'frontend' >/dev/null 2>&1; then
+            echo "::error::conflict markers still present — refusing to ship"
+            git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' -- 'backend' 'frontend' || true
+            exit 1
           fi
           changed=$(git status --porcelain | sed 's/^...//' | sed 's/.* -> //')
           outside=$(echo "$changed" | grep -vE '^(backend|frontend)/' | grep -v '^$' || true)
@@ -643,7 +668,7 @@ jobs:
       - name: Checker verdict
         if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome == 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
+        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
