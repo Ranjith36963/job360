@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { Activity, ExternalLink } from "lucide-react";
+// This strapline sits on every page. It said "47 sources" for a week after the
+// registry dropped to 41. See src/lib/catalog.ts.
+import { SOURCE_COUNT, SCORING_DIMENSIONS } from "@/lib/catalog";
 
 // Legal link slots — content (privacy policy, terms) populated in Batch 4 launch readiness
 const LEGAL_LINKS: { label: string; href: string }[] = [
@@ -46,7 +49,7 @@ export function Footer() {
         </nav>
 
         <p className="text-xs text-muted-foreground/60">
-          47 sources. 8D scoring. One dashboard.
+          {SOURCE_COUNT} sources. {SCORING_DIMENSIONS}D scoring. One dashboard.
         </p>
       </div>
     </footer>

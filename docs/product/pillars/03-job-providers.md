@@ -608,7 +608,7 @@ backend/tests/
 ## 12. Architectural rules touched by this pillar
 
 - **#1** — never touch `normalized_key()` without verifying deduplicator + DB UNIQUE.
-- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 49 subclasses.
+- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 40 subclasses.
 - **#4** — always mock HTTP in tests (`aioresponses`); the suite runs offline.
 - **#8 / #13** — adding/removing a source touches FIVE surfaces (registry, build list, rate limits, `test_cli.py`, `test_api.py`) plus CLAUDE.md.
 - **#14** — conditional fetch (`_get_json_conditional`) only for upstreams that honour ETag/Last-Modified.

@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Pillar 2 — The Search & Match Engine
 
 > **Audience.** Read this if you want to understand what happens *between* "a job posting exists on the internet" (Pillar 3 fetches it) and "a job appears on a user's dashboard ranked 87/100" (Pillar 1 shows it). The engine is the brain — it takes raw postings, filters out the irrelevant ones, scores the survivors against the user, deduplicates near-duplicate listings, enriches the high-scorers with LLM-extracted structured data, and writes everything to the shared `jobs` catalog.

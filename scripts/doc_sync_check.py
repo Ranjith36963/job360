@@ -60,6 +60,16 @@ LIVING_DOCS = [
     "CONTRIBUTING.md",
     "backend/README.md",
     "docs/product/pillars/03-job-providers.md",
+    # Added 2026-08-24 (second batch). Root CLAUDE.md calls docs/product/pillars/
+    # the AUTHORITATIVE code-verified reference, yet only 03 was watched -- and
+    # only since this morning. The glossary is the densest concentration of
+    # countable facts in the repo (registry size, instance count, RATE_LIMITS,
+    # JobEnrichment shape, Job field count) and not one of them had ever been
+    # checked: it claimed 18 fields / 8 enums against 16 / 7, and ~256 ATS slugs
+    # against 302.
+    "docs/product/pillars/01-user-pillar.md",
+    "docs/product/pillars/02-search-and-match-engine.md",
+    "docs/product/pillars/glossary.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -120,6 +130,142 @@ def migration_head() -> int:
     if not nums:
         raise RuntimeError("no NNNN_*.sql migrations found")
     return max(nums)
+
+
+def rate_limit_count() -> int:
+    """Entries in RATE_LIMITS. Same AST-strict style as registry_counts().
+
+    Promoted from the nightly routine 2026-08-24 (second batch). Docs claimed
+    46 and 47 in three places while the dict held 41. It must equal the
+    registry key count -- every source needs a limit -- so a mismatch between
+    THIS and registry is itself a bug worth seeing.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/settings.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "RATE_LIMITS":
+                if not isinstance(node.value, ast.Dict):
+                    raise RuntimeError("RATE_LIMITS is not a plain dict literal")
+                return len(node.value.keys)
+    raise RuntimeError("RATE_LIMITS dict literal not found in backend/src/core/settings.py")
+
+
+def source_subclass_count() -> int:
+    """Files declaring `class X(BaseJobSource)`.
+
+    Should equal unique source classes. The docs said "all 49 subclasses" in
+    rule #2's neighbourhood while 40 existed -- an over-count that makes the
+    five-surface rule read as bigger than it is.
+    """
+    n = 0
+    for p in (ROOT / "backend/src/sources").rglob("*.py"):
+        n += len(re.findall(r"^class \w+\(BaseJobSource\)", p.read_text(encoding="utf-8"), re.M))
+    return n
+
+
+def ats_slug_count() -> tuple[int, int]:
+    """(total ATS company slugs, number of *_COMPANIES lists).
+
+    Third promotion batch, 2026-08-24. The glossary said "~256 slugs across 11
+    platforms" against a real 302. A tilde is not a measurement -- it is a
+    number nobody intends to keep true.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
+    total = lists = 0
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            name = getattr(t, "id", None)
+            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
+                total += len(node.value.elts)
+                lists += 1
+    if not lists:
+        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
+    return total, lists
+
+
+def dataclass_field_count(rel: str, cls: str) -> int:
+    """Annotated fields on a dataclass. Used for Job and JobEnrichment.
+
+    The glossary described `Job` as "~27 fields" (31) and `JobEnrichment` as
+    "18 fields, 8 enums" (16, 7). These are the shapes every source and the
+    whole scorer are written against, so a wrong count teaches the wrong model.
+    """
+    tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == cls:
+            return len([x for x in node.body if isinstance(x, ast.AnnAssign)])
+    raise RuntimeError(f"class {cls} not found in {rel}")
+
+
+def enrichment_enum_count() -> int:
+    """Enum classes in the JobEnrichment schema module."""
+    tree = ast.parse(
+        (ROOT / "backend/src/services/job_enrichment_schema.py").read_text(encoding="utf-8")
+    )
+    return len([
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef)
+        and any(getattr(b, "id", "") == "str" or getattr(b, "attr", "") == "Enum" for b in n.bases)
+    ])
+
+
+def landing_page_source_claims() -> list[tuple[int, int]]:
+    """(line, claimed count) for every source-count claim on the landing page.
+
+    Added 2026-08-24. This is the only guard here that watches CODE rather than
+    a doc, and it exists because the doc was RIGHT and the code was LYING:
+    01-user-pillar.md faithfully quoted the landing page as "47 sources", and
+    the page really did say 47 -- to every visitor of job360.uk -- while the
+    registry held 41. Six sources were pruned on 2026-08-17 and the marketing
+    copy never moved.
+
+    Doc-sync found it by looking at the seam between doc and code. The nightly
+    routine never could: it may only edit *.md.
+    """
+    # Not just the landing page. The first sweep found five copies there and
+    # stopped; a wider grep then found the SAME stale number in the site
+    # metadata (the description Google and every social card show) and in the
+    # footer strapline that renders on every page. Reach was larger than the
+    # page that was fixed first, so the guard watches all three.
+    targets = [
+        "frontend/src/app/page.tsx",
+        "frontend/src/app/layout.tsx",
+        "frontend/src/components/layout/Footer.tsx",
+        "frontend/src/lib/catalog.ts",
+    ]
+    out: list[tuple[int, int]] = []
+    pat = re.compile(r"(\d+)\s+(?:[Jj]ob\s+)?[Ss]ources?\b|SOURCE_COUNT\s*=\s*(\d+)")
+    for rel in targets:
+        f = ROOT / rel
+        if not f.exists():
+            continue
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            # Case-INSENSITIVE. The first draft tested `"ource" not in line`,
+            # which skipped `SOURCE_COUNT = 41` -- the constant every other
+            # site reads from -- because that spelling is uppercase. Setting it
+            # to 99 left the guard green. Exactly the failure this file already
+            # records for the hard-rule count: one capital letter hiding a
+            # stale number from its own tripwire.
+            if "ource" not in line.lower():
+                continue
+            # Prose in a comment explaining the old bug legitimately says 47.
+            if line.lstrip().startswith(("*", "//", "#")):
+                continue
+            for m in pat.finditer(line):
+                claimed = m.group(1) or m.group(2)
+                if claimed:
+                    out.append((i, int(claimed)))
+    return out
 
 
 def workflow_count() -> int:
@@ -265,7 +411,14 @@ def dead_path_claims() -> list[tuple[str, str]]:
     """
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    pat = re.compile(r"`((?:backend|frontend)/src/[A-Za-z0-9_./-]+)`")
+    # `docs/` added 2026-08-24. The pillar docs MOVED to docs/product/pillars/
+    # and four LIVING docs went on naming `docs/pillars/` as fact for weeks --
+    # including the line calling it the AUTHORITATIVE architecture reference.
+    # dead_links() could not see it (that only matches `](...md)` targets) and
+    # this function's prefix list stopped at backend/frontend. A doc pointing an
+    # agent at a directory that does not exist is exactly what this was written
+    # for; it just could not look where the damage was.
+    pat = re.compile(r"`((?:backend|frontend)/src/[A-Za-z0-9_./-]+|docs/[A-Za-z0-9_./-]+)`")
     # README.md is a HOW-TO. It is full of "create `backend/src/sources/
     # yoursource.py`" examples - instructions, not claims that a file exists.
     # Flagging those is a permanent false alarm, and a permanent alarm is how a
@@ -343,6 +496,12 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     """
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
+    ats_slugs, ats_lists = ats_slug_count()
+    job_fields = dataclass_field_count("backend/src/models.py", "Job")
+    enr_fields = dataclass_field_count(
+        "backend/src/services/job_enrichment_schema.py", "JobEnrichment"
+    )
+    enr_enums = enrichment_enum_count()
 
     # (fact-name, actual-value, regex-with-one-capture-group). Patterns are
     # deliberately SPECIFIC phrases so unrelated numbers never false-match.
@@ -379,6 +538,27 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # here where they cost nothing and are caught on every push.
         ("workflows", workflow_count(), r"(\d+) workflows in"),
         ("test-files", test_file_count(), r"across (\d+) `?test_\*\.py`? files"),
+        # Second promotion batch, 2026-08-24, all found by the nightly routine
+        # in the pillar docs and glossary -- the densest concentration of
+        # countable facts in the repo, and until today none of them watched.
+        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`?[^.\n]{0,40}?\((\d+) entries"),
+        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`? dict in `?settings\.py`? \((\d+) entries"),
+        ("subclasses", source_subclass_count(), r"checking all (\d+) subclasses"),
+        ("registry", registry, r"from a (\d+)-key `?SOURCE_REGISTRY"),
+        ("registry", registry, r"The (\d+)-key dict in `?main\.py`?"),
+        ("unique-classes", unique_classes, r"[Bb]uilds (\d+) instances"),
+        # Third batch, 2026-08-24: the remaining countable facts in the glossary,
+        # the densest such file in the repo. Each was wrong until today.
+        ("ats-slugs", ats_slugs, r"\((\d+) slugs across \d+ platforms\)"),
+        ("ats-platforms", ats_lists, r"\(\d+ slugs across (\d+) platforms\)"),
+        ("job-fields", job_fields, r"every source must produce: (\d+) fields"),
+        ("enrichment-fields", enr_fields, r"shape with (\d+) strict-typed fields"),
+        ("enrichment-enums", enr_enums, r"strict-typed fields, (\d+) enums"),
+        # Deliberately NOT matching `SOURCE_INSTANCE_COUNT = N`. That is a
+        # verbatim code quote, and docs legitimately cite it -- including dated
+        # decision notes that are correct at the time of writing. Guarding it
+        # fires on every honest citation, and a permanent false alarm is how a
+        # loop dies. The prose form above covers the claim that matters.
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does
@@ -447,6 +627,15 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # The landing page is a claim to USERS, and it drifted the same way a doc
+    # does — it advertised 47 sources against a registry of 41 for a week.
+    for line_no, claimed in landing_page_source_claims():
+        if claimed != registry:
+            drift.append((
+                "frontend (user-facing copy)", str(line_no), "landing-source-count",
+                str(claimed), str(registry),
+            ))
 
     # Dead relative links anywhere in the doc tree (archive moves, renames).
     for doc, target in dead_links():

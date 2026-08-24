@@ -41,6 +41,38 @@ CASES: list[tuple[str, str, str, str]] = [
     ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
+    # Second promotion batch, 2026-08-24.
+    ("docs/product/pillars/03-job-providers.md",
+     r"checking all (\d+) subclasses", "checking all 999 subclasses", "subclasses"),
+    ("docs/product/pillars/glossary.md",
+     r"`RATE_LIMITS` dict in `settings\.py` \((\d+) entries",
+     "`RATE_LIMITS` dict in `settings.py` (999 entries", "rate-limits"),
+    # Third batch, 2026-08-24 — the glossary's remaining countable facts.
+    ("docs/product/pillars/glossary.md",
+     r"\((\d+) slugs across \d+ platforms\)", "(999 slugs across 11 platforms)", "ats-slugs"),
+    ("docs/product/pillars/glossary.md",
+     r"\(\d+ slugs across (\d+) platforms\)", "(302 slugs across 99 platforms)", "ats-platforms"),
+    ("docs/product/pillars/glossary.md",
+     r"every source must produce: (\d+) fields", "every source must produce: 999 fields", "job-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"shape with (\d+) strict-typed fields", "shape with 999 strict-typed fields",
+     "enrichment-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
+    # The only CODE file guarded here. It shipped "47 Job Sources" to every
+    # visitor of job360.uk for a week after the roster dropped to 41.
+    # The only CODE files guarded here. The copy shipped "47 Job Sources" to
+    # every visitor of job360.uk for a week after the roster dropped to 41 --
+    # on the landing page, in the site metadata Google and social cards read,
+    # and in the footer on every page.
+    #
+    # The constant is drilled SEPARATELY and deliberately. The first version of
+    # this guard filtered lines with `"ource" not in line`, which skipped
+    # `SOURCE_COUNT = 41` because that spelling is uppercase: setting it to 99
+    # left the report green. Drilling only the page copy would never have found
+    # that. One capital letter, one blind guard.
+    ("frontend/src/lib/catalog.ts",
+     r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
 ]
 
 
