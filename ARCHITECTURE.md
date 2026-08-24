@@ -100,10 +100,10 @@ job360/
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
 │   └── src/lib/{api.ts,types.ts,utils.ts}
 ├── docs/
-│   ├── pillars/                      # 3 pillar manuals + glossary + runbook (THE current architecture reference)
+│   ├── product/pillars/              # 3 pillar manuals + glossary + runbook (THE current architecture reference)
 │   └── ...                           # IMPLEMENTATION_LOG, plans/, research/, reviews/, step_*_plan.md
 ├── .env.example
-└── CLAUDE.md                         # Canonical AI agent instructions (24 hard rules)
+└── CLAUDE.md                         # Canonical AI agent instructions (31 hard rules)
 ```
 
 ---

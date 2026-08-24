@@ -24,7 +24,7 @@ The pipeline is a **6-stage straight line**, with the scheduler + circuit breake
                   │
 4. DEDUP         4-layer (exact → fuzzy → tf-idf → embedding-repost)
                   │
-5. ENRICH        [opt-in] LLM → JobEnrichment (18 fields)
+5. ENRICH        [opt-in] LLM → JobEnrichment (16 fields)
                   │
 6. STORE         insert into shared catalog `jobs`
                   │
@@ -161,7 +161,7 @@ Survives unchanged.
 
 ### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
 
-`match_score=93 ≥ ENRICHMENT_THRESHOLD=60` → eligible. The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
 
 ### Stage 6 — Store
 
@@ -252,7 +252,7 @@ class ScoreBreakdown:
 
 #### 3.2 Batch 2.9 multi-dimensions (active whenever `user_preferences` is passed)
 
-All four are called **unconditionally** once `user_preferences` is present, with whatever `enrichment_lookup` returns — including `None`. A missing `JobEnrichment` row therefore yields each dim's NEUTRAL half-weight, never a zero (rule #29):
+All four are called **unconditionally** once `user_preferences` is present, with whatever `enrichment_lookup` returns — including `None`. A missing `JobEnrichment` row therefore yields each dim's NEUTRAL half-weight, never a zero (rule #29). **One exception:** `visa_score` returns a real `0` when `needs_visa=False`, and that is not a penalty — it is "no reward for something irrelevant", checked before the enrichment test (`scoring_dimensions.py:242`):
 
 - **`seniority_score`** (`scoring_dimensions.py:138-173`) — maps job's `seniority` enum (intern → director, 0–6) and user's `experience_level` to the 0–6 scale. Curve: 0-diff → full, 1-diff → 62 %, 2-diff → 25 %, **3-diff → −50 %, 4+ → −100 %** (a real mismatch is a penalty, not merely "no reward"). Missing signal → 50 %.
 - **`salary_score`** (`scoring_dimensions.py:181-226`) — band-overlap ratio between job's `SalaryBand` (normalised to annual GBP via `salary.normalize_salary()`) and user's `salary_min`/`salary_max`. No overlap → 0; missing data → 50 %.
@@ -294,7 +294,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 - Gate: only jobs with `match_score >= ENRICHMENT_THRESHOLD` (default 60) are sent to the LLM.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
-  - **Provider chain**: Gemini (`gemini-2.0-flash`, best JSON) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`llama3.1-8b`, fastest).
+  - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
 - Output: a `JobEnrichment` row with **18 strict-typed fields** (see §3.3 below).
@@ -327,7 +327,7 @@ breakdown = scorer.score(job)
 # All 9 fields populated from real data
 ```
 
-**Rule #20, as the code actually behaves** (`skill_matcher.py:587`): the multi-dim path is gated on `user_preferences` **alone**. `enrichment_lookup` is optional — pass `user_preferences` without it and every dim function is still called, each returning its documented NEUTRAL half-weight rather than a zero (rule #29: an absent input is never a per-job penalty). That was a real bug fix: the old `if enrichment is not None:` gate left all four dims at 0 for any job the enrichment pipeline had not reached yet, so a fresh, correctly-un-enriched job scored 30 points below an identical enriched one. Guard: `tests/test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
+**Rule #20, as the code actually behaves** (`skill_matcher.py:587`): the multi-dim path is gated on `user_preferences` **alone**. `enrichment_lookup` is optional — pass `user_preferences` without it and every dim function is still called, each returning its documented NEUTRAL half-weight rather than a zero (the one exception is `visa_score` with `needs_visa=False`, which is a deliberate 0) (rule #29: an absent input is never a per-job penalty). That was a real bug fix: the old `if enrichment is not None:` gate left all four dims at 0 for any job the enrichment pipeline had not reached yet, so a fresh, correctly-un-enriched job scored 30 points below an identical enriched one. Guard: `tests/test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
 
 ### 3.2 The 16-field `JobEnrichment` schema — `backend/src/services/job_enrichment_schema.py`
 
@@ -533,7 +533,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | Symptom | Root cause | Where it surfaces | Fix |
 | --- | --- | --- | --- |
 | All scores are 0 / suspiciously low | No user profile loaded → `score_job()` legacy path firing against empty `keywords.py` | `match_score` column near 0 for every row | Run `setup-profile`. The "empty keywords.py" inflection from 2026-04-09 means a profile is mandatory now |
-| Dim columns all zero except classic 4 | `user_preferences` was **not** passed at all — that, not the lookup, is the gate (rule #20) | DB inspection of `seniority_score`/`salary_score`/etc all zero despite enrichment rows existing. Note a *neutral half* (e.g. visa 5 of 10) is correct, not a bug — only a flat 0 across all four points at a missing `user_preferences` | Confirm the caller passes `user_preferences`; `main.py:857` and `workers/tasks.py::score_and_ingest` show the correct pattern |
+| Dim columns all zero except classic 4 | `user_preferences` was **not** passed at all — that, not the lookup, is the gate (rule #20) | DB inspection of `seniority_score`/`salary_score`/etc all zero despite enrichment rows existing. Note a *neutral half* (e.g. visa 3 of `VISA_WEIGHT=6`) is correct, not a bug — as is a visa `0` when the user does not need sponsorship — only a flat 0 across all four points at a missing `user_preferences` | Confirm the caller passes `user_preferences`; `main.py:857` and `workers/tasks.py::score_and_ingest` show the correct pattern |
 | Enrichment never runs | `ENRICHMENT_ENABLED=false` (default), or all 3 LLM providers unset, or score never crosses `ENRICHMENT_THRESHOLD` | `job_enrichment` table stays empty | Check the three preconditions in that order |
 | Enrichment runs but every row is `category="other"` etc | LLM returning generic enum values; the validation loop converged on weak output | `SELECT category, COUNT(*) FROM job_enrichment GROUP BY category` shows skewed dist | Prompt-engineering territory — see `job_enrichment.py` system prompt; try forcing Gemini-only by unsetting the others |
 | Cross-encoder rerank takes too long | First call on each process initialises the model (~2 s download + load) | API request latency spike | Pre-warm via a startup hook, or accept the cold-start cost once per worker process |
@@ -588,7 +588,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| `JobEnrichment` 18-field schema + 8 enums + `SalaryBand` | ✅ | `job_enrichment_schema.py`, all length-bounded |
+| `JobEnrichment` 16-field schema + 7 enums + `SalaryBand` | ✅ | `job_enrichment_schema.py`, all length-bounded (`employer_type` + `locations` retired 2026-08) |
 | `enrich_batch()` with `asyncio.Semaphore(10)` | ✅ | per-job error isolation |
 | `INSERT OR REPLACE` upsert into `job_enrichment` table | ✅ | migration `0008`, shared catalog |
 | Multi-provider LLM fallback (Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` |
@@ -619,7 +619,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | `run_search()` 6-stage pipeline | ✅ | `main.py:741-1450` |
 | Domain-filtered source build | ✅ | `classify_user_domain` × source `.DOMAINS` |
-| 46 source instances from 47-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 46` |
+| 40 source instances from 41-key registry | ✅ | `SOURCE_INSTANCE_COUNT = 40` (`main.py:168`) |
 | `TieredScheduler.tick(force=True)` one-shot dispatch | ✅ | CLI path |
 | `TieredScheduler.run_forever()` long-running poller | 🟡 | written but not wired to systemd (Batch 4 scope) |
 | `CircuitBreaker` 5-fail/300s state machine | ✅ | per-source registry |
@@ -662,7 +662,7 @@ backend/
 │   │   ├── domain_classifier.py               — tech / healthcare / academia / education / climate
 │   │   ├── salary.py                          — normalize_salary() hourly→annual GBP
 │   │   ├── job_enrichment.py                  — enrich_batch() + DB helpers (opt-in)
-│   │   ├── job_enrichment_schema.py           — 18-field Pydantic JobEnrichment
+│   │   ├── job_enrichment_schema.py           — 16-field Pydantic JobEnrichment
 │   │   ├── embeddings.py                      — encode_job() (opt-in, lazy)
 │   │   ├── vector_index.py                    — ChromaDB wrapper (opt-in, lazy)
 │   │   ├── retrieval.py                       — RRF fusion + cross-encoder rerank (opt-in)

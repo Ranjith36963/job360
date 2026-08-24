@@ -365,23 +365,25 @@ Indeed/Glassdoor (`JobSpySource` wrapping `python-jobspy`, optional dep — skip
 
 ## 5. The ATS company-slug catalog — `backend/src/core/companies.py`
 
-ATS sources don't search — they poll a *known list of companies'* boards. The catalog holds ~266 companies across 12 platforms:
+ATS sources don't search — they poll a *known list of companies'* boards. The catalog holds 302 slugs across 11 platform lists (one of them, `RIPPLING_COMPANIES`, has no source class since the 2026-08-10 rotation):
 
 | Platform | Companies | Shape |
 | --- | --- | --- |
-| Greenhouse | ~80 | list of slug strings |
-| Lever | ~35 | slug strings |
-| Workable | ~25 | slug strings |
-| Ashby | ~25 | slug strings |
-| Recruitee | ~20 | slug strings |
-| Workday | ~20 | **dicts** `{tenant, wd, site, name}` (multi-tenant URL construction) |
-| Personio | ~18 | slug strings |
-| Pinpoint | ~15 | slug strings |
-| SmartRecruiters | ~15 | slug strings |
-| Rippling | 5 | slug strings (Batch 3 starter) |
+| Greenhouse | 82 | list of slug strings |
+| Pinpoint | 39 | slug strings |
+| Lever | 35 | slug strings |
+| Recruitee | 31 | slug strings |
+| Personio | 26 | slug strings |
+| Ashby | 25 | slug strings |
+| Workable | 21 | slug strings |
+| Workday | 20 | **dicts** `{tenant, wd, site, name}` (multi-tenant URL construction) |
+| SmartRecruiters | 15 | slug strings |
+| ~~Rippling~~ | 5 | slug strings — **no source class since 2026-08-10**; the list is not polled |
 | SuccessFactors | 3 | **dicts** `{name, sitemap_url}` (sitemap crawl) |
 
-A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited`) to display names (`Darktrace`) for the UI. Most platforms take simple slug lists; Workday and SuccessFactors need structured dicts because their URLs aren't derivable from a slug alone.
+Total **302**. Counts are exact AST counts of the list literals, not estimates — every `~N` in this table was wrong by up to 24 (Pinpoint read `~15` against a real 39).
+
+A `COMPANY_NAME_OVERRIDES` dict (55 entries) maps ugly slugs (`darktracelimited`) to display names (`Darktrace`) for the UI. Most platforms take simple slug lists; Workday and SuccessFactors need structured dicts because their URLs aren't derivable from a slug alone.
 
 ---
 
@@ -551,9 +553,9 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Item | Status | Notes |
 | --- | --- | --- |
 | HTML scrapers break when sites change markup | ⚠️ | inherent to LinkedIn/Workday/BCS/AIJobs regex parsing — no schema contract upstream |
-| Rippling slug list is a 5-company starter | 🟡 | need expansion to be impactful (Comeet dropped in M6) |
+| `RIPPLING_COMPANIES` slugs remain with no source class | 🟡 | `rippling` dropped 2026-08-10; the list is dead weight until a source is re-added |
 | ATS catalog is hand-curated | 🟡 | no auto-discovery of new company boards |
-| Conditional fetch used by only 1 of ~16 eligible feeds/ATS | 🟡 | rule #14 — opportunity to reduce upstream load |
+| Conditional fetch used by **no** source | 🔴 | tests are the only callers; rule #14 — opportunity to reduce upstream load |
 | University Jobs — only Cambridge feed confirmed valid | ⚠️ | other uni feeds may silently return nothing |
 | `python-jobspy` not in `requirements.txt` | ✅-by-design | optional; Indeed/Glassdoor skip if absent |
 | Per-source health/uptime dashboard | ❌ | breaker state is logged per-run but not surfaced in UI |

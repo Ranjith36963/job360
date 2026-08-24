@@ -57,7 +57,7 @@ Alice uploads her CV PDF. Frontend `POST /api/profile` with multipart `cv=<file>
 2. Save uploaded file to a temp dir.
 3. `cv_parser.parse_cv_async(temp_path)`:
    - `extract_text_from_pdf()` via `pdfplumber`.
-   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — Gemini first; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
+   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — **OpenAI (`gpt-4o-mini`) first**, then Gemini; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
    - Returns `CVData` (skills, titles, companies, education, …).
 4. `preferences.merge_cv_and_preferences(cv_data, prefs)` → composite skills/titles list with user prefs taking priority.
 5. `UserProfile(cv_data, preferences)` saved via `storage.save_profile(profile, user_id, source_action="upload")` — UPSERTs `user_profiles` (tip) **and** INSERTs `user_profile_versions` (immutable snapshot, retention 10).
@@ -220,7 +220,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 
 1. **Extract text** with `pdfplumber` (with font-size clustering for layout-aware section splitting — see `layout.segment_sections_from_words`) or `python-docx`.
 2. **Call an LLM** via `llm_extract_validated(prompt, CVSchema)` (`backend/src/services/profile/llm_provider.py`). The schema is enforced with Pydantic; on validation failure the prompt is re-sent up to 2× with the validation error appended so the model can self-correct.
-3. **Provider fallback chain**: Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
+3. **Provider fallback chain** (`llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
 4. **ESCO normalisation code exists but has never run in production.** `_maybe_normalise_skills_via_esco()` (`cv_parser.py:804`) is a real no-op today: it needs both `SEMANTIC_ENABLED=true` AND a prebuilt embedding index at `backend/data/esco/`, and that directory has never been committed or generated (verified: `ls backend/data/esco` → does not exist). Root `CLAUDE.md` rule #28 states this as FACT (verified 2026-08-11): "no ontology is consulted... ESCO is inert scaffolding, never built or shipped." Reviving it means shipping the index artefacts, not flipping a flag.
 
 #### LinkedIn PDF — `backend/src/services/profile/linkedin_parser.py`

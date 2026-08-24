@@ -67,7 +67,7 @@ Second-pass reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) that takes the top
 
 ### CV parsing
 
-Turning a CV PDF/DOCX into structured `CVData`. PDF text extraction via `pdfplumber`, DOCX via `python-docx`, then **LLM-only** structuring (Gemini → Groq → Cerebras fallback) — the regex `KNOWN_SKILLS` approach was removed in commit `804725c`.
+Turning a CV PDF/DOCX into structured `CVData`. PDF text extraction via `pdfplumber`, DOCX via `python-docx`, then **LLM-only** structuring (OpenAI → Gemini → Groq → Cerebras fallback) — the regex `KNOWN_SKILLS` approach was removed in commit `804725c`.
 **Code:** `backend/src/services/profile/cv_parser.py` · **Pillar 1**
 
 ### DEFAULT_TENANT_ID

@@ -94,7 +94,7 @@ The user arrives at the Job360 website and creates an account. Authentication me
 
 After sign-up, the user enters the profile builder. This is a guided flow, not a blank form.
 
-**Step 1 — Upload CV.** The user uploads their CV as a PDF or DOCX. The system extracts text and sends it through an LLM parsing pipeline (Gemini → Groq → Cerebras fallback chain) to extract skills, job titles, companies, education, certifications, summary, and experience text. The parsed result is displayed to the user for review.
+**Step 1 — Upload CV.** The user uploads their CV as a PDF or DOCX. The system extracts text and sends it through an LLM parsing pipeline (OpenAI → Gemini → Groq → Cerebras fallback chain) to extract skills, job titles, companies, education, certifications, summary, and experience text. The parsed result is displayed to the user for review.
 
 **Step 2 — Optional enrichment.** The user may optionally upload a LinkedIn data export (ZIP) or connect their GitHub username. LinkedIn enrichment adds positions, skills, and industry context. GitHub enrichment infers technical skills from repository languages and topics.
 
@@ -150,7 +150,7 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 **FR-2.1:** The system accepts CV uploads in PDF and DOCX formats. CV text extraction must handle standard document layouts. Scanned/image-only PDFs are out of scope for v1 but should fail gracefully with a clear error message.
 
-**FR-2.2:** CV parsing uses LLM-based extraction with a fallback chain (currently Gemini → Groq → Cerebras). The system must never crash if all LLM providers are unavailable — it must fall back to manual-only preferences entry.
+**FR-2.2:** CV parsing uses LLM-based extraction with a fallback chain (currently OpenAI `gpt-4o-mini` → Gemini → Groq → Cerebras). The system must never crash if all LLM providers are unavailable — it must fall back to manual-only preferences entry.
 
 **FR-2.3:** LinkedIn data export parsing accepts the standard LinkedIn ZIP format and extracts positions, skills, education, certifications, and industry.
 
@@ -306,7 +306,7 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 |---|---|---|---|
 | FR-1.1: Multi-user isolation | Single `user_profile.json` file, single SQLite DB | Must redesign for multi-tenant storage | **Critical** |
 | FR-2.1: CV ingestion | PDF/DOCX extraction works (pdfplumber + python-docx) | No OCR for scanned PDFs (acceptable for v1) | Low |
-| FR-2.2: LLM parsing | Gemini → Groq → Cerebras fallback chain functional | Hard crash if all 3 keys missing; needs graceful fallback to manual-only | Medium |
+| FR-2.2: LLM parsing | OpenAI → Gemini → Groq → Cerebras fallback chain functional | Hard crash if all 3 keys missing; needs graceful fallback to manual-only | Medium |
 | FR-2.3: LinkedIn enrichment | ZIP parsing works for standard format | No handling of LinkedIn format changes | Medium |
 | FR-2.4: GitHub enrichment | 32 language + 50 topic mappings | Limited coverage; public repos only | Low |
 | FR-2.5: Preference override | Manual preferences override auto-extracted values | No conflict resolution (CV says "junior", prefs say "senior") | Medium |
