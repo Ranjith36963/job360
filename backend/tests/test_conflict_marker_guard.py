@@ -319,6 +319,11 @@ _REDIRECT_CASES = [
     ("echo hi 2>> agent-error.txt", "agent-error.txt"),
     ("echo data>root.json", "root.json"),                    # no space needed
     ("echo data &>root.json", "root.json"),                  # both streams
+    # `&>>` was a branch of the pattern with no case behind it, so narrowing
+    # `&>>?` to `&>` would have stayed green while combined-stream APPENDS went
+    # unseen. An untested branch of your own regex is the same shape as an
+    # untested guard. (CodeRabbit, PR #395.)
+    ("echo data &>>both.json", "both.json"),                 # both streams, append
     ("jq . x > backend/report.json", "backend/report.json"), # in-cage, still found
     ("echo hi > root.json.bak", None),                       # NOT a scratch ext
     ('echo x >> "$GITHUB_OUTPUT"', None),                    # a variable, not a file
