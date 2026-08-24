@@ -38,6 +38,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "pr-repair.yml"
 
@@ -213,20 +215,30 @@ def test_the_guard_catches_diff3_style_too(tmp_path):
 # violation is the same defect as the conflict-marker pattern above it, which is
 # the whole reason this file exists. (CodeRabbit, PR #395.)
 #
-# EVERY REDIRECT FORM THAT CREATES A FILE, not just `>`.
-#   >  file    truncate-create
-#   >> file    append — CREATES the file if absent, so it is just as dangerous
-#   2> file    stderr, and `2>>`, and any other single-digit fd
-# The previous version matched only bare `>` and would have passed while
-# `>> agent-issue.md` or `2> agent-error.txt` left a root file for the cage to
-# blame on the agent. A guard that knows one spelling of the thing it guards is
-# a guard with a door in it — same shape as the `dependabot*` allowlist and the
-# `--merge`-only wiring check. (CodeRabbit, PR #395.)
+# EVERY REDIRECT FORM THAT CREATES A FILE, MATCHED ON WHOLE TOKENS.
+#   >  file    >> file    truncate / append — append CREATES when absent
+#   2> file    2>> file   any single-digit fd; stderr is the one nobody
+#                         thinks of as a file-creator
+#   &> file    &>> file   both streams
+#   data>file             no space: the shell does not need one
 #
-# The lookbehind stops `>>` being read twice (once for each `>`) and keeps
-# `->`-style text out. A redirect into a shell variable (`>> "$GITHUB_OUTPUT"`)
-# cannot match the filename class anyway.
-_ROOT_REDIRECT = re.compile(r"(?<![>&$\w])\d?>>?\s*([A-Za-z0-9._/-]+\.(?:json|md|txt))")
+# Widened here in three rounds, each time because it knew one spelling and the
+# door was the others (CodeRabbit, PR #395). That is the third instance of this
+# exact shape on this branch — `dependabot*` matched more than dependabot, and
+# the wiring check knew `--merge` but not `--queue`.
+#
+# TOKEN-BOUNDED, WHICH IS THE PART THAT IS EASY TO GET WRONG. The target is
+# captured as a whole shell word and the extension is checked at its END by the
+# caller. A pattern that instead ends at `\.(?:json|md|txt)` reports
+# `> root.json.bak` as a file called `root.json` — a name that does not exist,
+# while the one that does goes unnoticed. Wrong in both directions at once.
+#
+# `(?<![-<>&|])` on the fd branch keeps `->` in prose out and stops `>>` being
+# read as two redirects; `&>` gets its own branch because that lookbehind would
+# otherwise reject it. A redirect into a shell variable (`>> "$GITHUB_OUTPUT"`)
+# is excluded by the quote characters in the token class.
+_ROOT_REDIRECT = re.compile(r"(?:(?<![-<>&|])\d?>>?|&>>?)\s*([^\s;&|<>\"'()]+)")
+_SCRATCH_EXT = (".json", ".md", ".txt")
 # THE CONTINUATION ALTERNATIVE COMES FIRST, AND THAT ORDER IS THE WHOLE RULE.
 # Written the obvious way — `(?:[^\n]|\\\n)*` — the `[^\n]` branch consumes the
 # backslash, the newline then matches neither branch, and the match STOPS at the
@@ -265,7 +277,11 @@ def test_every_scratch_file_the_workflow_writes_is_cleaned_before_the_cage():
         "If the steps were reordered, this test needs rewriting rather than deleting: "
         "cleanup after the cage cleans nothing."
     )
-    written = set(_ROOT_REDIRECT.findall(text[:cage_at]))
+    # The extension is checked at the END of the whole token — see the note on
+    # `_ROOT_REDIRECT`. Anything else redirected (a shell variable, a device, a
+    # path with no scratch extension) is not a file this cleanup is about.
+    written = {t for t in _ROOT_REDIRECT.findall(text[:cage_at])
+               if t.endswith(_SCRATCH_EXT)}
 
     # Only ROOT files can be mistaken for an agent edit. A redirect into
     # `backend/` or `frontend/` lands inside the cage and is allowed; one with
@@ -288,3 +304,36 @@ def test_every_scratch_file_the_workflow_writes_is_cleaned_before_the_cage():
         f"Either add them to the `rm -f`, or — better — write them under "
         f"`$RUNNER_TEMP`, outside the working tree, where no cleanup is needed."
     )
+
+
+# Every redirect spelling that has been missed here at least once, plus the two
+# shapes that must NOT match. Written as a table because the pattern was widened
+# three times in one review and each round found a form the last one did not
+# know — a table makes "which spellings does this actually handle?" answerable
+# by reading rather than by re-deriving the regex.
+_REDIRECT_CASES = [
+    # (shell text, the target it must find or None)
+    ("echo hi > root.json", "root.json"),                    # the plain one
+    ("echo hi >> appended.md", "appended.md"),               # append CREATES
+    ("echo hi 2> agent-error.txt", "agent-error.txt"),       # stderr is a file too
+    ("echo hi 2>> agent-error.txt", "agent-error.txt"),
+    ("echo data>root.json", "root.json"),                    # no space needed
+    ("echo data &>root.json", "root.json"),                  # both streams
+    ("jq . x > backend/report.json", "backend/report.json"), # in-cage, still found
+    ("echo hi > root.json.bak", None),                       # NOT a scratch ext
+    ('echo x >> "$GITHUB_OUTPUT"', None),                    # a variable, not a file
+    ("# prose containing -> agent-issue.md", None),          # an arrow, not a redirect
+]
+
+
+@pytest.mark.parametrize(("line", "want"), _REDIRECT_CASES)
+def test_the_redirect_matcher_knows_every_spelling(line, want):
+    r"""The matcher is only as good as the forms it knows.
+
+    `root.json.bak` is the case worth staring at: a pattern that stops at
+    `\.(?:json|md|txt)` reports a file called `root.json`, which does not exist,
+    while the file that does — `root.json.bak` — goes unnoticed. Wrong in both
+    directions from one missing boundary.
+    """
+    hits = [t for t in _ROOT_REDIRECT.findall(line) if t.endswith(_SCRATCH_EXT)]
+    assert (hits[0] if hits else None) == want, f"got {hits} from {line!r}"
