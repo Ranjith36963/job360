@@ -43,7 +43,7 @@
 > Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
-**Last updated:** 2026-06-20
+**Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
@@ -191,9 +191,9 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py:330-334`)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation. Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
+- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation (only `nhs_jobs_xml` was retired — the separate `nhs_jobs` source is still registered, `main.py:142`). Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
 - All 8 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over 302 company slugs (11 platform lists in `core/companies.py`; comeet removed in M6, rippling in the 2026-08-10 rotation — its slug list survives with no source class)
+- All ATS boards iterate over **297** company slugs actually polled — `core/companies.py` holds **302** across 11 platform lists, but `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 ATS sources poll the other 297 (comeet was removed in M6)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default

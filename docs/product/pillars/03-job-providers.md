@@ -21,7 +21,7 @@ Three numbers float around the codebase and they're all correct because they cou
 | **41** | *Registry keys* in `SOURCE_REGISTRY` | `main.py` — `"glassdoor"` is a second key that aliases `JobSpySource` |
 | **40** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 40` (`main.py:168`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
 
-So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-17 and this table said 46/47/46 for a week afterwards.
+So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-10 (`main.py:161`) and this table said 46/47/46 for a week afterwards.
 
 ---
 
@@ -322,13 +322,13 @@ Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if t
 | Findwork | remote/freelance (Token auth) | `FINDWORK_API_KEY` |
 | Gov Apprenticeships | DfE Display Advert API v2 (restored 2026-06-16) | `DFE_APPRENTICESHIPS_API_KEY` |
 
-### 4.2 Free JSON APIs — `apis_free/` (10)
+### 4.2 Free JSON APIs — `apis_free/` (9 files; 8 declare `category="free_json"`, `teaching_vacancies` declares `rss`)
 
 Pattern: no auth, filter results with `self.relevance_keywords` on title+description, `_is_uk_or_remote()` on location.
 
 Arbeitnow (DE/EU tech), RemoteOK (skips metadata element 0), Jobicy (remote data/AI), Himalayas (paginated remote), Remotive (remote software-dev), DevITJobs `{tech}`, Landing.jobs `{tech}`, AIJobs.net `{tech}`, HN Jobs (Firebase "Who is Hiring") `{tech}`, **Teaching Vacancies** `{education}` (Batch 3). _(Gov Apprenticeships was dropped in M6 rotation then restored 2026-06-16 as a keyed API — see §4.1.)_
 
-### 4.3 ATS boards — `ats/` (11)
+### 4.3 ATS boards — `ats/` (10)
 
 Pattern: accept a `companies` slug list (default from `companies.py`), iterate each company's board API. See §5 for the catalog.
 
@@ -423,7 +423,7 @@ Effect: at most `concurrent` parallel requests, with a minimum `delay` between a
 
 ## 7. Source rotations (Batch 3, then M6)
 
-Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. A further prune on 2026-08-17 dropped six upstream-dead sources, taking the registry **47 → 41**. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
+Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. A further prune on **2026-08-10** dropped six upstream-dead sources — aijobs, jobs_ac_uk, biospace, rippling, nhs_jobs_xml, workanywhere — taking the registry **47 → 41** (`main.py:158-165` records each reason). Note `nhs_jobs_xml` was retired but the separate **`nhs_jobs` source is still alive** and registered at `main.py:142`. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
 
 ### Dropped (verified absent from disk)
 
@@ -539,7 +539,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | 40 source classes / 41 registry keys / 40 instances | ✅ | reconciled in §1 |
 | 8 keyed APIs (skip gracefully without key) | ✅ | `category = "keyed_api"` |
 | 8 free JSON APIs | ✅ | `category = "free_json"` |
-| 10 ATS boards over 302 company slugs | ✅ | `core/companies.py` — 11 platform lists, but `RIPPLING_COMPANIES` has no source class yet |
+| 10 ATS boards over 297 polled company slugs | ✅ | `core/companies.py` holds 302 across 11 platform lists; `RIPPLING_COMPANIES` (5) has no source class, so 297 are actually polled |
 | 5 RSS/XML feeds | ✅ | `category = "rss"` — includes `apis_free/teaching_vacancies.py` (folder ≠ tier, rule #15) |
 | 5 scrapers + 4 other | ✅ | `category = "scrapers"` / `"other"` |
 | 5 HTML scrapers | ✅ | regex/embedded-JSON — brittle by nature ⚠️ |

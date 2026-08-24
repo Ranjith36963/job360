@@ -46,8 +46,9 @@ class** with a working `fetch_jobs()`. Verified in `backend/src/main.py:110-128`
 ...
 ```
 
-`backend/src/main.py:157` notes: *"46 not 47 because 'indeed' and 'glassdoor' both
-map to JobSpySource (one instance)."*
+`backend/src/main.py:157` notes: *"40 not 41 because 'indeed' and 'glassdoor' both
+map to JobSpySource (one instance)."* (It said 46/47 when this document was
+written; the comment moved with the roster.)
 
 **Answer to "is it just a list / did I never write scraping code?"** — No. It maps to
 classes containing genuine fetch+parse code. See §3.
@@ -272,8 +273,11 @@ Removing a source touches **five** load-bearing places, not four:
    `test_status_returns_counts`, `test_full_api_workflow`
 
 Also: `pyproject.toml` `indeed = ["python-jobspy"]` extra can go if indeed/glassdoor
-are dropped. Count moves **47 → 44** registry entries (46 → 43 unique) if all 3 are
-removed; **47 → 46** (46 → 45) if only LinkedIn goes.
+are dropped. **Recomputed 2026-08-24** against the current roster: count moves
+**41 → 38** registry entries (40 → 37 unique) if all 3 are removed; **41 → 40**
+(40 → 39) if only LinkedIn goes. (This one paragraph is updated rather than left
+as written, because it is the arithmetic the decision acts on — unlike the
+descriptive counts elsewhere in this record, which the note at the top corrects.)
 
 Estimated effort (Fable): **one commit, ~1 hour.**
 
