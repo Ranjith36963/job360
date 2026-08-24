@@ -161,7 +161,7 @@ Survives unchanged.
 
 ### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
 
-`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
 
 ### Stage 6 — Store
 
@@ -591,7 +591,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | `JobEnrichment` 16-field schema + 7 enums + `SalaryBand` | ✅ | `job_enrichment_schema.py`, all length-bounded (`employer_type` + `locations` retired 2026-08) |
 | `enrich_batch()` with `asyncio.Semaphore(10)` | ✅ | per-job error isolation |
 | `INSERT OR REPLACE` upsert into `job_enrichment` table | ✅ | migration `0008`, shared catalog |
-| Multi-provider LLM fallback (Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` |
+| Multi-provider LLM fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` (`:329-334`) |
 | Self-correction loop (max 2 retries with appended errors) | ✅ | `llm_extract_validated` |
 | `_build_enrichment_lookup()` bulk-load for scoring | ✅ | graceful empty-dict on missing table |
 | `ENRICHMENT_THRESHOLD=60` gate | ✅ | only high-scoring jobs sent to LLM |

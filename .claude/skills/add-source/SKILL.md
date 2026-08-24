@@ -26,10 +26,10 @@ test suite fails on a hardcoded count:
 
 ```bash
 cd backend && python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"
-grep -rn "== 47\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
+grep -rn "== 41\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
 ```
 
-At the time of writing that prints `47 46` — 47 registry keys but 46 unique
+At the time of writing that prints `41 40` — 41 registry keys but 40 unique
 classes, because `indeed` and `glassdoor` both alias `JobSpySource`. Test
 assertions treat the **registry key count** as authoritative.
 

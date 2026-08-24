@@ -190,7 +190,7 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 
 ## 3. Ring 2 — Profile (CV + LinkedIn + GitHub + Preferences)
 
-The profile is what turns Job360 from "show me all 47 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
+The profile is what turns Job360 from "show me all 41 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
 
 ### 3.1 What the user experiences
 
@@ -531,7 +531,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | CV upload (PDF/DOCX) | ✅ | `cv_parser.py` with `pdfplumber` + `python-docx` |
 | LLM-only skill/title extraction | ✅ | regex `KNOWN_SKILLS` removed in 3ba1342 |
-| LLM provider fallback (Gemini → Groq → Cerebras) | ✅ | `llm_provider.py` |
+| LLM provider fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.py:329-334` |
 | LinkedIn "Save to PDF" import | ✅ | `linkedin_parser.py`, 2-of-3 detection heuristic |
 | GitHub enrichment with temporal weighting | ✅ | `github_enricher.py` — 3× weight for repos pushed in last year |
 | Dependency-file framework inference | ✅ | 7 file types parsed (package.json, requirements.txt, …) |
@@ -662,7 +662,7 @@ frontend/
 For completeness — these belong in the other two pillars and you won't find them here:
 
 - **How a job actually gets scored** — that's `JobScorer` in `src/services/skill_matcher.py` and the 8-dimension scoring stack. → see `02-search-and-match-engine.md` (next document).
-- **Where the 47 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
+- **Where the 41 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
 - **The shared `jobs` catalog table itself** — Pillar 3 (providers) writes it, Pillar 1 (this doc) reads it via `user_feed`.
 
 ---

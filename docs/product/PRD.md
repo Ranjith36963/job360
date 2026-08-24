@@ -102,7 +102,7 @@ After sign-up, the user enters the profile builder. This is a guided flow, not a
 
 **Step 4 — Save preferences (click 1).** The user clicks "Save Preferences" to confirm their profile. This is a deliberate action — the system does not auto-save on every keystroke, because saving triggers profile recomputation.
 
-**Step 5 — Trigger first search (click 2).** After saving, the user clicks "Search" to trigger their first pipeline run. This is a separate, deliberate action. The two-click pattern (save, then search) exists because each search consumes compute resources (47 source fetches, LLM calls, scoring), and auto-triggering on every profile edit would waste resources on incomplete configurations.
+**Step 5 — Trigger first search (click 2).** After saving, the user clicks "Search" to trigger their first pipeline run. This is a separate, deliberate action. The two-click pattern (save, then search) exists because each search consumes compute resources (41 source fetches, LLM calls, scoring), and auto-triggering on every profile edit would waste resources on incomplete configurations.
 
 **Why two clicks, not one:** Every time a user changes a single word in their preferences, if search ran automatically, the platform would burn compute on an unfinished configuration. The user must explicitly signal "I am satisfied with my profile" (save) and "run the search now" (search) as two separate intents.
 
@@ -256,7 +256,7 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 ### NFR-1: Performance
 
-**NFR-1.1:** A single user's search pipeline must complete within 5 minutes (47 sources, 120s per-source timeout, parallel execution).
+**NFR-1.1:** A single user's search pipeline must complete within 5 minutes (41 sources, 120s per-source timeout, parallel execution).
 
 **NFR-1.2:** Dashboard page load must be under 3 seconds for up to 500 job listings.
 
@@ -317,12 +317,12 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 
 | Requirement | Current State | Gap | Severity |
 |---|---|---|---|
-| FR-3.1: Parallel fan-out | asyncio.gather with 47 sources, failure isolation | Working. No changes needed for v1 architecture. | None |
+| FR-3.1: Parallel fan-out | asyncio.gather with 41 sources, failure isolation | Working. No changes needed for v1 architecture. | None |
 | FR-3.2: Normalisation | Job dataclass with HTML unescape, company cleaning, salary bounds | No currency detection, binary visa flag loses nuance | Medium |
 | FR-3.3: Scoring accuracy | 4-dimension scoring (title 40, skill 40, location 10, recency 10) | Title matching is substring-based (crude). Skill matching is regex-only (no synonyms, no semantic similarity). | **High** |
 | FR-3.4: Date accuracy | 14/47 sources hardcode `now()`. 3 more use wrong date field. | Recency scoring is broken for 36% of sources. Must fix to `None` + fallback logic. | **Critical** |
 | FR-3.5: Deduplication | Works within a run. DB unique key is narrower than dedup key (documented). | Cross-run reappearance of seniority variants is a known tradeoff. Acceptable for v1. | Low |
-| FR-3.7: Source routing | All 47 sources run for every user regardless of domain | Non-tech users drowned in tech-only results. Must implement domain-aware routing. | **Critical** |
+| FR-3.7: Source routing | All 41 sources run for every user regardless of domain | Non-tech users drowned in tech-only results. Must implement domain-aware routing. | **Critical** |
 | Not in FRs: LLM enrichment | Not implemented. LLM used only for CV parsing. | HiringCafe extracts 17+ fields per listing via GPT-4o-mini. Job360 has zero JD enrichment. | **High** |
 | Not in FRs: Semantic matching | Not implemented. No embeddings, no ChromaDB, no cross-encoder. | Skill matching misses synonyms ("ML" vs "Machine Learning"). | **High** |
 | Not in FRs: Ghost detection | Not implemented. No disappearance tracking. | Filled/expired jobs stay in DB until 30-day purge. | Medium |
@@ -332,7 +332,7 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 
 | Requirement | Current State | Gap | Severity |
 |---|---|---|---|
-| FR-4.1: Free sources only | All 47 sources are free | **Done.** | None |
+| FR-4.1: Free sources only | All 41 sources are free | **Done.** | None |
 | FR-4.2: ATS company coverage | Approximately 104 company slugs across 10 ATS platforms | Feashliaa repo has 4,000+. Target: 500+. | **High** |
 | FR-4.3: UK general aggregators | Reed, Adzuna, FindAJob (3 sources) | Critically insufficient for non-tech domains. Need more UK-wide boards. | **Critical** |
 | FR-4.4: Remove non-job sources | YC Companies (career links), Nomis (statistics) still active | Should be removed or reclassified | Low |

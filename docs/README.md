@@ -52,7 +52,7 @@ Start here to find the right doc fast.
 | [`pillars/README.md`](product/pillars/README.md) | Pillar overview + connection diagram (entry point). |
 | [`pillars/01-user-pillar.md`](product/pillars/01-user-pillar.md) | Auth, profile, feed, dashboard, notifications. |
 | [`pillars/02-search-and-match-engine.md`](product/pillars/02-search-and-match-engine.md) | The 6-stage pipeline: prefilter → scoring → dedup → enrich → store. |
-| [`pillars/03-job-providers.md`](product/pillars/03-job-providers.md) | 46 source classes / 47 registry keys, `BaseJobSource`, ATS catalog. |
+| [`pillars/03-job-providers.md`](product/pillars/03-job-providers.md) | 40 source classes / 41 registry keys, `BaseJobSource`, ATS catalog. |
 
 ## 📘 Product & strategy
 
