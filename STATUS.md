@@ -67,7 +67,7 @@
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
-| 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
+| Source file refactor (every source) | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
 | CLI setup-profile | `backend/src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `backend/tests/test_profile.py` | Done -- 56 tests covering all profile modules |
@@ -129,7 +129,7 @@
 | Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
 | Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
-| Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
+| Source category metadata | `backend/src/sources/base.py`, every source file (40 classes / 41 registry entries today) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scrapers/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
 
 ---
@@ -151,7 +151,7 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
 | #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:519-536`); data from the **enrichment** LLM step (`services/job_enrichment.py`), which the same flag gates | `ENRICHMENT_ENABLED` | false |
+| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`); data from the **enrichment** LLM step (`services/job_enrichment.py`), which the same flag gates | `ENRICHMENT_ENABLED` | false |
 | #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
 | #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 

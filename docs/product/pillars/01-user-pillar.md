@@ -72,7 +72,7 @@ When the worker tick runs (or CLI `python -m src.cli run` is invoked) — Pillar
 
 1. Loads Alice's `UserProfile` via `storage.load_profile(alice.id)`.
 2. Generates `SearchConfig` from it (Pillar 2 §3.1) — the bridge from Pillar 1 to Pillar 2.
-3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)` — both kwargs, per rule #20.
+3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)`. `user_preferences` is what turns the Batch-2.9 dims on (rule #20); the lookup is optional and only decides whether they read real data or their neutral halves.
 4. Domain-filters sources via `classify_user_domain(alice.profile)` → say `{"tech"}` → keeps tech + general sources, drops healthcare/academia/education/climate-only sources.
 5. Fetches → prefilters → scores → dedups → stores.
 

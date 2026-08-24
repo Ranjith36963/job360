@@ -1,7 +1,7 @@
 # Job360 Architecture
 <!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
-> **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
+> **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
 ## System Overview
 
@@ -265,7 +265,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
 | 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:519-536`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
 | 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
@@ -662,7 +662,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
-| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
+| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:130 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (`_set_session_cookie`, auth.py:125-139; the gate itself is `middleware.py:34`). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
@@ -763,7 +763,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
 | python-multipart | >=0.0.9 | File upload support |
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:154`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
+| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:343`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
 | google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
 | argon2-cffi / itsdangerous / cryptography / email-validator | >=23.1.0 / >=2.2.0 / >=42.0.0 / >=2.1.0 | Auth + signed sessions + Fernet channel-credential encryption (Batch 2) |
 | apprise | >=1.7.0 | Multi-channel notification dispatch (Batch 2; **lazy-imported**, rule #11) |

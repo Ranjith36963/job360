@@ -4,7 +4,7 @@
 
 > **What this is.** The ordered roadmap from *"the code is written"* (today) to *"the SaaS is operating, serving real users, generating revenue"* (target). Eight phases, with explicit dependencies and exit criteria per phase.
 >
-> **What this is NOT.** A status doc (see `STATUS.md` for what's already merged). A rule book (see `CLAUDE.md` for what you must not break). An architecture reference (see `docs/pillars/`). This document only answers *"what's next, in what order, and why"*.
+> **What this is NOT.** A status doc (see `STATUS.md` for what's already merged). A rule book (see `CLAUDE.md` for what you must not break). An architecture reference (see `docs/product/pillars/`). This document only answers *"what's next, in what order, and why"*.
 >
 > **When to read.** Before starting any work that could be a step toward launch — to make sure you're picking up the *right* next step. Also before any "should I work on X or Y" decision — the dependency graph below decides for you.
 >
@@ -387,4 +387,4 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 
 ---
 
-*See also: `STATUS.md` (what's done), `CLAUDE.md` (the rules), `docs/pillars/` (the architecture reference), `docs/product/pillars/runbook.md` (operational answers during execution).*
+*See also: `STATUS.md` (what's done), `CLAUDE.md` (the rules), `docs/product/pillars/` (the architecture reference), `docs/product/pillars/runbook.md` (operational answers during execution).*

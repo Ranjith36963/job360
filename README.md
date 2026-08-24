@@ -5,7 +5,7 @@ Automated UK job search system supporting **any professional domain**. Aggregate
 
 > **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
 
-> **For current architecture detail**: see [`docs/pillars/`](./docs/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
+> **For current architecture detail**: see [`docs/product/pillars/`](./docs/product/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
 
 ### API docs (auto-generated)
 

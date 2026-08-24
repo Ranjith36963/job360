@@ -164,9 +164,9 @@ If LinkedIn's HTML regex breaks because they changed markup:
 
 ## 2. The base class — `backend/src/sources/base.py`
 
-Every source extends `BaseJobSource`. **Never change this class without checking all 49 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
+Every source extends `BaseJobSource`. **Never change this class without checking all 40 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
 
-### 2.1 Constructor (`base.py:64-69`)
+### 2.1 Constructor (`base.py:98-105`)
 
 ```python
 def __init__(self, session: aiohttp.ClientSession, search_config=None):
@@ -181,7 +181,7 @@ def __init__(self, session: aiohttp.ClientSession, search_config=None):
 - `search_config=None` — when present, the source uses the user's dynamic keywords; when `None`, it falls back to the (now-empty) hard-coded defaults from `keywords.py`.
 - Rate limiter is pulled per-source from `RATE_LIMITS` (41 entries) with a safe `{concurrent:2, delay:1.0}` default.
 
-### 2.2 The three dynamic properties (`base.py:71-87`)
+### 2.2 The four dynamic properties (`base.py:107-137`)
 
 This is how a single source body serves both "profile loaded" and "no profile" cases without branching:
 
@@ -189,13 +189,16 @@ This is how a single source body serves both "profile loaded" and "no profile" c
 | --- | --- | --- |
 | `relevance_keywords` | `search_config.relevance_keywords` | `keywords.RELEVANCE_KEYWORDS` (empty post-3ba1342) |
 | `job_titles` | `search_config.job_titles` | `keywords.JOB_TITLES` (empty) |
+| `search_titles` | `search_config.search_titles` if non-empty | falls back to `job_titles` |
 | `search_queries` | `search_config.search_queries` if non-empty | `[]` |
+
+> `search_titles` is what a source may put in a *search request*; `job_titles` is the scorer's *evidence* list and holds raw CV strings no job board indexes. Don't swap them.
 
 > Sources MUST access keywords through these properties — never `from src.core.keywords import ...` directly. This is what makes the system domain-agnostic (CLAUDE.md "Dynamic keywords" pattern).
 
-### 2.3 HTTP helpers + retry machinery (`base.py:100-245`)
+### 2.3 HTTP helpers + retry machinery (`base.py:150-266`)
 
-The core is `_request()` (`base.py:100-155`). Everything else is a thin wrapper:
+The core is `_request()` (`base.py:150-216`). Everything else is a thin wrapper:
 
 - `_get_json(url, params, headers)` → JSON dict/list
 - `_post_json(url, body, headers)` → JSON dict/list
@@ -216,22 +219,22 @@ The core is `_request()` (`base.py:100-155`). Everything else is a thin wrapper:
 
 This is why individual source files are so short — all the resilience lives here.
 
-### 2.4 Conditional fetch (`base.py:185-245`)
+### 2.4 Conditional fetch (`base.py:244-331`)
 
 `_conditional_fetch()` stores `ETag` and `Last-Modified` per `(url, params)` in the `ConditionalCache` (256-entry FIFO). On a repeat call it sends `If-None-Match` / `If-Modified-Since`; a `304 Not Modified` replays the cached body at zero parse cost. If the upstream provides no validators, it transparently degrades to a normal GET.
 
-**Today only one source opts in: `nhs_jobs_xml`** (`feeds/nhs_jobs_xml.py:33`) — the Batch-3.5.3 pilot. Per CLAUDE.md rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
+**Today NO source opts in.** The only callers of `_get_json_conditional` / `_get_text_conditional` anywhere are `backend/tests/test_conditional_fetch.py` — the Batch-3.5.3 `nhs_jobs` pilot was reverted to a plain `_get_text` (`feeds/nhs_jobs.py:34`), and there is no `nhs_jobs_xml.py`. Per CLAUDE.md rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
 
-### 2.5 Location filter (`base.py:32-46`)
+### 2.5 Location filter (`base.py:39-81`)
 
 `_is_uk_or_remote(location)` is the free UK-relevance gate every source can call:
 
-- Empty location → `True` (unknown; don't pre-filter, let the scorer decide)
-- `uk_gate.names_foreign_place` says the text NAMES a foreign country/admin division → `False`
+- Empty location → `True` (unknown; don't pre-filter, let the door decide)
+- Markup, a newline, or anything longer than 120 chars → `True` (that is prose, not a location)
+- `uk_gate.names_foreign_place` says the whole trimmed value NAMES a foreign country/admin division → `False`
 - Anything else (UK, remote, unknown) → `True`; the door (`uk_gate.check_uk`) decides at ingestion
-- Default → `True` (conservative: include unknowns, let scoring penalise)
 
-The term lists are imported from `skill_matcher.py` so the filter and the scorer agree.
+`base.py` imports `names_foreign_place` straight from `src.services.uk_gate` (`base.py:16`) — it holds **no term list of its own**, and it no longer imports anything from `skill_matcher.py`. There is also no scorer penalty to fall back on: the −15 foreign penalty was deleted 2026-08-12 (CLAUDE.md rule #30). One gate, one data set.
 
 ### 2.6 The class attributes the rest of the engine reads
 
@@ -241,7 +244,7 @@ The term lists are imported from `skill_matcher.py` so the filter and the scorer
 | `category` | `"unknown"` | `scheduler.py` | Tier key (`ats`/`rss`/`keyed_api`/`free_json`/`scrapers`/`other`) → polling cadence |
 | `DOMAINS` | `{"general"}` | `domain_classifier.py` via `_build_sources()` | Which user domains this source serves; `{"general"}` = everyone |
 
-### 2.7 The abstract contract (`base.py:96-98`)
+### 2.7 The abstract contract (`base.py:146-148`)
 
 ```python
 @abstractmethod
@@ -276,14 +279,20 @@ The canonical shape every source produces. ~27 fields:
 
 `role`, `skill`, `seniority_score`, `experience`, `credentials`, `location_score`, `recency`, `semantic`, `penalty` — the per-dimension scores written by `JobScorer` (Pillar 2 §3).
 
-### 3.4 `normalized_key()` — the dedup key (`models.py:83-87`)
+### 3.4 `normalized_key()` — the dedup key (`models.py:106-127`)
 
 ```python
 def normalized_key(self) -> tuple[str, str]:
     company = _COMPANY_SUFFIXES.sub("", self.company).strip()
     company = _COMPANY_REGION_SUFFIXES.sub("", company).strip().lower()
-    title = self.title.strip().lower()
-    return (company, title)
+    # Collapse internal whitespace runs (rule #1) — "Software  Engineer"
+    # and "Software Engineer" must produce the SAME key.
+    company = re.sub(r"\s+", " ", company)
+    title = re.sub(r"\s+", " ", self.title.strip().lower())
+    # Cap each component at _KEY_COMPONENT_MAX (300). Found live 2026-07-30:
+    # one scraped title blew Postgres's btree index-row limit and that ONE
+    # poison row aborted the whole catalog insert.
+    return (company[:_KEY_COMPONENT_MAX], title[:_KEY_COMPONENT_MAX])
 ```
 
 - Strips legal suffixes: `Ltd|Limited|Inc|PLC|Corp|Group|LLC|GmbH|AG|SA|Co|Holdings|Solutions|Technologies|Services|Systems|Pty`
@@ -378,7 +387,7 @@ A `COMPANY_NAME_OVERRIDES` dict (~77 entries) maps ugly slugs (`darktracelimited
 
 ## 6. Cross-cutting: rate limits & the async limiter
 
-### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:93-146`
+### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:279-336`
 
 41 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
 
@@ -448,8 +457,8 @@ All five are currently aligned at **41**.
 
 ## 8. Testing — `backend/tests/test_sources.py` + friends
 
-- **`test_sources.py`** — 110 test functions covering all 41 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Batch-3 sources have 3 tests each (`test_sources.py:1561-1688`): parse / empty / http-error.
-- **`test_conditional_fetch.py`** — 11 tests for the shared ETag/Last-Modified/304 machinery, FIFO eviction at 256 entries, and the `nhs_jobs_xml` pilot proving `If-None-Match` is sent on the second call.
+- **`test_sources.py`** — 110 test functions covering all 41 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Newer sources follow a 3-test shape: parse / empty / http-error. (The old `test_sources.py:1561-1688` citation is dropped — that range is Greenhouse's tests today; the file has grown to 3,196 lines and any fixed range here rots within weeks.)
+- **`test_conditional_fetch.py`** — 13 tests for the shared ETag/Last-Modified/304 machinery and FIFO eviction at 256 entries. They drive a throwaway `BaseJobSource` subclass, not a real source: these tests are the **only** callers of the conditional helpers in the repo.
 - **`test_cli.py`** — `len(SOURCE_REGISTRY) == 41` + exact expected set.
 - **`test_api.py`** — the two hardcoded `== 41` assertions.
 
@@ -509,27 +518,28 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| `BaseJobSource` retry (3×, backoff 1/2/4) | ✅ | `base.py:100-155` |
-| Per-source rate limiting via `RATE_LIMITS` | ✅ | 47 entries, all sources covered |
+| `BaseJobSource` retry (3×, backoff 1/2/4) | ✅ | `base.py:150-216` |
+| Per-source rate limiting via `RATE_LIMITS` | ✅ | 41 entries, all sources covered |
 | 429 `Retry-After` honouring (cap 60 s) | ✅ | |
 | No-retry on 401/403/404/422 | ✅ | |
 | Conditional fetch (ETag/304) infrastructure | ✅ | `_get_json_conditional` / `_get_text_conditional` |
-| Conditional-fetch **adoption** | 🟡 | only `nhs_jobs_xml` opts in today — rule #14 pilot |
+| Conditional-fetch **adoption** | 🔴 | **no source opts in** — tests are the only callers (rule #14 keeps it opt-in) |
 | Dynamic-keyword properties (config/fallback) | ✅ | but fallback defaults are now empty (`keywords.py`) |
-| `_is_uk_or_remote()` location gate | ✅ | shares term lists with the scorer |
+| `_is_uk_or_remote()` location gate | ✅ | delegates to `uk_gate.names_foreign_place`; holds no term list, and there is no scorer penalty behind it (rule #30) |
 | `Job.normalized_key()` dedup key | ✅ | rule #1 protected |
-| Salary sanitisation (<10k / >500k → None) | ✅ | `models.py:69-72` |
+| Salary sanitisation (<10k / >500k → None) | ✅ | `models.py:91-95` |
 | HTML entity unescape in title/company | ✅ | `__post_init__` |
 
 ### 9.2 Source roster
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| 46 source classes / 47 registry keys / 46 instances | ✅ | reconciled in §1 |
-| 8 keyed APIs (skip gracefully without key) | ✅ | |
-| 10 free JSON APIs | ✅ | |
-| 11 ATS boards over ~256 company slugs | ✅ | `companies.py` |
-| 8 RSS/XML feeds | ✅ | |
+| 40 source classes / 41 registry keys / 40 instances | ✅ | reconciled in §1 |
+| 8 keyed APIs (skip gracefully without key) | ✅ | `category = "keyed_api"` |
+| 8 free JSON APIs | ✅ | `category = "free_json"` |
+| 10 ATS boards over 302 company slugs | ✅ | `core/companies.py` — 11 platform lists, but `RIPPLING_COMPANIES` has no source class yet |
+| 5 RSS/XML feeds | ✅ | `category = "rss"` — includes `apis_free/teaching_vacancies.py` (folder ≠ tier, rule #15) |
+| 5 scrapers + 4 other | ✅ | `category = "scrapers"` / `"other"` |
 | 5 HTML scrapers | ✅ | regex/embedded-JSON — brittle by nature ⚠️ |
 | 4 other (incl. optional jobspy) | ✅ | jobspy skips with warning if uninstalled |
 | Batch-3 rotation (−3, +5) | ✅ | verified on disk |
@@ -571,14 +581,15 @@ backend/src/
 ├── models.py                       — Job dataclass + normalized_key() (rule #1)
 ├── main.py                         — SOURCE_REGISTRY (41 keys) + _build_sources() + domain filter
 ├── core/
-│   ├── companies.py                — ~256 ATS slugs across 11 platforms + name overrides
-│   ├── settings.py:93-146          — RATE_LIMITS (47 entries)
+│   ├── companies.py                — 302 ATS slugs across 11 platform lists + name overrides
+│   ├── settings.py:279-336         — RATE_LIMITS (41 entries)
 │   └── keywords.py                 — LOCATIONS + VISA_KEYWORDS (the rest emptied 2026-04-09)
 └── utils/rate_limiter.py           — async semaphore + delay
 
 backend/tests/
-├── test_sources.py                 — 81 tests, all sources, aioresponses-mocked
-├── test_conditional_fetch.py       — 11 tests, ETag/304/FIFO + nhs_jobs_xml pilot
+├── test_sources.py                 — 110 tests, all sources, aioresponses-mocked
+├── test_conditional_fetch.py       — 13 tests, ETag/304/FIFO (the only callers of the
+│                                     conditional helpers — no source opts in)
 ├── test_cli.py                     — len(SOURCE_REGISTRY) == 41
 └── test_api.py                     — two == 41 assertions
 ```
