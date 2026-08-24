@@ -205,7 +205,14 @@ def test_the_guard_catches_diff3_style_too(tmp_path):
 # of trusting the green.
 # `(?<![>$\w])` keeps `>>` appends and `2>` out; a redirect to a shell variable
 # (`>> "$GITHUB_OUTPUT"`) cannot match the filename character class anyway.
-_ROOT_REDIRECT = re.compile(r"(?<![>$\w])>\s*([A-Za-z0-9._-]+\.(?:json|md|txt))")
+#
+# THE TARGET IS CAPTURED WHOLE, SLASHES AND ALL. Without `/` in the class the
+# match simply RESTARTS after the last slash, so `> backend/report.json` was
+# recorded as a root file called `report.json` — a file that is inside the cage
+# and needs no cleanup at all. A guard that mis-reads a safe redirect as a
+# violation is the same defect as the conflict-marker pattern above it, which is
+# the whole reason this file exists. (CodeRabbit, PR #395.)
+_ROOT_REDIRECT = re.compile(r"(?<![>$\w])>\s*([A-Za-z0-9._/-]+\.(?:json|md|txt))")
 # THE CONTINUATION ALTERNATIVE COMES FIRST, AND THAT ORDER IS THE WHOLE RULE.
 # Written the obvious way — `(?:[^\n]|\\\n)*` — the `[^\n]` branch consumes the
 # backslash, the newline then matches neither branch, and the match STOPS at the
@@ -231,23 +238,39 @@ def test_every_scratch_file_the_workflow_writes_is_cleaned_before_the_cage():
     # a line continuation becomes a harmless token that no filename can equal.
     cleaned = set(rm.group(1).split())
 
-    # ONLY WHAT IS WRITTEN *BEFORE* THE CAGE RUNS. Order is the whole point:
-    # `checker-input.md` and `checker-verdict.md` are written by the blind
-    # checker, which runs AFTER the cage has already inspected the tree, so they
-    # cannot possibly be mistaken for an agent edit. Demanding they be cleaned
-    # would be a guard firing on something that is fine — the same failure as the
-    # conflict-marker pattern two tests up, committed while fixing it. Found by
-    # this test's own first run, which reported `checker-input.md`.
-    before_cage = text[: rm.start()]
-    written = set(_ROOT_REDIRECT.findall(before_cage))
-    # `> file` inside a `working-directory: backend` step lands in backend/,
-    # which the cage allows; those are written with `../`.
-    written = {w for w in written if not w.startswith("..")}
+    # EVERYTHING WRITTEN BEFORE THE CAGE *STEP*, NOT BEFORE THE CLEANUP LINE.
+    # `text[:rm.start()]` was the first version and it left a real gap: a
+    # redirect added AFTER the cleanup but still inside the cage step — or in
+    # any step between them — is never examined, so the test stays green while
+    # the workflow fails at runtime with the exact error this file exists to
+    # prevent. The cage is what draws the line, so the cage is what the window
+    # ends at. (CodeRabbit, PR #395.)
+    cage_at = text.find("git grep -lE")
+    assert cage_at > rm.start(), (
+        "the `rm -f` cleanup no longer sits before the path cage in pr-repair.yml. "
+        "If the steps were reordered, this test needs rewriting rather than deleting: "
+        "cleanup after the cage cleans nothing."
+    )
+    written = set(_ROOT_REDIRECT.findall(text[:cage_at]))
+
+    # Only ROOT files can be mistaken for an agent edit. A redirect into
+    # `backend/` or `frontend/` lands inside the cage and is allowed; one with
+    # `../` from a `working-directory: backend` step also lands in the root, so
+    # it is normalised rather than dropped. Anything under `$RUNNER_TEMP` never
+    # matches at all — it is outside the working tree, which is where scratch
+    # belongs and why the review-thread files moved there.
+    def _is_root(path: str) -> bool:
+        p = path[3:] if path.startswith("../") else path
+        return "/" not in p
+
+    written = {w for w in written if _is_root(w)}
+    written = {w[3:] if w.startswith("../") else w for w in written}
 
     missed = sorted(written - cleaned)
     assert not missed, (
         f"pr-repair.yml writes {missed} into the repo root but does not delete them "
         f"before the path cage runs. The cage will report them as 'agent edited "
         f"outside the cage' and refuse a repair the agent did nothing wrong in. "
-        f"Add them to the `rm -f` line in the same commit that adds the file."
+        f"Either add them to the `rm -f`, or — better — write them under "
+        f"`$RUNNER_TEMP`, outside the working tree, where no cleanup is needed."
     )

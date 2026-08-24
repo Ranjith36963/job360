@@ -240,10 +240,10 @@ jobs:
                   }
                 }
               }
-            }' -f owner="$owner" -f name="$name" -F number="${{ inputs.pr }}" > threads.json
+            }' -f owner="$owner" -f name="$name" -F number="${{ inputs.pr }}" > "$RUNNER_TEMP/threads.json"
           jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]' \
-            threads.json > open-threads.json
-          n=$(jq 'length' open-threads.json)
+            "$RUNNER_TEMP/threads.json" > "$RUNNER_TEMP/open-threads.json"
+          n=$(jq 'length' "$RUNNER_TEMP/open-threads.json")
           echo "count=$n" >> "$GITHUB_OUTPUT"
           echo "review threads still open: $n" >> "$GITHUB_STEP_SUMMARY"
 
@@ -264,7 +264,7 @@ jobs:
               echo "$CONFLICTED"
               echo "Resolve each marker so BOTH sides' intent survives; then the tests below must pass."
             fi
-            if [ -s open-threads.json ] && [ "$(jq 'length' open-threads.json)" != "0" ]; then
+            if [ -s "$RUNNER_TEMP/open-threads.json" ] && [ "$(jq 'length' "$RUNNER_TEMP/open-threads.json")" != "0" ]; then
               echo
               echo "## UNRESOLVED REVIEW FINDINGS — every one of these blocks the merge"
               echo
@@ -279,7 +279,7 @@ jobs:
               echo
               jq -r '.[] | "### \(.path):\(.line)\n" +
                      ([.comments.nodes[] | "**\(.author.login):** \(.body)"] | join("\n\n")) + "\n"' \
-                 open-threads.json | head -500
+                 "$RUNNER_TEMP/open-threads.json" | head -500
             fi
           } > agent-issue.md
           echo "--- agent-issue.md: $(wc -l < agent-issue.md) lines ---"
@@ -407,22 +407,29 @@ jobs:
         id: cage
         run: |
           set -euo pipefail
-          # EVERY SCRATCH FILE THIS WORKFLOW WRITES, IN ONE PLACE.
+          # THE AGENT'S OWN BRIEFING FILES, WHICH MUST LIVE IN THE TREE.
           # The path cage compares `git status --porcelain` against
           # backend/|frontend/, so anything the WORKFLOW leaves in the repo root
-          # is indistinguishable from the AGENT escaping its cage.
-          # `threads.json` and `open-threads.json` arrived with the review-thread
-          # reader and were not added here, so the first repair run that ever got
-          # past the conflict-marker check died on:
-          #     agent edited outside the cage: open-threads.json threads.json
-          # (run 32746446218) — and the agent had touched neither.
+          # is indistinguishable from the AGENT escaping its cage. These four are
+          # read by the agent, which has no shell and only Read/Glob/Grep, so
+          # they have to be in the working tree — and therefore have to be
+          # removed here, before the cage looks.
           #
-          # A LIST LIKE THIS IS A COUPLING, so it is labelled as one: add a
-          # scratch file above, add it here in the same commit. Writing scratch
-          # outside the working tree entirely is the better shape and a bigger
-          # change than this fix should carry.
-          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md \
-                threads.json open-threads.json
+          # `threads.json` / `open-threads.json` are NOT in this list any more,
+          # and that is the fix rather than an omission: they now live in
+          # `$RUNNER_TEMP`, outside the working tree entirely. Nothing reads them
+          # through the agent, so nothing required them to be here — and the
+          # review-thread resolver at the end of this job READS
+          # `open-threads.json` long after this step runs. Deleting it here (the
+          # first version of this fix) left that step with no file, so it took
+          # its `exit 0` arm — "no threads file, nothing to resolve" — and every
+          # repair would have pushed a verified change while resolving nothing,
+          # leaving the merge cage blocked forever on threads it had answered.
+          # (CodeRabbit, PR #395: Major, and correct.)
+          #
+          # Scratch belongs outside the tree. The only reason these four are not
+          # is that the agent must be able to read them.
+          rm -f agent-test-output.txt agent-issue.md agent-plan.md already-built.md
           # No conflict marker may survive — a half-resolved merge must not ship.
           #
           # THE OLD PATTERN MATCHED `main` ITSELF, SO THIS LOOP COULD NEVER SHIP.
@@ -594,7 +601,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          [ -s open-threads.json ] || { echo "no threads file — nothing to resolve"; exit 0; }
+          [ -s "$RUNNER_TEMP/open-threads.json" ] || { echo "no threads file — nothing to resolve"; exit 0; }
           # What this repair really changed, measured from git, not claimed by
           # the agent. A file list the model produced would be a self-report,
           # and self-reports are what the independent verification exists to
@@ -616,7 +623,7 @@ jobs:
           # Same subshell caveat as security-watch.yml: a `while` on the right of
           # a pipe cannot carry a counter back out, so each thread reports itself
           # on its own line instead of a total that would always read zero.
-          jq -r '.[] | "\(.id)\t\(.path)"' open-threads.json | while IFS=$'\t' read -r tid tpath; do
+          jq -r '.[] | "\(.id)\t\(.path)"' "$RUNNER_TEMP/open-threads.json" | while IFS=$'\t' read -r tid tpath; do
             if ! grep -qxF "$tpath" repaired-files.txt; then
               echo "- left open: \`$tpath\` (this repair did not change that file)" >> "$GITHUB_STEP_SUMMARY"
               continue
