@@ -120,7 +120,10 @@ Two things the `Job.__post_init__` does automatically:
 
 ### T+0 — Return + scheduler post-processing
 
-`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 82 companies.
+`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` gathered across 82 companies.
+Volume is an upstream fact, not a constant, so it is quoted only as a dated measurement:
+**996 greenhouse rows in prod** as of 2026-08-05 (`backend/src/sources/ats/greenhouse.py:34`),
+and `first_published` verified across **928 live jobs** (`greenhouse.py:57-58`).
 
 Back in `TieredScheduler.tick()`:
 
