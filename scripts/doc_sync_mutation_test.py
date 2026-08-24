@@ -114,7 +114,13 @@ CASES: list[tuple[str, str, str, str]] = [
     # database -- five dead COMMANDS, not stale prose. The four SQLite entries
     # in FORBIDDEN_PHRASES all pin sentences; none matched a shell command.
     ("docs/product/pillars/runbook.md",
-     r"(railway) run -s Postgres psql", "sqlite3 data/jobs.db run -s Postgres psql",
+     # Anchored on `psql ` rather than the longer `railway run -s Postgres psql`
+     # form this drill originally targeted. #396 rewrote the runbook to use bare
+     # SQL blocks with a connect line, so the longer string vanished and the
+     # drill reported "guard watches nothing" -- correctly. Second time a drill
+     # has caught its own target being removed by someone else's fix (the first
+     # was suite-baseline after #393). That is the drill working, not failing.
+     r"(psql) postgresql://", "sqlite3 data/jobs.db postgresql://",
      "stale-phrase"),
     # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
     # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
