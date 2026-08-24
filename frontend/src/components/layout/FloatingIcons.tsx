@@ -79,9 +79,20 @@ const ICONS = generateIcons(100);
 
 export function FloatingIcons() {
   return (
+    // -z-10, not z-0. This layer is fixed and therefore POSITIONED, and a
+    // positioned element paints above non-positioned siblings even at z-0 — so
+    // on any page whose content sits in a plain static container, the decoration
+    // landed ON TOP of the content. At 3x on /register the icons were legible
+    // INSIDE the email and password inputs. The landing and profile pages only
+    // escaped because their wrappers happen to carry `relative`, which is a
+    // coincidence, not a guard: every future page would have to remember it.
+    //
+    // Note it is invisible to elementsFromPoint (pointer-events-none), so a
+    // hit-test probe reports the input on top while the paint says otherwise.
+    // Trust the screenshot here, not the stacking read.
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
     >
       {ICONS.map(({ Icon, x, y, size, rotation, delay }, i) => (
         <div
