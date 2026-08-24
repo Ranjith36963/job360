@@ -326,7 +326,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ### 4.1 Keyed APIs — `apis_keyed/` (8)
 
-Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if the key is empty (so the source skips gracefully on free installs).
+Pattern: accept `api_key` in `__init__`, return `[]` early if the key is empty (so the source skips gracefully on free installs). The log line is `WARNING` in seven of the eight — `gov_apprenticeships.py:62` is the only `INFO`.
 
 | Source | Upstream | Env var |
 | --- | --- | --- |
@@ -487,7 +487,7 @@ There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source 
 
 ## Environment variables — every var the Providers pillar reads
 
-Almost all are the keyed-source API credentials. The 43 free sources need no env at all.
+Almost all are the keyed-source API credentials. The other **33** registry keys need no env at all — 41 keys minus the 8 keyed sources (README's "API Key Setup" states the same split).
 
 | Var | Required by | Default | What changes when you flip it |
 | --- | --- | --- | --- |
