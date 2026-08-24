@@ -60,6 +60,20 @@ name: Finding watch (a finding wakes the fixer)
 # HONESTY RULE (same as dependabot-auto and pr-shepherd): every PR this file
 # looks at gets one line in the job summary -- acted on or left alone, with the
 # reason. Silent skipping is how a queue rots invisibly.
+#
+# THE BOUND, STATED RATHER THAN GLOSSED. On a `pull_request` event GitHub runs
+# the PR'S OWN copy of this file, so a PR can edit what this doorbell does and
+# have that edit take effect on itself. That is deliberate and it is bounded on
+# three sides, none of which this file supplies:
+#   * it dispatches, it never writes code -- the worst it can do is ring a bell;
+#   * `pr-repair.yml` runs from the DEFAULT branch and applies its own cage
+#     (same-repo only, allowlisted author, no shell, path cage, independent
+#     re-verification), so a rewritten doorbell cannot widen who gets repaired;
+#   * this file is `harness_owner` in merge-policy.yml, so no machine can merge
+#     a change to it in the first place.
+# Written down because "the PR supplies its own judge" is rule G5's whole
+# subject, and the honest answer here is "yes, and here is why it is survivable"
+# rather than pretending the question does not arise.
 
 on:
   pull_request_review:

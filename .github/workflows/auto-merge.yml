@@ -171,12 +171,33 @@ jobs:
           ref: refs/pull/${{ matrix.pr }}/merge
           path: _pr
 
+      # WHICH BASE THIS PR IS ACTUALLY ON.
+      # Read per PR from the API, NOT from the event payload. `check_suite` and
+      # `schedule` carry no `pull_request.base.ref`, so the payload form would
+      # silently fall back to the default branch — and then the ratchet baseline
+      # would be MAIN's numbers for a PR based on a feature branch. That is rule
+      # G4's exact failure ("a tree-scoped ratchet measured on the wrong tree"),
+      # arrived at through a different door: not the wrong checkout, but the
+      # right checkout of the wrong ref. The matrix means one job per PR, so
+      # there is a correct answer available for each one and no excuse to guess.
+      - name: Which ref is this PR based on
+        id: baseref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ref=$(gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}" --jq '.base.ref')
+          [ -n "$ref" ] || { echo "::error::could not read the base ref for PR #${{ matrix.pr }}"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "PR #${{ matrix.pr }} is based on \`$ref\`" >> "$GITHUB_STEP_SUMMARY"
+
       # THE BASELINE TREE.
       - uses: actions/checkout@v7
         id: base
         continue-on-error: true
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          ref: ${{ steps.baseref.outputs.ref }}
           path: _base
 
       - uses: actions/setup-python@v7
