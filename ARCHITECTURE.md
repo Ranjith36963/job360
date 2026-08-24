@@ -329,7 +329,8 @@ RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource,
 HNJobsSource
 ```
 
-**ATS Boards** (10 — iterate company slugs from companies.py):
+**ATS Boards** (10 — iterate company configurations from companies.py; plain
+string slugs except Workday and SuccessFactors, whose entries are dicts):
 ```
 GreenhouseSource(session, companies, search_config)   # 82 companies
 LeverSource(session, companies, search_config)         # 35 companies

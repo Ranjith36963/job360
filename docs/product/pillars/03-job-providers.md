@@ -58,7 +58,7 @@ In `BaseJobSource.__init__`:
 ```python
 async def fetch_jobs(self) -> list[Job]:
     jobs = []
-    for slug in GREENHOUSE_COMPANIES:        # ~80 slugs
+    for slug in GREENHOUSE_COMPANIES:        # 82 slugs
         url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
         data = await self._get_json(url)     # all retry/rate-limit machinery
         if not data:
